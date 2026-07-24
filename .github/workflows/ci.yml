@@ -1,0 +1,21 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      # The repo green gate — the same command contributors run locally, so CI and
+      # local never diverge: tool restore + fantomas --check + build + the Fable-compile
+      # gate (the "Fable-clean on encode AND decode" claim) + tests + the adoption sample.
+      - name: Verify (./verify.ps1)
+        shell: pwsh
+        run: ./verify.ps1

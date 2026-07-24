@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Projection</PackageId>
+    <Description>Fuaran.Core.Projection — the generic projection seam: a compact, id-keyed, round-trippable textual projection an AI reads instead of the wire JSON, plus scoped/windowed reads (whole / by-id / subtree / changed-since). Parameterised over a domain ProjectionWitness; owns no base node type and carries no domain content. FSharp.Core only, Fable-clean.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Projection.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

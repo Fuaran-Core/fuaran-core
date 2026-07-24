@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Validator</PackageId>
+    <Description>Fuaran.Core.Validator — the rule-family framework: defect record, severity, family registration, walker scaffolding, the PackRule (pack, ruleId) content-pack extension point, and the cross-host defect-code byte-parity discipline. All rule content stays domain-side. FSharp.Core only.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Validator.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
+    <!-- Phase 55/54: the columnar token uses Wire.Canon.canonicalFloat (the Fable-clean cross-host
+         float layout); a raw ToString("R") is not Fable-supported. Wire is FSharp.Core-only + Fable-clean. -->
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

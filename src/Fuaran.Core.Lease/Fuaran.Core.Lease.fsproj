@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Lease</PackageId>
+    <Description>Fuaran.Core.Lease — a generic lease/claim strand: claims over an abstract resource axis (Claim / Release / Expire) with a total apply / canApply where a conflicting claim is a typed rejection enumerating the current holder and the overlapping resources, a canonical wire codec, and a Fuaran.Core.OpStream StreamWitness — so lease history is an append-only, hash-chained, replayable, tamper-evident stream. The resource axis reuses Fuaran.Core.Tree's IdWitness (no new witness shape); expiry takes time as data (the host supplies "now"; Core reads no clock), so replay is deterministic. Generalises the coordination a multi-agent dispatcher hand-rolls. FSharp.Core only, Fable-clean.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Lease.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

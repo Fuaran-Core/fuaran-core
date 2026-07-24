@@ -1,0 +1,29 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Fuaran.Core.Tree/Fuaran.Core.Tree.fsproj" />
+    <Project Path="src/Fuaran.Core.Ops/Fuaran.Core.Ops.fsproj" />
+    <Project Path="src/Fuaran.Core.OpStream/Fuaran.Core.OpStream.fsproj" />
+    <Project Path="src/Fuaran.Core.Wire/Fuaran.Core.Wire.fsproj" />
+    <Project Path="src/Fuaran.Core.Validator/Fuaran.Core.Validator.fsproj" />
+    <Project Path="src/Fuaran.Core.Observer/Fuaran.Core.Observer.fsproj" />
+    <Project Path="src/Fuaran.Core.Function/Fuaran.Core.Function.fsproj" />
+    <Project Path="src/Fuaran.Core.Conformance/Fuaran.Core.Conformance.fsproj" />
+    <Project Path="src/Fuaran.Core.OpStream.Dag/Fuaran.Core.OpStream.Dag.fsproj" />
+    <Project Path="src/Fuaran.Core.Column/Fuaran.Core.Column.fsproj" />
+    <Project Path="src/Fuaran.Core.DataFrame/Fuaran.Core.DataFrame.fsproj" />
+    <Project Path="src/Fuaran.Core.Column.Ops/Fuaran.Core.Column.Ops.fsproj" />
+    <Project Path="src/Fuaran.Core.Query/Fuaran.Core.Query.fsproj" />
+    <Project Path="src/Fuaran.Core.Idl/Fuaran.Core.Idl.fsproj" />
+    <Project Path="src/Fuaran.Core.Idl.Spike/Fuaran.Core.Idl.Spike.fsproj" />
+    <Project Path="src/Fuaran.Core.Projection/Fuaran.Core.Projection.fsproj" />
+    <Project Path="src/Fuaran.Core.AiSurface/Fuaran.Core.AiSurface.fsproj" />
+    <Project Path="src/Fuaran.Core.Propagation/Fuaran.Core.Propagation.fsproj" />
+    <Project Path="src/Fuaran.Core.Lease/Fuaran.Core.Lease.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/adoption/Adoption.fsproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Reference.fs" />
+    <Compile Include="Reference2.fs" />
+    <Compile Include="TreeTests.fs" />
+    <Compile Include="TreeExtTests.fs" />
+    <Compile Include="OpsTests.fs" />
+    <Compile Include="CanApplyTests.fs" />
+    <Compile Include="ContainedOpsTests.fs" />
+    <Compile Include="InvertTests.fs" />
+    <Compile Include="DiffTests.fs" />
+    <Compile Include="OpStreamTests.fs" />
+    <Compile Include="IdempotentAppendTests.fs" />
+    <Compile Include="SnapshotTests.fs" />
+    <Compile Include="WireTests.fs" />
+    <Compile Include="DecodeTests.fs" />
+    <Compile Include="ValidatorTests.fs" />
+    <Compile Include="ObserverTests.fs" />
+    <Compile Include="FunctionTests.fs" />
+    <Compile Include="EffectAuditTests.fs" />
+    <Compile Include="SchemaTests.fs" />
+    <Compile Include="ConformanceTests.fs" />
+    <Compile Include="FootprintTests.fs" />
+    <Compile Include="ConcurrencyTests.fs" />
+    <Compile Include="WitnessLawTests.fs" />
+    <Compile Include="WitnessSurfaceTests.fs" />
+    <Compile Include="ReducerTests.fs" />
+    <Compile Include="DagTests.fs" />
+    <Compile Include="ProvenanceTests.fs" />
+    <Compile Include="ColumnTests.fs" />
+    <Compile Include="DataFrameTests.fs" />
+    <Compile Include="ColumnOpsTests.fs" />
+    <Compile Include="QueryTests.fs" />
+    <Compile Include="Snapshots.fs" />
+    <Compile Include="IdlSpikeTests.fs" />
+    <Compile Include="UiIdl.fs" />
+    <Compile Include="IdlUiTests.fs" />
+    <!-- Phase 317 real-tier compiled codegen: the committed generated module (emitted by
+         Fuaran.Core.Idl.Gen from uiIdl; drift-guarded) + its byte-identity test. -->
+    <Compile Include="UiGenerated.fs" />
+    <Compile Include="IdlUiGenTests.fs" />
+    <Compile Include="VersioningTests.fs" />
+    <Compile Include="AiSurfaceTests.fs" />
+    <Compile Include="ProjectionTests.fs" />
+    <Compile Include="PropagationTests.fs" />
+    <Compile Include="LeaseTests.fs" />
+    <Compile Include="MergeTests.fs" />
+    <Compile Include="ArbitrationTests.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Ops\Fuaran.Core.Ops.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Validator\Fuaran.Core.Validator.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Observer\Fuaran.Core.Observer.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Conformance\Fuaran.Core.Conformance.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.OpStream.Dag\Fuaran.Core.OpStream.Dag.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.DataFrame\Fuaran.Core.DataFrame.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Column.Ops\Fuaran.Core.Column.Ops.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Query\Fuaran.Core.Query.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Spike\Fuaran.Core.Idl.Spike.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+    <PackageReference Include="Expecto" />
+  </ItemGroup>
+</Project>

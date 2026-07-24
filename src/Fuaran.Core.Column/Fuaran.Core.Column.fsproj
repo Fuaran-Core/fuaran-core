@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Column</PackageId>
+    <Description>Fuaran.Core.Column — the relational/columnar data strand: a typed, null-aware, Arrow-compatible columnar model (int/float/bool/string/date/timestamp with a first-class validity mask) and its canonical wire codec (column-oriented, reusing the Fuaran.Core.Wire canonical-float rules so numeric columns are byte-identical across hosts; decode is Result-typed with a six-code error envelope). No tree-witness coupling, no base node type. FSharp.Core only, Fable-clean on encode and decode.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Column.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

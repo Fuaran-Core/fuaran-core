@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Fable-compilation smoke gate (Phase 54). This project exists only to be compiled by
+    `dotnet fable` in `./verify.ps1`: a successful Fable compile of every PUBLIC Fuaran.Core
+    package's encode + decode surface enforces the GP3 / STABILITY.md "Fable-clean on encode
+    AND decode" claim in-repo, instead of leaving it to be discovered downstream. The emitted
+    JS is throwaway (output dir is git-ignored); the COMPILE is the gate.
+    Idl / Idl.Spike / Observer are intentionally excluded — they are not part of the
+    Fable-targeted public surface.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Ops\Fuaran.Core.Ops.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.OpStream.Dag\Fuaran.Core.OpStream.Dag.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Validator\Fuaran.Core.Validator.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.DataFrame\Fuaran.Core.DataFrame.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Query\Fuaran.Core.Query.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Conformance\Fuaran.Core.Conformance.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+    <PackageReference Include="Fable.Core" />
+  </ItemGroup>
+</Project>

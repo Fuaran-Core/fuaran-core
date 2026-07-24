@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Tree</PackageId>
+    <Description>Fuaran.Core.Tree — generic tree addressing / walking / content-hash escape over a domain-witness record. Owns no base node type; generic over a '`Kind`-tag witness and an '`Id` witness (the string-vs-Guid identity axis resolved as a parameter). FSharp.Core only, Fable-clean.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Tree.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

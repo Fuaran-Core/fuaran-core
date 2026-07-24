@@ -1,0 +1,34 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarnOn>3390;$(WarnOn)</WarnOn>
+    <!-- 0.1.11 (2026-07-22): the Phase 94 pilot-5 lenient wave (c5e7863) landed in
+         Column.fs + DataFrame.fs AFTER 0.1.10 was packed, so the feed's 0.1.10
+         bytes predated the feature whose own commit message names that version.
+         Additive — values-only columns, flat logical/comparison spellings, epoch
+         timestamps — so consumers repin without source changes. Advancing rather
+         than repacking 0.1.10 in place: this is the one package every domain
+         consumes, so a same-version swap would give each machine a different
+         contract depending only on when it last packed. -->
+    <Version>0.1.11</Version>
+    <Authors>Andrew J. Willshire</Authors>
+    <Company>Diametrical Ltd</Company>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <Copyright>Copyright 2026 Diametrical Ltd</Copyright>
+    <PackageProjectUrl>https://github.com/fuaran-ui/fuaran-core</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/fuaran-ui/fuaran-core</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <!-- Fable source distribution. Every packable
+       Core project ships its F# source + .fsproj under `fable/` in the package, so a
+       Fable-compiled consumer (the Fuaran.UI client) compiles Core from source — alongside
+       the `lib/` DLL for .NET. The standard dual-pack convention (Feliz / Thoth). The internal
+       ProjectReferences become nuspec dependencies on pack; the dependency packages ship their
+       own `fable/` source, so Fable resolves the whole Core graph transitively. -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <Content Include="$(MSBuildProjectFile)" PackagePath="fable\" />
+    <Content Include="*.fs" PackagePath="fable\" />
+  </ItemGroup>
+</Project>

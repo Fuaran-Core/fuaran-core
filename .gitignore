@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+artifacts/
+# Fable-compile smoke gate (Phase 54) — the emitted JS + Fable cache are throwaway (the compile is the gate).
+tests/fable-smoke/out/
+fable_modules/
+.fable/

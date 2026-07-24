@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Query</PackageId>
+    <Description>Fuaran.Core.Query — the declarative, cross-domain data-acquisition seam (Phase 46): the data-acquisition sibling to Capability. A Query is a serialisable, typed declaration of external data to fetch (relational rows, retrieval hits, file/asset ingest, reference lookup) producing a Column Table; the host supplies the resolver (witness pattern). Default-deny registry, typed param validation, Phase 27 capture keying, Fable-clean codec. FSharp.Core only.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Query.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>
