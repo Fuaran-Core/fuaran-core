@@ -1,11 +1,9 @@
 name: publish-packages
 
-# Released distribution channels for the Fuaran.Core.* packs: nuget.org (the
-# public, no-auth-restore channel) and the fuaran-ui org GitHub Packages NuGet
-# feed. Bump <Version> in Directory.Build.props, commit,
-# then tag vX.Y.Z-alpha.N and push the tag to trigger this workflow. Re-runs of
-# the same tag are idempotent (--skip-duplicate); GH Packages refuses re-push of
-# the same id+version pair, so the operator must bump the version before tagging.
+# Released distribution channel for the Fuaran.Core.* packs: nuget.org — the
+# public, no-auth-restore channel. Bump <Version> in Directory.Build.props,
+# commit, then tag vX.Y.Z and push the tag to trigger this workflow.
+# Re-runs of the same tag are idempotent (--skip-duplicate).
 on:
   push:
     tags: ['v*']
@@ -13,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
   # `id-token: write` lets the job request the GitHub OIDC token that
   # nuget.org's Trusted Publishing exchange turns into a short-lived API key.
   id-token: write
@@ -28,18 +25,10 @@ jobs:
           global-json-file: global.json
       - name: Pack (all packable src projects)
         run: dotnet pack Fuaran.Core.slnx -c Release -o ${{ runner.temp }}/nupkgs
-      - name: Push to the fuaran-ui GitHub Packages feed
-        run: >
-          dotnet nuget push "${{ runner.temp }}/nupkgs/*.nupkg"
-          --source https://nuget.pkg.github.com/fuaran-ui/index.json
-          --api-key ${{ secrets.GITHUB_TOKEN }}
-          --skip-duplicate
-      # nuget.org is the public distribution channel — consumers restore with
-      # no credentials (GitHub Packages requires auth even for public NuGet
-      # packages). Auth is Trusted Publishing (OIDC): a policy on nuget.org
-      # (repo owner / repo / this workflow's file name) exchanges the job's
-      # OIDC token for a 1-hour API key — no long-lived key secret to rotate.
-      # NUGET_USER is the nuget.org profile name the policy belongs to.
+      # Auth is Trusted Publishing (OIDC): a policy on nuget.org (repo owner /
+      # repo / this workflow's file name) exchanges the job's OIDC token for a
+      # 1-hour API key — no long-lived key secret to rotate. NUGET_USER is the
+      # nuget.org profile name the policy belongs to.
       - name: NuGet login (OIDC → temp API key)
         uses: NuGet/login@v1
         id: nuget-login
