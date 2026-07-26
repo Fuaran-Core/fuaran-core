@@ -22,7 +22,7 @@ let tests =
         "Ops.applyContained"
         [ testCase "rejects an insert under a leaf with NotAContainer"
           <| fun _ ->
-              let op = InsertChild("p", 0, RNode.leaf "c" "para" "")
+              let op = InsertChild("p", RNode.leaf "c" "para" "")
 
               match Ops.applyContained canHold nodew idw op (mixed ()) with
               | Error(NotAContainer("p", "para")) -> ()
@@ -30,7 +30,7 @@ let tests =
 
           testCase "accepts an insert under a container"
           <| fun _ ->
-              let op = InsertChild("s", 0, RNode.leaf "c" "para" "hi")
+              let op = InsertChild("s", RNode.leaf "c" "para" "hi")
 
               match Ops.applyContained canHold nodew idw op (mixed ()) with
               | Ok r -> Expect.isSome (Tree.tryFind nodew idw "c" r) "inserted under the container"
@@ -40,18 +40,18 @@ let tests =
           <| fun _ ->
               // default `apply` treats every node as a container (back-compat); the insert
               // succeeds structurally (ReplaceChildren on the reference RNode is total).
-              let op = InsertChild("p", 0, RNode.leaf "c" "para" "")
+              let op = InsertChild("p", RNode.leaf "c" "para" "")
               Expect.isOk (Ops.apply nodew idw op (mixed ())) "default apply still accepts it"
 
           testCase "MoveNode under a leaf is NotAContainer"
           <| fun _ ->
-              match Ops.applyContained canHold nodew idw (MoveNode("s", "p", 0)) (mixed ()) with
+              match Ops.applyContained canHold nodew idw (MoveNode("s", "p")) (mixed ()) with
               | Error(NotAContainer("p", "para")) -> ()
               | other -> failtestf "expected NotAContainer, got %A" other
 
           testCase "canApplyContained mirrors applyContained"
           <| fun _ ->
-              let op = InsertChild("p", 0, RNode.leaf "c" "para" "")
+              let op = InsertChild("p", RNode.leaf "c" "para" "")
 
               Expect.equal
                   (Ops.canApplyContained canHold nodew idw op (mixed ()))

@@ -9,8 +9,6 @@ namespace Fuaran.Core
 type Rejection<'Id> =
     /// `target` is not in the tree; `addressable` enumerates the ids that are.
     | UnknownNode of target: 'Id * addressable: 'Id list
-    /// An index op addressed a parent whose child count is `count`.
-    | IndexOutOfRange of parent: 'Id * index: int * count: int
     /// Inserting / moving a node whose id already exists in the tree.
     | DuplicateId of 'Id
     /// The root cannot be removed or moved.
@@ -29,10 +27,24 @@ type Rejection<'Id> =
 /// The skeleton-five structural-edit ops shared by every domain. Per-kind property
 /// edits (`SetInput`, `SetParameter`, `SetVariable`, `UpdateProp`, …) stay domain-side
 /// and compose with these. `Batch` is all-or-nothing.
+///
+/// **Membership and order are separate concerns.** `InsertChild` and `MoveNode` change
+/// which children a parent has, and both APPEND; `ReorderChildren` states the order, by
+/// naming ids. Placing a node anywhere but last is therefore
+/// `Batch [InsertChild …; ReorderChildren …]`.
+///
+/// The ordinal these two ops used to carry was removed deliberately (2026-07-26). Every
+/// node has an id, every other op addresses by it, and `ReorderChildren` already stated
+/// order that way — so the integer was the one place the structural surface departed from
+/// the identity model the rest of the tree is built on. It also named something that does
+/// not exist in the tree: children are a list, so order is structural and no index is
+/// stored anywhere. An index is a projection over that list, derivable from it and only
+/// meaningful against one snapshot of it, which makes it silently wrong after any
+/// concurrent or preceding edit. An id is checkable; an ordinal is not.
 type SkeletonOp<'Node, 'Id> =
-    | InsertChild of parent: 'Id * index: int * node: 'Node
+    | InsertChild of parent: 'Id * node: 'Node
     | RemoveNode of target: 'Id
-    | MoveNode of target: 'Id * newParent: 'Id * index: int
+    | MoveNode of target: 'Id * newParent: 'Id
     | ReorderChildren of parent: 'Id * order: 'Id list
     | Batch of SkeletonOp<'Node, 'Id> list
 
@@ -72,11 +84,6 @@ type Footprint =
 /// `NodeKind` is ever in scope.
 module Ops =
 
-    let private insertAt (i: int) (x: 'a) (xs: 'a list) =
-        let before = xs |> List.truncate i
-        let after = xs |> List.skip i
-        before @ [ x ] @ after
-
     // ---- validation (Phase 246) ----
     // The structural checks each op must pass, factored out of `apply` so the dry-run
     // `canApply` and the mutating `apply` share one source of validation truth and can
@@ -90,7 +97,6 @@ module Ops =
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (parent: 'Id)
-        (index: int)
         (node: 'Node)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
@@ -102,13 +108,7 @@ module Ops =
             match Tree.tryFind w idw parent root with
             | None -> Error(UnknownNode(parent, Tree.ids w root))
             | Some p when not (canHold p) -> Error(NotAContainer(parent, w.KindTag p))
-            | Some p ->
-                let count = w.Children p |> List.length
-
-                if index < 0 || index > count then
-                    Error(IndexOutOfRange(parent, index, count))
-                else
-                    Ok()
+            | Some _ -> Ok()
 
     let private validateRemove
         (w: NodeWitness<'Node, 'Id>)
@@ -160,10 +160,10 @@ module Ops =
         let eq = idw.Equals
 
         match op with
-        | InsertChild(parent, index, node) ->
-            validateInsert canHold w idw parent index node root
+        | InsertChild(parent, node) ->
+            validateInsert canHold w idw parent node root
             |> Result.bind (fun () ->
-                Tree.updateNode w idw parent (fun p -> w.ReplaceChildren p (insertAt index node (w.Children p))) root
+                Tree.updateNode w idw parent (fun p -> w.ReplaceChildren p (w.Children p @ [ node ])) root
                 |> Option.map Ok
                 |> Option.defaultValue (Error(UnknownNode(parent, allIds ()))))
 
@@ -196,7 +196,7 @@ module Ops =
                     |> Option.map Ok
                     |> Option.defaultValue (Error(UnknownNode(parent, allIds ()))))
 
-        | MoveNode(target, newParent, index) ->
+        | MoveNode(target, newParent) ->
             if eq (w.Id root) target then
                 Error CannotRemoveRoot
             elif not (Tree.exists w idw target root) then
@@ -224,20 +224,15 @@ module Ops =
                                 // re-target into the removed tree (newParent still present there).
                                 match Tree.tryFind w idw newParent removed with
                                 | None -> Error(UnknownNode(newParent, Tree.ids w removed))
-                                | Some np ->
-                                    let count = w.Children np |> List.length
-
-                                    if index < 0 || index > count then
-                                        Error(IndexOutOfRange(newParent, index, count))
-                                    else
-                                        Tree.updateNode
-                                            w
-                                            idw
-                                            newParent
-                                            (fun np -> w.ReplaceChildren np (insertAt index sub (w.Children np)))
-                                            removed
-                                        |> Option.map Ok
-                                        |> Option.defaultValue (Error(UnknownNode(newParent, Tree.ids w removed)))
+                                | Some _ ->
+                                    Tree.updateNode
+                                        w
+                                        idw
+                                        newParent
+                                        (fun np -> w.ReplaceChildren np (w.Children np @ [ sub ]))
+                                        removed
+                                    |> Option.map Ok
+                                    |> Option.defaultValue (Error(UnknownNode(newParent, Tree.ids w removed)))
 
         | Batch ops ->
             // all-or-nothing: thread the tree; abort (leaving the original) on first failure.
@@ -282,7 +277,7 @@ module Ops =
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
         match op with
-        | InsertChild(parent, index, node) -> validateInsert canHold w idw parent index node root
+        | InsertChild(parent, node) -> validateInsert canHold w idw parent node root
         | RemoveNode target -> validateRemove w idw target root
         | ReorderChildren(parent, order) -> validateReorder w idw parent order root
         | MoveNode _
@@ -364,11 +359,28 @@ module Ops =
         (pre: 'Node)
         : Result<SkeletonOp<'Node, 'Id>, Rejection<'Id>> =
 
-        // The position of `childId` among `parentId`'s children in the pre-state.
-        let positionIn (parentNode: 'Node) (childId: 'Id) =
-            parentNode
-            |> w.Children
-            |> List.findIndex (fun c -> idw.Equals (w.Id c) childId)
+        // The pre-state order of a parent's children, by id. `InsertChild` / `MoveNode`
+        // append, so restoring a node to where it was is two steps: put it back, then
+        // restate the order it was part of. The order is read from the pre-state, exactly
+        // as the index used to be — the same information, named rather than counted.
+        let orderIn (parentNode: 'Node) =
+            parentNode |> w.Children |> List.map w.Id
+
+        // Restore `target` under `parentNode` at the position it held in `pre`. A single
+        // op when it was already last (the append lands it correctly); otherwise the
+        // append plus the order it belonged to.
+        let restoring (parentNode: 'Node) (target: 'Id) (put: SkeletonOp<'Node, 'Id>) =
+            let order = orderIn parentNode
+
+            let wasLast =
+                match List.tryLast order with
+                | Some lastId -> idw.Equals lastId target
+                | None -> false
+
+            if wasLast then
+                put
+            else
+                Batch [ put; ReorderChildren(w.Id parentNode, order) ]
 
         match op with
         | Batch ops ->
@@ -394,14 +406,14 @@ module Ops =
             | Error e -> Error e
             | Ok() ->
                 match op with
-                | InsertChild(_, _, node) -> Ok(RemoveNode(w.Id node))
+                | InsertChild(_, node) -> Ok(RemoveNode(w.Id node))
                 | RemoveNode target ->
                     let parent = Tree.parentOf w idw target pre |> Option.get
                     let sub = Tree.tryFind w idw target pre |> Option.get
-                    Ok(InsertChild(w.Id parent, positionIn parent target, sub))
-                | MoveNode(target, _, _) ->
+                    Ok(restoring parent target (InsertChild(w.Id parent, sub)))
+                | MoveNode(target, _) ->
                     let parent = Tree.parentOf w idw target pre |> Option.get
-                    Ok(MoveNode(target, w.Id parent, positionIn parent target))
+                    Ok(restoring parent target (MoveNode(target, w.Id parent)))
                 | ReorderChildren(parent, _) ->
                     let p = Tree.tryFind w idw parent pre |> Option.get
                     Ok(ReorderChildren(parent, p |> w.Children |> List.map w.Id))
@@ -449,8 +461,8 @@ module Ops =
         let rec peephole xs =
             match xs with
             | [] -> []
-            | InsertChild(_, _, node) :: RemoveNode target :: rest when eq (w.Id node) target -> peephole rest
-            | MoveNode(t1, _, _) :: (MoveNode(t2, _, _) as second) :: rest when eq t1 t2 -> peephole (second :: rest)
+            | InsertChild(_, node) :: RemoveNode target :: rest when eq (w.Id node) target -> peephole rest
+            | MoveNode(t1, _) :: (MoveNode(t2, _) as second) :: rest when eq t1 t2 -> peephole (second :: rest)
             | ReorderChildren(p1, _) :: (ReorderChildren(p2, _) as second) :: rest when eq p1 p2 ->
                 peephole (second :: rest)
             | x :: rest -> x :: peephole rest
@@ -513,7 +525,7 @@ module Ops =
 
         let rec ofOp (op: SkeletonOp<'Node, 'Id>) : Footprint =
             match op with
-            | InsertChild(parent, _, node) ->
+            | InsertChild(parent, node) ->
                 let inserted = subtreeKeys node
                 // parent existence + the inserted ids' dup-check are reads; the parent's child-list is a
                 // (known) structure-write; the inserted subtree is authored into being — a content-write.
@@ -528,7 +540,7 @@ module Ops =
                     Reads = Set.singleton (key target)
                     ContentWrites = Set.singleton (key target)
                     UnknownParentWrites = Set.singleton (key target) }
-            | MoveNode(target, newParent, _) ->
+            | MoveNode(target, newParent) ->
                 // relocation: the destination child-list is a known structure-write; the target is
                 // content-written (it moves); the source parent's child-list is the unknown over-approx.
                 { Reads = Set.ofList [ key target; key newParent ]
@@ -641,23 +653,31 @@ module Diff =
                         beforeNodes |> List.map (fun n -> key (w.Id n), childKeysOf n) |> Map.ofList
 
                     let ops = ResizeArray<SkeletonOp<'Node, 'Id>>()
+                    // Parents whose order must be restated once membership is final (step 4).
+                    let reorderParents = ResizeArray<'Id>()
 
                     // 1. Added nodes → leaf shells under their after-parent (top-down via
-                    //    preorder, so an added parent exists before an added child). Order
-                    //    is fixed in step 2; index 0 is always valid.
+                    //    preorder, so an added parent exists before an added child). They
+                    //    append; step 2 states the order.
                     for n in afterNodes do
                         let k = key (w.Id n)
 
                         if not (bIds.Contains k) then
                             match Map.tryFind k aParent with
-                            | Some pid -> ops.Add(InsertChild(pid, 0, w.ReplaceChildren n []))
+                            | Some pid -> ops.Add(InsertChild(pid, w.ReplaceChildren n []))
                             | None -> () // an added root is impossible (roots match)
 
                     // 2. Reattach + reorder every survivor to its after-position. A parent
                     //    whose child-id list is unchanged is already correct (its children
-                    //    are never disturbed), so skip it; otherwise place each after-child
-                    //    at its index in order — the front prefix builds correctly even with
-                    //    stale (not-yet-claimed) children trailing.
+                    //    are never disturbed), so skip it.
+                    //
+                    //    This used to be a positional sweep — one `MoveNode` per child at
+                    //    its index, relying on the front prefix building correctly whilst
+                    //    stale children trailed. With membership and order separated it is
+                    //    a `MoveNode` only for children that actually CHANGED parent, plus
+                    //    one `ReorderChildren` naming the after-order. That is strictly
+                    //    fewer ops (a pure reorder of n children is now 1 op, not n) and
+                    //    carries no ordinals.
                     for p in afterNodes do
                         let pk = key (w.Id p)
                         let aKidKeys = childKeysOf p
@@ -669,7 +689,29 @@ module Diff =
                                 | None -> false)
 
                         if not unchanged then
-                            w.Children p |> List.iteri (fun k c -> ops.Add(MoveNode(w.Id c, w.Id p, k)))
+                            // Membership: a survivor whose before-parent differs must move.
+                            // A newly-added node was already appended here in step 1.
+                            for c in w.Children p do
+                                let ck = key (w.Id c)
+
+                                let movedParent =
+                                    bIds.Contains ck
+                                    && (match Map.tryFind ck bParent with
+                                        | Some bp -> key bp <> pk
+                                        | None -> true) // no before-parent → it was the root's child set
+
+                                if movedParent then
+                                    ops.Add(MoveNode(w.Id c, w.Id p))
+
+                            // Order is stated LAST, in step 4 — not here. `ReorderChildren`
+                            // demands an exact permutation of the parent's children AT APPLY
+                            // TIME, and at this point the parent may still hold children that
+                            // are about to leave: a node moving to a parent processed later in
+                            // this loop, or a node removed in step 3. The old positional sweep
+                            // tolerated that ("the front prefix builds correctly even with
+                            // stale children trailing"); naming an order does not, so every
+                            // reorder waits until membership is final.
+                            reorderParents.Add(w.Id p)
 
                     // 3. Removals last — a removed region's surviving descendants have been
                     //    moved out in step 2, so removing the region's top node (the removed
@@ -681,6 +723,15 @@ module Diff =
                             match Map.tryFind k bParent with
                             | Some pid when aIds.Contains(key pid) -> ops.Add(RemoveNode(w.Id n))
                             | _ -> () // before-parent also removed → covered by removing it
+
+                    // 4. Order, last — every parent now holds exactly its after-children, so
+                    //    naming the after-order is a legal permutation. One op per changed
+                    //    parent, where the old sweep emitted one MoveNode per child.
+                    for pid in reorderParents do
+                        match Tree.tryFind w idw pid after with
+                        | Some p when List.length (w.Children p) > 1 ->
+                            ops.Add(ReorderChildren(pid, w.Children p |> List.map w.Id))
+                        | _ -> ()
 
                     Ok(List.ofSeq ops)
 

@@ -11,7 +11,7 @@
          than repacking 0.1.10 in place: this is the one package every domain
          consumes, so a same-version swap would give each machine a different
          contract depending only on when it last packed. -->
-    <Version>0.1.11</Version>
+    <Version>0.2.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

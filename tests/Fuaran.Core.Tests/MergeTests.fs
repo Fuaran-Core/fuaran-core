@@ -20,21 +20,21 @@ let conflictShapeTests =
         "Dag.conflicts"
         [ testCase "concurrent-update: one branch authors a node the other destroys (content-vs-content)"
           <| fun _ ->
-              let a = [ InsertChild("p", 0, RNode.leaf "z" "para" "v") ]
+              let a = [ InsertChild("p", RNode.leaf "z" "para" "v") ]
               let b = [ RemoveNode "z" ]
 
               match Dag.conflicts fp a b with
               | [ c ] ->
                   Expect.equal c.Shape ConcurrentUpdate "both touch z's content lifecycle"
                   Expect.equal c.Address "z" "the shared address is z"
-                  Expect.equal c.Left (InsertChild("p", 0, RNode.leaf "z" "para" "v")) "Left is delta-A's op"
+                  Expect.equal c.Left (InsertChild("p", RNode.leaf "z" "para" "v")) "Left is delta-A's op"
                   Expect.equal c.Right (RemoveNode "z") "Right is delta-B's op"
               | other -> failtestf "expected a single ConcurrentUpdate on z, got %A" other
 
           testCase "insert-position clash: two inserts under the SAME named parent"
           <| fun _ ->
-              let a = [ InsertChild("p", 0, RNode.leaf "x" "para" "v") ]
-              let b = [ InsertChild("p", 1, RNode.leaf "y" "para" "w") ]
+              let a = [ InsertChild("p", RNode.leaf "x" "para" "v") ]
+              let b = [ InsertChild("p", RNode.leaf "y" "para" "w") ]
 
               match Dag.conflicts fp a b with
               | [ c ] ->
@@ -47,7 +47,7 @@ let conflictShapeTests =
               // disjoint by NAMED ids, but a remove's source parent is a tree fact the script cannot
               // name — so it conservatively conflicts with b's insert (the pinned #78 over-approximation).
               let a = [ RemoveNode "a1" ]
-              let b = [ InsertChild("b", 0, RNode.leaf "y" "para" "w") ]
+              let b = [ InsertChild("b", RNode.leaf "y" "para" "w") ]
 
               match Dag.conflicts fp a b with
               | [ c ] ->
@@ -58,8 +58,8 @@ let conflictShapeTests =
           testCase "disjoint deltas return [] — no false positives"
           <| fun _ ->
               // inserts under DIFFERENT parents, disjoint new ids, no removes ⇒ footprint-independent.
-              let a = [ InsertChild("a", 0, RNode.leaf "x" "para" "v") ]
-              let b = [ InsertChild("b", 0, RNode.leaf "y" "para" "w") ]
+              let a = [ InsertChild("a", RNode.leaf "x" "para" "v") ]
+              let b = [ InsertChild("b", RNode.leaf "y" "para" "w") ]
               Expect.isTrue (Ops.independent (fp a.Head) (fp b.Head)) "the pair is footprint-independent"
               Expect.isEmpty (Dag.conflicts fp a b) "independent deltas ⇒ no conflicts"
 
@@ -72,10 +72,10 @@ let conflictShapeTests =
           <| fun _ ->
               // a small matrix: for every pair, `reported` must equal `not (Ops.independent …)`.
               let ops =
-                  [ InsertChild("p", 0, RNode.leaf "x" "para" "v")
-                    InsertChild("p", 1, RNode.leaf "y" "para" "w")
+                  [ InsertChild("p", RNode.leaf "x" "para" "v")
+                    InsertChild("p", RNode.leaf "y" "para" "w")
                     RemoveNode "a1"
-                    MoveNode("a1", "b", 0)
+                    MoveNode("a1", "b")
                     ReorderChildren("p", [ "b"; "a" ]) ]
 
               for oa in ops do
@@ -86,8 +86,8 @@ let conflictShapeTests =
 
           testCase "conflicts is symmetric up to Left/Right swap"
           <| fun _ ->
-              let a = [ InsertChild("p", 0, RNode.leaf "z" "para" "v"); RemoveNode "a1" ]
-              let b = [ RemoveNode "z"; InsertChild("b", 0, RNode.leaf "y" "para" "w") ]
+              let a = [ InsertChild("p", RNode.leaf "z" "para" "v"); RemoveNode "a1" ]
+              let b = [ RemoveNode "z"; InsertChild("b", RNode.leaf "y" "para" "w") ]
 
               let fwd =
                   Dag.conflicts fp a b |> List.map (fun c -> c.Shape, c.Address, c.Left, c.Right)
@@ -106,15 +106,13 @@ let conflictShapeTests =
 let private sw: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string>> =
     let rec encOp (op: SkeletonOp<RNode, string>) : string =
         match op with
-        | InsertChild(p, ix, node) ->
+        | InsertChild(p, node) ->
             "I|"
             + p
             + "|"
-            + string ix
-            + "|"
             + (Tree.preorder nodew node |> List.map encNode |> String.concat ",")
         | RemoveNode t -> "R|" + t
-        | MoveNode(t, np, ix) -> "M|" + t + "|" + np + "|" + string ix
+        | MoveNode(t, np) -> "M|" + t + "|" + np
         | ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
         | Batch inner -> "B|" + (inner |> List.map encOp |> String.concat ";")
 
@@ -148,8 +146,8 @@ let reconcileTests =
         "Dag.reconcile"
         [ testCase "a conflict-free fork reconciles to delta A ++ delta B (pinned order)"
           <| fun _ ->
-              let a = [ InsertChild("a", 0, RNode.leaf "x" "para" "v") ]
-              let b = [ InsertChild("b", 0, RNode.leaf "y" "para" "w") ]
+              let a = [ InsertChild("a", RNode.leaf "x" "para" "v") ]
+              let b = [ InsertChild("b", RNode.leaf "y" "para" "w") ]
               let baseId, headA, headB, dag = forkDag a b
 
               match Dag.reconcile fp dag baseId headA headB with
@@ -160,8 +158,8 @@ let reconcileTests =
           <| fun _ ->
               // root[a[a1,a2], b[b1]] — insert under a (branch A) vs insert under b (branch B) commute.
               let baseTree = sample ()
-              let a = [ InsertChild("a", 0, RNode.leaf "x" "para" "v") ]
-              let b = [ InsertChild("b", 0, RNode.leaf "y" "para" "w") ]
+              let a = [ InsertChild("a", RNode.leaf "x" "para" "v") ]
+              let b = [ InsertChild("b", RNode.leaf "y" "para" "w") ]
               let baseId, headA, headB, dag = forkDag a b
 
               match Dag.reconcile fp dag baseId headA headB with
@@ -178,7 +176,7 @@ let reconcileTests =
           testCase "a genuine conflict yields Phase 64's typed report, nothing applied"
           <| fun _ ->
               // branch A authors z under p; branch B removes z — a content-vs-content conflict.
-              let a = [ InsertChild("p", 0, RNode.leaf "z" "para" "v") ]
+              let a = [ InsertChild("p", RNode.leaf "z" "para" "v") ]
               let b = [ RemoveNode "z" ]
               let baseId, headA, headB, dag = forkDag a b
 
@@ -191,7 +189,7 @@ let reconcileTests =
           testCase "reconcile is a pure function of (base, headA, headB)"
           <| fun _ ->
               let a = [ RemoveNode "a1" ]
-              let b = [ InsertChild("b", 0, RNode.leaf "y" "para" "w") ]
+              let b = [ InsertChild("b", RNode.leaf "y" "para" "w") ]
               let baseId, headA, headB, dag = forkDag a b
               let r1 = Dag.reconcile fp dag baseId headA headB
               let r2 = Dag.reconcile fp dag baseId headA headB

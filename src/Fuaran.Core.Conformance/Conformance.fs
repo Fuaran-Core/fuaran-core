@@ -118,16 +118,14 @@ module Conformance =
         | 0 ->
             let parent, r2 = ConfRng.choose ids r1
             let fresh, r3 = gen.FreshNode idKeys r2
-            let idx, r4 = ConfRng.intBelow 4 r3
-            InsertChild(parent, idx, fresh), r4
+            InsertChild(parent, fresh), r3
         | 1 ->
             let target, r2 = ConfRng.choose ids r1
             RemoveNode target, r2
         | 2 ->
             let target, r2 = ConfRng.choose ids r1
             let np, r3 = ConfRng.choose ids r2
-            let idx, r4 = ConfRng.intBelow 3 r3
-            MoveNode(target, np, idx), r4
+            MoveNode(target, np), r3
         | _ ->
             let parent, r2 = ConfRng.choose ids r1
 
@@ -5205,15 +5203,13 @@ module Conformance =
         // fingerprint of the op — enough for distinct nodes to get distinct content ids.
         let rec encOp (op: SkeletonOp<'Node, 'Id>) : string =
             match op with
-            | InsertChild(p, ix, node) ->
+            | InsertChild(p, node) ->
                 "I|"
                 + idw.ToString p
                 + "|"
-                + string ix
-                + "|"
                 + (Tree.preorder nodew node |> List.map encode |> String.concat ",")
             | RemoveNode t -> "R|" + idw.ToString t
-            | MoveNode(t, np, ix) -> "M|" + idw.ToString t + "|" + idw.ToString np + "|" + string ix
+            | MoveNode(t, np) -> "M|" + idw.ToString t + "|" + idw.ToString np
             | ReorderChildren(p, order) ->
                 "O|"
                 + idw.ToString p

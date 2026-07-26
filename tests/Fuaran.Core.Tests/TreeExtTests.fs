@@ -101,11 +101,11 @@ let transformTests =
               Expect.equal (ids (Tree.preorder nodew copy)) [ "copy-a"; "copy-a1"; "copy-a2" ] "ids carry the rename"
 
               // the remapped copy inserts cleanly; the un-remapped original would collide
-              match Ops.apply nodew idw (InsertChild("b", 0, copy)) (sample ()) with
+              match Ops.apply nodew idw (InsertChild("b", copy)) (sample ()) with
               | Ok _ -> ()
               | Error e -> failtestf "insert of remapped copy rejected: %A" e
 
-              match Ops.apply nodew idw (InsertChild("b", 0, sub)) (sample ()) with
+              match Ops.apply nodew idw (InsertChild("b", sub)) (sample ()) with
               | Error(DuplicateId "a") -> ()
               | other -> failtestf "expected DuplicateId for the un-remapped copy, got %A" other ]
 

@@ -20,22 +20,21 @@ let private diffOk before after =
 /// Each scenario is a known op sequence producing `after` from the sample tree — the
 /// diff must reconstruct *some* valid script yielding the same `after`.
 let private scenarios: (string * SkeletonOp<RNode, string> list) list =
-    [ "insert leaf", [ InsertChild("a", 2, RNode.leaf "a3" "para" "w") ]
-      "insert subtree", [ InsertChild("b", 0, RNode.node "c" "section" [ RNode.leaf "c1" "para" "z" ]) ]
+    [ "insert leaf", [ InsertChild("a", RNode.leaf "a3" "para" "w") ]
+      "insert subtree", [ InsertChild("b", RNode.node "c" "section" [ RNode.leaf "c1" "para" "z" ]) ]
       "remove leaf", [ RemoveNode "a1" ]
       "remove subtree", [ RemoveNode "a" ]
-      "move subtree", [ MoveNode("a", "b", 0) ]
-      "move leaf", [ MoveNode("a1", "b", 0) ]
+      "move subtree", [ MoveNode("a", "b") ]
+      "move leaf", [ MoveNode("a1", "b") ]
       "reorder", [ ReorderChildren("a", [ "a2"; "a1" ]) ]
-      "move into a freshly-inserted parent",
-      [ InsertChild("root", 1, RNode.node "n" "section" []); MoveNode("a1", "n", 0) ]
+      "move into a freshly-inserted parent", [ InsertChild("root", RNode.node "n" "section" []); MoveNode("a1", "n") ]
       "survive out of a removed region",
-      [ InsertChild("root", 1, RNode.node "keep" "section" [])
-        MoveNode("a1", "keep", 0)
+      [ InsertChild("root", RNode.node "keep" "section" [])
+        MoveNode("a1", "keep")
         RemoveNode "a" ]
       "mixed insert+move+remove+reorder",
-      [ InsertChild("a", 2, RNode.leaf "a3" "para" "w")
-        MoveNode("a3", "b", 0)
+      [ InsertChild("a", RNode.leaf "a3" "para" "w")
+        MoveNode("a3", "b")
         RemoveNode "a2"
         ReorderChildren("root", [ "b"; "a" ]) ] ]
 
@@ -57,13 +56,13 @@ let tests =
           testCase "a relocated subtree diffs to MoveNode, never remove+insert"
           <| fun _ ->
               let before = sample ()
-              let after = applyAllOk [ MoveNode("a", "b", 0) ] before
+              let after = applyAllOk [ MoveNode("a", "b") ] before
               let d = diffOk before after
 
               Expect.isTrue
                   (d
                    |> List.exists (function
-                       | MoveNode("a", _, _) -> true
+                       | MoveNode("a", _) -> true
                        | _ -> false))
                   "uses MoveNode for the relocated subtree"
 
@@ -86,7 +85,7 @@ let tests =
           <| fun _ ->
               let canHold (n: RNode) = n.Kind <> "para"
               let before = sample ()
-              let after = applyAllOk [ InsertChild("b", 0, RNode.leaf "b2" "para" "w") ] before
+              let after = applyAllOk [ InsertChild("b", RNode.leaf "b2" "para" "w") ] before
 
               Expect.equal
                   (Diff.toOpsContained canHold nodew idw before after)
@@ -98,7 +97,7 @@ let tests =
               let canHold (n: RNode) = n.Kind <> "para"
               let before = sample ()
               // plain apply (every node a container) lets us build the illegal-for-leaves after
-              let after = applyAllOk [ InsertChild("a1", 0, RNode.leaf "x" "para" "v") ] before
+              let after = applyAllOk [ InsertChild("a1", RNode.leaf "x" "para" "v") ] before
 
               match Diff.toOpsContained canHold nodew idw before after with
               | Error(Diff.TargetNotAContainer("a1", "para")) -> ()

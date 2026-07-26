@@ -183,9 +183,9 @@ module Propagation =
             | None -> Set.singleton (s tid)
 
         match op with
-        | InsertChild(parent, _, node) -> Set.add (s parent) (idsOf node)
+        | InsertChild(parent, node) -> Set.add (s parent) (idsOf node)
         | RemoveNode target -> subtreeIds target
-        | MoveNode(target, newParent, _) -> Set.ofList [ s target; s newParent ]
+        | MoveNode(target, newParent) -> Set.ofList [ s target; s newParent ]
         | ReorderChildren(parent, _) -> Set.singleton (s parent)
         | Batch ops ->
             (Set.empty, ops)

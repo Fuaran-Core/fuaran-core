@@ -31,8 +31,8 @@ let arbitrateTests =
           <| fun _ ->
               // sample(): root[a[a1,a2], b[b1]] — inserts under different parents commute.
               let tree = sample ()
-              let p1 = prop 1 [ InsertChild("a", 0, RNode.leaf "x" "para" "v") ]
-              let p2 = prop 2 [ InsertChild("b", 0, RNode.leaf "y" "para" "w") ]
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "v") ]
+              let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "w") ]
 
               let r = AiSurface.arbitrate nodew idw tree [ p2; p1 ] // input order ≠ pinned order
 
@@ -49,9 +49,9 @@ let arbitrateTests =
               // three inserts under ONE parent — the pinned same-parent rule makes them pairwise
               // dependent, so greedy accepts only the first in pinned order.
               let tree = sample ()
-              let p1 = prop 1 [ InsertChild("a", 0, RNode.leaf "x" "para" "1") ]
-              let p2 = prop 2 [ InsertChild("a", 0, RNode.leaf "y" "para" "2") ]
-              let p3 = prop 3 [ InsertChild("a", 1, RNode.leaf "z" "para" "3") ]
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
+              let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ]
+              let p3 = prop 3 [ InsertChild("a", RNode.leaf "z" "para" "3") ]
 
               let r = AiSurface.arbitrate nodew idw tree [ p3; p1; p2 ]
 
@@ -65,7 +65,7 @@ let arbitrateTests =
           testCase "an inapplicable proposal carries the op-algebra's own rejection envelope"
           <| fun _ ->
               let tree = sample ()
-              let bad = [ InsertChild("zz", 0, RNode.leaf "x" "para" "v") ] // unknown parent
+              let bad = [ InsertChild("zz", RNode.leaf "x" "para" "v") ] // unknown parent
               let p1 = prop 1 bad
 
               let r = AiSurface.arbitrate nodew idw tree [ p1 ]
@@ -83,10 +83,10 @@ let arbitrateTests =
           testCase "mixed: accepted / inapplicable / conflicting each land in the right bucket"
           <| fun _ ->
               let tree = sample ()
-              let p1 = prop 1 [ InsertChild("a", 0, RNode.leaf "x" "para" "1") ] // accepted
-              let p2 = prop 2 [ InsertChild("zz", 0, RNode.leaf "y" "para" "2") ] // inapplicable
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ] // accepted
+              let p2 = prop 2 [ InsertChild("zz", RNode.leaf "y" "para" "2") ] // inapplicable
               let p3 = prop 3 [ RemoveNode "b1" ] // remove ⇒ unknown-parent ⇒ conflicts with any structural write
-              let p4 = prop 4 [ InsertChild("b", 0, RNode.leaf "w" "para" "4") ] // independent of p1 — accepted
+              let p4 = prop 4 [ InsertChild("b", RNode.leaf "w" "para" "4") ] // independent of p1 — accepted
 
               let r = AiSurface.arbitrate nodew idw tree [ p4; p3; p2; p1 ]
 
@@ -102,9 +102,9 @@ let arbitrateTests =
               // p2 (a remove — unknown-parent) is decided between p1 and p3 in pinned order, but
               // its citation must include p3, accepted after it.
               let tree = sample ()
-              let p1 = prop 1 [ InsertChild("a", 0, RNode.leaf "x" "para" "1") ]
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
               let p2 = prop 2 [ RemoveNode "b1" ]
-              let p3 = prop 3 [ InsertChild("b", 0, RNode.leaf "y" "para" "3") ]
+              let p3 = prop 3 [ InsertChild("b", RNode.leaf "y" "para" "3") ]
 
               let r = AiSurface.arbitrate nodew idw tree [ p1; p2; p3 ]
 
@@ -114,9 +114,9 @@ let arbitrateTests =
           testCase "the outcome is invariant under permutation of the input list"
           <| fun _ ->
               let tree = sample ()
-              let p1 = prop 1 [ InsertChild("a", 0, RNode.leaf "x" "para" "1") ]
-              let p2 = prop 2 [ InsertChild("a", 1, RNode.leaf "y" "para" "2") ]
-              let p3 = prop 3 [ InsertChild("b", 0, RNode.leaf "z" "para" "3") ]
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
+              let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ]
+              let p3 = prop 3 [ InsertChild("b", RNode.leaf "z" "para" "3") ]
 
               let reference = AiSurface.arbitrate nodew idw tree [ p1; p2; p3 ]
 
@@ -126,8 +126,8 @@ let arbitrateTests =
           testCase "the accepted scripts apply confluently in either order (same content hash)"
           <| fun _ ->
               let tree = sample ()
-              let p1 = prop 1 [ InsertChild("a", 0, RNode.leaf "x" "para" "1") ]
-              let p2 = prop 2 [ InsertChild("b", 0, RNode.leaf "y" "para" "2") ]
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
+              let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "2") ]
               let r = AiSurface.arbitrate nodew idw tree [ p1; p2 ]
               Expect.equal (acceptedIds r) [ 1; 2 ] "both accepted"
 

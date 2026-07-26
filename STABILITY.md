@@ -43,6 +43,23 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   See "Typed, attested provenance" below (migration notes shipped with that release).
 - **`ArtifactWitness<'Node, 'Id>`** (`{ Tree; IdW; Holes; Effect; Bind }`) — the
   artifact-function witness.
+- **`SkeletonOp` carries no ordinal** (`0.2.0`, 2026-07-26). `InsertChild` and `MoveNode` are
+  `(parent, node)` and `(target, newParent)`; both **append**, and `ReorderChildren` states order by
+  naming ids. Placing a node anywhere but last is `Batch [InsertChild …; ReorderChildren …]`.
+  **Breaking twice over**: the two constructors lost an argument, and `Rejection.IndexOutOfRange` was
+  removed because nothing can construct it any more — an unreachable rejection case is dead
+  vocabulary, and the envelope discipline above is about naming real failures.
+  **The rule this establishes: where a collection's members have identity, they are addressed by it.**
+  An ordinal names a projection over a list rather than anything the tree stores — children are a list,
+  so order is structural and no index exists in the state. It is therefore derivable, snapshot-bound,
+  and silently wrong after any preceding or concurrent edit, where a wrong id fails loudly.
+  Reintroducing a positional argument to these ops is a regression, not a convenience. Contained data
+  with no identity of its own (a column list, a chart's series) is a different case and may still be
+  addressed positionally.
+  *Consequence worth knowing:* a remove and an insert on the same parent now **commute**, where the
+  index-bearing forms did not. `Ops.footprint` still reports them dependent — it is a deliberate
+  over-approximation keyed on the parent id and does not consult the tree — and that conservatism is
+  pinned by a test so it reads as a choice rather than a defect.
 - **The recoverable envelope discipline** — `Rejection<'Id>` (Ops) and `ApplyError`
   (Function) must always *name the failure and enumerate the valid alternatives*. New
   cases are additive; removing the enumeration from a case is breaking.

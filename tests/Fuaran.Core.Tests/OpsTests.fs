@@ -15,7 +15,7 @@ let tests =
         "Ops"
         [ testCase "InsertChild appends at index"
           <| fun _ ->
-              let op = InsertChild("a", 2, RNode.leaf "a3" "para" "w")
+              let op = InsertChild("a", RNode.leaf "a3" "para" "w")
 
               match Ops.apply nodew idw op (sample ()) with
               | Ok r -> Expect.equal (childIds nodew "a" r) [ "a1"; "a2"; "a3" ] "appended"
@@ -23,21 +23,15 @@ let tests =
 
           testCase "InsertChild rejects a duplicate id"
           <| fun _ ->
-              let op = InsertChild("a", 0, RNode.leaf "b1" "para" "dup")
+              let op = InsertChild("a", RNode.leaf "b1" "para" "dup")
 
               match Ops.apply nodew idw op (sample ()) with
               | Error(DuplicateId "b1") -> ()
               | other -> failtestf "expected DuplicateId, got %A" other
 
-          testCase "InsertChild rejects an out-of-range index, reporting the count"
-          <| fun _ ->
-              match Ops.apply nodew idw (InsertChild("a", 9, RNode.leaf "z" "para" "")) (sample ()) with
-              | Error(IndexOutOfRange("a", 9, 2)) -> ()
-              | other -> failtestf "expected IndexOutOfRange .. 2, got %A" other
-
           testCase "InsertChild under an unknown parent enumerates the addressable ids"
           <| fun _ ->
-              match Ops.apply nodew idw (InsertChild("ghost", 0, RNode.leaf "z" "para" "")) (sample ()) with
+              match Ops.apply nodew idw (InsertChild("ghost", RNode.leaf "z" "para" "")) (sample ()) with
               | Error(UnknownNode("ghost", addressable)) -> Expect.contains addressable "root" "addressable lists ids"
               | other -> failtestf "expected UnknownNode, got %A" other
 
@@ -53,17 +47,27 @@ let tests =
               | Error CannotRemoveRoot -> ()
               | other -> failtestf "expected CannotRemoveRoot, got %A" other
 
-          testCase "MoveNode relocates under a new parent"
+          testCase "MoveNode relocates under a new parent, appending"
           <| fun _ ->
-              match Ops.apply nodew idw (MoveNode("a1", "b", 0)) (sample ()) with
+              // Membership only: the move APPENDS. Landing it anywhere else is
+              // `Batch [MoveNode …; ReorderChildren …]` — see the next case.
+              match Ops.apply nodew idw (MoveNode("a1", "b")) (sample ()) with
               | Ok r ->
-                  Expect.equal (childIds nodew "b" r) [ "a1"; "b1" ] "a1 moved under b"
+                  Expect.equal (childIds nodew "b" r) [ "b1"; "a1" ] "a1 appended under b"
                   Expect.equal (childIds nodew "a" r) [ "a2" ] "a1 left a"
+              | Error e -> failtestf "unexpected %A" e
+
+          testCase "a move to a chosen position is the move plus a reorder"
+          <| fun _ ->
+              let op = Batch [ MoveNode("a1", "b"); ReorderChildren("b", [ "a1"; "b1" ]) ]
+
+              match Ops.apply nodew idw op (sample ()) with
+              | Ok r -> Expect.equal (childIds nodew "b" r) [ "a1"; "b1" ] "placed first by naming the order"
               | Error e -> failtestf "unexpected %A" e
 
           testCase "MoveNode refuses to nest a node under itself"
           <| fun _ ->
-              match Ops.apply nodew idw (MoveNode("a", "a1", 0)) (sample ()) with
+              match Ops.apply nodew idw (MoveNode("a", "a1")) (sample ()) with
               | Error(WouldNestUnderSelf "a") -> ()
               | other -> failtestf "expected WouldNestUnderSelf, got %A" other
 
@@ -82,7 +86,7 @@ let tests =
           testCase "Batch is atomic — a failing member leaves the tree untouched"
           <| fun _ ->
               let batch =
-                  Batch [ InsertChild("a", 2, RNode.leaf "a3" "para" "w"); RemoveNode "root" ]
+                  Batch [ InsertChild("a", RNode.leaf "a3" "para" "w"); RemoveNode "root" ]
 
               match Ops.apply nodew idw batch (sample ()) with
               | Error CannotRemoveRoot -> ()
@@ -90,7 +94,7 @@ let tests =
 
           testCase "applyAll reports the failing index and partial tree"
           <| fun _ ->
-              let ops = [ InsertChild("a", 2, RNode.leaf "a3" "para" "w"); RemoveNode "ghost" ]
+              let ops = [ InsertChild("a", RNode.leaf "a3" "para" "w"); RemoveNode "ghost" ]
 
               match Ops.applyAll nodew idw ops (sample ()) with
               | Error(1, UnknownNode("ghost", _), partial) ->
@@ -101,9 +105,9 @@ let tests =
           testCase "normalize cancels an adjacent insert-then-remove of the same node"
           <| fun _ ->
               let ops =
-                  [ InsertChild("a", 0, RNode.leaf "tmp" "para" "x")
+                  [ InsertChild("a", RNode.leaf "tmp" "para" "x")
                     RemoveNode "tmp"
-                    InsertChild("a", 0, RNode.leaf "keep" "para" "y") ]
+                    InsertChild("a", RNode.leaf "keep" "para" "y") ]
 
               let normd = Ops.normalize nodew idw ops
               Expect.equal (List.length normd) 1 "the insert/remove pair collapses"
@@ -124,13 +128,13 @@ let tests =
           <| fun _ ->
               let ops =
                   [ Batch []
-                    Batch [ InsertChild("a", 0, RNode.leaf "t" "para" "x"); RemoveNode "t" ] ]
+                    Batch [ InsertChild("a", RNode.leaf "t" "para" "x"); RemoveNode "t" ] ]
 
               Expect.equal (Ops.normalize nodew idw ops) [] "both batches collapse to nothing"
 
           testCase "normalize leaves an irreducible script untouched"
           <| fun _ ->
-              let ops = [ InsertChild("a", 0, RNode.leaf "x" "para" "v"); RemoveNode "b1" ]
+              let ops = [ InsertChild("a", RNode.leaf "x" "para" "v"); RemoveNode "b1" ]
               Expect.equal (Ops.normalize nodew idw ops) ops "nothing to collapse"
 
           testCase "normalize is idempotent when a cancellation exposes a new adjacency (review fix)"
@@ -138,10 +142,10 @@ let tests =
               // cancelling the insert/remove adjoins the two same-target moves; the fixpoint must
               // then collapse them, and a second normalize must be a no-op.
               let ops =
-                  [ MoveNode("a1", "b", 0)
-                    InsertChild("a", 0, RNode.leaf "tmp" "para" "x")
+                  [ MoveNode("a1", "b")
+                    InsertChild("a", RNode.leaf "tmp" "para" "x")
                     RemoveNode "tmp"
-                    MoveNode("a1", "a", 0) ]
+                    MoveNode("a1", "a") ]
 
               let once = Ops.normalize nodew idw ops
               Expect.equal (List.length once) 1 "the exposed same-target moves collapse to the net move"

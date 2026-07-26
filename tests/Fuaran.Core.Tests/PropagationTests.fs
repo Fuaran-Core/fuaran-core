@@ -71,12 +71,12 @@ let tests =
               let tb op = Propagation.touchedBy nodew idw root op
 
               Expect.equal
-                  (tb (InsertChild("r", 0, RNode.leaf "z" "para" "")))
+                  (tb (InsertChild("r", RNode.leaf "z" "para" "")))
                   (Set.ofList [ "r"; "z" ])
                   "insert touches parent + inserted subtree"
 
               Expect.equal (tb (RemoveNode "b")) (Set.singleton "b") "remove touches the removed subtree"
-              Expect.equal (tb (MoveNode("a", "r", 0))) (Set.ofList [ "a"; "r" ]) "move touches target + new parent"
+              Expect.equal (tb (MoveNode("a", "r"))) (Set.ofList [ "a"; "r" ]) "move touches target + new parent"
 
               Expect.equal
                   (tb (ReorderChildren("r", [ "c"; "b"; "a" ])))
