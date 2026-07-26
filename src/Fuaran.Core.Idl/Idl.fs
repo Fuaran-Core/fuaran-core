@@ -40,6 +40,13 @@ type IdlType =
     /// `"<opaque>"`, matching `Fuaran.UI`'s `CanonicalJson` best-effort `obj`
     /// encoder. As with [[TClosure]] there is no authored content to carry.
     | TOpaque
+    /// **Arbitrary JSON, carried verbatim in both directions** — `Action.Notify`'s
+    /// payload, `SetState`'s value, `AiTool`'s args, `Custom` props. Distinct from
+    /// [[TOpaque]] in the way that matters: `TOpaque` ERASES to a sentinel because
+    /// the encoder cannot see the value, whereas a `TJson` value is real data the
+    /// wire must round-trip faithfully at any nesting depth. Reaching for `TOpaque`
+    /// here is silent data loss (Phase 676).
+    | TJson
     /// A *non-discriminated* object (a plain F# record) — an object with named
     /// fields and **no `$type` tag** (`SelectOption`, `FormField`, `FilterSpec`,
     /// `TabHeader`, a capability-invoke arg …). Distinct from [[TUnion]] (which
@@ -106,6 +113,10 @@ and IdlValue =
     /// An `obj`-erased value the encoder cannot inspect (matches [[TOpaque]]) —
     /// emits the `"<opaque>"` sentinel.
     | VOpaque
+    /// An arbitrary JSON value (matches [[TJson]]) — carried as a canonical `JVal`
+    /// so it renders through `Canon` like every other value rather than by a
+    /// separate stringifier that could drift on key order, escaping or float layout.
+    | VJson of JVal
     /// A non-discriminated object value (matches [[TRecord]]) — named fields, no
     /// `$type`. Encoded as a plain JSON object with the fields Ordinal-sorted.
     | VRecord of fields: (string * IdlValue) list
@@ -218,6 +229,11 @@ module Encode =
         | TVar v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
         | TClosure, VClosure -> Ok(JStr "<closure>")
         | TOpaque, VOpaque -> Ok(JStr "<opaque>")
+        // Phase 676 — verbatim passthrough. Emitting the `JVal` unchanged is what
+        // keeps the bytes canonical: `Canon.render` already sorts keys Ordinal,
+        // escapes per rule 6 and lays floats out per rule 5, so a passthrough
+        // inherits all three instead of re-implementing them.
+        | TJson, VJson j -> Ok j
         | TRecord name, VRecord fields ->
             match findRecord name idl with
             | None -> Error(sprintf "unknown record '%s'" name)
@@ -379,6 +395,10 @@ module Decode =
         | TVar v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
         | TClosure, JStr "<closure>" -> Ok VClosure
         | TOpaque, JStr "<opaque>" -> Ok VOpaque
+        // Phase 676 — accept any JSON at this position, verbatim and unvalidated.
+        // A shape check here would be wrong by definition: the field's whole
+        // contract is that its content is not the schema's business.
+        | TJson, j -> Ok(VJson j)
         | TRecord name, JObj fs ->
             match idl.Records |> List.tryFind (fun r -> r.Name = name) with
             | None -> Error(sprintf "unknown record '%s'" name)
@@ -587,6 +607,9 @@ module Gen =
         // re-attaches behaviour on the domain side (documented in docs/migrations/317-*).
         | TClosure -> "unit"
         | TOpaque -> "unit"
+        // Phase 676 — a JSON slot is a real `JVal`, NOT erased to `unit`: it carries
+        // data in both directions, which is the whole difference from `TOpaque`.
+        | TJson -> "JVal"
         | TRecord n -> n
         | TMap vt -> "Map<string, " + fsType vt + ">"
 
@@ -671,6 +694,10 @@ module Gen =
         // A closure/opaque codec ignores its argument and emits the fixed sentinel.
         | TClosure -> "(fun _ -> JStr \"<closure>\")"
         | TOpaque -> "(fun _ -> JStr \"<opaque>\")"
+        // Phase 676 — verbatim passthrough. `Canon.render` already sorts keys Ordinal,
+        // escapes per rule 6 and lays floats out per rule 5, so identity inherits all
+        // three rather than re-implementing them — the risk this phase named.
+        | TJson -> "id"
         | TRecord n -> "enc" + n
         | TMap vt -> sprintf "(fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, %s v)))" (encFn vt)
 
@@ -855,6 +882,9 @@ module Gen =
         | TList inner -> sprintf "(dList %s)" (decFn inner)
         | TClosure
         | TOpaque -> "dUnit"
+        // Phase 676 — accept any JSON verbatim; a shape check would contradict the
+        // field's contract.
+        | TJson -> "dJson"
         | TRecord n -> "dec" + n
         | TMap vt -> sprintf "(dMap %s)" (decFn vt)
 
@@ -1021,6 +1051,9 @@ module Gen =
               "let private dBool (j: JVal) : Result<bool, string> =\n    match j with\n    | JBool b -> Ok b\n    | _ -> Error \"expected a bool\""
               "// A whole-valued float renders without a decimal point, so it parses back as JInt.\nlet private dFloat (j: JVal) : Result<float, string> =\n    match j with\n    | JFloat f -> Ok f\n    | JInt i -> Ok(float i)\n    | _ -> Error \"expected a number\""
               "let private dUnit (_: JVal) : Result<unit, string> = Ok()"
+              "// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
+// contract is that its content is not the schema's business.
+let private dJson (j: JVal) : Result<JVal, string> = Ok j"
               "let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =\n    match j with\n    | JArr xs ->\n        (Ok [], xs)\n        ||> List.fold (fun acc x ->\n            match acc with\n            | Error e -> Error e\n            | Ok items -> dec x |> Result.map (fun v -> v :: items))\n        |> Result.map List.rev\n    | _ -> Error \"expected an array\""
               "let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =\n    match j with\n    | JObj fs ->\n        (Ok [], fs)\n        ||> List.fold (fun acc (k, v) ->\n            match acc with\n            | Error e -> Error e\n            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))\n        |> Result.map (List.rev >> Map.ofList)\n    | _ -> Error \"expected an object\""
               "let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v\n    | None -> Error(\"missing required field '\" + name + \"'\")"
@@ -1428,6 +1461,10 @@ module Gen =
         // Closure / opaque fields are sentinel strings on the wire.
         | TClosure -> JObj [ "type", JStr "string"; "const", JStr "<closure>" ]
         | TOpaque -> JObj [ "type", JStr "string"; "const", JStr "<opaque>" ]
+        // Phase 676 — "any JSON": the schema deliberately does not constrain content
+        // the encoder does not decompose, matching how the hand-written schema already
+        // renders the rule-12 structured-payload positions.
+        | TJson -> JBool true
         | TRecord n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TMap vt -> JObj [ "type", JStr "object"; "additionalProperties", schemaOf vt ]
 
@@ -1570,6 +1607,16 @@ module Gen =
         | TFloat -> VFloat(pick r floatPool)
         | TClosure -> VClosure
         | TOpaque -> VOpaque
+        // Phase 676 — sample real JSON, built from the SAME adversarial pools, so the
+        // passthrough is stressed on escaping and float layout like every other leg.
+        | TJson ->
+            VJson(
+                match nextInt r % 4 with
+                | 0 -> JStr(pick r stringPool)
+                | 1 -> JFloat(pick r floatPool)
+                | 2 -> JArr [ JInt(pick r intPool); JStr(pick r stringPool) ]
+                | _ -> JObj [ "z", JInt(pick r intPool); "a", JStr(pick r stringPool) ]
+            )
         | TVar _ -> VStr(pick r stringPool)
         | TEnum name ->
             match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
@@ -1701,6 +1748,8 @@ module Gen =
         // emits the sentinel regardless, so any placeholder operand serialises right.
         | VClosure
         | VOpaque -> "undefined"
+        // Phase 676 — a JSON value emits as its canonical literal.
+        | VJson j -> Canon.render j
 
     /// The point-free TS encoder reference for a type (used where a codec must be
     /// passed — a generic union's type-parameter codec).
@@ -1724,6 +1773,8 @@ module Gen =
         // A closure/opaque codec ignores its argument and emits the fixed sentinel.
         | TClosure -> "(() => '\"<closure>\"')"
         | TOpaque -> "(() => '\"<opaque>\"')"
+        // Phase 676 — `encJson` renders the parsed value canonically (see the prelude).
+        | TJson -> "encJson"
         | TRecord n -> "enc" + n
         | TMap vt ->
             "((m) => '{' + Object.keys(m).sort().map((k) => encStr(k) + ':' + ("
@@ -1862,6 +1913,8 @@ module Gen =
         // The value carries nothing; only its presence matters (see tsDecField).
         | TClosure
         | TOpaque -> "(() => null)"
+        // Phase 676 — keep the parsed JSON as-is.
+        | TJson -> "((x) => x)"
         | TRecord n -> "dec" + n
         | TMap vt -> "dMap(" + tsDecFn vt + ")"
 
@@ -2084,6 +2137,18 @@ const encFloat = (n) => {
   if (n === Infinity) return '"Infinity"';
   if (n === -Infinity) return '"-Infinity"';
   return formatFiniteDouble(n);
+};
+// Phase 676 — arbitrary JSON rendered CANONICALLY: keys Ordinal-sorted, strings
+// through the same escaper, numbers through the same float layout. Reusing those
+// three is what stops a passthrough drifting from the rest of the wire.
+const encJson = (v) => {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'string') return encStr(v);
+  if (typeof v === 'boolean') return encBool(v);
+  if (typeof v === 'number') return Number.isInteger(v) ? encInt(v) : encFloat(v);
+  if (Array.isArray(v)) return '[' + v.map(encJson).join(',') + ']';
+  const keys = Object.keys(v).sort();
+  return '{' + keys.map((k) => encStr(k) + ':' + encJson(v[k])).join(',') + '}';
 };
 const typed = (tag, pairs) =>
   '{"$type":' + encStr(tag) + pairs.filter((p) => p !== null).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';"""

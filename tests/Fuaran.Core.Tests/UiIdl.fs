@@ -254,7 +254,17 @@ let private action =
           { Tag = "Navigate"
             Fields = [ req "route" TStr ] }
           { Tag = "CommitLocal"
-            Fields = [ req "nodeId" TStr ] } ] }
+            Fields = [ req "nodeId" TStr ] }
+          // Phase 676 — the three JSON-payload actions. `TJson`, never `TOpaque`:
+          // these carry real data in both directions (`Notify` is the estate's
+          // cross-host data primitive), so erasing them to a sentinel would be
+          // silent data loss.
+          { Tag = "Notify"
+            Fields = [ req "channel" TStr; req "payload" TJson ] }
+          { Tag = "SetState"
+            Fields = [ req "key" TStr; req "value" TJson ] }
+          { Tag = "AiTool"
+            Fields = [ req "args" TJson; req "toolName" TStr ] } ] }
 
 /// Where a `Call`'s result lands, declaratively. NOTE the wire tags are `State` /
 /// `Query`, not the F# case names `IntoState` / `IntoQuery`.

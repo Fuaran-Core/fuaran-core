@@ -77,6 +77,19 @@ let miniIdl: Idl =
                   Fields =
                     [ { Name = "ops"
                         Type = TList(TUnion("Action", []))
+                        Opt = Required } ] }
+                // Phase 676 — a `TJson` case, present so the GENERATIVE cross-host
+                // test actually exercises the JSON passthrough. Without it the spike
+                // vocabulary has no `TJson` anywhere and both new legs (F# `id` /
+                // `dJson`, TS `encJson`) would ship unverified across hosts. No fixed
+                // fixture uses it, so the vendored snapshots are unchanged.
+                { Tag = "Notify"
+                  Fields =
+                    [ { Name = "channel"
+                        Type = TStr
+                        Opt = Required }
+                      { Name = "payload"
+                        Type = TJson
                         Opt = Required } ] } ] }
           // Fuaran-UI 0.2.0 Box unification: Dashboard/Card/Stack/GridLayout → one `Box`
           // kind with `role` + a `layout` mode (Auto / Flex{direction,wrap} / Grid{cols}).

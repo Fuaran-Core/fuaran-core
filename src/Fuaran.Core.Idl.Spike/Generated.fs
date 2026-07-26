@@ -69,6 +69,7 @@ and [<RequireQualifiedAccess>] Format =
 
 and [<RequireQualifiedAccess>] Action =
     | Chain of ops: Action list
+    | Notify of channel: string * payload: JVal
 
 and [<RequireQualifiedAccess>] LayoutMode =
     | Auto
@@ -221,6 +222,7 @@ and private encFormat (v: Format) : JVal =
 and private encAction (v: Action) : JVal =
     match v with
     | Action.Chain ops -> Canon.typed "Chain" [ "ops", JArr(List.map encAction ops) ]
+    | Action.Notify (channel, payload) -> Canon.typed "Notify" [ "channel", JStr channel; "payload", id payload ]
 
 and private encLayoutMode (v: LayoutMode) : JVal =
     match v with
@@ -281,6 +283,10 @@ let private dFloat (j: JVal) : Result<float, string> =
     | _ -> Error "expected a number"
 
 let private dUnit (_: JVal) : Result<unit, string> = Ok()
+
+// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
+// contract is that its content is not the schema's business.
+let private dJson (j: JVal) : Result<JVal, string> = Ok j
 
 let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =
     match j with
@@ -451,6 +457,10 @@ and private decAction (j: JVal) : Result<Action, string> =
         | "Chain" ->
             dReq "ops" __fs (dList decAction) |> Result.bind (fun ops ->
             Ok(Action.Chain(ops)))
+        | "Notify" ->
+            dReq "channel" __fs dStr |> Result.bind (fun channel ->
+            dReq "payload" __fs dJson |> Result.bind (fun payload ->
+            Ok(Action.Notify(channel, payload))))
         | __other -> Error ("unknown Action case: " + __other))
     | _ -> Error "expected a Action object"
 
