@@ -169,8 +169,13 @@ let private binding =
         // key rather than emitting JSON null, for which the wire model has no case.
         [ { Tag = "Static"
             Fields = [ opt "value" (TVar "T") ] }
+          // Phase 671 step 2 — the direct byte-diff caught this: the wire has NOT
+          // carried `accessor` since 0.2.0 (the encoder renders `dependsOn` +
+          // `name` only), so declaring it here made the generated encoder emit a
+          // field that does not exist. `dependsOn` rides as a string array,
+          // omitted when empty.
           { Tag = "Query"
-            Fields = [ req "accessor" TClosure; req "name" TStr ] }
+            Fields = [ opt "dependsOn" (TList TStr); req "name" TStr ] }
           { Tag = "Filter"
             Fields = [ req "name" TStr ] }
           { Tag = "State"
@@ -700,11 +705,15 @@ let layoutKinds: IdlKind list =
         Fields = [ req "children" (TList TNode); opt "heading" TS ] }
       { Tag = "Disclosure"
         Category = "Layout"
-        // OnToggle is a closure that is NOT on the wire — no field declared.
+        // Phase 671 step 2 — this comment used to read "OnToggle is a closure that
+        // is NOT on the wire — no field declared", which was true before Phase 426
+        // and false after: `onToggle` now rides as the `"<closure>"` sentinel when
+        // present. The direct byte-diff caught the drift (`controls-closure`).
         Fields =
           [ req "children" (TList TNode)
             req "defaultOpen" TBool
             req "heading" TS
+            opt "onToggle" TClosure
             req "open" (bindingOf TBool) ] }
       { Tag = "Modal"
         Category = "Layout"
@@ -731,6 +740,9 @@ let layoutKinds: IdlKind list =
           [ req "activeIndex" (bindingOf TInt)
             req "children" (TList TNode)
             opt "onSelect" TClosure
+            // Phase 671 step 2 — also caught by the direct diff: present in
+            // `controls-closure`, absent from the IDL, so it was silently dropped.
+            opt "onSelectTag" TClosure
             opt "tabHeaders" (TList(TRecord "TabHeader"))
             opt "tabTags" (TList TStr)
             opt "activeTag" (bindingOf TStr) ] }
@@ -769,6 +781,10 @@ let inputKinds: IdlKind list =
         Fields =
           [ req "label" (TUnion("TextSource", []))
             opt "onChange" TClosure
+            // Phase 671 step 2 — the multi-select handler, present in
+            // `controls-closure` and absent from the IDL until the direct
+            // byte-diff found it silently dropped.
+            opt "onChangeMulti" TClosure
             req "source" (bindingOf (TList(TRecord "SelectOption")))
             req "value" (bindingOf TStr)
             opt "placeholder" (TUnion("TextSource", []))

@@ -134,19 +134,29 @@ let tests =
               | Ok w -> Expect.stringContains w "\"<opaque>\"" "the opaque sentinel renders for the obj value"
               | Error m -> failtestf "chart-1 encode failed: %s" m
 
-              // A `Binding.Query` (closure accessor) renders the `<closure>` sentinel.
+              // A `Binding.Query` renders `dependsOn` (omitted when absent) + `name`
+              // and NO accessor. Phase 671 step 2's direct byte-diff caught the IDL
+              // declaring `accessor` here: the wire dropped it at 0.2.0, and this
+              // assertion had been confirming the model's own mistake back to
+              // itself rather than checking the wire. The genuine on-the-wire
+              // closure sentinel is asserted just below, on `Tabs.onSelect`.
               let queried =
                   VNode(
                       "q",
                       "Image",
                       [ "alt", lit "x"
-                        "src", VUnion("Query", [ "accessor", VClosure; "name", VStr "avatarUrl" ])
+                        "src", VUnion("Query", [ "name", VStr "avatarUrl" ])
                         "variant", VEnum "Default" ]
                   )
 
               match Encode.encode uiIdl queried with
               | Ok w ->
-                  Expect.stringContains w "\"<closure>\"" "the closure sentinel renders for a Binding.Query accessor"
+                  Expect.stringContains w "\"$type\":\"Query\"" "the Query case renders"
+                  Expect.stringContains w "\"name\":\"avatarUrl\"" "Query carries its name"
+
+                  Expect.isFalse
+                      (w.Contains "accessor")
+                      "Query must NOT emit an accessor — the wire dropped it at 0.2.0"
               | Error m -> failtestf "query-binding encode failed: %s" m
 
               // `Tabs.onSelect` is an on-the-wire closure sentinel (not omitted).
