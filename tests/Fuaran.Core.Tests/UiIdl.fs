@@ -682,7 +682,27 @@ let displayKinds: IdlKind list =
             req "copyable" TBool
             req "highlightLines" (TList TInt)
             req "language" TStr
-            req "lineNumbers" TBool ] } ]
+            req "lineNumbers" TBool ] }
+      // Phase 679 — `Toast`. NOTE the polarity: `dismissable` omits when TRUE
+      // (a toast defaults dismissable), the opposite of `Callout`'s, which omits
+      // when false. Same field name, same type, inverted default.
+      { Tag = "Toast"
+        Category = "Display"
+        Fields =
+          [ omit "dismissable" TBool (VBool true)
+            req "message" TS
+            req "open" (bindingOf TBool)
+            omit "tone" (TEnum "ToneVariant") (VEnum "Default") ] }
+      // Phase 679 — `Drawing`. Its closure (Shape / DrawStyle / DrawPoint /
+      // CurveCommand / ViewBox / TextAnchor) is declared above the meta kinds.
+      { Tag = "Drawing"
+        Category = "Display"
+        Fields =
+          [ opt "description" TS
+            req "shapes" (TList(TUnion("Shape", [])))
+            req "style" (TRecord "DrawStyle")
+            opt "title" TS
+            req "viewBox" (TRecord "ViewBox") ] } ]
 
 // ─── Layout kinds (child-bearing; `children : Node list` recurses via TNode) ─
 //
@@ -873,6 +893,132 @@ let visKinds: IdlKind list =
 // its value-type is `TOpaque` (non-empty props with real JsonValue best-effort is
 // a later refinement). Completing `Custom` + these kinds is what unblocks
 // Phase 321 tasks 2 + 3 (the Custom allowlist + codegen-time sanitisation).
+// ─── Phase 679: the `Drawing` sub-vocabulary ───────────────────────────────
+//
+// One kind, but the largest closure in the IDL: a 9-case RECURSIVE shape union
+// (`Group` nests `Shape list`), an all-optional style record, a point record, a
+// 5-case path-command union, a viewBox record and a text-anchor enum. Modelled
+// together because a half-modelled `Shape` is worse than none — the drift would
+// be silent (a dropped case) rather than a loud missing-kind error.
+
+let private textAnchor =
+    { Name = "TextAnchor"
+      Cases = [ "Start"; "Middle"; "End" ] }
+
+let private drawPoint =
+    { Name = "DrawPoint"
+      Fields = [ req "x" TFloat; req "y" TFloat ] }
+
+let private viewBoxRecord =
+    { Name = "ViewBox"
+      Fields =
+        [ req "height" TFloat
+          req "minX" TFloat
+          req "minY" TFloat
+          req "width" TFloat ] }
+
+/// Every field optional — an empty `{}` is a legitimate style (see `drawing-empty`).
+let private drawStyle =
+    { Name = "DrawStyle"
+      Fields =
+        [ opt "emphasis" (TEnum "Emphasis")
+          opt "fill" (bindingOf TStr)
+          opt "fontFamily" TStr
+          opt "fontSize" TFloat
+          opt "opacity" (bindingOf TFloat)
+          opt "stroke" (bindingOf TStr)
+          opt "strokeWidth" (bindingOf TFloat)
+          opt "textAnchor" (TEnum "TextAnchor") ] }
+
+let private curveCommand =
+    { Name = "CurveCommand"
+      Params = []
+      Cases =
+        // The destination point is `to` on every command — NOT the F# case-field
+        // names (`point` / `endpoint`), which is what the first cut of this
+        // modelled and why `drawing-1` failed to decode. Read the wire.
+        [ { Tag = "MoveTo"
+            Fields = [ req "to" (TRecord "DrawPoint") ] }
+          { Tag = "LineTo"
+            Fields = [ req "to" (TRecord "DrawPoint") ] }
+          { Tag = "CubicTo"
+            Fields =
+              [ req "control1" (TRecord "DrawPoint")
+                req "control2" (TRecord "DrawPoint")
+                req "to" (TRecord "DrawPoint") ] }
+          { Tag = "QuadraticTo"
+            Fields = [ req "control" (TRecord "DrawPoint"); req "to" (TRecord "DrawPoint") ] }
+          { Tag = "Close"; Fields = [] } ] }
+
+/// Recursive: `Group` carries `Shape list`. Every case carries a `style`.
+let private shape =
+    { Name = "Shape"
+      Params = []
+      Cases =
+        [ { Tag = "Group"
+            Fields =
+              [ req "children" (TList(TUnion("Shape", [])))
+                req "style" (TRecord "DrawStyle") ] }
+          { Tag = "Rectangle"
+            Fields =
+              [ opt "cornerRadius" TFloat
+                req "height" TFloat
+                req "style" (TRecord "DrawStyle")
+                req "width" TFloat
+                req "x" TFloat
+                req "y" TFloat ] }
+          { Tag = "Line"
+            Fields =
+              [ req "style" (TRecord "DrawStyle")
+                req "x1" TFloat
+                req "x2" TFloat
+                req "y1" TFloat
+                req "y2" TFloat ] }
+          { Tag = "Polyline"
+            Fields = [ req "points" (TList(TRecord "DrawPoint")); req "style" (TRecord "DrawStyle") ] }
+          { Tag = "Polygon"
+            Fields = [ req "points" (TList(TRecord "DrawPoint")); req "style" (TRecord "DrawStyle") ] }
+          { Tag = "Curve"
+            Fields =
+              [ req "commands" (TList(TUnion("CurveCommand", [])))
+                req "style" (TRecord "DrawStyle") ] }
+          { Tag = "Circle"
+            Fields =
+              [ req "cx" TFloat
+                req "cy" TFloat
+                req "r" TFloat
+                req "style" (TRecord "DrawStyle") ] }
+          { Tag = "Ellipse"
+            Fields =
+              [ req "cx" TFloat
+                req "cy" TFloat
+                req "rx" TFloat
+                req "ry" TFloat
+                req "style" (TRecord "DrawStyle") ] }
+          { Tag = "Label"
+            Fields =
+              [ req "style" (TRecord "DrawStyle")
+                req "text" TS
+                req "x" TFloat
+                req "y" TFloat ] } ] }
+
+/// Phase 679 — a `Switch` case: the match string plus the node it selects. The
+/// tier holds this as a `(string * Node) tuple list`, which the IDL has no type
+/// for; on the wire it is a two-field record, so that is what is modelled.
+let private switchCase =
+    { Name = "SwitchCase"
+      Fields = [ req "child" TNode; req "match" TStr ] }
+
+/// Phase 679 — `Mount`'s guest channel. `messageShape` rides only on `TwoWay`
+/// in practice but is optional in the shape, not conditional on direction.
+let private guestChannel =
+    { Name = "GuestChannel"
+      Fields = [ req "direction" (TEnum "ChannelDirection"); opt "messageShape" TStr ] }
+
+let private channelDirection =
+    { Name = "ChannelDirection"
+      Cases = [ "OutOnly"; "TwoWay" ] }
+
 let metaKinds: IdlKind list =
     [ { Tag = "Custom"
         Category = "Meta"
@@ -896,7 +1042,24 @@ let metaKinds: IdlKind list =
       { Tag = "FragmentRef"
         Category = "Meta"
         // args omitted for the degenerate name-only ref.
-        Fields = [ req "name" TStr; opt "args" (TMap(TUnion("FragmentArg", []))) ] } ]
+        Fields = [ req "name" TStr; opt "args" (TMap(TUnion("FragmentArg", []))) ] }
+      // Phase 679 — `Switch`: declarative branch selection on a state key.
+      { Tag = "Switch"
+        Category = "Meta"
+        Fields =
+          [ req "cases" (TList(TRecord "SwitchCase"))
+            req "default" TNode
+            req "stateKey" TStr ] }
+      // Phase 679 — `Mount`: a guest fragment host. `inputs` is omitted when
+      // empty; `onBubble` is the closure sentinel.
+      { Tag = "Mount"
+        Category = "Meta"
+        Fields =
+          [ req "capabilities" (TList TStr)
+            req "channel" (TRecord "GuestChannel")
+            opt "inputs" (TMap(TUnion("FragmentArg", [])))
+            opt "onBubble" TClosure
+            req "scopeId" TStr ] } ]
 
 /// The real-tier IDL as grown so far: the Display + Layout + Input + Visualisation
 /// + meta families over the shared value-unions + enums + records + maps. Children
@@ -920,7 +1083,9 @@ let uiIdl: Idl =
           holeValueSpace
           scalar
           holeDecl
-          fragmentArg ]
+          fragmentArg
+          curveCommand
+          shape ]
       Enums =
         [ headingVariant
           badgeVariant
@@ -940,9 +1105,16 @@ let uiIdl: Idl =
           chartKind
           hashStrictness
           hostEffect
-          determinismSource ]
+          determinismSource
+          channelDirection
+          textAnchor ]
       Records =
-        [ invokeArgRecord
+        [ switchCase
+          guestChannel
+          drawPoint
+          viewBoxRecord
+          drawStyle
+          invokeArgRecord
           selectOptionRecord
           mapMarkerRecord
           staticRowsRecord
@@ -1098,6 +1270,34 @@ let private fact1 =
           "value", lit "Alice Smith" ]
     )
 
+/// `toast-1` — `open` a Static bool, `tone` non-Default, `dismissable` at its
+/// (true) default so the omission path is exercised.
+let private toast1 =
+    VNode(
+        "toast-1",
+        "Toast",
+        [ "message", lit "Saved"
+          "open", VUnion("Static", [ "value", VBool true ])
+          "tone", VEnum "Success" ]
+    )
+
+/// `drawing-empty` — no shapes and an EMPTY style record. Both matter: an empty
+/// `{}` style is a legitimate value (every `DrawStyle` field is optional), not
+/// absence, and an empty `shapes` array is not absence either.
+let private drawingEmpty =
+    VNode(
+        "drawing-empty",
+        "Drawing",
+        [ "shapes", VList []
+          "style", VRecord []
+          "viewBox",
+          VRecord
+              [ "height", VFloat 100.0
+                "minX", VFloat 0.0
+                "minY", VFloat 0.0
+                "width", VFloat 100.0 ] ]
+    )
+
 let displayCases: (string * IdlValue) list =
     [ "heading-1", heading1
       "badge-1", badge1
@@ -1113,7 +1313,9 @@ let displayCases: (string * IdlValue) list =
       "lvr-1", lvr1
       "spark-1", spark1
       "code-1", code1
-      "fact-1", fact1 ]
+      "fact-1", fact1
+      "toast-1", toast1
+      "drawing-empty", drawingEmpty ]
 
 /// Vendored canonical wire bytes for each Display fixture — a self-contained
 /// snapshot (the gate never goes vacuous when the corpus is not checked out),
@@ -1834,6 +2036,40 @@ let private fragRefArgs =
     )
 
 /// Meta fixture name -> authored value.
+/// `switch-1` — two cases plus a default, each carrying a real child node.
+let private switch1 =
+    let md id text =
+        VNode(id, "Markdown", [ "text", lit text ])
+
+    VNode(
+        "switch-1",
+        "Switch",
+        [ "cases",
+          VList
+              [ VRecord [ "child", md "switch-details" "Details view"; "match", VStr "details" ]
+                VRecord [ "child", md "switch-summary" "Summary view"; "match", VStr "summary" ] ]
+          "default",
+          VNode(
+              "switch-default",
+              "Callout",
+              [ "body", lit "No view selected"
+                "heading", lit "Pick a view"
+                "tone", VEnum "Info" ]
+          )
+          "stateKey", VStr "view" ]
+    )
+
+/// `mount-1` — the minimal guest: no inputs (omitted), OutOnly channel.
+let private mount1 =
+    VNode(
+        "mount-1",
+        "Mount",
+        [ "capabilities", VList []
+          "channel", VRecord [ "direction", VEnum "OutOnly" ]
+          "onBubble", VClosure
+          "scopeId", VStr "guest-sidebar" ]
+    )
+
 let metaCases: (string * IdlValue) list =
     [ "custom-1", custom1
       "custom-bounded-1", customBounded1
@@ -1842,7 +2078,9 @@ let metaCases: (string * IdlValue) list =
       "frag-decl-1", fragDecl1
       "frag-decl-param", fragDeclParam
       "frag-ref-1", fragRef1
-      "frag-ref-args", fragRefArgs ]
+      "frag-ref-args", fragRefArgs
+      "switch-1", switch1
+      "mount-1", mount1 ]
 
 /// Vendored canonical wire bytes for each meta fixture (drift-guarded vs live).
 let metaExpected: (string * string) list = Snapshots.loadPaired "ui" metaCases
