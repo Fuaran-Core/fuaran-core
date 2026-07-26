@@ -63,12 +63,12 @@ let private metric1: G.Node =
       Kind =
         G.NodeKind.Metric
             { Label = lit "Revenue"
-              Value = G.Binding.Static 1234.5
+              Value = G.Binding.Static(Some 1234.5)
               Format = G.CellFormat.Currency "GBP"
               Tone = G.ToneVariant.Brand
               Weight = G.StyleWeight.Standard
               Emphasis = G.Emphasis.Normal
-              Trend = Some(G.Binding.Static 0.07)
+              Trend = Some(G.Binding.Static(Some 0.07))
               TrendFormat = Some(G.CellFormat.Percent(Some 1))
               Icon = Some "trending-up"
               Subtext = Some(lit "vs last month") } }
@@ -111,23 +111,23 @@ let private form1: G.Node =
       Kind =
         G.NodeKind.Form
             { Fields =
-                [ field "name" (G.FormFieldKind.Text(Some(), G.Binding.Static "")) "Name" true (Some "Full legal name")
-                  field "age" (G.FormFieldKind.Number(Some(), G.Binding.Static 0.0)) "Age" false None
-                  field "agree" (G.FormFieldKind.Checkbox(Some(), G.Binding.Static false)) "I agree" true None
+                [ field "name" (G.FormFieldKind.Text(Some(), G.Binding.Static(Some ""))) "Name" true (Some "Full legal name")
+                  field "age" (G.FormFieldKind.Number(Some(), G.Binding.Static(Some 0.0))) "Age" false None
+                  field "agree" (G.FormFieldKind.Checkbox(Some(), G.Binding.Static(Some false))) "I agree" true None
                   field
                       "tier"
                       (G.FormFieldKind.Choice(
                           Some(),
-                          G.Binding.Static [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ],
-                          G.Binding.Static "basic"
+                          G.Binding.Static(Some [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ]),
+                          G.Binding.Static(Some "basic")
                       ))
                       "Tier"
                       false
                       None
-                  field "notes" (G.FormFieldKind.TextArea(Some(), 5, G.Binding.Static "")) "Notes" false None ]
+                  field "notes" (G.FormFieldKind.TextArea(Some(), 5, G.Binding.Static(Some ""))) "Notes" false None ]
               OnSubmit = G.Action.Chain []
               SubmitLabel = lit "Save"
-              Disabled = Some(G.Binding.State(false, "formBusy")) } }
+              Disabled = Some(G.Binding.State(Some false, "formBusy")) } }
 
 /// `grid-1` — the `ColumnErased` record holding a `CellKindErased` union + a
 /// `ColumnWidth` union + a `CellFormat` + closure/opaque sentinels.
@@ -144,7 +144,7 @@ let private grid1: G.Node =
                   : G.ColumnErased) ]
               Editable = false
               RowKey = Some()
-              Source = G.Binding.Static()
+              Source = G.Binding.Static(Some())
               StaticRows = None
               OnRowClick = None } }
 
@@ -157,7 +157,7 @@ let private table1: G.Node =
             { Columns = []
               Editable = false
               RowKey = None
-              Source = G.Binding.Static()
+              Source = G.Binding.Static(Some())
               StaticRows =
                 Some
                     { Headers = [ "Term"; "Definition" ]
@@ -252,23 +252,23 @@ let private formatBindings: G.Node =
               Layout = G.LayoutMode.Flex(G.Orientation.Vertical, false)
               Role = G.BoxRole.Group
               Children =
-                [ fmt "fmt-number" (G.Format.Number(Some 2)) (G.LocaleSource.Explicit "en-US") (G.Binding.Static 1234.5)
+                [ fmt "fmt-number" (G.Format.Number(Some 2)) (G.LocaleSource.Explicit "en-US") (G.Binding.Static(Some 1234.5))
                   fmt
                       "fmt-currency"
                       (G.Format.Currency "GBP")
                       (G.LocaleSource.Explicit "en-GB")
-                      (G.Binding.Static 1234.5)
-                  fmt "fmt-percent" (G.Format.Percent Option.None) G.LocaleSource.Ambient (G.Binding.Static 0.42)
+                      (G.Binding.Static(Some 1234.5))
+                  fmt "fmt-percent" (G.Format.Percent Option.None) G.LocaleSource.Ambient (G.Binding.Static(Some 0.42))
                   fmt
                       "fmt-date"
                       (G.Format.Date G.DateStyle.Medium)
                       (G.LocaleSource.Explicit "fr-FR")
-                      (G.Binding.Static 1700000000.0)
+                      (G.Binding.Static(Some 1700000000.0))
                   fmt
                       "fmt-relative"
                       (G.Format.RelativeTime G.RelativeTimeUnit.Day)
                       (G.LocaleSource.Explicit "en-US")
-                      (G.Binding.Static -3.0) ] } }
+                      (G.Binding.Static(Some -3.0)) ] } }
 
 /// The representative generated fixtures — one (or more) per new emission class.
 let private generatedCases: (string * G.Node) list =

@@ -165,14 +165,16 @@ let private binding =
     { Name = "Binding"
       Params = [ "T" ]
       Cases =
+        // Phase 677 — absence is STRUCTURAL: a binding carrying no value omits the
+        // key rather than emitting JSON null, for which the wire model has no case.
         [ { Tag = "Static"
-            Fields = [ req "value" (TVar "T") ] }
+            Fields = [ opt "value" (TVar "T") ] }
           { Tag = "Query"
             Fields = [ req "accessor" TClosure; req "name" TStr ] }
           { Tag = "Filter"
             Fields = [ req "name" TStr ] }
           { Tag = "State"
-            Fields = [ req "defaultValue" (TVar "T"); req "key" TStr ] }
+            Fields = [ opt "defaultValue" (TVar "T"); req "key" TStr ] }
           { Tag = "Computed"
             Fields = [ req "fn" TClosure ] }
           // A controlled-input local buffer. `initialFrom` recurses at the same
