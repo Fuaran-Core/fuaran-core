@@ -493,6 +493,82 @@ let tests =
                   with _ ->
                       ())
 
+          // ---- Phase 672 task 4: the TS backend's DECODER ----
+
+          testCase "second backend: the generated TypeScript decoder round-trips the corpus" (fun _ ->
+              // The same gate the F# decoder passes, run on the independent host:
+              // `decodeNode >> encodeNode` must be byte-identical. Doing it on both
+              // backends is what makes the saving multiply across hosts rather than
+              // accruing only to F#, and it re-proves cross-host byte-identity from
+              // the decode side (Phase 320's attestation rests on both directions).
+              let tsModule = Gen.typescriptModule miniIdl generatedKinds
+
+              let jsStr (s: string) = Text.Json.JsonSerializer.Serialize s
+
+              let wireJs =
+                  expected
+                  |> List.map (fun (name, w) -> sprintf "  [%s, %s]," (jsStr name) (jsStr w))
+                  |> String.concat "\n"
+
+              let harness =
+                  tsModule
+                  + "\n\nconst __wire = [\n"
+                  + wireJs
+                  + "\n];\n"
+                  + "for (const [name, s] of __wire) {\n"
+                  + "  const r = decodeNode(s);\n"
+                  + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + r.error));\n"
+                  + "}\n"
+
+              let tmp =
+                  Path.Combine(Path.GetTempPath(), sprintf "fuaran-ts-decode-%s.mjs" (Guid.NewGuid().ToString("N")))
+
+              File.WriteAllText(tmp, harness)
+
+              try
+                  let psi = Diagnostics.ProcessStartInfo("node", "\"" + tmp + "\"")
+                  psi.RedirectStandardOutput <- true
+                  psi.RedirectStandardError <- true
+                  psi.UseShellExecute <- false
+
+                  let proc =
+                      try
+                          Some(Diagnostics.Process.Start psi)
+                      with _ ->
+                          None
+
+                  match proc with
+                  | None -> skiptest "node not on PATH — TS-backend decode round-trip skipped"
+                  | Some p ->
+                      let stdout = p.StandardOutput.ReadToEnd()
+                      let stderr = p.StandardError.ReadToEnd()
+                      p.WaitForExit()
+
+                      if p.ExitCode <> 0 then
+                          failtestf "node failed running the generated TS decoder: %s" stderr
+
+                      let got =
+                          stdout.Replace("\r\n", "\n").Split('\n')
+                          |> Array.filter (fun l -> l <> "")
+                          |> Array.map (fun l ->
+                              let parts = l.Split('')
+                              parts.[0], parts.[1])
+                          |> Map.ofArray
+
+                      for name, expectedWire in expected do
+                          match Map.tryFind name got with
+                          | Some actual ->
+                              Expect.equal
+                                  actual
+                                  expectedWire
+                                  (sprintf "TS decodeNode >> encodeNode is not the identity for '%s'" name)
+                          | None -> failtestf "TS backend produced no output for '%s'" name
+              finally
+                  try
+                      File.Delete tmp
+                  with _ ->
+                      ())
+
           // ---- Phase 317 syntax-tree-emission leg + Phase 321 trust boundary ----
 
           testCase

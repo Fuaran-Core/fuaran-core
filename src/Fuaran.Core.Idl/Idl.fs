@@ -1675,6 +1675,163 @@ module Gen =
         + pieces
         + "]);\n}"
 
+    // ---- Phase 672 task 4: the TS decoder backend ----
+    // The JS host's in-memory shape IS the wire shape (plain objects), so decoding
+    // is validation plus rebuilding the positions the encoder writes implicitly:
+    // omit-when-default fields (refilled so the encoder omits them again),
+    // transparent union cases (re-wrapped so the encoder can re-flatten them), and
+    // closure/opaque sentinels (whose PRESENCE is the only information they carry).
+
+    /// The point-free TS decoder reference for a type.
+    let rec private tsDecFn (t: IdlType) : string =
+        match t with
+        | TStr -> "dStr"
+        | TInt -> "dInt"
+        | TBool -> "dBool"
+        | TFloat -> "dFloat"
+        | TEnum n -> "dec" + n
+        | TVar v -> "dec" + v
+        | TNode -> "decNode"
+        | TUnion(n, []) -> "dec" + n
+        | TUnion(n, args) ->
+            "((x) => dec"
+            + n
+            + "("
+            + (args |> List.map tsDecFn |> String.concat ", ")
+            + ", x))"
+        | TList inner -> "dList(" + tsDecFn inner + ")"
+        // The value carries nothing; only its presence matters (see tsDecField).
+        | TClosure
+        | TOpaque -> "(() => null)"
+        | TRecord n -> "dec" + n
+        | TMap vt -> "dMap(" + tsDecFn vt + ")"
+
+    /// The TS literal for an omit-when-default value, in its WIRE representation —
+    /// refilled on decode so the encoder's omit test fires again and the bytes match.
+    let private tsDefaultLit (t: IdlType) (d: IdlValue) : string option =
+        match t, d with
+        | TEnum _, VEnum c -> Some(tsSourceStr c)
+        | TUnion _, VUnion(tag, []) -> Some("{ $type: " + tsSourceStr tag + " }")
+        | TBool, VBool b -> Some(if b then "true" else "false")
+        | _ -> None
+
+    let private tsDecField (f: IdlField) : string =
+        let key = tsSourceStr f.Name
+
+        match f.Type with
+        | TClosure
+        | TOpaque ->
+            match f.Opt with
+            | Optional -> "dPresent(" + key + ", fs)"
+            | _ -> "null"
+        | _ ->
+            match f.Opt with
+            | Required -> "dReq(" + key + ", fs, " + tsDecFn f.Type + ")"
+            | Optional -> "dOpt(" + key + ", fs, " + tsDecFn f.Type + ")"
+            | OmitDefault d ->
+                match tsDefaultLit f.Type d with
+                | Some lit -> "dDef(" + key + ", fs, " + tsDecFn f.Type + ", " + lit + ")"
+                // `tsSpecPiece` fell back to always-emit, so decode is required too.
+                | None -> "dReq(" + key + ", fs, " + tsDecFn f.Type + ")"
+
+    let private tsFieldObject (extra: (string * string) list) (fields: IdlField list) : string =
+        let pairs =
+            (extra |> List.map (fun (k, v) -> k + ": " + v))
+            @ (fields |> List.map (fun f -> tsSourceStr f.Name + ": " + tsDecField f))
+
+        "{ " + String.concat ", " pairs + " }"
+
+    let private tsEnumDecoder (e: IdlEnum) =
+        let cases = e.Cases |> List.map tsSourceStr |> String.concat ", "
+
+        "const dec" + e.Name + " = dEnum(" + tsSourceStr e.Name + ", [" + cases + "]);"
+
+    let private tsUnionDecoder (u: IdlUnion) =
+        let argList =
+            match u.Params with
+            | [] -> "j"
+            | ps -> (ps |> List.map (fun p -> "dec" + p) |> String.concat ", ") + ", j"
+
+        let arm (c: IdlUnionCase) =
+            "    case "
+            + tsSourceStr c.Tag
+            + ": return "
+            + tsFieldObject [ "$type", tsSourceStr c.Tag ] c.Fields
+            + ";"
+
+        let tagged =
+            "  if (isTagged(j)) {\n    const fs = j;\n    switch (j.$type) {\n"
+            + (u.Cases |> List.map arm |> String.concat "\n")
+            + "\n      default: return dFail("
+            + tsSourceStr ("unknown " + u.Name + " case: ")
+            + " + j.$type);\n    }\n  }"
+
+        // A transparent union also accepts its single-field case bare, and re-wraps
+        // it so the encoder can flatten it back to the same bytes.
+        let untagged =
+            match TransparentUnion.tag u with
+            | Some ttag ->
+                match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
+                | Some({ Fields = [ f ] }) ->
+                    "  return { $type: "
+                    + tsSourceStr ttag
+                    + ", "
+                    + tsSourceStr f.Name
+                    + ": "
+                    + tsDecFn f.Type
+                    + "(j) };"
+                | _ -> failwithf "transparent union case '%s' must have exactly one field" ttag
+            | None -> "  return dFail(" + tsSourceStr ("expected a " + u.Name + " object") + ");"
+
+        "function dec"
+        + u.Name
+        + "("
+        + argList
+        + ") {\n"
+        + tagged
+        + "\n"
+        + untagged
+        + "\n}"
+
+    let private tsRecordDecoder (r: IdlRecord) =
+        "function dec"
+        + r.Name
+        + "(j) {\n  const fs = dObj(j);\n  return "
+        + tsFieldObject [] r.Fields
+        + ";\n}"
+
+    let private tsSpecDecoder (k: IdlKind) =
+        "function dec"
+        + k.Tag
+        + "Spec(j) {\n  const fs = dObj(j);\n  return "
+        + tsFieldObject [ "$type", tsSourceStr k.Tag ] k.Fields
+        + ";\n}"
+
+    /// The decode runtime prelude — the JS mirror of the F# `dObj`/`dReq`/… helpers.
+    let private tsDecodePrelude =
+        """const dFail = (m) => { throw new Error(m); };
+const isTagged = (j) => j !== null && typeof j === 'object' && !Array.isArray(j) && '$type' in j;
+const dObj = (j) => (j !== null && typeof j === 'object' && !Array.isArray(j)) ? j : dFail('expected an object');
+const dStr = (j) => (typeof j === 'string') ? j : dFail('expected a string');
+const dInt = (j) => (typeof j === 'number' && Number.isInteger(j)) ? j : dFail('expected an int');
+const dFloat = (j) => (typeof j === 'number') ? j : dFail('expected a number');
+const dBool = (j) => (typeof j === 'boolean') ? j : dFail('expected a bool');
+const dList = (dec) => (j) => Array.isArray(j) ? j.map(dec) : dFail('expected an array');
+const dMap = (dec) => (j) => {
+  const o = dObj(j);
+  const out = {};
+  for (const k of Object.keys(o)) out[k] = dec(o[k]);
+  return out;
+};
+const dEnum = (name, cases) => (j) =>
+  (typeof j === 'string' && cases.indexOf(j) >= 0) ? j : dFail('not a ' + name);
+const dReq = (name, fs, dec) => (name in fs) ? dec(fs[name]) : dFail("missing required field '" + name + "'");
+const dOpt = (name, fs, dec) => (name in fs) ? dec(fs[name]) : undefined;
+const dDef = (name, fs, dec, dflt) => (name in fs) ? dec(fs[name]) : dflt;
+// An optional closure/opaque field: the value is a sentinel carrying nothing, but
+// its PRESENCE distinguishes present-from-absent and must survive the round trip.
+const dPresent = (name, fs) => (name in fs) ? null : undefined;"""
+
     /// Emit a self-contained TypeScript (ESM) structural encoder for the named
     /// kinds — `encodeNode(n)` returns canonical wire byte-identical to the F#
     /// generated `encodeNode`. Plain JS string-building: no FSharp.Core, no .NET,
@@ -1719,11 +1876,33 @@ const typed = (tag, pairs) =>
             + arms
             + "\n  }\n}\n\nfunction encodeNode(n) {\n  return '{\"id\":' + encStr(n.id) + ',\"kind\":' + encKind(n.kind) + '}';\n}"
 
+        let enums, _, records = referenced idl kinds
+
+        let kindDecodeDispatch =
+            let arms =
+                kinds
+                |> List.map (fun k -> "    case " + tsSourceStr k.Tag + ": return dec" + k.Tag + "Spec(j);")
+                |> String.concat "\n"
+
+            "function decKind(j) {\n  if (!isTagged(j)) return dFail('expected a kind object');\n  switch (j.$type) {\n"
+            + arms
+            + "\n    default: return dFail('unknown node kind: ' + j.$type);\n  }\n}\n\n"
+            + "function decNode(j) {\n  const fs = dObj(j);\n  return { id: dReq('id', fs, dStr), kind: dReq('kind', fs, decKind) };\n}\n\n"
+            + "// Structural decode. The policy layer (diagnostics, §16 lenient-accept, the\n"
+            + "// reject set) composes ABOVE this — see the Phase 672 note in the generator.\n"
+            + "function decodeNode(s) {\n  try {\n    return { ok: true, value: decNode(JSON.parse(s)) };\n  } catch (e) {\n    return { ok: false, error: String(e && e.message ? e.message : e) };\n  }\n}"
+
         [ [ prelude ]
           unions |> List.map tsUnionEncoder
           kinds |> List.map tsSpecEncoder
           [ kindDispatch ]
-          [ "export { encodeNode };" ] ]
+          [ tsDecodePrelude ]
+          enums |> List.map tsEnumDecoder
+          records |> List.map tsRecordDecoder
+          unions |> List.map tsUnionDecoder
+          kinds |> List.map tsSpecDecoder
+          [ kindDecodeDispatch ]
+          [ "export { encodeNode, decodeNode };" ] ]
         |> List.concat
         |> String.concat "\n\n"
 
