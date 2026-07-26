@@ -111,20 +111,20 @@ let private form1: G.Node =
       Kind =
         G.NodeKind.Form
             { Fields =
-                [ field "name" (G.FormFieldKind.Text((), G.Binding.Static "")) "Name" true (Some "Full legal name")
-                  field "age" (G.FormFieldKind.Number((), G.Binding.Static 0.0)) "Age" false None
-                  field "agree" (G.FormFieldKind.Checkbox((), G.Binding.Static false)) "I agree" true None
+                [ field "name" (G.FormFieldKind.Text(Some(), G.Binding.Static "")) "Name" true (Some "Full legal name")
+                  field "age" (G.FormFieldKind.Number(Some(), G.Binding.Static 0.0)) "Age" false None
+                  field "agree" (G.FormFieldKind.Checkbox(Some(), G.Binding.Static false)) "I agree" true None
                   field
                       "tier"
                       (G.FormFieldKind.Choice(
-                          (),
+                          Some(),
                           G.Binding.Static [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ],
                           G.Binding.Static "basic"
                       ))
                       "Tier"
                       false
                       None
-                  field "notes" (G.FormFieldKind.TextArea((), 5, G.Binding.Static "")) "Notes" false None ]
+                  field "notes" (G.FormFieldKind.TextArea(Some(), 5, G.Binding.Static "")) "Notes" false None ]
               OnSubmit = G.Action.Chain []
               SubmitLabel = lit "Save"
               Disabled = Some(G.Binding.State(false, "formBusy")) } }

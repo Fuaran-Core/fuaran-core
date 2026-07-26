@@ -182,7 +182,7 @@ let private binding =
               [ req "flushOn" (TUnion("LocalFlushTrigger", []))
                 req "format" TClosure
                 req "initialFrom" (TUnion("Binding", [ TVar "T" ]))
-                req "onCommit" TClosure
+                opt "onCommit" TClosure
                 req "parse" TClosure ] }
           // Locale-aware formatted string. `source` is ALWAYS `Binding<float>`
           // (independent of `'T`); `format` / `locale` are bounded DUs.
@@ -236,7 +236,7 @@ let private action =
             Fields =
               [ req "encoding" (TEnum "FileReadEncoding")
                 req "fileRef" TStr
-                req "onRead" TClosure ] } ] }
+                opt "onRead" TClosure ] } ] }
 
 /// The locale-aware `Binding.Format` intent union (distinct from [[cellFormat]] —
 /// this one carries `isoCode` / `dateStyle` / `unit`, not `code`).
@@ -294,37 +294,37 @@ let private formFieldKind =
       Params = []
       Cases =
         [ { Tag = "Text"
-            Fields = [ req "onChange" TClosure; req "value" (TUnion("Binding", [ TStr ])) ] }
+            Fields = [ opt "onChange" TClosure; req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Number"
-            Fields = [ req "onChange" TClosure; req "value" (TUnion("Binding", [ TFloat ])) ] }
+            Fields = [ opt "onChange" TClosure; req "value" (TUnion("Binding", [ TFloat ])) ] }
           { Tag = "Checkbox"
-            Fields = [ req "onToggle" TClosure; req "value" (TUnion("Binding", [ TBool ])) ] }
+            Fields = [ opt "onToggle" TClosure; req "value" (TUnion("Binding", [ TBool ])) ] }
           { Tag = "Choice"
             Fields =
-              [ req "onChange" TClosure
+              [ opt "onChange" TClosure
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "TextArea"
             Fields =
-              [ req "onChange" TClosure
+              [ opt "onChange" TClosure
                 req "rows" TInt
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "RangedNumber"
             Fields =
-              [ req "onChange" TClosure
+              [ opt "onChange" TClosure
                 req "value" (TUnion("Binding", [ TFloat ]))
                 opt "min" TFloat
                 opt "max" TFloat
                 opt "step" TFloat ] }
           { Tag = "SegmentedChoice"
             Fields =
-              [ req "onChange" TClosure
+              [ opt "onChange" TClosure
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "orientation" (TEnum "Orientation")
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Date"
             Fields =
-              [ req "onChange" TClosure
+              [ opt "onChange" TClosure
                 req "value" (TUnion("Binding", [ TStr ]))
                 req "variant" (TEnum "DateVariant")
                 opt "min" TStr
@@ -339,18 +339,18 @@ let private filterKind =
       Params = []
       Cases =
         [ { Tag = "Text"
-            Fields = [ req "onChange" TClosure; req "value" (TUnion("Binding", [ TStr ])) ] }
+            Fields = [ opt "onChange" TClosure; req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Choice"
             Fields =
-              [ req "onChange" TClosure
+              [ opt "onChange" TClosure
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           // RangeFilter's value is opaque on the wire (no corpus fixture yet).
           { Tag = "Range"
-            Fields = [ req "onChange" TClosure; req "value" TOpaque ] }
+            Fields = [ opt "onChange" TClosure; req "value" TOpaque ] }
           { Tag = "SegmentedChoice"
             Fields =
-              [ req "onChange" TClosure
+              [ opt "onChange" TClosure
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "orientation" (TEnum "Orientation")
                 req "value" (TUnion("Binding", [ TStr ])) ] } ] }
@@ -379,11 +379,11 @@ let private cellKindErased =
           { Tag = "Numeric"; Fields = [] }
           { Tag = "Date"; Fields = [] }
           { Tag = "Editable"
-            Fields = [ req "onEdit" TClosure ] }
+            Fields = [ opt "onEdit" TClosure ] }
           { Tag = "Checkbox"
-            Fields = [ req "get" TClosure; req "onToggle" TClosure ] }
+            Fields = [ req "get" TClosure; opt "onToggle" TClosure ] }
           { Tag = "Button"
-            Fields = [ req "label" (TUnion("TextSource", [])); req "onClick" TClosure ] }
+            Fields = [ req "label" (TUnion("TextSource", [])); opt "onClick" TClosure ] }
           { Tag = "ButtonGroup"
             Fields = [ req "buttons" (TList(TRecord "ButtonGroupItem")) ] }
           { Tag = "Link"
@@ -520,7 +520,7 @@ let private columnErasedRecord =
 /// One button of a `CellKindErased.ButtonGroup` (`onClick` is a closure).
 let private buttonGroupItemRecord =
     { Name = "ButtonGroupItem"
-      Fields = [ req "label" (TUnion("TextSource", [])); req "onClick" TClosure ] }
+      Fields = [ req "label" (TUnion("TextSource", [])); opt "onClick" TClosure ] }
 
 /// A `Custom` node's content-identity envelope (`strictness` is a bare-string DU).
 let private contentHashRecord =
@@ -694,7 +694,7 @@ let layoutKinds: IdlKind list =
         Fields =
           [ req "activeIndex" (bindingOf TInt)
             req "children" (TList TNode)
-            req "onSelect" TClosure
+            opt "onSelect" TClosure
             opt "tabHeaders" (TList(TRecord "TabHeader"))
             opt "tabTags" (TList TStr)
             opt "activeTag" (bindingOf TStr) ] }
@@ -703,7 +703,7 @@ let layoutKinds: IdlKind list =
         Fields =
           [ req "activeStep" (bindingOf TInt)
             req "children" (TList TNode)
-            req "onSelect" TClosure ] } ]
+            opt "onSelect" TClosure ] } ]
 
 // ─── Input kinds (interactive; the richest Binding / Action surface) ────────
 //
@@ -732,7 +732,7 @@ let inputKinds: IdlKind list =
         // rides multiselect-1, deferred — a `Static None` renders JSON null.)
         Fields =
           [ req "label" (TUnion("TextSource", []))
-            req "onChange" TClosure
+            opt "onChange" TClosure
             req "source" (bindingOf (TList(TRecord "SelectOption")))
             req "value" (bindingOf TStr)
             opt "placeholder" (TUnion("TextSource", []))
@@ -745,7 +745,7 @@ let inputKinds: IdlKind list =
           [ req "accept" (TList TStr)
             req "label" (TUnion("TextSource", []))
             req "multiple" TBool
-            req "onSelect" TClosure
+            opt "onSelect" TClosure
             opt "disabled" (bindingOf TBool) ] }
       { Tag = "Form"
         Category = "Input"
