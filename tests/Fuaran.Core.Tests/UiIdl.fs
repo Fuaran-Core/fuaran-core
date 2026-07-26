@@ -236,7 +236,29 @@ let private action =
             Fields =
               [ req "encoding" (TEnum "FileReadEncoding")
                 req "fileRef" TStr
-                opt "onRead" TClosure ] } ] }
+                opt "onRead" TClosure ] }
+          // `ApiEndpoint` is a bare string on the wire; `into` is the declarative
+          // result target, omitted when None; `onResult` rides only when present.
+          { Tag = "Call"
+            Fields =
+              [ req "endpoint" TStr
+                opt "into" (TUnion("CallResultTarget", []))
+                opt "onResult" TClosure ] }
+          { Tag = "Navigate"
+            Fields = [ req "route" TStr ] }
+          { Tag = "CommitLocal"
+            Fields = [ req "nodeId" TStr ] } ] }
+
+/// Where a `Call`'s result lands, declaratively. NOTE the wire tags are `State` /
+/// `Query`, not the F# case names `IntoState` / `IntoQuery`.
+let private callResultTarget =
+    { Name = "CallResultTarget"
+      Params = []
+      Cases =
+        [ { Tag = "State"
+            Fields = [ req "key" TStr ] }
+          { Tag = "Query"
+            Fields = [ req "name" TStr ] } ] }
 
 /// The locale-aware `Binding.Format` intent union (distinct from [[cellFormat]] —
 /// this one carries `isoCode` / `dateStyle` / `unit`, not `code`).
@@ -620,6 +642,18 @@ let displayKinds: IdlKind list =
             // Fuaran-UI 0.2.x renamed the binding slot `source` → `value`.
             req "value" (bindingOf TFloat)
             opt "help" TS ] }
+      // `Fact` — a labelled TEXT fact (LabelValueRow's sibling: that one's `value`
+      // is a numeric binding, this one's is a TextSource). `emphasis` is the
+      // behavioural bool, emitted only when true; `tone` omits at Default.
+      { Tag = "Fact"
+        Category = "Display"
+        Fields =
+          [ omit "emphasis" TBool (VBool false)
+            opt "help" TS
+            opt "icon" icon
+            req "label" TS
+            omit "tone" (TEnum "ToneVariant") (VEnum "Default")
+            req "value" TS ] }
       { Tag = "Sparkline"
         Category = "Display"
         // Fuaran-UI 0.2.x typed-Static: the source seq is a real int list on the wire.
@@ -846,6 +880,7 @@ let uiIdl: Idl =
           binding
           cellFormat
           action
+          callResultTarget
           formatUnion
           localeSource
           localFlushTrigger
@@ -1021,6 +1056,20 @@ let private code1 =
 
 /// Fixture name → authored value. Each must encode byte-identical to
 /// `wire-format-fixtures/nodes/<name>.json`.
+/// `fact-1` — the labelled-text sibling of `lvr-1`: `emphasis` true (so it emits),
+/// `tone` non-Default (so it emits), plus both optionals present.
+let private fact1 =
+    VNode(
+        "fact-1",
+        "Fact",
+        [ "emphasis", VBool true
+          "help", lit "Primary insured"
+          "icon", VStr "user"
+          "label", lit "Patient"
+          "tone", VEnum "Brand"
+          "value", lit "Alice Smith" ]
+    )
+
 let displayCases: (string * IdlValue) list =
     [ "heading-1", heading1
       "badge-1", badge1
@@ -1035,7 +1084,8 @@ let displayCases: (string * IdlValue) list =
       "metric-1", metric1
       "lvr-1", lvr1
       "spark-1", spark1
-      "code-1", code1 ]
+      "code-1", code1
+      "fact-1", fact1 ]
 
 /// Vendored canonical wire bytes for each Display fixture — a self-contained
 /// snapshot (the gate never goes vacuous when the corpus is not checked out),
