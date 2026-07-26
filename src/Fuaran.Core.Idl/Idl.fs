@@ -817,6 +817,217 @@ module Gen =
         let pieces = r.Fields |> List.map specPiece |> String.concat "; "
         sprintf "and private enc%s (s: %s) : JVal =\n    JObj([ %s ] |> List.choose id)" r.Name r.Name pieces
 
+    // -----------------------------------------------------------------------
+    // Phase 672 — the structural DECODER leg.
+    //
+    // The inverse of the encoder emitters above, and deliberately only the
+    // STRUCTURAL half: which `$type` maps to which case, which fields, which
+    // types. The decode-side *policy* a schema cannot describe — the canonical
+    // diagnostic codes with `$`-rooted paths, §16 lenient-accept normalisation,
+    // and the reject set — stays hand-written ABOVE this, exactly as the
+    // `'Msg`-generic author facades sit above the generated encoder. So the
+    // generated error is a plain string: enough to locate a structural fault,
+    // deliberately not competing with the hand-written envelope.
+    //
+    // Two inversions are NOT symmetric with the encoder, and are the ones to get
+    // right:
+    //   * §16 sentinel omission — the no-information closure sentinels
+    //     (`Binding.Query.accessor`, `Selection.accessor`, `Action.Dispatch.msg`)
+    //     are OFF the wire, so a `TClosure`/`TOpaque` field decodes from
+    //     *absence* and must never look for its key.
+    //   * a whole-valued float renders without a decimal point, so it parses
+    //     back as `JInt` — `dFloat` accepts both.
+    // -----------------------------------------------------------------------
+
+    /// The decoder expression for a type — a `JVal -> Result<'T, string>`.
+    /// Mirrors [[encFn]] arm for arm.
+    let rec private decFn (t: IdlType) : string =
+        match t with
+        | TStr -> "dStr"
+        | TInt -> "dInt"
+        | TBool -> "dBool"
+        | TFloat -> "dFloat"
+        | TEnum n -> "dec" + n
+        | TVar v -> "dec" + v
+        | TUnion(n, []) -> "dec" + n
+        | TUnion(n, args) -> "(dec" + n + " " + (args |> List.map decFn |> String.concat " ") + ")"
+        | TNode -> "decNode"
+        | TList inner -> sprintf "(dList %s)" (decFn inner)
+        | TClosure
+        | TOpaque -> "dUnit"
+        | TRecord n -> "dec" + n
+        | TMap vt -> sprintf "(dMap %s)" (decFn vt)
+
+    /// Reading one field back out, honouring the presence rules [[specPiece]] /
+    /// [[casePiece]] wrote it under.
+    let private decField (f: IdlField) : string =
+        match f.Type with
+        | TClosure
+        | TOpaque ->
+            // The VALUE is a sentinel and carries nothing, so it is never read. But an
+            // OPTIONAL sentinel field's PRESENCE is real wire information — the encoder
+            // omits the key when `None` and emits the sentinel when `Some ()`. Reading
+            // presence is what makes the decode a structural inverse; a flat `Ok None`
+            // silently drops the field (caught by the corpus round-trip gate on
+            // `grid-1`'s optional `rowKey`).
+            match f.Opt with
+            | Optional -> sprintf "dPresent \"%s\" __fs" f.Name
+            | _ -> "Ok()"
+        | _ ->
+            match f.Opt with
+            | Required -> sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type)
+            | Optional -> sprintf "dOpt \"%s\" __fs %s" f.Name (decFn f.Type)
+            | OmitDefault d ->
+                match fsDefaultLit f.Type d with
+                | Some dexpr -> sprintf "dDef \"%s\" __fs %s (%s)" f.Name (decFn f.Type) dexpr
+                // The encoder fell back to always-emit, so decode is required too.
+                | None -> sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type)
+
+    /// Nest one `Result.bind` per field over `final`, then close the lot. F# has
+    /// no applicative sugar for this, and the generated file is Fantomas-exempt,
+    /// so the nesting is emitted explicitly rather than prettified.
+    let private bindChain
+        (indent: string)
+        (binders: (string * string) list)
+        (final: string)
+        (extraCloses: int)
+        : string =
+        let opens =
+            binders
+            |> List.map (fun (v, e) -> sprintf "%s%s |> Result.bind (fun %s ->" indent e v)
+
+        let closes = String.replicate (List.length binders + extraCloses) ")"
+        (opens @ [ indent + final + closes ]) |> String.concat "\n"
+
+    let private fieldBinders (fs: IdlField list) =
+        fs |> List.map (fun f -> ident f.Name, decField f)
+
+    let private enumDecoder (e: IdlEnum) =
+        let arms =
+            e.Cases
+            |> List.map (fun c -> sprintf "    | JStr \"%s\" -> Ok %s.%s" c e.Name c)
+            |> String.concat "\n"
+
+        sprintf
+            "let private dec%s (j: JVal) : Result<%s, string> =\n    match j with\n%s\n    | _ -> Error \"not a %s\""
+            e.Name
+            e.Name
+            arms
+            e.Name
+
+    /// A union decoder. Generic unions take one `decX` codec per type parameter,
+    /// with the explicit type-parameter list [[unionEncoder]] needs for the same
+    /// polymorphic-recursion reason (`Binding.Format.source` recurses at `float`).
+    let private unionDecoder (u: IdlUnion) : string =
+        let decArgs =
+            u.Params
+            |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, string>)" p p)
+            |> String.concat ""
+
+        let tyArgs =
+            if List.isEmpty u.Params then
+                ""
+            else
+                "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
+
+        let ctor (c: IdlUnionCase) =
+            match c.Fields with
+            | [] -> sprintf "%s.%s" u.Name c.Tag
+            | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
+
+        let arm (c: IdlUnionCase) =
+            if List.isEmpty c.Fields then
+                sprintf "        | \"%s\" -> Ok %s" c.Tag (ctor c)
+            else
+                sprintf
+                    "        | \"%s\" ->\n%s"
+                    c.Tag
+                    (bindChain "            " (fieldBinders c.Fields) (sprintf "Ok(%s)" (ctor c)) 0)
+
+        // The transparent case (TextSource.Literal) is on the wire BARE, so it is
+        // recognised by the ABSENCE of a `$type`, not by a tag.
+        let transparent =
+            match TransparentUnion.tag u with
+            | Some ttag ->
+                match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
+                | Some c when c.Fields.Length = 1 ->
+                    let f = c.Fields.Head
+
+                    Some(
+                        sprintf
+                            "    | __bare ->\n        %s __bare |> Result.bind (fun %s -> Ok(%s))"
+                            (decFn f.Type)
+                            (ident f.Name)
+                            (ctor c)
+                    )
+                | _ -> None
+            | None -> None
+
+        let tagged =
+            let arms = u.Cases |> List.map arm |> String.concat "\n"
+
+            sprintf
+                "    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = \"$type\")) ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> Error (\"unknown %s case: \" + __other))"
+                arms
+                u.Name
+
+        let fallthrough =
+            match transparent with
+            | Some t -> t
+            | None -> sprintf "    | _ -> Error \"expected a %s object\"" u.Name
+
+        sprintf
+            "and private dec%s%s%s (j: JVal) : Result<%s%s, string> =\n    match j with\n%s\n%s"
+            u.Name
+            tyArgs
+            decArgs
+            u.Name
+            tyArgs
+            tagged
+            fallthrough
+
+    let private specDecoder (k: IdlKind) : string =
+        let assigns =
+            k.Fields
+            |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
+            |> String.concat "; "
+
+        sprintf
+            "and private dec%sSpec (j: JVal) : Result<%sSpec, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+            k.Tag
+            k.Tag
+            (bindChain "    " (fieldBinders k.Fields) (sprintf "Ok { %s }" assigns) 1)
+
+    let private recordDecoder (r: IdlRecord) : string =
+        let assigns =
+            r.Fields
+            |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
+            |> String.concat "; "
+
+        sprintf
+            "and private dec%s (j: JVal) : Result<%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+            r.Name
+            r.Name
+            (bindChain "    " (fieldBinders r.Fields) (sprintf "Ok { %s }" assigns) 1)
+
+    /// The decode-side helper prelude, emitted once per module.
+    let private decodeHelpers () : string =
+        String.concat
+            "\n\n"
+            [ "let private dObj (j: JVal) : Result<(string * JVal) list, string> =\n    match j with\n    | JObj fs -> Ok fs\n    | _ -> Error \"expected an object\""
+              "let private dTag (fs: (string * JVal) list) : Result<string, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = \"$type\") with\n    | Some(_, JStr t) -> Ok t\n    | _ -> Error \"missing or non-string $type\""
+              "let private dStr (j: JVal) : Result<string, string> =\n    match j with\n    | JStr s -> Ok s\n    | _ -> Error \"expected a string\""
+              "let private dInt (j: JVal) : Result<int, string> =\n    match j with\n    | JInt i -> Ok i\n    | _ -> Error \"expected an int\""
+              "let private dBool (j: JVal) : Result<bool, string> =\n    match j with\n    | JBool b -> Ok b\n    | _ -> Error \"expected a bool\""
+              "// A whole-valued float renders without a decimal point, so it parses back as JInt.\nlet private dFloat (j: JVal) : Result<float, string> =\n    match j with\n    | JFloat f -> Ok f\n    | JInt i -> Ok(float i)\n    | _ -> Error \"expected a number\""
+              "let private dUnit (_: JVal) : Result<unit, string> = Ok()"
+              "let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =\n    match j with\n    | JArr xs ->\n        (Ok [], xs)\n        ||> List.fold (fun acc x ->\n            match acc with\n            | Error e -> Error e\n            | Ok items -> dec x |> Result.map (fun v -> v :: items))\n        |> Result.map List.rev\n    | _ -> Error \"expected an array\""
+              "let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =\n    match j with\n    | JObj fs ->\n        (Ok [], fs)\n        ||> List.fold (fun acc (k, v) ->\n            match acc with\n            | Error e -> Error e\n            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))\n        |> Result.map (List.rev >> Map.ofList)\n    | _ -> Error \"expected an object\""
+              "let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v\n    | None -> Error(\"missing required field '\" + name + \"'\")"
+              "let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T option, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v |> Result.map Some\n    | None -> Ok None"
+              "let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v\n    | None -> Ok dflt"
+              "// An optional closure / opaque field: the value is a sentinel carrying nothing,\n// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.\nlet private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =\n    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))" ]
+
     /// Transitive closure of the enum / union / record types referenced from a set of kinds —
     /// through union case fields, record fields, list elements, map value-types, and union
     /// type-args. Records ↔ unions are mutually recursive (`CellKindErased.ButtonGroup` holds a
@@ -1144,6 +1355,36 @@ module Gen =
                 "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.\nmodule %s\n\nopen Fuaran.Core"
                 moduleName
 
+        // Phase 672: the decoder's mutually-recursive group, mirroring `recGroup`.
+        // `decNodeKind` dispatches `$type` to the per-kind spec decoder; `decNode`
+        // reads the `{ id, kind }` envelope `encNode` writes.
+        let decGroup =
+            let decNodeKindDecl =
+                let arms =
+                    kinds
+                    |> List.map (fun k ->
+                        sprintf "    | \"%s\" -> dec%sSpec j |> Result.map NodeKind.%s" k.Tag k.Tag k.Tag)
+                    |> String.concat "\n"
+
+                "let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =\n"
+                + "    dObj j |> Result.bind (fun __fs ->\n"
+                + "    dTag __fs |> Result.bind (fun __t ->\n"
+                + "    match __t with\n"
+                + arms
+                + "\n    | __other -> Error (\"unknown node kind: \" + __other)))"
+
+            let decNodeDecl =
+                "and private decNode (j: JVal) : Result<Node, string> =\n"
+                + "    dObj j |> Result.bind (fun __fs ->\n"
+                + "    dReq \"id\" __fs dStr |> Result.bind (fun id ->\n"
+                + "    dReq \"kind\" __fs decNodeKind |> Result.bind (fun kind ->\n"
+                + "    Ok { Id = id; Kind = kind })))"
+
+            (decNodeKindDecl :: decNodeDecl :: (unions |> List.map unionDecoder)
+             @ (records |> List.map recordDecoder)
+             @ (kinds |> List.map specDecoder))
+            |> String.concat "\n\n"
+
         match witnessDecl kinds, defaultsDecl idl kinds with
         | Ok witness, Ok defaults ->
             [ [ header ]
@@ -1152,6 +1393,10 @@ module Gen =
               enums |> List.map enumEncoder
               [ recGroup ]
               [ "let encodeNode (n: Node) : string = Canon.render (encNode n)" ]
+              [ decodeHelpers () ]
+              enums |> List.map enumDecoder
+              [ decGroup ]
+              [ "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\nlet decodeNode (s: string) : Result<Node, string> =\n    Json.parse s |> Result.bind decNode" ]
               [ witness ]
               [ validatorDecl () ]
               [ defaults ] ]

@@ -314,6 +314,36 @@ let tests =
                       (wire name)
                       (sprintf "generated encoder byte mismatch for '%s'" name))
 
+          // ---- Phase 672 task 2: the round-trip gate ----
+          testCase "the GENERATED decoder round-trips the whole corpus byte-for-byte" (fun _ ->
+              // The same corpus that gates the generated encoder, run the other way:
+              // decode each fixture into the generated structural types and re-encode.
+              // Byte-identity proves the decoder reads every field the encoder writes
+              // — a structural inverse, established over the real 40-kind vocabulary
+              // rather than asserted.
+              let failures =
+                  allExpected
+                  |> List.choose (fun (name, expected) ->
+                      match G.decodeNode expected with
+                      | Error e -> Some(name, "decode failed: " + e)
+                      | Ok node ->
+                          let reEncoded = G.encodeNode node
+
+                          if reEncoded = expected then
+                              None
+                          else
+                              Some(
+                                  name,
+                                  "re-encode differs:
+  in : "
+                                  + expected
+                                  + "
+  out: "
+                                  + reEncoded
+                              ))
+
+              Expect.isEmpty failures (sprintf "decodeNode >> encodeNode is not the identity for: %A" failures))
+
           testCase
               "generated witness: Children / ReplaceChildren over a multi-single-Node kind (ErrorBoundary)"
               (fun _ ->
@@ -343,6 +373,12 @@ let tests =
               match tryFindGenerated () with
               | None -> skiptest "UiGenerated.fs not found on disk — drift guard skipped"
               | Some path ->
+                  // Regeneration escape hatch: FUARAN_REGEN=1 rewrites the committed
+                  // file instead of asserting, so a deliberate generator change is a
+                  // one-command update rather than a hand-edit of generated code.
+                  if System.Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
+                      File.WriteAllText(path, generated)
+
                   // Whitespace-insensitive: a real generator change is caught, formatting is not.
                   let strip (s: string) =
                       s |> Seq.filter (Char.IsWhiteSpace >> not) |> Seq.toArray |> String

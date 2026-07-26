@@ -248,6 +248,283 @@ and private encMarkdownSpec (s: MarkdownSpec) : JVal =
 
 let encodeNode (n: Node) : string = Canon.render (encNode n)
 
+let private dObj (j: JVal) : Result<(string * JVal) list, string> =
+    match j with
+    | JObj fs -> Ok fs
+    | _ -> Error "expected an object"
+
+let private dTag (fs: (string * JVal) list) : Result<string, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = "$type") with
+    | Some(_, JStr t) -> Ok t
+    | _ -> Error "missing or non-string $type"
+
+let private dStr (j: JVal) : Result<string, string> =
+    match j with
+    | JStr s -> Ok s
+    | _ -> Error "expected a string"
+
+let private dInt (j: JVal) : Result<int, string> =
+    match j with
+    | JInt i -> Ok i
+    | _ -> Error "expected an int"
+
+let private dBool (j: JVal) : Result<bool, string> =
+    match j with
+    | JBool b -> Ok b
+    | _ -> Error "expected a bool"
+
+// A whole-valued float renders without a decimal point, so it parses back as JInt.
+let private dFloat (j: JVal) : Result<float, string> =
+    match j with
+    | JFloat f -> Ok f
+    | JInt i -> Ok(float i)
+    | _ -> Error "expected a number"
+
+let private dUnit (_: JVal) : Result<unit, string> = Ok()
+
+let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =
+    match j with
+    | JArr xs ->
+        (Ok [], xs)
+        ||> List.fold (fun acc x ->
+            match acc with
+            | Error e -> Error e
+            | Ok items -> dec x |> Result.map (fun v -> v :: items))
+        |> Result.map List.rev
+    | _ -> Error "expected an array"
+
+let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =
+    match j with
+    | JObj fs ->
+        (Ok [], fs)
+        ||> List.fold (fun acc (k, v) ->
+            match acc with
+            | Error e -> Error e
+            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))
+        |> Result.map (List.rev >> Map.ofList)
+    | _ -> Error "expected an object"
+
+let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v
+    | None -> Error("missing required field '" + name + "'")
+
+let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T option, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> Result.map Some
+    | None -> Ok None
+
+let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v
+    | None -> Ok dflt
+
+// An optional closure / opaque field: the value is a sentinel carrying nothing,
+// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
+let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =
+    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))
+
+let private decHeadingVariant (j: JVal) : Result<HeadingVariant, string> =
+    match j with
+    | JStr "Standard" -> Ok HeadingVariant.Standard
+    | JStr "Subtle" -> Ok HeadingVariant.Subtle
+    | JStr "Display" -> Ok HeadingVariant.Display
+    | _ -> Error "not a HeadingVariant"
+
+let private decBadgeVariant (j: JVal) : Result<BadgeVariant, string> =
+    match j with
+    | JStr "Info" -> Ok BadgeVariant.Info
+    | JStr "Success" -> Ok BadgeVariant.Success
+    | JStr "Warning" -> Ok BadgeVariant.Warning
+    | JStr "Critical" -> Ok BadgeVariant.Critical
+    | JStr "Neutral" -> Ok BadgeVariant.Neutral
+    | _ -> Error "not a BadgeVariant"
+
+let private decButtonVariant (j: JVal) : Result<ButtonVariant, string> =
+    match j with
+    | JStr "Primary" -> Ok ButtonVariant.Primary
+    | JStr "Secondary" -> Ok ButtonVariant.Secondary
+    | JStr "Ghost" -> Ok ButtonVariant.Ghost
+    | JStr "Danger" -> Ok ButtonVariant.Danger
+    | _ -> Error "not a ButtonVariant"
+
+let private decEmphasis (j: JVal) : Result<Emphasis, string> =
+    match j with
+    | JStr "Normal" -> Ok Emphasis.Normal
+    | JStr "Strong" -> Ok Emphasis.Strong
+    | JStr "Subtle" -> Ok Emphasis.Subtle
+    | _ -> Error "not a Emphasis"
+
+let private decToneVariant (j: JVal) : Result<ToneVariant, string> =
+    match j with
+    | JStr "Default" -> Ok ToneVariant.Default
+    | JStr "Brand" -> Ok ToneVariant.Brand
+    | JStr "Positive" -> Ok ToneVariant.Positive
+    | JStr "Caution" -> Ok ToneVariant.Caution
+    | JStr "Critical" -> Ok ToneVariant.Critical
+    | _ -> Error "not a ToneVariant"
+
+let private decStyleWeight (j: JVal) : Result<StyleWeight, string> =
+    match j with
+    | JStr "Standard" -> Ok StyleWeight.Standard
+    | JStr "Light" -> Ok StyleWeight.Light
+    | JStr "Heavy" -> Ok StyleWeight.Heavy
+    | _ -> Error "not a StyleWeight"
+
+let private decOrientation (j: JVal) : Result<Orientation, string> =
+    match j with
+    | JStr "Horizontal" -> Ok Orientation.Horizontal
+    | JStr "Vertical" -> Ok Orientation.Vertical
+    | _ -> Error "not a Orientation"
+
+let private decBoxRole (j: JVal) : Result<BoxRole, string> =
+    match j with
+    | JStr "Dashboard" -> Ok BoxRole.Dashboard
+    | JStr "Card" -> Ok BoxRole.Card
+    | JStr "Group" -> Ok BoxRole.Group
+    | _ -> Error "not a BoxRole"
+
+let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dTag __fs |> Result.bind (fun __t ->
+    match __t with
+    | "Heading" -> decHeadingSpec j |> Result.map NodeKind.Heading
+    | "Badge" -> decBadgeSpec j |> Result.map NodeKind.Badge
+    | "Button" -> decButtonSpec j |> Result.map NodeKind.Button
+    | "Metric" -> decMetricSpec j |> Result.map NodeKind.Metric
+    | "Box" -> decBoxSpec j |> Result.map NodeKind.Box
+    | "Markdown" -> decMarkdownSpec j |> Result.map NodeKind.Markdown
+    | __other -> Error ("unknown node kind: " + __other)))
+
+and private decNode (j: JVal) : Result<Node, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "id" __fs dStr |> Result.bind (fun id ->
+    dReq "kind" __fs decNodeKind |> Result.bind (fun kind ->
+    Ok { Id = id; Kind = kind })))
+
+and private decTextSource (j: JVal) : Result<TextSource, string> =
+    match j with
+    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "$type")) ->
+        dTag __fs |> Result.bind (fun __t ->
+        match __t with
+        | "Literal" ->
+            dReq "text" __fs dStr |> Result.bind (fun text ->
+            Ok(TextSource.Literal(text)))
+        | __other -> Error ("unknown TextSource case: " + __other))
+    | __bare ->
+        dStr __bare |> Result.bind (fun text -> Ok(TextSource.Literal(text)))
+
+and private decBinding<'T> (decT: JVal -> Result<'T, string>) (j: JVal) : Result<Binding<'T>, string> =
+    match j with
+    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "$type")) ->
+        dTag __fs |> Result.bind (fun __t ->
+        match __t with
+        | "Static" ->
+            dReq "value" __fs decT |> Result.bind (fun value ->
+            Ok(Binding.Static(value)))
+        | "State" ->
+            dReq "defaultValue" __fs decT |> Result.bind (fun defaultValue ->
+            dReq "key" __fs dStr |> Result.bind (fun key ->
+            Ok(Binding.State(defaultValue, key))))
+        | __other -> Error ("unknown Binding case: " + __other))
+    | _ -> Error "expected a Binding object"
+
+and private decFormat (j: JVal) : Result<Format, string> =
+    match j with
+    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "$type")) ->
+        dTag __fs |> Result.bind (fun __t ->
+        match __t with
+        | "Currency" ->
+            dReq "code" __fs dStr |> Result.bind (fun code ->
+            Ok(Format.Currency(code)))
+        | "Percent" ->
+            dReq "decimals" __fs dInt |> Result.bind (fun decimals ->
+            Ok(Format.Percent(decimals)))
+        | __other -> Error ("unknown Format case: " + __other))
+    | _ -> Error "expected a Format object"
+
+and private decAction (j: JVal) : Result<Action, string> =
+    match j with
+    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "$type")) ->
+        dTag __fs |> Result.bind (fun __t ->
+        match __t with
+        | "Chain" ->
+            dReq "ops" __fs (dList decAction) |> Result.bind (fun ops ->
+            Ok(Action.Chain(ops)))
+        | __other -> Error ("unknown Action case: " + __other))
+    | _ -> Error "expected a Action object"
+
+and private decLayoutMode (j: JVal) : Result<LayoutMode, string> =
+    match j with
+    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "$type")) ->
+        dTag __fs |> Result.bind (fun __t ->
+        match __t with
+        | "Auto" -> Ok LayoutMode.Auto
+        | "Flex" ->
+            dReq "direction" __fs decOrientation |> Result.bind (fun direction ->
+            dReq "wrap" __fs dBool |> Result.bind (fun wrap ->
+            Ok(LayoutMode.Flex(direction, wrap))))
+        | "Grid" ->
+            dReq "cols" __fs dInt |> Result.bind (fun cols ->
+            dOpt "templateColumns" __fs dStr |> Result.bind (fun templateColumns ->
+            Ok(LayoutMode.Grid(cols, templateColumns))))
+        | __other -> Error ("unknown LayoutMode case: " + __other))
+    | _ -> Error "expected a LayoutMode object"
+
+and private decHeadingSpec (j: JVal) : Result<HeadingSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "level" __fs dInt |> Result.bind (fun level ->
+    dReq "text" __fs decTextSource |> Result.bind (fun text ->
+    dReq "variant" __fs decHeadingVariant |> Result.bind (fun variant ->
+    Ok { Level = level; Text = text; Variant = variant }))))
+
+and private decBadgeSpec (j: JVal) : Result<BadgeSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "label" __fs decTextSource |> Result.bind (fun label ->
+    dReq "variant" __fs decBadgeVariant |> Result.bind (fun variant ->
+    Ok { Label = label; Variant = variant })))
+
+and private decButtonSpec (j: JVal) : Result<ButtonSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dOpt "disabled" __fs (decBinding dBool) |> Result.bind (fun disabled ->
+    dOpt "icon" __fs dStr |> Result.bind (fun icon ->
+    dReq "label" __fs decTextSource |> Result.bind (fun label ->
+    dReq "onClick" __fs decAction |> Result.bind (fun onClick ->
+    dReq "variant" __fs decButtonVariant |> Result.bind (fun variant ->
+    Ok { Disabled = disabled; Icon = icon; Label = label; OnClick = onClick; Variant = variant }))))))
+
+and private decMetricSpec (j: JVal) : Result<MetricSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dDef "emphasis" __fs decEmphasis (Emphasis.Normal) |> Result.bind (fun emphasis ->
+    dReq "format" __fs decFormat |> Result.bind (fun format ->
+    dOpt "icon" __fs dStr |> Result.bind (fun icon ->
+    dReq "label" __fs decTextSource |> Result.bind (fun label ->
+    dOpt "subtext" __fs decTextSource |> Result.bind (fun subtext ->
+    dDef "tone" __fs decToneVariant (ToneVariant.Default) |> Result.bind (fun tone ->
+    dOpt "trend" __fs (decBinding dFloat) |> Result.bind (fun trend ->
+    dOpt "trendFormat" __fs decFormat |> Result.bind (fun trendFormat ->
+    dReq "value" __fs (decBinding dFloat) |> Result.bind (fun value ->
+    dDef "weight" __fs decStyleWeight (StyleWeight.Standard) |> Result.bind (fun weight ->
+    Ok { Emphasis = emphasis; Format = format; Icon = icon; Label = label; Subtext = subtext; Tone = tone; Trend = trend; TrendFormat = trendFormat; Value = value; Weight = weight })))))))))))
+
+and private decBoxSpec (j: JVal) : Result<BoxSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
+    dOpt "heading" __fs decTextSource |> Result.bind (fun heading ->
+    dReq "layout" __fs decLayoutMode |> Result.bind (fun layout ->
+    dReq "role" __fs decBoxRole |> Result.bind (fun role ->
+    Ok { Children = children; Heading = heading; Layout = layout; Role = role })))))
+
+and private decMarkdownSpec (j: JVal) : Result<MarkdownSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "text" __fs decTextSource |> Result.bind (fun text ->
+    Ok { Text = text }))
+
+/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
+/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
+let decodeNode (s: string) : Result<Node, string> =
+    Json.parse s |> Result.bind decNode
+
 let private witnessKindTag (n: Node) : string =
     match n.Kind with
     | NodeKind.Heading _ -> "Heading"
