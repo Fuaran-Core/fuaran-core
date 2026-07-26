@@ -230,6 +230,61 @@ let trustTests =
               Expect.stringContains scrubbed "hello" "benign text preserved"
               Expect.equal (Sanitize.scrubMarkdown "Updated hourly.") "Updated hourly." "benign markdown untouched")
 
+          // ─── Phase 96 — the adversarial cases the straight-line corpus missed ───
+          //
+          // These are the mechanism that replaces Phase 321's unenforced "matches the
+          // UI module byte-for-byte" comment. Each one FAILED against the pre-96
+          // implementation; a regression here is a real divergence, not a style drift.
+
+          testCase "Sanitize: the scheme scrub cannot resurrect a spliced match (Phase 96)" (fun _ ->
+              // Deleting the match splices the halves together and re-forms the pattern;
+              // a single non-rescanning pass then emits it. The old code turned this
+              // input into a live `javascript:alert(1)` — the sanitiser constructing the
+              // payload it exists to remove.
+              let scrubbed = Sanitize.scrubMarkdown "javascjavascript:ript:alert(1)"
+              Expect.isFalse (scrubbed.Contains "javascript:") "no scheme reconstructed from the halves"
+
+              let inHref =
+                  Sanitize.scrubMarkdown "<a href=\"javascjavascript:ript:alert(1)\">x</a>"
+
+              Expect.isFalse (inHref.Contains "javascript:") "nor in an href position"
+
+              Expect.isFalse ((Sanitize.scrubMarkdown "vbscvbscript:ript:x").Contains "vbscript:") "same for vbscript:")
+
+          testCase "Sanitize: inline on*= handlers are stripped from tag interiors (Phase 96)" (fun _ ->
+              Expect.equal
+                  (Sanitize.scrubMarkdown "<a href=\"x\" onclick=\"alert(1)\">x</a>")
+                  "<a href=\"x\">x</a>"
+                  "quoted handler removed"
+
+              Expect.isFalse
+                  ((Sanitize.scrubMarkdown "<img src=\"x\" onerror=alert(1)>").Contains "onerror")
+                  "unquoted handler removed"
+
+              Expect.isFalse
+                  ((Sanitize.scrubMarkdown "<div onload>x</div>").Contains "onload")
+                  "boolean handler removed")
+
+          testCase "Sanitize: the tag-interior anchor leaves prose intact (Phase 96)" (fun _ ->
+              // Without the anchor the scan matches whitespace-`on`-letter in ordinary
+              // English and the boolean-attribute branch deletes the word from body text.
+              let prose = "Only one once, online and onto the next."
+              Expect.equal (Sanitize.scrubMarkdown prose) prose "words beginning `on` survive outside a tag")
+
+          testCase "Sanitize: attribute values reject controls and angle brackets (Phase 96)" (fun _ ->
+              Expect.isTrue (Sanitize.isSafeAttributeValue "plain value") "benign value passes"
+              Expect.isTrue (Sanitize.isSafeAttributeValue "tab\there") "tab tolerated"
+              Expect.isFalse (Sanitize.isSafeAttributeValue "a<b") "angle bracket rejected"
+              Expect.isFalse (Sanitize.isSafeAttributeValue ("nul" + string (char 1) + "here")) "C0 control rejected"
+              Expect.isFalse (Sanitize.isAllowedAttributeKey "style") "style rejected"
+
+              let filtered =
+                  Sanitize.sanitizeAttributes (
+                      Map.ofList [ "data-ok", "fine"; "data-bad", "a<b"; "onclick", "alert(1)" ]
+                  )
+
+              Expect.equal (Map.toList filtered) [ "data-ok", "fine" ] "only the safe data- entry survives")
+
           testCase "Custom gate: an unhashed Custom becomes an inert placeholder (never a live call)" (fun _ ->
               // custom-1 carries no contentHash → inert-by-default regardless of allowlist.
               match
