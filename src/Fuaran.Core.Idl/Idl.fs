@@ -1515,6 +1515,151 @@ module Gen =
     /// Emit a TypeScript value literal for an authored `IdlValue` — unions/nodes
     /// become `$type`-tagged objects (matching the generated encoder's dispatch),
     /// fields keyed by name. Builds the conformance fixtures the node harness runs.
+    // -----------------------------------------------------------------------
+    // Phase 317 — GENERATIVE conformance vectors.
+    //
+    // The fixed corpus proves the hosts agree on the shapes someone thought to
+    // write down. It cannot prove they agree on the shapes nobody did — and
+    // independent hosts diverge in exactly two places the corpus under-samples:
+    // **string escaping** and **float formatting**. So the pools below are
+    // adversarial by construction rather than uniform: quotes, backslashes, a
+    // control character, an astral-plane codepoint, and floats that render with
+    // no decimal point (so a re-parse sees an integer).
+    //
+    // Determinism is the whole point of a failing vector, so this uses an
+    // explicit LCG rather than `System.Random`, whose sequence is not
+    // contractually stable across runtimes — a vector that fails elsewhere has
+    // to reproduce here from its seed alone.
+    // -----------------------------------------------------------------------
+
+    type private Rng = { mutable State: uint64 }
+
+    let private nextInt (r: Rng) : int =
+        r.State <- r.State * 6364136223846793005UL + 1442695040888963407UL
+        int ((r.State >>> 33) &&& 0x7FFFFFFFUL)
+
+    let private pick (r: Rng) (xs: 'a list) : 'a = xs.[nextInt r % List.length xs]
+
+    /// Strings chosen to break a hand-rolled escaper: the two characters JSON
+    /// must escape, a control character (the \u00xx path), a surrogate pair, and
+    /// a payload that would terminate an unescaped script context.
+    let private stringPool =
+        [ ""
+          "plain"
+          "quote\" inside"
+          "back\\slash"
+          "ctrlhere"
+          "new\nline"
+          "tab\there"
+          "accent-é"
+          "astral-\U0001F600"
+          "</script>" ]
+
+    /// Both Int32 extremes (digit-count boundaries) plus zero.
+    let private intPool = [ 0; 1; -1; 42; -7; 2147483647; -2147483648 ]
+
+    /// Whole-valued floats are the hazard; mixed with values that exercise
+    /// round-trip ("R") formatting.
+    let private floatPool = [ 0.0; 1.0; -1.0; 3.0; 2.5; -0.125; 1234.5; 1e10; 1e-7 ]
+
+    let rec private sampleType (idl: Idl) (r: Rng) (depth: int) (t: IdlType) : IdlValue =
+        match t with
+        | TStr -> VStr(pick r stringPool)
+        | TInt -> VInt(pick r intPool)
+        | TBool -> VBool(nextInt r % 2 = 0)
+        | TFloat -> VFloat(pick r floatPool)
+        | TClosure -> VClosure
+        | TOpaque -> VOpaque
+        | TVar _ -> VStr(pick r stringPool)
+        | TEnum name ->
+            match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
+            | Some e -> VEnum(pick r e.Cases)
+            | None -> VStr "?"
+        | TList inner ->
+            // Bounded, and empty is a legitimate sample — an empty collection is
+            // NOT absence, and the two must stay distinguishable on the wire.
+            let n = if depth <= 0 then 0 else nextInt r % 3
+            VList [ for _ in 1..n -> sampleType idl r (depth - 1) inner ]
+        | TMap vt ->
+            let n = if depth <= 0 then 0 else nextInt r % 3
+            VMap [ for i in 1..n -> (sprintf "k%d" i), sampleType idl r (depth - 1) vt ]
+        | TRecord name ->
+            match idl.Records |> List.tryFind (fun rc -> rc.Name = name) with
+            | Some rc -> VRecord(sampleFields idl r (depth - 1) rc.Fields)
+            | None -> VRecord []
+        | TUnion(name, args) ->
+            match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
+            | Some u ->
+                // At the depth floor prefer a nullary case when one exists, so a
+                // recursive union terminates rather than being truncated.
+                let candidates =
+                    if depth <= 0 then
+                        match u.Cases |> List.filter (fun c -> List.isEmpty c.Fields) with
+                        | [] -> u.Cases
+                        | nullary -> nullary
+                    else
+                        u.Cases
+
+                let c = pick r candidates
+
+                // Substitute the type parameter RECURSIVELY. A shallow swap leaves
+                // `TList (TVar "T")` alone, so the sampler would generate a string
+                // where the slot's codec expects a float — which surfaces as an
+                // unrelated "not iterable" inside the TS escaper rather than as a
+                // real divergence.
+                let rec subst (ft: IdlType) =
+                    match ft with
+                    | TVar _ ->
+                        match args with
+                        | a :: _ -> a
+                        | [] -> ft
+                    | TList inner -> TList(subst inner)
+                    | TMap vt -> TMap(subst vt)
+                    | TUnion(n, uargs) -> TUnion(n, uargs |> List.map subst)
+                    | _ -> ft
+
+                VUnion(
+                    c.Tag,
+                    sampleFields idl r (depth - 1) (c.Fields |> List.map (fun f -> { f with Type = subst f.Type }))
+                )
+            | None -> VUnion("?", [])
+        | TNode -> sampleNode idl r (depth - 1) (pick r (idl.Kinds |> List.map (fun k -> k.Tag)))
+
+    and private sampleFields (idl: Idl) (r: Rng) (depth: int) (fields: IdlField list) : (string * IdlValue) list =
+        fields
+        |> List.map (fun f ->
+            let v =
+                match f.Opt with
+                | Required -> sampleType idl r depth f.Type
+                // Sample BOTH sides of every presence rule: an optional that is
+                // sometimes absent, and an omit-when-default that sits at its
+                // default often enough to exercise the omission path.
+                | Optional ->
+                    if nextInt r % 3 = 0 then
+                        VAbsent
+                    else
+                        sampleType idl r depth f.Type
+                | OmitDefault d ->
+                    if nextInt r % 2 = 0 then
+                        d
+                    else
+                        sampleType idl r depth f.Type
+
+            f.Name, v)
+
+    and private sampleNode (idl: Idl) (r: Rng) (depth: int) (kindTag: string) : IdlValue =
+        match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+        | Some k -> VNode(pick r [ "n"; "node-1"; "a\"b"; "" ], k.Tag, sampleFields idl r depth k.Fields)
+        | None -> VNode("n", kindTag, [])
+
+    /// `count` deterministic sample nodes over `kindTags`, cycling the tags so the
+    /// vocabulary is covered evenly rather than by chance. Same seed gives the
+    /// same vectors on any host and any runtime.
+    let sampleNodes (idl: Idl) (kindTags: string list) (seed: int) (count: int) : IdlValue list =
+        let r = { State = uint64 seed * 2862933555777941757UL + 3037000493UL }
+
+        [ for i in 0 .. count - 1 -> sampleNode idl r 3 (kindTags.[i % List.length kindTags]) ]
+
     let rec typescriptValue (v: IdlValue) : string =
         match v with
         | VStr s -> tsSourceStr s
@@ -1624,8 +1769,22 @@ module Gen =
             | Some pred -> "(" + pred + " ? null : " + pair + ")"
             | None -> pair
 
+    /// A union CASE field, honouring the same presence rules as a spec field.
+    /// Phase 317 generative conformance caught this ignoring `f.Opt` entirely:
+    /// TS emitted every optional union-case field unconditionally while F# omitted
+    /// it, so `LayoutMode.Grid` without `templateColumns` diverged (and threw in
+    /// the escaper). No fixed fixture carried that shape.
     let private tsCasePair (f: IdlField) : string =
-        "[" + tsSourceStr f.Name + ", " + tsEncApplied ("v." + f.Name) f.Type + "]"
+        let src = "v." + f.Name
+        let pair = "[" + tsSourceStr f.Name + ", " + tsEncApplied src f.Type + "]"
+
+        match f.Opt with
+        | Required -> pair
+        | Optional -> "(" + src + " === undefined ? null : " + pair + ")"
+        | OmitDefault d ->
+            match tsIsDefault src f.Type d with
+            | Some pred -> "(" + pred + " ? null : " + pair + ")"
+            | None -> pair
 
     let private tsUnionEncoder (u: IdlUnion) : string =
         let argList =
@@ -1862,7 +2021,70 @@ const encStr = (s) => {
 };
 const encInt = (n) => String(n);
 const encBool = (b) => (b ? 'true' : 'false');
-const encFloat = (n) => String(n);
+// §2 rule 5 — floats render in the .NET `ToString("R")` LAYOUT, which is not
+// what JS `String(x)` produces: JS uses a lowercase `e`, an unsigned exponent,
+// and a wider fixed-point threshold. The shortest-round-trip DIGITS agree (both
+// .NET Core 3.0+ and V8 emit them); only the layout differs, so this normalises
+// layout without touching the digits.
+const formatFiniteDouble = (n) => {
+  if (n === 0) return '0';
+  const neg = n < 0;
+  const s = Math.abs(n).toString();
+  let digits;
+  let exp;
+  const eIdx = s.indexOf('e');
+  if (eIdx >= 0) {
+    const mant = s.slice(0, eIdx);
+    const mantExp = parseInt(s.slice(eIdx + 1), 10);
+    const dot = mant.indexOf('.');
+    if (dot < 0) {
+      digits = mant;
+      exp = mantExp + (mant.length - 1);
+    } else {
+      digits = mant.slice(0, dot) + mant.slice(dot + 1);
+      exp = mantExp + (dot - 1);
+    }
+  } else {
+    const dot = s.indexOf('.');
+    if (dot < 0) {
+      digits = s;
+      exp = s.length - 1;
+    } else {
+      const intPart = s.slice(0, dot);
+      const fracPart = s.slice(dot + 1);
+      if (intPart === '0') {
+        const leadingZeros = fracPart.length - fracPart.replace(/^0+/, '').length;
+        digits = fracPart.slice(leadingZeros);
+        exp = -(leadingZeros + 1);
+      } else {
+        digits = intPart + fracPart;
+        exp = intPart.length - 1;
+      }
+    }
+  }
+  digits = digits.replace(/0+$/, '') || '0';
+  let out;
+  if (exp >= -4 && exp <= 16) {
+    if (exp >= 0) {
+      out =
+        digits.length <= exp + 1
+          ? digits + '0'.repeat(exp + 1 - digits.length)
+          : digits.slice(0, exp + 1) + '.' + digits.slice(exp + 1);
+    } else {
+      out = '0.' + '0'.repeat(-exp - 1) + digits;
+    }
+  } else {
+    const mantissa = digits.length === 1 ? digits : digits[0] + '.' + digits.slice(1);
+    out = mantissa + 'E' + (exp >= 0 ? '+' : '-') + Math.abs(exp).toString().padStart(2, '0');
+  }
+  return neg ? '-' + out : out;
+};
+const encFloat = (n) => {
+  if (Number.isNaN(n)) return '"NaN"';
+  if (n === Infinity) return '"Infinity"';
+  if (n === -Infinity) return '"-Infinity"';
+  return formatFiniteDouble(n);
+};
 const typed = (tag, pairs) =>
   '{"$type":' + encStr(tag) + pairs.filter((p) => p !== null).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';"""
 

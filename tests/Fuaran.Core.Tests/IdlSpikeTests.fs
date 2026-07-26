@@ -569,6 +569,109 @@ let tests =
                   with _ ->
                       ())
 
+          // ---- Phase 317: GENERATIVE cross-host conformance ----
+
+          testCase "generative conformance: F# and TypeScript agree on 500 generated vectors" (fun _ ->
+              // The fixed corpus proves the hosts agree on the shapes someone
+              // thought to write down. This closes the other half: deterministic
+              // vectors generated FROM the IDL, encoded by the F# interpreter and
+              // by the independent TypeScript backend under node, asserted
+              // byte-identical.
+              //
+              // The pools are adversarial where hosts actually diverge — string
+              // escaping and float formatting — so this reaches shapes the corpus
+              // does not contain: control characters, surrogate pairs, whole-valued
+              // floats, empty collections, and both sides of every presence rule.
+              let vectors = Gen.sampleNodes miniIdl generatedKinds 20260726 500
+
+              Expect.equal (List.length vectors) 500 "the sampler produced the requested vectors"
+
+              let fsharpWire =
+                  vectors
+                  |> List.mapi (fun i v ->
+                      match Encode.encode miniIdl v with
+                      | Ok w -> w
+                      | Error m -> failtestf "F# encode failed on vector %d: %s" i m)
+
+              let tsModule = Gen.typescriptModule miniIdl generatedKinds
+
+              let vectorsJs =
+                  vectors
+                  |> List.mapi (fun i v -> sprintf "  [%d, %s]," i (Gen.typescriptValue v))
+                  |> String.concat "\n"
+
+              let harness =
+                  tsModule
+                  + "\n\nconst __vectors = [\n"
+                  + vectorsJs
+                  + "\n];\n"
+                  // Fault-isolate per vector: one bad vector must not lose the other
+                  // 199, and the index has to survive into the report.
+                  + "for (const [i, node] of __vectors) {
+"
+                  + "  try { console.log(i + '\u0001' + encodeNode(node)); }
+"
+                  + "  catch (e) { console.log(i + '\u0001' + 'TS-THREW: ' + (e && e.message ? e.message : e)); }
+"
+                  + "}
+"
+
+              let tmp =
+                  Path.Combine(Path.GetTempPath(), sprintf "fuaran-generative-%s.mjs" (Guid.NewGuid().ToString("N")))
+
+              File.WriteAllText(tmp, harness)
+
+              try
+                  let psi = Diagnostics.ProcessStartInfo("node", "\"" + tmp + "\"")
+                  psi.RedirectStandardOutput <- true
+                  psi.RedirectStandardError <- true
+                  psi.UseShellExecute <- false
+
+                  let proc =
+                      try
+                          Some(Diagnostics.Process.Start psi)
+                      with _ ->
+                          None
+
+                  match proc with
+                  | None -> skiptest "node not on PATH — generative cross-host conformance skipped"
+                  | Some p ->
+                      let stdout = p.StandardOutput.ReadToEnd()
+                      let stderr = p.StandardError.ReadToEnd()
+                      p.WaitForExit()
+
+                      if p.ExitCode <> 0 then
+                          failtestf "node failed running the generative harness: %s" stderr
+
+                      let got =
+                          stdout.Replace("\r\n", "\n").Split('\n')
+                          |> Array.filter (fun l -> l <> "")
+                          |> Array.map (fun l ->
+                              let parts = l.Split('')
+                              int parts.[0], parts.[1])
+                          |> Map.ofArray
+
+                      // Report the FIRST divergence with its index, so a failing
+                      // vector reproduces from (seed, index) alone.
+                      let divergence =
+                          fsharpWire
+                          |> List.mapi (fun i w -> i, w)
+                          |> List.tryPick (fun (i, w) ->
+                              match Map.tryFind i got with
+                              | None -> Some(i, w, "(no TS output)")
+                              | Some actual when actual <> w -> Some(i, w, actual)
+                              | Some _ -> None)
+
+                      match divergence with
+                      | None -> ()
+                      | Some(i, fs, ts) ->
+                          failtestf "cross-host divergence at vector %d (seed 20260726)\n  F#: %s\n  TS: %s" i fs ts
+              finally
+                  try
+                      File.Delete tmp
+                  with _ ->
+                      ())
+
           // ---- Phase 317 syntax-tree-emission leg + Phase 321 trust boundary ----
 
           testCase
