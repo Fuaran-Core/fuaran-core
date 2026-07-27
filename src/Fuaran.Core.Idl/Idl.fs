@@ -98,6 +98,20 @@ type Optionality =
     | Required
     | Optional
     | OmitDefault of IdlValue
+    /// **Never on the wire at all** (Phase 691) — present in the host declaration,
+    /// absent from every encoding, restored from the slot's declared placeholder on
+    /// decode. `WIRE_FORMAT.md` §9's "wire-omitted fields (by design)": `Node.Motion`
+    /// and `Node.ExtraAttributes` are consumer-authored and deliberately not AI-visible,
+    /// and `Action.Dispatch`'s `'Msg` payload is a host value with no wire projection.
+    ///
+    /// Distinct from [[Optional]], which IS wire-visible — its presence is information,
+    /// and `WIRE_FORMAT.md` rule 4 turns on exactly that difference.
+    ///
+    /// A host-only field's type must be a [[TFn]], because that is what carries the
+    /// declared host type and the decoder's placeholder. (`TFn` is named for its
+    /// commonest use, but what it really means is "a slot whose host type is declared
+    /// and whose wire form is fixed" — a host-only slot's wire form being *absence*.)
+    | HostOnly
 
 and IdlField =
     { Name: string
@@ -321,6 +335,7 @@ module Encode =
                 | [] -> Ok(List.rev acc)
                 | (f: IdlField) :: rest ->
                     match provided f.Name authored, f.Opt with
+                    | _, HostOnly -> go acc rest
                     | (None | Some VAbsent), (Optional | OmitDefault _) -> go acc rest
                     | (None | Some VAbsent), Required -> Error(sprintf "required field '%s' is absent" f.Name)
                     // omit-at-default: a present value equal to the field's identity default emits nothing
@@ -478,6 +493,7 @@ module Decode =
             | [] -> Ok(List.rev acc)
             | (f: IdlField) :: rest ->
                 match field f.Name jfields, f.Opt with
+                | _, HostOnly -> go acc rest
                 | None, Optional -> go acc rest
                 // omit-at-default: an absent field restores its identity default
                 | None, OmitDefault d -> go ((f.Name, d) :: acc) rest
@@ -773,8 +789,11 @@ module Gen =
             match f.Opt with
             | Optional -> fsType f.Type + " option"
             // OmitDefault fields always carry a value (the default is restored on
-            // absence at decode) — a non-option field, like Required.
+            // absence at decode) — a non-option field, like Required. HostOnly takes
+            // the declared type verbatim: its `TFn` signature already says whether it
+            // is an option (`Motion option`) or a bare value (`'Msg`).
             | Required
+            | HostOnly
             | OmitDefault _ -> fsType f.Type
 
         sprintf "      %s: %s" (pascal f.Name) ty
@@ -790,6 +809,7 @@ module Gen =
                 match f.Opt with
                 | Optional -> fsType f.Type + " option"
                 | Required
+                | HostOnly
                 | OmitDefault _ -> fsType f.Type
 
             sprintf "%s: %s" (ident f.Name) ty
@@ -883,6 +903,15 @@ module Gen =
 
     /// One field of a record-spec encoder, as a `(string * JVal) option` for `List.choose id`
     /// (Required → always `Some`; Optional → omit-on-`None`; OmitDefault → omit-at-default).
+    /// The F# expression a HostOnly field takes on decode — its `TFn` placeholder.
+    /// A host-only field must be a `TFn`, because that is what carries both the
+    /// declared host type and the value to restore; anything else is an IDL defect
+    /// the generator refuses rather than guesses at.
+    let private hostOnlyLit (f: IdlField) : string =
+        match f.Type with
+        | TFn sg -> sg.Placeholder
+        | _ -> failwithf "field '%s' is HostOnly but not a TFn — it declares no host type or placeholder" f.Name
+
     /// `recv` is the bound record variable — `s` for a spec/record encoder, `n` for
     /// the node envelope (Phase 690), which reuses this presence machinery unchanged.
     let private specPieceOf (recv: string) (f: IdlField) : string =
@@ -891,8 +920,22 @@ module Gen =
         match f.Opt with
         | Required -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
         | Optional -> sprintf "(%s |> Option.map (fun v -> \"%s\", %s))" src f.Name (encApplied "v" f.Type)
+        // Phase 691 — never on the wire, in any state.
+        | HostOnly -> "None"
         | OmitDefault d ->
             match fsDefaultLit f.Type d with
+            // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
+            // closure slot gives its owning union a function-typed field, and F#
+            // functions support no equality, so the union stops supporting the
+            // `equality` constraint entirely — `CellFormat.Custom of (obj -> string)`
+            // broke `s.Format = CellFormat.None` for every column. A match is also
+            // simply the better test: it needs no constraint, and reads as what it is.
+            | Some dexpr when
+                (match f.Type with
+                 | TUnion _ -> true
+                 | _ -> false)
+                ->
+                sprintf "(match %s with | %s -> None | _ -> Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
             | Some dexpr ->
                 sprintf "(if %s = %s then None else Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
             | None -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
@@ -912,8 +955,22 @@ module Gen =
         match f.Opt with
         | Required -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
         | Optional -> sprintf "(%s |> Option.map (fun v -> \"%s\", %s))" src f.Name (encApplied "v" f.Type)
+        // Phase 691 — never on the wire, in any state.
+        | HostOnly -> "None"
         | OmitDefault d ->
             match fsDefaultLit f.Type d with
+            // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
+            // closure slot gives its owning union a function-typed field, and F#
+            // functions support no equality, so the union stops supporting the
+            // `equality` constraint entirely — `CellFormat.Custom of (obj -> string)`
+            // broke `s.Format = CellFormat.None` for every column. A match is also
+            // simply the better test: it needs no constraint, and reads as what it is.
+            | Some dexpr when
+                (match f.Type with
+                 | TUnion _ -> true
+                 | _ -> false)
+                ->
+                sprintf "(match %s with | %s -> None | _ -> Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
             | Some dexpr ->
                 sprintf "(if %s = %s then None else Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
             | None -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
@@ -1079,6 +1136,8 @@ module Gen =
             match f.Opt with
             | Required -> sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type)
             | Optional -> sprintf "dOpt \"%s\" __fs %s" f.Name (decFn f.Type)
+            // Never on the wire — nothing to read, so take the declared placeholder.
+            | HostOnly -> sprintf "Ok (%s)" (hostOnlyLit f)
             | OmitDefault d ->
                 match fsDefaultLit f.Type d with
                 | Some dexpr -> sprintf "dDef \"%s\" __fs %s (%s)" f.Name (decFn f.Type) dexpr
@@ -1265,6 +1324,24 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                     | None -> ()
             | TList inner -> visit inner
             | TMap vt -> visit vt
+            // Phase 691 — a declared type NAMED IN A SIGNATURE is reachable. `TFn.FSharp`
+            // is free text the walker cannot parse, so this searches it for the names the
+            // IDL already declares. Crude, but self-limiting (it can only ever mark
+            // something the IDL defines), and without it a type reached ONLY through a
+            // signature — `Motion`, on the host-only node fields — is declared in the IDL
+            // and then never emitted, so the generated module names a type it lacks.
+            | TFn sg ->
+                for e in idl.Enums do
+                    if sg.FSharp.Contains e.Name then
+                        enums.Add e.Name |> ignore
+
+                for r in idl.Records do
+                    if sg.FSharp.Contains r.Name then
+                        visit (TRecord r.Name)
+
+                for u in idl.Unions do
+                    if sg.FSharp.Contains u.Name then
+                        visit (TUnion(u.Name, []))
             | _ -> ()
 
         kinds |> List.iter (fun k -> k.Fields |> List.iter (fun f -> visit f.Type))
@@ -1461,6 +1538,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 | Some v, Optional -> defaultExpr f.Type v |> Result.map (fun e -> "Some(" + e + ")")
                 | None, Required -> Ok(ident f.Name)
                 | None, Optional -> Ok "None"
+                // HostOnly: not a ctor param either — the field takes its placeholder.
+                | _, HostOnly -> Ok(hostOnlyLit f)
                 // OmitDefault: not a ctor param — the field takes its identity default.
                 | _, OmitDefault d -> defaultExpr f.Type d
 
@@ -1483,6 +1562,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                             match fsDefaultLit f.Type d with
                             | Some e -> sprintf "; %s = %s" (pascal f.Name) e
                             | None -> failwithf "node envelope field '%s' has an unrenderable default" f.Name
+                        | HostOnly -> sprintf "; %s = %s" (pascal f.Name) (hostOnlyLit f)
                         | Required -> failwithf "node envelope field '%s' is Required — not yet supported" f.Name)
                     |> String.concat ""
 
@@ -1970,6 +2050,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         |> List.map (fun f ->
             let v =
                 match f.Opt with
+                // Host-only fields have no wire projection, so there is nothing to sample.
+                | HostOnly -> VAbsent
                 | Required -> sampleType idl r depth f.Type
                 // Sample BOTH sides of every presence rule: an optional that is
                 // sometimes absent, and an omit-when-default that sits at its
@@ -2128,6 +2210,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         match f.Opt with
         | Required -> pair
         | Optional -> "(" + src + " === undefined ? null : " + pair + ")"
+        | HostOnly -> "null"
         | OmitDefault d ->
             match tsIsDefault src f.Type d with
             | Some pred -> "(" + pred + " ? null : " + pair + ")"
@@ -2145,6 +2228,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         match f.Opt with
         | Required -> pair
         | Optional -> "(" + src + " === undefined ? null : " + pair + ")"
+        | HostOnly -> "null"
         | OmitDefault d ->
             match tsIsDefault src f.Type d with
             | Some pred -> "(" + pred + " ? null : " + pair + ")"
@@ -2267,6 +2351,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             match f.Opt with
             | Required -> "dReq(" + key + ", fs, " + tsDecFn f.Type + ")"
             | Optional -> "dOpt(" + key + ", fs, " + tsDecFn f.Type + ")"
+            | HostOnly -> "undefined"
             | OmitDefault d ->
                 match tsDefaultLit f.Type d with
                 | Some lit -> "dDef(" + key + ", fs, " + tsDecFn f.Type + ", " + lit + ")"
@@ -2640,6 +2725,7 @@ const plain = (pairs) =>
                         | (None | Some(_, VAbsent)) ->
                             match f.Opt with
                             | Optional -> Ok(pascal f.Name + " = None")
+                            | HostOnly -> Ok(pascal f.Name + " = " + hostOnlyLit f)
                             // OmitDefault absent → restore the identity default value.
                             | OmitDefault d ->
                                 match fsDefaultLit f.Type d with
@@ -2656,6 +2742,9 @@ const plain = (pairs) =>
                         | Some(_, fv) ->
                             match f.Opt, fsharpValue idl f.Type fv with
                             | _, Error e -> Error e
+                            // A host-only field has no wire projection, so a wire value
+                            // at its name is not its value — take the placeholder.
+                            | HostOnly, Ok _ -> Ok(pascal f.Name + " = " + hostOnlyLit f)
                             | Optional, Ok s -> Ok(pascal f.Name + " = Some(" + s + ")")
                             // OmitDefault present → the raw (non-option) value, like Required.
                             | OmitDefault _, Ok s

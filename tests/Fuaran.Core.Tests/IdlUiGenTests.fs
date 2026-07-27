@@ -52,18 +52,28 @@ let private allKindTags = uiIdl.Kinds |> List.map (fun k -> k.Tag)
 
 let private lit (s: string) = G.TextSource.Literal s
 
-let private markdown1: G.Node =
+/// Phase 691 — a stand-in handler. Closure slots carry their real signature
+/// now, so a fixture supplies a function rather than `()`. The encoder emits
+/// `"<closure>"` regardless of which function it is — that is the whole reason
+/// the slot's host type was free to declare.
+let private noop _ : G.Action<unit> = G.Action.Chain []
+
+let private markdown1: G.Node<unit> =
     { Id = "markdown-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind = G.NodeKind.Markdown { Text = lit "Updated hourly." } }
 
 /// `metric-1` — optional spec fields (all present) + a generic `Binding<float>` +
 /// two `CellFormat`s (one with an optional `decimals`).
-let private metric1: G.Node =
+let private metric1: G.Node<unit> =
     { Id = "metric-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -82,9 +92,11 @@ let private metric1: G.Node =
 // ─── The generated fixtures — name → generated Node (one per emission class) ──
 
 /// `stack-1` — a `Box` (role Group / Flex layout) nesting across families (Metric + Markdown).
-let private stack1: G.Node =
+let private stack1: G.Node<unit> =
     { Id = "stack-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -95,9 +107,11 @@ let private stack1: G.Node =
               Role = G.BoxRole.Group } }
 
 /// `btn-invoke` — the `Action` union + a `TRecord` (`InvokeArg`) list + optionals-as-None.
-let private btnInvoke: G.Node =
+let private btnInvoke: G.Node<unit> =
     { Id = "btn-invoke"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -111,10 +125,10 @@ let private btnInvoke: G.Node =
 
 /// `form-1` — a `FormField` record list, the closure-heavy `FormFieldKind` union,
 /// `TClosure`/`TOpaque` sentinels, an optional record field (`help`), a `State` binding.
-let private form1: G.Node =
+let private form1: G.Node<unit> =
     // NOT a node — `FormField` is a spec record that happens to share the `Id` /
     // `Kind` field names, so it takes no envelope.
-    let field id (kind: G.FormFieldKind) label required help : G.FormField =
+    let field id (kind: G.FormFieldKind<unit>) label required help : G.FormField<unit> =
         { Id = id
           Kind = kind
           Label = lit label
@@ -123,6 +137,8 @@ let private form1: G.Node =
 
     { Id = "form-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -130,16 +146,16 @@ let private form1: G.Node =
             { Fields =
                 [ field
                       "name"
-                      (G.FormFieldKind.Text(Some(), G.Binding.Static(Some "")))
+                      (G.FormFieldKind.Text(Some noop, G.Binding.Static(Some "")))
                       "Name"
                       true
                       (Some "Full legal name")
-                  field "age" (G.FormFieldKind.Number(Some(), G.Binding.Static(Some 0.0))) "Age" false None
-                  field "agree" (G.FormFieldKind.Checkbox(Some(), G.Binding.Static(Some false))) "I agree" true None
+                  field "age" (G.FormFieldKind.Number(Some noop, G.Binding.Static(Some 0.0))) "Age" false None
+                  field "agree" (G.FormFieldKind.Checkbox(Some noop, G.Binding.Static(Some false))) "I agree" true None
                   field
                       "tier"
                       (G.FormFieldKind.Choice(
-                          Some(),
+                          Some noop,
                           G.Binding.Static(
                               Some [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ]
                           ),
@@ -148,16 +164,18 @@ let private form1: G.Node =
                       "Tier"
                       false
                       None
-                  field "notes" (G.FormFieldKind.TextArea(Some(), 5, G.Binding.Static(Some ""))) "Notes" false None ]
+                  field "notes" (G.FormFieldKind.TextArea(Some noop, 5, G.Binding.Static(Some ""))) "Notes" false None ]
               OnSubmit = G.Action.Chain []
               SubmitLabel = lit "Save"
               Disabled = Some(G.Binding.State(Some false, "formBusy")) } }
 
 /// `grid-1` — the `ColumnErased` record holding a `CellKindErased` union + a
 /// `ColumnWidth` union + a `CellFormat` + closure/opaque sentinels.
-let private grid1: G.Node =
+let private grid1: G.Node<unit> =
     { Id = "grid-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -166,20 +184,22 @@ let private grid1: G.Node =
                 [ ({ Format = G.CellFormat.None
                      Kind = G.CellKindErased.Text
                      Label = "Channel"
-                     Value = ()
+                     Value = (fun _ -> box "")
                      Width = G.ColumnWidth.Auto }
-                  : G.ColumnErased) ]
+                  : G.ColumnErased<unit>) ]
               Editable = false
-              RowKey = Some()
+              RowKey = Some(fun _ -> "")
               Source = G.Binding.Static(Some())
               StaticRows = None
               OnRowClick = None } }
 
 /// `table-1` — the retired `Table` decode-upgraded to a static `DataGrid` (`staticRows`
 /// carrying its bare-string header/row grid).
-let private table1: G.Node =
+let private table1: G.Node<unit> =
     { Id = "table-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -195,9 +215,11 @@ let private table1: G.Node =
               OnRowClick = None } }
 
 /// `custom-bounded-1` — an (empty) `TMap` + a `ContentHash` record + an optional string list.
-let private customBounded1: G.Node =
+let private customBounded1: G.Node<unit> =
     { Id = "custom-bounded-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -215,9 +237,11 @@ let private customBounded1: G.Node =
               ExposedNodeIds = Some [ "quality-ring-segment-1"; "quality-ring-segment-2" ] } }
 
 /// `frag-ref-args` — a non-empty `TMap` of the `FragmentArg` union (incl. a `Node`-bearing `SlotArg`).
-let private fragRefArgs: G.Node =
+let private fragRefArgs: G.Node<unit> =
     { Id = "frag-ref-args"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -230,6 +254,8 @@ let private fragRefArgs: G.Node =
                           G.FragmentArg.SlotArg
                               { Id = "slot-tree"
                                 Accessibility = None
+                                ExtraAttributes = None
+                                Motion = None
                                 State = None
                                 Style = None
                                 Kind = G.NodeKind.Markdown { Text = lit "Bound slot" } }
@@ -237,9 +263,11 @@ let private fragRefArgs: G.Node =
                 ) } }
 
 /// `boundary-1` — a multi-single-`Node` kind (`child` + `fallback`).
-let private boundary1: G.Node =
+let private boundary1: G.Node<unit> =
     { Id = "boundary-1"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -247,12 +275,16 @@ let private boundary1: G.Node =
             { Child =
                 { Id = "boundary-child"
                   Accessibility = None
+                  ExtraAttributes = None
+                  Motion = None
                   State = None
                   Style = None
                   Kind = G.NodeKind.Markdown { Text = lit "Child body" } }
               Fallback =
                 { Id = "boundary-fallback"
                   Accessibility = None
+                  ExtraAttributes = None
+                  Motion = None
                   State = None
                   Style = None
                   Kind =
@@ -265,9 +297,11 @@ let private boundary1: G.Node =
 
 /// `frag-decl-param` — the `HoleDecl` union (incl. the back-tick `default` field +
 /// an omitted optional `default`), `Scalar` / `HoleValueSpace`, an `EffectClass` record.
-let private fragDeclParam: G.Node =
+let private fragDeclParam: G.Node<unit> =
     { Id = "frag-decl-param"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -275,6 +309,8 @@ let private fragDeclParam: G.Node =
             { Body =
                 { Id = "param-body"
                   Accessibility = None
+                  ExtraAttributes = None
+                  Motion = None
                   State = None
                   Style = None
                   Kind = G.NodeKind.Markdown { Text = lit "Parameterised body" } }
@@ -294,16 +330,20 @@ let private fragDeclParam: G.Node =
 
 /// `format-bindings` — the polymorphic-recursion path: `Binding.Format`'s `source`
 /// is a fixed `Binding<float>` inside `Binding<'T>`, exercised at runtime here.
-let private formatBindings: G.Node =
-    let fmt id (format: G.Format) (locale: G.LocaleSource) (source: G.Binding<float>) : G.Node =
+let private formatBindings: G.Node<unit> =
+    let fmt id (format: G.Format) (locale: G.LocaleSource) (source: G.Binding<float>) : G.Node<unit> =
         { Id = id
           Accessibility = None
+          ExtraAttributes = None
+          Motion = None
           State = None
           Style = None
           Kind = G.NodeKind.Markdown { Text = G.TextSource.Bound(G.Binding.Format(format, locale, source)) } }
 
     { Id = "format-bindings"
       Accessibility = None
+      ExtraAttributes = None
+      Motion = None
       State = None
       Style = None
       Kind =
@@ -335,7 +375,7 @@ let private formatBindings: G.Node =
                       (G.Binding.Static(Some -3.0)) ] } }
 
 /// The representative generated fixtures — one (or more) per new emission class.
-let private generatedCases: (string * G.Node) list =
+let private generatedCases: (string * G.Node<unit>) list =
     [ "metric-1", metric1
       "stack-1", stack1
       "btn-invoke", btnInvoke

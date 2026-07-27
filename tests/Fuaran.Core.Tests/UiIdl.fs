@@ -98,6 +98,21 @@ let private fontVoice =
     { Name = "FontVoice"
       Cases = [ "Default"; "Display"; "Structural" ] }
 
+/// Phase 691 — the per-node animation token. NEVER on the wire (`WIRE_FORMAT.md`
+/// §9: motion is consumer-authored, not AI-authored), and declared only so the
+/// host-only `Node.motion` field has a type to name.
+let private motion =
+    { Name = "Motion"
+      Cases =
+        [ "None"
+          "PulseDuringLoad"
+          "FadeInOnMount"
+          "SlideInFromBelow"
+          "ShakeOnError"
+          "RotateOnRefresh"
+          "SlideInFromRight"
+          "ExpandCollapse" ] }
+
 /// `LayoutKind.ScrollArea`'s scroll-axis enum (distinct from `Orientation` — it
 /// adds `Both`).
 let private scrollOrientation =
@@ -152,6 +167,51 @@ let private opt (name: string) (t: IdlType) : IdlField =
       Type = t
       Opt = Optional }
 
+// ─── Phase 691: function-typed slots carry their HOST signature ────────────
+//
+// Wire behaviour is identical to `TClosure` — the fixed `"<closure>"` sentinel,
+// presence-only decode. What `TFn` adds is the declaration, which is what lets
+// the generated layer be the authoring type rather than a projection of it (D2).
+//
+// Signatures are read from `Fuaran.UI/Types.fs`, NOT inferred from the field
+// name. Two shapes dominate: a handler returning `Action<'Msg>` (every `on*` on a
+// spec) and a pure projection returning a value (the `DataGrid` column functions).
+//
+// Where an argument's host type is not IDL-declared — `BindingContext`,
+// `ErrorPayload`, `CellValue`, `FileSelection` — the slot takes `obj` in that
+// position and says so at the site. That is a real fidelity loss against the
+// hand-written type, and it is the one thing standing between this phase and a
+// generated layer that could be authored against directly; Phase 692 resolves it
+// when it reconciles the two authoring surfaces.
+
+/// A function-typed slot: the F# declaration, the TypeScript one, and the
+/// expression the decoder puts in the slot (written at `'Msg = obj`).
+let private hostOnly (name: string) (fs: string) (ph: string) : IdlField =
+    { Name = name
+      Type =
+        TFn
+            { FSharp = fs
+              TypeScript = "never"
+              Placeholder = ph }
+      Opt = HostOnly }
+
+let private fn (fs: string) (ts: string) (ph: string) : IdlType =
+    TFn
+        { FSharp = fs
+          TypeScript = ts
+          Placeholder = ph }
+
+/// The common shape — an event handler `arg -> Action<'Msg>`. The placeholder is
+/// `Action.Chain []`: a decoded tree has no behaviour, and "do nothing" is the
+/// honest stand-in for a handler the wire could not carry.
+let private handlerOf (arg: string) (tsArg: string) : IdlType =
+    fn (arg + " -> Action<'Msg>") ("(v: " + tsArg + ") => Action") ("(fun (_: " + arg + ") -> Action.Chain [])")
+
+/// A pure projection `arg -> result` (no `'Msg`) — the `DataGrid` column
+/// functions and `Binding`'s accessors.
+let private projOf (arg: string) (result: string) (tsSig: string) (ph: string) : IdlType =
+    fn (arg + " -> " + result) tsSig ph
+
 /// A field omitted on the wire when it equals its identity default `dflt`, restored
 /// on absence (Fuaran-UI Phase 460 omit-when-default: tone/weight/emphasis/format/width).
 let private omit (name: string) (t: IdlType) (dflt: IdlValue) : IdlField =
@@ -196,16 +256,18 @@ let private binding =
           { Tag = "State"
             Fields = [ opt "defaultValue" (TVar "T"); req "key" TStr ] }
           { Tag = "Computed"
-            Fields = [ req "fn" TClosure ] }
+            // `BindingContext -> 'T`. `BindingContext` is a HOST type (it carries a
+            // `TryGetState<'T>` member), so the argument erases to `obj` here.
+            Fields = [ req "fn" (projOf "obj" "'T" "(ctx: unknown) => T" "(fun _ -> Unchecked.defaultof<'T>)") ] }
           // A controlled-input local buffer. `initialFrom` recurses at the same
           // `'T`; `format` / `onCommit` / `parse` are closures; `flushOn` is a DU.
           { Tag = "Local"
             Fields =
               [ req "flushOn" (TUnion("LocalFlushTrigger", []))
-                req "format" TClosure
+                req "format" (projOf "'T" "string" "(v: T) => string" "(fun _ -> \"\")")
                 req "initialFrom" (TUnion("Binding", [ TVar "T" ]))
-                opt "onCommit" TClosure
-                req "parse" TClosure ] }
+                opt "onCommit" (projOf "'T" "obj" "(v: T) => unknown" "(fun _ -> (\"<closure>\" :> obj))")
+                req "parse" (projOf "string" "Result<'T, string>" "(s: string) => T" "(fun _ -> Error \"<closure>\")") ] }
           // Locale-aware formatted string. `source` is ALWAYS `Binding<float>`
           // (independent of `'T`); `format` / `locale` are bounded DUs.
           { Tag = "Format"
@@ -236,7 +298,8 @@ let private cellFormat =
           { Tag = "Date"
             Fields = [ req "format" TStr ] }
           { Tag = "Custom"
-            Fields = [ req "fn" TClosure ] } ] }
+            // `CellValue -> string`; `CellValue` is a host type, so the argument erases.
+            Fields = [ req "fn" (projOf "obj" "string" "(v: unknown) => string" "(fun _ -> \"\")") ] } ] }
 
 /// `Action<'Msg>` — the effect-typed action union. `Chain` recurses; `Dispatch`
 /// / `onRead` payloads are closures; `Invoke` / `ReadFileBody` carry data. The
@@ -251,21 +314,25 @@ let private action =
           { Tag = "WriteToClipboard"
             Fields = [ req "text" TStr ] }
           // Fuaran-UI 0.2.x: the dispatch msg closure is omitted entirely (no wire key).
-          { Tag = "Dispatch"; Fields = [] }
+          // `Dispatch of 'Msg`. The payload is a host value with NO wire projection —
+          // `{"$type":"Dispatch"}` is the whole encoding, before and after. Declaring it
+          // host-only is what lets the generated `Action` be the authoring `Action`.
+          { Tag = "Dispatch"
+            Fields = [ hostOnly "msg" "'Msg" "((\"<dispatch>\" :> obj))" ] }
           { Tag = "Invoke"
             Fields = [ req "args" (TList(TRecord "InvokeArg")); req "capabilityId" TStr ] }
           { Tag = "ReadFileBody"
             Fields =
               [ req "encoding" (TEnum "FileReadEncoding")
                 req "fileRef" TStr
-                opt "onRead" TClosure ] }
+                opt "onRead" (fn "string -> 'Msg" "(body: string) => Msg" "(fun (_: string) -> (\"<closure>\" :> obj))") ] }
           // `ApiEndpoint` is a bare string on the wire; `into` is the declarative
           // result target, omitted when None; `onResult` rides only when present.
           { Tag = "Call"
             Fields =
               [ req "endpoint" TStr
                 opt "into" (TUnion("CallResultTarget", []))
-                opt "onResult" TClosure ] }
+                opt "onResult" (fn "obj -> 'Msg" "(r: unknown) => Msg" "(fun (_: obj) -> (\"<closure>\" :> obj))") ] }
           { Tag = "Navigate"
             Fields = [ req "route" TStr ] }
           { Tag = "CommitLocal"
@@ -348,37 +415,43 @@ let private formFieldKind =
       Params = []
       Cases =
         [ { Tag = "Text"
-            Fields = [ opt "onChange" TClosure; req "value" (TUnion("Binding", [ TStr ])) ] }
+            Fields =
+              [ opt "onChange" (handlerOf "string" "string")
+                req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Number"
-            Fields = [ opt "onChange" TClosure; req "value" (TUnion("Binding", [ TFloat ])) ] }
+            Fields =
+              [ opt "onChange" (handlerOf "float" "number")
+                req "value" (TUnion("Binding", [ TFloat ])) ] }
           { Tag = "Checkbox"
-            Fields = [ opt "onToggle" TClosure; req "value" (TUnion("Binding", [ TBool ])) ] }
+            Fields =
+              [ opt "onToggle" (handlerOf "bool" "boolean")
+                req "value" (TUnion("Binding", [ TBool ])) ] }
           { Tag = "Choice"
             Fields =
-              [ opt "onChange" TClosure
+              [ opt "onChange" (handlerOf "string option" "string | null")
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "TextArea"
             Fields =
-              [ opt "onChange" TClosure
+              [ opt "onChange" (handlerOf "float" "number")
                 req "rows" TInt
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "RangedNumber"
             Fields =
-              [ opt "onChange" TClosure
+              [ opt "onChange" (handlerOf "float" "number")
                 req "value" (TUnion("Binding", [ TFloat ]))
                 opt "min" TFloat
                 opt "max" TFloat
                 opt "step" TFloat ] }
           { Tag = "SegmentedChoice"
             Fields =
-              [ opt "onChange" TClosure
+              [ opt "onChange" (handlerOf "string option" "string | null")
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "orientation" (TEnum "Orientation")
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Date"
             Fields =
-              [ opt "onChange" TClosure
+              [ opt "onChange" (handlerOf "string option" "string | null")
                 req "value" (TUnion("Binding", [ TStr ]))
                 req "variant" (TEnum "DateVariant")
                 opt "min" TStr
@@ -393,18 +466,22 @@ let private filterKind =
       Params = []
       Cases =
         [ { Tag = "Text"
-            Fields = [ opt "onChange" TClosure; req "value" (TUnion("Binding", [ TStr ])) ] }
+            Fields =
+              [ opt "onChange" (handlerOf "string" "string")
+                req "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Choice"
             Fields =
-              [ opt "onChange" TClosure
+              [ opt "onChange" (handlerOf "string option" "string | null")
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "value" (TUnion("Binding", [ TStr ])) ] }
           // RangeFilter's value is opaque on the wire (no corpus fixture yet).
           { Tag = "Range"
-            Fields = [ opt "onChange" TClosure; req "value" TOpaque ] }
+            Fields =
+              [ opt "onChange" (handlerOf "float * float" "[number, number]")
+                req "value" TOpaque ] }
           { Tag = "SegmentedChoice"
             Fields =
-              [ opt "onChange" TClosure
+              [ opt "onChange" (handlerOf "string option" "string | null")
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "orientation" (TEnum "Orientation")
                 req "value" (TUnion("Binding", [ TStr ])) ] } ] }
@@ -433,21 +510,47 @@ let private cellKindErased =
           { Tag = "Numeric"; Fields = [] }
           { Tag = "Date"; Fields = [] }
           { Tag = "Editable"
-            Fields = [ opt "onEdit" TClosure ] }
+            // `(obj * CellValue) -> Action<'Msg>`; `CellValue` is a host type.
+            Fields = [ opt "onEdit" (handlerOf "obj * obj" "[unknown, unknown]") ] }
           { Tag = "Checkbox"
-            Fields = [ req "get" TClosure; opt "onToggle" TClosure ] }
+            Fields =
+              [ req "get" (projOf "obj" "bool" "(row: unknown) => boolean" "(fun _ -> false)")
+                opt "onToggle" (handlerOf "obj * bool" "[unknown, boolean]") ] }
           { Tag = "Button"
-            Fields = [ req "label" (TUnion("TextSource", [])); opt "onClick" TClosure ] }
+            Fields =
+              [ req "label" (TUnion("TextSource", []))
+                opt "onClick" (handlerOf "obj" "unknown") ] }
           { Tag = "ButtonGroup"
             Fields = [ req "buttons" (TList(TRecord "ButtonGroupItem")) ] }
           { Tag = "Link"
-            Fields = [ req "hrefFn" TClosure; req "labelFn" TClosure ] }
+            Fields =
+              [ req "hrefFn" (projOf "obj" "string" "(row: unknown) => string" "(fun _ -> \"\")")
+                req
+                    "labelFn"
+                    (projOf "obj" "TextSource" "(row: unknown) => TextSource" "(fun _ -> TextSource.Literal \"\")") ] }
           { Tag = "Pill"
-            Fields = [ req "labelFn" TClosure; req "toneFn" TClosure ] }
+            Fields =
+              [ req
+                    "labelFn"
+                    (projOf "obj" "TextSource" "(row: unknown) => TextSource" "(fun _ -> TextSource.Literal \"\")")
+                req
+                    "toneFn"
+                    (projOf "obj" "ToneVariant" "(row: unknown) => ToneVariant" "(fun _ -> ToneVariant.Default)") ] }
           { Tag = "Progress"
-            Fields = [ req "fractionFn" TClosure; req "labelFn" TClosure ] }
+            Fields =
+              [ req "fractionFn" (projOf "obj" "float" "(row: unknown) => number" "(fun _ -> 0.0)")
+                req
+                    "labelFn"
+                    (projOf "obj" "TextSource" "(row: unknown) => TextSource" "(fun _ -> TextSource.Literal \"\")") ] }
           { Tag = "Custom"
-            Fields = [ req "fn" TClosure ] } ] }
+            // `(obj -> JVal) -> Node<'Msg>` — a cell renderer over the row projector.
+            Fields =
+              [ req
+                    "fn"
+                    (fn
+                        "(obj -> JVal) -> Node<'Msg>"
+                        "(proj: (row: unknown) => unknown) => Node"
+                        "(fun _ -> Unchecked.defaultof<Node<obj>>)") ] } ] }
 
 // ─── Meta-family unions (parameterised fragments) ───────────────────────────
 
@@ -568,13 +671,16 @@ let private columnErasedRecord =
         [ omit "format" (TUnion("CellFormat", [])) (VUnion("None", []))
           req "kind" (TUnion("CellKindErased", []))
           req "label" TStr
-          req "value" TClosure
+          // `obj -> CellValue`; `CellValue` is a host type, so the result erases.
+          req "value" (projOf "obj" "obj" "(row: unknown) => unknown" "(fun _ -> (\"<closure>\" :> obj))")
           omit "width" (TUnion("ColumnWidth", [])) (VUnion("Auto", [])) ] }
 
 /// One button of a `CellKindErased.ButtonGroup` (`onClick` is a closure).
 let private buttonGroupItemRecord =
     { Name = "ButtonGroupItem"
-      Fields = [ req "label" (TUnion("TextSource", [])); opt "onClick" TClosure ] }
+      Fields =
+        [ req "label" (TUnion("TextSource", []))
+          opt "onClick" (handlerOf "obj" "unknown") ] }
 
 /// A `Custom` node's content-identity envelope (`strictness` is a bare-string DU).
 let private contentHashRecord =
@@ -622,7 +728,10 @@ let private semanticStyleRecord =
 /// sentinel, and its PRESENCE is the only thing the wire carries.
 let private stateBehaviourRecord =
     { Name = "StateBehaviour"
-      Fields = [ opt "onEmpty" TNode; opt "onError" TClosure; opt "onLoading" TNode ] }
+      Fields =
+        [ opt "onEmpty" TNode
+          opt "onError" (fn "obj -> Node<'Msg>" "(e: unknown) => Node" "(fun _ -> Unchecked.defaultof<Node<obj>>)")
+          opt "onLoading" TNode ] }
 
 /// `{ "describedBy"?, "hidden"?, "label"?, "labelledBy"?, "liveRegion"?, "role"? }`.
 ///
@@ -802,7 +911,7 @@ let layoutKinds: IdlKind list =
           [ req "children" (TList TNode)
             req "defaultOpen" TBool
             req "heading" TS
-            opt "onToggle" TClosure
+            opt "onToggle" (handlerOf "bool" "boolean")
             req "open" (bindingOf TBool) ] }
       { Tag = "Modal"
         Category = "Layout"
@@ -828,10 +937,10 @@ let layoutKinds: IdlKind list =
         Fields =
           [ req "activeIndex" (bindingOf TInt)
             req "children" (TList TNode)
-            opt "onSelect" TClosure
+            opt "onSelect" (handlerOf "int" "number")
             // Phase 671 step 2 — also caught by the direct diff: present in
             // `controls-closure`, absent from the IDL, so it was silently dropped.
-            opt "onSelectTag" TClosure
+            opt "onSelectTag" (handlerOf "string" "string")
             opt "tabHeaders" (TList(TRecord "TabHeader"))
             opt "tabTags" (TList TStr)
             opt "activeTag" (bindingOf TStr) ] }
@@ -840,7 +949,7 @@ let layoutKinds: IdlKind list =
         Fields =
           [ req "activeStep" (bindingOf TInt)
             req "children" (TList TNode)
-            opt "onSelect" TClosure ] } ]
+            opt "onSelect" (handlerOf "int" "number") ] } ]
 
 // ─── Input kinds (interactive; the richest Binding / Action surface) ────────
 //
@@ -869,11 +978,11 @@ let inputKinds: IdlKind list =
         // rides multiselect-1, deferred — a `Static None` renders JSON null.)
         Fields =
           [ req "label" (TUnion("TextSource", []))
-            opt "onChange" TClosure
+            opt "onChange" (handlerOf "string option" "string | null")
             // Phase 671 step 2 — the multi-select handler, present in
             // `controls-closure` and absent from the IDL until the direct
             // byte-diff found it silently dropped.
-            opt "onChangeMulti" TClosure
+            opt "onChangeMulti" (handlerOf "string list" "string[]")
             req "source" (bindingOf (TList(TRecord "SelectOption")))
             req "value" (bindingOf TStr)
             opt "placeholder" (TUnion("TextSource", []))
@@ -886,7 +995,7 @@ let inputKinds: IdlKind list =
           [ req "accept" (TList TStr)
             req "label" (TUnion("TextSource", []))
             req "multiple" TBool
-            opt "onSelect" TClosure
+            opt "onSelect" (handlerOf "obj list" "unknown[]")
             opt "disabled" (bindingOf TBool) ] }
       { Tag = "Form"
         Category = "Input"
@@ -918,10 +1027,10 @@ let visKinds: IdlKind list =
         Fields =
           [ req "columns" (TList(TRecord "ColumnErased"))
             omit "editable" TBool (VBool false)
-            opt "rowKey" TClosure
+            opt "rowKey" (projOf "obj" "string" "(row: unknown) => string" "(fun _ -> \"\")")
             req "source" (bindingOf TOpaque)
             opt "staticRows" (TRecord "StaticRows")
-            opt "onRowClick" TClosure ] }
+            opt "onRowClick" (handlerOf "obj" "unknown") ] }
       { Tag = "Chart"
         Category = "Visualisation"
         Fields =
@@ -931,7 +1040,7 @@ let visKinds: IdlKind list =
             req "xField" TStr
             req "yFields" (TList TStr)
             opt "title" TS
-            opt "onPointClick" TClosure ] }
+            opt "onPointClick" (handlerOf "obj" "unknown") ] }
       { Tag = "Map"
         Category = "Visualisation"
         // Fuaran-UI 0.2.x typed-Static: the map source is a real MapMarker list.
@@ -940,7 +1049,7 @@ let visKinds: IdlKind list =
             req "centreLongitude" TFloat
             req "source" (bindingOf (TList(TRecord "MapMarker")))
             req "zoom" TInt
-            opt "onMarkerClick" TClosure ] } ]
+            opt "onMarkerClick" (handlerOf "MapMarker" "MapMarker") ] } ]
 
 // ─── Meta kinds (the escape hatches + parameterised fragments) ──────────────
 //
@@ -1117,7 +1226,7 @@ let metaKinds: IdlKind list =
           [ req "capabilities" (TList TStr)
             req "channel" (TRecord "GuestChannel")
             opt "inputs" (TMap(TUnion("FragmentArg", [])))
-            opt "onBubble" TClosure
+            opt "onBubble" (handlerOf "obj" "unknown")
             req "scopeId" TStr ] } ]
 
 /// The real-tier IDL as grown so far: the Display + Layout + Input + Visualisation
@@ -1168,7 +1277,8 @@ let uiIdl: Idl =
           channelDirection
           textAnchor
           styleRole
-          fontVoice ]
+          fontVoice
+          motion ]
       Records =
         [ semanticStyleRecord
           stateBehaviourRecord
@@ -1201,6 +1311,12 @@ let uiIdl: Idl =
       // encoder should never be handed rather than one it must silently absorb.
       NodeFields =
         [ opt "accessibility" (TRecord "Accessibility")
+          // `WIRE_FORMAT.md` §9 — consumer-authored, deliberately NOT AI-visible, and
+          // never emitted. They are on the node because the generated type has to be
+          // able to hold everything the authoring type holds (Phase 694), not because
+          // the wire has anything to say about them.
+          hostOnly "extraAttributes" "Map<string, string> option" "None"
+          hostOnly "motion" "Motion option" "None"
           opt "state" (TRecord "StateBehaviour")
           opt "style" (TRecord "SemanticStyle") ] }
 
