@@ -164,11 +164,22 @@ type IdlDefault =
 /// The whole IDL — kinds, value-unions, enums, non-discriminated records, and
 /// field defaults. The canonical root.
 type Idl =
-    { Kinds: IdlKind list
-      Unions: IdlUnion list
-      Enums: IdlEnum list
-      Records: IdlRecord list
-      Defaults: IdlDefault list }
+    {
+        Kinds: IdlKind list
+        Unions: IdlUnion list
+        Enums: IdlEnum list
+        Records: IdlRecord list
+        Defaults: IdlDefault list
+        /// The node ENVELOPE — fields a `Node` carries beside `id` and `kind`
+        /// (Phase 690). Empty (the default) generates `{ Id; Kind }`, exactly as
+        /// before; the Fuaran-UI vocabulary declares `state` / `style` /
+        /// `accessibility` here, per `WIRE_FORMAT.md` §3.1.
+        ///
+        /// Declared rather than hard-coded, because "what a node carries beside its
+        /// kind" is a property of the DOMAIN's tree, not of the generator: another
+        /// Fuaran domain has a different envelope, or none at all.
+        NodeFields: IdlField list
+    }
 
 /// A "transparent" union case is encoded/decoded as a bare JSON value (its single
 /// field's value) rather than a `$type`-tagged object — the Fuaran-UI 0.2.0
@@ -872,8 +883,10 @@ module Gen =
 
     /// One field of a record-spec encoder, as a `(string * JVal) option` for `List.choose id`
     /// (Required → always `Some`; Optional → omit-on-`None`; OmitDefault → omit-at-default).
-    let private specPiece (f: IdlField) : string =
-        let src = "s." + pascal f.Name
+    /// `recv` is the bound record variable — `s` for a spec/record encoder, `n` for
+    /// the node envelope (Phase 690), which reuses this presence machinery unchanged.
+    let private specPieceOf (recv: string) (f: IdlField) : string =
+        let src = recv + "." + pascal f.Name
 
         match f.Opt with
         | Required -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
@@ -892,7 +905,7 @@ module Gen =
     /// One `(string * JVal) option` piece of a union-case encoder — `Some` for a required field,
     /// omit-on-`None` for an optional one (`CellFormat.Number`'s `decimals`, `Format.Percent`,
     /// `FormFieldKind.RangedNumber`'s `min`/`max`/`step`, `HoleDecl.Value`'s `default`). Mirrors
-    /// [[specPiece]] for the `List.choose id` shape, but binds the *positional* case field.
+    /// [[specPieceOf]] for the `List.choose id` shape, but binds the *positional* case field.
     let private casePiece (f: IdlField) : string =
         let src = ident f.Name
 
@@ -972,7 +985,7 @@ module Gen =
 
     let private specEncoder (msg: Set<string>) (k: IdlKind) : string =
         // Single-line list literal — avoids F# offside-rule pitfalls in generated code.
-        let pieces = k.Fields |> List.map specPiece |> String.concat "; "
+        let pieces = k.Fields |> List.map (specPieceOf "s") |> String.concat "; "
 
         sprintf
             "and private enc%sSpec%s (s: %sSpec%s) : JVal =\n    Canon.typed \"%s\" ([ %s ] |> List.choose id)"
@@ -985,10 +998,10 @@ module Gen =
 
     /// A non-discriminated *record* encoder — a plain `JObj` (no `$type`), fields via `List.choose
     /// id` (omit-on-absence for optionals). `Canon.render` Ordinal-sorts keys, so emission order is
-    /// irrelevant. Reuses [[specPiece]] (`s.<Pascal>` field access). New for the real tier
+    /// irrelevant. Reuses [[specPieceOf]] (`s.<Pascal>` field access). New for the real tier
     /// (`InvokeArg`, `FormField`, `FilterSpec`, `TabHeader`, `ColumnErased`, `ContentHash`, …).
     let private recordEncoder (msg: Set<string>) (r: IdlRecord) : string =
-        let pieces = r.Fields |> List.map specPiece |> String.concat "; "
+        let pieces = r.Fields |> List.map (specPieceOf "s") |> String.concat "; "
         let ps = declParams msg r.Name []
         sprintf "and private enc%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)" r.Name ps r.Name ps pieces
 
@@ -1040,7 +1053,7 @@ module Gen =
         | TRecord n -> "dec" + n
         | TMap vt -> sprintf "(dMap %s)" (decFn vt)
 
-    /// Reading one field back out, honouring the presence rules [[specPiece]] /
+    /// Reading one field back out, honouring the presence rules [[specPieceOf]] /
     /// [[casePiece]] wrote it under.
     let private decField (f: IdlField) : string =
         match f.Type with
@@ -1255,6 +1268,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             | _ -> ()
 
         kinds |> List.iter (fun k -> k.Fields |> List.iter (fun f -> visit f.Type))
+        // Phase 690 — the node envelope is a reachability ROOT too. Its records are
+        // reachable from no kind (nothing nests a `SemanticStyle`), so walking only
+        // the kinds emits a `Node` whose field types were never declared.
+        idl.NodeFields |> List.iter (fun f -> visit f.Type)
 
         idl.Enums |> List.filter (fun e -> enums.Contains e.Name),
         idl.Unions |> List.filter (fun u -> unions.Contains u.Name),
@@ -1453,13 +1470,30 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             |> Result.map (fun fieldStrs ->
                 let record = String.concat "; " fieldStrs
 
+                // Phase 690 — a smart constructor fills the envelope with its identity
+                // value, so the common case stays `mkHeading "h" 2 text`. An envelope
+                // field that is neither optional nor defaulted would have to become a
+                // parameter; none is, and the generator says so rather than guessing.
+                let envelope =
+                    idl.NodeFields
+                    |> List.map (fun f ->
+                        match f.Opt with
+                        | Optional -> sprintf "; %s = None" (pascal f.Name)
+                        | OmitDefault d ->
+                            match fsDefaultLit f.Type d with
+                            | Some e -> sprintf "; %s = %s" (pascal f.Name) e
+                            | None -> failwithf "node envelope field '%s' has an unrenderable default" f.Name
+                        | Required -> failwithf "node envelope field '%s' is Required — not yet supported" f.Name)
+                    |> String.concat ""
+
                 sprintf
-                    "let mk%s %s : Node%s =\n    { Id = id; Kind = NodeKind.%s { %s } }"
+                    "let mk%s %s : Node%s =\n    { Id = id; Kind = NodeKind.%s { %s }%s }"
                     k.Tag
                     parms
                     nodeArgs
                     k.Tag
-                    record)
+                    record
+                    envelope)
 
         kinds
         |> List.map ctor
@@ -1543,13 +1577,18 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                        sprintf "    | %s of %sSpec%s" k.Tag k.Tag (declParams msg (k.Tag + "Spec") []))
                    |> String.concat "\n")
 
+            // Phase 690 — `id` + `kind` + the declared envelope. An IDL declaring no
+            // envelope keeps the original one-liner, so nothing about it changes.
             let nodeBody =
-                None,
-                false,
-                sprintf
-                    "Node%s = { Id: string; Kind: NodeKind%s }"
-                    (declParams msg "Node" [])
-                    (declParams msg "NodeKind" [])
+                if List.isEmpty idl.NodeFields then
+                    None, false, sprintf "Node%s = { Id: string; Kind: NodeKind%s }" nodeArgs kindArgs
+                else
+                    let fields =
+                        "      Id: string"
+                        :: sprintf "      Kind: NodeKind%s" kindArgs
+                        :: (idl.NodeFields |> List.map (fsField msg))
+
+                    None, false, sprintf "Node%s =\n    {\n%s\n    }" nodeArgs (String.concat "\n" fields)
 
             // (comment, requiresQualifiedAccess, keyword-less body). The first member leads with
             // `type` (RQA attribute on its own preceding line); the rest are `and`-joined.
@@ -1582,9 +1621,23 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 |> List.map (fun k -> sprintf "        | NodeKind.%s s -> enc%sSpec s" k.Tag k.Tag)
                 |> String.concat "\n"
 
+            // Phase 690 — the envelope rides the same `List.choose id` presence
+            // machinery every spec field uses, with `s.` rebound to `n.`, so
+            // omit-on-absence / omit-at-default behave identically on a node field
+            // and on a kind field. No envelope ⇒ the original two-key literal.
+            let body =
+                if List.isEmpty idl.NodeFields then
+                    "\n\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
+                else
+                    let pieces = idl.NodeFields |> List.map (specPieceOf "n") |> String.concat "; "
+
+                    sprintf
+                        "\n\n    JObj([ Some(\"id\", JStr n.Id); Some(\"kind\", kind); %s ] |> List.choose id)"
+                        pieces
+
             sprintf "let rec private encNode (n: Node%s) : JVal =\n    let kind =\n        match n.Kind with\n" nodeArgs
             + arms
-            + "\n\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
+            + body
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
@@ -1619,11 +1672,23 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 + "\n    | __other -> Error (\"unknown node kind: \" + __other)))"
 
             let decNodeDecl =
+                // Phase 690 — the envelope binds through the same `bindChain` /
+                // `decField` machinery a spec record uses, so its presence rules are
+                // the encoder's inverse by construction rather than by hand.
+                let envelopeAssigns =
+                    idl.NodeFields
+                    |> List.map (fun f -> sprintf "; %s = %s" (pascal f.Name) (ident f.Name))
+                    |> String.concat ""
+
+                let final = sprintf "Ok { Id = id; Kind = kind%s }" envelopeAssigns
+
+                let binders =
+                    [ "id", "dReq \"id\" __fs dStr"; "kind", "dReq \"kind\" __fs decNodeKind" ]
+                    @ fieldBinders idl.NodeFields
+
                 sprintf "and private decNode (j: JVal) : Result<Node%s, string> =\n" (objParams msg "Node" [])
                 + "    dObj j |> Result.bind (fun __fs ->\n"
-                + "    dReq \"id\" __fs dStr |> Result.bind (fun id ->\n"
-                + "    dReq \"kind\" __fs decNodeKind |> Result.bind (fun kind ->\n"
-                + "    Ok { Id = id; Kind = kind })))"
+                + bindChain "    " binders final 1
 
             (decNodeKindDecl :: decNodeDecl :: (unions |> List.map (unionDecoder msg))
              @ (records |> List.map (recordDecoder msg))
@@ -1713,13 +1778,25 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             "Node",
             JObj
                 [ "type", JStr "object"
-                  "required", JArr [ JStr "id"; JStr "kind" ]
+                  // Phase 690 — the envelope is optional by construction (`state` /
+                  // `style` / `accessibility` are omitted when empty), so `required`
+                  // stays `id` + `kind` unless an envelope field is declared Required.
+                  "required",
+                  JArr(
+                      JStr "id"
+                      :: JStr "kind"
+                      :: (idl.NodeFields
+                          |> List.filter (fun f -> f.Opt = Required)
+                          |> List.map (fun f -> JStr f.Name))
+                  )
                   "properties",
-                  JObj
+                  JObj(
                       [ "id", JObj [ "type", JStr "string" ]
                         "kind",
                         JObj
                             [ "oneOf", JArr(idl.Kinds |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + k.Tag) ])) ] ]
+                      @ (idl.NodeFields |> List.map (fun f -> f.Name, schemaOf f.Type))
+                  )
                   "additionalProperties", JBool false ]
 
         let defs =
@@ -1914,6 +1991,14 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
         | Some k -> VNode(pick r [ "n"; "node-1"; "a\"b"; "" ], k.Tag, sampleFields idl r depth k.Fields)
         | None -> VNode("n", kindTag, [])
+    // Phase 690 note — a sampled node carries NO envelope. `VNode` models `(id,
+    // kindTag, kindFields)`, so the interpreter and the generative sampler cannot
+    // express `state` / `style` / `accessibility` at all; only the GENERATED codec
+    // can. The envelope's round-trip is therefore covered by the corpus
+    // (`style-role-voice-1`) and not by the 500-vector cross-host sweep. Widening
+    // `VNode` would touch the interpreter, the TS value emitter and every authored
+    // case, which is a larger change than this phase needs — but it is the reason
+    // cross-host envelope parity is currently unproven.
 
     /// `count` deterministic sample nodes over `kindTags`, cycling the tags so the
     /// vocabulary is covered evenly rather than by chance. Same seed gives the
@@ -1964,7 +2049,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // emits the sentinel regardless, so any placeholder operand serialises right.
         //
         // But it must not be `undefined`, which is how [[VAbsent]] says "this field
-        // is NOT on the wire": `tsSpecPiece` omits an optional field on exactly that
+        // is NOT on the wire": `tsSpecPieceOf` omits an optional field on exactly that
         // test, so an OPTIONAL closure/opaque slot silently vanished from the TS
         // encoding while F# emitted its sentinel. Latent since the TS backend landed
         // — no fixture and no sampled vector had an optional sentinel field until the
@@ -2034,8 +2119,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TBool, VBool b -> Some(src + " === " + (if b then "true" else "false"))
         | _ -> None
 
-    let private tsSpecPiece (f: IdlField) : string =
-        let src = "s." + f.Name
+    /// `recv` is the bound JS variable — `s` for a spec/record encoder, `n` for the
+    /// node envelope (Phase 690), mirroring [[specPieceOf]] on the F# side.
+    let private tsSpecPieceOf (recv: string) (f: IdlField) : string =
+        let src = recv + "." + f.Name
         let pair = "[" + tsSourceStr f.Name + ", " + tsEncApplied src f.Type + "]"
 
         match f.Opt with
@@ -2100,8 +2187,18 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         + (u.Cases |> List.map arm |> String.concat "\n")
         + "\n  }\n}"
 
+    /// A non-discriminated *record* encoder — a plain object, no `$type`, mirroring
+    /// `recordEncoder` on the F# side. Added by Phase 690: the TS backend decoded
+    /// records but could not ENCODE them, so `tsEncFn`'s `TRecord n -> "enc" + n`
+    /// named a function that was never emitted. Harmless while the only IDL the TS
+    /// backend ran on had no records, and a `ReferenceError` waiting for the first
+    /// one — the node envelope is three of them.
+    let private tsRecordEncoder (r: IdlRecord) : string =
+        let pieces = r.Fields |> List.map (tsSpecPieceOf "s") |> String.concat ", "
+        "function enc" + r.Name + "(s) {\n  return plain([" + pieces + "]);\n}"
+
     let private tsSpecEncoder (k: IdlKind) : string =
-        let pieces = k.Fields |> List.map tsSpecPiece |> String.concat ", "
+        let pieces = k.Fields |> List.map (tsSpecPieceOf "s") |> String.concat ", "
 
         "function enc"
         + k.Tag
@@ -2173,7 +2270,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             | OmitDefault d ->
                 match tsDefaultLit f.Type d with
                 | Some lit -> "dDef(" + key + ", fs, " + tsDecFn f.Type + ", " + lit + ")"
-                // `tsSpecPiece` fell back to always-emit, so decode is required too.
+                // `tsSpecPieceOf` fell back to always-emit, so decode is required too.
                 | None -> "dReq(" + key + ", fs, " + tsDecFn f.Type + ")"
 
     let private tsFieldObject (extra: (string * string) list) (fields: IdlField list) : string =
@@ -2381,7 +2478,12 @@ const encJson = (v) => {
   return '{' + keys.map((k) => encStr(k) + ':' + encJson(v[k])).join(',') + '}';
 };
 const typed = (tag, pairs) =>
-  '{"$type":' + encStr(tag) + pairs.filter((p) => p !== null).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';"""
+  '{"$type":' + encStr(tag) + pairs.filter((p) => p !== null).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';
+// Phase 690 — `typed` without the discriminator: a plain object (a non-discriminated
+// record, or the node envelope). Pairs arrive in the caller's order, which is Ordinal
+// by convention, so this matches the F# canonical renderer's key sort.
+const plain = (pairs) =>
+  '{' + pairs.filter((p) => p !== null).map(([k, v]) => encStr(k) + ':' + v).join(',') + '}';"""
 
         let kindDispatch =
             let arms =
@@ -2389,9 +2491,22 @@ const typed = (tag, pairs) =>
                 |> List.map (fun k -> "    case " + tsSourceStr k.Tag + ": return enc" + k.Tag + "Spec(k);")
                 |> String.concat "\n"
 
+            // Phase 690 — `id` / `kind` / the envelope, merged and sorted Ordinal so
+            // the TS emission order matches F#'s canonical key sort. With no envelope
+            // this is `id` then `kind`, i.e. exactly the previous hand-built literal.
+            let nodePairs =
+                ("id", "[\"id\", encStr(n.id)]")
+                :: ("kind", "[\"kind\", encKind(n.kind)]")
+                :: (idl.NodeFields |> List.map (fun f -> f.Name, tsSpecPieceOf "n" f))
+                |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
+                |> List.map snd
+                |> String.concat ", "
+
             "function encKind(k) {\n  switch (k.$type) {\n"
             + arms
-            + "\n  }\n}\n\nfunction encodeNode(n) {\n  return '{\"id\":' + encStr(n.id) + ',\"kind\":' + encKind(n.kind) + '}';\n}"
+            + "\n  }\n}\n\nfunction encodeNode(n) {\n  return plain(["
+            + nodePairs
+            + "]);\n}"
 
         let enums, _, records = referenced idl kinds
 
@@ -2404,12 +2519,17 @@ const typed = (tag, pairs) =>
             "function decKind(j) {\n  if (!isTagged(j)) return dFail('expected a kind object');\n  switch (j.$type) {\n"
             + arms
             + "\n    default: return dFail('unknown node kind: ' + j.$type);\n  }\n}\n\n"
-            + "function decNode(j) {\n  const fs = dObj(j);\n  return { id: dReq('id', fs, dStr), kind: dReq('kind', fs, decKind) };\n}\n\n"
+            + "function decNode(j) {\n  const fs = dObj(j);\n  return { id: dReq('id', fs, dStr), kind: dReq('kind', fs, decKind)"
+            + (idl.NodeFields
+               |> List.map (fun f -> ", " + f.Name + ": " + tsDecField f)
+               |> String.concat "")
+            + " };\n}\n\n"
             + "// Structural decode. The policy layer (diagnostics, §16 lenient-accept, the\n"
             + "// reject set) composes ABOVE this — see the Phase 672 note in the generator.\n"
             + "function decodeNode(s) {\n  try {\n    return { ok: true, value: decNode(JSON.parse(s)) };\n  } catch (e) {\n    return { ok: false, error: String(e && e.message ? e.message : e) };\n  }\n}"
 
         [ [ prelude ]
+          records |> List.map tsRecordEncoder
           unions |> List.map tsUnionEncoder
           kinds |> List.map tsSpecEncoder
           [ kindDispatch ]

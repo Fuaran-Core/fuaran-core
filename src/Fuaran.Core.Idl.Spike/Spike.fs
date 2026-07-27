@@ -276,7 +276,10 @@ let miniIdl: Idl =
             Value = VEnum "Standard" }
           { Kind = "Button"
             Field = "variant"
-            Value = VEnum "Primary" } ] }
+            Value = VEnum "Primary" } ]
+      // The mini IDL models no node envelope — `Node` stays `{ id, kind }`, which
+      // is also what keeps the Phase 690 generator change provably additive here.
+      NodeFields = [] }
 
 /// `TextSource.Literal` — the most-used value-union, sugared.
 let lit (s: string) : IdlValue = VUnion("Literal", [ "text", VStr s ])

@@ -54,12 +54,18 @@ let private lit (s: string) = G.TextSource.Literal s
 
 let private markdown1: G.Node =
     { Id = "markdown-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind = G.NodeKind.Markdown { Text = lit "Updated hourly." } }
 
 /// `metric-1` — optional spec fields (all present) + a generic `Binding<float>` +
 /// two `CellFormat`s (one with an optional `decimals`).
 let private metric1: G.Node =
     { Id = "metric-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.Metric
             { Label = lit "Revenue"
@@ -78,6 +84,9 @@ let private metric1: G.Node =
 /// `stack-1` — a `Box` (role Group / Flex layout) nesting across families (Metric + Markdown).
 let private stack1: G.Node =
     { Id = "stack-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.Box
             { Children = [ metric1; markdown1 ]
@@ -88,6 +97,9 @@ let private stack1: G.Node =
 /// `btn-invoke` — the `Action` union + a `TRecord` (`InvokeArg`) list + optionals-as-None.
 let private btnInvoke: G.Node =
     { Id = "btn-invoke"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.Button
             { Label = lit "Run model"
@@ -100,6 +112,8 @@ let private btnInvoke: G.Node =
 /// `form-1` — a `FormField` record list, the closure-heavy `FormFieldKind` union,
 /// `TClosure`/`TOpaque` sentinels, an optional record field (`help`), a `State` binding.
 let private form1: G.Node =
+    // NOT a node — `FormField` is a spec record that happens to share the `Id` /
+    // `Kind` field names, so it takes no envelope.
     let field id (kind: G.FormFieldKind) label required help : G.FormField =
         { Id = id
           Kind = kind
@@ -108,17 +122,27 @@ let private form1: G.Node =
           Help = help |> Option.map lit }
 
     { Id = "form-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.Form
             { Fields =
-                [ field "name" (G.FormFieldKind.Text(Some(), G.Binding.Static(Some ""))) "Name" true (Some "Full legal name")
+                [ field
+                      "name"
+                      (G.FormFieldKind.Text(Some(), G.Binding.Static(Some "")))
+                      "Name"
+                      true
+                      (Some "Full legal name")
                   field "age" (G.FormFieldKind.Number(Some(), G.Binding.Static(Some 0.0))) "Age" false None
                   field "agree" (G.FormFieldKind.Checkbox(Some(), G.Binding.Static(Some false))) "I agree" true None
                   field
                       "tier"
                       (G.FormFieldKind.Choice(
                           Some(),
-                          G.Binding.Static(Some [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ]),
+                          G.Binding.Static(
+                              Some [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ]
+                          ),
                           G.Binding.Static(Some "basic")
                       ))
                       "Tier"
@@ -133,6 +157,9 @@ let private form1: G.Node =
 /// `ColumnWidth` union + a `CellFormat` + closure/opaque sentinels.
 let private grid1: G.Node =
     { Id = "grid-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.DataGrid
             { Columns =
@@ -152,6 +179,9 @@ let private grid1: G.Node =
 /// carrying its bare-string header/row grid).
 let private table1: G.Node =
     { Id = "table-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.DataGrid
             { Columns = []
@@ -167,6 +197,9 @@ let private table1: G.Node =
 /// `custom-bounded-1` — an (empty) `TMap` + a `ContentHash` record + an optional string list.
 let private customBounded1: G.Node =
     { Id = "custom-bounded-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.Custom
             { ModuleId = "deal-flow"
@@ -184,6 +217,9 @@ let private customBounded1: G.Node =
 /// `frag-ref-args` — a non-empty `TMap` of the `FragmentArg` union (incl. a `Node`-bearing `SlotArg`).
 let private fragRefArgs: G.Node =
     { Id = "frag-ref-args"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.FragmentRef
             { Name = "stat-card"
@@ -193,6 +229,9 @@ let private fragRefArgs: G.Node =
                         [ "content",
                           G.FragmentArg.SlotArg
                               { Id = "slot-tree"
+                                Accessibility = None
+                                State = None
+                                Style = None
                                 Kind = G.NodeKind.Markdown { Text = lit "Bound slot" } }
                           "count", G.FragmentArg.Int 7 ]
                 ) } }
@@ -200,13 +239,22 @@ let private fragRefArgs: G.Node =
 /// `boundary-1` — a multi-single-`Node` kind (`child` + `fallback`).
 let private boundary1: G.Node =
     { Id = "boundary-1"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.ErrorBoundary
             { Child =
                 { Id = "boundary-child"
+                  Accessibility = None
+                  State = None
+                  Style = None
                   Kind = G.NodeKind.Markdown { Text = lit "Child body" } }
               Fallback =
                 { Id = "boundary-fallback"
+                  Accessibility = None
+                  State = None
+                  Style = None
                   Kind =
                     G.NodeKind.Callout
                         { Body = lit "Fallback rendered"
@@ -219,10 +267,16 @@ let private boundary1: G.Node =
 /// an omitted optional `default`), `Scalar` / `HoleValueSpace`, an `EffectClass` record.
 let private fragDeclParam: G.Node =
     { Id = "frag-decl-param"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.FragmentDecl
             { Body =
                 { Id = "param-body"
+                  Accessibility = None
+                  State = None
+                  Style = None
                   Kind = G.NodeKind.Markdown { Text = lit "Parameterised body" } }
               Name = "stat-card"
               Holes =
@@ -243,16 +297,26 @@ let private fragDeclParam: G.Node =
 let private formatBindings: G.Node =
     let fmt id (format: G.Format) (locale: G.LocaleSource) (source: G.Binding<float>) : G.Node =
         { Id = id
+          Accessibility = None
+          State = None
+          Style = None
           Kind = G.NodeKind.Markdown { Text = G.TextSource.Bound(G.Binding.Format(format, locale, source)) } }
 
     { Id = "format-bindings"
+      Accessibility = None
+      State = None
+      Style = None
       Kind =
         G.NodeKind.Box
             { Heading = None
               Layout = G.LayoutMode.Flex(G.Orientation.Vertical, false)
               Role = G.BoxRole.Group
               Children =
-                [ fmt "fmt-number" (G.Format.Number(Some 2)) (G.LocaleSource.Explicit "en-US") (G.Binding.Static(Some 1234.5))
+                [ fmt
+                      "fmt-number"
+                      (G.Format.Number(Some 2))
+                      (G.LocaleSource.Explicit "en-US")
+                      (G.Binding.Static(Some 1234.5))
                   fmt
                       "fmt-currency"
                       (G.Format.Currency "GBP")

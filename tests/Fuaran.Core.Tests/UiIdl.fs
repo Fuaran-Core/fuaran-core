@@ -83,6 +83,21 @@ let private emphasis =
     { Name = "Emphasis"
       Cases = [ "Quiet"; "Normal"; "Loud" ] }
 
+// ─── Phase 690: the node envelope (WIRE_FORMAT.md §3.1) ────────────────────
+//
+// `style` / `state` / `accessibility` sit on the NODE, beside `id` and `kind`,
+// and each is omitted when empty. Excluded from the IDL since Phase 671 on the
+// stated grounds that no corpus fixture carried one — which Phase 674 found to be
+// false (`style-role-voice-1` does, and the generated layer was corrupting it).
+
+let private styleRole =
+    { Name = "StyleRole"
+      Cases = [ "None"; "Eyebrow"; "Data"; "Lede"; "Caption" ] }
+
+let private fontVoice =
+    { Name = "FontVoice"
+      Cases = [ "Default"; "Display"; "Structural" ] }
+
 /// `LayoutKind.ScrollArea`'s scroll-axis enum (distinct from `Orientation` — it
 /// adds `Both`).
 let private scrollOrientation =
@@ -584,6 +599,50 @@ let private bindingOf (t: IdlType) = TUnion("Binding", [ t ])
 let private CF = TUnion("CellFormat", [])
 /// `IconSource` is a bare string on the wire (`"icon":"trending-up"`).
 let private icon = TStr
+
+// ─── The node envelope records (Phase 690, WIRE_FORMAT.md §3.1) ────────────
+//
+// Field ORDER is Ordinal throughout — the TS backend emits in declared order and
+// does not sort, so a declaration out of Ordinal order diverges the two hosts.
+
+/// `{ "emphasis"?, "role"?, "tone"?, "voice"?, "weight"? }` — every field
+/// individually omit-when-default (Fuaran-UI Phase 147 role/voice, Phase 460 the
+/// other three), and the whole object omitted when all five are default.
+let private semanticStyleRecord =
+    { Name = "SemanticStyle"
+      Fields =
+        [ omit "emphasis" (TEnum "Emphasis") (VEnum "Normal")
+          omit "role" (TEnum "StyleRole") (VEnum "None")
+          omit "tone" (TEnum "ToneVariant") (VEnum "Default")
+          omit "voice" (TEnum "FontVoice") (VEnum "Default")
+          omit "weight" (TEnum "StyleWeight") (VEnum "Standard") ] }
+
+/// `{ "onEmpty"?: Node, "onError"?: "<closure>", "onLoading"?: Node }`.
+/// `onError` is the `ErrorPayload -> Node` callback — unobservable, so the
+/// sentinel, and its PRESENCE is the only thing the wire carries.
+let private stateBehaviourRecord =
+    { Name = "StateBehaviour"
+      Fields = [ opt "onEmpty" TNode; opt "onError" TClosure; opt "onLoading" TNode ] }
+
+/// `{ "describedBy"?, "hidden"?, "label"?, "labelledBy"?, "liveRegion"?, "role"? }`.
+///
+/// `role` and `liveRegion` are `TStr`, deliberately, and this is read from the
+/// ENCODER rather than the F# type: `AriaRole` carries a `Custom of string` case
+/// that emits its payload verbatim, so the wire position genuinely admits any
+/// string and is not a closed set. `liveRegion` IS closed (`polite`/`assertive`/
+/// `off`) but its wire strings are lower-case, and an `IdlEnum`'s case name IS its
+/// wire string — F# DU cases cannot be lower-case, so modelling it as an enum needs
+/// a case-name-to-wire-string mapping the generator does not have. Left as `TStr`
+/// with the gap named rather than mis-modelled.
+let private accessibilityRecord =
+    { Name = "Accessibility"
+      Fields =
+        [ opt "describedBy" TStr
+          opt "hidden" (bindingOf TBool)
+          opt "label" (bindingOf TStr)
+          opt "labelledBy" TStr
+          opt "liveRegion" TStr
+          opt "role" TStr ] }
 
 // ─── Display kinds (flat `$type`-discriminated) ────────────────────────────
 
@@ -1107,9 +1166,14 @@ let uiIdl: Idl =
           hostEffect
           determinismSource
           channelDirection
-          textAnchor ]
+          textAnchor
+          styleRole
+          fontVoice ]
       Records =
-        [ switchCase
+        [ semanticStyleRecord
+          stateBehaviourRecord
+          accessibilityRecord
+          switchCase
           guestChannel
           drawPoint
           viewBoxRecord
@@ -1125,7 +1189,20 @@ let uiIdl: Idl =
           buttonGroupItemRecord
           contentHashRecord
           effectClassRecord ]
-      Defaults = [] }
+      Defaults = []
+      // Phase 690 — the node envelope, Ordinal-ordered like every other field list.
+      //
+      // All three are `Optional` here, where the hand-written tier stores `state` and
+      // `style` as NON-option records and omits them when empty / all-default. Both
+      // shapes produce identical wire — absent is absent — but they are different
+      // AUTHORING types, and reconciling them is Phase 692's job, not a difference to
+      // paper over. `Optional` is chosen because it is what the wire actually says
+      // (§3.1: "omitted when empty"), and because an all-default `Some` is a shape the
+      // encoder should never be handed rather than one it must silently absorb.
+      NodeFields =
+        [ opt "accessibility" (TRecord "Accessibility")
+          opt "state" (TRecord "StateBehaviour")
+          opt "style" (TRecord "SemanticStyle") ] }
 
 /// Back-compat alias — the Display tests grew up against this name.
 let uiDisplayIdl: Idl = uiIdl
