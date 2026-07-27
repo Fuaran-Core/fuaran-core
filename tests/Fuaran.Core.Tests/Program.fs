@@ -35,7 +35,7 @@ let main argv =
             "src/Fuaran.Core.Idl.Spike/Generated.fs"
             "Fuaran.Core.Idl.Spike.Generated"
             Fuaran.Core.Idl.Spike.Fixtures.miniIdl
-            [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown" ]
+            [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown"; "Tabs" ]
 
         writeGen
             "tests/Fuaran.Core.Tests/UiGenerated.fs"

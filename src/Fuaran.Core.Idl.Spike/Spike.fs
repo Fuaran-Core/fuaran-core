@@ -56,6 +56,25 @@ let miniIdl: Idl =
                         Opt = Required }
                       { Name = "key"
                         Type = TStr
+                        Opt = Required } ] }
+                // Phase 689 spike, leg 3 — a closure whose signature mentions the
+                // union's OWN type parameter rather than `'Msg`. It is here to prove
+                // the `'Msg` fixpoint does not over-reach: `Binding<'T>` must stay
+                // msg-free, exactly as the hand-written tier keeps it (which obj-erases
+                // at `LocalBinding.OnCommit` for the same reason).
+                { Tag = "Computed"
+                  Fields =
+                    [ { Name = "fn"
+                        Type =
+                          TFn
+                              { FSharp = "obj -> 'T"
+                                TypeScript = "(ctx: unknown) => T"
+                                // A `'T` cannot be conjured at decode. The hand-written
+                                // decoder threads a real placeholder value per type
+                                // parameter (`bindingGeneric<'T> … placeholder …`); the
+                                // generated one has no such channel yet, so the spike
+                                // records the gap rather than papering over it.
+                                Placeholder = "(fun _ -> Unchecked.defaultof<'T>)" }
                         Opt = Required } ] } ] }
           { Name = "Format"
             Params = []
@@ -209,7 +228,47 @@ let miniIdl: Idl =
                   Opt = Required }
                 { Name = "role"
                   Type = TEnum "BoxRole"
-                  Opt = Required } ] } ]
+                  Opt = Required } ] }
+          // ── Phase 689 spike, legs 1 + 2 ───────────────────────────────────
+          //
+          // A kind carrying `'Msg`-producing handlers. `Tabs` stands in for the
+          // phase's named targets because the real `Button.onClick` turns out NOT
+          // to be a closure at all — it is an `Action` union, and the `'Msg` in
+          // `Action.Dispatch of 'Msg` is a wire-OMITTED value rather than a
+          // `"<closure>"` sentinel. That is a distinct case (see D2 open question
+          // 2); `Tabs.onSelect` / `onCommit` are genuine closures, and two of them
+          // with different argument types is what the spike needs to prove.
+          //
+          // Both slots are `TList TNode`-adjacent on purpose: `children` forces the
+          // `'Msg` to travel Node → NodeKind → TabsSpec → Node again, which is the
+          // recursion that would break a naive threading.
+          { Tag = "Tabs"
+            Category = "Layout"
+            Fields =
+              [ { Name = "children"
+                  Type = TList TNode
+                  Opt = Required }
+                // Declared in Ordinal key order — the TS backend emits in author
+                // order and does not sort, so `onCommit` precedes `onSelect` here.
+                //
+                // Required: always on the wire as the sentinel. A second argument
+                // type, so the emission cannot be accidentally monomorphic.
+                { Name = "onCommit"
+                  Type =
+                    TFn
+                        { FSharp = "string -> 'Msg"
+                          TypeScript = "(tag: string) => Msg"
+                          Placeholder = "(fun (_: string) -> box \"<closure>\")" }
+                  Opt = Required }
+                // Optional: PRESENCE is wire-visible, so decode must restore
+                // `Some placeholder` — not `None`, and not `Some ()`.
+                { Name = "onSelect"
+                  Type =
+                    TFn
+                        { FSharp = "int -> 'Msg"
+                          TypeScript = "(index: number) => Msg"
+                          Placeholder = "(fun (_: int) -> box \"<closure>\")" }
+                  Opt = Optional } ] } ]
       Records = []
       Defaults =
         [ { Kind = "Heading"

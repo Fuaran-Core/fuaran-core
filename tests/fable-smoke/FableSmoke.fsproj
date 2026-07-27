@@ -15,6 +15,16 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <!--
+      Phase 689 — the GENERATED layer's shape, not the generator. `Fuaran.Core.Idl` and
+      `Idl.Spike` stay off the Fable surface (they are build-time tools), but the artefact
+      the generator EMITS is Fable-compiled downstream, so its shape has to be clean here.
+      Since Phase 689 that shape includes `'Msg`-generic records holding function-typed
+      fields inside a mutually-recursive `and` chain — the construct the whole programme
+      rests on, and cheaper to disprove now than at adoption. LINKED rather than
+      project-referenced, so no generator dependency enters the Fable compilation.
+    -->
+    <Compile Include="..\..\src\Fuaran.Core.Idl.Spike\Generated.fs" Link="SpikeGenerated.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

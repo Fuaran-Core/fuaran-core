@@ -39,9 +39,14 @@ let private wire (name: string) =
     | None -> failwithf "no vendored wire snapshot for '%s'" name
 
 /// The kinds the generated F# encoder (`Generated.fs`) covers — the 6-kind slice
-/// (Fuaran-UI 0.2.0: Card / Stack unified into `Box`, Divider retired).
+/// (Fuaran-UI 0.2.0: Card / Stack unified into `Box`, Divider retired), plus
+/// `Tabs`, the Phase 689 `'Msg`-threading spike kind. This list and the one in
+/// `Program.fs`'s `--regen-snapshots` must stay in step: the generative
+/// conformance test samples from the whole IDL but compares against a TS module
+/// built from THIS list, so a kind missing here shows up as `"kind":undefined` on
+/// the TS side rather than as a missing-kind error.
 let private generatedKinds =
-    [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown" ]
+    [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown"; "Tabs" ]
 
 let private tryFindCorpus () : string option =
     let candidates (root: string) =
@@ -191,7 +196,7 @@ let tests =
           testCase "real code emission: the GENERATED encoder round-trips byte-identical" (fun _ ->
               // Construct values of the GENERATED types and encode via the GENERATED encoder
               // (not the interpreter) — proving the emitted F# compiles and is byte-correct.
-              let heading: G.Node =
+              let heading: G.Node<unit> =
                   { Id = "heading-1"
                     Kind =
                       G.NodeKind.Heading
@@ -201,7 +206,7 @@ let tests =
 
               Expect.equal (G.encodeNode heading) (wire "heading-1") "generated encoder byte mismatch for heading-1"
 
-              let badge: G.Node =
+              let badge: G.Node<unit> =
                   { Id = "badge-1"
                     Kind =
                       G.NodeKind.Badge
@@ -211,7 +216,7 @@ let tests =
               Expect.equal (G.encodeNode badge) (wire "badge-1") "generated encoder byte mismatch for badge-1"
 
               // Button — optionals + a generic Binding<bool> + an action.
-              let button: G.Node =
+              let button: G.Node<unit> =
                   { Id = "btn-1"
                     Kind =
                       G.NodeKind.Button
@@ -237,7 +242,7 @@ let tests =
                     TrendFormat = Some(G.Format.Percent 1)
                     Weight = G.StyleWeight.Standard }
 
-              let stack: G.Node =
+              let stack: G.Node<unit> =
                   { Id = "stack-1"
                     Kind =
                       G.NodeKind.Box
@@ -298,7 +303,7 @@ let tests =
                     TrendFormat = Some(G.Format.Percent 1)
                     Weight = G.StyleWeight.Standard }
 
-              let card: G.Node =
+              let card: G.Node<unit> =
                   { Id = "card-1"
                     Kind =
                       G.NodeKind.Box
@@ -315,7 +320,7 @@ let tests =
               Expect.equal (Fuaran.Core.Tree.ids w card) [ "card-1"; "metric-1" ] "preorder ids via witness Children"
 
               // A leaf kind (no node-bearing fields) reports no children.
-              let leaf: G.Node =
+              let leaf: G.Node<unit> =
                   { Id = "markdown-1"
                     Kind = G.NodeKind.Markdown { Text = G.TextSource.Literal "x" } }
 
@@ -344,7 +349,7 @@ let tests =
 
                   let reg = Validator.empty |> Validator.register noEmptyId
 
-                  let tree: G.Node =
+                  let tree: G.Node<unit> =
                       { Id = "root"
                         Kind =
                           G.NodeKind.Box
@@ -360,7 +365,7 @@ let tests =
                   Expect.equal defects.[0].Code "GEN001" "the registered domain rule fired"
 
                   // A clean tree yields no defects.
-                  let clean: G.Node =
+                  let clean: G.Node<unit> =
                       { Id = "root"
                         Kind = G.NodeKind.Markdown { Text = G.TextSource.Literal "ok" } }
 
@@ -701,7 +706,10 @@ let tests =
                       + dllRef "Fuaran.Core.Tree.dll"
                       + dllRef "Fuaran.Core.Validator.dll"
                       + decls
-                      + "\n\nlet __scaffolded: Node = "
+                      // Phase 689 — the spike IDL now carries `'Msg`-producing handlers, so the
+                      // generated `Node` is generic. The scaffold instantiates it; the injection
+                      // question this test asks is about the emitted STRING literals, not `'Msg`.
+                      + "\n\nlet __scaffolded: Node<unit> = "
                       + valueSrc
                       + "\nprintfn \"%s\" (encodeNode __scaffolded)\n"
 

@@ -18,6 +18,30 @@ open Fuaran.Core
 // canonical number/key/escape rules are inherited, not re-implemented.
 // ---------------------------------------------------------------------------
 
+/// The HOST signature of a function-typed slot (Phase 689) — what the generated
+/// F# / TypeScript declaration should say the slot's type is.
+///
+/// A closure is invisible to the wire: the encoder emits the fixed `"<closure>"`
+/// sentinel without ever reading the value, and the decoder reads presence only.
+/// That is exactly why the slot's HOST type is free — nothing downstream of the
+/// declaration depends on it. [[TClosure]] takes the cheapest option and erases the
+/// slot to `unit`; [[TFn]] declares the real signature instead, which is what lets
+/// the generated layer BE the authoring type rather than a projection of it.
+///
+/// `FSharp` may mention `'Msg`; a type transitively containing such a slot is
+/// emitted generic in `'Msg` (see `Gen.msgCarrying`).
+///
+/// `Placeholder` is the F# expression the DECODER puts in the slot. A closure
+/// cannot be reconstructed from `"<closure>"` — there is nothing on the wire to
+/// rebuild it from — so a decoded tree is the storage shape (`'Msg = obj`, the
+/// tier's own `decodeNodeObj` / `WireTree` boundary), and the placeholder is what
+/// stands in until a host re-attaches behaviour. It is written at `'Msg = obj`
+/// for that reason.
+type ClosureSig =
+    { FSharp: string
+      TypeScript: string
+      Placeholder: string }
+
 /// The structural type of a field's value on the wire.
 type IdlType =
     | TStr
@@ -35,6 +59,11 @@ type IdlType =
     /// full of these (Phase 317 real-tier migration); the spike had none. There is
     /// no authored content — the encoder emits the sentinel unconditionally.
     | TClosure
+    /// A function-typed field carrying its **host signature** (Phase 689). Wire
+    /// behaviour is identical to [[TClosure]] in every respect — same `"<closure>"`
+    /// sentinel, same presence-only decode, same schema. The only difference is the
+    /// generated *declaration*: `TClosure` says `unit`, `TFn` says `(int -> 'Msg)`.
+    | TFn of ClosureSig
     /// An `obj`-erased field whose CLR shape the encoder cannot see (e.g. a
     /// `Binding<float seq>.Static` value): rendered as the fixed sentinel string
     /// `"<opaque>"`, matching `Fuaran.UI`'s `CanonicalJson` best-effort `obj`
@@ -227,7 +256,8 @@ module Encode =
                         | _ -> Error(sprintf "transparent union case '%s' must have exactly one field" tag)
                     | _ -> encodeFields idl caseFields fields |> Result.map (Canon.typed tag)
         | TVar v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
-        | TClosure, VClosure -> Ok(JStr "<closure>")
+        | TClosure, VClosure
+        | TFn _, VClosure -> Ok(JStr "<closure>")
         | TOpaque, VOpaque -> Ok(JStr "<opaque>")
         // Phase 676 — verbatim passthrough. Emitting the `JVal` unchanged is what
         // keeps the bytes canonical: `Canon.render` already sorts keys Ordinal,
@@ -393,7 +423,8 @@ module Decode =
                             |> Result.map (fun v -> VUnion(ttag, [ single.Name, v ]))
                         | _ -> Error(sprintf "transparent union case '%s' must have exactly one field" ttag)
         | TVar v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
-        | TClosure, JStr "<closure>" -> Ok VClosure
+        | TClosure, JStr "<closure>"
+        | TFn _, JStr "<closure>" -> Ok VClosure
         | TOpaque, JStr "<opaque>" -> Ok VOpaque
         // Phase 676 — accept any JSON at this position, verbatim and unvalidated.
         // A shape check here would be wrong by definition: the field's whole
@@ -585,17 +616,123 @@ module Gen =
     let private ident (s: string) : string =
         if fsKeywords.Contains s then "``" + s + "``" else s
 
-    let rec private fsType (t: IdlType) =
+    // -----------------------------------------------------------------------
+    // Phase 689 — `'Msg` threading.
+    //
+    // A [[TFn]] slot whose `FSharp` signature mentions `'Msg` makes its owning
+    // type generic in `'Msg`, and that propagates: `TabsSpec` carries a handler,
+    // so `NodeKind` carries `TabsSpec`, so `Node` carries `NodeKind`. The set is
+    // the least fixpoint of "mentions `'Msg` directly, or references something
+    // that does". Computing it is what lets the generated declarations BE the
+    // authoring types instead of a `'Msg`-erased projection of them.
+    //
+    // `Binding<'T>` is deliberately NOT in the set on the real UI IDL: the tier
+    // obj-erases exactly where a `'Msg` parameter would be inconvenient
+    // (`LocalBinding.OnCommit: 'T -> obj`, `Action.Call`'s `onResult: obj -> 'Msg`),
+    // so the parameter stays confined to the kinds that genuinely dispatch.
+    // -----------------------------------------------------------------------
+
+    /// The type names emitted generic in `'Msg` — union names, record names,
+    /// `<Tag>Spec` names, plus `NodeKind` / `Node` when any kind qualifies.
+    let msgCarrying (idl: Idl) : Set<string> =
+        let rec mentions (seen: Set<string>) (t: IdlType) =
+            match t with
+            | TFn s -> s.FSharp.Contains "'Msg"
+            | TList inner -> mentions seen inner
+            | TMap vt -> mentions seen vt
+            | TNode -> seen.Contains "Node"
+            | TUnion(n, args) -> seen.Contains n || args |> List.exists (mentions seen)
+            | TRecord n -> seen.Contains n
+            | _ -> false
+
+        let step (seen: Set<string>) =
+            let fieldsMention (fs: IdlField list) =
+                fs |> List.exists (fun f -> mentions seen f.Type)
+
+            let unions =
+                idl.Unions
+                |> List.filter (fun u -> u.Cases |> List.exists (fun c -> fieldsMention c.Fields))
+                |> List.map _.Name
+
+            let records =
+                idl.Records |> List.filter (fun r -> fieldsMention r.Fields) |> List.map _.Name
+
+            let kinds =
+                idl.Kinds
+                |> List.filter (fun k -> fieldsMention k.Fields)
+                |> List.map (fun k -> k.Tag + "Spec")
+
+            // `NodeKind` wraps every spec, and `Node` wraps `NodeKind` — so one
+            // dispatching kind makes the whole tree generic. That is the point.
+            let tree =
+                if
+                    idl.Kinds
+                    |> List.exists (fun k -> Set.contains (k.Tag + "Spec") (Set.ofList kinds))
+                then
+                    [ "NodeKind"; "Node" ]
+                else
+                    []
+
+            Set.unionMany
+                [ seen
+                  Set.ofList unions
+                  Set.ofList records
+                  Set.ofList kinds
+                  Set.ofList tree ]
+
+        let rec fix (seen: Set<string>) =
+            let next = step seen
+            if next = seen then seen else fix next
+
+        fix Set.empty
+
+    /// The `<…>` parameter list for a declaration, with `'Msg` appended when the
+    /// type is msg-carrying. Declared params come first so an existing
+    /// `Binding<'T>` keeps its shape if it ever gains a handler.
+    let private declParams (msg: Set<string>) (name: string) (ps: string list) =
+        let ps =
+            (ps |> List.map (fun p -> "'" + p))
+            @ (if msg.Contains name then [ "'Msg" ] else [])
+
+        if List.isEmpty ps then
+            ""
+        else
+            "<" + String.concat ", " ps + ">"
+
+    /// The same suffix with `'Msg` instantiated to `obj` — the DECODER's shape.
+    /// A closure cannot be rebuilt from `"<closure>"`, so a decoded tree is the
+    /// storage shape (the tier's own `decodeNodeObj` / `WireTree` boundary), and a
+    /// host re-attaches typed behaviour above it.
+    let private objParams (msg: Set<string>) (name: string) (ps: string list) =
+        let ps =
+            (ps |> List.map (fun p -> "'" + p))
+            @ (if msg.Contains name then [ "obj" ] else [])
+
+        if List.isEmpty ps then
+            ""
+        else
+            "<" + String.concat ", " ps + ">"
+
+    let rec private fsTypeIn (msg: Set<string>) (t: IdlType) =
+        let fsType = fsTypeIn msg
+
+        let applied (n: string) (args: string list) =
+            let args = args @ (if msg.Contains n then [ "'Msg" ] else [])
+
+            if List.isEmpty args then
+                n
+            else
+                n + "<" + String.concat ", " args + ">"
+
         match t with
         | TStr -> "string"
         | TInt -> "int"
         | TBool -> "bool"
         | TFloat -> "float"
         | TEnum n -> n
-        | TUnion(n, []) -> n
-        | TUnion(n, args) -> n + "<" + (args |> List.map fsType |> String.concat ", ") + ">"
+        | TUnion(n, args) -> applied n (args |> List.map fsType)
         | TVar v -> "'" + v
-        | TNode -> "Node"
+        | TNode -> applied "Node" []
         | TList inner -> fsType inner + " list"
         // Closure / opaque fields carry no observable data — the generated structural layer is
         // ENCODER-ONLY and `'Msg`-erased (Phase 317 real-tier boundary): a function-typed field
@@ -607,13 +744,20 @@ module Gen =
         // re-attaches behaviour on the domain side (documented in docs/migrations/317-*).
         | TClosure -> "unit"
         | TOpaque -> "unit"
+        // Phase 689 — the declared host signature, verbatim. This is the whole
+        // difference from `TClosure`, and the reason the generated layer can be
+        // the authoring type: the encoder never reads the value, so the slot's
+        // host type was always free.
+        | TFn s -> "(" + s.FSharp + ")"
         // Phase 676 — a JSON slot is a real `JVal`, NOT erased to `unit`: it carries
         // data in both directions, which is the whole difference from `TOpaque`.
         | TJson -> "JVal"
-        | TRecord n -> n
+        | TRecord n -> applied n []
         | TMap vt -> "Map<string, " + fsType vt + ">"
 
-    let private fsField (f: IdlField) =
+    let private fsField (msg: Set<string>) (f: IdlField) =
+        let fsType = fsTypeIn msg
+
         let ty =
             match f.Opt with
             | Optional -> fsType f.Type + " option"
@@ -627,7 +771,9 @@ module Gen =
     let private enumDecl (e: IdlEnum) =
         sprintf "type %s =\n%s" e.Name (e.Cases |> List.map (sprintf "    | %s") |> String.concat "\n")
 
-    let private unionCaseDecl (c: IdlUnionCase) =
+    let private unionCaseDecl (msg: Set<string>) (c: IdlUnionCase) =
+        let fsType = fsTypeIn msg
+
         let fieldDecl (f: IdlField) =
             let ty =
                 match f.Opt with
@@ -644,27 +790,28 @@ module Gen =
         else
             sprintf "    | %s of %s" c.Tag fields
 
-    let private unionDecl (u: IdlUnion) =
-        let ps =
-            if List.isEmpty u.Params then
-                ""
-            else
-                "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
-
-        sprintf "type %s%s =\n%s" u.Name ps (u.Cases |> List.map unionCaseDecl |> String.concat "\n")
-
-    let private kindDecl (k: IdlKind) =
+    let private unionDecl (msg: Set<string>) (u: IdlUnion) =
         sprintf
-            "// %s\ntype %sSpec =\n    {\n%s\n    }"
+            "type %s%s =\n%s"
+            u.Name
+            (declParams msg u.Name u.Params)
+            (u.Cases |> List.map (unionCaseDecl msg) |> String.concat "\n")
+
+    let private kindDecl (msg: Set<string>) (k: IdlKind) =
+        sprintf
+            "// %s\ntype %sSpec%s =\n    {\n%s\n    }"
             k.Category
             k.Tag
-            (k.Fields |> List.map fsField |> String.concat "\n")
+            (declParams msg (k.Tag + "Spec") [])
+            (k.Fields |> List.map (fsField msg) |> String.concat "\n")
 
     /// Emit F# type declarations (enums, value-unions, per-kind spec records) from the IDL.
     let fsharpTypes (idl: Idl) : string =
+        let msg = msgCarrying idl
+
         [ idl.Enums |> List.map enumDecl
-          idl.Unions |> List.map unionDecl
-          idl.Kinds |> List.map kindDecl ]
+          idl.Unions |> List.map (unionDecl msg)
+          idl.Kinds |> List.map (kindDecl msg) ]
         |> List.concat
         |> String.concat "\n\n"
 
@@ -692,7 +839,8 @@ module Gen =
         | TNode -> "encNode"
         | TList inner -> sprintf "(fun __xs -> JArr(List.map %s __xs))" (encFn inner)
         // A closure/opaque codec ignores its argument and emits the fixed sentinel.
-        | TClosure -> "(fun _ -> JStr \"<closure>\")"
+        | TClosure
+        | TFn _ -> "(fun _ -> JStr \"<closure>\")"
         | TOpaque -> "(fun _ -> JStr \"<opaque>\")"
         // Phase 676 — verbatim passthrough. `Canon.render` already sorts keys Ordinal,
         // escapes per rule 6 and lays floats out per rule 5, so identity inherits all
@@ -706,7 +854,8 @@ module Gen =
         match t with
         | TList inner -> sprintf "JArr(List.map %s %s)" (encFn inner) var
         | TNode -> sprintf "encNode %s" var
-        | TClosure -> "JStr \"<closure>\""
+        | TClosure
+        | TFn _ -> "JStr \"<closure>\""
         | TOpaque -> "JStr \"<opaque>\""
         | _ -> sprintf "%s %s" (encFn t) var
 
@@ -766,17 +915,13 @@ module Gen =
 
     /// A union encoder (an `and`-member of the recursive group). Generic unions take one
     /// `encX : 'X -> JVal` codec per type parameter.
-    let private unionEncoder (u: IdlUnion) : string =
+    let private unionEncoder (msg: Set<string>) (u: IdlUnion) : string =
         let encArgs =
             u.Params
             |> List.map (fun p -> sprintf " (enc%s: '%s -> JVal)" p p)
             |> String.concat ""
 
-        let tyArgs =
-            if List.isEmpty u.Params then
-                ""
-            else
-                "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
+        let tyArgs = declParams msg u.Name u.Params
 
         let arm (c: IdlUnionCase) =
             let pat =
@@ -825,14 +970,16 @@ module Gen =
             tyArgs
             arms
 
-    let private specEncoder (k: IdlKind) : string =
+    let private specEncoder (msg: Set<string>) (k: IdlKind) : string =
         // Single-line list literal — avoids F# offside-rule pitfalls in generated code.
         let pieces = k.Fields |> List.map specPiece |> String.concat "; "
 
         sprintf
-            "and private enc%sSpec (s: %sSpec) : JVal =\n    Canon.typed \"%s\" ([ %s ] |> List.choose id)"
+            "and private enc%sSpec%s (s: %sSpec%s) : JVal =\n    Canon.typed \"%s\" ([ %s ] |> List.choose id)"
             k.Tag
+            (declParams msg (k.Tag + "Spec") [])
             k.Tag
+            (declParams msg (k.Tag + "Spec") [])
             k.Tag
             pieces
 
@@ -840,9 +987,10 @@ module Gen =
     /// id` (omit-on-absence for optionals). `Canon.render` Ordinal-sorts keys, so emission order is
     /// irrelevant. Reuses [[specPiece]] (`s.<Pascal>` field access). New for the real tier
     /// (`InvokeArg`, `FormField`, `FilterSpec`, `TabHeader`, `ColumnErased`, `ContentHash`, …).
-    let private recordEncoder (r: IdlRecord) : string =
+    let private recordEncoder (msg: Set<string>) (r: IdlRecord) : string =
         let pieces = r.Fields |> List.map specPiece |> String.concat "; "
-        sprintf "and private enc%s (s: %s) : JVal =\n    JObj([ %s ] |> List.choose id)" r.Name r.Name pieces
+        let ps = declParams msg r.Name []
+        sprintf "and private enc%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)" r.Name ps r.Name ps pieces
 
     // -----------------------------------------------------------------------
     // Phase 672 — the structural DECODER leg.
@@ -882,6 +1030,10 @@ module Gen =
         | TList inner -> sprintf "(dList %s)" (decFn inner)
         | TClosure
         | TOpaque -> "dUnit"
+        // Phase 689 — a `TFn` slot decodes to its declared placeholder. There is
+        // nothing on the wire to rebuild a closure from, so the decoded tree is the
+        // storage shape and the placeholder is what a host re-attaches over.
+        | TFn s -> sprintf "(fun _ -> Ok (%s))" s.Placeholder
         // Phase 676 — accept any JSON verbatim; a shape check would contradict the
         // field's contract.
         | TJson -> "dJson"
@@ -903,6 +1055,13 @@ module Gen =
             match f.Opt with
             | Optional -> sprintf "dPresent \"%s\" __fs" f.Name
             | _ -> "Ok()"
+        // Phase 689 — same presence rule, but the slot is typed, so the value put
+        // back is the declared placeholder rather than `()`.
+        | TFn s ->
+            match f.Opt with
+            | Optional ->
+                sprintf "(dPresent \"%s\" __fs |> Result.map (Option.map (fun () -> %s)))" f.Name s.Placeholder
+            | _ -> sprintf "Ok (%s)" s.Placeholder
         | _ ->
             match f.Opt with
             | Required -> sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type)
@@ -948,17 +1107,20 @@ module Gen =
     /// A union decoder. Generic unions take one `decX` codec per type parameter,
     /// with the explicit type-parameter list [[unionEncoder]] needs for the same
     /// polymorphic-recursion reason (`Binding.Format.source` recurses at `float`).
-    let private unionDecoder (u: IdlUnion) : string =
+    let private unionDecoder (msg: Set<string>) (u: IdlUnion) : string =
         let decArgs =
             u.Params
             |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, string>)" p p)
             |> String.concat ""
 
-        let tyArgs =
+        // Declared params stay generic; `'Msg` alone is pinned to `obj`.
+        let declArgs =
             if List.isEmpty u.Params then
                 ""
             else
                 "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
+
+        let tyArgs = objParams msg u.Name u.Params
 
         let ctor (c: IdlUnionCase) =
             match c.Fields with
@@ -1009,35 +1171,37 @@ module Gen =
         sprintf
             "and private dec%s%s%s (j: JVal) : Result<%s%s, string> =\n    match j with\n%s\n%s"
             u.Name
-            tyArgs
+            declArgs
             decArgs
             u.Name
             tyArgs
             tagged
             fallthrough
 
-    let private specDecoder (k: IdlKind) : string =
+    let private specDecoder (msg: Set<string>) (k: IdlKind) : string =
         let assigns =
             k.Fields
             |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
             |> String.concat "; "
 
         sprintf
-            "and private dec%sSpec (j: JVal) : Result<%sSpec, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+            "and private dec%sSpec (j: JVal) : Result<%sSpec%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
             k.Tag
             k.Tag
+            (objParams msg (k.Tag + "Spec") [])
             (bindChain "    " (fieldBinders k.Fields) (sprintf "Ok { %s }" assigns) 1)
 
-    let private recordDecoder (r: IdlRecord) : string =
+    let private recordDecoder (msg: Set<string>) (r: IdlRecord) : string =
         let assigns =
             r.Fields
             |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
             |> String.concat "; "
 
         sprintf
-            "and private dec%s (j: JVal) : Result<%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+            "and private dec%s (j: JVal) : Result<%s%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
             r.Name
             r.Name
+            (objParams msg r.Name [])
             (bindChain "    " (fieldBinders r.Fields) (sprintf "Ok { %s }" assigns) 1)
 
     /// The decode-side helper prelude, emitted once per module.
@@ -1119,7 +1283,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// fields (`ReplaceChildren` not generable — GP4/GP5) rather than emitting a runtime
     /// `failwith` guard; kinds whose node-bearing fields are all single `Node` are generated
     /// with positional re-assignment.
-    let private witnessDecl (kinds: IdlKind list) : Result<string, CodegenError> =
+    let private witnessDecl (msg: Set<string>) (kinds: IdlKind list) : Result<string, CodegenError> =
+        let nodeArgs = declParams msg "Node" []
+
         let childBearing =
             kinds
             |> List.filter (fun k -> k.Fields |> List.exists (nodeBearing >> Option.isSome))
@@ -1183,19 +1349,23 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         |> Result.map (fun replaceArmsStr ->
             String.concat
                 "\n"
-                [ "let private witnessKindTag (n: Node) : string ="
+                [ sprintf "let private witnessKindTag (n: Node%s) : string =" nodeArgs
                   "    match n.Kind with"
                   kindTagArms
                   ""
-                  "let private witnessChildren (n: Node) : Node list ="
+                  sprintf "let private witnessChildren (n: Node%s) : Node%s list =" nodeArgs nodeArgs
                   "    match n.Kind with"
                   childArms
                   ""
-                  "let private witnessReplaceChildren (n: Node) (kids: Node list) : Node ="
+                  sprintf
+                      "let private witnessReplaceChildren (n: Node%s) (kids: Node%s list) : Node%s ="
+                      nodeArgs
+                      nodeArgs
+                      nodeArgs
                   "    match n.Kind with"
                   replaceArmsStr
                   ""
-                  "let nodeWitness: NodeWitness<Node, string> ="
+                  sprintf "let nodeWitness: NodeWitness<Node%s, string> =" nodeArgs
                   "    { Id = fun n -> n.Id"
                   "      KindTag = witnessKindTag"
                   "      Children = witnessChildren"
@@ -1213,11 +1383,16 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
     /// Emit the validator scaffold — independent of the kind set (it wires the
     /// generic `Validator.runAll` to the generated `Node` + `nodeWitness`).
-    let private validatorDecl () : string =
+    let private validatorDecl (msg: Set<string>) : string =
+        let nodeArgs = declParams msg "Node" []
+
         String.concat
             "\n"
             [ "// Validator scaffold — register domain RuleFamilies into `reg`; rule content stays domain-side."
-              "let runValidator (reg: Validator.Registry<Node, string>) (root: Node) : Defect<string> list ="
+              sprintf
+                  "let runValidator (reg: Validator.Registry<Node%s, string>) (root: Node%s) : Defect<string> list ="
+                  nodeArgs
+                  nodeArgs
               "    Validator.runAll nodeWitness reg root" ]
 
     // -----------------------------------------------------------------------
@@ -1243,7 +1418,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
     /// IDL-declared default has no code emission (`defaultExpr` — GP4/GP5).
-    let private defaultsDecl (idl: Idl) (kinds: IdlKind list) : Result<string, CodegenError> =
+    let private defaultsDecl (msg: Set<string>) (idl: Idl) (kinds: IdlKind list) : Result<string, CodegenError> =
+        let nodeArgs = declParams msg "Node" []
+        let fsType = fsTypeIn msg
+
         let defaultFor (kindTag: string) (fieldName: string) : IdlValue option =
             idl.Defaults
             |> List.tryPick (fun d ->
@@ -1275,7 +1453,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             |> Result.map (fun fieldStrs ->
                 let record = String.concat "; " fieldStrs
 
-                sprintf "let mk%s %s : Node =\n    { Id = id; Kind = NodeKind.%s { %s } }" k.Tag parms k.Tag record)
+                sprintf
+                    "let mk%s %s : Node%s =\n    { Id = id; Kind = NodeKind.%s { %s } }"
+                    k.Tag
+                    parms
+                    nodeArgs
+                    k.Tag
+                    record)
 
         kinds
         |> List.map ctor
@@ -1300,6 +1484,15 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
         let enums, unions, records = referenced idl kinds
 
+        // Phase 689 — which declarations are generic in `'Msg`. Empty unless the IDL
+        // uses `TFn`, so an IDL that has not adopted it generates exactly as before.
+        let msg = msgCarrying idl
+
+        /// `"<'Msg>"` where the tree is msg-carrying, `""` otherwise — the suffix every
+        /// emitted `Node` / `NodeKind` annotation needs.
+        let nodeArgs = declParams msg "Node" []
+        let kindArgs = declParams msg "NodeKind" []
+
         let rqaEnum (e: IdlEnum) =
             "[<RequireQualifiedAccess>]\n" + enumDecl e
 
@@ -1313,33 +1506,50 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // a keyword, and construction sites disambiguate by annotation).
         let typeGroup =
             let unionBody (u: IdlUnion) =
-                let ps =
-                    if List.isEmpty u.Params then
-                        ""
-                    else
-                        "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
-
-                None, true, sprintf "%s%s =\n%s" u.Name ps (u.Cases |> List.map unionCaseDecl |> String.concat "\n")
+                None,
+                true,
+                sprintf
+                    "%s%s =\n%s"
+                    u.Name
+                    (declParams msg u.Name u.Params)
+                    (u.Cases |> List.map (unionCaseDecl msg) |> String.concat "\n")
 
             let recordBody (r: IdlRecord) =
                 None,
                 false,
-                sprintf "%s =\n    {\n%s\n    }" r.Name (r.Fields |> List.map fsField |> String.concat "\n")
+                sprintf
+                    "%s%s =\n    {\n%s\n    }"
+                    r.Name
+                    (declParams msg r.Name [])
+                    (r.Fields |> List.map (fsField msg) |> String.concat "\n")
 
             let specBody (k: IdlKind) =
                 Some("// " + k.Category),
                 false,
-                sprintf "%sSpec =\n    {\n%s\n    }" k.Tag (k.Fields |> List.map fsField |> String.concat "\n")
+                sprintf
+                    "%sSpec%s =\n    {\n%s\n    }"
+                    k.Tag
+                    (declParams msg (k.Tag + "Spec") [])
+                    (k.Fields |> List.map (fsField msg) |> String.concat "\n")
 
             let nodeKindBody =
                 None,
                 true,
-                "NodeKind =\n"
+                "NodeKind"
+                + declParams msg "NodeKind" []
+                + " =\n"
                 + (kinds
-                   |> List.map (fun k -> sprintf "    | %s of %sSpec" k.Tag k.Tag)
+                   |> List.map (fun k ->
+                       sprintf "    | %s of %sSpec%s" k.Tag k.Tag (declParams msg (k.Tag + "Spec") []))
                    |> String.concat "\n")
 
-            let nodeBody = None, false, "Node = { Id: string; Kind: NodeKind }"
+            let nodeBody =
+                None,
+                false,
+                sprintf
+                    "Node%s = { Id: string; Kind: NodeKind%s }"
+                    (declParams msg "Node" [])
+                    (declParams msg "NodeKind" [])
 
             // (comment, requiresQualifiedAccess, keyword-less body). The first member leads with
             // `type` (RQA attribute on its own preceding line); the rest are `and`-joined.
@@ -1372,15 +1582,15 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 |> List.map (fun k -> sprintf "        | NodeKind.%s s -> enc%sSpec s" k.Tag k.Tag)
                 |> String.concat "\n"
 
-            "let rec private encNode (n: Node) : JVal =\n    let kind =\n        match n.Kind with\n"
+            sprintf "let rec private encNode (n: Node%s) : JVal =\n    let kind =\n        match n.Kind with\n" nodeArgs
             + arms
             + "\n\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
-            (encNodeDecl :: (unions |> List.map unionEncoder)
-             @ (records |> List.map recordEncoder)
-             @ (kinds |> List.map specEncoder))
+            (encNodeDecl :: (unions |> List.map (unionEncoder msg))
+             @ (records |> List.map (recordEncoder msg))
+             @ (kinds |> List.map (specEncoder msg)))
             |> String.concat "\n\n"
 
         let header =
@@ -1399,7 +1609,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                         sprintf "    | \"%s\" -> dec%sSpec j |> Result.map NodeKind.%s" k.Tag k.Tag k.Tag)
                     |> String.concat "\n"
 
-                "let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =\n"
+                sprintf
+                    "let rec private decNodeKind (j: JVal) : Result<NodeKind%s, string> =\n"
+                    (objParams msg "NodeKind" [])
                 + "    dObj j |> Result.bind (fun __fs ->\n"
                 + "    dTag __fs |> Result.bind (fun __t ->\n"
                 + "    match __t with\n"
@@ -1407,31 +1619,33 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 + "\n    | __other -> Error (\"unknown node kind: \" + __other)))"
 
             let decNodeDecl =
-                "and private decNode (j: JVal) : Result<Node, string> =\n"
+                sprintf "and private decNode (j: JVal) : Result<Node%s, string> =\n" (objParams msg "Node" [])
                 + "    dObj j |> Result.bind (fun __fs ->\n"
                 + "    dReq \"id\" __fs dStr |> Result.bind (fun id ->\n"
                 + "    dReq \"kind\" __fs decNodeKind |> Result.bind (fun kind ->\n"
                 + "    Ok { Id = id; Kind = kind })))"
 
-            (decNodeKindDecl :: decNodeDecl :: (unions |> List.map unionDecoder)
-             @ (records |> List.map recordDecoder)
-             @ (kinds |> List.map specDecoder))
+            (decNodeKindDecl :: decNodeDecl :: (unions |> List.map (unionDecoder msg))
+             @ (records |> List.map (recordDecoder msg))
+             @ (kinds |> List.map (specDecoder msg)))
             |> String.concat "\n\n"
 
-        match witnessDecl kinds, defaultsDecl idl kinds with
+        match witnessDecl msg kinds, defaultsDecl msg idl kinds with
         | Ok witness, Ok defaults ->
             [ [ header ]
               enums |> List.map rqaEnum
               [ typeGroup ]
               enums |> List.map enumEncoder
               [ recGroup ]
-              [ "let encodeNode (n: Node) : string = Canon.render (encNode n)" ]
+              [ sprintf "let encodeNode (n: Node%s) : string = Canon.render (encNode n)" nodeArgs ]
               [ decodeHelpers () ]
               enums |> List.map enumDecoder
               [ decGroup ]
-              [ "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\nlet decodeNode (s: string) : Result<Node, string> =\n    Json.parse s |> Result.bind decNode" ]
+              [ sprintf
+                    "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\nlet decodeNode (s: string) : Result<Node%s, string> =\n    Json.parse s |> Result.bind decNode"
+                    (objParams msg "Node" []) ]
               [ witness ]
-              [ validatorDecl () ]
+              [ validatorDecl msg ]
               [ defaults ] ]
             |> List.concat
             |> String.concat "\n\n"
@@ -1459,7 +1673,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TNode -> JObj [ "$ref", JStr "#/$defs/Node" ]
         | TList inner -> JObj [ "type", JStr "array"; "items", schemaOf inner ]
         // Closure / opaque fields are sentinel strings on the wire.
-        | TClosure -> JObj [ "type", JStr "string"; "const", JStr "<closure>" ]
+        | TClosure
+        | TFn _ -> JObj [ "type", JStr "string"; "const", JStr "<closure>" ]
         | TOpaque -> JObj [ "type", JStr "string"; "const", JStr "<opaque>" ]
         // Phase 676 — "any JSON": the schema deliberately does not constrain content
         // the encoder does not decompose, matching how the hand-written schema already
@@ -1605,7 +1820,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TInt -> VInt(pick r intPool)
         | TBool -> VBool(nextInt r % 2 = 0)
         | TFloat -> VFloat(pick r floatPool)
-        | TClosure -> VClosure
+        | TClosure
+        | TFn _ -> VClosure
         | TOpaque -> VOpaque
         // Phase 676 — sample real JSON, built from the SAME adversarial pools, so the
         // passthrough is stressed on escaping and float layout like every other leg.
@@ -1746,8 +1962,17 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | VAbsent -> "undefined"
         // Closure / opaque values carry no data the TS encoder reads — its codec
         // emits the sentinel regardless, so any placeholder operand serialises right.
+        //
+        // But it must not be `undefined`, which is how [[VAbsent]] says "this field
+        // is NOT on the wire": `tsSpecPiece` omits an optional field on exactly that
+        // test, so an OPTIONAL closure/opaque slot silently vanished from the TS
+        // encoding while F# emitted its sentinel. Latent since the TS backend landed
+        // — no fixture and no sampled vector had an optional sentinel field until the
+        // Phase 689 spike added `Tabs.onSelect`, at which point the generative
+        // conformance test failed at vector 6. A stand-in that is PRESENT keeps the
+        // presence test honest without giving the codec anything to read.
         | VClosure
-        | VOpaque -> "undefined"
+        | VOpaque -> "(() => undefined)"
         // Phase 676 — a JSON value emits as its canonical literal.
         | VJson j -> Canon.render j
 
@@ -1771,7 +1996,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             + ", x))"
         | TList inner -> "((xs) => '[' + xs.map(" + tsEncFn inner + ").join(',') + ']')"
         // A closure/opaque codec ignores its argument and emits the fixed sentinel.
-        | TClosure -> "(() => '\"<closure>\"')"
+        | TClosure
+        | TFn _ -> "(() => '\"<closure>\"')"
         | TOpaque -> "(() => '\"<opaque>\"')"
         // Phase 676 — `encJson` renders the parsed value canonically (see the prelude).
         | TJson -> "encJson"
@@ -1911,7 +2137,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             + ", x))"
         | TList inner -> "dList(" + tsDecFn inner + ")"
         // The value carries nothing; only its presence matters (see tsDecField).
+        // A `TFn` slot is the same on the wire — the TS tier has no `'Msg` to
+        // rebuild into, so it stays `null` there regardless of the declared signature.
         | TClosure
+        | TFn _
         | TOpaque -> "(() => null)"
         // Phase 676 — keep the parsed JSON as-is.
         | TJson -> "((x) => x)"
@@ -1932,6 +2161,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
         match f.Type with
         | TClosure
+        | TFn _
         | TOpaque ->
             match f.Opt with
             | Optional -> "dPresent(" + key + ", fs)"

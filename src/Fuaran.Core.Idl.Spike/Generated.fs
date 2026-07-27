@@ -62,6 +62,7 @@ type TextSource =
 and [<RequireQualifiedAccess>] Binding<'T> =
     | Static of value: 'T
     | State of defaultValue: 'T * key: string
+    | Computed of fn: (obj -> 'T)
 
 and [<RequireQualifiedAccess>] Format =
     | Currency of code: string
@@ -117,9 +118,9 @@ and MetricSpec =
     }
 
 // Layout
-and BoxSpec =
+and BoxSpec<'Msg> =
     {
-      Children: Node list
+      Children: Node<'Msg> list
       Heading: TextSource option
       Layout: LayoutMode
       Role: BoxRole
@@ -131,15 +132,24 @@ and MarkdownSpec =
       Text: TextSource
     }
 
-and [<RequireQualifiedAccess>] NodeKind =
+// Layout
+and TabsSpec<'Msg> =
+    {
+      Children: Node<'Msg> list
+      OnCommit: (string -> 'Msg)
+      OnSelect: (int -> 'Msg) option
+    }
+
+and [<RequireQualifiedAccess>] NodeKind<'Msg> =
     | Heading of HeadingSpec
     | Badge of BadgeSpec
     | Button of ButtonSpec
     | Metric of MetricSpec
-    | Box of BoxSpec
+    | Box of BoxSpec<'Msg>
     | Markdown of MarkdownSpec
+    | Tabs of TabsSpec<'Msg>
 
-and Node = { Id: string; Kind: NodeKind }
+and Node<'Msg> = { Id: string; Kind: NodeKind<'Msg> }
 
 let private encHeadingVariant (v: HeadingVariant) : JVal =
     match v with
@@ -193,7 +203,7 @@ let private encBoxRole (v: BoxRole) : JVal =
     | BoxRole.Card -> JStr "Card"
     | BoxRole.Group -> JStr "Group"
 
-let rec private encNode (n: Node) : JVal =
+let rec private encNode (n: Node<'Msg>) : JVal =
     let kind =
         match n.Kind with
         | NodeKind.Heading s -> encHeadingSpec s
@@ -202,6 +212,7 @@ let rec private encNode (n: Node) : JVal =
         | NodeKind.Metric s -> encMetricSpec s
         | NodeKind.Box s -> encBoxSpec s
         | NodeKind.Markdown s -> encMarkdownSpec s
+        | NodeKind.Tabs s -> encTabsSpec s
 
     JObj [ "id", JStr n.Id; "kind", kind ]
 
@@ -213,6 +224,7 @@ and private encBinding<'T> (encT: 'T -> JVal) (v: Binding<'T>) : JVal =
     match v with
     | Binding.Static value -> Canon.typed "Static" [ "value", encT value ]
     | Binding.State (defaultValue, key) -> Canon.typed "State" [ "defaultValue", encT defaultValue; "key", JStr key ]
+    | Binding.Computed fn -> Canon.typed "Computed" [ "fn", JStr "<closure>" ]
 
 and private encFormat (v: Format) : JVal =
     match v with
@@ -242,13 +254,16 @@ and private encButtonSpec (s: ButtonSpec) : JVal =
 and private encMetricSpec (s: MetricSpec) : JVal =
     Canon.typed "Metric" ([ (if s.Emphasis = Emphasis.Normal then None else Some("emphasis", encEmphasis s.Emphasis)); Some("format", encFormat s.Format); (s.Icon |> Option.map (fun v -> "icon", JStr v)); Some("label", encTextSource s.Label); (s.Subtext |> Option.map (fun v -> "subtext", encTextSource v)); (if s.Tone = ToneVariant.Default then None else Some("tone", encToneVariant s.Tone)); (s.Trend |> Option.map (fun v -> "trend", (encBinding JFloat) v)); (s.TrendFormat |> Option.map (fun v -> "trendFormat", encFormat v)); Some("value", (encBinding JFloat) s.Value); (if s.Weight = StyleWeight.Standard then None else Some("weight", encStyleWeight s.Weight)) ] |> List.choose id)
 
-and private encBoxSpec (s: BoxSpec) : JVal =
+and private encBoxSpec<'Msg> (s: BoxSpec<'Msg>) : JVal =
     Canon.typed "Box" ([ Some("children", JArr(List.map encNode s.Children)); (s.Heading |> Option.map (fun v -> "heading", encTextSource v)); Some("layout", encLayoutMode s.Layout); Some("role", encBoxRole s.Role) ] |> List.choose id)
 
 and private encMarkdownSpec (s: MarkdownSpec) : JVal =
     Canon.typed "Markdown" ([ Some("text", encTextSource s.Text) ] |> List.choose id)
 
-let encodeNode (n: Node) : string = Canon.render (encNode n)
+and private encTabsSpec<'Msg> (s: TabsSpec<'Msg>) : JVal =
+    Canon.typed "Tabs" ([ Some("children", JArr(List.map encNode s.Children)); Some("onCommit", JStr "<closure>"); (s.OnSelect |> Option.map (fun v -> "onSelect", JStr "<closure>")) ] |> List.choose id)
+
+let encodeNode (n: Node<'Msg>) : string = Canon.render (encNode n)
 
 let private dObj (j: JVal) : Result<(string * JVal) list, string> =
     match j with
@@ -390,7 +405,7 @@ let private decBoxRole (j: JVal) : Result<BoxRole, string> =
     | JStr "Group" -> Ok BoxRole.Group
     | _ -> Error "not a BoxRole"
 
-let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
+let rec private decNodeKind (j: JVal) : Result<NodeKind<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
     dTag __fs |> Result.bind (fun __t ->
     match __t with
@@ -400,9 +415,10 @@ let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
     | "Metric" -> decMetricSpec j |> Result.map NodeKind.Metric
     | "Box" -> decBoxSpec j |> Result.map NodeKind.Box
     | "Markdown" -> decMarkdownSpec j |> Result.map NodeKind.Markdown
+    | "Tabs" -> decTabsSpec j |> Result.map NodeKind.Tabs
     | __other -> Error ("unknown node kind: " + __other)))
 
-and private decNode (j: JVal) : Result<Node, string> =
+and private decNode (j: JVal) : Result<Node<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
     dReq "id" __fs dStr |> Result.bind (fun id ->
     dReq "kind" __fs decNodeKind |> Result.bind (fun kind ->
@@ -432,6 +448,9 @@ and private decBinding<'T> (decT: JVal -> Result<'T, string>) (j: JVal) : Result
             dReq "defaultValue" __fs decT |> Result.bind (fun defaultValue ->
             dReq "key" __fs dStr |> Result.bind (fun key ->
             Ok(Binding.State(defaultValue, key))))
+        | "Computed" ->
+            Ok ((fun _ -> Unchecked.defaultof<'T>)) |> Result.bind (fun fn ->
+            Ok(Binding.Computed(fn)))
         | __other -> Error ("unknown Binding case: " + __other))
     | _ -> Error "expected a Binding object"
 
@@ -517,7 +536,7 @@ and private decMetricSpec (j: JVal) : Result<MetricSpec, string> =
     dDef "weight" __fs decStyleWeight (StyleWeight.Standard) |> Result.bind (fun weight ->
     Ok { Emphasis = emphasis; Format = format; Icon = icon; Label = label; Subtext = subtext; Tone = tone; Trend = trend; TrendFormat = trendFormat; Value = value; Weight = weight })))))))))))
 
-and private decBoxSpec (j: JVal) : Result<BoxSpec, string> =
+and private decBoxSpec (j: JVal) : Result<BoxSpec<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     dOpt "heading" __fs decTextSource |> Result.bind (fun heading ->
@@ -530,12 +549,19 @@ and private decMarkdownSpec (j: JVal) : Result<MarkdownSpec, string> =
     dReq "text" __fs decTextSource |> Result.bind (fun text ->
     Ok { Text = text }))
 
+and private decTabsSpec (j: JVal) : Result<TabsSpec<obj>, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
+    Ok ((fun (_: string) -> box "<closure>")) |> Result.bind (fun onCommit ->
+    (dPresent "onSelect" __fs |> Result.map (Option.map (fun () -> (fun (_: int) -> box "<closure>")))) |> Result.bind (fun onSelect ->
+    Ok { Children = children; OnCommit = onCommit; OnSelect = onSelect }))))
+
 /// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
 /// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
-let decodeNode (s: string) : Result<Node, string> =
+let decodeNode (s: string) : Result<Node<obj>, string> =
     Json.parse s |> Result.bind decNode
 
-let private witnessKindTag (n: Node) : string =
+let private witnessKindTag (n: Node<'Msg>) : string =
     match n.Kind with
     | NodeKind.Heading _ -> "Heading"
     | NodeKind.Badge _ -> "Badge"
@@ -543,44 +569,50 @@ let private witnessKindTag (n: Node) : string =
     | NodeKind.Metric _ -> "Metric"
     | NodeKind.Box _ -> "Box"
     | NodeKind.Markdown _ -> "Markdown"
+    | NodeKind.Tabs _ -> "Tabs"
 
-let private witnessChildren (n: Node) : Node list =
+let private witnessChildren (n: Node<'Msg>) : Node<'Msg> list =
     match n.Kind with
     | NodeKind.Box s -> s.Children
+    | NodeKind.Tabs s -> s.Children
     | _ -> []
 
-let private witnessReplaceChildren (n: Node) (kids: Node list) : Node =
+let private witnessReplaceChildren (n: Node<'Msg>) (kids: Node<'Msg> list) : Node<'Msg> =
     match n.Kind with
     | NodeKind.Box s -> { n with Kind = NodeKind.Box { s with Children = kids } }
+    | NodeKind.Tabs s -> { n with Kind = NodeKind.Tabs { s with Children = kids } }
     | _ -> n
 
-let nodeWitness: NodeWitness<Node, string> =
+let nodeWitness: NodeWitness<Node<'Msg>, string> =
     { Id = fun n -> n.Id
       KindTag = witnessKindTag
       Children = witnessChildren
       ReplaceChildren = witnessReplaceChildren }
 
 // Validator scaffold — register domain RuleFamilies into `reg`; rule content stays domain-side.
-let runValidator (reg: Validator.Registry<Node, string>) (root: Node) : Defect<string> list =
+let runValidator (reg: Validator.Registry<Node<'Msg>, string>) (root: Node<'Msg>) : Defect<string> list =
     Validator.runAll nodeWitness reg root
 
 // Smart constructors — required-without-default fields are parameters; IDL-declared
 // defaults are filled, other optionals default to None.
 
-let mkHeading (id: string) (level: int) (text: TextSource) : Node =
+let mkHeading (id: string) (level: int) (text: TextSource) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Heading { Level = level; Text = text; Variant = HeadingVariant.Standard } }
 
-let mkBadge (id: string) (label: TextSource) (variant: BadgeVariant) : Node =
+let mkBadge (id: string) (label: TextSource) (variant: BadgeVariant) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Badge { Label = label; Variant = variant } }
 
-let mkButton (id: string) (label: TextSource) (onClick: Action) : Node =
+let mkButton (id: string) (label: TextSource) (onClick: Action) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Button { Disabled = None; Icon = None; Label = label; OnClick = onClick; Variant = ButtonVariant.Primary } }
 
-let mkMetric (id: string) (format: Format) (label: TextSource) (value: Binding<float>) : Node =
+let mkMetric (id: string) (format: Format) (label: TextSource) (value: Binding<float>) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Metric { Emphasis = Emphasis.Normal; Format = format; Icon = None; Label = label; Subtext = None; Tone = ToneVariant.Default; Trend = None; TrendFormat = None; Value = value; Weight = StyleWeight.Standard } }
 
-let mkBox (id: string) (children: Node list) (layout: LayoutMode) (role: BoxRole) : Node =
+let mkBox (id: string) (children: Node<'Msg> list) (layout: LayoutMode) (role: BoxRole) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Box { Children = children; Heading = None; Layout = layout; Role = role } }
 
-let mkMarkdown (id: string) (text: TextSource) : Node =
+let mkMarkdown (id: string) (text: TextSource) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Markdown { Text = text } }
+
+let mkTabs (id: string) (children: Node<'Msg> list) (onCommit: (string -> 'Msg)) : Node<'Msg> =
+    { Id = id; Kind = NodeKind.Tabs { Children = children; OnCommit = onCommit; OnSelect = None } }
