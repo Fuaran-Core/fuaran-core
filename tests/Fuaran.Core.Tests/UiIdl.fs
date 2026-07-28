@@ -1361,7 +1361,10 @@ let metaKinds: IdlKind list =
         Fields =
           [ req "moduleId" TStr
             req "componentId" TStr
-            req "props" (TMap TOpaque)
+            // The prop bag is verbatim JSON on the wire (the tier's Map<string, JVal>)
+            // — `TJson`, not `TOpaque`: the hand encoder emits real values, and the
+            // generated record must be constructible with them.
+            req "props" (TMap TJson)
             opt "contentHash" (TRecord "ContentHash")
             opt "exposedNodeIds" (TList TStr) ] }
       { Tag = "ErrorBoundary"
