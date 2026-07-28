@@ -199,7 +199,7 @@ let private grid1: G.Node<unit> =
                      Format = G.CellFormat.None
                      Kind = G.CellKindErased.Text
                      Label = "Channel"
-                     Value = Some(fun _ -> box "")
+                     Value = Some(fun _ -> Fuaran.UI.HostPrelude.CellValue.Empty)
                      Width = G.ColumnWidth.Auto }
                   : G.ColumnErased<unit>) ]
               Editable = false
@@ -210,7 +210,7 @@ let private grid1: G.Node<unit> =
               OnRowClick = None } }
 
 /// `table-1` — the retired `Table` decode-upgraded to a static `DataGrid` (`staticRows`
-/// carrying its bare-string header/row grid).
+/// carrying its header/row grid; cells are `TextSource`, a `Literal` renders bare).
 let private table1: G.Node<unit> =
     { Id = "table-1"
       Accessibility = None
@@ -227,8 +227,10 @@ let private table1: G.Node<unit> =
               Source = G.Binding.Static(Some(Seq.empty: obj seq))
               StaticRows =
                 Some
-                    { Headers = [ "Term"; "Definition" ]
-                      Rows = [ [ "MVU"; "Model-View-Update" ]; [ "DSL"; "Domain-specific language" ] ] }
+                    { Headers = [ G.TextSource.Literal "Term"; G.TextSource.Literal "Definition" ]
+                      Rows =
+                        [ [ G.TextSource.Literal "MVU"; G.TextSource.Literal "Model-View-Update" ]
+                          [ G.TextSource.Literal "DSL"; G.TextSource.Literal "Domain-specific language" ] ] }
               OnRowClick = None } }
 
 /// `custom-bounded-1` — an (empty) `TMap` + a `ContentHash` record + an optional string list.
