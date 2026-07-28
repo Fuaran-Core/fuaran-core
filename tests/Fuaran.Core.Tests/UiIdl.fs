@@ -968,8 +968,11 @@ let displayKinds: IdlKind list =
             req "value" TS ] }
       { Tag = "Sparkline"
         Category = "Display"
-        // Fuaran-UI 0.2.x typed-Static: the source seq is a real int list on the wire.
-        Fields = [ req "source" (bindingOf (TList TInt)) ] }
+        // Fuaran-UI 0.2.x typed-Static: a real numeric list on the wire. FLOAT, not
+        // int — the hand tier's source is `Binding<float …>` and canonical JNum
+        // rendering emits whole floats in integer form, so the corpus's `[1,2,3]`
+        // bytes are unchanged while fractional samples stay representable.
+        Fields = [ req "source" (bindingOf (TList TFloat)) ] }
       { Tag = "CodeBlock"
         Category = "Display"
         Fields =
@@ -1125,7 +1128,9 @@ let inputKinds: IdlKind list =
           [ req "accept" (TList TStr)
             req "label" (TUnion("TextSource", []))
             req "multiple" TBool
-            opt "onSelect" (handlerOf "obj list" "unknown[]")
+            // The handler arg is the hosted browser-file metadata record (prelude
+            // type; closure args never serialise, so no codec is needed).
+            opt "onSelect" (handlerOf "Fuaran.UI.HostPrelude.FileSelection list" "unknown[]")
             opt "disabled" (bindingOf TBool) ] }
       { Tag = "Form"
         Category = "Input"
