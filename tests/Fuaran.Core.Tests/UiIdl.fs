@@ -1126,7 +1126,12 @@ let inputKinds: IdlKind list =
             req "onClick" (TUnion("Action", []))
             req "variant" (TEnum "ButtonVariant")
             opt "icon" TStr
-            opt "tooltip" (TUnion("TextSource", []))
+            // WIRE_FORMAT.md §10.1 — `ButtonSpec.Tooltip` is typed surface but
+            // NOT wire vocabulary: never emitted, restored to `None` on decode.
+            // Modelling it `opt` made the generated encoder emit a field the
+            // spec forbids — invisible to the corpus (no fixture carries it),
+            // caught by the Phase 101 idempotence fuzz at the 694 collapse.
+            hostOnly "tooltip" "TextSource option" "None"
             opt "disabled" (bindingOf TBool) ] }
       { Tag = "Select"
         Category = "Input"

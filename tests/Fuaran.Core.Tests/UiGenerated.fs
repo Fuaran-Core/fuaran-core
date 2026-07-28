@@ -693,7 +693,7 @@ and ButtonSpec<'Msg> =
       OnClick: Action<'Msg>
       Variant: ButtonVariant
       Icon: string option
-      Tooltip: TextSource option
+      Tooltip: (TextSource option)
       Disabled: Binding<bool> option
     }
 
@@ -1382,7 +1382,7 @@ and private encStepperSpec<'Msg> (s: StepperSpec<'Msg>) : JVal =
     Canon.typed "Stepper" ([ Some("activeStep", (encBinding JInt) s.ActiveStep); Some("children", JArr(List.map encNode s.Children)); (s.OnSelect |> Option.map (fun v -> "onSelect", JStr "<closure>")) ] |> List.choose id)
 
 and private encButtonSpec<'Msg> (s: ButtonSpec<'Msg>) : JVal =
-    Canon.typed "Button" ([ Some("label", encTextSource s.Label); Some("onClick", encAction s.OnClick); Some("variant", encButtonVariant s.Variant); (s.Icon |> Option.map (fun v -> "icon", JStr v)); (s.Tooltip |> Option.map (fun v -> "tooltip", encTextSource v)); (s.Disabled |> Option.map (fun v -> "disabled", (encBinding JBool) v)) ] |> List.choose id)
+    Canon.typed "Button" ([ Some("label", encTextSource s.Label); Some("onClick", encAction s.OnClick); Some("variant", encButtonVariant s.Variant); (s.Icon |> Option.map (fun v -> "icon", JStr v)); None; (s.Disabled |> Option.map (fun v -> "disabled", (encBinding JBool) v)) ] |> List.choose id)
 
 and private encSelectSpec<'Msg> (s: SelectSpec<'Msg>) : JVal =
     Canon.typed "Select" ([ Some("label", encTextSource s.Label); (s.OnChange |> Option.map (fun v -> "onChange", JStr "<closure>")); (s.OnChangeMulti |> Option.map (fun v -> "onChangeMulti", JStr "<closure>")); Some("source", (encBinding (fun __xs -> JArr(List.map encSelectOption __xs))) s.Source); Some("value", (encBinding JStr) s.Value); (s.Placeholder |> Option.map (fun v -> "placeholder", encTextSource v)); (s.Disabled |> Option.map (fun v -> "disabled", (encBinding JBool) v)); (s.Multiple |> Option.map (fun v -> "multiple", JBool v)); (s.Values |> Option.map (fun v -> "values", (encBinding (fun __xs -> JArr(List.map JStr __xs))) v)) ] |> List.choose id)
@@ -2639,7 +2639,7 @@ and private decButtonSpec (j: JVal) : Result<ButtonSpec<obj>, string> =
     dReq "onClick" __fs decAction |> Result.bind (fun onClick ->
     dReq "variant" __fs decButtonVariant |> Result.bind (fun variant ->
     dOpt "icon" __fs dStr |> Result.bind (fun icon ->
-    dOpt "tooltip" __fs decTextSource |> Result.bind (fun tooltip ->
+    Ok (None) |> Result.bind (fun tooltip ->
     dOpt "disabled" __fs (decBinding dBool) |> Result.bind (fun disabled ->
     Ok { Label = label; OnClick = onClick; Variant = variant; Icon = icon; Tooltip = tooltip; Disabled = disabled })))))))
 
