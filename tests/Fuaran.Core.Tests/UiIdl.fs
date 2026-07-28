@@ -834,24 +834,32 @@ let private semanticStyleRecord =
 
 /// `{ "onEmpty"?: Node, "onError"?: "<closure>", "onLoading"?: Node }`.
 /// `onError` is the `ErrorPayload -> Node` callback — unobservable, so the
-/// sentinel, and its PRESENCE is the only thing the wire carries.
+/// sentinel, and its PRESENCE is the only thing the wire carries. The arg type
+/// is the HOSTED `ErrorPayload` (defined in the consuming host's prelude — the
+/// tier's `Fuaran.UI.HostPrelude`, stubbed identically in this test assembly)
+/// so the swap does not erode the renderer-called closure to `obj`.
 let private stateBehaviourRecord =
     { Name = "StateBehaviour"
       Fields =
         [ opt "onEmpty" TNode
-          opt "onError" (fn "obj -> Node<'Msg>" "(e: unknown) => Node" "(fun _ -> Unchecked.defaultof<Node<obj>>)")
+          opt
+              "onError"
+              (fn
+                  "Fuaran.UI.HostPrelude.ErrorPayload -> Node<'Msg>"
+                  "(e: unknown) => Node"
+                  "(fun _ -> Unchecked.defaultof<Node<obj>>)")
           opt "onLoading" TNode ] }
 
 /// `{ "describedBy"?, "hidden"?, "label"?, "labelledBy"?, "liveRegion"?, "role"? }`.
 ///
-/// `role` and `liveRegion` are `TStr`, deliberately, and this is read from the
-/// ENCODER rather than the F# type: `AriaRole` carries a `Custom of string` case
-/// that emits its payload verbatim, so the wire position genuinely admits any
-/// string and is not a closed set. `liveRegion` IS closed (`polite`/`assertive`/
-/// `off`) but its wire strings are lower-case, and an `IdlEnum`'s case name IS its
-/// wire string — F# DU cases cannot be lower-case, so modelling it as an enum needs
-/// a case-name-to-wire-string mapping the generator does not have. Left as `TStr`
-/// with the gap named rather than mis-modelled.
+/// `role` and `liveRegion` were `TStr` until the swap's stage 4 because neither
+/// fits `TEnum`: `AriaRole` carries a `Custom of string` case that emits its
+/// payload verbatim (the wire position genuinely admits any string), and
+/// `LiveRegionKind`'s wire strings are lower-case while an `IdlEnum`'s case name
+/// IS its wire string. Both are now `THosted` — the host declares the real DU +
+/// its wire codec in `Fuaran.UI.HostPrelude` (lower-case mapping + `Custom`
+/// passthrough), and everywhere else (interpreter, TS, schema, sampler) the slot
+/// behaves as verbatim JSON exactly as `TStr` did. Same bytes, typed surface kept.
 let private accessibilityRecord =
     { Name = "Accessibility"
       Fields =
@@ -859,8 +867,18 @@ let private accessibilityRecord =
           opt "hidden" (bindingOf TBool)
           opt "label" (bindingOf TStr)
           opt "labelledBy" TStr
-          opt "liveRegion" TStr
-          opt "role" TStr ] }
+          opt
+              "liveRegion"
+              (THosted
+                  { FSharp = "Fuaran.UI.HostPrelude.LiveRegionKind"
+                    Encode = "Fuaran.UI.HostPrelude.encLiveRegionKind"
+                    Decode = "Fuaran.UI.HostPrelude.decLiveRegionKind" })
+          opt
+              "role"
+              (THosted
+                  { FSharp = "Fuaran.UI.HostPrelude.AriaRole"
+                    Encode = "Fuaran.UI.HostPrelude.encAriaRole"
+                    Decode = "Fuaran.UI.HostPrelude.decAriaRole" }) ] }
 
 // ─── Display kinds (flat `$type`-discriminated) ────────────────────────────
 
