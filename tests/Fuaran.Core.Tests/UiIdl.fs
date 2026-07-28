@@ -569,6 +569,26 @@ let private formFieldKind =
                 req "variant" (TEnum "DateVariant")
                 opt "min" TStr
                 opt "max" TStr
+                opt "step" TFloat ] }
+          // Single-control date range (Fuaran-UI Phase 725) — `Range`'s pair
+          // mechanics with `Date`'s value conventions. The value slot carries
+          // the same transparent-Static posture as `Range`: a `Static` pair
+          // rides as the BARE `{from, to}` object (no `Static` envelope), any
+          // other binding rides enveloped; both directions via the slot codec.
+          { Tag = "DateRange"
+            Fields =
+              [ opt
+                    "value"
+                    (THosted
+                        { FSharp = "Binding<DateRangePair>"
+                          Encode =
+                            "(fun (v: Binding<DateRangePair>) -> match v with | Binding.Static(Some p) -> encDateRangePair p | __other -> encBinding encDateRangePair __other)"
+                          Decode =
+                            "(fun (j: JVal) -> match j with | JObj __rf when not (__rf |> List.exists (fun (k, _) -> k = \"$type\")) -> decDateRangePair j |> Result.map (fun p -> Binding.Static(Some p)) | __other -> decBinding decDateRangePair __other)" })
+                opt "onChange" (handlerOf "string * string" "[string, string]")
+                req "variant" (TEnum "DateVariant")
+                opt "min" TStr
+                opt "max" TStr
                 opt "step" TFloat ] } ] }
 
 // _(The separate `FilterKind` union this file carried until the Phase 692
@@ -772,6 +792,15 @@ let private transformParamRecord =
 let private rangePairRecord =
     { Name = "RangePair"
       Fields = [ req "max" TFloat; req "min" TFloat ] }
+
+/// The `{from, to}` payload of a `DateRange` control's value (Fuaran-UI Phase
+/// 725) — the ordered ISO-8601 pair, `RangePair`'s record-IS-the-wire-object
+/// trade for the hand-written tier's `(from, to)` string pair. The ordering
+/// rule (`from` ≤ `to`, ordinal) is decoder POLICY, not structure — it lives in
+/// the tier's lenient/reject layer, not here.
+let private dateRangePairRecord =
+    { Name = "DateRangePair"
+      Fields = [ req "from" TStr; req "to" TStr ] }
 
 let private tabHeaderRecord =
     { Name = "TabHeader"
@@ -1495,6 +1524,7 @@ let uiIdl: Idl =
           filterSpecRecord
           transformParamRecord
           rangePairRecord
+          dateRangePairRecord
           tabHeaderRecord
           columnErasedRecord
           buttonGroupItemRecord

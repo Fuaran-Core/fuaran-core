@@ -247,6 +247,7 @@ and [<RequireQualifiedAccess>] FormFieldKind<'Msg> =
     | Range of value: Binding<RangePair> option * onChange: (float * float -> Action<'Msg>) option * min: float option * max: float option * step: float option
     | SegmentedChoice of options: Binding<SelectOption list> * value: Binding<string> option * onChange: (string option -> Action<'Msg>) option * orientation: Orientation
     | Date of value: Binding<string> option * onChange: (string option -> Action<'Msg>) option * variant: DateVariant * min: string option * max: string option * step: float option
+    | DateRange of value: Binding<DateRangePair> option * onChange: (string * string -> Action<'Msg>) option * variant: DateVariant * min: string option * max: string option * step: float option
 
 and [<RequireQualifiedAccess>] ColumnWidth =
     | Auto
@@ -425,6 +426,12 @@ and RangePair =
     {
       Max: float
       Min: float
+    }
+
+and DateRangePair =
+    {
+      From: string
+      To: string
     }
 
 and TabHeader =
@@ -1173,6 +1180,7 @@ and private encFormFieldKind<'Msg> (v: FormFieldKind<'Msg>) : JVal =
     | FormFieldKind.Range (value, onChange, min, max, step) -> Canon.typed "Range" ([ (value |> Option.map (fun v -> "value", (fun (v: Binding<RangePair>) -> match v with | Binding.Static(Some p) -> encRangePair p | __other -> encBinding encRangePair __other) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")); (min |> Option.map (fun v -> "min", JFloat v)); (max |> Option.map (fun v -> "max", JFloat v)); (step |> Option.map (fun v -> "step", JFloat v)) ] |> List.choose id)
     | FormFieldKind.SegmentedChoice (options, value, onChange, orientation) -> Canon.typed "SegmentedChoice" ([ Some("options", (encBinding (fun __xs -> JArr(List.map encSelectOption __xs))) options); (value |> Option.map (fun v -> "value", (encBinding JStr) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")); Some("orientation", encOrientation orientation) ] |> List.choose id)
     | FormFieldKind.Date (value, onChange, variant, min, max, step) -> Canon.typed "Date" ([ (value |> Option.map (fun v -> "value", (encBinding JStr) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")); Some("variant", encDateVariant variant); (min |> Option.map (fun v -> "min", JStr v)); (max |> Option.map (fun v -> "max", JStr v)); (step |> Option.map (fun v -> "step", JFloat v)) ] |> List.choose id)
+    | FormFieldKind.DateRange (value, onChange, variant, min, max, step) -> Canon.typed "DateRange" ([ (value |> Option.map (fun v -> "value", (fun (v: Binding<DateRangePair>) -> match v with | Binding.Static(Some p) -> encDateRangePair p | __other -> encBinding encDateRangePair __other) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")); Some("variant", encDateVariant variant); (min |> Option.map (fun v -> "min", JStr v)); (max |> Option.map (fun v -> "max", JStr v)); (step |> Option.map (fun v -> "step", JFloat v)) ] |> List.choose id)
 
 and private encColumnWidth (v: ColumnWidth) : JVal =
     match v with
@@ -1290,6 +1298,9 @@ and private encTransformParam (s: TransformParam) : JVal =
 
 and private encRangePair (s: RangePair) : JVal =
     JObj([ Some("max", JFloat s.Max); Some("min", JFloat s.Min) ] |> List.choose id)
+
+and private encDateRangePair (s: DateRangePair) : JVal =
+    JObj([ Some("from", JStr s.From); Some("to", JStr s.To) ] |> List.choose id)
 
 and private encTabHeader (s: TabHeader) : JVal =
     JObj([ Some("label", encTextSource s.Label); (s.Icon |> Option.map (fun v -> "icon", JStr v)); (s.Disabled |> Option.map (fun v -> "disabled", (encBinding JBool) v)) ] |> List.choose id)
@@ -2053,6 +2064,14 @@ and private decFormFieldKind (j: JVal) : Result<FormFieldKind<obj>, string> =
             dOpt "max" __fs dStr |> Result.bind (fun max ->
             dOpt "step" __fs dFloat |> Result.bind (fun step ->
             Ok(FormFieldKind.Date(value, onChange, variant, min, max, step))))))))
+        | "DateRange" ->
+            dOpt "value" __fs (fun (j: JVal) -> match j with | JObj __rf when not (__rf |> List.exists (fun (k, _) -> k = "$type")) -> decDateRangePair j |> Result.map (fun p -> Binding.Static(Some p)) | __other -> decBinding decDateRangePair __other) |> Result.bind (fun value ->
+            (dPresent "onChange" __fs |> Result.map (Option.map (fun () -> (fun (_: string * string) -> Action.Chain [])))) |> Result.bind (fun onChange ->
+            dReq "variant" __fs decDateVariant |> Result.bind (fun variant ->
+            dOpt "min" __fs dStr |> Result.bind (fun min ->
+            dOpt "max" __fs dStr |> Result.bind (fun max ->
+            dOpt "step" __fs dFloat |> Result.bind (fun step ->
+            Ok(FormFieldKind.DateRange(value, onChange, variant, min, max, step))))))))
         | __other -> Error ("unknown FormFieldKind case: " + __other))
     | _ -> Error "expected a FormFieldKind object"
 
@@ -2398,6 +2417,12 @@ and private decRangePair (j: JVal) : Result<RangePair, string> =
     dReq "max" __fs dFloat |> Result.bind (fun max ->
     dReq "min" __fs dFloat |> Result.bind (fun min ->
     Ok { Max = max; Min = min })))
+
+and private decDateRangePair (j: JVal) : Result<DateRangePair, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "from" __fs dStr |> Result.bind (fun from ->
+    dReq "to" __fs dStr |> Result.bind (fun ``to`` ->
+    Ok { From = from; To = ``to`` })))
 
 and private decTabHeader (j: JVal) : Result<TabHeader, string> =
     dObj j |> Result.bind (fun __fs ->
