@@ -368,8 +368,10 @@ let private cellFormat =
           { Tag = "Date"
             Fields = [ req "format" TStr ] }
           { Tag = "Custom"
-            // `CellValue -> string`; `CellValue` is a host type, so the argument erases.
-            Fields = [ req "fn" (projOf "obj" "string" "(v: unknown) => string" "(fun _ -> \"\")") ] } ] }
+            // `CellValue -> string`; `CellValue` is a host-prelude DU (stage 4b) —
+            // the stage-3 obj erasure un-erased now the prelude hosts the type.
+            Fields =
+              [ req "fn" (projOf "Fuaran.UI.HostPrelude.CellValue" "string" "(v: unknown) => string" "(fun _ -> \"\")") ] } ] }
 
 /// `Action<'Msg>` — the effect-typed action union. `Chain` recurses; `Dispatch`
 /// / `onRead` payloads are closures; `Invoke` / `ReadFileBody` carry data. The
@@ -599,8 +601,9 @@ let private cellKindErased =
           { Tag = "Numeric"; Fields = [] }
           { Tag = "Date"; Fields = [] }
           { Tag = "Editable"
-            // `(obj * CellValue) -> Action<'Msg>`; `CellValue` is a host type.
-            Fields = [ opt "onEdit" (handlerOf "obj * obj" "[unknown, unknown]") ] }
+            // `(obj * CellValue) -> Action<'Msg>`; `CellValue` is a host-prelude DU
+            // (stage 4b) — the typed edit payload survives the swap.
+            Fields = [ opt "onEdit" (handlerOf "obj * Fuaran.UI.HostPrelude.CellValue" "[unknown, unknown]") ] }
           { Tag = "Checkbox"
             Fields =
               [ req "get" (projOf "obj" "bool" "(row: unknown) => boolean" "(fun _ -> false)")
@@ -628,7 +631,11 @@ let private cellKindErased =
           { Tag = "Progress"
             Fields =
               [ req "fractionFn" (projOf "obj" "float" "(row: unknown) => number" "(fun _ -> 0.0)")
-                req
+                // The hand-written tier's label is genuinely optional (a progress
+                // cell with no label) — `opt`, stage 4b. The hand encoder emitted
+                // an unconditional sentinel; omit-when-None is the honest form and
+                // no fixture pins the None-label emission.
+                opt
                     "labelFn"
                     (projOf "obj" "TextSource" "(row: unknown) => TextSource" "(fun _ -> TextSource.Literal \"\")") ] }
           { Tag = "Custom"
@@ -726,10 +733,15 @@ let private mapMarkerRecord =
       Fields = [ req "label" TStr; req "latitude" TFloat; req "longitude" TFloat ] }
 
 /// A `DataGrid.staticRows` payload — the header/row grid a legacy `Table` decode-upgrades
-/// into (Fuaran-UI Phase 393: `Table` retired, becomes a static `DataGrid`). Bare strings.
+/// into (Fuaran-UI Phase 393: `Table` retired, becomes a static `DataGrid`). Cells are
+/// `TextSource`, NOT bare strings: the hand codec encodes each cell via `encodeTextSource`
+/// (a `Literal` IS the bare string on the wire — 0.2.0) and the decoder accepts `Bound` /
+/// `I18n` objects per cell, so a `TStr` here would narrow live wire fidelity (stage 4b).
 let private staticRowsRecord =
     { Name = "StaticRows"
-      Fields = [ req "headers" (TList TStr); req "rows" (TList(TList TStr)) ] }
+      Fields =
+        [ req "headers" (TList(TUnion("TextSource", [])))
+          req "rows" (TList(TList(TUnion("TextSource", [])))) ] }
 
 let private formFieldRecord =
     { Name = "FormField"
@@ -780,8 +792,15 @@ let private columnErasedRecord =
           omit "format" (TUnion("CellFormat", [])) (VUnion("None", []))
           req "kind" (TUnion("CellKindErased", []))
           req "label" TStr
-          // `obj -> CellValue`; `CellValue` is a host type, so the result erases.
-          opt "value" (projOf "obj" "obj" "(row: unknown) => unknown" "(fun _ -> (\"<closure>\" :> obj))")
+          // `obj -> CellValue`; `CellValue` is a host DU declared in the host
+          // prelude (stage 4b) — the typed cell surface survives the swap.
+          opt
+              "value"
+              (projOf
+                  "obj"
+                  "Fuaran.UI.HostPrelude.CellValue"
+                  "(row: unknown) => unknown"
+                  "(fun _ -> Fuaran.UI.HostPrelude.CellValue.Empty)")
           omit "width" (TUnion("ColumnWidth", [])) (VUnion("Auto", [])) ] }
 
 /// One button of a `CellKindErased.ButtonGroup` (`onClick` is a closure).
@@ -1067,10 +1086,15 @@ let layoutKinds: IdlKind list =
         // onSelect is a closure that IS on the wire as the "<closure>" sentinel.
         // The tabHeaders / tabTags / activeTag overlays are optional (omitted in
         // tabs-1, present in tabs-explicit-1 — the TabHeader record slice).
-        // Fuaran-UI 0.2.x dropped Tabs.orientation (no wire key).
+        // `orientation` is omit-when-Horizontal (0.2.0) — the previous note here
+        // ("0.2.x dropped Tabs.orientation") was wrong: the hand encoder emits it
+        // for Vertical and the decoder restores the Horizontal default on absence.
+        // No corpus fixture is Vertical, which is how the byte gate missed it
+        // (found by the stage-4b swap, the stage-3b BoxRole.Separator class).
         Fields =
           [ req "activeIndex" (bindingOf TInt)
             req "children" (TList TNode)
+            omit "orientation" (TEnum "Orientation") (VEnum "Horizontal")
             opt "onSelect" (handlerOf "int" "number")
             // Phase 671 step 2 — also caught by the direct diff: present in
             // `controls-closure`, absent from the IDL, so it was silently dropped.
@@ -2259,7 +2283,8 @@ let private chartNode =
     )
 
 /// Fuaran-UI Phase 393: the legacy `Table` retired upstream and decode-upgrades to a
-/// static `DataGrid` carrying its header/row grid in `staticRows` (bare strings).
+/// static `DataGrid` carrying its header/row grid in `staticRows`. Cells are
+/// `TextSource` (stage 4b) — a `Literal` still renders as the bare wire string.
 let private tableNode =
     VNode(
         "table-1",
@@ -2268,11 +2293,11 @@ let private tableNode =
           "source", staticOpaque
           "staticRows",
           VRecord
-              [ "headers", VList [ VStr "Term"; VStr "Definition" ]
+              [ "headers", VList [ lit "Term"; lit "Definition" ]
                 "rows",
                 VList
-                    [ VList [ VStr "MVU"; VStr "Model-View-Update" ]
-                      VList [ VStr "DSL"; VStr "Domain-specific language" ] ] ] ]
+                    [ VList [ lit "MVU"; lit "Model-View-Update" ]
+                      VList [ lit "DSL"; lit "Domain-specific language" ] ] ] ]
     )
 
 let private mapNode =
