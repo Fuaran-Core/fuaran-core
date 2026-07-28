@@ -1283,10 +1283,10 @@ let private shape =
                 req "style" (TRecord "DrawStyle") ] }
           { Tag = "Label"
             Fields =
-              [ req "style" (TRecord "DrawStyle")
+              [ req "x" TFloat
+                req "y" TFloat
                 req "text" TS
-                req "x" TFloat
-                req "y" TFloat ] } ] }
+                req "style" (TRecord "DrawStyle") ] } ] }
 
 /// Phase 679 — a `Switch` case: the match string plus the node it selects. The
 /// tier holds this as a `(string * Node) tuple list`, which the IDL has no type
