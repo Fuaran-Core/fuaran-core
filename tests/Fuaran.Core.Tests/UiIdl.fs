@@ -392,6 +392,13 @@ let private action =
           { Tag = "ReadFileBody"
             Fields =
               [ req "fileRef" TStr
+                // The runtime file handle (the boxed browser `File` blob) rides
+                // BESIDE the wire id as a host-only slot (Phase 692 stage 2) —
+                // never encoded, restored to `None` on decode, exactly the
+                // hand-written `FileRef.Handle` semantics ("only Ref.Id ever
+                // serialises"). Without it the generated case could name a file
+                // it can no longer read.
+                hostOnly "fileHandle" "obj option" "None"
                 req "encoding" (TEnum "FileReadEncoding")
                 opt "onRead" (fn "string -> 'Msg" "(body: string) => Msg" "(fun (_: string) -> (\"<closure>\" :> obj))") ] }
           // `ApiEndpoint` is a bare string on the wire; `into` is the declarative
