@@ -203,16 +203,18 @@ let private encBoxRole (v: BoxRole) : JVal =
     | BoxRole.Card -> JStr "Card"
     | BoxRole.Group -> JStr "Group"
 
-let rec private encNode (n: Node<'Msg>) : JVal =
-    let kind =
-        match n.Kind with
-        | NodeKind.Heading s -> encHeadingSpec s
-        | NodeKind.Badge s -> encBadgeSpec s
-        | NodeKind.Button s -> encButtonSpec s
-        | NodeKind.Metric s -> encMetricSpec s
-        | NodeKind.Box s -> encBoxSpec s
-        | NodeKind.Markdown s -> encMarkdownSpec s
-        | NodeKind.Tabs s -> encTabsSpec s
+let rec private encNodeKind (k: NodeKind<'Msg>) : JVal =
+    match k with
+    | NodeKind.Heading s -> encHeadingSpec s
+    | NodeKind.Badge s -> encBadgeSpec s
+    | NodeKind.Button s -> encButtonSpec s
+    | NodeKind.Metric s -> encMetricSpec s
+    | NodeKind.Box s -> encBoxSpec s
+    | NodeKind.Markdown s -> encMarkdownSpec s
+    | NodeKind.Tabs s -> encTabsSpec s
+
+and private encNode (n: Node<'Msg>) : JVal =
+    let kind = encNodeKind n.Kind
 
     JObj [ "id", JStr n.Id; "kind", kind ]
 
@@ -264,6 +266,12 @@ and private encTabsSpec<'Msg> (s: TabsSpec<'Msg>) : JVal =
     Canon.typed "Tabs" ([ Some("children", JArr(List.map encNode s.Children)); Some("onCommit", JStr "<closure>"); (s.OnSelect |> Option.map (fun v -> "onSelect", JStr "<closure>")) ] |> List.choose id)
 
 let encodeNode (n: Node<'Msg>) : string = Canon.render (encNode n)
+
+/// JVal-level accessors (Phase 694) — for host codecs that splice generated
+/// encodings into a larger canonical document (e.g. a TreeOp codec).
+let encodeNodeJson (n: Node<'Msg>) : JVal = encNode n
+
+let encodeNodeKindJson (k: NodeKind<'Msg>) : JVal = encNodeKind k
 
 let private dObj (j: JVal) : Result<(string * JVal) list, string> =
     match j with

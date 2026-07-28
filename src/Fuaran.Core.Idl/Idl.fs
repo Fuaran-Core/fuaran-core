@@ -1760,7 +1760,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         let encNodeDecl =
             let arms =
                 kinds
-                |> List.map (fun k -> sprintf "        | NodeKind.%s s -> enc%sSpec s" k.Tag k.Tag)
+                |> List.map (fun k -> sprintf "    | NodeKind.%s s -> enc%sSpec s" k.Tag k.Tag)
                 |> String.concat "\n"
 
             // Phase 690 — the envelope rides the same `List.choose id` presence
@@ -1769,16 +1769,19 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // and on a kind field. No envelope ⇒ the original two-key literal.
             let body =
                 if List.isEmpty idl.NodeFields then
-                    "\n\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
+                    "\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
                 else
                     let pieces = idl.NodeFields |> List.map (specPieceOf "n") |> String.concat "; "
 
-                    sprintf
-                        "\n\n    JObj([ Some(\"id\", JStr n.Id); Some(\"kind\", kind); %s ] |> List.choose id)"
-                        pieces
+                    sprintf "\n    JObj([ Some(\"id\", JStr n.Id); Some(\"kind\", kind); %s ] |> List.choose id)" pieces
 
-            sprintf "let rec private encNode (n: Node%s) : JVal =\n    let kind =\n        match n.Kind with\n" nodeArgs
+            // Phase 694 — the kind dispatch is its own function (was inline in
+            // encNode) so the JVal accessors below can expose it: a host codec
+            // splicing a bare NodeKind (a TreeOp `EditNode.newKind`) reaches the
+            // same single encoder the node envelope uses.
+            sprintf "let rec private encNodeKind (k: NodeKind%s) : JVal =\n    match k with\n" nodeArgs
             + arms
+            + sprintf "\n\nand private encNode (n: Node%s) : JVal =\n    let kind = encNodeKind n.Kind\n" nodeArgs
             + body
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
@@ -1845,6 +1848,24 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
               enums |> List.map enumEncoder
               [ recGroup ]
               [ sprintf "let encodeNode (n: Node%s) : string = Canon.render (encNode n)" nodeArgs ]
+              // Phase 694 — JVal-level accessors for host codecs that splice
+              // generated encodings into a larger canonical document (the
+              // tier's TreeOp codec re-points at these when the hand-written
+              // node encoder is deleted). Node + kind always; the two envelope
+              // records only when the vocabulary declares them (the spike
+              // vocabulary has neither).
+              [ sprintf
+                    "/// JVal-level accessors (Phase 694) — for host codecs that splice generated\n/// encodings into a larger canonical document (e.g. a TreeOp codec).\nlet encodeNodeJson (n: Node%s) : JVal = encNode n"
+                    nodeArgs
+                sprintf "let encodeNodeKindJson (k: NodeKind%s) : JVal = encNodeKind k" nodeArgs ]
+              (if records |> List.exists (fun r -> r.Name = "StateBehaviour") then
+                   [ sprintf "let encodeStateBehaviourJson (s: StateBehaviour%s) : JVal = encStateBehaviour s" nodeArgs ]
+               else
+                   [])
+              (if records |> List.exists (fun r -> r.Name = "SemanticStyle") then
+                   [ "let encodeSemanticStyleJson (s: SemanticStyle) : JVal = encSemanticStyle s" ]
+               else
+                   [])
               [ decodeHelpers () ]
               enums |> List.map enumDecoder
               [ decGroup ]
