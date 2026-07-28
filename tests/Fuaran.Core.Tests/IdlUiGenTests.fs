@@ -144,14 +144,22 @@ let private form1: G.Node<unit> =
       Kind =
         G.NodeKind.Form
             { Fields =
+                // Phase 692 gap-closure: every control `value` slot is now optional
+                // (Phase 596 auto-bind — absence is legal wire), so an explicit
+                // value wraps in `Some`.
                 [ field
                       "name"
-                      (G.FormFieldKind.Text(Some noop, G.Binding.Static(Some "")))
+                      (G.FormFieldKind.Text(Some noop, Some(G.Binding.Static(Some ""))))
                       "Name"
                       true
                       (Some "Full legal name")
-                  field "age" (G.FormFieldKind.Number(Some noop, G.Binding.Static(Some 0.0))) "Age" false None
-                  field "agree" (G.FormFieldKind.Checkbox(Some noop, G.Binding.Static(Some false))) "I agree" true None
+                  field "age" (G.FormFieldKind.Number(Some noop, Some(G.Binding.Static(Some 0.0)))) "Age" false None
+                  field
+                      "agree"
+                      (G.FormFieldKind.Checkbox(Some noop, Some(G.Binding.Static(Some false))))
+                      "I agree"
+                      true
+                      None
                   field
                       "tier"
                       (G.FormFieldKind.Choice(
@@ -159,12 +167,17 @@ let private form1: G.Node<unit> =
                           G.Binding.Static(
                               Some [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ]
                           ),
-                          G.Binding.Static(Some "basic")
+                          Some(G.Binding.Static(Some "basic"))
                       ))
                       "Tier"
                       false
                       None
-                  field "notes" (G.FormFieldKind.TextArea(Some noop, 5, G.Binding.Static(Some ""))) "Notes" false None ]
+                  field
+                      "notes"
+                      (G.FormFieldKind.TextArea(Some noop, 5, Some(G.Binding.Static(Some ""))))
+                      "Notes"
+                      false
+                      None ]
               OnSubmit = G.Action.Chain []
               SubmitLabel = lit "Save"
               Disabled = Some(G.Binding.State(Some false, "formBusy")) } }
@@ -181,14 +194,16 @@ let private grid1: G.Node<unit> =
       Kind =
         G.NodeKind.DataGrid
             { Columns =
-                [ ({ Format = G.CellFormat.None
+                [ ({ Field = None
+                     Format = G.CellFormat.None
                      Kind = G.CellKindErased.Text
                      Label = "Channel"
-                     Value = (fun _ -> box "")
+                     Value = Some(fun _ -> box "")
                      Width = G.ColumnWidth.Auto }
                   : G.ColumnErased<unit>) ]
               Editable = false
               RowKey = Some(fun _ -> "")
+              RowKeyField = None
               Source = G.Binding.Static(Some())
               StaticRows = None
               OnRowClick = None } }
@@ -207,6 +222,7 @@ let private table1: G.Node<unit> =
             { Columns = []
               Editable = false
               RowKey = None
+              RowKeyField = None
               Source = G.Binding.Static(Some())
               StaticRows =
                 Some

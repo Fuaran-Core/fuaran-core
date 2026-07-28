@@ -42,6 +42,29 @@ type ClosureSig =
       TypeScript: string
       Placeholder: string }
 
+/// The host codec of a [[THosted]] slot (Phase 692 gap-closure) — a wire-visible
+/// field whose value is a HOST type with its own canonical codec, spliced into the
+/// generated module verbatim. The motivating case is `Binding.Transform`: its
+/// `source` is a `Fuaran.Core.DataSource` and its `pipeline` a `Fuaran.Core.Transform
+/// list`, rendered by Core's own `ColumnCodec` / `DataFrameCodec` under the same
+/// `Canon` discipline — re-modelling that vocabulary as IDL unions would mint a
+/// second set of types beside the ones the evaluator actually consumes.
+///
+/// `FSharp` is the slot's host type, verbatim. `Encode` is an F# expression of type
+/// `'host -> JVal`; `Decode` an F# expression of type `JVal -> Result<'host, string>`.
+/// Both are emitted into the generated module, so (like a [[ClosureSig]] placeholder)
+/// they may reference generated-internal declarations (`encBinding`, a record codec)
+/// as well as fully-qualified host functions.
+///
+/// Everywhere else — the schema, the TypeScript backend, the interpreter's
+/// `IdlValue` carrier, the sampler — a hosted slot behaves exactly like [[TJson]]:
+/// the JSON is carried verbatim, because its content is the host codec's business,
+/// not the schema's.
+type HostedCodec =
+    { FSharp: string
+      Encode: string
+      Decode: string }
+
 /// The structural type of a field's value on the wire.
 type IdlType =
     | TStr
@@ -76,6 +99,12 @@ type IdlType =
     /// wire must round-trip faithfully at any nesting depth. Reaching for `TOpaque`
     /// here is silent data loss (Phase 676).
     | TJson
+    /// A wire-visible field whose value is a HOST type with its own canonical codec
+    /// (see [[HostedCodec]]) — `Binding.Transform`'s `source` / `pipeline`, and the
+    /// slot-specific transparent-Static convention of a `Range` control's value.
+    /// The generated F# declares the real host type and delegates to the named
+    /// codec expressions; every other backend carries the JSON verbatim ([[TJson]]).
+    | THosted of HostedCodec
     /// A *non-discriminated* object (a plain F# record) — an object with named
     /// fields and **no `$type` tag** (`SelectOption`, `FormField`, `FilterSpec`,
     /// `TabHeader`, a capability-invoke arg …). Distinct from [[TUnion]] (which
@@ -289,6 +318,9 @@ module Encode =
         // escapes per rule 6 and lays floats out per rule 5, so a passthrough
         // inherits all three instead of re-implementing them.
         | TJson, VJson j -> Ok j
+        // A hosted slot's content is the host codec's business — the interpreter
+        // carries it verbatim, exactly as TJson (see [[HostedCodec]]).
+        | THosted _, VJson j -> Ok j
         | TRecord name, VRecord fields ->
             match findRecord name idl with
             | None -> Error(sprintf "unknown record '%s'" name)
@@ -456,6 +488,9 @@ module Decode =
         // A shape check here would be wrong by definition: the field's whole
         // contract is that its content is not the schema's business.
         | TJson, j -> Ok(VJson j)
+        // A hosted slot decodes verbatim in the interpreter — only the generated
+        // F# runs the real host codec (see [[HostedCodec]]).
+        | THosted _, j -> Ok(VJson j)
         | TRecord name, JObj fs ->
             match idl.Records |> List.tryFind (fun r -> r.Name = name) with
             | None -> Error(sprintf "unknown record '%s'" name)
@@ -618,6 +653,9 @@ module Gen =
               "open"
               "or"
               "override"
+              // Reserved-for-future (FS0046 warns on bare use) — hit by
+              // `Binding.Transform`'s `params` field; escaping is harmless.
+              "params"
               "private"
               "public"
               "rec"
@@ -779,6 +817,8 @@ module Gen =
         // Phase 676 — a JSON slot is a real `JVal`, NOT erased to `unit`: it carries
         // data in both directions, which is the whole difference from `TOpaque`.
         | TJson -> "JVal"
+        // A hosted slot declares the real host type — that is its whole point.
+        | THosted h -> h.FSharp
         | TRecord n -> applied n []
         | TMap vt -> "Map<string, " + fsType vt + ">"
 
@@ -877,6 +917,9 @@ module Gen =
         // escapes per rule 6 and lays floats out per rule 5, so identity inherits all
         // three rather than re-implementing them — the risk this phase named.
         | TJson -> "id"
+        // The named host encode expression, verbatim ('host -> JVal). Canonicality is
+        // inherited: the host codec builds a JVal that renders through the same Canon.
+        | THosted h -> h.Encode
         | TRecord n -> "enc" + n
         | TMap vt -> sprintf "(fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, %s v)))" (encFn vt)
 
@@ -1107,6 +1150,8 @@ module Gen =
         // Phase 676 — accept any JSON verbatim; a shape check would contradict the
         // field's contract.
         | TJson -> "dJson"
+        // The named host decode expression, verbatim (JVal -> Result<'host, string>).
+        | THosted h -> h.Decode
         | TRecord n -> "dec" + n
         | TMap vt -> sprintf "(dMap %s)" (decFn vt)
 
@@ -1341,6 +1386,23 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
                 for u in idl.Unions do
                     if sg.FSharp.Contains u.Name then
+                        visit (TUnion(u.Name, []))
+            // Same name-scan for a hosted slot: its type and codec expressions may
+            // reference declared types AND generated codecs (`encRangePair`,
+            // `decBinding`) — a type reached only that way must still be emitted.
+            | THosted h ->
+                let text = h.FSharp + " " + h.Encode + " " + h.Decode
+
+                for e in idl.Enums do
+                    if text.Contains e.Name then
+                        enums.Add e.Name |> ignore
+
+                for r in idl.Records do
+                    if text.Contains r.Name then
+                        visit (TRecord r.Name)
+
+                for u in idl.Unions do
+                    if text.Contains u.Name then
                         visit (TUnion(u.Name, []))
             | _ -> ()
 
@@ -1823,8 +1885,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TOpaque -> JObj [ "type", JStr "string"; "const", JStr "<opaque>" ]
         // Phase 676 — "any JSON": the schema deliberately does not constrain content
         // the encoder does not decompose, matching how the hand-written schema already
-        // renders the rule-12 structured-payload positions.
-        | TJson -> JBool true
+        // renders the rule-12 structured-payload positions. A hosted slot is the same
+        // deliberate abstention: its content belongs to the host codec's own spec.
+        | TJson
+        | THosted _ -> JBool true
         | TRecord n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TMap vt -> JObj [ "type", JStr "object"; "additionalProperties", schemaOf vt ]
 
@@ -1982,7 +2046,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TOpaque -> VOpaque
         // Phase 676 — sample real JSON, built from the SAME adversarial pools, so the
         // passthrough is stressed on escaping and float layout like every other leg.
-        | TJson ->
+        // A hosted slot samples the same way: both the interpreter and the TS backend
+        // carry it verbatim, so arbitrary JSON stresses exactly what they share.
+        | TJson
+        | THosted _ ->
             VJson(
                 match nextInt r % 4 with
                 | 0 -> JStr(pick r stringPool)
@@ -2167,7 +2234,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TFn _ -> "(() => '\"<closure>\"')"
         | TOpaque -> "(() => '\"<opaque>\"')"
         // Phase 676 — `encJson` renders the parsed value canonically (see the prelude).
-        | TJson -> "encJson"
+        // A hosted slot is verbatim JSON to the TS backend, like the interpreter.
+        | TJson
+        | THosted _ -> "encJson"
         | TRecord n -> "enc" + n
         | TMap vt ->
             "((m) => '{' + Object.keys(m).sort().map((k) => encStr(k) + ':' + ("
@@ -2323,8 +2392,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TClosure
         | TFn _
         | TOpaque -> "(() => null)"
-        // Phase 676 — keep the parsed JSON as-is.
-        | TJson -> "((x) => x)"
+        // Phase 676 — keep the parsed JSON as-is. Hosted slots identically.
+        | TJson
+        | THosted _ -> "((x) => x)"
         | TRecord n -> "dec" + n
         | TMap vt -> "dMap(" + tsDecFn vt + ")"
 

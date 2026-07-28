@@ -29,18 +29,21 @@ open Fuaran.Core.Idl
 //   * non-discriminated *records* (`TRecord`, no `$type`) — `FormField`,
 //     `FilterSpec`, `TabHeader`, `ColumnErased`, `ContentHash`, `EffectClass`;
 //   * string-keyed *maps* (`TMap`) — `Custom.props`, `FragmentRef.args`;
-//   * the real recursive `TextSource` / `Binding<'T>` (Static/Query/Filter/State/
-//     Computed/Local/Format/Invoke) / `Action` / `CellFormat` / `HoleDecl` unions.
+//   * the real recursive `TextSource` / `Binding<'T>` (now at FULL case parity
+//     with the hand-written tier — Static/Query/Filter/Selection/State/Computed/
+//     I18n/Local/Format/Transform/Invoke, the Phase 692 gap-closure) / `Action`
+//     / `CellFormat` / `HoleDecl` unions;
+//   * HOSTED slots (`THosted`) — `Binding.Transform`'s `source` / `pipeline`
+//     delegate to `Fuaran.Core.ColumnCodec` / `DataFrameCodec`, and the `Range`
+//     control's transparent-Static value carries a slot-specific codec.
 //
-// NOT covered here (out of the structural-encoder scope): the node envelope
-// (`state` / `style` / `accessibility` — no corpus Node fixture carries them);
-// multi-param generic specs (`GridSpecOf<'row,'Msg>` — a typed *author* facade,
-// not wire-visible); the compiled `Gen.fsharpModule` leg for the real tier
-// (proven here via the schema-driven interpreter); the `Types.fs` switch-over;
-// `grid-transform` (a `Binding.Transform` rendered by `Fuaran.Core.DataFrame`'s
-// own codecs); and the two `null`-bearing fixtures (`multiselect-1` +
-// `form-segmented` — a `Binding.Static None` renders JSON `null`, which the
-// FSharp.Core `JVal` model has no case for: a wire-null decision for the owner).
+// The earlier exclusions have all since landed: the node envelope (Phase 690),
+// `'Msg` threading via `TFn` (Phase 691), `grid-transform` + the whole Transform
+// family and the Phase 596 auto-bind omissions (the Phase 692 gap-closure — the
+// full 85-fixture node corpus now round-trips through the generated layer, the
+// tier-side `GeneratedLayerTests` pin). Still out of scope: multi-param generic
+// specs (`GridSpecOf<'row,'Msg>` — a typed *author* facade, not wire-visible)
+// and the `Types.fs` switch-over itself (Phase 692's remaining work).
 // ---------------------------------------------------------------------------
 
 // ─── Enums (bare-string DUs on the wire) ───────────────────────────────────
@@ -231,11 +234,14 @@ let private textSource =
           { Tag = "Bound"
             Fields = [ req "binding" (TUnion("Binding", [ TStr ])) ] } ] }
 
-/// `Binding<'T>` — the real recursive binding union. The Display corpus uses
-/// `Static` (and `Sparkline` an opaque-valued `Static`); the closure-bearing
-/// `Query` / `Computed` cases are modelled too (now expressible via `TClosure`),
-/// exercising a closure *inside* a union. The data-heavy cases (`I18n` / `Local`
-/// / `Format` / `Transform` / `Invoke`) ride later slices with their owning kinds.
+/// `Binding<'T>` — the real recursive binding union, now at full case parity with
+/// the hand-written tier (the Phase 692 gap-closure): every case the hand-written
+/// encoder can emit is modelled — `Static` / `Query` / `Filter` / `Selection` /
+/// `State` / `Computed` / `I18n` / `Local` / `Format` / `Transform` / `Invoke`.
+/// The `Deferred<'T>` trio (`Pending` / `Ready` / `Error`) is deliberately NOT
+/// here: it is not a `Binding` case at all but a separate runtime-only envelope
+/// ("a runtime value (the resolver produces it); not wire-serialised" — the
+/// resolver's async view of an `Invoke`), and the corpus carries no occurrence.
 let private binding =
     { Name = "Binding"
       Params = [ "T" ]
@@ -246,13 +252,32 @@ let private binding =
             Fields = [ opt "value" (TVar "T") ] }
           // Phase 671 step 2 — the direct byte-diff caught this: the wire has NOT
           // carried `accessor` since 0.2.0 (the encoder renders `dependsOn` +
-          // `name` only), so declaring it here made the generated encoder emit a
-          // field that does not exist. `dependsOn` rides as a string array,
-          // omitted when empty.
+          // `name` only). The closure survives as a HOST-ONLY slot (never encoded,
+          // restored to the identity projection on decode) so the generated case
+          // can hold everything the hand-written one holds. `dependsOn` rides as a
+          // string array, omitted when empty.
           { Tag = "Query"
-            Fields = [ opt "dependsOn" (TList TStr); req "name" TStr ] }
+            Fields =
+              [ hostOnly "accessor" "obj -> 'T" "(fun (raw: obj) -> unbox raw)"
+                opt "dependsOn" (TList TStr)
+                req "name" TStr ] }
+          // `defaultValue` (Fuaran-UI 0.2.0) rides the wire when present, omitted
+          // when None — the value the resolver yields before the filter is first
+          // written.
           { Tag = "Filter"
-            Fields = [ req "name" TStr ] }
+            Fields = [ opt "defaultValue" (TVar "T"); req "name" TStr ] }
+          // Row selection on `nodeId` (Fuaran-UI 0.2.9/0.2.10). `defaultValue` and
+          // `field` (the declarative row-field projection) ride when present; the
+          // accessor closure is host-only — the hand-written POLICY decoder
+          // synthesises `projectSelectionField field` when `field` is present, a
+          // context-dependent restoration the structural placeholder (identity)
+          // deliberately does not attempt.
+          { Tag = "Selection"
+            Fields =
+              [ hostOnly "accessor" "obj -> 'T" "(fun (raw: obj) -> unbox raw)"
+                opt "defaultValue" (TVar "T")
+                opt "field" TStr
+                req "nodeId" TStr ] }
           { Tag = "State"
             Fields = [ opt "defaultValue" (TVar "T"); req "key" TStr ] }
           { Tag = "Computed"
@@ -275,6 +300,37 @@ let private binding =
               [ req "format" (TUnion("Format", []))
                 req "locale" (TUnion("LocaleSource", []))
                 req "source" (TUnion("Binding", [ TFloat ])) ] }
+          // i18n catalog lookup. `args` is a name-keyed bag of `Binding<obj>`
+          // placeholder sources, omitted when None. The obj-erased positions
+          // (here and `Transform.params`) instantiate at `JVal` — the typed
+          // verbatim carrier — because `TOpaque` would erase real defaultValues
+          // to a sentinel and lose bytes.
+          { Tag = "I18n"
+            Fields = [ opt "args" (TMap(TUnion("Binding", [ TJson ]))); req "key" TStr ] }
+          // Declarative dataframe transform (Fuaran-UI Phase 282/424 — the Compute
+          // layer). `source` / `pipeline` are HOSTED slots: real `Fuaran.Core`
+          // types rendered by Core's own codecs under the same `Canon` discipline,
+          // so the composite splices in canonical and byte-stable ($type < params
+          // < pipeline < source after the Ordinal sort). `params` binds pipeline
+          // `ColExpr.Param` names to scalar binding sources, omitted when empty.
+          { Tag = "Transform"
+            Fields =
+              [ opt "params" (TList(TRecord "TransformParam"))
+                req
+                    "pipeline"
+                    (TList(
+                        THosted
+                            { FSharp = "Fuaran.Core.Transform"
+                              Encode = "Fuaran.Core.DataFrameCodec.encodeTransform"
+                              Decode =
+                                "(fun __j -> Fuaran.Core.DataFrameCodec.decodeTransform __j |> Result.mapError string)" }
+                    ))
+                req
+                    "source"
+                    (THosted
+                        { FSharp = "Fuaran.Core.DataSource"
+                          Encode = "Fuaran.Core.ColumnCodec.encodeJson"
+                          Decode = "(fun __j -> Fuaran.Core.ColumnCodec.decodeJson __j |> Result.mapError string)" }) ] }
           // Host-registered capability value. Same wire shape as `Action.Invoke`.
           { Tag = "Invoke"
             Fields = [ req "args" (TList(TRecord "InvokeArg")); req "capabilityId" TStr ] } ] }
@@ -407,9 +463,18 @@ let private layoutMode =
           { Tag = "Grid"
             Fields = [ req "cols" TInt; opt "templateColumns" TStr ] } ] }
 
-/// `FormFieldKind<'Msg>` — the per-field input-shape union. `options` / `value`
-/// on the choice cases are opaque-`Binding`s on the wire; `onChange` / `onToggle`
-/// are closures.
+/// `FormFieldKind<'Msg>` — the per-field input-shape union, shared by `Form`
+/// fields AND `Filters` chips (the 0.2.0 filters-unification — the separate
+/// `FilterKind` union this file carried until the Phase 692 gap-closure was
+/// pre-unification drift).
+///
+/// **Every `value` slot is Optional (Phase 596 auto-bind).** The wire contract is
+/// that a control may omit `value` entirely: a filter chip auto-binds
+/// `Filter(name)`, a form field `State(field id, typed placeholder)`. That
+/// synthesis is CONTEXT-dependent — it turns on the enclosing record's `name` /
+/// `id` — so it is policy, owned by the hand-written decoder above this layer;
+/// the structural layer carries absence as absence (`None` ⇔ no key), which is
+/// what makes the round-trip byte-exact without expressing the context rule.
 let private formFieldKind =
     { Name = "FormFieldKind"
       Params = []
@@ -417,74 +482,74 @@ let private formFieldKind =
         [ { Tag = "Text"
             Fields =
               [ opt "onChange" (handlerOf "string" "string")
-                req "value" (TUnion("Binding", [ TStr ])) ] }
+                opt "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Number"
             Fields =
               [ opt "onChange" (handlerOf "float" "number")
-                req "value" (TUnion("Binding", [ TFloat ])) ] }
+                opt "value" (TUnion("Binding", [ TFloat ])) ] }
           { Tag = "Checkbox"
             Fields =
               [ opt "onToggle" (handlerOf "bool" "boolean")
-                req "value" (TUnion("Binding", [ TBool ])) ] }
+                opt "value" (TUnion("Binding", [ TBool ])) ] }
           { Tag = "Choice"
             Fields =
               [ opt "onChange" (handlerOf "string option" "string | null")
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
-                req "value" (TUnion("Binding", [ TStr ])) ] }
+                opt "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "TextArea"
             Fields =
-              [ opt "onChange" (handlerOf "float" "number")
+              [ opt "onChange" (handlerOf "string" "string")
                 req "rows" TInt
-                req "value" (TUnion("Binding", [ TStr ])) ] }
+                opt "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "RangedNumber"
             Fields =
               [ opt "onChange" (handlerOf "float" "number")
-                req "value" (TUnion("Binding", [ TFloat ]))
+                opt "value" (TUnion("Binding", [ TFloat ]))
                 opt "min" TFloat
                 opt "max" TFloat
                 opt "step" TFloat ] }
+          // Dual-thumb numeric range (0.2.0 — absorbed FilterKind.RangeFilter).
+          // The value slot is HOSTED because its Static case is TRANSPARENT on
+          // the wire: `Binding.Static (Some pair)` encodes as the bare
+          // `{"max":…,"min":…}` object (no `$type`), while every other binding
+          // case keeps its tagged form with a RangePair static payload. That is
+          // a property of this SLOT, not of the Binding union, so the slot
+          // carries its own codec over the generated `encBinding` / `decBinding`
+          // + `RangePair` record codecs.
+          { Tag = "Range"
+            Fields =
+              [ opt "max" TFloat
+                opt "min" TFloat
+                opt "onChange" (handlerOf "float * float" "[number, number]")
+                opt "step" TFloat
+                opt
+                    "value"
+                    (THosted
+                        { FSharp = "Binding<RangePair>"
+                          Encode =
+                            "(fun (v: Binding<RangePair>) -> match v with | Binding.Static(Some p) -> encRangePair p | __other -> encBinding encRangePair __other)"
+                          Decode =
+                            "(fun (j: JVal) -> match j with | JObj __rf when not (__rf |> List.exists (fun (k, _) -> k = \"$type\")) -> decRangePair j |> Result.map (fun p -> Binding.Static(Some p)) | __other -> decBinding decRangePair __other)" }) ] }
           { Tag = "SegmentedChoice"
             Fields =
               [ opt "onChange" (handlerOf "string option" "string | null")
                 req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
                 req "orientation" (TEnum "Orientation")
-                req "value" (TUnion("Binding", [ TStr ])) ] }
+                opt "value" (TUnion("Binding", [ TStr ])) ] }
           { Tag = "Date"
             Fields =
               [ opt "onChange" (handlerOf "string option" "string | null")
-                req "value" (TUnion("Binding", [ TStr ]))
+                opt "value" (TUnion("Binding", [ TStr ]))
                 req "variant" (TEnum "DateVariant")
                 opt "min" TStr
                 opt "max" TStr
                 opt "step" TFloat ] } ] }
 
-/// `FilterKind<'Msg>` — the filter-chip shape union. Fuaran-UI 0.2.x renamed the case
-/// tags to match `FormFieldKind` (`Text` / `Choice` / `SegmentedChoice`) and typed the
-/// choice payloads: `options` carries a real `SelectOption` list, `value` a real string.
-let private filterKind =
-    { Name = "FilterKind"
-      Params = []
-      Cases =
-        [ { Tag = "Text"
-            Fields =
-              [ opt "onChange" (handlerOf "string" "string")
-                req "value" (TUnion("Binding", [ TStr ])) ] }
-          { Tag = "Choice"
-            Fields =
-              [ opt "onChange" (handlerOf "string option" "string | null")
-                req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
-                req "value" (TUnion("Binding", [ TStr ])) ] }
-          // RangeFilter's value is opaque on the wire (no corpus fixture yet).
-          { Tag = "Range"
-            Fields =
-              [ opt "onChange" (handlerOf "float * float" "[number, number]")
-                req "value" TOpaque ] }
-          { Tag = "SegmentedChoice"
-            Fields =
-              [ opt "onChange" (handlerOf "string option" "string | null")
-                req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
-                req "orientation" (TEnum "Orientation")
-                req "value" (TUnion("Binding", [ TStr ])) ] } ] }
+// _(The separate `FilterKind` union this file carried until the Phase 692
+// gap-closure was pre-unification drift: the hand-written tier's `FilterSpec`
+// holds a `FormFieldKind` — one control vocabulary for forms and filter strips
+// since the 0.2.0 filters-unification. `filters-declarative`'s Range chip is
+// what surfaced it.)_
 
 /// `ColumnWidth` — a `DataGrid` column's sizing intent.
 let private columnWidth =
@@ -652,9 +717,23 @@ let private formFieldRecord =
 let private filterSpecRecord =
     { Name = "FilterSpec"
       Fields =
-        [ req "kind" (TUnion("FilterKind", []))
+        [ req "kind" (TUnion("FormFieldKind", []))
           req "label" (TUnion("TextSource", []))
           req "name" TStr ] }
+
+/// One `Binding.Transform` parameter — binds a pipeline `ColExpr.Param` name to a
+/// scalar binding source. `from` instantiates `Binding` at `JVal` (the typed
+/// verbatim carrier for obj-erased positions).
+let private transformParamRecord =
+    { Name = "TransformParam"
+      Fields = [ req "from" (TUnion("Binding", [ TJson ])); req "name" TStr ] }
+
+/// The `{max, min}` payload of a `Range` control's value — the wire shape of the
+/// hand-written tier's `(min, max)` float pair (the IDL has no tuple type; the
+/// record IS the wire object, so nothing is lost in the trade).
+let private rangePairRecord =
+    { Name = "RangePair"
+      Fields = [ req "max" TFloat; req "min" TFloat ] }
 
 let private tabHeaderRecord =
     { Name = "TabHeader"
@@ -663,16 +742,20 @@ let private tabHeaderRecord =
           opt "icon" TStr
           opt "disabled" (TUnion("Binding", [ TBool ])) ] }
 
-/// A `DataGrid` column, row-erased: `value` is a projection closure; `kind` /
-/// `width` are unions; `format` is a `CellFormat`.
+/// A `DataGrid` column, row-erased. Fuaran-UI Phase 425: `value` (the projection
+/// closure) and `field` (the declarative row-property name) are SIBLING optional
+/// slots, each omitted-when-None — a closure-authored column keeps
+/// `"value":"<closure>"` byte-stable, a decoded/field-named column carries
+/// `"field":"…"` instead. `format` / `width` omitted-when-default (Phase 460).
 let private columnErasedRecord =
     { Name = "ColumnErased"
       Fields =
-        [ omit "format" (TUnion("CellFormat", [])) (VUnion("None", []))
+        [ opt "field" TStr
+          omit "format" (TUnion("CellFormat", [])) (VUnion("None", []))
           req "kind" (TUnion("CellKindErased", []))
           req "label" TStr
           // `obj -> CellValue`; `CellValue` is a host type, so the result erases.
-          req "value" (projOf "obj" "obj" "(row: unknown) => unknown" "(fun _ -> (\"<closure>\" :> obj))")
+          opt "value" (projOf "obj" "obj" "(row: unknown) => unknown" "(fun _ -> (\"<closure>\" :> obj))")
           omit "width" (TUnion("ColumnWidth", [])) (VUnion("Auto", [])) ] }
 
 /// One button of a `CellKindErased.ButtonGroup` (`onClick` is a closure).
@@ -915,10 +998,14 @@ let layoutKinds: IdlKind list =
             req "open" (bindingOf TBool) ] }
       { Tag = "Modal"
         Category = "Layout"
+        // `onDismiss` optional since Fuaran-UI Phase 426: `Some action` encodes
+        // exactly as before; `None` omits the key and arms the renderer's `Open`
+        // write-back default. The IDL carried it Required until the Phase 692
+        // gap-closure (`controls-declarative` omits it).
         Fields =
           [ req "children" (TList TNode)
             req "dismissable" TBool
-            req "onDismiss" (TUnion("Action", []))
+            opt "onDismiss" (TUnion("Action", []))
             req "open" (bindingOf TBool)
             opt "heading" TS ] }
       { Tag = "ScrollArea"
@@ -958,9 +1045,8 @@ let layoutKinds: IdlKind list =
 // `Binding.Local` / `Binding.Format` / `Binding.Invoke` cases, the closure-heavy
 // `FormFieldKind` / `FilterKind` unions, and — the headline — **non-discriminated
 // record** fields (`FormField` / `FilterSpec` / `InvokeArg` / `TabHeader`, all
-// `TRecord`). Deferred: multiselect-1 + form-segmented (a `Binding.Static None`
-// renders JSON `null`, which the FSharp.Core `JVal` model has no case for — a
-// wire-null-representation decision for the owning team, tracked on the phase).
+// `TRecord`). _(The old multiselect-1 / form-segmented deferral is closed: Phase
+// 677 removed null from the wire — absence omits the key — so both round-trip.)_
 let inputKinds: IdlKind list =
     [ { Tag = "Button"
         Category = "Input"
@@ -1014,20 +1100,23 @@ let inputKinds: IdlKind list =
 // TS)`), the erased `ColumnErased` record holding a `CellKindErased` union + a
 // `ColumnWidth` union, and closure-projection fields (`rowKey` / column `value`).
 // `DataGrid.source` / `Chart.source` / `Map.source` are opaque `Binding`s on the
-// wire. Deferred: grid-transform — its `Binding.Transform` embeds a
-// `Fuaran.Core.DataFrame` pipeline + `DataSource` rendered by Core's OWN codecs
-// (`DataFrameCodec` / `ColumnCodec`), a separate wire surface from the UI
-// structural layer this migration models.
+// wire — except when they carry a `Binding.Transform`, whose `source` / `pipeline`
+// are HOSTED slots rendered by Core's own codecs (`DataFrameCodec` / `ColumnCodec`)
+// under the same `Canon` discipline (the Phase 692 gap-closure; the old
+// grid-transform deferral is closed).
 let visKinds: IdlKind list =
     [ { Tag = "DataGrid"
         Category = "Visualisation"
         // Fuaran-UI 0.2.x: `editable` omit-when-false, `rowKey` optional (absent on a
         // static grid), + `staticRows` (the retired `Table` decode-upgrades into a static
         // DataGrid carrying its header/row grid). `source` stays opaque.
+        // Phase 425 — `rowKey` (closure) + `rowKeyField` (declarative) are
+        // sibling optional slots, mirroring the column-level `value` / `field`.
         Fields =
           [ req "columns" (TList(TRecord "ColumnErased"))
             omit "editable" TBool (VBool false)
             opt "rowKey" (projOf "obj" "string" "(row: unknown) => string" "(fun _ -> \"\")")
+            opt "rowKeyField" TStr
             req "source" (bindingOf TOpaque)
             opt "staticRows" (TRecord "StaticRows")
             opt "onRowClick" (handlerOf "obj" "unknown") ] }
@@ -1245,7 +1334,6 @@ let uiIdl: Idl =
           localFlushTrigger
           layoutMode
           formFieldKind
-          filterKind
           columnWidth
           cellKindErased
           holeValueSpace
@@ -1294,6 +1382,8 @@ let uiIdl: Idl =
           staticRowsRecord
           formFieldRecord
           filterSpecRecord
+          transformParamRecord
+          rangePairRecord
           tabHeaderRecord
           columnErasedRecord
           buttonGroupItemRecord
