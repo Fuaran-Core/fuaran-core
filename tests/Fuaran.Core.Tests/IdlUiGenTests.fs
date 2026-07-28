@@ -117,7 +117,7 @@ let private btnInvoke: G.Node<unit> =
       Kind =
         G.NodeKind.Button
             { Label = lit "Run model"
-              OnClick = G.Action.Invoke([ ({ Addr = "rows"; Value = "all" }: G.InvokeArg) ], "model.score")
+              OnClick = G.Action.Invoke("model.score", [ ({ Addr = "rows"; Value = "all" }: G.InvokeArg) ])
               Variant = G.ButtonVariant.Primary
               Icon = None
               Tooltip = None
@@ -144,43 +144,44 @@ let private form1: G.Node<unit> =
       Kind =
         G.NodeKind.Form
             { Fields =
-                // Phase 692 gap-closure: every control `value` slot is now optional
+                // Phase 692 gap-closure: every control `value` slot is optional
                 // (Phase 596 auto-bind — absence is legal wire), so an explicit
-                // value wraps in `Some`.
+                // value wraps in `Some`. Case-field ORDER is the hand-written
+                // tier's positional order (the swap-prep alignment).
                 [ field
                       "name"
-                      (G.FormFieldKind.Text(Some noop, Some(G.Binding.Static(Some ""))))
+                      (G.FormFieldKind.Text(Some(G.Binding.Static(Some "")), Some noop))
                       "Name"
                       true
                       (Some "Full legal name")
-                  field "age" (G.FormFieldKind.Number(Some noop, Some(G.Binding.Static(Some 0.0)))) "Age" false None
+                  field "age" (G.FormFieldKind.Number(Some(G.Binding.Static(Some 0.0)), Some noop)) "Age" false None
                   field
                       "agree"
-                      (G.FormFieldKind.Checkbox(Some noop, Some(G.Binding.Static(Some false))))
+                      (G.FormFieldKind.Checkbox(Some(G.Binding.Static(Some false)), Some noop))
                       "I agree"
                       true
                       None
                   field
                       "tier"
                       (G.FormFieldKind.Choice(
-                          Some noop,
                           G.Binding.Static(
                               Some [ { Label = "Basic"; Value = "basic" }; { Label = "Pro"; Value = "pro" } ]
                           ),
-                          Some(G.Binding.Static(Some "basic"))
+                          Some(G.Binding.Static(Some "basic")),
+                          Some noop
                       ))
                       "Tier"
                       false
                       None
                   field
                       "notes"
-                      (G.FormFieldKind.TextArea(Some noop, 5, Some(G.Binding.Static(Some ""))))
+                      (G.FormFieldKind.TextArea(Some(G.Binding.Static(Some "")), Some noop, 5))
                       "Notes"
                       false
                       None ]
               OnSubmit = G.Action.Chain []
               SubmitLabel = lit "Save"
-              Disabled = Some(G.Binding.State(Some false, "formBusy")) } }
+              Disabled = Some(G.Binding.State("formBusy", Some false)) } }
 
 /// `grid-1` — the `ColumnErased` record holding a `CellKindErased` union + a
 /// `ColumnWidth` union + a `CellFormat` + closure/opaque sentinels.
@@ -354,7 +355,7 @@ let private formatBindings: G.Node<unit> =
           Motion = None
           State = None
           Style = None
-          Kind = G.NodeKind.Markdown { Text = G.TextSource.Bound(G.Binding.Format(format, locale, source)) } }
+          Kind = G.NodeKind.Markdown { Text = G.TextSource.Bound(G.Binding.Format(source, format, locale)) } }
 
     { Id = "format-bindings"
       Accessibility = None

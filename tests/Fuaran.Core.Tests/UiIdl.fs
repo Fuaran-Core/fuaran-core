@@ -232,12 +232,24 @@ let private textSource =
         [ { Tag = "Literal"
             Fields = [ req "text" TStr ] }
           { Tag = "Bound"
-            Fields = [ req "binding" (TUnion("Binding", [ TStr ])) ] } ] }
+            Fields = [ req "binding" (TUnion("Binding", [ TStr ])) ] }
+          // i18n catalog lookup (Phase 692 swap-prep — the last TextSource case;
+          // no corpus fixture carries it, but the hand-written encoder emits it,
+          // so the generated union must hold it for the swap). `args` is a
+          // name-keyed JVal bag, always emitted (matching the hand-written arm).
+          { Tag = "I18n"
+            Fields = [ req "key" TStr; req "args" (TMap TJson) ] } ] }
 
 /// `Binding<'T>` — the real recursive binding union, now at full case parity with
 /// the hand-written tier (the Phase 692 gap-closure): every case the hand-written
 /// encoder can emit is modelled — `Static` / `Query` / `Filter` / `Selection` /
 /// `State` / `Computed` / `I18n` / `Local` / `Format` / `Transform` / `Invoke`.
+///
+/// **Case-field ORDER matches the hand-written tier's positional order, not the
+/// alphabetical convention** (Phase 692 swap-prep). The order is wire-free — the
+/// canonical renderer Ordinal-sorts keys and the decoder reads by name — but it
+/// IS the generated DU's positional shape, so matching the hand-written order
+/// lets every existing construction/match site compile unchanged at the swap.
 /// The `Deferred<'T>` trio (`Pending` / `Ready` / `Error`) is deliberately NOT
 /// here: it is not a `Binding` case at all but a separate runtime-only envelope
 /// ("a runtime value (the resolver produces it); not wire-serialised" — the
@@ -258,14 +270,14 @@ let private binding =
           // string array, omitted when empty.
           { Tag = "Query"
             Fields =
-              [ hostOnly "accessor" "obj -> 'T" "(fun (raw: obj) -> unbox raw)"
-                opt "dependsOn" (TList TStr)
-                req "name" TStr ] }
+              [ req "name" TStr
+                hostOnly "accessor" "obj -> 'T" "(fun (raw: obj) -> unbox raw)"
+                opt "dependsOn" (TList TStr) ] }
           // `defaultValue` (Fuaran-UI 0.2.0) rides the wire when present, omitted
           // when None — the value the resolver yields before the filter is first
           // written.
           { Tag = "Filter"
-            Fields = [ opt "defaultValue" (TVar "T"); req "name" TStr ] }
+            Fields = [ req "name" TStr; opt "defaultValue" (TVar "T") ] }
           // Row selection on `nodeId` (Fuaran-UI 0.2.9/0.2.10). `defaultValue` and
           // `field` (the declarative row-field projection) ride when present; the
           // accessor closure is host-only — the hand-written POLICY decoder
@@ -274,12 +286,12 @@ let private binding =
           // deliberately does not attempt.
           { Tag = "Selection"
             Fields =
-              [ hostOnly "accessor" "obj -> 'T" "(fun (raw: obj) -> unbox raw)"
+              [ req "nodeId" TStr
+                hostOnly "accessor" "obj -> 'T" "(fun (raw: obj) -> unbox raw)"
                 opt "defaultValue" (TVar "T")
-                opt "field" TStr
-                req "nodeId" TStr ] }
+                opt "field" TStr ] }
           { Tag = "State"
-            Fields = [ opt "defaultValue" (TVar "T"); req "key" TStr ] }
+            Fields = [ req "key" TStr; opt "defaultValue" (TVar "T") ] }
           { Tag = "Computed"
             // `BindingContext -> 'T`. `BindingContext` is a HOST type (it carries a
             // `TryGetState<'T>` member), so the argument erases to `obj` here.
@@ -297,16 +309,16 @@ let private binding =
           // (independent of `'T`); `format` / `locale` are bounded DUs.
           { Tag = "Format"
             Fields =
-              [ req "format" (TUnion("Format", []))
-                req "locale" (TUnion("LocaleSource", []))
-                req "source" (TUnion("Binding", [ TFloat ])) ] }
+              [ req "source" (TUnion("Binding", [ TFloat ]))
+                req "format" (TUnion("Format", []))
+                req "locale" (TUnion("LocaleSource", [])) ] }
           // i18n catalog lookup. `args` is a name-keyed bag of `Binding<obj>`
           // placeholder sources, omitted when None. The obj-erased positions
           // (here and `Transform.params`) instantiate at `JVal` — the typed
           // verbatim carrier — because `TOpaque` would erase real defaultValues
           // to a sentinel and lose bytes.
           { Tag = "I18n"
-            Fields = [ opt "args" (TMap(TUnion("Binding", [ TJson ]))); req "key" TStr ] }
+            Fields = [ req "key" TStr; opt "args" (TMap(TUnion("Binding", [ TJson ]))) ] }
           // Declarative dataframe transform (Fuaran-UI Phase 282/424 — the Compute
           // layer). `source` / `pipeline` are HOSTED slots: real `Fuaran.Core`
           // types rendered by Core's own codecs under the same `Canon` discipline,
@@ -315,7 +327,12 @@ let private binding =
           // `ColExpr.Param` names to scalar binding sources, omitted when empty.
           { Tag = "Transform"
             Fields =
-              [ opt "params" (TList(TRecord "TransformParam"))
+              [ req
+                    "source"
+                    (THosted
+                        { FSharp = "Fuaran.Core.DataSource"
+                          Encode = "Fuaran.Core.ColumnCodec.encodeJson"
+                          Decode = "(fun __j -> Fuaran.Core.ColumnCodec.decodeJson __j |> Result.mapError string)" })
                 req
                     "pipeline"
                     (TList(
@@ -325,15 +342,10 @@ let private binding =
                               Decode =
                                 "(fun __j -> Fuaran.Core.DataFrameCodec.decodeTransform __j |> Result.mapError string)" }
                     ))
-                req
-                    "source"
-                    (THosted
-                        { FSharp = "Fuaran.Core.DataSource"
-                          Encode = "Fuaran.Core.ColumnCodec.encodeJson"
-                          Decode = "(fun __j -> Fuaran.Core.ColumnCodec.decodeJson __j |> Result.mapError string)" }) ] }
+                opt "params" (TList(TRecord "TransformParam")) ] }
           // Host-registered capability value. Same wire shape as `Action.Invoke`.
           { Tag = "Invoke"
-            Fields = [ req "args" (TList(TRecord "InvokeArg")); req "capabilityId" TStr ] } ] }
+            Fields = [ req "capabilityId" TStr; req "args" (TList(TRecord "InvokeArg")) ] } ] }
 
 /// `CellFormat` — the column / `Metric` display-format vocabulary. `Number` /
 /// `Percent` carry an *optional* `decimals` (omitted on `None`, rule 4); `Custom`
@@ -376,19 +388,19 @@ let private action =
           { Tag = "Dispatch"
             Fields = [ hostOnly "msg" "'Msg" "((\"<dispatch>\" :> obj))" ] }
           { Tag = "Invoke"
-            Fields = [ req "args" (TList(TRecord "InvokeArg")); req "capabilityId" TStr ] }
+            Fields = [ req "capabilityId" TStr; req "args" (TList(TRecord "InvokeArg")) ] }
           { Tag = "ReadFileBody"
             Fields =
-              [ req "encoding" (TEnum "FileReadEncoding")
-                req "fileRef" TStr
+              [ req "fileRef" TStr
+                req "encoding" (TEnum "FileReadEncoding")
                 opt "onRead" (fn "string -> 'Msg" "(body: string) => Msg" "(fun (_: string) -> (\"<closure>\" :> obj))") ] }
           // `ApiEndpoint` is a bare string on the wire; `into` is the declarative
           // result target, omitted when None; `onResult` rides only when present.
           { Tag = "Call"
             Fields =
               [ req "endpoint" TStr
-                opt "into" (TUnion("CallResultTarget", []))
-                opt "onResult" (fn "obj -> 'Msg" "(r: unknown) => Msg" "(fun (_: obj) -> (\"<closure>\" :> obj))") ] }
+                opt "onResult" (fn "obj -> 'Msg" "(r: unknown) => Msg" "(fun (_: obj) -> (\"<closure>\" :> obj))")
+                opt "into" (TUnion("CallResultTarget", [])) ] }
           { Tag = "Navigate"
             Fields = [ req "route" TStr ] }
           { Tag = "CommitLocal"
@@ -402,7 +414,7 @@ let private action =
           { Tag = "SetState"
             Fields = [ req "key" TStr; req "value" TJson ] }
           { Tag = "AiTool"
-            Fields = [ req "args" TJson; req "toolName" TStr ] } ] }
+            Fields = [ req "toolName" TStr; req "args" TJson ] } ] }
 
 /// Where a `Call`'s result lands, declaratively. NOTE the wire tags are `State` /
 /// `Query`, not the F# case names `IntoState` / `IntoQuery`.
@@ -481,30 +493,30 @@ let private formFieldKind =
       Cases =
         [ { Tag = "Text"
             Fields =
-              [ opt "onChange" (handlerOf "string" "string")
-                opt "value" (TUnion("Binding", [ TStr ])) ] }
+              [ opt "value" (TUnion("Binding", [ TStr ]))
+                opt "onChange" (handlerOf "string" "string") ] }
           { Tag = "Number"
             Fields =
-              [ opt "onChange" (handlerOf "float" "number")
-                opt "value" (TUnion("Binding", [ TFloat ])) ] }
+              [ opt "value" (TUnion("Binding", [ TFloat ]))
+                opt "onChange" (handlerOf "float" "number") ] }
           { Tag = "Checkbox"
             Fields =
-              [ opt "onToggle" (handlerOf "bool" "boolean")
-                opt "value" (TUnion("Binding", [ TBool ])) ] }
+              [ opt "value" (TUnion("Binding", [ TBool ]))
+                opt "onToggle" (handlerOf "bool" "boolean") ] }
           { Tag = "Choice"
             Fields =
-              [ opt "onChange" (handlerOf "string option" "string | null")
-                req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
-                opt "value" (TUnion("Binding", [ TStr ])) ] }
+              [ req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
+                opt "value" (TUnion("Binding", [ TStr ]))
+                opt "onChange" (handlerOf "string option" "string | null") ] }
           { Tag = "TextArea"
             Fields =
-              [ opt "onChange" (handlerOf "string" "string")
-                req "rows" TInt
-                opt "value" (TUnion("Binding", [ TStr ])) ] }
+              [ opt "value" (TUnion("Binding", [ TStr ]))
+                opt "onChange" (handlerOf "string" "string")
+                req "rows" TInt ] }
           { Tag = "RangedNumber"
             Fields =
-              [ opt "onChange" (handlerOf "float" "number")
-                opt "value" (TUnion("Binding", [ TFloat ]))
+              [ opt "value" (TUnion("Binding", [ TFloat ]))
+                opt "onChange" (handlerOf "float" "number")
                 opt "min" TFloat
                 opt "max" TFloat
                 opt "step" TFloat ] }
@@ -518,28 +530,28 @@ let private formFieldKind =
           // + `RangePair` record codecs.
           { Tag = "Range"
             Fields =
-              [ opt "max" TFloat
-                opt "min" TFloat
-                opt "onChange" (handlerOf "float * float" "[number, number]")
-                opt "step" TFloat
-                opt
+              [ opt
                     "value"
                     (THosted
                         { FSharp = "Binding<RangePair>"
                           Encode =
                             "(fun (v: Binding<RangePair>) -> match v with | Binding.Static(Some p) -> encRangePair p | __other -> encBinding encRangePair __other)"
                           Decode =
-                            "(fun (j: JVal) -> match j with | JObj __rf when not (__rf |> List.exists (fun (k, _) -> k = \"$type\")) -> decRangePair j |> Result.map (fun p -> Binding.Static(Some p)) | __other -> decBinding decRangePair __other)" }) ] }
+                            "(fun (j: JVal) -> match j with | JObj __rf when not (__rf |> List.exists (fun (k, _) -> k = \"$type\")) -> decRangePair j |> Result.map (fun p -> Binding.Static(Some p)) | __other -> decBinding decRangePair __other)" })
+                opt "onChange" (handlerOf "float * float" "[number, number]")
+                opt "min" TFloat
+                opt "max" TFloat
+                opt "step" TFloat ] }
           { Tag = "SegmentedChoice"
             Fields =
-              [ opt "onChange" (handlerOf "string option" "string | null")
-                req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
-                req "orientation" (TEnum "Orientation")
-                opt "value" (TUnion("Binding", [ TStr ])) ] }
+              [ req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
+                opt "value" (TUnion("Binding", [ TStr ]))
+                opt "onChange" (handlerOf "string option" "string | null")
+                req "orientation" (TEnum "Orientation") ] }
           { Tag = "Date"
             Fields =
-              [ opt "onChange" (handlerOf "string option" "string | null")
-                opt "value" (TUnion("Binding", [ TStr ]))
+              [ opt "value" (TUnion("Binding", [ TStr ]))
+                opt "onChange" (handlerOf "string option" "string | null")
                 req "variant" (TEnum "DateVariant")
                 opt "min" TStr
                 opt "max" TStr
