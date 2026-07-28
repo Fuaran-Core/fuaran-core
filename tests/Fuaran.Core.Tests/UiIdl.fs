@@ -643,12 +643,13 @@ let private holeValueSpace =
     { Name = "HoleValueSpace"
       Params = []
       Cases =
+        // Hand-written positional order (min before max) — wire-free.
         [ { Tag = "IntRange"
-            Fields = [ req "max" TInt; req "min" TInt ] }
+            Fields = [ req "min" TInt; req "max" TInt ] }
           { Tag = "FloatRange"
-            Fields = [ req "max" TFloat; req "min" TFloat ] }
+            Fields = [ req "min" TFloat; req "max" TFloat ] }
           { Tag = "StringLen"
-            Fields = [ req "maxLen" TInt; req "minLen" TInt ] }
+            Fields = [ req "minLen" TInt; req "maxLen" TInt ] }
           { Tag = "Enum"
             Fields = [ req "choices" (TList TStr) ] }
           { Tag = "AnyString"; Fields = [] } ] }
@@ -673,15 +674,16 @@ let private holeDecl =
     { Name = "HoleDecl"
       Params = []
       Cases =
+        // Hand-written positional order (name first) — wire-free.
         [ { Tag = "Value"
             Fields =
-              [ opt "default" (TUnion("Scalar", []))
-                req "name" TStr
-                req "space" (TUnion("HoleValueSpace", [])) ] }
+              [ req "name" TStr
+                req "space" (TUnion("HoleValueSpace", []))
+                opt "default" (TUnion("Scalar", [])) ] }
           { Tag = "Slot"
-            Fields = [ opt "kindConstraint" TStr; req "name" TStr ] }
+            Fields = [ req "name" TStr; opt "kindConstraint" TStr ] }
           { Tag = "Repeat"
-            Fields = [ req "countSpace" (TUnion("HoleValueSpace", [])); req "name" TStr ] } ] }
+            Fields = [ req "name" TStr; req "countSpace" (TUnion("HoleValueSpace", [])) ] } ] }
 
 /// A bound argument at a `FragmentRef` — a scalar value or a slot subtree. Shares
 /// the scalar tags with [[scalar]] plus `SlotArg` (a `Node`-bearing tree).
@@ -1201,6 +1203,12 @@ let private drawStyle =
           opt "fill" (bindingOf TStr)
           opt "fontFamily" TStr
           opt "fontSize" TFloat
+          // Phase 642 — the derivation-based mark identity for a data-bearing
+          // shape (`series-field|category-key`, emitted as `data-fuaran-mark`).
+          // Wire-visible when present (omitted-when-None, rule 4); the corpus
+          // carries no occurrence, which is why the Phase 692 gap-closure sweep
+          // missed it until the stage-3 swap read the hand-written encoder.
+          opt "markId" TStr
           opt "opacity" (bindingOf TFloat)
           opt "stroke" (bindingOf TStr)
           opt "strokeWidth" (bindingOf TFloat)
@@ -1235,21 +1243,23 @@ let private shape =
             Fields =
               [ req "children" (TList(TUnion("Shape", [])))
                 req "style" (TRecord "DrawStyle") ] }
+          // Case-field order matches the hand-written positional order (the
+          // stage-0 swap-prep convention — wire-free, the renderer sorts keys).
           { Tag = "Rectangle"
             Fields =
-              [ opt "cornerRadius" TFloat
-                req "height" TFloat
-                req "style" (TRecord "DrawStyle")
+              [ req "x" TFloat
+                req "y" TFloat
                 req "width" TFloat
-                req "x" TFloat
-                req "y" TFloat ] }
+                req "height" TFloat
+                opt "cornerRadius" TFloat
+                req "style" (TRecord "DrawStyle") ] }
           { Tag = "Line"
             Fields =
-              [ req "style" (TRecord "DrawStyle")
-                req "x1" TFloat
-                req "x2" TFloat
+              [ req "x1" TFloat
                 req "y1" TFloat
-                req "y2" TFloat ] }
+                req "x2" TFloat
+                req "y2" TFloat
+                req "style" (TRecord "DrawStyle") ] }
           { Tag = "Polyline"
             Fields = [ req "points" (TList(TRecord "DrawPoint")); req "style" (TRecord "DrawStyle") ] }
           { Tag = "Polygon"

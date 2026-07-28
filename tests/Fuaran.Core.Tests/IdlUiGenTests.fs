@@ -334,10 +334,10 @@ let private fragDeclParam: G.Node<unit> =
               Name = "stat-card"
               Holes =
                 Some
-                    [ G.HoleDecl.Value(Some(G.Scalar.Str "Untitled"), "title", G.HoleValueSpace.StringLen(40, 1))
-                      G.HoleDecl.Value(None, "count", G.HoleValueSpace.IntRange(100, 0))
-                      G.HoleDecl.Slot(Some "Display", "content")
-                      G.HoleDecl.Repeat(G.HoleValueSpace.IntRange(12, 1), "rows") ]
+                    [ G.HoleDecl.Value("title", G.HoleValueSpace.StringLen(1, 40), Some(G.Scalar.Str "Untitled"))
+                      G.HoleDecl.Value("count", G.HoleValueSpace.IntRange(0, 100), None)
+                      G.HoleDecl.Slot("content", Some "Display")
+                      G.HoleDecl.Repeat("rows", G.HoleValueSpace.IntRange(1, 12)) ]
               Effect =
                 Some(
                     { Determinism = G.DeterminismSource.Clock
