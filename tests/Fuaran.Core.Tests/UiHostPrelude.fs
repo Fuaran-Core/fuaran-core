@@ -27,6 +27,7 @@ type ErrorPayload =
 
 /// ARIA role — a closed convenience list plus `Custom` verbatim passthrough
 /// (the wire position admits any string; canonical cases emit lower-case).
+[<RequireQualifiedAccess>]
 type AriaRole =
     | Button
     | Link
