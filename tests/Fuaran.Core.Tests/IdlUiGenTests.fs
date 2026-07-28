@@ -103,7 +103,7 @@ let private stack1: G.Node<unit> =
         G.NodeKind.Box
             { Children = [ metric1; markdown1 ]
               Heading = None
-              Layout = G.LayoutMode.Flex(G.Orientation.Vertical, false)
+              Layout = G.LayoutMode.Flex(G.Orientation.Vertical, false, None)
               Role = G.BoxRole.Group } }
 
 /// `btn-invoke` — the `Action` union + a `TRecord` (`InvokeArg`) list + optionals-as-None.
@@ -366,7 +366,7 @@ let private formatBindings: G.Node<unit> =
       Kind =
         G.NodeKind.Box
             { Heading = None
-              Layout = G.LayoutMode.Flex(G.Orientation.Vertical, false)
+              Layout = G.LayoutMode.Flex(G.Orientation.Vertical, false, None)
               Role = G.BoxRole.Group
               Children =
                 [ fmt

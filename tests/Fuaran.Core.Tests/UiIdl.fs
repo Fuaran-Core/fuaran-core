@@ -64,7 +64,9 @@ let private orientation =
 /// Card / Stack / GridLayout collapsed into one `Box` kind with a `role` + `layout`).
 let private boxRole =
     { Name = "BoxRole"
-      Cases = [ "Dashboard"; "Card"; "Group" ] }
+      // `Separator` (the divider role) is wire vocabulary the hand-written
+      // encoder emits with no corpus fixture — found by the stage-3 swap.
+      Cases = [ "Dashboard"; "Card"; "Group"; "Separator" ] }
 
 let private mathDisplay =
     { Name = "MathDisplay"
@@ -477,10 +479,13 @@ let private layoutMode =
       Params = []
       Cases =
         [ { Tag = "Auto"; Fields = [] }
+          // `gap` (the px spacing knob, omitted-when-None) is wire vocabulary
+          // on BOTH layout cases — no corpus fixture carries it; found by the
+          // stage-3 swap reading the hand-written encoder.
           { Tag = "Flex"
-            Fields = [ req "direction" (TEnum "Orientation"); req "wrap" TBool ] }
+            Fields = [ req "direction" (TEnum "Orientation"); req "wrap" TBool; opt "gap" TInt ] }
           { Tag = "Grid"
-            Fields = [ req "cols" TInt; opt "templateColumns" TStr ] } ] }
+            Fields = [ req "cols" TInt; opt "templateColumns" TStr; opt "gap" TInt ] } ] }
 
 /// `FormFieldKind<'Msg>` — the per-field input-shape union, shared by `Form`
 /// fields AND `Filters` chips (the 0.2.0 filters-unification — the separate
