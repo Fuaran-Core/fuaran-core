@@ -205,7 +205,7 @@ let private grid1: G.Node<unit> =
               Editable = false
               RowKey = Some(fun _ -> "")
               RowKeyField = None
-              Source = G.Binding.Static(Some())
+              Source = G.Binding.Static(Some(Seq.empty: obj seq))
               StaticRows = None
               OnRowClick = None } }
 
@@ -224,7 +224,7 @@ let private table1: G.Node<unit> =
               Editable = false
               RowKey = None
               RowKeyField = None
-              Source = G.Binding.Static(Some())
+              Source = G.Binding.Static(Some(Seq.empty: obj seq))
               StaticRows =
                 Some
                     { Headers = [ "Term"; "Definition" ]

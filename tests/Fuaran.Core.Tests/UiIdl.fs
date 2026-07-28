@@ -1166,14 +1166,36 @@ let visKinds: IdlKind list =
             omit "editable" TBool (VBool false)
             opt "rowKey" (projOf "obj" "string" "(row: unknown) => string" "(fun _ -> \"\")")
             opt "rowKeyField" TStr
-            req "source" (bindingOf TOpaque)
+            // The row feed is HOSTED `obj seq` (the tier's erased-row boundary): the
+            // wire carries only the `"<opaque>"` sentinel (a Static row payload is
+            // not wire-representable), and decode yields the empty feed — exactly
+            // the hand codec's behaviour, but typed instead of `TOpaque`→unit.
+            req
+                "source"
+                (bindingOf (
+                    THosted
+                        { FSharp = "obj seq"
+                          Encode = "(fun (_: obj seq) -> JStr \"<opaque>\")"
+                          Decode = "(fun _ -> Ok(Seq.empty: obj seq))" }
+                ))
             opt "staticRows" (TRecord "StaticRows")
             opt "onRowClick" (handlerOf "obj" "unknown") ] }
       { Tag = "Chart"
         Category = "Visualisation"
         Fields =
           [ req "kind" (TEnum "ChartKind")
-            req "source" (bindingOf TOpaque)
+            // The row feed is HOSTED `obj seq` (the tier's erased-row boundary): the
+            // wire carries only the `"<opaque>"` sentinel (a Static row payload is
+            // not wire-representable), and decode yields the empty feed — exactly
+            // the hand codec's behaviour, but typed instead of `TOpaque`→unit.
+            req
+                "source"
+                (bindingOf (
+                    THosted
+                        { FSharp = "obj seq"
+                          Encode = "(fun (_: obj seq) -> JStr \"<opaque>\")"
+                          Decode = "(fun _ -> Ok(Seq.empty: obj seq))" }
+                ))
             req "stacked" TBool
             req "xField" TStr
             req "yFields" (TList TStr)
@@ -1478,7 +1500,11 @@ let lit (s: string) : IdlValue = VUnion("Literal", [ "text", VStr s ])
 /// `Binding.Static` over a string / float / opaque value.
 let private staticStr (s: string) = VUnion("Static", [ "value", VStr s ])
 let private staticFloat (f: float) = VUnion("Static", [ "value", VFloat f ])
-let private staticOpaque = VUnion("Static", [ "value", VOpaque ])
+// The hosted opaque row-feed slots (Chart/DataGrid `source`) carry the sentinel
+// as verbatim hosted JSON — `VJson`, the THosted interpreter carrier — since the
+// slots moved off `TOpaque` (whose carrier was `VOpaque`).
+let private staticOpaque =
+    VUnion("Static", [ "value", VJson(Fuaran.Core.JStr "<opaque>") ])
 
 /// A `SelectOption` record — a `{label, value}` choice entry (Fuaran-UI 0.2.x typed-Static).
 let private selectOption (label: string) (value: string) =
