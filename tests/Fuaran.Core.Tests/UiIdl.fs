@@ -611,8 +611,8 @@ let private columnWidth =
 /// `CellKindErased<'Msg>` — the row-erased grid-cell shape union. Non-interactive
 /// cases (`Text` / `Numeric` / `Date`) are field-less; the interactive ones carry
 /// closure accessors (`get` / `onEdit` / `onClick` / `fractionFn` …). `ButtonGroup`
-/// carries a list of `ButtonGroupItem` records. Only `Text` is corpus-exercised
-/// (grid-1); the rest are modelled for a faithful union surface.
+/// carries a list of `ButtonGroupItem` records. `TonedPill` (Fuaran-UI Phase 750)
+/// is the one WIRE-EXPRESSIBLE interactive-ish case — all data, no closure.
 let private cellKindErased =
     { Name = "CellKindErased"
       Params = []
@@ -648,6 +648,21 @@ let private cellKindErased =
                 req
                     "toneFn"
                     (projOf "obj" "ToneVariant" "(row: unknown) => ToneVariant" "(fun _ -> ToneVariant.Default)") ] }
+          // Fuaran-UI Phase 750 — the WIRE-EXPRESSIBLE pill. `Pill` above is a pair
+          // of closures, so its whole meaning erases to two `"<closure>"` sentinels
+          // and "distinguish the delayed rows" is inexpressible in canonical JSON —
+          // an author with no host code cannot say it at all. `TonedPill` says the
+          // same thing as DATA: `field` names the row property that is both the
+          // pill's label and the map key, `map` carries value → `ToneVariant`, and
+          // `default` tones a value the map does not mention (omitted at
+          // `ToneVariant.Default`, the Phase 460 discipline). The closure case stays
+          // — the two coexist exactly as a hosted row feed coexists with
+          // `StaticRows`, and a host that already projects a tone keeps doing so.
+          { Tag = "TonedPill"
+            Fields =
+              [ req "field" TStr
+                req "map" (TMap(TEnum "ToneVariant"))
+                omit "default" (TEnum "ToneVariant") (VEnum "Default") ] }
           { Tag = "Progress"
             Fields =
               [ req "fractionFn" (projOf "obj" "float" "(row: unknown) => number" "(fun _ -> 0.0)")
