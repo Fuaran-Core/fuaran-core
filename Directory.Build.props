@@ -11,7 +11,10 @@
          than repacking 0.1.10 in place: this is the one package every domain
          consumes, so a same-version swap would give each machine a different
          contract depending only on when it last packed. -->
-    <Version>0.2.0</Version>
+    <!-- 0.2.1 (2026-07-31): fuaran#665 — `Fuaran.Core.Row` + `RowCodec` (typed grid/chart
+         row-source payload; the rows slot leaves the residual-"<opaque>" boundary).
+         Additive — new type + module in Fuaran.Core.Wire; no existing surface moved. -->
+    <Version>0.2.1</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

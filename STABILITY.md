@@ -559,6 +559,20 @@ routes its uniqueness tokens through `Canon.canonicalFloat` directly — one can
 one implementation, no inlined copy to drift (a host comparing Validator tokens cross-host uses the
 same canonical form).
 
+## Typed row-source codec (fuaran#665, `0.2.1`)
+
+`Fuaran.Core.Row` (= `Map<string, obj>`) + `Fuaran.Core.RowCodec` are the canonical codec for the
+UI wire format's grid/chart row-source payload (WIRE_FORMAT §5 — rows leave the residual-`"<opaque>"`
+boundary). Pinned behaviour a conformant host MUST replicate: rows encode as a JSON array of row
+objects (empty feed → `[]`, never `null`); cells are best-effort scalars per WIRE_FORMAT §2 rule 11
+(string / bool / int / int64 / float / float32 / DateTimeOffset / DateTime → Unix seconds; `null`
+cells omit their key per rule 4; anything else the `"<opaque>"` sentinel — the residual boundary,
+narrowed to the cell seam). The `float` type-test runs before `int` deliberately: under Fable every
+number satisfies every numeric test, so float-first routes all JS numbers through `canonicalFloat`,
+byte-identical to .NET. Decode accepts the typed array **and** the legacy `"<opaque>"` sentinel
+indefinitely (read-compat → the empty feed); decoded numbers surface as `float` (one number
+population, per the `JVal` numeric-normalization note).
+
 ## Value-level compare-and-append (Phase 79)
 
 `Fuaran.Core.OpStream.appendIf : HashFn -> StreamWitness -> expectedHead -> Actor -> op -> state ->

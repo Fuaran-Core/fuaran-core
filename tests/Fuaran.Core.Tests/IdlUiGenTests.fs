@@ -205,7 +205,17 @@ let private grid1: G.Node<unit> =
               Editable = false
               RowKey = Some(fun _ -> "")
               RowKeyField = None
-              Source = G.Binding.Static(Some(Seq.empty: obj seq))
+              // fuaran#665 — typed rows: mirrors the authored `gridNode` sample
+              // byte-for-byte (int cells encode via `JInt`; a decoded row would
+              // carry `float`, which renders the same bytes under rule 5).
+              Source =
+                G.Binding.Static(
+                    Some(
+                        Seq.ofList
+                            [ (Map.ofList [ "channel", box "Direct"; "revenue", box 1200 ]: Fuaran.Core.Row)
+                              Map.ofList [ "channel", box "Referral"; "revenue", box 830 ] ]
+                    )
+                )
               StaticRows = None
               OnRowClick = None } }
 
@@ -224,7 +234,7 @@ let private table1: G.Node<unit> =
               Editable = false
               RowKey = None
               RowKeyField = None
-              Source = G.Binding.Static(Some(Seq.empty: obj seq))
+              Source = G.Binding.Static(Some(Seq.empty: Fuaran.Core.Row seq))
               StaticRows =
                 Some
                     { Headers = [ G.TextSource.Literal "Term"; G.TextSource.Literal "Definition" ]

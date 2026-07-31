@@ -143,3 +143,76 @@ let tests =
                   RNode.leaf (sprintf "n%d" seed) "para" "real"
 
               Expect.isError (Corpus.codecLaws broken genLeaf 1 50) "broken decode yields a counterexample" ]
+
+[<Tests>]
+let rowCodecTests =
+    testList
+        "RowCodec (fuaran#665 — typed row-source payload)"
+        [ testCase "rows encode as an array of row objects, Ordinal-sorted, canonical bytes"
+          <| fun _ ->
+              let rows: Row list =
+                  [ Map.ofList [ "channel", box "Direct"; "revenue", box 1200; "active", box true ]
+                    Map.ofList [ "channel", box "Referral"; "revenue", box 830.5 ] ]
+
+              Expect.equal
+                  (Canon.render (RowCodec.encodeRows rows))
+                  "[{\"active\":true,\"channel\":\"Direct\",\"revenue\":1200},{\"channel\":\"Referral\",\"revenue\":830.5}]"
+                  "canonical rows bytes"
+
+          testCase "an empty feed encodes [], never null"
+          <| fun _ -> Expect.equal (Canon.render (RowCodec.encodeRows Seq.empty)) "[]" "empty rows"
+
+          testCase "an int-boxed and a float-boxed integral cell emit the same bytes (rule 5)"
+          <| fun _ ->
+              let asInt: Row = Map.ofList [ "n", box 42 ]
+              let asFloat: Row = Map.ofList [ "n", box 42.0 ]
+
+              Expect.equal
+                  (Canon.render (RowCodec.encodeRows [ asInt ]))
+                  (Canon.render (RowCodec.encodeRows [ asFloat ]))
+                  "int/float one population on the wire"
+
+          testCase
+              "cell-seam best effort: null omits the key, a non-scalar renders the sentinel, dates go to Unix seconds"
+          <| fun _ ->
+              let row: Row =
+                  Map.ofList
+                      [ "gone", (null: obj)
+                        "nested", box (Map.ofList [ "x", box 1 ])
+                        "when", box (System.DateTimeOffset(2026, 1, 1, 0, 0, 0, System.TimeSpan.Zero)) ]
+
+              Expect.equal
+                  (Canon.render (RowCodec.encodeRows [ row ]))
+                  "[{\"nested\":\"<opaque>\",\"when\":1767225600}]"
+                  "null omitted; nested → sentinel; DateTimeOffset → Unix seconds"
+
+          testCase "decode: the typed array yields rows whose numbers surface as float"
+          <| fun _ ->
+              match RowCodec.decodeRows (JArr [ JObj [ "name", JStr "a"; "n", JInt 3 ] ]) with
+              | Error m -> failtest m
+              | Ok rows ->
+                  let row = Seq.exactlyOne rows
+                  Expect.equal row["name"] (box "a") "string cell"
+                  Expect.equal row["n"] (box 3.0) "numbers decode as float (one number population)"
+
+          testCase "decode: the legacy \"<opaque>\" sentinel is read-compat — the empty feed"
+          <| fun _ ->
+              match RowCodec.decodeRows (JStr "<opaque>") with
+              | Ok rows -> Expect.isEmpty rows "sentinel decodes to the empty feed"
+              | Error m -> failtest m
+
+          testCase "decode: a non-array payload and a non-object row are named errors"
+          <| fun _ ->
+              Expect.isError (RowCodec.decodeRows (JStr "nope")) "non-array"
+              Expect.isError (RowCodec.decodeRows (JArr [ JStr "not-a-row" ])) "non-object row"
+
+          testCase "round-trip: encode ∘ decode is byte-stable over canonical rows"
+          <| fun _ ->
+              let wire =
+                  Canon.render (
+                      RowCodec.encodeRows [ (Map.ofList [ "b", box false; "s", box "x"; "v", box 12.5 ]: Row) ]
+                  )
+
+              match Json.parse wire |> Result.bind RowCodec.decodeRows with
+              | Error m -> failtest m
+              | Ok rows -> Expect.equal (Canon.render (RowCodec.encodeRows rows)) wire "byte-stable" ]

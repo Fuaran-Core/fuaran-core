@@ -621,33 +621,48 @@ let private cellKindErased =
           { Tag = "Numeric"; Fields = [] }
           { Tag = "Date"; Fields = [] }
           { Tag = "Editable"
-            // `(obj * CellValue) -> Action<'Msg>`; `CellValue` is a host-prelude DU
-            // (stage 4b) — the typed edit payload survives the swap.
-            Fields = [ opt "onEdit" (handlerOf "obj * Fuaran.UI.HostPrelude.CellValue" "[unknown, unknown]") ] }
+            // `(Row * CellValue) -> Action<'Msg>`; `CellValue` is a host-prelude DU
+            // (stage 4b) — the typed edit payload survives the swap. Row closures
+            // take `Fuaran.Core.Row` since fuaran#665 (the rows slot is typed, so
+            // the accessors' argument is the name-addressable row, not `obj`).
+            Fields =
+              [ opt "onEdit" (handlerOf "Fuaran.Core.Row * Fuaran.UI.HostPrelude.CellValue" "[unknown, unknown]") ] }
           { Tag = "Checkbox"
             Fields =
-              [ req "get" (projOf "obj" "bool" "(row: unknown) => boolean" "(fun _ -> false)")
-                opt "onToggle" (handlerOf "obj * bool" "[unknown, boolean]") ] }
+              [ req "get" (projOf "Fuaran.Core.Row" "bool" "(row: unknown) => boolean" "(fun _ -> false)")
+                opt "onToggle" (handlerOf "Fuaran.Core.Row * bool" "[unknown, boolean]") ] }
           { Tag = "Button"
             Fields =
               [ req "label" (TUnion("TextSource", []))
-                opt "onClick" (handlerOf "obj" "unknown") ] }
+                opt "onClick" (handlerOf "Fuaran.Core.Row" "unknown") ] }
           { Tag = "ButtonGroup"
             Fields = [ req "buttons" (TList(TRecord "ButtonGroupItem")) ] }
           { Tag = "Link"
             Fields =
-              [ req "hrefFn" (projOf "obj" "string" "(row: unknown) => string" "(fun _ -> \"\")")
+              [ req "hrefFn" (projOf "Fuaran.Core.Row" "string" "(row: unknown) => string" "(fun _ -> \"\")")
                 req
                     "labelFn"
-                    (projOf "obj" "TextSource" "(row: unknown) => TextSource" "(fun _ -> TextSource.Literal \"\")") ] }
+                    (projOf
+                        "Fuaran.Core.Row"
+                        "TextSource"
+                        "(row: unknown) => TextSource"
+                        "(fun _ -> TextSource.Literal \"\")") ] }
           { Tag = "Pill"
             Fields =
               [ req
                     "labelFn"
-                    (projOf "obj" "TextSource" "(row: unknown) => TextSource" "(fun _ -> TextSource.Literal \"\")")
+                    (projOf
+                        "Fuaran.Core.Row"
+                        "TextSource"
+                        "(row: unknown) => TextSource"
+                        "(fun _ -> TextSource.Literal \"\")")
                 req
                     "toneFn"
-                    (projOf "obj" "ToneVariant" "(row: unknown) => ToneVariant" "(fun _ -> ToneVariant.Default)") ] }
+                    (projOf
+                        "Fuaran.Core.Row"
+                        "ToneVariant"
+                        "(row: unknown) => ToneVariant"
+                        "(fun _ -> ToneVariant.Default)") ] }
           // Fuaran-UI Phase 750 — the WIRE-EXPRESSIBLE pill. `Pill` above is a pair
           // of closures, so its whole meaning erases to two `"<closure>"` sentinels
           // and "distinguish the delayed rows" is inexpressible in canonical JSON —
@@ -665,21 +680,25 @@ let private cellKindErased =
                 omit "default" (TEnum "ToneVariant") (VEnum "Default") ] }
           { Tag = "Progress"
             Fields =
-              [ req "fractionFn" (projOf "obj" "float" "(row: unknown) => number" "(fun _ -> 0.0)")
+              [ req "fractionFn" (projOf "Fuaran.Core.Row" "float" "(row: unknown) => number" "(fun _ -> 0.0)")
                 // The hand-written tier's label is genuinely optional (a progress
                 // cell with no label) — `opt`, stage 4b. The hand encoder emitted
                 // an unconditional sentinel; omit-when-None is the honest form and
                 // no fixture pins the None-label emission.
                 opt
                     "labelFn"
-                    (projOf "obj" "TextSource" "(row: unknown) => TextSource" "(fun _ -> TextSource.Literal \"\")") ] }
+                    (projOf
+                        "Fuaran.Core.Row"
+                        "TextSource"
+                        "(row: unknown) => TextSource"
+                        "(fun _ -> TextSource.Literal \"\")") ] }
           { Tag = "Custom"
-            // `(obj -> JVal) -> Node<'Msg>` — a cell renderer over the row projector.
+            // `(Row -> JVal) -> Node<'Msg>` — a cell renderer over the row projector.
             Fields =
               [ req
                     "fn"
                     (fn
-                        "(obj -> JVal) -> Node<'Msg>"
+                        "(Fuaran.Core.Row -> JVal) -> Node<'Msg>"
                         "(proj: (row: unknown) => unknown) => Node"
                         "(fun _ -> Unchecked.defaultof<Node<obj>>)") ] } ] }
 
@@ -836,23 +855,24 @@ let private columnErasedRecord =
           omit "format" (TUnion("CellFormat", [])) (VUnion("None", []))
           req "kind" (TUnion("CellKindErased", []))
           req "label" TStr
-          // `obj -> CellValue`; `CellValue` is a host DU declared in the host
-          // prelude (stage 4b) — the typed cell surface survives the swap.
+          // `Row -> CellValue`; `CellValue` is a host DU declared in the host
+          // prelude (stage 4b) — the typed cell surface survives the swap; the
+          // row argument is typed `Fuaran.Core.Row` since fuaran#665.
           opt
               "value"
               (projOf
-                  "obj"
+                  "Fuaran.Core.Row"
                   "Fuaran.UI.HostPrelude.CellValue"
                   "(row: unknown) => unknown"
                   "(fun _ -> Fuaran.UI.HostPrelude.CellValue.Empty)")
           omit "width" (TUnion("ColumnWidth", [])) (VUnion("Auto", [])) ] }
 
-/// One button of a `CellKindErased.ButtonGroup` (`onClick` is a closure).
+/// One button of a `CellKindErased.ButtonGroup` (`onClick` is a closure over the row).
 let private buttonGroupItemRecord =
     { Name = "ButtonGroupItem"
       Fields =
         [ req "label" (TUnion("TextSource", []))
-          opt "onClick" (handlerOf "obj" "unknown") ] }
+          opt "onClick" (handlerOf "Fuaran.Core.Row" "unknown") ] }
 
 /// A `Custom` node's content-identity envelope (`strictness` is a bare-string DU).
 let private contentHashRecord =
@@ -1221,59 +1241,59 @@ let inputKinds: IdlKind list =
 // New shape classes vs Input: nested list-of-lists (`Table.rows : TList (TList
 // TS)`), the erased `ColumnErased` record holding a `CellKindErased` union + a
 // `ColumnWidth` union, and closure-projection fields (`rowKey` / column `value`).
-// `DataGrid.source` / `Chart.source` / `Map.source` are opaque `Binding`s on the
-// wire — except when they carry a `Binding.Transform`, whose `source` / `pipeline`
-// are HOSTED slots rendered by Core's own codecs (`DataFrameCodec` / `ColumnCodec`)
-// under the same `Canon` discipline (the Phase 692 gap-closure; the old
-// grid-transform deferral is closed).
+// `DataGrid.source` / `Chart.source` carry TYPED rows on the wire (fuaran#665 —
+// `Fuaran.Core.Row seq`, rendered by Core's `RowCodec`; the `"<opaque>"` sentinel
+// is decode-accepted read-compat only), `Map.source` a typed `MapMarker` list; a
+// `Binding.Transform`'s `source` / `pipeline` are HOSTED slots rendered by Core's
+// `ColumnCodec` / `DataFrameCodec` under the same `Canon` discipline (the Phase
+// 692 gap-closure; the old grid-transform deferral is closed).
 let visKinds: IdlKind list =
     [ { Tag = "DataGrid"
         Category = "Visualisation"
         // Fuaran-UI 0.2.x: `editable` omit-when-false, `rowKey` optional (absent on a
         // static grid), + `staticRows` (the retired `Table` decode-upgrades into a static
-        // DataGrid carrying its header/row grid). `source` stays opaque.
+        // DataGrid carrying its header/row grid).
         // Phase 425 — `rowKey` (closure) + `rowKeyField` (declarative) are
         // sibling optional slots, mirroring the column-level `value` / `field`.
         Fields =
           [ req "columns" (TList(TRecord "ColumnErased"))
             omit "editable" TBool (VBool false)
-            opt "rowKey" (projOf "obj" "string" "(row: unknown) => string" "(fun _ -> \"\")")
+            opt "rowKey" (projOf "Fuaran.Core.Row" "string" "(row: unknown) => string" "(fun _ -> \"\")")
             opt "rowKeyField" TStr
-            // The row feed is HOSTED `obj seq` (the tier's erased-row boundary): the
-            // wire carries only the `"<opaque>"` sentinel (a Static row payload is
-            // not wire-representable), and decode yields the empty feed — exactly
-            // the hand codec's behaviour, but typed instead of `TOpaque`→unit.
+            // The row feed is HOSTED `Fuaran.Core.Row seq` (fuaran#665 — typed rows):
+            // a Static/State rows payload IS wire-representable (a JSON array of row
+            // objects, scalar cells, rendered by Core's `RowCodec` under the `Canon`
+            // discipline), and decode accepts the legacy `"<opaque>"` sentinel
+            // indefinitely (read-compat → the empty feed).
             req
                 "source"
                 (bindingOf (
                     THosted
-                        { FSharp = "obj seq"
-                          Encode = "(fun (_: obj seq) -> JStr \"<opaque>\")"
-                          Decode = "(fun _ -> Ok(Seq.empty: obj seq))" }
+                        { FSharp = "Fuaran.Core.Row seq"
+                          Encode = "Fuaran.Core.RowCodec.encodeRows"
+                          Decode = "Fuaran.Core.RowCodec.decodeRows" }
                 ))
             opt "staticRows" (TRecord "StaticRows")
-            opt "onRowClick" (handlerOf "obj" "unknown") ] }
+            opt "onRowClick" (handlerOf "Fuaran.Core.Row" "unknown") ] }
       { Tag = "Chart"
         Category = "Visualisation"
         Fields =
           [ req "kind" (TEnum "ChartKind")
-            // The row feed is HOSTED `obj seq` (the tier's erased-row boundary): the
-            // wire carries only the `"<opaque>"` sentinel (a Static row payload is
-            // not wire-representable), and decode yields the empty feed — exactly
-            // the hand codec's behaviour, but typed instead of `TOpaque`→unit.
+            // The row feed is HOSTED `Fuaran.Core.Row seq` (fuaran#665 — typed rows,
+            // same `RowCodec` + read-compat sentinel acceptance as `DataGrid.source`).
             req
                 "source"
                 (bindingOf (
                     THosted
-                        { FSharp = "obj seq"
-                          Encode = "(fun (_: obj seq) -> JStr \"<opaque>\")"
-                          Decode = "(fun _ -> Ok(Seq.empty: obj seq))" }
+                        { FSharp = "Fuaran.Core.Row seq"
+                          Encode = "Fuaran.Core.RowCodec.encodeRows"
+                          Decode = "Fuaran.Core.RowCodec.decodeRows" }
                 ))
             req "stacked" TBool
             req "xField" TStr
             req "yFields" (TList TStr)
             opt "title" TS
-            opt "onPointClick" (handlerOf "obj" "unknown") ] }
+            opt "onPointClick" (handlerOf "Fuaran.Core.Row" "unknown") ] }
       { Tag = "Map"
         Category = "Visualisation"
         // Fuaran-UI 0.2.x typed-Static: the map source is a real MapMarker list.
@@ -1577,11 +1597,15 @@ let lit (s: string) : IdlValue = VUnion("Literal", [ "text", VStr s ])
 /// `Binding.Static` over a string / float / opaque value.
 let private staticStr (s: string) = VUnion("Static", [ "value", VStr s ])
 let private staticFloat (f: float) = VUnion("Static", [ "value", VFloat f ])
-// The hosted opaque row-feed slots (Chart/DataGrid `source`) carry the sentinel
-// as verbatim hosted JSON — `VJson`, the THosted interpreter carrier — since the
-// slots moved off `TOpaque` (whose carrier was `VOpaque`).
-let private staticOpaque =
-    VUnion("Static", [ "value", VJson(Fuaran.Core.JStr "<opaque>") ])
+// The hosted row-feed slots (Chart/DataGrid `source`) carry TYPED rows as verbatim
+// hosted JSON — `VJson`, the THosted interpreter carrier (fuaran#665; the legacy
+// `"<opaque>"` sentinel is decode-accepted read-compat only, exercised by
+// `RowCodec`'s own tests rather than authored here).
+let private staticRows (rows: (string * Fuaran.Core.JVal) list list) =
+    VUnion("Static", [ "value", VJson(Fuaran.Core.JArr(rows |> List.map Fuaran.Core.JObj)) ])
+
+let private cellS (k: string) (s: string) = k, Fuaran.Core.JStr s
+let private cellI (k: string) (n: int) = k, Fuaran.Core.JInt n
 
 /// A `SelectOption` record — a `{label, value}` choice entry (Fuaran-UI 0.2.x typed-Static).
 let private selectOption (label: string) (value: string) =
@@ -2317,7 +2341,10 @@ let private gridNode =
                       "width", VUnion("Auto", []) ] ]
           "editable", VBool false
           "rowKey", VClosure
-          "source", staticOpaque ]
+          "source",
+          staticRows
+              [ [ cellS "channel" "Direct"; cellI "revenue" 1200 ]
+                [ cellS "channel" "Referral"; cellI "revenue" 830 ] ] ]
     )
 
 let private chartNode =
@@ -2325,7 +2352,10 @@ let private chartNode =
         "chart-1",
         "Chart",
         [ "kind", VEnum "Line"
-          "source", staticOpaque
+          "source",
+          staticRows
+              [ [ cellI "cost" 420; cellS "month" "Jan"; cellI "revenue" 980 ]
+                [ cellI "cost" 390; cellS "month" "Feb"; cellI "revenue" 1105 ] ]
           "stacked", VBool true
           "title", lit "Channel mix"
           "xField", VStr "month"
@@ -2340,7 +2370,7 @@ let private tableNode =
         "table-1",
         "DataGrid",
         [ "columns", VList []
-          "source", staticOpaque
+          "source", staticRows []
           "staticRows",
           VRecord
               [ "headers", VList [ lit "Term"; lit "Definition" ]

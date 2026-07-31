@@ -655,6 +655,101 @@ module Decode =
             go [] xs
         | other -> Error("expected array, got " + kindName other)
 
+/// A single grid / chart / table row: an *open* name→value map (unlike a `TRecord`, whose
+/// field set is fixed). Cells are boxed scalars — the shape the UI tier's decoded path and
+/// its `Binding.Transform` resolution have always produced at runtime; naming it here makes
+/// the rows slot wire-expressible without changing the representation (fuaran#665).
+type Row = Map<string, obj>
+
+/// Canonical codec for the typed row-source payload (fuaran#665 — rows leave the
+/// residual-`"<opaque>"` boundary). Encodes a `Row seq` as a JSON array of row objects with
+/// scalar cells (WIRE_FORMAT §2 rules 5/11); decode accepts the typed form **and** the legacy
+/// `"<opaque>"` sentinel indefinitely (read-compat — a pre-typed emission decodes to the empty
+/// feed, exactly the old behaviour). Canonicality (Ordinal key sort, float layout, escaping) is
+/// inherited from `Canon.render`, never re-implemented here.
+module RowCodec =
+
+    /// The residual-opaque sentinel the rows slot carried before the typed encoding.
+    [<Literal>]
+    let opaqueSentinel = "<opaque>"
+
+    let private kindName =
+        function
+        | JStr _ -> "string"
+        | JInt _ -> "int"
+        | JBool _ -> "bool"
+        | JFloat _ -> "float"
+        | JArr _ -> "array"
+        | JObj _ -> "object"
+
+    /// Best-effort scalar cell encode over the boxed-cell seam — the rule-11 recognised set
+    /// (string / bool / int / int64 / float / float32 / DateTimeOffset / DateTime → Unix
+    /// seconds), anything else the `"<opaque>"` sentinel, a `null` cell omitted (rule 4:
+    /// absence is structural). The `float` test runs FIRST: under Fable every number satisfies
+    /// every numeric type test (`typeof x === "number"`), so float-first routes all JS numbers
+    /// through the canonical float layout — byte-identical to .NET, where the boxed types are
+    /// exact and the arm order is immaterial. Integral floats render in integer form (rule 5
+    /// shortest round-trip), so a .NET `box 42` (→ `JInt`) and a Fable `42` (→ `JFloat`) emit
+    /// the same bytes.
+    let private encodeCell (v: obj) : JVal option =
+        match v with
+        | null -> None
+        | :? string as s -> Some(JStr s)
+        | :? bool as b -> Some(JBool b)
+        | :? float as f -> Some(JFloat f)
+        | :? int as n -> Some(JInt n)
+        | :? int64 as n -> Some(JFloat(float n))
+        | :? float32 as f -> Some(JFloat(float f))
+        | :? System.DateTimeOffset as t -> Some(JFloat(float (t.ToUnixTimeSeconds())))
+        | :? System.DateTime as t ->
+            Some(JFloat(float (System.DateTimeOffset(t.ToUniversalTime(), System.TimeSpan.Zero).ToUnixTimeSeconds())))
+        | _ -> Some(JStr opaqueSentinel)
+
+    /// Encode a row feed as a JSON array of row objects. An empty feed encodes `[]`, never
+    /// `null`. No runtime test recognises a *row* (the slot is statically typed — the point
+    /// of fuaran#665 design C); only the cell seam is best-effort.
+    let encodeRows (rows: Row seq) : JVal =
+        JArr
+            [ for row in rows ->
+                  JObj(
+                      row
+                      |> Map.toList
+                      |> List.choose (fun (k, v) -> encodeCell v |> Option.map (fun jv -> k, jv))
+                  ) ]
+
+    /// A decoded cell is a boxed scalar: numbers surface as `float` (JSON has one number
+    /// population — see the `JVal` numeric-normalization note), strings/bools as themselves.
+    /// Nested arrays / objects are carried structurally (boxed `obj list` / `Row`) so a lenient
+    /// ingest is not rejected — but they are display-opaque and re-encode as `"<opaque>"`
+    /// cells (the residual boundary, narrowed to the cell seam).
+    let rec private decodeCell (j: JVal) : obj =
+        match j with
+        | JStr s -> box s
+        | JBool b -> box b
+        | JInt n -> box (float n)
+        | JFloat f -> box f
+        | JArr xs -> box (xs |> List.map decodeCell)
+        | JObj fields -> box (fields |> List.map (fun (k, v) -> k, decodeCell v) |> Map.ofList)
+
+    /// Decode a rows payload: the typed array form, or the legacy `"<opaque>"` sentinel
+    /// (→ the empty feed, read-compat with every pre-typed emission). Any other shape is a
+    /// named error.
+    let decodeRows (j: JVal) : Result<Row seq, string> =
+        match j with
+        | JStr s when s = opaqueSentinel -> Ok Seq.empty
+        | JArr xs ->
+            let rec go acc rest =
+                match rest with
+                | [] -> Ok(List.rev acc |> Seq.ofList)
+                | JObj fields :: tail ->
+                    let row = fields |> List.map (fun (k, v) -> k, decodeCell v) |> Map.ofList
+
+                    go (row :: acc) tail
+                | other :: _ -> Error("rows: expected a row object, got " + kindName other)
+
+            go [] xs
+        | other -> Error("rows: expected an array of row objects or \"<opaque>\", got " + kindName other)
+
 /// Wire versioning + the forward/backward-compatibility contract (Phase 319). A versioned
 /// wire format lets an *older* consumer meet a *newer* artifact and **detect → preserve →
 /// degrade** instead of crashing — while the authoring/generation surface stays closed and

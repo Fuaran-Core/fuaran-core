@@ -128,10 +128,19 @@ let tests =
           familyTests "Meta" metaCases metaExpected metaKinds
 
           testCase "sentinel modelling: the closure + opaque field classes round-trip" (fun _ ->
-              // `Chart.source` is a `Binding<obj>.Static` — opaque on the wire (Chart/DataGrid
-              // sources stayed opaque through the 0.2.x typed-Static advance).
+              // `Chart.source` carries TYPED rows since fuaran#665 (the rows slot left the
+              // residual-`"<opaque>"` boundary): a Static rows payload renders as a JSON
+              // array of row objects, no sentinel anywhere in the emission.
               match Encode.encode uiIdl (List.find (fun (n, _) -> n = "chart-1") visCases |> snd) with
-              | Ok w -> Expect.stringContains w "\"<opaque>\"" "the opaque sentinel renders for the obj value"
+              | Ok w ->
+                  Expect.stringContains
+                      w
+                      "\"value\":[{\"cost\":420,\"month\":\"Jan\",\"revenue\":980}"
+                      "typed rows render as an array of row objects"
+
+                  Expect.isFalse
+                      (w.Contains "\"<opaque>\"")
+                      "the rows slot must no longer emit the opaque sentinel (fuaran#665)"
               | Error m -> failtestf "chart-1 encode failed: %s" m
 
               // A `Binding.Query` renders `dependsOn` (omitted when absent) + `name`
