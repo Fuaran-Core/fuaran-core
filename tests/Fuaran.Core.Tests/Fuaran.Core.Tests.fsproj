@@ -51,6 +51,7 @@
     <Compile Include="UiHostPrelude.fs" />
     <Compile Include="UiGenerated.fs" />
     <Compile Include="IdlUiGenTests.fs" />
+    <Compile Include="IdlEnumWireTests.fs" />
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="ProjectionTests.fs" />

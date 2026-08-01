@@ -15,22 +15,14 @@ open Fuaran.Core.Idl
 /// The mini UI IDL — the canonical source the codec is driven from.
 let miniIdl: Idl =
     { Enums =
-        [ { Name = "HeadingVariant"
-            Cases = [ "Standard"; "Subtle"; "Display" ] }
-          { Name = "BadgeVariant"
-            Cases = [ "Info"; "Success"; "Warning"; "Critical"; "Neutral" ] }
-          { Name = "ButtonVariant"
-            Cases = [ "Primary"; "Secondary"; "Ghost"; "Danger" ] }
-          { Name = "Emphasis"
-            Cases = [ "Normal"; "Strong"; "Subtle" ] }
-          { Name = "ToneVariant"
-            Cases = [ "Default"; "Brand"; "Positive"; "Caution"; "Critical" ] }
-          { Name = "StyleWeight"
-            Cases = [ "Standard"; "Light"; "Heavy" ] }
-          { Name = "Orientation"
-            Cases = [ "Horizontal"; "Vertical" ] }
-          { Name = "BoxRole"
-            Cases = [ "Dashboard"; "Card"; "Group" ] } ]
+        [ Declare.enumOf "HeadingVariant" [ "Standard"; "Subtle"; "Display" ]
+          Declare.enumOf "BadgeVariant" [ "Info"; "Success"; "Warning"; "Critical"; "Neutral" ]
+          Declare.enumOf "ButtonVariant" [ "Primary"; "Secondary"; "Ghost"; "Danger" ]
+          Declare.enumOf "Emphasis" [ "Normal"; "Strong"; "Subtle" ]
+          Declare.enumOf "ToneVariant" [ "Default"; "Brand"; "Positive"; "Caution"; "Critical" ]
+          Declare.enumOf "StyleWeight" [ "Standard"; "Light"; "Heavy" ]
+          Declare.enumOf "Orientation" [ "Horizontal"; "Vertical" ]
+          Declare.enumOf "BoxRole" [ "Dashboard"; "Card"; "Group" ] ]
       Unions =
         [ { Name = "TextSource"
             Params = []

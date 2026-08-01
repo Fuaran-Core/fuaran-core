@@ -49,44 +49,32 @@ open Fuaran.Core.Idl
 // ─── Enums (bare-string DUs on the wire) ───────────────────────────────────
 
 let private headingVariant =
-    { Name = "HeadingVariant"
-      Cases = [ "Standard"; "Eyebrow"; "Caption"; "Lead" ] }
+    Declare.enumOf "HeadingVariant" [ "Standard"; "Eyebrow"; "Caption"; "Lead" ]
 
 let private badgeVariant =
-    { Name = "BadgeVariant"
-      Cases = [ "Neutral"; "Brand"; "Success"; "Warning"; "Critical"; "Info" ] }
+    Declare.enumOf "BadgeVariant" [ "Neutral"; "Brand"; "Success"; "Warning"; "Critical"; "Info" ]
 
-let private orientation =
-    { Name = "Orientation"
-      Cases = [ "Vertical"; "Horizontal" ] }
+let private orientation = Declare.enumOf "Orientation" [ "Vertical"; "Horizontal" ]
 
 /// `Box.role` — the container-role enum (Fuaran-UI 0.2.0 Box unification: Dashboard /
 /// Card / Stack / GridLayout collapsed into one `Box` kind with a `role` + `layout`).
 let private boxRole =
-    { Name = "BoxRole"
-      // `Separator` (the divider role) is wire vocabulary the hand-written
-      // encoder emits with no corpus fixture — found by the stage-3 swap.
-      Cases = [ "Dashboard"; "Card"; "Group"; "Separator" ] }
+    // `Separator` (the divider role) is wire vocabulary the hand-written
+    // encoder emits with no corpus fixture — found by the stage-3 swap.
+    Declare.enumOf "BoxRole" [ "Dashboard"; "Card"; "Group"; "Separator" ]
 
-let private mathDisplay =
-    { Name = "MathDisplay"
-      Cases = [ "Inline"; "Block" ] }
+let private mathDisplay = Declare.enumOf "MathDisplay" [ "Inline"; "Block" ]
 
 let private imageVariant =
-    { Name = "ImageVariant"
-      Cases = [ "Default"; "Avatar"; "Rounded" ] }
+    Declare.enumOf "ImageVariant" [ "Default"; "Avatar"; "Rounded" ]
 
 let private toneVariant =
-    { Name = "ToneVariant"
-      Cases = [ "Default"; "Subdued"; "Brand"; "Success"; "Warning"; "Critical"; "Info" ] }
+    Declare.enumOf "ToneVariant" [ "Default"; "Subdued"; "Brand"; "Success"; "Warning"; "Critical"; "Info" ]
 
 let private styleWeight =
-    { Name = "StyleWeight"
-      Cases = [ "Compact"; "Standard"; "Spacious" ] }
+    Declare.enumOf "StyleWeight" [ "Compact"; "Standard"; "Spacious" ]
 
-let private emphasis =
-    { Name = "Emphasis"
-      Cases = [ "Quiet"; "Normal"; "Loud" ] }
+let private emphasis = Declare.enumOf "Emphasis" [ "Quiet"; "Normal"; "Loud" ]
 
 // ─── Phase 690: the node envelope (WIRE_FORMAT.md §3.1) ────────────────────
 //
@@ -96,19 +84,17 @@ let private emphasis =
 // false (`style-role-voice-1` does, and the generated layer was corrupting it).
 
 let private styleRole =
-    { Name = "StyleRole"
-      Cases = [ "None"; "Eyebrow"; "Data"; "Lede"; "Caption" ] }
+    Declare.enumOf "StyleRole" [ "None"; "Eyebrow"; "Data"; "Lede"; "Caption" ]
 
 let private fontVoice =
-    { Name = "FontVoice"
-      Cases = [ "Default"; "Display"; "Structural" ] }
+    Declare.enumOf "FontVoice" [ "Default"; "Display"; "Structural" ]
 
 /// Phase 691 — the per-node animation token. NEVER on the wire (`WIRE_FORMAT.md`
 /// §9: motion is consumer-authored, not AI-authored), and declared only so the
 /// host-only `Node.motion` field has a type to name.
 let private motion =
-    { Name = "Motion"
-      Cases =
+    Declare.enumOf
+        "Motion"
         [ "None"
           "PulseDuringLoad"
           "FadeInOnMount"
@@ -116,49 +102,39 @@ let private motion =
           "ShakeOnError"
           "RotateOnRefresh"
           "SlideInFromRight"
-          "ExpandCollapse" ] }
+          "ExpandCollapse" ]
 
 /// `LayoutKind.ScrollArea`'s scroll-axis enum (distinct from `Orientation` — it
 /// adds `Both`).
 let private scrollOrientation =
-    { Name = "ScrollOrientation"
-      Cases = [ "Vertical"; "Horizontal"; "Both" ] }
+    Declare.enumOf "ScrollOrientation" [ "Vertical"; "Horizontal"; "Both" ]
 
 let private buttonVariant =
-    { Name = "ButtonVariant"
-      Cases = [ "Primary"; "Secondary"; "Tertiary"; "Destructive" ] }
+    Declare.enumOf "ButtonVariant" [ "Primary"; "Secondary"; "Tertiary"; "Destructive" ]
 
 let private fileReadEncoding =
-    { Name = "FileReadEncoding"
-      Cases = [ "Text"; "Base64"; "DataUrl" ] }
+    Declare.enumOf "FileReadEncoding" [ "Text"; "Base64"; "DataUrl" ]
 
 let private dateVariant =
-    { Name = "DateVariant"
-      Cases = [ "Date"; "Time"; "DateTime" ] }
+    Declare.enumOf "DateVariant" [ "Date"; "Time"; "DateTime" ]
 
 let private dateStyle =
-    { Name = "DateStyle"
-      Cases = [ "Short"; "Medium"; "Long"; "Full" ] }
+    Declare.enumOf "DateStyle" [ "Short"; "Medium"; "Long"; "Full" ]
 
 let private relativeTimeUnit =
-    { Name = "RelativeTimeUnit"
-      Cases = [ "Second"; "Minute"; "Hour"; "Day"; "Week"; "Month"; "Year" ] }
+    Declare.enumOf "RelativeTimeUnit" [ "Second"; "Minute"; "Hour"; "Day"; "Week"; "Month"; "Year" ]
 
 let private chartKind =
-    { Name = "ChartKind"
-      Cases = [ "Line"; "Bar"; "Area"; "Pie"; "Scatter"; "Heatmap" ] }
+    Declare.enumOf "ChartKind" [ "Line"; "Bar"; "Area"; "Pie"; "Scatter"; "Heatmap" ]
 
 let private hashStrictness =
-    { Name = "HashStrictness"
-      Cases = [ "StrictReplay"; "AdvisoryWarning"; "Enforced" ] }
+    Declare.enumOf "HashStrictness" [ "StrictReplay"; "AdvisoryWarning"; "Enforced" ]
 
 let private hostEffect =
-    { Name = "HostEffect"
-      Cases = [ "Pure"; "ReadsHost"; "WritesHost" ] }
+    Declare.enumOf "HostEffect" [ "Pure"; "ReadsHost"; "WritesHost" ]
 
 let private determinismSource =
-    { Name = "DeterminismSource"
-      Cases = [ "Deterministic"; "Clock"; "Random"; "Network" ] }
+    Declare.enumOf "DeterminismSource" [ "Deterministic"; "Clock"; "Random"; "Network" ]
 
 // ─── Value-unions ──────────────────────────────────────────────────────────
 
@@ -1322,9 +1298,7 @@ let visKinds: IdlKind list =
 // together because a half-modelled `Shape` is worse than none — the drift would
 // be silent (a dropped case) rather than a loud missing-kind error.
 
-let private textAnchor =
-    { Name = "TextAnchor"
-      Cases = [ "Start"; "Middle"; "End" ] }
+let private textAnchor = Declare.enumOf "TextAnchor" [ "Start"; "Middle"; "End" ]
 
 let private drawPoint =
     { Name = "DrawPoint"
@@ -1445,8 +1419,7 @@ let private guestChannel =
       Fields = [ req "direction" (TEnum "ChannelDirection"); opt "messageShape" TStr ] }
 
 let private channelDirection =
-    { Name = "ChannelDirection"
-      Cases = [ "OutOnly"; "TwoWay" ] }
+    Declare.enumOf "ChannelDirection" [ "OutOnly"; "TwoWay" ]
 
 let metaKinds: IdlKind list =
     [ { Tag = "Custom"

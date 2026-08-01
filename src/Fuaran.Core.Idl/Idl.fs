@@ -161,7 +161,58 @@ and IdlUnion =
       Params: string list
       Cases: IdlUnionCase list }
 
-and IdlEnum = { Name: string; Cases: string list }
+/// A closed set of bare strings on the wire.
+///
+/// `Cases` are the HOST case identifiers (the F# DU cases the generator emits);
+/// `Wires` are their wire strings, positionally parallel. `Wires = []` means the
+/// two coincide — each case name IS its wire string, which is every declaration
+/// written before Phase 707 and remains the overwhelmingly common shape.
+///
+/// The split exists because a wire vocabulary is not obliged to respect F#
+/// case-name constraints: `liveRegion`'s wire strings are lower-case
+/// (`"polite"` / `"assertive"` / `"off"`), and other domains' closed sets will
+/// be hyphenated or otherwise unspellable as an F# identifier. Before the split
+/// such a set was simply unmodellable as a `TEnum` and had to be left `TStr` (or
+/// pushed out to a host codec via [[THosted]]) — "named rather than
+/// mis-modelled", but still a hole in the type model.
+///
+/// **Build these with [[Idl.enumOf]] / [[Idl.enumWith]] rather than by record
+/// literal.** `enumWith` takes `(case, wire)` PAIRS, so the parallel-arity
+/// invariant cannot be stated wrongly; [[Idl.enumWireErrors]] is the backstop
+/// for a record built by hand.
+and IdlEnum =
+    { Name: string
+      Cases: string list
+      Wires: string list }
+
+    /// The wire string for a host case name — the case name itself when the enum
+    /// declares no mapping. Unknown case names come back unchanged, which keeps
+    /// this total; callers that need rejection check membership of `Cases` first
+    /// (`Encode` does exactly that).
+    member this.WireOf(case: string) : string =
+        match this.Wires with
+        | [] -> case
+        | ws ->
+            match List.tryFindIndex (fun c -> c = case) this.Cases with
+            | Some i when i < List.length ws -> ws[i]
+            | _ -> case
+
+    /// The host case name for a wire string, or `None` when the wire string is
+    /// not in this enum's closed set. The inverse of [[WireOf]].
+    member this.CaseOf(wire: string) : string option =
+        match this.Wires with
+        | [] -> this.Cases |> List.tryFind (fun c -> c = wire)
+        | ws ->
+            match List.tryFindIndex (fun w -> w = wire) ws with
+            | Some i when i < List.length this.Cases -> Some this.Cases[i]
+            | _ -> None
+
+    /// Every wire string this enum admits, in declaration order — what the
+    /// schema's `enum` array, the TS decoder's case list and the sampler draw on.
+    member this.WireCases: string list =
+        match this.Wires with
+        | [] -> this.Cases
+        | ws -> ws
 
 /// A non-discriminated object type — named fields, no `$type` tag (referenced by
 /// [[TRecord]]). Fields may be `Optional` (omitted on the wire when absent).
@@ -224,6 +275,53 @@ type Idl =
         NodeFields: IdlField list
     }
 
+/// Declaration helpers for the IDL's hand-authored parts.
+[<RequireQualifiedAccess>]
+module Declare =
+
+    /// An enum whose wire strings ARE its case names — the common case, and the
+    /// shape every declaration had before Phase 707.
+    let enumOf (name: string) (cases: string list) : IdlEnum =
+        { Name = name
+          Cases = cases
+          Wires = [] }
+
+    /// An enum whose wire strings differ from its host case names, declared as
+    /// `(case, wire)` pairs. Taking PAIRS rather than two lists is the point: the
+    /// parallel-arity invariant [[Idl.IdlEnum]] carries cannot be stated wrongly
+    /// here, so the only way to violate it is to build the record by hand — which
+    /// [[enumWireErrors]] then catches.
+    let enumWith (name: string) (cases: (string * string) list) : IdlEnum =
+        { Name = name
+          Cases = cases |> List.map fst
+          Wires = cases |> List.map snd }
+
+    /// Well-formedness of every enum's case↔wire mapping — the backstop for a
+    /// record built by literal rather than through [[enumOf]] / [[enumWith]].
+    /// Empty list ⇒ well-formed. Checks the arity the pair-taking constructor
+    /// makes unrepresentable, plus the two duplicate classes that would make the
+    /// mapping non-invertible (a repeated case name, or two cases sharing one
+    /// wire string — the latter silently collapses on decode).
+    let enumWireErrors (idl: Idl) : string list =
+        [ for e in idl.Enums do
+              let cases, wires = e.Cases, e.Wires
+
+              if not (List.isEmpty wires) && List.length wires <> List.length cases then
+                  sprintf
+                      "enum '%s': %d case(s) but %d wire string(s) — the lists must be parallel (or Wires empty)"
+                      e.Name
+                      (List.length cases)
+                      (List.length wires)
+
+              if List.length (List.distinct cases) <> List.length cases then
+                  sprintf "enum '%s': duplicate case name" e.Name
+
+              if
+                  not (List.isEmpty wires)
+                  && List.length (List.distinct wires) <> List.length wires
+              then
+                  sprintf "enum '%s': two cases share a wire string — decoding would not be invertible" e.Name ]
+
 /// A "transparent" union case is encoded/decoded as a bare JSON value (its single
 /// field's value) rather than a `$type`-tagged object — the Fuaran-UI 0.2.0
 /// bare-string canonical `TextSource.Literal` (`{"$type":"Literal","text":"x"}` →
@@ -275,7 +373,10 @@ module Encode =
         | TEnum name, VEnum case ->
             match findEnum name idl with
             | None -> Error(sprintf "unknown enum '%s'" name)
-            | Some e when List.contains case e.Cases -> Ok(JStr case)
+            // `VEnum` carries the WIRE string, exactly as `VUnion` carries the wire
+            // `$type` tag — so an enum that declares a case↔wire mapping is checked
+            // against its wire strings here, and only the F# emitter maps back.
+            | Some e when List.contains case e.WireCases -> Ok(JStr case)
             | Some _ -> Error(sprintf "enum '%s' has no case '%s'" name case)
         | TUnion(name, args), VUnion(tag, fields) ->
             match findUnion name idl with
@@ -427,7 +528,7 @@ module Decode =
         | TFloat, JInt i -> Ok(VFloat(float i))
         | TEnum name, JStr s ->
             match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
-            | Some e when List.contains s e.Cases -> Ok(VEnum s)
+            | Some e when List.contains s e.WireCases -> Ok(VEnum s)
             | Some _ -> Error(sprintf "enum '%s' has no case '%s'" name s)
             | None -> Error(sprintf "unknown enum '%s'" name)
         | TUnion(name, args), JObj fs ->
@@ -933,13 +1034,24 @@ module Gen =
         | TOpaque -> "JStr \"<opaque>\""
         | _ -> sprintf "%s %s" (encFn t) var
 
+    /// The host case name behind a `VEnum`'s WIRE string (Phase 707). `VEnum`
+    /// carries the wire form like every other `IdlValue` case, so the F# emitter —
+    /// alone among the backends — has to map back to the identifier it declared.
+    /// Falls through to the wire string when the enum is unknown or declares no
+    /// mapping, which is the identity every pre-707 declaration already had.
+    let private fsEnumCase (enums: IdlEnum list) (enumName: string) (wire: string) : string =
+        enums
+        |> List.tryFind (fun e -> e.Name = enumName)
+        |> Option.bind _.CaseOf(wire)
+        |> Option.defaultValue wire
+
     /// The F# literal for an omit-when-default field's identity default — enums
     /// (`ToneVariant.Default`) and nullary unions (`CellFormat.None`), the only
     /// default shapes the omit-when-default wire (Phase 147 / 460) uses. `None` ⇒
     /// the emitter can't render it, and the encoder falls back to always-emit.
-    let private fsDefaultLit (t: IdlType) (v: IdlValue) : string option =
+    let private fsDefaultLit (enums: IdlEnum list) (t: IdlType) (v: IdlValue) : string option =
         match t, v with
-        | TEnum n, VEnum c -> Some(n + "." + c)
+        | TEnum n, VEnum c -> Some(n + "." + fsEnumCase enums n c)
         | TUnion(n, _), VUnion(tag, []) -> Some(n + "." + tag)
         | TBool, VBool b -> Some(if b then "true" else "false")
         | _ -> None
@@ -957,7 +1069,7 @@ module Gen =
 
     /// `recv` is the bound record variable — `s` for a spec/record encoder, `n` for
     /// the node envelope (Phase 690), which reuses this presence machinery unchanged.
-    let private specPieceOf (recv: string) (f: IdlField) : string =
+    let private specPieceOf (enums: IdlEnum list) (recv: string) (f: IdlField) : string =
         let src = recv + "." + pascal f.Name
 
         match f.Opt with
@@ -966,7 +1078,7 @@ module Gen =
         // Phase 691 — never on the wire, in any state.
         | HostOnly -> "None"
         | OmitDefault d ->
-            match fsDefaultLit f.Type d with
+            match fsDefaultLit enums f.Type d with
             // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
             // closure slot gives its owning union a function-typed field, and F#
             // functions support no equality, so the union stops supporting the
@@ -992,7 +1104,7 @@ module Gen =
     /// omit-on-`None` for an optional one (`CellFormat.Number`'s `decimals`, `Format.Percent`,
     /// `FormFieldKind.RangedNumber`'s `min`/`max`/`step`, `HoleDecl.Value`'s `default`). Mirrors
     /// [[specPieceOf]] for the `List.choose id` shape, but binds the *positional* case field.
-    let private casePiece (f: IdlField) : string =
+    let private casePiece (enums: IdlEnum list) (f: IdlField) : string =
         let src = ident f.Name
 
         match f.Opt with
@@ -1001,7 +1113,7 @@ module Gen =
         // Phase 691 — never on the wire, in any state.
         | HostOnly -> "None"
         | OmitDefault d ->
-            match fsDefaultLit f.Type d with
+            match fsDefaultLit enums f.Type d with
             // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
             // closure slot gives its owning union a function-typed field, and F#
             // functions support no equality, so the union stops supporting the
@@ -1019,16 +1131,18 @@ module Gen =
             | None -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
 
     let private enumEncoder (e: IdlEnum) =
+        // The case name is the F# identifier, the wire string is what goes on the
+        // wire — identical unless the enum declares a mapping (Phase 707).
         let arms =
             e.Cases
-            |> List.map (fun c -> sprintf "    | %s.%s -> JStr \"%s\"" e.Name c c)
+            |> List.map (fun c -> sprintf "    | %s.%s -> JStr \"%s\"" e.Name c (e.WireOf c))
             |> String.concat "\n"
 
         sprintf "let private enc%s (v: %s) : JVal =\n    match v with\n%s" e.Name e.Name arms
 
     /// A union encoder (an `and`-member of the recursive group). Generic unions take one
     /// `encX : 'X -> JVal` codec per type parameter.
-    let private unionEncoder (msg: Set<string>) (u: IdlUnion) : string =
+    let private unionEncoder (msg: Set<string>) (enums: IdlEnum list) (u: IdlUnion) : string =
         let encArgs =
             u.Params
             |> List.map (fun p -> sprintf " (enc%s: '%s -> JVal)" p p)
@@ -1057,7 +1171,7 @@ module Gen =
                     let pairs = c.Fields |> List.map casePair |> String.concat "; "
                     sprintf "    | %s.%s%s -> Canon.typed \"%s\" [ %s ]" u.Name c.Tag pat c.Tag pairs
                 else
-                    let pieces = c.Fields |> List.map casePiece |> String.concat "; "
+                    let pieces = c.Fields |> List.map (casePiece enums) |> String.concat "; "
 
                     sprintf
                         "    | %s.%s%s -> Canon.typed \"%s\" ([ %s ] |> List.choose id)"
@@ -1083,9 +1197,9 @@ module Gen =
             tyArgs
             arms
 
-    let private specEncoder (msg: Set<string>) (k: IdlKind) : string =
+    let private specEncoder (msg: Set<string>) (enums: IdlEnum list) (k: IdlKind) : string =
         // Single-line list literal — avoids F# offside-rule pitfalls in generated code.
-        let pieces = k.Fields |> List.map (specPieceOf "s") |> String.concat "; "
+        let pieces = k.Fields |> List.map (specPieceOf enums "s") |> String.concat "; "
 
         sprintf
             "and private enc%sSpec%s (s: %sSpec%s) : JVal =\n    Canon.typed \"%s\" ([ %s ] |> List.choose id)"
@@ -1100,8 +1214,8 @@ module Gen =
     /// id` (omit-on-absence for optionals). `Canon.render` Ordinal-sorts keys, so emission order is
     /// irrelevant. Reuses [[specPieceOf]] (`s.<Pascal>` field access). New for the real tier
     /// (`InvokeArg`, `FormField`, `FilterSpec`, `TabHeader`, `ColumnErased`, `ContentHash`, …).
-    let private recordEncoder (msg: Set<string>) (r: IdlRecord) : string =
-        let pieces = r.Fields |> List.map (specPieceOf "s") |> String.concat "; "
+    let private recordEncoder (msg: Set<string>) (enums: IdlEnum list) (r: IdlRecord) : string =
+        let pieces = r.Fields |> List.map (specPieceOf enums "s") |> String.concat "; "
         let ps = declParams msg r.Name []
         sprintf "and private enc%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)" r.Name ps r.Name ps pieces
 
@@ -1157,7 +1271,7 @@ module Gen =
 
     /// Reading one field back out, honouring the presence rules [[specPieceOf]] /
     /// [[casePiece]] wrote it under.
-    let private decField (f: IdlField) : string =
+    let private decField (enums: IdlEnum list) (f: IdlField) : string =
         match f.Type with
         | TClosure
         | TOpaque ->
@@ -1184,7 +1298,7 @@ module Gen =
             // Never on the wire — nothing to read, so take the declared placeholder.
             | HostOnly -> sprintf "Ok (%s)" (hostOnlyLit f)
             | OmitDefault d ->
-                match fsDefaultLit f.Type d with
+                match fsDefaultLit enums f.Type d with
                 | Some dexpr -> sprintf "dDef \"%s\" __fs %s (%s)" f.Name (decFn f.Type) dexpr
                 // The encoder fell back to always-emit, so decode is required too.
                 | None -> sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type)
@@ -1205,13 +1319,13 @@ module Gen =
         let closes = String.replicate (List.length binders + extraCloses) ")"
         (opens @ [ indent + final + closes ]) |> String.concat "\n"
 
-    let private fieldBinders (fs: IdlField list) =
-        fs |> List.map (fun f -> ident f.Name, decField f)
+    let private fieldBinders (enums: IdlEnum list) (fs: IdlField list) =
+        fs |> List.map (fun f -> ident f.Name, decField enums f)
 
     let private enumDecoder (e: IdlEnum) =
         let arms =
             e.Cases
-            |> List.map (fun c -> sprintf "    | JStr \"%s\" -> Ok %s.%s" c e.Name c)
+            |> List.map (fun c -> sprintf "    | JStr \"%s\" -> Ok %s.%s" (e.WireOf c) e.Name c)
             |> String.concat "\n"
 
         sprintf
@@ -1224,7 +1338,7 @@ module Gen =
     /// A union decoder. Generic unions take one `decX` codec per type parameter,
     /// with the explicit type-parameter list [[unionEncoder]] needs for the same
     /// polymorphic-recursion reason (`Binding.Format.source` recurses at `float`).
-    let private unionDecoder (msg: Set<string>) (u: IdlUnion) : string =
+    let private unionDecoder (msg: Set<string>) (enums: IdlEnum list) (u: IdlUnion) : string =
         let decArgs =
             u.Params
             |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, string>)" p p)
@@ -1251,7 +1365,7 @@ module Gen =
                 sprintf
                     "        | \"%s\" ->\n%s"
                     c.Tag
-                    (bindChain "            " (fieldBinders c.Fields) (sprintf "Ok(%s)" (ctor c)) 0)
+                    (bindChain "            " (fieldBinders enums c.Fields) (sprintf "Ok(%s)" (ctor c)) 0)
 
         // The transparent case (TextSource.Literal) is on the wire BARE, so it is
         // recognised by the ABSENCE of a `$type`, not by a tag.
@@ -1295,7 +1409,7 @@ module Gen =
             tagged
             fallthrough
 
-    let private specDecoder (msg: Set<string>) (k: IdlKind) : string =
+    let private specDecoder (msg: Set<string>) (enums: IdlEnum list) (k: IdlKind) : string =
         let assigns =
             k.Fields
             |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
@@ -1306,9 +1420,9 @@ module Gen =
             k.Tag
             k.Tag
             (objParams msg (k.Tag + "Spec") [])
-            (bindChain "    " (fieldBinders k.Fields) (sprintf "Ok { %s }" assigns) 1)
+            (bindChain "    " (fieldBinders enums k.Fields) (sprintf "Ok { %s }" assigns) 1)
 
-    let private recordDecoder (msg: Set<string>) (r: IdlRecord) : string =
+    let private recordDecoder (msg: Set<string>) (enums: IdlEnum list) (r: IdlRecord) : string =
         let assigns =
             r.Fields
             |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
@@ -1319,7 +1433,7 @@ module Gen =
             r.Name
             r.Name
             (objParams msg r.Name [])
-            (bindChain "    " (fieldBinders r.Fields) (sprintf "Ok { %s }" assigns) 1)
+            (bindChain "    " (fieldBinders enums r.Fields) (sprintf "Ok { %s }" assigns) 1)
 
     /// The decode-side helper prelude, emitted once per module.
     let private decodeHelpers () : string =
@@ -1563,12 +1677,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// field's IDL type (so a `VEnum "Standard"` on a `HeadingVariant` field emits
     /// `HeadingVariant.Standard`). Scalars + enums are supported — the spike's default
     /// classes; richer default values (unions / nodes) are a later leg.
-    let private defaultExpr (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+    let private defaultExpr (enums: IdlEnum list) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
         match t, v with
         | TStr, VStr s -> Ok("\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"")
         | TInt, VInt i -> Ok(string i)
         | TBool, VBool b -> Ok(if b then "true" else "false")
-        | TEnum n, VEnum c -> Ok(n + "." + c)
+        | TEnum n, VEnum c -> Ok(n + "." + fsEnumCase enums n c)
         | TUnion(n, _), VUnion(tag, []) -> Ok(n + "." + tag)
         | _ -> Error(CodegenError.UnsupportedDefault(t, v))
 
@@ -1596,14 +1710,14 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
             let fieldExpr (f: IdlField) : Result<string, CodegenError> =
                 match defaultFor k.Tag f.Name, f.Opt with
-                | Some v, Required -> defaultExpr f.Type v
-                | Some v, Optional -> defaultExpr f.Type v |> Result.map (fun e -> "Some(" + e + ")")
+                | Some v, Required -> defaultExpr idl.Enums f.Type v
+                | Some v, Optional -> defaultExpr idl.Enums f.Type v |> Result.map (fun e -> "Some(" + e + ")")
                 | None, Required -> Ok(ident f.Name)
                 | None, Optional -> Ok "None"
                 // HostOnly: not a ctor param either — the field takes its placeholder.
                 | _, HostOnly -> Ok(hostOnlyLit f)
                 // OmitDefault: not a ctor param — the field takes its identity default.
-                | _, OmitDefault d -> defaultExpr f.Type d
+                | _, OmitDefault d -> defaultExpr idl.Enums f.Type d
 
             k.Fields
             |> List.map (fun f -> fieldExpr f |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
@@ -1621,7 +1735,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                         match f.Opt with
                         | Optional -> sprintf "; %s = None" (pascal f.Name)
                         | OmitDefault d ->
-                            match fsDefaultLit f.Type d with
+                            match fsDefaultLit idl.Enums f.Type d with
                             | Some e -> sprintf "; %s = %s" (pascal f.Name) e
                             | None -> failwithf "node envelope field '%s' has an unrenderable default" f.Name
                         | HostOnly -> sprintf "; %s = %s" (pascal f.Name) (hostOnlyLit f)
@@ -1771,7 +1885,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 if List.isEmpty idl.NodeFields then
                     "\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
                 else
-                    let pieces = idl.NodeFields |> List.map (specPieceOf "n") |> String.concat "; "
+                    let pieces =
+                        idl.NodeFields |> List.map (specPieceOf idl.Enums "n") |> String.concat "; "
 
                     sprintf "\n    JObj([ Some(\"id\", JStr n.Id); Some(\"kind\", kind); %s ] |> List.choose id)" pieces
 
@@ -1786,9 +1901,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
-            (encNodeDecl :: (unions |> List.map (unionEncoder msg))
-             @ (records |> List.map (recordEncoder msg))
-             @ (kinds |> List.map (specEncoder msg)))
+            (encNodeDecl :: (unions |> List.map (unionEncoder msg idl.Enums))
+             @ (records |> List.map (recordEncoder msg idl.Enums))
+             @ (kinds |> List.map (specEncoder msg idl.Enums)))
             |> String.concat "\n\n"
 
         let header =
@@ -1829,15 +1944,17 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
                 let binders =
                     [ "id", "dReq \"id\" __fs dStr"; "kind", "dReq \"kind\" __fs decNodeKind" ]
-                    @ fieldBinders idl.NodeFields
+                    @ fieldBinders idl.Enums idl.NodeFields
 
                 sprintf "and private decNode (j: JVal) : Result<Node%s, string> =\n" (objParams msg "Node" [])
                 + "    dObj j |> Result.bind (fun __fs ->\n"
                 + bindChain "    " binders final 1
 
-            (decNodeKindDecl :: decNodeDecl :: (unions |> List.map (unionDecoder msg))
-             @ (records |> List.map (recordDecoder msg))
-             @ (kinds |> List.map (specDecoder msg)))
+            (decNodeKindDecl
+             :: decNodeDecl
+             :: (unions |> List.map (unionDecoder msg idl.Enums))
+             @ (records |> List.map (recordDecoder msg idl.Enums))
+             @ (kinds |> List.map (specDecoder msg idl.Enums)))
             |> String.concat "\n\n"
 
         match witnessDecl msg kinds, defaultsDecl msg idl kinds with
@@ -1932,7 +2049,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// Emit a Draft 2020-12 JSON Schema for the whole IDL's canonical wire.
     let jsonSchema (idl: Idl) : string =
         let enumDef (e: IdlEnum) =
-            e.Name, JObj [ "type", JStr "string"; "enum", JArr(e.Cases |> List.map JStr) ]
+            // The `enum` array is a WIRE contract — wire strings, not host case names.
+            e.Name, JObj [ "type", JStr "string"; "enum", JArr(e.WireCases |> List.map JStr) ]
 
         let unionDef (u: IdlUnion) =
             u.Name, JObj [ "oneOf", JArr(u.Cases |> List.map (fun c -> objectSchema c.Tag c.Fields)) ]
@@ -2081,7 +2199,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TVar _ -> VStr(pick r stringPool)
         | TEnum name ->
             match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
-            | Some e -> VEnum(pick r e.Cases)
+            | Some e -> VEnum(pick r e.WireCases)
             | None -> VStr "?"
         | TList inner ->
             // Bounded, and empty is a legitimate sample — an empty collection is
@@ -2457,7 +2575,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         "{ " + String.concat ", " pairs + " }"
 
     let private tsEnumDecoder (e: IdlEnum) =
-        let cases = e.Cases |> List.map tsSourceStr |> String.concat ", "
+        // TS holds an enum AS its wire string — there is no second representation
+        // on this side, so the decoder's closed set is the wire strings.
+        let cases = e.WireCases |> List.map tsSourceStr |> String.concat ", "
 
         "const dec" + e.Name + " = dEnum(" + tsSourceStr e.Name + ", [" + cases + "]);"
 
@@ -2819,7 +2939,7 @@ const plain = (pairs) =>
                             | HostOnly -> Ok(pascal f.Name + " = " + hostOnlyLit f)
                             // OmitDefault absent → restore the identity default value.
                             | OmitDefault d ->
-                                match fsDefaultLit f.Type d with
+                                match fsDefaultLit idl.Enums f.Type d with
                                 | Some e -> Ok(pascal f.Name + " = " + e)
                                 | None ->
                                     Error(
@@ -3089,7 +3209,20 @@ module Artifact =
               JArr(
                   idl.Enums
                   |> sortedBy _.Name
-                  |> List.map (fun e -> JObj [ "name", JStr e.Name; "cases", JArr(e.Cases |> List.map JStr) ])
+                  |> List.map (fun e ->
+                      // `cases` is the wire contract (what a decoder must accept).
+                      // `hostCases` appears ONLY for a Phase 707 wire-mapped enum and
+                      // is a hostSurface key in the §13 sense — a host-language
+                      // declaration carrying nothing observable on the wire. Omitting
+                      // it for the identity mapping is what keeps every pre-707
+                      // artefact byte-identical.
+                      JObj(
+                          [ "name", JStr e.Name; "cases", JArr(e.WireCases |> List.map JStr) ]
+                          @ (if List.isEmpty e.Wires then
+                                 []
+                             else
+                                 [ "hostCases", JArr(e.Cases |> List.map JStr) ])
+                      ))
               )
               "records",
               JArr(
