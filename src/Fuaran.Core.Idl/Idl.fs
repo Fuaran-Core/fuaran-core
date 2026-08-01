@@ -2030,21 +2030,55 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TRecord n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TMap vt -> JObj [ "type", JStr "object"; "additionalProperties", schemaOf vt ]
 
+    /// The wire-visible fields of a declaration. A [[HostOnly]] field is never on
+    /// the wire in any state (Phase 691), so it is not a property the schema
+    /// describes — listing it would advertise a key no encoder emits.
+    let private wireFields (fields: IdlField list) =
+        fields |> List.filter (fun f -> f.Opt <> HostOnly)
+
+    /// The property/required pair shared by every object-shaped schema.
+    ///
+    /// **`additionalProperties` is deliberately absent** (Phase 697). The decoder
+    /// tolerates unknown keys — it looks fields up by name, `WIRE_FORMAT.md` §2.1
+    /// rule 2 — and the published `schema.json` matches that tolerance. A generated
+    /// schema that set `additionalProperties: false` would reject payloads the
+    /// format accepts and the decoder round-trips, which makes it a fourth mirror
+    /// disagreeing with the spec rather than a projection of it. Forward
+    /// compatibility is the point: an older host validating a newer producer's
+    /// output must not fail on a key it has not learned yet.
+    let private objectBody (fields: IdlField list) =
+        let wire = wireFields fields
+
+        [ "required",
+          JArr(
+              wire
+              |> List.filter (fun f -> f.Opt = Required)
+              |> List.map (fun f -> JStr f.Name)
+          )
+          "properties", JObj(wire |> List.map (fun f -> f.Name, schemaOf f.Type)) ]
+
     /// An object schema with a `$type` const (for a kind / union case) + its fields.
     let private objectSchema (typeConst: string) (fields: IdlField list) : JVal =
+        let wire = wireFields fields
+
         let props =
             ("$type", JObj [ "const", JStr typeConst ])
-            :: (fields |> List.map (fun f -> f.Name, schemaOf f.Type))
+            :: (wire |> List.map (fun f -> f.Name, schemaOf f.Type))
 
         let required =
             "$type"
-            :: (fields |> List.filter (fun f -> f.Opt = Required) |> List.map (fun f -> f.Name))
+            :: (wire |> List.filter (fun f -> f.Opt = Required) |> List.map (fun f -> f.Name))
 
         JObj
             [ "type", JStr "object"
               "required", JArr(required |> List.map JStr)
-              "properties", JObj props
-              "additionalProperties", JBool false ]
+              "properties", JObj props ]
+
+    /// A NON-discriminated object schema — a [[TRecord]] (`FormField`, `FilterSpec`,
+    /// `TabHeader`, `ColumnErased`, …). No `$type` const: that is exactly what
+    /// distinguishes a record from a union case on the wire.
+    let private recordSchema (r: IdlRecord) : JVal =
+        JObj(("type", JStr "object") :: objectBody r.Fields)
 
     /// Emit a Draft 2020-12 JSON Schema for the whole IDL's canonical wire.
     let jsonSchema (idl: Idl) : string =
@@ -2053,7 +2087,26 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             e.Name, JObj [ "type", JStr "string"; "enum", JArr(e.WireCases |> List.map JStr) ]
 
         let unionDef (u: IdlUnion) =
-            u.Name, JObj [ "oneOf", JArr(u.Cases |> List.map (fun c -> objectSchema c.Tag c.Fields)) ]
+            let tagged = u.Cases |> List.map (fun c -> objectSchema c.Tag c.Fields)
+
+            // A transparent case is on the wire BARE — its single field's value with
+            // no `$type` envelope (`TextSource.Literal`: `"x"`, not
+            // `{"$type":"Literal","text":"x"}`). The codec legs already special-case
+            // it; without reflecting it here the schema rejects the CANONICAL form of
+            // every literal string in the corpus. The tagged branch stays: §16
+            // lenient-accept admits the envelope on input.
+            let bare =
+                match TransparentUnion.tag u with
+                | None -> []
+                | Some ttag ->
+                    u.Cases
+                    |> List.tryFind (fun c -> c.Tag = ttag)
+                    |> Option.map (fun c -> c.Fields |> List.map (fun f -> schemaOf f.Type))
+                    |> Option.defaultValue []
+
+            u.Name, JObj [ "oneOf", JArr(bare @ tagged) ]
+
+        let recordDef (r: IdlRecord) = r.Name, recordSchema r
 
         let kindDef (k: IdlKind) = k.Tag, objectSchema k.Tag k.Fields
 
@@ -2078,13 +2131,18 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                         "kind",
                         JObj
                             [ "oneOf", JArr(idl.Kinds |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + k.Tag) ])) ] ]
-                      @ (idl.NodeFields |> List.map (fun f -> f.Name, schemaOf f.Type))
-                  )
-                  "additionalProperties", JBool false ]
+                      @ (wireFields idl.NodeFields |> List.map (fun f -> f.Name, schemaOf f.Type))
+                  ) ]
 
+        // Records join the assembly (Phase 697). Every `TRecord` slot emits a
+        // `$ref` into `#/$defs/`, so omitting them left a dangling reference for
+        // `FormField` / `FilterSpec` / `TabHeader` / `ColumnErased` / … — under a
+        // strict validator an unresolvable `$ref` is an error, not a permissive
+        // skip, so the leg could never have certified against the corpus.
         let defs =
             (idl.Enums |> List.map enumDef)
             @ (idl.Unions |> List.map unionDef)
+            @ (idl.Records |> List.map recordDef)
             @ (idl.Kinds |> List.map kindDef)
             @ [ nodeDef ]
 

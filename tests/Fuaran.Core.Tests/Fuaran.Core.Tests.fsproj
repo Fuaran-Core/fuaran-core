@@ -52,6 +52,7 @@
     <Compile Include="UiGenerated.fs" />
     <Compile Include="IdlUiGenTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
+    <Compile Include="IdlSchemaTests.fs" />
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="ProjectionTests.fs" />
@@ -85,5 +86,6 @@
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
     <PackageReference Include="Expecto" />
+    <PackageReference Include="JsonSchema.Net" />
   </ItemGroup>
 </Project>

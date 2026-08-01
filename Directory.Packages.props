@@ -5,6 +5,13 @@
          at runtime; Expecto is test-only. No domain / native / host dependency. -->
     <PackageVersion Include="FSharp.Core" Version="10.1.300" />
     <PackageVersion Include="Expecto" Version="9.0.4" />
+    <!-- JsonSchema.Net: TEST-ONLY, like Expecto. Phase 697 certifies the IDL's
+         JSON-schema leg by validating the wire corpus against it with a real
+         Draft 2020-12 validator — a leg checked only by string assertions is not
+         certified, it is described. Same version the UI tier pins for the
+         hand-written schema's conformance suite, so both are checked by the same
+         implementation and a disagreement is about the schemas, not the validators. -->
+    <PackageVersion Include="JsonSchema.Net" Version="9.2.1" />
     <!-- Fable.Core: used ONLY under `#if FABLE_COMPILER` for the `[<Emit>]` JS-number-toString in
          `Canon` (Wire.fs). A no-op netstandard package on .NET (the runtime stays FSharp.Core-only);
          present so the Fable-distributed source compiles the float-layout port. Matches the UI host. -->
