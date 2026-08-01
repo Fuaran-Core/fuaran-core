@@ -5,6 +5,16 @@ open Expecto
 [<EntryPoint>]
 let main argv =
     match List.ofArray argv with
+    // Phase 696 — write the canonical `idl.json` vocabulary artifact into the
+    // wire-format-fixtures corpus clone:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-idl ..\Fuaran-UI\wire-format-fixtures
+    // The emitter lives here rather than beside the corpus regen in the UI tier
+    // because the IDL engine ships in no package and the vocabulary is local to
+    // this test project — see IdlArtifactTests.fs. The drift guard in that file
+    // fails whenever the committed artifact and a fresh emission disagree.
+    | "--emit-idl" :: dir :: _ ->
+        IdlArtifactTests.emit dir
+        0
     // Re-vendor the IDL-inversion golden snapshots from the authored cases:
     //   dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots
     | "--regen-snapshots" :: _ ->

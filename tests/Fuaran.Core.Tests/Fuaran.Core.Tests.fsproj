@@ -41,6 +41,9 @@
     <Compile Include="IdlSpikeTests.fs" />
     <Compile Include="UiIdl.fs" />
     <Compile Include="IdlUiTests.fs" />
+    <!-- Phase 696 — the canonical `idl.json` spec artifact: its emit leg (driven by the
+         emit-idl switch in Program.fs) and the regenerate-and-byte-compare drift guard. -->
+    <Compile Include="IdlArtifactTests.fs" />
     <!-- Phase 317 real-tier compiled codegen: the committed generated module (emitted by
          Fuaran.Core.Idl.Gen from uiIdl; drift-guarded) + its byte-identity test.
          UiHostPrelude.fs stubs the consuming tier's `Fuaran.UI.HostPrelude` (THosted
