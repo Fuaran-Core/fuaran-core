@@ -1,6 +1,6 @@
 // Test-assembly stub of the Fuaran-UI tier's host prelude (`Fuaran.UI.HostPrelude`).
 //
-// The IDL's `THosted` slots (Accessibility.role / .liveRegion, StateBehaviour.onError's
+// The IDL's `THosted` slots (Accessibility.role, StateBehaviour.onError's
 // arg) name host types + codecs that live in the CONSUMING tier, compiled ahead of its
 // generated module. This test assembly compiles the same generated code (`UiGenerated.fs`,
 // the drift-guarded snapshot), so it carries an identical stub under the same module path.
@@ -69,13 +69,6 @@ type AriaRole =
     | Tabpanel
     | Custom of role: string
 
-/// `aria-live` politeness — closed, lower-case on the wire.
-[<RequireQualifiedAccess>]
-type LiveRegionKind =
-    | Polite
-    | Assertive
-    | Off
-
 let encAriaRole (r: AriaRole) : JVal =
     JStr(
         match r with
@@ -116,19 +109,3 @@ let decAriaRole (j: JVal) : Result<AriaRole, string> =
     | JStr "tabpanel" -> Ok AriaRole.Tabpanel
     | JStr other -> Ok(AriaRole.Custom other)
     | _ -> Error "expected JSON string for aria role"
-
-let encLiveRegionKind (k: LiveRegionKind) : JVal =
-    JStr(
-        match k with
-        | LiveRegionKind.Polite -> "polite"
-        | LiveRegionKind.Assertive -> "assertive"
-        | LiveRegionKind.Off -> "off"
-    )
-
-let decLiveRegionKind (j: JVal) : Result<LiveRegionKind, string> =
-    match j with
-    | JStr "polite" -> Ok LiveRegionKind.Polite
-    | JStr "assertive" -> Ok LiveRegionKind.Assertive
-    | JStr "off" -> Ok LiveRegionKind.Off
-    | JStr other -> Error("unknown liveRegion '" + other + "' (expected polite | assertive | off)")
-    | _ -> Error "expected JSON string for liveRegion"

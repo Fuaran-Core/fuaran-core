@@ -136,11 +136,15 @@ let staleIdlArtifactGuard =
           // Enum vocabularies are one of the four things acceptance names a third
           // party must be able to enumerate, and the only one whose payload is a
           // bare string list — so a mis-rendered enum would be invisible above.
-          testCase "enum vocabularies carry their case lists verbatim" (fun () ->
+          // Phase 707: `cases` is the WIRE contract — the strings a non-F# consumer
+          // must accept — which is `WireCases`, not the host case names. For an enum
+          // that declares a mapping the two differ, and the host identifiers appear
+          // separately under `hostCases` (pinned by the sibling case below).
+          testCase "enum vocabularies carry their wire case lists verbatim" (fun () ->
               let expected =
                   uiIdl.Enums
                   |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
-                  |> List.map (fun e -> e.Name, e.Cases)
+                  |> List.map (fun e -> e.Name, e.WireCases)
 
               match Artifact.json uiIdl with
               | JObj fields ->
@@ -170,4 +174,51 @@ let staleIdlArtifactGuard =
 
                       Expect.equal actual expected "every enum name maps to its authored case list, in order"
                   | _ -> failtest "'enums' is missing or not an array"
-              | _ -> failtest "the artifact is not a JSON object") ]
+              | _ -> failtest "the artifact is not a JSON object")
+
+          // The other half of the Phase 707 promise: an enum whose host case names
+          // differ from its wire strings publishes BOTH, and one whose don't
+          // publishes only the wire list — so the artefact of an unmapped
+          // vocabulary is byte-for-byte what it always was.
+          testCase "a wire-mapped enum publishes its host case names, an unmapped one does not" (fun () ->
+              let entries =
+                  match Artifact.json uiIdl with
+                  | JObj fields ->
+                      match fields |> List.tryFind (fun (n, _) -> n = "enums") |> Option.map snd with
+                      | Some(JArr es) -> es
+                      | _ -> failtest "'enums' is missing or not an array"
+                  | _ -> failtest "the artifact is not a JSON object"
+
+              let hostCasesOf (name: string) =
+                  entries
+                  |> List.tryPick (function
+                      | JObj ef ->
+                          match ef |> List.tryFind (fun (n, _) -> n = "name") |> Option.map snd with
+                          | Some(JStr n) when n = name ->
+                              Some(
+                                  ef
+                                  |> List.tryFind (fun (k, _) -> k = "hostCases")
+                                  |> Option.map (fun (_, v) ->
+                                      match v with
+                                      | JArr cs ->
+                                          cs
+                                          |> List.map (function
+                                              | JStr s -> s
+                                              | _ -> failtest "hostCases entry is not a string")
+                                      | _ -> failtest "'hostCases' is not an array")
+                              )
+                          | _ -> None
+                      | _ -> None)
+
+              // `LiveRegionKind` is the vocabulary's one wire-mapped enum: closed set,
+              // lower-case wire strings, F# identifiers that cannot spell them.
+              Expect.equal
+                  (hostCasesOf "LiveRegionKind")
+                  (Some(Some [ "Polite"; "Assertive"; "Off" ]))
+                  "the mapped enum publishes its host identifiers"
+
+              for e in uiIdl.Enums |> List.filter (fun e -> List.isEmpty e.Wires) do
+                  Expect.equal
+                      (hostCasesOf e.Name)
+                      (Some None)
+                      (sprintf "'%s' is unmapped and adds no hostCases" e.Name)) ]

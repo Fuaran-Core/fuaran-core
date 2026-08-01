@@ -909,16 +909,27 @@ let private stateBehaviourRecord =
                   "(fun _ -> Unchecked.defaultof<Node<obj>>)")
           opt "onLoading" TNode ] }
 
+/// `aria-live` politeness — closed, and lower-case on the wire. Phase 707: the
+/// lower-case half of the old "doesn't fit `TEnum`" excuse is gone, so this is a
+/// declared enum with a case↔wire mapping rather than a host-owned codec. Case
+/// order matches the tier's DU so the generated declaration lands identically.
+let private liveRegionKind =
+    Declare.enumWith "LiveRegionKind" [ "Polite", "polite"; "Assertive", "assertive"; "Off", "off" ]
+
 /// `{ "describedBy"?, "hidden"?, "label"?, "labelledBy"?, "liveRegion"?, "role"? }`.
 ///
-/// `role` and `liveRegion` were `TStr` until the swap's stage 4 because neither
-/// fits `TEnum`: `AriaRole` carries a `Custom of string` case that emits its
-/// payload verbatim (the wire position genuinely admits any string), and
-/// `LiveRegionKind`'s wire strings are lower-case while an `IdlEnum`'s case name
-/// IS its wire string. Both are now `THosted` — the host declares the real DU +
-/// its wire codec in `Fuaran.UI.HostPrelude` (lower-case mapping + `Custom`
-/// passthrough), and everywhere else (interpreter, TS, schema, sampler) the slot
-/// behaves as verbatim JSON exactly as `TStr` did. Same bytes, typed surface kept.
+/// `role` stays `THosted`: `AriaRole` carries a `Custom of string` case that emits
+/// its payload verbatim, so the wire position genuinely admits any string — the
+/// set is OPEN, which no `TEnum` can model however its cases are spelled. The host
+/// declares the DU + its codec in `Fuaran.UI.HostPrelude`, and everywhere else
+/// (interpreter, TS, schema, sampler) the slot behaves as verbatim JSON exactly as
+/// `TStr` did.
+///
+/// `liveRegion` was `THosted` for a DIFFERENT reason — its set is closed, and only
+/// its lower-case wire strings were unspellable as `IdlEnum` cases. Phase 707 split
+/// case name from wire string, so it is now a real `TEnum`: same bytes, and the
+/// closed set is visible to the schema, the TS decoder and the sampler, which a
+/// host-owned codec kept opaque to all three.
 let private accessibilityRecord =
     { Name = "Accessibility"
       Fields =
@@ -926,12 +937,7 @@ let private accessibilityRecord =
           opt "hidden" (bindingOf TBool)
           opt "label" (bindingOf TStr)
           opt "labelledBy" TStr
-          opt
-              "liveRegion"
-              (THosted
-                  { FSharp = "Fuaran.UI.HostPrelude.LiveRegionKind"
-                    Encode = "Fuaran.UI.HostPrelude.encLiveRegionKind"
-                    Decode = "Fuaran.UI.HostPrelude.decLiveRegionKind" })
+          opt "liveRegion" (TEnum "LiveRegionKind")
           opt
               "role"
               (THosted
@@ -1514,7 +1520,8 @@ let uiIdl: Idl =
           textAnchor
           styleRole
           fontVoice
-          motion ]
+          motion
+          liveRegionKind ]
       Records =
         [ semanticStyleRecord
           stateBehaviourRecord
