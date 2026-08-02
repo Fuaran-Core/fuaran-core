@@ -47,7 +47,8 @@ let private idl: Idl =
       Enums = [ liveRegion; tone ]
       Records = []
       Defaults = []
-      NodeFields = [] }
+      NodeFields = []
+      Ops = [] }
 
 let private note (live: string) (tone: string) =
     VNode("n1", "Note", [ "live", VEnum live; "tone", VEnum tone ])

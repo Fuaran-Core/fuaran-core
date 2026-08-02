@@ -68,9 +68,10 @@ let emit (outputDir: string) : unit =
     File.WriteAllText(path, text)
 
     printfn
-        "Emitted %s (%d kinds, %d unions, %d enums, %d records, %d defaults) to %s"
+        "Emitted %s (%d kinds, %d ops, %d unions, %d enums, %d records, %d defaults) to %s"
         artifactFileName
         uiIdl.Kinds.Length
+        uiIdl.Ops.Length
         uiIdl.Unions.Length
         uiIdl.Enums.Length
         uiIdl.Records.Length

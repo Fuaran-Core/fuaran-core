@@ -4,8 +4,9 @@ Phase 697. `Gen.jsonSchema` had only ever been smoke-tested on the 8-kind `miniI
 what it does now that it has met the full corpus, and answers the one question the phase exists to
 answer: **can it subsume the hand-written `Fuaran.UI.Ops.SchemaGen`?**
 
-**Verdict: not yet — three named gaps, none of them in the schema leg's core.** The leg is now
-corpus-certified for what it covers, which is the precondition for the decision, not the decision.
+**Verdict: not yet.** Three gaps were named at Phase 697; Phase 703 closed the first, so two
+remain, and neither is in the schema leg's core. The leg is corpus-certified for what it covers,
+which is the precondition for the decision, not the decision.
 
 Certification lives in `tests/Fuaran.Core.Tests/IdlSchemaTests.fs`, evaluated by JsonSchema.Net —
 the same Draft 2020-12 implementation the UI tier uses for the hand-written schema, so a
@@ -66,16 +67,30 @@ the hand-written schema does not define at all (`BoxRole`, `ChannelDirection`, `
 > the F# emitter.
 
 **Only in the hand-written schema (43).** The `*Spec` naming half of the same convention difference
-(21). `NodeKind` plus the four category definitions `DisplayKind` / `LayoutKind` / `InputKind` /
-`VisKind` — the generated schema inlines the kind `oneOf` directly into `Node.kind` instead. The
-layout family `BoxLayout` / `FlexLayout` / `GridSpec` / `GridTemplate`, and `CellValue`. `AriaRole`,
-which the IDL models as `THosted` and therefore renders as unconstrained JSON. And `TreeOp`.
+(21). The four category definitions `DisplayKind` / `LayoutKind` / `InputKind` / `VisKind` — the
+generated schema has no equivalent, and does not need one: Phase 692 flattened `NodeKind`, and the
+categories are a host-side classification recovered on decode (`WIRE_FORMAT.md` §3.2). The layout
+family `BoxLayout` / `FlexLayout` / `GridSpec` / `GridTemplate`, and `CellValue`. `AriaRole`, which
+the IDL models as `THosted` and therefore renders as unconstrained JSON.
+
+> Counted before Phase 703. `NodeKind` and `TreeOp` were in this column at the time and are now in
+> both, which is the shape of the diff shrinking as the IDL gains expressiveness rather than as the
+> schemas are talked into agreeing.
 
 ## The three gaps that actually block subsumption
 
-1. **No `TreeOp` root.** The published schema validates ops as well as nodes; the IDL models nodes
-   only. Tracked as roadmap phase 703 (model `TreeOp`s in the IDL) — that phase is the gating one,
-   not this.
+1. ~~**No `TreeOp` root.**~~ **CLOSED by Phase 703.** The IDL now carries an op vocabulary
+   (`Idl.Ops`), the schema root is `oneOf [Node; TreeOp]` when a domain declares ops, and all 22 op
+   fixtures round-trip through the interpreter byte-identically. `NodeKind` also became a named
+   definition rather than an alternation inlined into `Node.kind`, matching the published schema —
+   `TKind` (`EditNode.newKind`) needed something to reference.
+
+   Phase 703 left ONE leg of its own unshipped, which is now the honest remainder here: the F# and
+   TypeScript **emitters** do not generate an op family. Nothing walks `Idl.Ops` in either backend,
+   so no generated artefact changed; the arms are explicit and fail loudly rather than falling
+   through a match. Emitting a `TreeOp` DU is a genuinely larger piece of work than the modelling
+   was — it is msg-carrying through `TKind`/`TNode`, so it lands as a generic type group — and
+   nothing consumes it yet.
 2. **`AriaRole` is unconstrained.** The hand-written schema enumerates the ARIA roles plus a
    free-string escape. The IDL renders it `true`, because its set is genuinely OPEN
    (`AriaRole.Custom of string` emits its payload verbatim) and no `TEnum` can model an open set —
@@ -86,11 +101,14 @@ which the IDL models as `THosted` and therefore renders as unconstrained JSON. A
 
 ## Recommendation
 
-Keep both, and revisit after 703. Subsuming now would trade a schema that states three things the
+_(Updated after Phase 703 closed blocker 1.)_ Keep both, and revisit when blockers 2 and 3 are
+addressed. Subsuming now would trade a schema that states two things the
 generated one cannot for one that is merely generated — a regression in what the published artefact
 promises, in exchange for removing a mirror. The mirror is worth removing, but only once the
-generated leg is at least as expressive, and each of the three gaps above is a one-time fix in the
-IDL that pays off across every backend rather than only here.
+generated leg is at least as expressive, and each remaining gap is a one-time fix in the IDL that
+pays off across every backend rather than only here. Phase 703 is the worked example: closing the
+op gap in the IDL gave the schema its second root, `idl.json` its op family, and the 700 classifier
+an op taxonomy, from one piece of modelling.
 
 The naming convention (`Heading` vs `HeadingSpec`) should be settled deliberately at that point, not
 drifted into: whichever wins becomes the `$ref` vocabulary a third-party validator quotes.

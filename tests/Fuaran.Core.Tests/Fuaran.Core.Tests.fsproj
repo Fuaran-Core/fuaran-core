@@ -53,6 +53,7 @@
     <Compile Include="IdlUiGenTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
     <Compile Include="IdlSchemaTests.fs" />
+    <Compile Include="IdlOpTests.fs" />
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="ProjectionTests.fs" />

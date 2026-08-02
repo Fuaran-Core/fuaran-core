@@ -116,6 +116,16 @@ type IdlType =
     /// a fixed field set — `Custom`'s `props`, `FragmentRef`'s `args`, i18n arg
     /// bags. Distinct from [[TRecord]] (fixed field names) — the keys vary per value.
     | TMap of valueType: IdlType
+    /// A BARE node kind — the `$type`-discriminated kind object WITHOUT the `id`
+    /// envelope a [[TNode]] carries (Phase 703). `TreeOp.EditNode`'s `newKind` is
+    /// the wire position that needs it: `{"$type":"Markdown","text":"Edited"}`,
+    /// which is a kind, not a node. Distinct from [[TNode]] in exactly the way the
+    /// wire is — one has an `id`, the other does not.
+    | TKind
+    /// A tree op (Phase 703) — the op vocabulary's own recursion, which exists for
+    /// exactly one wire position: `TreeOp.Batch`'s `ops` list. Resolves against
+    /// [[Idl]]'s `Ops`, the way [[TNode]] resolves against `Kinds`.
+    | TOp
 
 /// Whether a field is always present, omitted on the wire when absent, or
 /// omitted on the wire when equal to an identity default (omit-on-absence and
@@ -273,6 +283,23 @@ type Idl =
         /// kind" is a property of the DOMAIN's tree, not of the generator: another
         /// Fuaran domain has a different envelope, or none at all.
         NodeFields: IdlField list
+        /// The TREE-OP vocabulary (Phase 703) — `WIRE_FORMAT.md` §3.4's
+        /// `$type`-discriminated op cases, the wire's second root beside `Node`.
+        /// Empty (the default) means the domain declares no ops, exactly as before.
+        ///
+        /// **Modelled as [[IdlKind]] rather than a dedicated carrier, deliberately.**
+        /// An op is structurally what a node kind is — a flat `$type`-discriminated
+        /// object over the same field + optionality model — so every leg that walks
+        /// a kind walks an op unchanged, and a second near-identical type would have
+        /// duplicated the encoder, decoder, schema and artefact plumbing to express
+        /// no difference. `Category` carries `"op"`; it is metadata, never
+        /// serialised, and the same slot classifies node kinds by behaviour.
+        ///
+        /// **Shapes only.** Apply SEMANTICS — §3.4's error mapping, path addressing,
+        /// what `UpdateProp`'s `path` means, whether a `target` resolves — stay
+        /// hand-written above this, exactly as decode policy does for nodes. The IDL
+        /// states what is on the wire, never what applying it does.
+        Ops: IdlKind list
     }
 
 /// Declaration helpers for the IDL's hand-authored parts.
@@ -437,6 +464,17 @@ module Encode =
 
             go [] entries
         | TNode, VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields
+        // A bare kind and an op are both `$type`-tagged objects with named fields —
+        // structurally what a union case is — so `VUnion` carries them, and the wire
+        // difference is only which vocabulary the tag resolves against.
+        | TKind, VUnion(tag, fields) ->
+            match findKind tag idl with
+            | None -> Error(sprintf "unknown kind '%s'" tag)
+            | Some k -> encodeFields idl k.Fields fields |> Result.map (Canon.typed tag)
+        | TOp, VUnion(tag, fields) ->
+            match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
+            | None -> Error(sprintf "unknown op '%s'" tag)
+            | Some o -> encodeFields idl o.Fields fields |> Result.map (Canon.typed tag)
         | TList inner, VList xs ->
             let rec go acc =
                 function
@@ -492,6 +530,14 @@ module Encode =
         match v with
         | VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields |> Result.map Canon.render
         | _ -> Error "top-level authored value must be a node"
+
+    /// Encode an authored TREE OP to canonical wire JSON (Phase 703) — the wire's
+    /// second root. Separate from [[encode]] rather than folded into it: the two
+    /// roots are distinguishable on the wire (a node carries `id` + `kind`, an op a
+    /// top-level `$type`), but which one a caller MEANT is not the codec's guess to
+    /// make. The schema states the same thing as `oneOf`.
+    let encodeOp (idl: Idl) (v: IdlValue) : Result<string, string> =
+        encodeValue idl TOp v |> Result.map Canon.render
 
 /// The symmetric decode leg — the IDL also drives JSON → `IdlValue`, so the codec
 /// round-trips (`encode (decode wire) = wire`). Parsing is the shared portable
@@ -607,6 +653,18 @@ module Decode =
 
             go [] fs
         | TNode, JObj _ -> decodeNode idl j
+        | TKind, JObj fs ->
+            dollarType fs
+            |> Result.bind (fun tag ->
+                match idl.Kinds |> List.tryFind (fun k -> k.Tag = tag) with
+                | None -> Error(sprintf "unknown kind '%s'" tag)
+                | Some k -> decodeFields idl k.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
+        | TOp, JObj fs ->
+            dollarType fs
+            |> Result.bind (fun tag ->
+                match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
+                | None -> Error(sprintf "unknown op '%s'" tag)
+                | Some o -> decodeFields idl o.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
         | TList inner, JArr xs ->
             let rec go acc =
                 function
@@ -661,6 +719,13 @@ module Decode =
         match Json.parse json with
         | Error m -> Error("parse failed: " + m)
         | Ok j -> decodeNode idl j
+
+    /// Decode canonical wire JSON as a TREE OP (Phase 703) — the symmetric partner
+    /// of [[Encode.encodeOp]], and the wire's second root.
+    let decodeOp (idl: Idl) (json: string) : Result<IdlValue, string> =
+        match Json.parse json with
+        | Error m -> Error("parse failed: " + m)
+        | Ok j -> decodeValue idl TOp j
 
 /// A code-generation failure on an IDL construct the generator cannot yet emit (GP4: a typed
 /// value, not an exception; GP5: each case names the unsupported construct and thereby the set
@@ -899,6 +964,17 @@ module Gen =
         | TUnion(n, args) -> applied n (args |> List.map fsType)
         | TVar v -> "'" + v
         | TNode -> applied "Node" []
+        // Phase 703 models the OP vocabulary and certifies the interpreter leg
+        // against the corpus; emitting an op family from the F# type emitter is a separate,
+        // larger piece of work (`TreeOp` is msg-carrying through `TKind`/`TNode`,
+        // so it lands as a generic type group). Nothing walks `idl.Ops` in this
+        // backend yet, so these arms are unreachable today — explicit and loud so
+        // that wiring ops in gets a precise signal instead of a match failure.
+        | TKind
+        | TOp ->
+            failwithf
+                "the F# type emitter does not emit the op vocabulary yet (Phase 703 leaves that leg unshipped): %A"
+                t
         | TList inner -> fsType inner + " list"
         // Closure / opaque fields carry no observable data — the generated structural layer is
         // ENCODER-ONLY and `'Msg`-erased (Phase 317 real-tier boundary): a function-typed field
@@ -1009,6 +1085,17 @@ module Gen =
         | TUnion(n, []) -> "enc" + n
         | TUnion(n, args) -> "(enc" + n + " " + (args |> List.map encFn |> String.concat " ") + ")"
         | TNode -> "encNode"
+        // Phase 703 models the OP vocabulary and certifies the interpreter leg
+        // against the corpus; emitting an op family from the F# encoder emitter is a separate,
+        // larger piece of work (`TreeOp` is msg-carrying through `TKind`/`TNode`,
+        // so it lands as a generic type group). Nothing walks `idl.Ops` in this
+        // backend yet, so these arms are unreachable today — explicit and loud so
+        // that wiring ops in gets a precise signal instead of a match failure.
+        | TKind
+        | TOp ->
+            failwithf
+                "the F# encoder emitter does not emit the op vocabulary yet (Phase 703 leaves that leg unshipped): %A"
+                t
         | TList inner -> sprintf "(fun __xs -> JArr(List.map %s __xs))" (encFn inner)
         // A closure/opaque codec ignores its argument and emits the fixed sentinel.
         | TClosure
@@ -1254,6 +1341,17 @@ module Gen =
         | TUnion(n, []) -> "dec" + n
         | TUnion(n, args) -> "(dec" + n + " " + (args |> List.map decFn |> String.concat " ") + ")"
         | TNode -> "decNode"
+        // Phase 703 models the OP vocabulary and certifies the interpreter leg
+        // against the corpus; emitting an op family from the F# decoder emitter is a separate,
+        // larger piece of work (`TreeOp` is msg-carrying through `TKind`/`TNode`,
+        // so it lands as a generic type group). Nothing walks `idl.Ops` in this
+        // backend yet, so these arms are unreachable today — explicit and loud so
+        // that wiring ops in gets a precise signal instead of a match failure.
+        | TKind
+        | TOp ->
+            failwithf
+                "the F# decoder emitter does not emit the op vocabulary yet (Phase 703 leaves that leg unshipped): %A"
+                t
         | TList inner -> sprintf "(dList %s)" (decFn inner)
         | TClosure
         | TOpaque -> "dUnit"
@@ -2016,6 +2114,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TUnion(n, _) -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TVar _ -> JObj []
         | TNode -> JObj [ "$ref", JStr "#/$defs/Node" ]
+        | TKind -> JObj [ "$ref", JStr "#/$defs/NodeKind" ]
+        | TOp -> JObj [ "$ref", JStr "#/$defs/TreeOp" ]
         | TList inner -> JObj [ "type", JStr "array"; "items", schemaOf inner ]
         // Closure / opaque fields are sentinel strings on the wire.
         | TClosure
@@ -2128,11 +2228,39 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                   "properties",
                   JObj(
                       [ "id", JObj [ "type", JStr "string" ]
-                        "kind",
-                        JObj
-                            [ "oneOf", JArr(idl.Kinds |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + k.Tag) ])) ] ]
+                        "kind", JObj [ "$ref", JStr "#/$defs/NodeKind" ] ]
                       @ (wireFields idl.NodeFields |> List.map (fun f -> f.Name, schemaOf f.Type))
                   ) ]
+
+        // The kind alternation, named (Phase 703). It was inlined into `Node.kind`,
+        // which is equivalent for a node but leaves `TKind` — `EditNode.newKind`'s
+        // type — with nothing to reference. Naming it also matches the published
+        // schema, which has always carried a `NodeKind` definition.
+        let nodeKindDef =
+            "NodeKind",
+            JObj [ "oneOf", JArr(idl.Kinds |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + k.Tag) ])) ]
+
+        let opDef (o: IdlKind) = o.Tag, objectSchema o.Tag o.Fields
+
+        /// The op alternation. Absent when the domain declares no ops, so an
+        /// op-free IDL's schema is exactly what it was.
+        let treeOpDefs =
+            if List.isEmpty idl.Ops then
+                []
+            else
+                (idl.Ops |> List.map opDef)
+                @ [ "TreeOp",
+                    JObj [ "oneOf", JArr(idl.Ops |> List.map (fun o -> JObj [ "$ref", JStr("#/$defs/" + o.Tag) ])) ] ]
+
+        // The wire has TWO roots once ops are declared (`WIRE_FORMAT.md` §3.4) —
+        // a payload is a Node or a TreeOp. They are distinguishable on structure
+        // (a node carries `id` + `kind`, an op a top-level `$type`), so `oneOf`
+        // states it exactly.
+        let root =
+            if List.isEmpty idl.Ops then
+                "$ref", JStr "#/$defs/Node"
+            else
+                "oneOf", JArr [ JObj [ "$ref", JStr "#/$defs/Node" ]; JObj [ "$ref", JStr "#/$defs/TreeOp" ] ]
 
         // Records join the assembly (Phase 697). Every `TRecord` slot emits a
         // `$ref` into `#/$defs/`, so omitting them left a dangling reference for
@@ -2144,11 +2272,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             @ (idl.Unions |> List.map unionDef)
             @ (idl.Records |> List.map recordDef)
             @ (idl.Kinds |> List.map kindDef)
-            @ [ nodeDef ]
+            @ [ nodeKindDef; nodeDef ]
+            @ treeOpDefs
 
         JObj
             [ "$schema", JStr "https://json-schema.org/draft/2020-12/schema"
-              "$ref", JStr "#/$defs/Node"
+              root
               "$defs", JObj defs ]
         |> Json.render
 
@@ -2308,6 +2437,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 )
             | None -> VUnion("?", [])
         | TNode -> sampleNode idl r (depth - 1) (pick r (idl.Kinds |> List.map (fun k -> k.Tag)))
+        | TKind ->
+            let k = pick r idl.Kinds
+            VUnion(k.Tag, [ for f in k.Fields -> f.Name, sampleType idl r (depth - 1) f.Type ])
+        | TOp when depth <= 0 || List.isEmpty idl.Ops -> VStr "?"
+        | TOp ->
+            let o = pick r idl.Ops
+            VUnion(o.Tag, [ for f in o.Fields -> f.Name, sampleType idl r (depth - 1) f.Type ])
 
     and private sampleFields (idl: Idl) (r: Rng) (depth: int) (fields: IdlField list) : (string * IdlValue) list =
         fields
@@ -2418,6 +2554,17 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TEnum _ -> "encStr" // an enum value IS its wire string
         | TVar v -> "enc" + v
         | TNode -> "encodeNode"
+        // Phase 703 models the OP vocabulary and certifies the interpreter leg
+        // against the corpus; emitting an op family from the TypeScript encoder backend is a separate,
+        // larger piece of work (`TreeOp` is msg-carrying through `TKind`/`TNode`,
+        // so it lands as a generic type group). Nothing walks `idl.Ops` in this
+        // backend yet, so these arms are unreachable today — explicit and loud so
+        // that wiring ops in gets a precise signal instead of a match failure.
+        | TKind
+        | TOp ->
+            failwithf
+                "the TypeScript encoder backend does not emit the op vocabulary yet (Phase 703 leaves that leg unshipped): %A"
+                t
         | TUnion(n, []) -> "enc" + n
         | TUnion(n, args) ->
             "((x) => enc"
@@ -2575,6 +2722,17 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TEnum n -> "dec" + n
         | TVar v -> "dec" + v
         | TNode -> "decNode"
+        // Phase 703 models the OP vocabulary and certifies the interpreter leg
+        // against the corpus; emitting an op family from the TypeScript decoder backend is a separate,
+        // larger piece of work (`TreeOp` is msg-carrying through `TKind`/`TNode`,
+        // so it lands as a generic type group). Nothing walks `idl.Ops` in this
+        // backend yet, so these arms are unreachable today — explicit and loud so
+        // that wiring ops in gets a precise signal instead of a match failure.
+        | TKind
+        | TOp ->
+            failwithf
+                "the TypeScript decoder backend does not emit the op vocabulary yet (Phase 703 leaves that leg unshipped): %A"
+                t
         | TUnion(n, []) -> "dec" + n
         | TUnion(n, args) ->
             "((x) => dec"
@@ -3146,6 +3304,8 @@ module Artifact =
         | TUnion(name, args) -> Canon.typed "union" [ "name", JStr name; "args", JArr(args |> List.map typeJson) ]
         | TVar name -> Canon.typed "var" [ "name", JStr name ]
         | TNode -> Canon.typed "node" []
+        | TKind -> Canon.typed "kind" []
+        | TOp -> Canon.typed "op" []
         | TList inner -> Canon.typed "list" [ "of", typeJson inner ]
         | TMap valueType -> Canon.typed "map" [ "values", typeJson valueType ]
         | TRecord name -> Canon.typed "record" [ "name", JStr name ]
@@ -3249,7 +3409,7 @@ module Artifact =
         let sortedBy (key: 'a -> string) (xs: 'a list) =
             xs |> List.sortWith (fun a b -> ordinal (key a) (key b))
 
-        JObj
+        JObj(
             [ "version", JInt version
               "description",
               JStr(
@@ -3298,6 +3458,14 @@ module Artifact =
                   |> List.map (fun d -> JObj [ "kind", JStr d.Kind; "field", JStr d.Field; "value", valueJson d.Value ])
               )
               "nodeFields", fieldsJson idl.NodeFields ]
+            // The op vocabulary (Phase 703) — the wire's second root. Emitted only
+            // when the domain declares ops, so an op-free vocabulary's artefact is
+            // byte-for-byte what it was, the same posture `hostCases` takes.
+            @ (if List.isEmpty idl.Ops then
+                   []
+               else
+                   [ "ops", JArr(idl.Ops |> sortedBy _.Tag |> List.map kindJson) ])
+        )
 
     /// The `idl.json` bytes — indented, canonically ordered, newline-terminated
     /// (matching `schema.json`'s convention in the same corpus).

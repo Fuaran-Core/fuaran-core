@@ -1475,6 +1475,67 @@ let metaKinds: IdlKind list =
 /// The real-tier IDL as grown so far: the Display + Layout + Input + Visualisation
 /// + meta families over the shared value-unions + enums + records + maps. Children
 /// resolve within this one IDL, so any node can nest any kind.
+// ─── The op vocabulary (WIRE_FORMAT.md §3.4) ───────────────────────────────
+//
+// Phase 703. The wire's SECOND ROOT: a payload is a Node or a TreeOp. Modelled as
+// `IdlKind`s because an op is structurally what a node kind is — a flat
+// `$type`-discriminated object over the same field + optionality model — so every
+// leg that walks a kind walks an op unchanged. `Category` is metadata, never
+// serialised.
+//
+// SHAPES ONLY. Apply semantics — §3.4's error mapping, what `UpdateProp`'s dotted
+// `path` addresses, whether a `target` resolves, what happens when it does not —
+// stay hand-written above the IDL, exactly as decode POLICY does for nodes. The
+// IDL states what is on the wire, never what applying it does.
+//
+// Read from the corpus bytes, not from prose: `InsertChild` carries no `position`
+// (removed by Phase 681), and `MoveNode` carries no index either.
+let private treeOps: IdlKind list =
+    [ { Tag = "Batch"
+        Category = "op"
+        // The op vocabulary's only recursion, and the only reason `TOp` exists.
+        Fields = [ req "ops" (TList TOp) ] }
+      { Tag = "EditNode"
+        Category = "op"
+        // `newKind` is a BARE kind — `{"$type":"Markdown",…}`, no `id` envelope —
+        // which is why `TKind` is distinct from `TNode`.
+        Fields = [ req "newKind" TKind; req "target" TStr ] }
+      { Tag = "InsertChild"
+        Category = "op"
+        Fields = [ req "child" TNode; req "parentId" TStr ] }
+      { Tag = "MoveNode"
+        Category = "op"
+        Fields = [ req "newParentId" TStr; req "target" TStr ] }
+      { Tag = "RemoveNode"
+        Category = "op"
+        Fields = [ req "target" TStr ] }
+      { Tag = "ReorderChildren"
+        Category = "op"
+        Fields = [ req "newOrder" (TList TStr); req "parentId" TStr ] }
+      { Tag = "ReplaceBinding"
+        Category = "op"
+        // The binding's value type is erased at this position — the op replaces a
+        // slot whose type the op itself does not name — so `Binding<Json>`.
+        Fields =
+          [ req "binding" (TUnion("Binding", [ TJson ]))
+            req "slot" TStr
+            req "target" TStr ] }
+      { Tag = "ReplaceRoot"
+        Category = "op"
+        Fields = [ req "node" TNode ] }
+      { Tag = "UpdateProp"
+        Category = "op"
+        // `value` is genuinely any JSON: the corpus carries a bare string, a
+        // number, and a `$type`-tagged object (`Currency`) at this position,
+        // because the target slot's type is whatever `path` addresses.
+        Fields = [ req "path" TStr; req "target" TStr; req "value" TJson ] }
+      { Tag = "UpdateState"
+        Category = "op"
+        Fields = [ req "state" (TRecord "StateBehaviour"); req "target" TStr ] }
+      { Tag = "UpdateStyle"
+        Category = "op"
+        Fields = [ req "style" (TRecord "SemanticStyle"); req "target" TStr ] } ]
+
 let uiIdl: Idl =
     { Kinds = displayKinds @ layoutKinds @ inputKinds @ visKinds @ metaKinds
       Unions =
@@ -1564,7 +1625,8 @@ let uiIdl: Idl =
           hostOnly "extraAttributes" "Map<string, string> option" "None"
           hostOnly "motion" "Motion option" "None"
           opt "state" (TRecord "StateBehaviour")
-          opt "style" (TRecord "SemanticStyle") ] }
+          opt "style" (TRecord "SemanticStyle") ]
+      Ops = treeOps }
 
 /// Back-compat alias — the Display tests grew up against this name.
 let uiDisplayIdl: Idl = uiIdl
