@@ -237,10 +237,14 @@ let private table1: G.Node<unit> =
               Source = G.Binding.Static(Some(Seq.empty: Fuaran.Core.Row seq))
               StaticRows =
                 Some
-                    { Headers = [ G.TextSource.Literal "Term"; G.TextSource.Literal "Definition" ]
+                    // Phase 801 — the sort-intent slots stay absent here on purpose: this
+                    // fixture is the byte-identity anchor for the pre-801 wire.
+                    { DefaultSort = None
+                      Headers = [ G.TextSource.Literal "Term"; G.TextSource.Literal "Definition" ]
                       Rows =
                         [ [ G.TextSource.Literal "MVU"; G.TextSource.Literal "Model-View-Update" ]
-                          [ G.TextSource.Literal "DSL"; G.TextSource.Literal "Domain-specific language" ] ] }
+                          [ G.TextSource.Literal "DSL"; G.TextSource.Literal "Domain-specific language" ] ]
+                      Sortable = None }
               OnRowClick = None } }
 
 /// `custom-bounded-1` — an (empty) `TMap` + a `ContentHash` record + an optional string list.

@@ -762,16 +762,44 @@ let private mapMarkerRecord =
     { Name = "MapMarker"
       Fields = [ req "label" TStr; req "latitude" TFloat; req "longitude" TFloat ] }
 
+/// Sort direction on a static table's declared initial order — closed, and
+/// lower-case on the wire (Fuaran-UI Phase 801). Case↔wire mapping for the same
+/// reason `LiveRegionKind` carries one: the wire vocabulary is lower-case and the
+/// F# case names are not.
+let private sortDirection =
+    Declare.enumWith "SortDirection" [ "Asc", "asc"; "Desc", "desc" ]
+
+/// `{ "column": <header index>, "direction": "asc" | "desc" }` — a static table's
+/// declared INITIAL order (Fuaran-UI Phase 801). Both fields are required *within*
+/// the record; the record itself is an optional slot on `StaticRows`, so a table
+/// that declares no initial order carries no `defaultSort` key at all.
+///
+/// `column` indexes `StaticRows.headers`. The IDL cannot state the non-negativity
+/// bound (there is no refined-integer type), so the decode-side rejection of a
+/// negative index lives in the policy decoder and the published JSON Schema.
+let private defaultSortRecord =
+    { Name = "DefaultSort"
+      Fields = [ req "column" TInt; req "direction" (TEnum "SortDirection") ] }
+
 /// A `DataGrid.staticRows` payload — the header/row grid a legacy `Table` decode-upgrades
 /// into (Fuaran-UI Phase 393: `Table` retired, becomes a static `DataGrid`). Cells are
 /// `TextSource`, NOT bare strings: the hand codec encodes each cell via `encodeTextSource`
 /// (a `Literal` IS the bare string on the wire — 0.2.0) and the decoder accepts `Bound` /
 /// `I18n` objects per cell, so a `TStr` here would narrow live wire fidelity (stage 4b).
+///
+/// Phase 801 adds two OPTIONAL sort-intent slots — `sortable` (this table invites
+/// interactive column sorting) and `defaultSort` (its initial order). Both are
+/// `Optional` rather than `OmitDefault`, so absence is absence: a table authored
+/// before the addition encodes byte-identically, which is the phase's hard
+/// constraint. The declaration is INTENT, not a behaviour guarantee — a host
+/// honours it with whatever sorting affordance it has.
 let private staticRowsRecord =
     { Name = "StaticRows"
       Fields =
-        [ req "headers" (TList(TUnion("TextSource", [])))
-          req "rows" (TList(TList(TUnion("TextSource", [])))) ] }
+        [ opt "defaultSort" (TRecord "DefaultSort")
+          req "headers" (TList(TUnion("TextSource", [])))
+          req "rows" (TList(TList(TUnion("TextSource", []))))
+          opt "sortable" TBool ] }
 
 let private formFieldRecord =
     { Name = "FormField"
@@ -1582,7 +1610,8 @@ let uiIdl: Idl =
           styleRole
           fontVoice
           motion
-          liveRegionKind ]
+          liveRegionKind
+          sortDirection ]
       Records =
         [ semanticStyleRecord
           stateBehaviourRecord
@@ -1595,6 +1624,7 @@ let uiIdl: Idl =
           invokeArgRecord
           selectOptionRecord
           mapMarkerRecord
+          defaultSortRecord
           staticRowsRecord
           formFieldRecord
           filterSpecRecord
