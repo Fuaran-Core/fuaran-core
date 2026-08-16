@@ -54,6 +54,9 @@
     <Compile Include="IdlEnumWireTests.fs" />
     <Compile Include="IdlSchemaTests.fs" />
     <Compile Include="IdlOpTests.fs" />
+    <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named
+         IdlDiffTests, not DiffTests: the latter is Phase 245's TREE diff. -->
+    <Compile Include="IdlDiffTests.fs" />
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="ProjectionTests.fs" />

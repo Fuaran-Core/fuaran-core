@@ -15,6 +15,26 @@ let main argv =
     | "--emit-idl" :: dir :: _ ->
         IdlArtifactTests.emit dir
         0
+    // Phase 700 — classify the delta between two `idl.json` revisions and print
+    // the host-strand report:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --idl-diff <old.json> <new.json> [<manifest.json>]
+    // Advisory output only; nothing is written and nothing is gated. The optional
+    // third argument is the corpus manifest, read solely for the §11.0 host
+    // roster once it carries one — until then the declared roster is used and the
+    // report says so.
+    | "--idl-diff" :: oldPath :: newPath :: rest ->
+        let read (p: string) = System.IO.File.ReadAllText p
+
+        let manifest =
+            rest |> List.tryHead |> Option.filter System.IO.File.Exists |> Option.map read
+
+        match Fuaran.Core.Idl.Diff.run manifest (read oldPath) (read newPath) with
+        | Ok text ->
+            printf "%s" text
+            0
+        | Error e ->
+            eprintfn "idl-diff: %s" e
+            1
     // Re-vendor the IDL-inversion golden snapshots from the authored cases:
     //   dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots
     | "--regen-snapshots" :: _ ->
