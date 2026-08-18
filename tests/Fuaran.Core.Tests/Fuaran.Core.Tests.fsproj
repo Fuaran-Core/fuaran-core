@@ -64,6 +64,10 @@
     <Compile Include="LeaseTests.fs" />
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
+    <!-- Phase 698 - the full-vocabulary generative cross-host fuzz (interpreter vs
+         generated F# vs generated TypeScript). Appended at the end of the list: it
+         reads UiIdl.fs + UiGenerated.fs, so it must compile after both. -->
+    <Compile Include="IdlFullVocabularyFuzzTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

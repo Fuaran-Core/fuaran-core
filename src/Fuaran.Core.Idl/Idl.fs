@@ -238,6 +238,23 @@ and IdlValue =
     | VUnion of tag: string * fields: (string * IdlValue) list
     | VList of IdlValue list
     | VNode of id: string * kindTag: string * fields: (string * IdlValue) list
+    /// A node carrying its ENVELOPE as well as its kind (Phase 698) — the
+    /// `WIRE_FORMAT.md` §3.1 fields a node holds beside `id`/`kind`, declared per
+    /// domain in [[Idl.NodeFields]].
+    ///
+    /// **Why a sibling case rather than a fourth slot on [[VNode]].** Widening
+    /// `VNode`'s arity would break every authored construction site in the estate
+    /// — the vocabulary fixtures included — for a slot that is empty in almost all
+    /// of them, so the envelope arrived as its own case and `VNode` stayed the
+    /// envelope-free form it always was. Producers emit `VNode` when the envelope
+    /// is empty and `VNodeEnv` only when it is not, which is why every pre-existing
+    /// seeded stream and snapshot is byte-unchanged.
+    ///
+    /// **Why the envelope is NOT merged into `fields`.** The two are separate
+    /// namespaces and they already collide: the UI vocabulary declares an envelope
+    /// `style` (a `SemanticStyle`) and a `Drawing.style` kind field (a `DrawStyle`),
+    /// so a single flat list could not say which one a `"style"` entry meant.
+    | VNodeEnv of id: string * envelope: (string * IdlValue) list * kindTag: string * fields: (string * IdlValue) list
     | VAbsent
     /// A function-typed value (matches [[TClosure]]) — carries nothing; the
     /// encoder emits the `"<closure>"` sentinel. Present so a `TClosure` field can
@@ -464,6 +481,9 @@ module Encode =
 
             go [] entries
         | TNode, VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields
+        // Phase 698 — the enveloped form, at ANY depth: a nested child carries its
+        // envelope through exactly this arm, so the sweep is not root-only.
+        | TNode, VNodeEnv(id, envelope, kindTag, fields) -> encodeNodeEnv idl id envelope kindTag fields
         // A bare kind and an op are both `$type`-tagged objects with named fields —
         // structurally what a union case is — so `VUnion` carries them, and the wire
         // difference is only which vocabulary the tag resolves against.
@@ -525,10 +545,35 @@ module Encode =
             encodeFields idl k.Fields fields
             |> Result.map (fun fs -> JObj [ "id", JStr id; "kind", Canon.typed kindTag fs ])
 
+    /// The enveloped partner of [[encodeNode]] (Phase 698) — `id` + `kind` + the
+    /// declared node envelope. The envelope rides the SAME [[encodeFields]] the kind
+    /// fields ride, so `Optional`-absent, `OmitDefault`-at-default and `HostOnly`
+    /// behave identically on a node field and on a kind field; that shared path is
+    /// the whole reason the generated hosts and the interpreter can be expected to
+    /// agree. Key order is irrelevant — `Canon.render` sorts Ordinal.
+    and encodeNodeEnv
+        (idl: Idl)
+        (id: string)
+        (envelope: (string * IdlValue) list)
+        (kindTag: string)
+        (fields: (string * IdlValue) list)
+        : Result<JVal, string> =
+        match findKind kindTag idl with
+        | None -> Error(sprintf "unknown kind '%s'" kindTag)
+        | Some k ->
+            match encodeFields idl k.Fields fields with
+            | Error m -> Error m
+            | Ok kindFs ->
+                match encodeFields idl idl.NodeFields envelope with
+                | Error m -> Error(sprintf "node envelope: %s" m)
+                | Ok envFs -> Ok(JObj(("id", JStr id) :: ("kind", Canon.typed kindTag kindFs) :: envFs))
+
     /// Encode an authored node to canonical wire JSON — byte-identical to the UI host.
     let encode (idl: Idl) (v: IdlValue) : Result<string, string> =
         match v with
         | VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields |> Result.map Canon.render
+        | VNodeEnv(id, envelope, kindTag, fields) ->
+            encodeNodeEnv idl id envelope kindTag fields |> Result.map Canon.render
         | _ -> Error "top-level authored value must be a node"
 
     /// Encode an authored TREE OP to canonical wire JSON (Phase 703) — the wire's
@@ -710,7 +755,17 @@ module Decode =
                     | None -> Error(sprintf "unknown kind '%s'" kindTag)
                     | Some k ->
                         decodeFields idl k.Fields kindFs
-                        |> Result.map (fun fields -> VNode(id, kindTag, fields)))
+                        |> Result.bind (fun fields ->
+                            // Phase 698 — the envelope decodes through the same
+                            // `decodeFields` the kind fields do, so it is the encoder's
+                            // inverse by construction. An empty result (nothing on the
+                            // wire, and no `OmitDefault` to restore) yields the bare
+                            // `VNode` this returned before the envelope existed, which is
+                            // why every pre-existing decode round-trip is byte-unchanged.
+                            decodeFields idl idl.NodeFields fs
+                            |> Result.map (function
+                                | [] -> VNode(id, kindTag, fields)
+                                | envelope -> VNodeEnv(id, envelope, kindTag, fields))))
             | _ -> Error "node must have a string 'id' and an object 'kind'"
         | _ -> Error "node must be an object"
 
@@ -2361,6 +2416,80 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// round-trip ("R") formatting.
     let private floatPool = [ 0.0; 1.0; -1.0; 3.0; 2.5; -0.125; 1234.5; 1e10; 1e-7 ]
 
+    /// Whether sampling a value of `t` **at the depth floor** can still reach a
+    /// `TNode` — the sampler's termination predicate (Phase 698).
+    ///
+    /// It mirrors [[sampleType]]'s own floor behaviour exactly rather than being a
+    /// conservative over-approximation: a list/map is EMPTY at the floor and so
+    /// reaches nothing, a union prefers its nullary cases, and an optional field is
+    /// forced absent there — which leaves bare nodes and required record fields as
+    /// the only surviving paths. Mirroring is what keeps the guard from changing a
+    /// single draw on a vocabulary that never needed it: `miniIdl`'s only
+    /// node-bearing field is `Box.children`, a LIST, so it is floor-safe and its
+    /// seeded stream is untouched.
+    ///
+    /// **Why this is needed at all.** A bare `TNode` was the one recursion site with
+    /// no floor arm — `TList` and `TUnion` both have one — so a vocabulary that
+    /// reaches a node from a node by any non-list path recursed until the stack went.
+    /// The real vocabulary has exactly that: `ErrorBoundary.child`/`.fallback` and
+    /// `Switch.default` on the kind side, and `StateBehaviour.onEmpty`/`.onLoading`
+    /// reached through the node ENVELOPE. The envelope path is why this surfaced
+    /// only when the sampler learned to draw envelopes — with `state` present 2 in 3
+    /// and two node slots behind it, the branching factor crosses 1 and the sampled
+    /// tree does not terminate.
+    let rec private reachesNodeAtFloor (idl: Idl) (seen: Set<string>) (t: IdlType) : bool =
+        match t with
+        // A kind / op carries whatever its fields carry, and neither has a floor arm
+        // of its own; treat both as reaching, which is also true in practice.
+        | TNode
+        | TKind
+        | TOp -> true
+        // Empty at the floor, so nothing inside them is ever sampled there.
+        | TList _
+        | TMap _ -> false
+        | TRecord n when not (Set.contains ("r:" + n) seen) ->
+            match idl.Records |> List.tryFind (fun rc -> rc.Name = n) with
+            | Some rc ->
+                rc.Fields
+                |> List.exists (fun f -> f.Opt = Required && reachesNodeAtFloor idl (Set.add ("r:" + n) seen) f.Type)
+            | None -> false
+        | TUnion(n, args) when not (Set.contains ("u:" + n) seen) ->
+            let seen' = Set.add ("u:" + n) seen
+
+            args |> List.exists (reachesNodeAtFloor idl seen')
+            || (match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+                | Some u ->
+                    // The floor prefers a nullary case when the union has one, and a
+                    // nullary case has no fields — so only a union WITHOUT one can
+                    // still reach a node here.
+                    let candidates =
+                        match u.Cases |> List.filter (fun c -> List.isEmpty c.Fields) with
+                        | [] -> u.Cases
+                        | nullary -> nullary
+
+                    candidates
+                    |> List.exists (fun c ->
+                        c.Fields
+                        |> List.exists (fun f -> f.Opt = Required && reachesNodeAtFloor idl seen' f.Type))
+                | None -> false)
+        | _ -> false
+
+    /// The kind tags a node may take AT THE DEPTH FLOOR: those whose required fields
+    /// reach no further node, so the recursion stops there. Falls back to the whole
+    /// vocabulary when a domain declares no such kind — the sampler must still
+    /// produce a node for a required slot, and a domain with no leaf kind has no
+    /// finite node at all, which is its own defect rather than one to hide here.
+    let private floorKindTags (idl: Idl) : string list =
+        let leaves =
+            idl.Kinds
+            |> List.filter (fun k ->
+                k.Fields
+                |> List.forall (fun f -> f.Opt <> Required || not (reachesNodeAtFloor idl Set.empty f.Type)))
+
+        match leaves with
+        | [] -> idl.Kinds |> List.map (fun k -> k.Tag)
+        | ks -> ks |> List.map (fun k -> k.Tag)
+
     let rec private sampleType (idl: Idl) (r: Rng) (depth: int) (t: IdlType) : IdlValue =
         match t with
         | TStr -> VStr(pick r stringPool)
@@ -2436,7 +2565,17 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                     sampleFields idl r (depth - 1) (c.Fields |> List.map (fun f -> { f with Type = subst f.Type }))
                 )
             | None -> VUnion("?", [])
-        | TNode -> sampleNode idl r (depth - 1) (pick r (idl.Kinds |> List.map (fun k -> k.Tag)))
+        | TNode ->
+            // At the floor a REQUIRED node cannot be omitted, so the shallowest legal
+            // one is produced instead: a kind whose required fields reach no further
+            // node. See [[reachesNodeAtFloor]] for why the guard exists.
+            let tags =
+                if depth <= 0 then
+                    floorKindTags idl
+                else
+                    idl.Kinds |> List.map (fun k -> k.Tag)
+
+            sampleNode idl r (depth - 1) (pick r tags)
         | TKind ->
             let k = pick r idl.Kinds
             VUnion(k.Tag, [ for f in k.Fields -> f.Name, sampleType idl r (depth - 1) f.Type ])
@@ -2453,6 +2592,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 // Host-only fields have no wire projection, so there is nothing to sample.
                 | HostOnly -> VAbsent
                 | Required -> sampleType idl r depth f.Type
+                // At the depth floor a node-reaching OPTIONAL is forced to its absent
+                // form — the other half of the termination guard, and the half that
+                // stops the node ENVELOPE recursing (`state` → `StateBehaviour` →
+                // `onEmpty`/`onLoading`). No RNG is drawn, which is what keeps a
+                // floor-safe vocabulary's seeded stream byte-identical.
+                | Optional when depth <= 0 && reachesNodeAtFloor idl Set.empty f.Type -> VAbsent
+                | OmitDefault d when depth <= 0 && reachesNodeAtFloor idl Set.empty f.Type -> d
                 // Sample BOTH sides of every presence rule: an optional that is
                 // sometimes absent, and an omit-when-default that sits at its
                 // default often enough to exercise the omission path.
@@ -2469,18 +2615,40 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
             f.Name, v)
 
+    /// Phase 698 — the node ENVELOPE, sampled from [[Idl.NodeFields]] through the
+    /// same [[sampleFields]] the kind fields use, so both presence polarities are
+    /// drawn on a node field exactly as on a kind field (`Optional` absent 1-in-3,
+    /// `OmitDefault` at its default 1-in-2, `HostOnly` never present).
+    ///
+    /// `VAbsent` entries are dropped so "the envelope is empty" is a shape, not a
+    /// list of absences — which is what lets an envelope-free draw stay a plain
+    /// [[VNode]] and keeps every seeded stream that predates this byte-identical.
+    /// An IDL declaring no envelope draws nothing at all from the RNG.
+    ///
+    /// **This closes the Phase 690 limitation that stood here.** That note recorded
+    /// that a sampled node carried no envelope, so `state` / `style` /
+    /// `accessibility` were reachable only by the GENERATED codecs and cross-host
+    /// envelope parity was unproven — covered by one corpus fixture rather than by
+    /// the generative sweep. It is proven now: `IdlFullVocabularyFuzzTests` compares
+    /// the envelope across the interpreter, the generated F# module and the
+    /// generated TypeScript module on every vector, and removing it from any one leg
+    /// fails the sweep from vector 0.
+    and private sampleEnvelope (idl: Idl) (r: Rng) (depth: int) : (string * IdlValue) list =
+        sampleFields idl r depth idl.NodeFields
+        |> List.filter (fun (_, v) -> v <> VAbsent)
+
     and private sampleNode (idl: Idl) (r: Rng) (depth: int) (kindTag: string) : IdlValue =
-        match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
-        | Some k -> VNode(pick r [ "n"; "node-1"; "a\"b"; "" ], k.Tag, sampleFields idl r depth k.Fields)
-        | None -> VNode("n", kindTag, [])
-    // Phase 690 note — a sampled node carries NO envelope. `VNode` models `(id,
-    // kindTag, kindFields)`, so the interpreter and the generative sampler cannot
-    // express `state` / `style` / `accessibility` at all; only the GENERATED codec
-    // can. The envelope's round-trip is therefore covered by the corpus
-    // (`style-role-voice-1`) and not by the 500-vector cross-host sweep. Widening
-    // `VNode` would touch the interpreter, the TS value emitter and every authored
-    // case, which is a larger change than this phase needs — but it is the reason
-    // cross-host envelope parity is currently unproven.
+        let id = pick r [ "n"; "node-1"; "a\"b"; "" ]
+        let envelope = sampleEnvelope idl r depth
+
+        let fields =
+            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            | Some k -> sampleFields idl r depth k.Fields
+            | None -> []
+
+        match envelope with
+        | [] -> VNode(id, kindTag, fields)
+        | env -> VNodeEnv(id, env, kindTag, fields)
 
     /// `count` deterministic sample nodes over `kindTags`, cycling the tags so the
     /// vocabulary is covered evenly rather than by chance. Same seed gives the
@@ -2520,6 +2688,22 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | VNode(id, kindTag, fields) ->
             "{ id: "
             + tsSourceStr id
+            + ", kind: { $type: "
+            + tsSourceStr kindTag
+            + (fields
+               |> List.map (fun (n, fv) -> ", " + n + ": " + typescriptValue fv)
+               |> String.concat "")
+            + " } }"
+        // Phase 698 — the envelope sits BESIDE `kind` on the emitted object, which is
+        // where the generated `encodeNode` reads it from (`n.style`, `n.state`, …).
+        // Nothing else changes: the generated TS node encoder has read the envelope
+        // since Phase 690; only the VALUE emitter could not express one.
+        | VNodeEnv(id, envelope, kindTag, fields) ->
+            "{ id: "
+            + tsSourceStr id
+            + (envelope
+               |> List.map (fun (n, fv) -> ", " + n + ": " + typescriptValue fv)
+               |> String.concat "")
             + ", kind: { $type: "
             + tsSourceStr kindTag
             + (fields
@@ -2989,13 +3173,23 @@ const encJson = (v) => {
   const keys = Object.keys(v).sort();
   return '{' + keys.map((k) => encStr(k) + ':' + encJson(v[k])).join(',') + '}';
 };
+// Phase 698 — the Ordinal key sort is done HERE, at emission, not left to the
+// caller's declaration order. `Canon.render` sorts every object's keys Ordinal on
+// the F# side unconditionally, and JS `<` on strings compares UTF-16 code units,
+// which is the same order — so sorting here is what makes the two hosts agree by
+// construction. It previously relied on "pairs arrive Ordinal by convention", and
+// the convention did not hold: the full-vocabulary sweep's very first vector
+// diverged on `TextSource.I18n`, declared `key` then `args` and therefore emitted
+// in that order against F#'s `args` then `key`. Every union case, spec and record
+// whose fields are not already declared alphabetically had the same defect; no
+// fixed fixture and no 8-kind sampled vector had ever contained one.
+const ordinal = (a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
 const typed = (tag, pairs) =>
-  '{"$type":' + encStr(tag) + pairs.filter((p) => p !== null).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';
-// Phase 690 — `typed` without the discriminator: a plain object (a non-discriminated
-// record, or the node envelope). Pairs arrive in the caller's order, which is Ordinal
-// by convention, so this matches the F# canonical renderer's key sort.
+  '{"$type":' + encStr(tag) + pairs.filter((p) => p !== null).sort(ordinal).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';
+// `typed` without the discriminator: a plain object (a non-discriminated record, or
+// the node envelope).
 const plain = (pairs) =>
-  '{' + pairs.filter((p) => p !== null).map(([k, v]) => encStr(k) + ':' + v).join(',') + '}';"""
+  '{' + pairs.filter((p) => p !== null).sort(ordinal).map(([k, v]) => encStr(k) + ':' + v).join(',') + '}';"""
 
         let kindDispatch =
             let arms =
@@ -3098,6 +3292,68 @@ const plain = (pairs) =>
         | TUnion(n, args) -> TUnion(n, List.map (substG subst) args)
         | other -> other
 
+    /// Does this authored value POPULATE a hosted slot ([[THosted]]) anywhere?
+    ///
+    /// A hosted slot's CONTENT belongs to the host codec's own specification — the
+    /// IDL says only that the position carries verbatim JSON (see [[HostedCodec]]) —
+    /// so a value-generic sampler cannot draw content a host codec is obliged to
+    /// accept, and the real vocabulary's codecs are genuinely strict: an aria role
+    /// is a string, a row feed is an array of row objects or the legacy sentinel, a
+    /// `DataSource` is an object carrying `columns`. Any consumer that runs a
+    /// sampled value THROUGH a host codec therefore has to know which of its own
+    /// vectors it put beyond that codec's reach; this answers exactly that, so the
+    /// answer is a stated boundary rather than a swallowed failure.
+    ///
+    /// Precise, not conservative: it walks the value ALONGSIDE its declared type and
+    /// only reports a slot that is actually populated, so an optional hosted field
+    /// sampled absent does not count.
+    let usesHosted (idl: Idl) (v: IdlValue) : bool =
+        let rec go (t: IdlType) (value: IdlValue) : bool =
+            match t, value with
+            | THosted _, _ -> true
+            | TList inner, VList xs -> xs |> List.exists (go inner)
+            | TMap vt, VMap entries -> entries |> List.exists (fun (_, ev) -> go vt ev)
+            | TRecord n, VRecord fs ->
+                match idl.Records |> List.tryFind (fun r -> r.Name = n) with
+                | Some r -> fields r.Fields fs
+                | None -> false
+            | TUnion(n, args), VUnion(tag, fs) ->
+                match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+                | Some u when List.length u.Params = List.length args ->
+                    match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                    | Some c ->
+                        let subst = Map.ofList (List.zip u.Params args)
+
+                        fields (c.Fields |> List.map (fun f -> { f with Type = substG subst f.Type })) fs
+                    | None -> false
+                | _ -> false
+            | TKind, VUnion(tag, fs) ->
+                match idl.Kinds |> List.tryFind (fun k -> k.Tag = tag) with
+                | Some k -> fields k.Fields fs
+                | None -> false
+            | TOp, VUnion(tag, fs) ->
+                match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
+                | Some o -> fields o.Fields fs
+                | None -> false
+            | TNode, VNode(_, kindTag, fs) -> node kindTag fs []
+            | TNode, VNodeEnv(_, envelope, kindTag, fs) -> node kindTag fs envelope
+            | _ -> false
+
+        and fields (declared: IdlField list) (authored: (string * IdlValue) list) : bool =
+            declared
+            |> List.exists (fun f ->
+                match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
+                | Some(_, av) when av <> VAbsent -> go f.Type av
+                | _ -> false)
+
+        and node (kindTag: string) (kindFields: (string * IdlValue) list) (envelope: (string * IdlValue) list) : bool =
+            fields idl.NodeFields envelope
+            || (match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+                | Some k -> fields k.Fields kindFields
+                | None -> false)
+
+        go TNode v
+
     let private combineR (results: Result<string, string> list) : Result<string list, string> =
         (Ok [], results)
         ||> List.fold (fun acc r ->
@@ -3145,39 +3401,7 @@ const plain = (pairs) =>
             match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
             | None -> Error(sprintf "fsharpValue: unknown kind '%s'" kindTag)
             | Some k ->
-                let fieldResults =
-                    k.Fields
-                    |> List.map (fun f ->
-                        match fields |> List.tryFind (fun (n, _) -> n = f.Name) with
-                        | (None | Some(_, VAbsent)) ->
-                            match f.Opt with
-                            | Optional -> Ok(pascal f.Name + " = None")
-                            | HostOnly -> Ok(pascal f.Name + " = " + hostOnlyLit f)
-                            // OmitDefault absent → restore the identity default value.
-                            | OmitDefault d ->
-                                match fsDefaultLit idl.Enums f.Type d with
-                                | Some e -> Ok(pascal f.Name + " = " + e)
-                                | None ->
-                                    Error(
-                                        sprintf
-                                            "fsharpValue: unrenderable omit-default for '%s' on kind '%s'"
-                                            f.Name
-                                            kindTag
-                                    )
-                            | Required ->
-                                Error(sprintf "fsharpValue: kind '%s' missing required field '%s'" kindTag f.Name)
-                        | Some(_, fv) ->
-                            match f.Opt, fsharpValue idl f.Type fv with
-                            | _, Error e -> Error e
-                            // A host-only field has no wire projection, so a wire value
-                            // at its name is not its value — take the placeholder.
-                            | HostOnly, Ok _ -> Ok(pascal f.Name + " = " + hostOnlyLit f)
-                            | Optional, Ok s -> Ok(pascal f.Name + " = Some(" + s + ")")
-                            // OmitDefault present → the raw (non-option) value, like Required.
-                            | OmitDefault _, Ok s
-                            | Required, Ok s -> Ok(pascal f.Name + " = " + s))
-
-                match combineR fieldResults with
+                match fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields with
                 | Error e -> Error e
                 | Ok recFields ->
                     Ok(
@@ -3187,12 +3411,70 @@ const plain = (pairs) =>
                             kindTag
                             (String.concat "; " recFields)
                     )
+        // Phase 698 — the enveloped form. The envelope's assignments sit on the
+        // `Node` record itself (`Style = Some …`), the kind's on the spec record, and
+        // both go through the SAME `fsAssignments`, so the presence rules cannot
+        // drift between the two halves of a node.
+        | TNode, VNodeEnv(id, envelope, kindTag, fields) ->
+            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            | None -> Error(sprintf "fsharpValue: unknown kind '%s'" kindTag)
+            | Some k ->
+                match
+                    fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields,
+                    fsAssignments idl "node envelope" idl.NodeFields envelope
+                with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok recFields, Ok envFields ->
+                    Ok(
+                        sprintf
+                            "{ Id = %s; Kind = NodeKind.%s { %s }%s }"
+                            (fsStringLit id)
+                            kindTag
+                            (String.concat "; " recFields)
+                            (envFields |> List.map (fun a -> "; " + a) |> String.concat "")
+                    )
         | TList inner, VList xs ->
             match combineR (xs |> List.map (fsharpValue idl inner)) with
             | Error e -> Error e
             | Ok items -> Ok("[ " + String.concat "; " items + " ]")
         | _, VAbsent -> Error "fsharpValue: VAbsent reached the emitter"
         | _ -> Error(sprintf "fsharpValue: value does not match IDL type %A" t)
+
+    /// Record-field assignments (`Label = …; Icon = Some …`) for one declared field
+    /// list against one authored field list, honouring every presence rule. Shared
+    /// by a kind's spec record and (Phase 698) by the node envelope — `where`
+    /// names the owner for the error messages only.
+    and private fsAssignments
+        (idl: Idl)
+        (where: string)
+        (declared: IdlField list)
+        (authored: (string * IdlValue) list)
+        : Result<string list, string> =
+        declared
+        |> List.map (fun f ->
+            match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
+            | (None | Some(_, VAbsent)) ->
+                match f.Opt with
+                | Optional -> Ok(pascal f.Name + " = None")
+                | HostOnly -> Ok(pascal f.Name + " = " + hostOnlyLit f)
+                // OmitDefault absent → restore the identity default value.
+                | OmitDefault d ->
+                    match fsDefaultLit idl.Enums f.Type d with
+                    | Some e -> Ok(pascal f.Name + " = " + e)
+                    | None -> Error(sprintf "fsharpValue: unrenderable omit-default for '%s' on %s" f.Name where)
+                | Required -> Error(sprintf "fsharpValue: %s missing required field '%s'" where f.Name)
+            | Some(_, fv) ->
+                match f.Opt, fsharpValue idl f.Type fv with
+                | _, Error e -> Error e
+                // A host-only field has no wire projection, so a wire value
+                // at its name is not its value — take the placeholder.
+                | HostOnly, Ok _ -> Ok(pascal f.Name + " = " + hostOnlyLit f)
+                | Optional, Ok s -> Ok(pascal f.Name + " = Some(" + s + ")")
+                // OmitDefault present → the raw (non-option) value, like Required.
+                | OmitDefault _, Ok s
+                | Required, Ok s -> Ok(pascal f.Name + " = " + s))
+        |> combineR
 
     /// A provenance-stamp header for AI-scaffolded source (Phase 321) — records
     /// the source wire hash + the typed actor so generated code is auditable +
@@ -3339,6 +3621,17 @@ module Artifact =
         | VList xs -> Canon.typed "list" [ "items", JArr(xs |> List.map valueJson) ]
         | VNode(id, kindTag, fields) ->
             Canon.typed "node" [ "id", JStr id; "kind", JStr kindTag; "fields", namedValues fields ]
+        // Phase 698 — the enveloped form records its envelope under its own key
+        // rather than merged into `fields`: the two namespaces can collide (an
+        // envelope `style` and `Drawing.style` both exist), so merging them would
+        // make the artefact ambiguous and the Phase 700 diff classifier wrong.
+        | VNodeEnv(id, envelope, kindTag, fields) ->
+            Canon.typed
+                "node"
+                [ "envelope", namedValues envelope
+                  "fields", namedValues fields
+                  "id", JStr id
+                  "kind", JStr kindTag ]
         | VAbsent -> Canon.typed "absent" []
         | VClosure -> Canon.typed "closure" []
         | VOpaque -> Canon.typed "opaque" []

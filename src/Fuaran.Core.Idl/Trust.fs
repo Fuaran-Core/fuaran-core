@@ -420,6 +420,19 @@ module Trust =
                 harden policy sanitised
 
             VNode(id, kindTag, fields |> List.map (fun (n, fv) -> n, hardenField n fv))
+        // Phase 698 — an enveloped node hardens as its bare form does, plus its
+        // envelope values. It DELEGATES to the arms above rather than repeating
+        // them: a second copy of the Custom gate here is exactly how an enveloped
+        // `Custom` node would quietly stop being gated. When the gate replaces the
+        // node with the inert placeholder the envelope goes with it — the
+        // placeholder is a fresh inert node, not a re-dressed version of the one
+        // that was refused.
+        | VNodeEnv(id, envelope, kindTag, fields) ->
+            let env = envelope |> List.map (fun (n, fv) -> n, harden policy fv)
+
+            match harden policy (VNode(id, kindTag, fields)) with
+            | VNode(hid, hTag, hFields) when hTag = kindTag -> VNodeEnv(hid, env, hTag, hFields)
+            | replaced -> replaced
         | VList xs -> VList(xs |> List.map (harden policy))
         | VUnion(tag, fields) -> VUnion(tag, fields |> List.map (fun (n, fv) -> n, harden policy fv))
         | VRecord fields -> VRecord(fields |> List.map (fun (n, fv) -> n, harden policy fv))
