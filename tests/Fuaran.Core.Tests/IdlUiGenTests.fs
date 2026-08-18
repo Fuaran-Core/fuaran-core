@@ -1,4 +1,4 @@
-module Fuaran.Core.Tests.IdlUiGenTests
+﻿module Fuaran.Core.Tests.IdlUiGenTests
 
 open System
 open System.IO
@@ -212,6 +212,7 @@ let private grid1: G.Node<unit> =
               PageStateKey = None
               DefaultSort = None
               EditStateKey = None
+              Reorderable = false
               // fuaran#665 — typed rows: mirrors the authored `gridNode` sample
               // byte-for-byte (int cells encode via `JInt`; a decoded row would
               // carry `float`, which renders the same bytes under rule 5).
@@ -246,6 +247,7 @@ let private table1: G.Node<unit> =
               PageStateKey = None
               DefaultSort = None
               EditStateKey = None
+              Reorderable = false
               Source = G.Binding.Static(Some(Seq.empty: Fuaran.Core.Row seq))
               StaticRows =
                 Some

@@ -1,4 +1,4 @@
-module Fuaran.Core.Tests.UiIdl
+﻿module Fuaran.Core.Tests.UiIdl
 
 open Fuaran.Core.Idl
 
@@ -1377,6 +1377,13 @@ let visKinds: IdlKind list =
             // Phase 863 — the DECLARED edit destination: the State key an edited
             // cell's whole updated rows value is committed to.
             opt "editStateKey" TStr
+            // Phase 934 — declarative row reorder. Omit-when-false, matching its
+            // nearest sibling `editable` rather than being an optional bool: for an
+            // affordance flag "not stated" and "explicitly off" are the same state, so
+            // an option would carry a distinction the renderer cannot act on. The
+            // reordered rows commit to `editStateKey` above — a reorder IS a write of
+            // the whole updated rows value, so it needs no destination of its own.
+            omit "reorderable" TBool (VBool false)
             // The row feed is HOSTED `Fuaran.Core.Row seq` (fuaran#665 — typed rows):
             // a Static/State rows payload IS wire-representable (a JSON array of row
             // objects, scalar cells, rendered by Core's `RowCodec` under the `Canon`
