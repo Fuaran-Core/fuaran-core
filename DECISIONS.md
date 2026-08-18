@@ -1,5 +1,66 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-08-18 — D13: the compute vocabulary's closed sets, and what is deliberately absent (Phase 101)
+
+A demand-side census of the transform algebra (enumerate the intents a declarative pipeline must
+express, then check each is EXPRESSIBLE — rather than waiting for a failure to harvest) found the
+verb set close to complete, with the remaining gaps concentrated in **asymmetries of otherwise-closed
+sets**. Those are the cheapest gaps to close and the most expensive to leave: a reader who finds one
+member of a familiar pair reasonably assumes the other.
+
+**Closed (all additive — every pre-existing pipeline's wire is byte-unchanged).** `Transform` gains
+`Intersect` / `Except` beside `Union`, as **multiset** ops keyed on the full row (`· Distinct`
+recovers the SQL set forms, exactly as it does for `Union`); `JoinKind` gains `Semi` / `Anti`;
+`AggFn` gains `CountDistinct`; `WindowFn` gains `DenseRank`, `CompetitionRank`, `NTile n`,
+`CumulMax`, `CumulMin`, `RollingSum`; `ScalarFn` gains `Sqrt`, `Least`, `Greatest`, `IndexOf`.
+Row identity for the set ops and for `CountDistinct` is the **same canonical token `Distinct` dedups
+on** — so `NaN` is one value, `-0.0`/`0.0` coincide, `Null` matches `Null`, and an `Int 1` never
+matches a `Float 1.0`. That is a different rule from a `Join` key (`cellEq`, where a null matches
+nothing), and the difference is intentional: it is what SQL's set operations do and what makes the
+result host-identical rather than host-comparison-dependent.
+
+**Two corrections to the census the closure produced, worth more than the additions.**
+
+1. **`Rank` was already DENSE.** It computes `1, 1, 2` — SQL's `DENSE_RANK()`, not `RANK()`. So the
+   missing member of the ranking family was never "dense rank"; it was the **gapped** rank, which had
+   no spelling at all. `DenseRank` is therefore the explicit (byte-identical) name for what `Rank`
+   already does, and `CompetitionRank` is the genuinely new capability. `Rank` is **not** re-pointed
+   at the gapped semantics: that would silently change every existing pipeline's output — a major
+   bump, not an additive one.
+2. **`Semi` is not expressible; `Anti` is.** The prior reading was that both reduce to `Left` + an
+   `IsNull` filter. `Anti` does (`cellEq` never matches a null, so a matched row's right key is
+   always present, and each unmatched left row yields exactly one output row). `Semi` does **not**: a
+   `Left` join has already fanned a left row out once per right match, and no downstream filter undoes
+   that — a `Distinct` would also collapse duplicates the input legitimately carried. That is the
+   argument for the case, and it is asserted as a test rather than left as prose.
+
+**Declined, with reasons, so the next census does not re-file them.**
+
+- **No clock (`Now` / `Today`).** The evaluator is a pure function of `(table, env, pipeline)`. A
+  clock makes the same pipeline over the same data produce different answers — which is precisely
+  what `Conformance.transformLaws` byte-identity and deterministic replay exist to forbid. The
+  intended route is a host-injected `Param` (D12's binding mechanism): bind `"today"` once at the
+  edge and the pipeline stays total; `DateDiffDays` does the arithmetic.
+- **No regex.** A pattern is not a cross-host value: .NET, JS, Go and Rust differ on syntax, escapes
+  and Unicode classes, and the backtracking engines differ on worst-case *time*, which a total
+  algebra cannot absorb. `Contains` / `StartsWith` / `EndsWith` / `IndexOf` / `Substr` / `Replace`
+  cover the common intents; anything else is a host-side derived column.
+- **No `Pow` / `Log`.** IEEE-754 does not require transcendental functions to be correctly rounded,
+  so two conformant hosts may differ in the last ulp — and one ulp is a different byte in the
+  canonical float layout, i.e. a parity failure. `Sqrt` **is** IEEE-754-exact, which is why it is
+  present and they are not; integer powers compose from `Mul`.
+- **No explode/flatten and no `Split`.** Both need a list-valued cell, and D12 rejected exactly that
+  (`CellList`) for blast radius and model coherence. `Unpivot` is wide→long **across columns** and
+  genuinely does not cover it. So the gap is in the *type model*, not the verb set: closing it is a
+  major model change, not an additive verb, and until then a host flattens its JSON before handing
+  Core a table — the same materialisation it already performs for every other source.
+- **No `PadLeft` / number formatting.** The algebra pins **values**; presentation belongs to the
+  render tier, which knows the locale and the column width and this does not.
+
+Naming note: the two-argument extremes are `Least` / `Greatest` (the SQL spelling) rather than
+`Min` / `Max`, because `AggFn` already owns those two names in this namespace and a second binding
+would shadow it for every unqualified use.
+
 ## 2026-07-19 — D12: list-valued params resolve by substitution, not an env change (Phase 91)
 
 The multi-select-chip binding is `ColExpr.InParam of ColExpr * name`, riding the existing `in`

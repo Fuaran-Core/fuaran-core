@@ -160,6 +160,12 @@ type AggFn =
     | StdDev
     | First
     | Last
+    /// Phase 101 — the count of DISTINCT present values (nulls skipped, so `CountDistinct` over an
+    /// all-null column is `0`, exactly as `Count` is). Distinctness is the SAME canonical token the
+    /// DataFrame `Distinct` / `GroupBy` partition on (Phase 41), so `NaN` collapses to one value,
+    /// `-0.0`/`0.0` coincide, and two cells of different types never collide — the count is
+    /// host-identical, not host-comparison-dependent.
+    | CountDistinct
 
 /// Why an aggregate was refused (Phase 36) — recoverable + enumerated (GP5), never a throw (GP4). A
 /// numeric aggregate (`Sum`/`Mean`/`Median`/`StdDev`) over a non-numeric column names the expected
@@ -219,6 +225,27 @@ module Column =
         | StdDev -> "stddev"
         | First -> "first"
         | Last -> "last"
+        | CountDistinct -> "countDistinct"
+
+    /// The canonical, host-deterministic identity token of a cell (Phase 101) — the same layout the
+    /// DataFrame evaluator's `groupKey` uses per cell, so `CountDistinct` counts exactly the values
+    /// a `Distinct` step would keep. Floats route through the pinned `Canon` layout (`-0.0` collapses
+    /// to `0`) with `NaN`/±∞ named, and each token is type-tagged so an `Int 1` and a `Float 1.0`
+    /// are two values, never one.
+    let private distinctToken (c: Cell) : string =
+        match c with
+        | Int i -> "i:" + string i
+        | Float f ->
+            "f:"
+            + (if System.Double.IsNaN f then "NaN"
+               elif System.Double.IsPositiveInfinity f then "Inf"
+               elif System.Double.IsNegativeInfinity f then "-Inf"
+               else Canon.canonicalFloat f)
+        | Bool b -> "b:" + (if b then "1" else "0")
+        | Str s -> "s:" + s
+        | Date s -> "d:" + s
+        | Timestamp s -> "t:" + s
+        | Null -> "n:"
 
     let private checkedSumInt (r: int64) : Result<Cell, AggregateError> =
         if r >= int64 System.Int32.MinValue && r <= int64 System.Int32.MaxValue then
@@ -230,7 +257,8 @@ module Column =
     /// int; `Mean`/`Median`/`StdDev` are float; the rest keep the source type.
     let aggType (fn: AggFn) (srcType: ColumnType) : ColumnType =
         match fn with
-        | Count -> IntType
+        | Count
+        | CountDistinct -> IntType
         | Mean
         | Median
         | StdDev -> FloatType
@@ -247,6 +275,8 @@ module Column =
     /// `AggregateOverflow` (Phase 39 no-silent-wrap). `Min`/`Max` order any same-family present cells;
     /// `First`/`Last` keep the first/last cell (a `Null` included). Int sums fold in int64 then range-
     /// check, so the result is host-deterministic. `Float` sums via the pinned `List.sum`.
+    /// `CountDistinct` (Phase 101) counts distinct PRESENT values by the canonical `Distinct` token, so
+    /// it never depends on a host's float equality.
     let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
         let cells = col.Cells
         let present = cells |> List.filter (fun c -> not (Cell.isNull c))
@@ -261,6 +291,7 @@ module Column =
 
         match fn with
         | Count -> Ok(Int(List.length present))
+        | CountDistinct -> Ok(Int(present |> List.map distinctToken |> List.distinct |> List.length))
         | First ->
             Ok(
                 match cells with

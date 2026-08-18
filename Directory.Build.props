@@ -14,7 +14,15 @@
     <!-- 0.2.1 (2026-07-31): fuaran#665 — `Fuaran.Core.Row` + `RowCodec` (typed grid/chart
          row-source payload; the rows slot leaves the residual-"<opaque>" boundary).
          Additive — new type + module in Fuaran.Core.Wire; no existing surface moved. -->
-    <Version>0.2.1</Version>
+    <!-- 0.3.0 (2026-08-18): Phase 101 — the relational algebra's closed-set asymmetries.
+         `Transform` gains Intersect/Except; `JoinKind` Semi/Anti; `AggFn` CountDistinct;
+         `WindowFn` DenseRank/CompetitionRank/NTile/CumulMax/CumulMin/RollingSum; `ScalarFn`
+         Sqrt/Least/Greatest/IndexOf. Additive — every pre-existing pipeline encodes to
+         byte-identical wire (the sole new field, a window step's "n", is emitted only for
+         NTile), so consumers repin without source changes. MINOR rather than patch because
+         STABILITY.md pins "adding a step kind is minor", and because an F# consumer that
+         matches these DUs exhaustively will see new incomplete-match warnings. -->
+    <Version>0.3.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

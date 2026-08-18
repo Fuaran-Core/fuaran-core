@@ -100,6 +100,20 @@ are **conformance-certified**, not asserted. Stable surfaces:
   `Conformance.transformLaws`: a reference and a host evaluator agree by **byte-identical wire output**
   (or both reject), the cross-host determinism contract. Removing a step kind or changing a step's
   semantics is a major bump; adding one is minor.
+- **The vocabulary's closed sets + the recorded omissions (Phase 101)** — `Transform` /
+  `JoinKind` / `AggFn` / `WindowFn` / `ScalarFn` are closed sets, and Phase 101 closed their
+  remaining asymmetries **additively** (minor): `Intersect` / `Except`; `Semi` / `Anti`;
+  `CountDistinct`; `DenseRank` / `CompetitionRank` / `NTile` / `CumulMax` / `CumulMin` /
+  `RollingSum`; `Sqrt` / `Least` / `Greatest` / `IndexOf`. Every pre-existing pipeline encodes to
+  byte-identical wire (the one new field, a window step's `"n"`, is emitted only for `NTile`), so a
+  consumer repins without source changes. Two semantics are **pinned and load-bearing**: the set
+  operations and `CountDistinct` key on the canonical `Distinct` token (`Null` matches `Null`,
+  `NaN` is one value, `Int 1` ≠ `Float 1.0`), and `Rank` remains the **dense** rank it has always
+  computed — `DenseRank` is its explicit spelling, `CompetitionRank` is SQL `RANK()`. Re-pointing
+  `Rank` at the gapped semantics would be a **major** bump, not a fix. What is deliberately ABSENT
+  is a decision, not a gap — no clock, no regex, no `Pow`/`Log`, no explode/`Split`, no `PadLeft`;
+  the reasons (determinism, cross-host portability, IEEE-754 rounding, the flat `Cell` set) are
+  recorded in `DECISIONS.md` D13 and beside the `ScalarFn` declaration.
 - **`ColExpr.Param` + the evaluation environment (Phase 77)** — `ColExpr` gains a `Param of name`
   case and the evaluator gains env-aware entry points (`DataFrame.evalPipelineInEnv` /
   `evalPipelineWithInEnv`, an `env: Map<string, Cell>`), certified by `Conformance.paramLaws`. Both

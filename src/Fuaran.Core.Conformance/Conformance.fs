@@ -2379,7 +2379,7 @@ module Conformance =
         let mutable parity = None
         let mutable nullSkip = None
 
-        let fns = [ Sum; Mean; Min; Max; Count; Median; StdDev; First; Last ]
+        let fns = [ Sum; Mean; Min; Max; Count; Median; StdDev; First; Last; CountDistinct ]
 
         for i in 0 .. iterations - 1 do
             let isInt, r1 = ConfRng.intBelow 2 rng
