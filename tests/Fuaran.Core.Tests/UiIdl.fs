@@ -51,6 +51,12 @@ open Fuaran.Core.Idl
 let private headingVariant =
     Declare.enumOf "HeadingVariant" [ "Standard"; "Eyebrow"; "Caption"; "Lead" ]
 
+/// Phase 812 — the anti-scraper render strategy for a `Link`. `Email` marks a
+/// `mailto:` link whose address must not appear in plaintext in emitted HTML.
+/// The wire string is lower-case (`"email"`), so the enum declares an explicit
+/// case-to-wire mapping rather than relying on the identity default.
+let private linkProtection = Declare.enumWith "LinkProtection" [ "Email", "email" ]
+
 let private badgeVariant =
     Declare.enumOf "BadgeVariant" [ "Neutral"; "Brand"; "Success"; "Warning"; "Critical"; "Info" ]
 
@@ -124,8 +130,37 @@ let private dateStyle =
 let private relativeTimeUnit =
     Declare.enumOf "RelativeTimeUnit" [ "Second"; "Minute"; "Hour"; "Day"; "Week"; "Month"; "Year" ]
 
+/// Phase 819 — the unit a `Format.Duration` / `CellFormat.Duration` numeric
+/// source counts.
+let private durationUnit =
+    Declare.enumOf "DurationUnit" [ "Seconds"; "Minutes"; "Hours" ]
+
+/// Phase 819 — the presentation style for a duration: `Compact` "1h 20m",
+/// `Clock` "1:20:00", `Long` "1 hour 20 minutes".
+let private durationStyle =
+    Declare.enumOf "DurationStyle" [ "Compact"; "Clock"; "Long" ]
+
+/// Phase 821 — the size class for the standalone `Icon` display kind. `Medium`
+/// is the default and is omitted on the wire (the omit-at-default rule lives on
+/// the kind field; the enum itself is a plain bare-string DU).
+let private iconSize = Declare.enumOf "IconSize" [ "Small"; "Medium"; "Large" ]
+
 let private chartKind =
     Declare.enumOf "ChartKind" [ "Line"; "Bar"; "Area"; "Pie"; "Scatter"; "Heatmap" ]
+
+/// Phase 880 — which edge of the chart the series legend occupies, or `None`,
+/// which suppresses it entirely.
+let private chartLegendPosition =
+    Declare.enumOf "ChartLegendPosition" [ "Top"; "Right"; "Bottom"; "None" ]
+
+/// Phase 881 — whether a chart writes its values onto the picture, and where.
+/// Deliberately two cases: there is no all-points case, because a number on
+/// every interior point is the clutter the vocabulary exists to avoid.
+let private chartDataLabels = Declare.enumOf "ChartDataLabels" [ "Off"; "Ends" ]
+
+/// Phase 882 — what the chart's x axis MEANS: discrete categories, or dates on
+/// a continuous temporal scale. Declared, never inferred.
+let private chartXScale = Declare.enumOf "ChartXScale" [ "Category"; "Temporal" ]
 
 let private hashStrictness =
     Declare.enumOf "HashStrictness" [ "StrictReplay"; "AdvisoryWarning"; "Enforced" ]
@@ -270,6 +305,14 @@ let private binding =
                 opt "field" TStr ] }
           { Tag = "State"
             Fields = [ req "key" TStr; opt "defaultValue" (TVar "T") ] }
+          // Phase 765 — the environment "now" binding: the host furnishes the
+          // instant, so the wire carries NOTHING beside the `$type` tag, and the
+          // accessor is a HOST-ONLY slot restored to the identity projection on
+          // decode (the Phase 427 Selection fix replayed — the host-furnished
+          // instant is already the wire-shaped string, so a value-discarding
+          // placeholder would make every decoded `Now` resolve to nothing).
+          { Tag = "Now"
+            Fields = [ hostOnly "accessor" "obj -> 'T" "(fun (raw: obj) -> unbox raw)" ] }
           { Tag = "Computed"
             // `BindingContext -> 'T`. `BindingContext` is a HOST type (it carries a
             // `TryGetState<'T>` member), so the argument erases to `obj` here.
@@ -343,6 +386,14 @@ let private cellFormat =
             Fields = [ req "digits" TInt ] }
           { Tag = "Date"
             Fields = [ req "format" TStr ] }
+          // Phase 819 — trendable duration cells: the raw float counts `unit`s,
+          // rendered per `style`.
+          { Tag = "Duration"
+            Fields = [ req "unit" (TEnum "DurationUnit"); req "style" (TEnum "DurationStyle") ] }
+          // Phase 819 — cell-vocabulary parity with `Format.RelativeTime`: the raw
+          // float is a signed count of `unit`.
+          { Tag = "RelativeTime"
+            Fields = [ req "unit" (TEnum "RelativeTimeUnit") ] }
           { Tag = "Custom"
             // `CellValue -> string`; `CellValue` is a host-prelude DU (stage 4b) —
             // the stage-3 obj erasure un-erased now the prelude hosts the type.
@@ -398,8 +449,17 @@ let private action =
           // silent data loss.
           { Tag = "Notify"
             Fields = [ req "channel" TStr; req "payload" TJson ] }
+          // Phase 818 — `valueFrom` (a Binding evaluated at dispatch time) is a
+          // SIBLING of the literal `value`, and `value` became optional in the same
+          // change so the valueFrom-only wire shape is representable. Both are
+          // declared Optional because that is what the SHAPE is; the "exactly one"
+          // rule is decoder policy (`reject-setstate-value-and-valuefrom`), which
+          // the IDL states no more than it states path addressing.
           { Tag = "SetState"
-            Fields = [ req "key" TStr; req "value" TJson ] }
+            Fields =
+              [ req "key" TStr
+                opt "value" TJson
+                opt "valueFrom" (TUnion("Binding", [ TJson ])) ] }
           { Tag = "AiTool"
             Fields = [ req "toolName" TStr; req "args" TJson ] } ] }
 
@@ -429,7 +489,11 @@ let private formatUnion =
           { Tag = "Date"
             Fields = [ req "dateStyle" (TEnum "DateStyle") ] }
           { Tag = "RelativeTime"
-            Fields = [ req "unit" (TEnum "RelativeTimeUnit") ] } ] }
+            Fields = [ req "unit" (TEnum "RelativeTimeUnit") ] }
+          // Phase 819 — locale-independent duration formatting: the numeric source
+          // counts `unit`s, rendered per `style`.
+          { Tag = "Duration"
+            Fields = [ req "unit" (TEnum "DurationUnit"); req "style" (TEnum "DurationStyle") ] } ] }
 
 let private localeSource =
     { Name = "LocaleSource"
@@ -490,6 +554,12 @@ let private formFieldKind =
               [ opt "value" (TUnion("Binding", [ TFloat ]))
                 opt "onChange" (handlerOf "float" "number") ] }
           { Tag = "Checkbox"
+            Fields =
+              [ opt "value" (TUnion("Binding", [ TBool ]))
+                opt "onToggle" (handlerOf "bool" "boolean") ] }
+          // Phase 766 — the boolean TOGGLE control: the same value / onToggle pair
+          // as `Checkbox`, a distinct affordance rather than a styling of one.
+          { Tag = "Toggle"
             Fields =
               [ opt "value" (TUnion("Binding", [ TBool ]))
                 opt "onToggle" (handlerOf "bool" "boolean") ] }
@@ -856,6 +926,16 @@ let private columnErasedRecord =
     { Name = "ColumnErased"
       Fields =
         [ opt "field" TStr
+          // Phase 861 — per-column sort NARROWING on the bound path (the Phase 860
+          // charter rule: a column flag narrows a behaviour, never widens it).
+          // Absent = inherit; `false` opts this column out; `true` is the inherited
+          // default made explicit and is an error where the grid declares no
+          // `sortStateKey`. That grounding is a DECODER-POLICY rule, not a shape
+          // rule, so it stays hand-written above this layer.
+          opt "sortable" TBool
+          // Phase 863 — per-column EDITABILITY narrowing, the same rule on the
+          // write side. Absent = inherit the grid-level `editable`.
+          opt "editable" TBool
           omit "format" (TUnion("CellFormat", [])) (VUnion("None", []))
           req "kind" (TUnion("CellKindErased", []))
           req "label" TStr
@@ -991,6 +1071,17 @@ let displayKinds: IdlKind list =
       { Tag = "Skeleton"
         Category = "Display"
         Fields = [ req "rows" TInt ] }
+      // Phase 821 — the standalone icon-only display kind: a decorative or
+      // labelled glyph with no Button / Image envelope. `size` / `tone` carry
+      // their defaults and are omitted at them; `label` absent is decorative
+      // (`aria-hidden`), present is meaningful (`role="img"` + `aria-label`).
+      { Tag = "Icon"
+        Category = "Display"
+        Fields =
+          [ req "icon" icon
+            omit "size" (TEnum "IconSize") (VEnum "Medium")
+            omit "tone" (TEnum "ToneVariant") (VEnum "Default")
+            opt "label" TStr ] }
       { Tag = "List"
         Category = "Display"
         Fields = [ req "items" (TList TS); req "ordered" TBool ] }
@@ -1007,7 +1098,9 @@ let displayKinds: IdlKind list =
             req "label" TS
             req "download" TBool
             opt "rel" TStr
-            opt "target" TStr ] }
+            opt "target" TStr
+            // Phase 812 — the anti-scraper render strategy. Omitted when absent.
+            opt "protection" (TEnum "LinkProtection") ] }
       { Tag = "Callout"
         Category = "Display"
         Fields =
@@ -1270,6 +1363,20 @@ let visKinds: IdlKind list =
             omit "editable" TBool (VBool false)
             opt "rowKey" (projOf "Fuaran.Core.Row" "string" "(row: unknown) => string" "(fun _ -> \"\")")
             opt "rowKeyField" TStr
+            // Phase 818 — the grid-sort header affordance for a DATA-BOUND grid:
+            // the State key carrying the sort descriptor
+            // `{"column": <index>, "direction": "asc"|"desc"}`.
+            opt "sortStateKey" TStr
+            // Phase 862 — declarative pagination: `pageStateKey` carries
+            // `{"page": <1-based int>}`, `pageSize` is how many rows a page holds.
+            opt "pageSize" TInt
+            opt "pageStateKey" TStr
+            // Phase 861 — the bound path's declared INITIAL order, reusing the same
+            // `DefaultSort` record and field name `staticRows` carries (Phase 801).
+            opt "defaultSort" (TRecord "DefaultSort")
+            // Phase 863 — the DECLARED edit destination: the State key an edited
+            // cell's whole updated rows value is committed to.
+            opt "editStateKey" TStr
             // The row feed is HOSTED `Fuaran.Core.Row seq` (fuaran#665 — typed rows):
             // a Static/State rows payload IS wire-representable (a JSON array of row
             // objects, scalar cells, rendered by Core's `RowCodec` under the `Canon`
@@ -1303,6 +1410,22 @@ let visKinds: IdlKind list =
             req "xField" TStr
             req "yFields" (TList TStr)
             opt "title" TS
+            // Phase 876 — the VALUE axis's number format, reusing the existing
+            // `Format` vocabulary rather than minting a parallel formatting DU.
+            opt "valueFormat" (TUnion("Format", []))
+            // Phase 878 — the axis NAMES and the subtitle. Semantic wire fields for
+            // the same reason `title` is one and `ChartStyle` is not (D8).
+            opt "xTitle" TS
+            opt "yTitle" TS
+            opt "subtitle" TS
+            // Phase 880 — WHERE the legend sits, and whether it sits anywhere at
+            // all. Absent means the style's default (`Right`), never "no legend".
+            opt "legendPosition" (TEnum "ChartLegendPosition")
+            // Phase 881 — whether the values are written onto the picture. Absent
+            // means `Off`, which is also the shipped default.
+            opt "dataLabels" (TEnum "ChartDataLabels")
+            // Phase 882 — what the x column MEANS. Absent means `Category`.
+            opt "xScale" (TEnum "ChartXScale")
             opt "onPointClick" (handlerOf "Fuaran.Core.Row" "unknown") ] }
       { Tag = "Map"
         Category = "Visualisation"
@@ -1361,9 +1484,15 @@ let private drawStyle =
           // missed it until the stage-3 swap read the hand-written encoder.
           opt "markId" TStr
           opt "opacity" (bindingOf TFloat)
+          // Phase 883 — the mark's rotation in degrees (a rotated axis label, a
+          // tilted category tick). Omitted when absent.
+          opt "rotation" TFloat
           opt "stroke" (bindingOf TStr)
           opt "strokeWidth" (bindingOf TFloat)
-          opt "textAnchor" (TEnum "TextAnchor") ] }
+          opt "textAnchor" (TEnum "TextAnchor")
+          // Phase 883 — the mark's hover tip. A TextSource, so it carries the
+          // same literal / bound / formatted vocabulary every other label does.
+          opt "tip" TS ] }
 
 let private curveCommand =
     { Name = "CurveCommand"
@@ -1482,13 +1611,23 @@ let metaKinds: IdlKind list =
         Category = "Meta"
         // args omitted for the degenerate name-only ref.
         Fields = [ req "name" TStr; opt "args" (TMap(TUnion("FragmentArg", []))) ] }
-      // Phase 679 — `Switch`: declarative branch selection on a state key.
+      // Phase 679 — `Switch`: declarative branch selection. Phase 768 widened the
+      // selector from a StateStore key to ANY binding, so the wire now carries
+      // `stateKey` (the compact State form) OR `on` (the general form), and BOTH
+      // are Optional here because that is what the wire says — `stateKey` was
+      // declared Required until Phase 802 and that statement was simply false
+      // (`switch-on-selection.json` carries `on` and no `stateKey`, and the
+      // schema leg rejected it as a result). "Exactly one of the two" is a
+      // cross-field rule Draft 2020-12 cannot state, so it stays DECODER policy
+      // alongside `reject-setstate-value-and-valuefrom` — its exact mirror image
+      // — and `reject-missing-switch-statekey` moves into that same set.
       { Tag = "Switch"
         Category = "Meta"
         Fields =
           [ req "cases" (TList(TRecord "SwitchCase"))
             req "default" TNode
-            req "stateKey" TStr ] }
+            opt "on" (bindingOf TStr)
+            opt "stateKey" TStr ] }
       // Phase 679 — `Mount`: a guest fragment host. `inputs` is omitted when
       // empty; `onBubble` is the closure sentinel.
       { Tag = "Mount"
@@ -1587,6 +1726,7 @@ let uiIdl: Idl =
           shape ]
       Enums =
         [ headingVariant
+          linkProtection
           badgeVariant
           orientation
           boxRole
@@ -1601,7 +1741,13 @@ let uiIdl: Idl =
           dateVariant
           dateStyle
           relativeTimeUnit
+          durationUnit
+          durationStyle
+          iconSize
           chartKind
+          chartLegendPosition
+          chartDataLabels
+          chartXScale
           hashStrictness
           hostEffect
           determinismSource
@@ -1837,12 +1983,18 @@ let private drawingEmpty =
                 "width", VFloat 100.0 ] ]
     )
 
+/// Phase 821 — `icon-1`: the standalone glyph. `size` non-default (so it emits),
+/// `tone` at its default and `label` absent (so neither does).
+let private icon1 =
+    VNode("icon-1", "Icon", [ "icon", VStr "sparkles"; "size", VEnum "Large" ])
+
 let displayCases: (string * IdlValue) list =
     [ "heading-1", heading1
       "badge-1", badge1
       "markdown-1", markdown1
       "math-1", math1
       "skel-1", skel1
+      "icon-1", icon1
       "list-1", list1
       "image-1", image1
       "link-1", link1

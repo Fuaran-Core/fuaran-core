@@ -196,6 +196,8 @@ let private grid1: G.Node<unit> =
         G.NodeKind.DataGrid
             { Columns =
                 [ ({ Field = None
+                     Sortable = None
+                     Editable = None
                      Format = G.CellFormat.None
                      Kind = G.CellKindErased.Text
                      Label = "Channel"
@@ -205,6 +207,11 @@ let private grid1: G.Node<unit> =
               Editable = false
               RowKey = Some(fun _ -> "")
               RowKeyField = None
+              SortStateKey = None
+              PageSize = None
+              PageStateKey = None
+              DefaultSort = None
+              EditStateKey = None
               // fuaran#665 — typed rows: mirrors the authored `gridNode` sample
               // byte-for-byte (int cells encode via `JInt`; a decoded row would
               // carry `float`, which renders the same bytes under rule 5).
@@ -234,6 +241,11 @@ let private table1: G.Node<unit> =
               Editable = false
               RowKey = None
               RowKeyField = None
+              SortStateKey = None
+              PageSize = None
+              PageStateKey = None
+              DefaultSort = None
+              EditStateKey = None
               Source = G.Binding.Static(Some(Seq.empty: Fuaran.Core.Row seq))
               StaticRows =
                 Some

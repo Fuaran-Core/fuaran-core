@@ -11,6 +11,10 @@ type HeadingVariant =
     | Lead
 
 [<RequireQualifiedAccess>]
+type LinkProtection =
+    | Email
+
+[<RequireQualifiedAccess>]
 type BadgeVariant =
     | Neutral
     | Brand
@@ -107,6 +111,24 @@ type RelativeTimeUnit =
     | Year
 
 [<RequireQualifiedAccess>]
+type DurationUnit =
+    | Seconds
+    | Minutes
+    | Hours
+
+[<RequireQualifiedAccess>]
+type DurationStyle =
+    | Compact
+    | Clock
+    | Long
+
+[<RequireQualifiedAccess>]
+type IconSize =
+    | Small
+    | Medium
+    | Large
+
+[<RequireQualifiedAccess>]
 type ChartKind =
     | Line
     | Bar
@@ -114,6 +136,23 @@ type ChartKind =
     | Pie
     | Scatter
     | Heatmap
+
+[<RequireQualifiedAccess>]
+type ChartLegendPosition =
+    | Top
+    | Right
+    | Bottom
+    | None
+
+[<RequireQualifiedAccess>]
+type ChartDataLabels =
+    | Off
+    | Ends
+
+[<RequireQualifiedAccess>]
+type ChartXScale =
+    | Category
+    | Temporal
 
 [<RequireQualifiedAccess>]
 type HashStrictness =
@@ -193,6 +232,7 @@ and [<RequireQualifiedAccess>] Binding<'T> =
     | Filter of name: string * defaultValue: 'T option
     | Selection of nodeId: string * accessor: (obj -> 'T) * defaultValue: 'T option * field: string option
     | State of key: string * defaultValue: 'T option
+    | Now of accessor: (obj -> 'T)
     | Computed of fn: (obj -> 'T)
     | Local of flushOn: LocalFlushTrigger * format: ('T -> string) * initialFrom: Binding<'T> * onCommit: ('T -> obj) option * parse: (string -> Result<'T, string>)
     | Format of source: Binding<float> * format: Format * locale: LocaleSource
@@ -207,6 +247,8 @@ and [<RequireQualifiedAccess>] CellFormat =
     | Percent of decimals: int option
     | SignificantDigits of digits: int
     | Date of format: string
+    | Duration of unit: DurationUnit * style: DurationStyle
+    | RelativeTime of unit: RelativeTimeUnit
     | Custom of fn: (Fuaran.UI.HostPrelude.CellValue -> string)
 
 and [<RequireQualifiedAccess>] Action<'Msg> =
@@ -219,7 +261,7 @@ and [<RequireQualifiedAccess>] Action<'Msg> =
     | Navigate of route: string
     | CommitLocal of nodeId: string
     | Notify of channel: string * payload: JVal
-    | SetState of key: string * value: JVal
+    | SetState of key: string * value: JVal option * valueFrom: Binding<JVal> option
     | AiTool of toolName: string * args: JVal
 
 and [<RequireQualifiedAccess>] CallResultTarget =
@@ -232,6 +274,7 @@ and [<RequireQualifiedAccess>] Format =
     | Percent of decimals: int option
     | Date of dateStyle: DateStyle
     | RelativeTime of unit: RelativeTimeUnit
+    | Duration of unit: DurationUnit * style: DurationStyle
 
 and [<RequireQualifiedAccess>] LocaleSource =
     | Ambient
@@ -252,6 +295,7 @@ and [<RequireQualifiedAccess>] FormFieldKind<'Msg> =
     | Text of value: Binding<string> option * onChange: (string -> Action<'Msg>) option
     | Number of value: Binding<float> option * onChange: (float -> Action<'Msg>) option
     | Checkbox of value: Binding<bool> option * onToggle: (bool -> Action<'Msg>) option
+    | Toggle of value: Binding<bool> option * onToggle: (bool -> Action<'Msg>) option
     | Choice of options: Binding<SelectOption list> * value: Binding<string> option * onChange: (string option -> Action<'Msg>) option
     | TextArea of value: Binding<string> option * onChange: (string -> Action<'Msg>) option * rows: int
     | RangedNumber of value: Binding<float> option * onChange: (float -> Action<'Msg>) option * min: float option * max: float option * step: float option
@@ -382,9 +426,11 @@ and DrawStyle =
       FontSize: float option
       MarkId: string option
       Opacity: Binding<float> option
+      Rotation: float option
       Stroke: Binding<string> option
       StrokeWidth: Binding<float> option
       TextAnchor: TextAnchor option
+      Tip: TextSource option
     }
 
 and InvokeArg =
@@ -464,6 +510,8 @@ and TabHeader =
 and ColumnErased<'Msg> =
     {
       Field: string option
+      Sortable: bool option
+      Editable: bool option
       Format: CellFormat
       Kind: CellKindErased<'Msg>
       Label: string
@@ -525,6 +573,15 @@ and SkeletonSpec =
     }
 
 // Display
+and IconSpec =
+    {
+      Icon: string
+      Size: IconSize
+      Tone: ToneVariant
+      Label: string option
+    }
+
+// Display
 and ListSpec =
     {
       Items: TextSource list
@@ -547,6 +604,7 @@ and LinkSpec =
       Download: bool
       Rel: string option
       Target: string option
+      Protection: LinkProtection option
     }
 
 // Display
@@ -770,6 +828,11 @@ and DataGridSpec<'Msg> =
       Editable: bool
       RowKey: (Fuaran.Core.Row -> string) option
       RowKeyField: string option
+      SortStateKey: string option
+      PageSize: int option
+      PageStateKey: string option
+      DefaultSort: DefaultSort option
+      EditStateKey: string option
       Source: Binding<Fuaran.Core.Row seq>
       StaticRows: StaticRows option
       OnRowClick: (Fuaran.Core.Row -> Action<'Msg>) option
@@ -784,6 +847,13 @@ and ChartSpec<'Msg> =
       XField: string
       YFields: string list
       Title: TextSource option
+      ValueFormat: Format option
+      XTitle: TextSource option
+      YTitle: TextSource option
+      Subtitle: TextSource option
+      LegendPosition: ChartLegendPosition option
+      DataLabels: ChartDataLabels option
+      XScale: ChartXScale option
       OnPointClick: (Fuaran.Core.Row -> Action<'Msg>) option
     }
 
@@ -835,7 +905,8 @@ and SwitchSpec<'Msg> =
     {
       Cases: SwitchCase<'Msg> list
       Default: Node<'Msg>
-      StateKey: string
+      On: Binding<string> option
+      StateKey: string option
     }
 
 // Meta
@@ -854,6 +925,7 @@ and [<RequireQualifiedAccess>] NodeKind<'Msg> =
     | Markdown of MarkdownSpec
     | Math of MathSpec
     | Skeleton of SkeletonSpec
+    | Icon of IconSpec
     | List of ListSpec
     | Image of ImageSpec
     | Link of LinkSpec
@@ -906,6 +978,10 @@ let private encHeadingVariant (v: HeadingVariant) : JVal =
     | HeadingVariant.Eyebrow -> JStr "Eyebrow"
     | HeadingVariant.Caption -> JStr "Caption"
     | HeadingVariant.Lead -> JStr "Lead"
+
+let private encLinkProtection (v: LinkProtection) : JVal =
+    match v with
+    | LinkProtection.Email -> JStr "email"
 
 let private encBadgeVariant (v: BadgeVariant) : JVal =
     match v with
@@ -1003,6 +1079,24 @@ let private encRelativeTimeUnit (v: RelativeTimeUnit) : JVal =
     | RelativeTimeUnit.Month -> JStr "Month"
     | RelativeTimeUnit.Year -> JStr "Year"
 
+let private encDurationUnit (v: DurationUnit) : JVal =
+    match v with
+    | DurationUnit.Seconds -> JStr "Seconds"
+    | DurationUnit.Minutes -> JStr "Minutes"
+    | DurationUnit.Hours -> JStr "Hours"
+
+let private encDurationStyle (v: DurationStyle) : JVal =
+    match v with
+    | DurationStyle.Compact -> JStr "Compact"
+    | DurationStyle.Clock -> JStr "Clock"
+    | DurationStyle.Long -> JStr "Long"
+
+let private encIconSize (v: IconSize) : JVal =
+    match v with
+    | IconSize.Small -> JStr "Small"
+    | IconSize.Medium -> JStr "Medium"
+    | IconSize.Large -> JStr "Large"
+
 let private encChartKind (v: ChartKind) : JVal =
     match v with
     | ChartKind.Line -> JStr "Line"
@@ -1011,6 +1105,23 @@ let private encChartKind (v: ChartKind) : JVal =
     | ChartKind.Pie -> JStr "Pie"
     | ChartKind.Scatter -> JStr "Scatter"
     | ChartKind.Heatmap -> JStr "Heatmap"
+
+let private encChartLegendPosition (v: ChartLegendPosition) : JVal =
+    match v with
+    | ChartLegendPosition.Top -> JStr "Top"
+    | ChartLegendPosition.Right -> JStr "Right"
+    | ChartLegendPosition.Bottom -> JStr "Bottom"
+    | ChartLegendPosition.None -> JStr "None"
+
+let private encChartDataLabels (v: ChartDataLabels) : JVal =
+    match v with
+    | ChartDataLabels.Off -> JStr "Off"
+    | ChartDataLabels.Ends -> JStr "Ends"
+
+let private encChartXScale (v: ChartXScale) : JVal =
+    match v with
+    | ChartXScale.Category -> JStr "Category"
+    | ChartXScale.Temporal -> JStr "Temporal"
 
 let private encHashStrictness (v: HashStrictness) : JVal =
     match v with
@@ -1085,6 +1196,7 @@ let rec private encNodeKind (k: NodeKind<'Msg>) : JVal =
     | NodeKind.Markdown s -> encMarkdownSpec s
     | NodeKind.Math s -> encMathSpec s
     | NodeKind.Skeleton s -> encSkeletonSpec s
+    | NodeKind.Icon s -> encIconSpec s
     | NodeKind.List s -> encListSpec s
     | NodeKind.Image s -> encImageSpec s
     | NodeKind.Link s -> encLinkSpec s
@@ -1138,6 +1250,7 @@ and private encBinding<'T> (encT: 'T -> JVal) (v: Binding<'T>) : JVal =
     | Binding.Filter (name, defaultValue) -> Canon.typed "Filter" ([ Some("name", JStr name); (defaultValue |> Option.map (fun v -> "defaultValue", encT v)) ] |> List.choose id)
     | Binding.Selection (nodeId, accessor, defaultValue, field) -> Canon.typed "Selection" ([ Some("nodeId", JStr nodeId); None; (defaultValue |> Option.map (fun v -> "defaultValue", encT v)); (field |> Option.map (fun v -> "field", JStr v)) ] |> List.choose id)
     | Binding.State (key, defaultValue) -> Canon.typed "State" ([ Some("key", JStr key); (defaultValue |> Option.map (fun v -> "defaultValue", encT v)) ] |> List.choose id)
+    | Binding.Now accessor -> Canon.typed "Now" ([ None ] |> List.choose id)
     | Binding.Computed fn -> Canon.typed "Computed" [ "fn", JStr "<closure>" ]
     | Binding.Local (flushOn, format, initialFrom, onCommit, parse) -> Canon.typed "Local" ([ Some("flushOn", encLocalFlushTrigger flushOn); Some("format", JStr "<closure>"); Some("initialFrom", (encBinding encT) initialFrom); (onCommit |> Option.map (fun v -> "onCommit", JStr "<closure>")); Some("parse", JStr "<closure>") ] |> List.choose id)
     | Binding.Format (source, format, locale) -> Canon.typed "Format" [ "source", (encBinding JFloat) source; "format", encFormat format; "locale", encLocaleSource locale ]
@@ -1153,6 +1266,8 @@ and private encCellFormat (v: CellFormat) : JVal =
     | CellFormat.Percent decimals -> Canon.typed "Percent" ([ (decimals |> Option.map (fun v -> "decimals", JInt v)) ] |> List.choose id)
     | CellFormat.SignificantDigits digits -> Canon.typed "SignificantDigits" [ "digits", JInt digits ]
     | CellFormat.Date format -> Canon.typed "Date" [ "format", JStr format ]
+    | CellFormat.Duration (unit, style) -> Canon.typed "Duration" [ "unit", encDurationUnit unit; "style", encDurationStyle style ]
+    | CellFormat.RelativeTime unit -> Canon.typed "RelativeTime" [ "unit", encRelativeTimeUnit unit ]
     | CellFormat.Custom fn -> Canon.typed "Custom" [ "fn", JStr "<closure>" ]
 
 and private encAction<'Msg> (v: Action<'Msg>) : JVal =
@@ -1166,7 +1281,7 @@ and private encAction<'Msg> (v: Action<'Msg>) : JVal =
     | Action.Navigate route -> Canon.typed "Navigate" [ "route", JStr route ]
     | Action.CommitLocal nodeId -> Canon.typed "CommitLocal" [ "nodeId", JStr nodeId ]
     | Action.Notify (channel, payload) -> Canon.typed "Notify" [ "channel", JStr channel; "payload", id payload ]
-    | Action.SetState (key, value) -> Canon.typed "SetState" [ "key", JStr key; "value", id value ]
+    | Action.SetState (key, value, valueFrom) -> Canon.typed "SetState" ([ Some("key", JStr key); (value |> Option.map (fun v -> "value", id v)); (valueFrom |> Option.map (fun v -> "valueFrom", (encBinding id) v)) ] |> List.choose id)
     | Action.AiTool (toolName, args) -> Canon.typed "AiTool" [ "toolName", JStr toolName; "args", id args ]
 
 and private encCallResultTarget (v: CallResultTarget) : JVal =
@@ -1181,6 +1296,7 @@ and private encFormat (v: Format) : JVal =
     | Format.Percent decimals -> Canon.typed "Percent" ([ (decimals |> Option.map (fun v -> "decimals", JInt v)) ] |> List.choose id)
     | Format.Date dateStyle -> Canon.typed "Date" [ "dateStyle", encDateStyle dateStyle ]
     | Format.RelativeTime unit -> Canon.typed "RelativeTime" [ "unit", encRelativeTimeUnit unit ]
+    | Format.Duration (unit, style) -> Canon.typed "Duration" [ "unit", encDurationUnit unit; "style", encDurationStyle style ]
 
 and private encLocaleSource (v: LocaleSource) : JVal =
     match v with
@@ -1205,6 +1321,7 @@ and private encFormFieldKind<'Msg> (v: FormFieldKind<'Msg>) : JVal =
     | FormFieldKind.Text (value, onChange) -> Canon.typed "Text" ([ (value |> Option.map (fun v -> "value", (encBinding JStr) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")) ] |> List.choose id)
     | FormFieldKind.Number (value, onChange) -> Canon.typed "Number" ([ (value |> Option.map (fun v -> "value", (encBinding JFloat) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")) ] |> List.choose id)
     | FormFieldKind.Checkbox (value, onToggle) -> Canon.typed "Checkbox" ([ (value |> Option.map (fun v -> "value", (encBinding JBool) v)); (onToggle |> Option.map (fun v -> "onToggle", JStr "<closure>")) ] |> List.choose id)
+    | FormFieldKind.Toggle (value, onToggle) -> Canon.typed "Toggle" ([ (value |> Option.map (fun v -> "value", (encBinding JBool) v)); (onToggle |> Option.map (fun v -> "onToggle", JStr "<closure>")) ] |> List.choose id)
     | FormFieldKind.Choice (options, value, onChange) -> Canon.typed "Choice" ([ Some("options", (encBinding (fun __xs -> JArr(List.map encSelectOption __xs))) options); (value |> Option.map (fun v -> "value", (encBinding JStr) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")) ] |> List.choose id)
     | FormFieldKind.TextArea (value, onChange, rows) -> Canon.typed "TextArea" ([ (value |> Option.map (fun v -> "value", (encBinding JStr) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")); Some("rows", JInt rows) ] |> List.choose id)
     | FormFieldKind.RangedNumber (value, onChange, min, max, step) -> Canon.typed "RangedNumber" ([ (value |> Option.map (fun v -> "value", (encBinding JFloat) v)); (onChange |> Option.map (fun v -> "onChange", JStr "<closure>")); (min |> Option.map (fun v -> "min", JFloat v)); (max |> Option.map (fun v -> "max", JFloat v)); (step |> Option.map (fun v -> "step", JFloat v)) ] |> List.choose id)
@@ -1305,7 +1422,7 @@ and private encViewBox (s: ViewBox) : JVal =
     JObj([ Some("height", JFloat s.Height); Some("minX", JFloat s.MinX); Some("minY", JFloat s.MinY); Some("width", JFloat s.Width) ] |> List.choose id)
 
 and private encDrawStyle (s: DrawStyle) : JVal =
-    JObj([ (s.Emphasis |> Option.map (fun v -> "emphasis", encEmphasis v)); (s.Fill |> Option.map (fun v -> "fill", (encBinding JStr) v)); (s.FontFamily |> Option.map (fun v -> "fontFamily", JStr v)); (s.FontSize |> Option.map (fun v -> "fontSize", JFloat v)); (s.MarkId |> Option.map (fun v -> "markId", JStr v)); (s.Opacity |> Option.map (fun v -> "opacity", (encBinding JFloat) v)); (s.Stroke |> Option.map (fun v -> "stroke", (encBinding JStr) v)); (s.StrokeWidth |> Option.map (fun v -> "strokeWidth", (encBinding JFloat) v)); (s.TextAnchor |> Option.map (fun v -> "textAnchor", encTextAnchor v)) ] |> List.choose id)
+    JObj([ (s.Emphasis |> Option.map (fun v -> "emphasis", encEmphasis v)); (s.Fill |> Option.map (fun v -> "fill", (encBinding JStr) v)); (s.FontFamily |> Option.map (fun v -> "fontFamily", JStr v)); (s.FontSize |> Option.map (fun v -> "fontSize", JFloat v)); (s.MarkId |> Option.map (fun v -> "markId", JStr v)); (s.Opacity |> Option.map (fun v -> "opacity", (encBinding JFloat) v)); (s.Rotation |> Option.map (fun v -> "rotation", JFloat v)); (s.Stroke |> Option.map (fun v -> "stroke", (encBinding JStr) v)); (s.StrokeWidth |> Option.map (fun v -> "strokeWidth", (encBinding JFloat) v)); (s.TextAnchor |> Option.map (fun v -> "textAnchor", encTextAnchor v)); (s.Tip |> Option.map (fun v -> "tip", encTextSource v)) ] |> List.choose id)
 
 and private encInvokeArg (s: InvokeArg) : JVal =
     JObj([ Some("addr", JStr s.Addr); Some("value", JStr s.Value) ] |> List.choose id)
@@ -1341,7 +1458,7 @@ and private encTabHeader (s: TabHeader) : JVal =
     JObj([ Some("label", encTextSource s.Label); (s.Icon |> Option.map (fun v -> "icon", JStr v)); (s.Disabled |> Option.map (fun v -> "disabled", (encBinding JBool) v)) ] |> List.choose id)
 
 and private encColumnErased<'Msg> (s: ColumnErased<'Msg>) : JVal =
-    JObj([ (s.Field |> Option.map (fun v -> "field", JStr v)); (match s.Format with | CellFormat.None -> None | _ -> Some("format", encCellFormat s.Format)); Some("kind", encCellKindErased s.Kind); Some("label", JStr s.Label); (s.Value |> Option.map (fun v -> "value", JStr "<closure>")); (match s.Width with | ColumnWidth.Auto -> None | _ -> Some("width", encColumnWidth s.Width)) ] |> List.choose id)
+    JObj([ (s.Field |> Option.map (fun v -> "field", JStr v)); (s.Sortable |> Option.map (fun v -> "sortable", JBool v)); (s.Editable |> Option.map (fun v -> "editable", JBool v)); (match s.Format with | CellFormat.None -> None | _ -> Some("format", encCellFormat s.Format)); Some("kind", encCellKindErased s.Kind); Some("label", JStr s.Label); (s.Value |> Option.map (fun v -> "value", JStr "<closure>")); (match s.Width with | ColumnWidth.Auto -> None | _ -> Some("width", encColumnWidth s.Width)) ] |> List.choose id)
 
 and private encButtonGroupItem<'Msg> (s: ButtonGroupItem<'Msg>) : JVal =
     JObj([ Some("label", encTextSource s.Label); (s.OnClick |> Option.map (fun v -> "onClick", JStr "<closure>")) ] |> List.choose id)
@@ -1367,6 +1484,9 @@ and private encMathSpec (s: MathSpec) : JVal =
 and private encSkeletonSpec (s: SkeletonSpec) : JVal =
     Canon.typed "Skeleton" ([ Some("rows", JInt s.Rows) ] |> List.choose id)
 
+and private encIconSpec (s: IconSpec) : JVal =
+    Canon.typed "Icon" ([ Some("icon", JStr s.Icon); (if s.Size = IconSize.Medium then None else Some("size", encIconSize s.Size)); (if s.Tone = ToneVariant.Default then None else Some("tone", encToneVariant s.Tone)); (s.Label |> Option.map (fun v -> "label", JStr v)) ] |> List.choose id)
+
 and private encListSpec (s: ListSpec) : JVal =
     Canon.typed "List" ([ Some("items", JArr(List.map encTextSource s.Items)); Some("ordered", JBool s.Ordered) ] |> List.choose id)
 
@@ -1374,7 +1494,7 @@ and private encImageSpec (s: ImageSpec) : JVal =
     Canon.typed "Image" ([ Some("alt", encTextSource s.Alt); Some("src", (encBinding JStr) s.Src); Some("variant", encImageVariant s.Variant) ] |> List.choose id)
 
 and private encLinkSpec (s: LinkSpec) : JVal =
-    Canon.typed "Link" ([ Some("href", (encBinding JStr) s.Href); Some("label", encTextSource s.Label); Some("download", JBool s.Download); (s.Rel |> Option.map (fun v -> "rel", JStr v)); (s.Target |> Option.map (fun v -> "target", JStr v)) ] |> List.choose id)
+    Canon.typed "Link" ([ Some("href", (encBinding JStr) s.Href); Some("label", encTextSource s.Label); Some("download", JBool s.Download); (s.Rel |> Option.map (fun v -> "rel", JStr v)); (s.Target |> Option.map (fun v -> "target", JStr v)); (s.Protection |> Option.map (fun v -> "protection", encLinkProtection v)) ] |> List.choose id)
 
 and private encCalloutSpec (s: CalloutSpec) : JVal =
     Canon.typed "Callout" ([ Some("body", encTextSource s.Body); (if s.Dismissable = false then None else Some("dismissable", JBool s.Dismissable)); (if s.Tone = ToneVariant.Default then None else Some("tone", encToneVariant s.Tone)); (s.Heading |> Option.map (fun v -> "heading", encTextSource v)); (s.Icon |> Option.map (fun v -> "icon", JStr v)) ] |> List.choose id)
@@ -1443,10 +1563,10 @@ and private encFiltersSpec<'Msg> (s: FiltersSpec<'Msg>) : JVal =
     Canon.typed "Filters" ([ Some("items", JArr(List.map encFilterSpec s.Items)) ] |> List.choose id)
 
 and private encDataGridSpec<'Msg> (s: DataGridSpec<'Msg>) : JVal =
-    Canon.typed "DataGrid" ([ Some("columns", JArr(List.map encColumnErased s.Columns)); (if s.Editable = false then None else Some("editable", JBool s.Editable)); (s.RowKey |> Option.map (fun v -> "rowKey", JStr "<closure>")); (s.RowKeyField |> Option.map (fun v -> "rowKeyField", JStr v)); Some("source", (encBinding Fuaran.Core.RowCodec.encodeRows) s.Source); (s.StaticRows |> Option.map (fun v -> "staticRows", encStaticRows v)); (s.OnRowClick |> Option.map (fun v -> "onRowClick", JStr "<closure>")) ] |> List.choose id)
+    Canon.typed "DataGrid" ([ Some("columns", JArr(List.map encColumnErased s.Columns)); (if s.Editable = false then None else Some("editable", JBool s.Editable)); (s.RowKey |> Option.map (fun v -> "rowKey", JStr "<closure>")); (s.RowKeyField |> Option.map (fun v -> "rowKeyField", JStr v)); (s.SortStateKey |> Option.map (fun v -> "sortStateKey", JStr v)); (s.PageSize |> Option.map (fun v -> "pageSize", JInt v)); (s.PageStateKey |> Option.map (fun v -> "pageStateKey", JStr v)); (s.DefaultSort |> Option.map (fun v -> "defaultSort", encDefaultSort v)); (s.EditStateKey |> Option.map (fun v -> "editStateKey", JStr v)); Some("source", (encBinding Fuaran.Core.RowCodec.encodeRows) s.Source); (s.StaticRows |> Option.map (fun v -> "staticRows", encStaticRows v)); (s.OnRowClick |> Option.map (fun v -> "onRowClick", JStr "<closure>")) ] |> List.choose id)
 
 and private encChartSpec<'Msg> (s: ChartSpec<'Msg>) : JVal =
-    Canon.typed "Chart" ([ Some("kind", encChartKind s.Kind); Some("source", (encBinding Fuaran.Core.RowCodec.encodeRows) s.Source); Some("stacked", JBool s.Stacked); Some("xField", JStr s.XField); Some("yFields", JArr(List.map JStr s.YFields)); (s.Title |> Option.map (fun v -> "title", encTextSource v)); (s.OnPointClick |> Option.map (fun v -> "onPointClick", JStr "<closure>")) ] |> List.choose id)
+    Canon.typed "Chart" ([ Some("kind", encChartKind s.Kind); Some("source", (encBinding Fuaran.Core.RowCodec.encodeRows) s.Source); Some("stacked", JBool s.Stacked); Some("xField", JStr s.XField); Some("yFields", JArr(List.map JStr s.YFields)); (s.Title |> Option.map (fun v -> "title", encTextSource v)); (s.ValueFormat |> Option.map (fun v -> "valueFormat", encFormat v)); (s.XTitle |> Option.map (fun v -> "xTitle", encTextSource v)); (s.YTitle |> Option.map (fun v -> "yTitle", encTextSource v)); (s.Subtitle |> Option.map (fun v -> "subtitle", encTextSource v)); (s.LegendPosition |> Option.map (fun v -> "legendPosition", encChartLegendPosition v)); (s.DataLabels |> Option.map (fun v -> "dataLabels", encChartDataLabels v)); (s.XScale |> Option.map (fun v -> "xScale", encChartXScale v)); (s.OnPointClick |> Option.map (fun v -> "onPointClick", JStr "<closure>")) ] |> List.choose id)
 
 and private encMapSpec<'Msg> (s: MapSpec<'Msg>) : JVal =
     Canon.typed "Map" ([ Some("centreLatitude", JFloat s.CentreLatitude); Some("centreLongitude", JFloat s.CentreLongitude); Some("source", (encBinding (fun __xs -> JArr(List.map encMapMarker __xs))) s.Source); Some("zoom", JInt s.Zoom); (s.OnMarkerClick |> Option.map (fun v -> "onMarkerClick", JStr "<closure>")) ] |> List.choose id)
@@ -1464,7 +1584,7 @@ and private encFragmentRefSpec<'Msg> (s: FragmentRefSpec<'Msg>) : JVal =
     Canon.typed "FragmentRef" ([ Some("name", JStr s.Name); (s.Args |> Option.map (fun v -> "args", (fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, encFragmentArg v))) v)) ] |> List.choose id)
 
 and private encSwitchSpec<'Msg> (s: SwitchSpec<'Msg>) : JVal =
-    Canon.typed "Switch" ([ Some("cases", JArr(List.map encSwitchCase s.Cases)); Some("default", encNode s.Default); Some("stateKey", JStr s.StateKey) ] |> List.choose id)
+    Canon.typed "Switch" ([ Some("cases", JArr(List.map encSwitchCase s.Cases)); Some("default", encNode s.Default); (s.On |> Option.map (fun v -> "on", (encBinding JStr) v)); (s.StateKey |> Option.map (fun v -> "stateKey", JStr v)) ] |> List.choose id)
 
 and private encMountSpec<'Msg> (s: MountSpec<'Msg>) : JVal =
     Canon.typed "Mount" ([ Some("capabilities", JArr(List.map JStr s.Capabilities)); Some("channel", encGuestChannel s.Channel); (s.Inputs |> Option.map (fun v -> "inputs", (fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, encFragmentArg v))) v)); (s.OnBubble |> Option.map (fun v -> "onBubble", JStr "<closure>")); Some("scopeId", JStr s.ScopeId) ] |> List.choose id)
@@ -1568,6 +1688,11 @@ let private decHeadingVariant (j: JVal) : Result<HeadingVariant, string> =
     | JStr "Caption" -> Ok HeadingVariant.Caption
     | JStr "Lead" -> Ok HeadingVariant.Lead
     | _ -> Error "not a HeadingVariant"
+
+let private decLinkProtection (j: JVal) : Result<LinkProtection, string> =
+    match j with
+    | JStr "email" -> Ok LinkProtection.Email
+    | _ -> Error "not a LinkProtection"
 
 let private decBadgeVariant (j: JVal) : Result<BadgeVariant, string> =
     match j with
@@ -1679,6 +1804,27 @@ let private decRelativeTimeUnit (j: JVal) : Result<RelativeTimeUnit, string> =
     | JStr "Year" -> Ok RelativeTimeUnit.Year
     | _ -> Error "not a RelativeTimeUnit"
 
+let private decDurationUnit (j: JVal) : Result<DurationUnit, string> =
+    match j with
+    | JStr "Seconds" -> Ok DurationUnit.Seconds
+    | JStr "Minutes" -> Ok DurationUnit.Minutes
+    | JStr "Hours" -> Ok DurationUnit.Hours
+    | _ -> Error "not a DurationUnit"
+
+let private decDurationStyle (j: JVal) : Result<DurationStyle, string> =
+    match j with
+    | JStr "Compact" -> Ok DurationStyle.Compact
+    | JStr "Clock" -> Ok DurationStyle.Clock
+    | JStr "Long" -> Ok DurationStyle.Long
+    | _ -> Error "not a DurationStyle"
+
+let private decIconSize (j: JVal) : Result<IconSize, string> =
+    match j with
+    | JStr "Small" -> Ok IconSize.Small
+    | JStr "Medium" -> Ok IconSize.Medium
+    | JStr "Large" -> Ok IconSize.Large
+    | _ -> Error "not a IconSize"
+
 let private decChartKind (j: JVal) : Result<ChartKind, string> =
     match j with
     | JStr "Line" -> Ok ChartKind.Line
@@ -1688,6 +1834,26 @@ let private decChartKind (j: JVal) : Result<ChartKind, string> =
     | JStr "Scatter" -> Ok ChartKind.Scatter
     | JStr "Heatmap" -> Ok ChartKind.Heatmap
     | _ -> Error "not a ChartKind"
+
+let private decChartLegendPosition (j: JVal) : Result<ChartLegendPosition, string> =
+    match j with
+    | JStr "Top" -> Ok ChartLegendPosition.Top
+    | JStr "Right" -> Ok ChartLegendPosition.Right
+    | JStr "Bottom" -> Ok ChartLegendPosition.Bottom
+    | JStr "None" -> Ok ChartLegendPosition.None
+    | _ -> Error "not a ChartLegendPosition"
+
+let private decChartDataLabels (j: JVal) : Result<ChartDataLabels, string> =
+    match j with
+    | JStr "Off" -> Ok ChartDataLabels.Off
+    | JStr "Ends" -> Ok ChartDataLabels.Ends
+    | _ -> Error "not a ChartDataLabels"
+
+let private decChartXScale (j: JVal) : Result<ChartXScale, string> =
+    match j with
+    | JStr "Category" -> Ok ChartXScale.Category
+    | JStr "Temporal" -> Ok ChartXScale.Temporal
+    | _ -> Error "not a ChartXScale"
 
 let private decHashStrictness (j: JVal) : Result<HashStrictness, string> =
     match j with
@@ -1774,6 +1940,7 @@ let rec private decNodeKind (j: JVal) : Result<NodeKind<obj>, string> =
     | "Markdown" -> decMarkdownSpec j |> Result.map NodeKind.Markdown
     | "Math" -> decMathSpec j |> Result.map NodeKind.Math
     | "Skeleton" -> decSkeletonSpec j |> Result.map NodeKind.Skeleton
+    | "Icon" -> decIconSpec j |> Result.map NodeKind.Icon
     | "List" -> decListSpec j |> Result.map NodeKind.List
     | "Image" -> decImageSpec j |> Result.map NodeKind.Image
     | "Link" -> decLinkSpec j |> Result.map NodeKind.Link
@@ -1867,6 +2034,9 @@ and private decBinding<'T> (decT: JVal -> Result<'T, string>) (j: JVal) : Result
             dReq "key" __fs dStr |> Result.bind (fun key ->
             dOpt "defaultValue" __fs decT |> Result.bind (fun defaultValue ->
             Ok(Binding.State(key, defaultValue))))
+        | "Now" ->
+            Ok ((fun (raw: obj) -> unbox raw)) |> Result.bind (fun accessor ->
+            Ok(Binding.Now(accessor)))
         | "Computed" ->
             Ok ((fun _ -> Unchecked.defaultof<'T>)) |> Result.bind (fun fn ->
             Ok(Binding.Computed(fn)))
@@ -1919,6 +2089,13 @@ and private decCellFormat (j: JVal) : Result<CellFormat, string> =
         | "Date" ->
             dReq "format" __fs dStr |> Result.bind (fun format ->
             Ok(CellFormat.Date(format)))
+        | "Duration" ->
+            dReq "unit" __fs decDurationUnit |> Result.bind (fun unit ->
+            dReq "style" __fs decDurationStyle |> Result.bind (fun style ->
+            Ok(CellFormat.Duration(unit, style))))
+        | "RelativeTime" ->
+            dReq "unit" __fs decRelativeTimeUnit |> Result.bind (fun unit ->
+            Ok(CellFormat.RelativeTime(unit)))
         | "Custom" ->
             Ok ((fun _ -> "")) |> Result.bind (fun fn ->
             Ok(CellFormat.Custom(fn)))
@@ -1966,8 +2143,9 @@ and private decAction (j: JVal) : Result<Action<obj>, string> =
             Ok(Action.Notify(channel, payload))))
         | "SetState" ->
             dReq "key" __fs dStr |> Result.bind (fun key ->
-            dReq "value" __fs dJson |> Result.bind (fun value ->
-            Ok(Action.SetState(key, value))))
+            dOpt "value" __fs dJson |> Result.bind (fun value ->
+            dOpt "valueFrom" __fs (decBinding dJson) |> Result.bind (fun valueFrom ->
+            Ok(Action.SetState(key, value, valueFrom)))))
         | "AiTool" ->
             dReq "toolName" __fs dStr |> Result.bind (fun toolName ->
             dReq "args" __fs dJson |> Result.bind (fun args ->
@@ -2009,6 +2187,10 @@ and private decFormat (j: JVal) : Result<Format, string> =
         | "RelativeTime" ->
             dReq "unit" __fs decRelativeTimeUnit |> Result.bind (fun unit ->
             Ok(Format.RelativeTime(unit)))
+        | "Duration" ->
+            dReq "unit" __fs decDurationUnit |> Result.bind (fun unit ->
+            dReq "style" __fs decDurationStyle |> Result.bind (fun style ->
+            Ok(Format.Duration(unit, style))))
         | __other -> Error ("unknown Format case: " + __other))
     | _ -> Error "expected a Format object"
 
@@ -2074,6 +2256,10 @@ and private decFormFieldKind (j: JVal) : Result<FormFieldKind<obj>, string> =
             dOpt "value" __fs (decBinding dBool) |> Result.bind (fun value ->
             (dPresent "onToggle" __fs |> Result.map (Option.map (fun () -> (fun (_: bool) -> Action.Chain [])))) |> Result.bind (fun onToggle ->
             Ok(FormFieldKind.Checkbox(value, onToggle))))
+        | "Toggle" ->
+            dOpt "value" __fs (decBinding dBool) |> Result.bind (fun value ->
+            (dPresent "onToggle" __fs |> Result.map (Option.map (fun () -> (fun (_: bool) -> Action.Chain [])))) |> Result.bind (fun onToggle ->
+            Ok(FormFieldKind.Toggle(value, onToggle))))
         | "Choice" ->
             dReq "options" __fs (decBinding (dList decSelectOption)) |> Result.bind (fun options ->
             dOpt "value" __fs (decBinding dStr) |> Result.bind (fun value ->
@@ -2413,10 +2599,12 @@ and private decDrawStyle (j: JVal) : Result<DrawStyle, string> =
     dOpt "fontSize" __fs dFloat |> Result.bind (fun fontSize ->
     dOpt "markId" __fs dStr |> Result.bind (fun markId ->
     dOpt "opacity" __fs (decBinding dFloat) |> Result.bind (fun opacity ->
+    dOpt "rotation" __fs dFloat |> Result.bind (fun rotation ->
     dOpt "stroke" __fs (decBinding dStr) |> Result.bind (fun stroke ->
     dOpt "strokeWidth" __fs (decBinding dFloat) |> Result.bind (fun strokeWidth ->
     dOpt "textAnchor" __fs decTextAnchor |> Result.bind (fun textAnchor ->
-    Ok { Emphasis = emphasis; Fill = fill; FontFamily = fontFamily; FontSize = fontSize; MarkId = markId; Opacity = opacity; Stroke = stroke; StrokeWidth = strokeWidth; TextAnchor = textAnchor }))))))))))
+    dOpt "tip" __fs decTextSource |> Result.bind (fun tip ->
+    Ok { Emphasis = emphasis; Fill = fill; FontFamily = fontFamily; FontSize = fontSize; MarkId = markId; Opacity = opacity; Rotation = rotation; Stroke = stroke; StrokeWidth = strokeWidth; TextAnchor = textAnchor; Tip = tip }))))))))))))
 
 and private decInvokeArg (j: JVal) : Result<InvokeArg, string> =
     dObj j |> Result.bind (fun __fs ->
@@ -2495,12 +2683,14 @@ and private decTabHeader (j: JVal) : Result<TabHeader, string> =
 and private decColumnErased (j: JVal) : Result<ColumnErased<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
     dOpt "field" __fs dStr |> Result.bind (fun field ->
+    dOpt "sortable" __fs dBool |> Result.bind (fun sortable ->
+    dOpt "editable" __fs dBool |> Result.bind (fun editable ->
     dDef "format" __fs decCellFormat (CellFormat.None) |> Result.bind (fun format ->
     dReq "kind" __fs decCellKindErased |> Result.bind (fun kind ->
     dReq "label" __fs dStr |> Result.bind (fun label ->
     (dPresent "value" __fs |> Result.map (Option.map (fun () -> (fun _ -> Fuaran.UI.HostPrelude.CellValue.Empty)))) |> Result.bind (fun value ->
     dDef "width" __fs decColumnWidth (ColumnWidth.Auto) |> Result.bind (fun width ->
-    Ok { Field = field; Format = format; Kind = kind; Label = label; Value = value; Width = width })))))))
+    Ok { Field = field; Sortable = sortable; Editable = editable; Format = format; Kind = kind; Label = label; Value = value; Width = width })))))))))
 
 and private decButtonGroupItem (j: JVal) : Result<ButtonGroupItem<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
@@ -2550,6 +2740,14 @@ and private decSkeletonSpec (j: JVal) : Result<SkeletonSpec, string> =
     dReq "rows" __fs dInt |> Result.bind (fun rows ->
     Ok { Rows = rows }))
 
+and private decIconSpec (j: JVal) : Result<IconSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "icon" __fs dStr |> Result.bind (fun icon ->
+    dDef "size" __fs decIconSize (IconSize.Medium) |> Result.bind (fun size ->
+    dDef "tone" __fs decToneVariant (ToneVariant.Default) |> Result.bind (fun tone ->
+    dOpt "label" __fs dStr |> Result.bind (fun label ->
+    Ok { Icon = icon; Size = size; Tone = tone; Label = label })))))
+
 and private decListSpec (j: JVal) : Result<ListSpec, string> =
     dObj j |> Result.bind (fun __fs ->
     dReq "items" __fs (dList decTextSource) |> Result.bind (fun items ->
@@ -2570,7 +2768,8 @@ and private decLinkSpec (j: JVal) : Result<LinkSpec, string> =
     dReq "download" __fs dBool |> Result.bind (fun download ->
     dOpt "rel" __fs dStr |> Result.bind (fun rel ->
     dOpt "target" __fs dStr |> Result.bind (fun target ->
-    Ok { Href = href; Label = label; Download = download; Rel = rel; Target = target }))))))
+    dOpt "protection" __fs decLinkProtection |> Result.bind (fun protection ->
+    Ok { Href = href; Label = label; Download = download; Rel = rel; Target = target; Protection = protection })))))))
 
 and private decCalloutSpec (j: JVal) : Result<CalloutSpec, string> =
     dObj j |> Result.bind (fun __fs ->
@@ -2770,10 +2969,15 @@ and private decDataGridSpec (j: JVal) : Result<DataGridSpec<obj>, string> =
     dDef "editable" __fs dBool (false) |> Result.bind (fun editable ->
     (dPresent "rowKey" __fs |> Result.map (Option.map (fun () -> (fun _ -> "")))) |> Result.bind (fun rowKey ->
     dOpt "rowKeyField" __fs dStr |> Result.bind (fun rowKeyField ->
+    dOpt "sortStateKey" __fs dStr |> Result.bind (fun sortStateKey ->
+    dOpt "pageSize" __fs dInt |> Result.bind (fun pageSize ->
+    dOpt "pageStateKey" __fs dStr |> Result.bind (fun pageStateKey ->
+    dOpt "defaultSort" __fs decDefaultSort |> Result.bind (fun defaultSort ->
+    dOpt "editStateKey" __fs dStr |> Result.bind (fun editStateKey ->
     dReq "source" __fs (decBinding Fuaran.Core.RowCodec.decodeRows) |> Result.bind (fun source ->
     dOpt "staticRows" __fs decStaticRows |> Result.bind (fun staticRows ->
     (dPresent "onRowClick" __fs |> Result.map (Option.map (fun () -> (fun (_: Fuaran.Core.Row) -> Action.Chain [])))) |> Result.bind (fun onRowClick ->
-    Ok { Columns = columns; Editable = editable; RowKey = rowKey; RowKeyField = rowKeyField; Source = source; StaticRows = staticRows; OnRowClick = onRowClick }))))))))
+    Ok { Columns = columns; Editable = editable; RowKey = rowKey; RowKeyField = rowKeyField; SortStateKey = sortStateKey; PageSize = pageSize; PageStateKey = pageStateKey; DefaultSort = defaultSort; EditStateKey = editStateKey; Source = source; StaticRows = staticRows; OnRowClick = onRowClick })))))))))))))
 
 and private decChartSpec (j: JVal) : Result<ChartSpec<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
@@ -2783,8 +2987,15 @@ and private decChartSpec (j: JVal) : Result<ChartSpec<obj>, string> =
     dReq "xField" __fs dStr |> Result.bind (fun xField ->
     dReq "yFields" __fs (dList dStr) |> Result.bind (fun yFields ->
     dOpt "title" __fs decTextSource |> Result.bind (fun title ->
+    dOpt "valueFormat" __fs decFormat |> Result.bind (fun valueFormat ->
+    dOpt "xTitle" __fs decTextSource |> Result.bind (fun xTitle ->
+    dOpt "yTitle" __fs decTextSource |> Result.bind (fun yTitle ->
+    dOpt "subtitle" __fs decTextSource |> Result.bind (fun subtitle ->
+    dOpt "legendPosition" __fs decChartLegendPosition |> Result.bind (fun legendPosition ->
+    dOpt "dataLabels" __fs decChartDataLabels |> Result.bind (fun dataLabels ->
+    dOpt "xScale" __fs decChartXScale |> Result.bind (fun xScale ->
     (dPresent "onPointClick" __fs |> Result.map (Option.map (fun () -> (fun (_: Fuaran.Core.Row) -> Action.Chain [])))) |> Result.bind (fun onPointClick ->
-    Ok { Kind = kind; Source = source; Stacked = stacked; XField = xField; YFields = yFields; Title = title; OnPointClick = onPointClick }))))))))
+    Ok { Kind = kind; Source = source; Stacked = stacked; XField = xField; YFields = yFields; Title = title; ValueFormat = valueFormat; XTitle = xTitle; YTitle = yTitle; Subtitle = subtitle; LegendPosition = legendPosition; DataLabels = dataLabels; XScale = xScale; OnPointClick = onPointClick })))))))))))))))
 
 and private decMapSpec (j: JVal) : Result<MapSpec<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
@@ -2828,8 +3039,9 @@ and private decSwitchSpec (j: JVal) : Result<SwitchSpec<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
     dReq "cases" __fs (dList decSwitchCase) |> Result.bind (fun cases ->
     dReq "default" __fs decNode |> Result.bind (fun ``default`` ->
-    dReq "stateKey" __fs dStr |> Result.bind (fun stateKey ->
-    Ok { Cases = cases; Default = ``default``; StateKey = stateKey }))))
+    dOpt "on" __fs (decBinding dStr) |> Result.bind (fun on ->
+    dOpt "stateKey" __fs dStr |> Result.bind (fun stateKey ->
+    Ok { Cases = cases; Default = ``default``; On = on; StateKey = stateKey })))))
 
 and private decMountSpec (j: JVal) : Result<MountSpec<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
@@ -2852,6 +3064,7 @@ let private witnessKindTag (n: Node<'Msg>) : string =
     | NodeKind.Markdown _ -> "Markdown"
     | NodeKind.Math _ -> "Math"
     | NodeKind.Skeleton _ -> "Skeleton"
+    | NodeKind.Icon _ -> "Icon"
     | NodeKind.List _ -> "List"
     | NodeKind.Image _ -> "Image"
     | NodeKind.Link _ -> "Link"
@@ -2945,6 +3158,9 @@ let mkMath (id: string) (source: string) (display: MathDisplay) : Node<'Msg> =
 let mkSkeleton (id: string) (rows: int) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Skeleton { Rows = rows }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
+let mkIcon (id: string) (icon: string) : Node<'Msg> =
+    { Id = id; Kind = NodeKind.Icon { Icon = icon; Size = IconSize.Medium; Tone = ToneVariant.Default; Label = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
+
 let mkList (id: string) (items: TextSource list) (ordered: bool) : Node<'Msg> =
     { Id = id; Kind = NodeKind.List { Items = items; Ordered = ordered }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
@@ -2952,7 +3168,7 @@ let mkImage (id: string) (alt: TextSource) (src: Binding<string>) (variant: Imag
     { Id = id; Kind = NodeKind.Image { Alt = alt; Src = src; Variant = variant }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
 let mkLink (id: string) (href: Binding<string>) (label: TextSource) (download: bool) : Node<'Msg> =
-    { Id = id; Kind = NodeKind.Link { Href = href; Label = label; Download = download; Rel = None; Target = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
+    { Id = id; Kind = NodeKind.Link { Href = href; Label = label; Download = download; Rel = None; Target = None; Protection = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
 let mkCallout (id: string) (body: TextSource) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Callout { Body = body; Dismissable = false; Tone = ToneVariant.Default; Heading = None; Icon = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
@@ -3021,10 +3237,10 @@ let mkFilters (id: string) (items: FilterSpec<'Msg> list) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Filters { Items = items }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
 let mkDataGrid (id: string) (columns: ColumnErased<'Msg> list) (source: Binding<Fuaran.Core.Row seq>) : Node<'Msg> =
-    { Id = id; Kind = NodeKind.DataGrid { Columns = columns; Editable = false; RowKey = None; RowKeyField = None; Source = source; StaticRows = None; OnRowClick = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
+    { Id = id; Kind = NodeKind.DataGrid { Columns = columns; Editable = false; RowKey = None; RowKeyField = None; SortStateKey = None; PageSize = None; PageStateKey = None; DefaultSort = None; EditStateKey = None; Source = source; StaticRows = None; OnRowClick = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
 let mkChart (id: string) (kind: ChartKind) (source: Binding<Fuaran.Core.Row seq>) (stacked: bool) (xField: string) (yFields: string list) : Node<'Msg> =
-    { Id = id; Kind = NodeKind.Chart { Kind = kind; Source = source; Stacked = stacked; XField = xField; YFields = yFields; Title = None; OnPointClick = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
+    { Id = id; Kind = NodeKind.Chart { Kind = kind; Source = source; Stacked = stacked; XField = xField; YFields = yFields; Title = None; ValueFormat = None; XTitle = None; YTitle = None; Subtitle = None; LegendPosition = None; DataLabels = None; XScale = None; OnPointClick = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
 let mkMap (id: string) (centreLatitude: float) (centreLongitude: float) (source: Binding<MapMarker list>) (zoom: int) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Map { CentreLatitude = centreLatitude; CentreLongitude = centreLongitude; Source = source; Zoom = zoom; OnMarkerClick = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
@@ -3041,8 +3257,8 @@ let mkFragmentDecl (id: string) (body: Node<'Msg>) (name: string) : Node<'Msg> =
 let mkFragmentRef (id: string) (name: string) : Node<'Msg> =
     { Id = id; Kind = NodeKind.FragmentRef { Name = name; Args = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
-let mkSwitch (id: string) (cases: SwitchCase<'Msg> list) (``default``: Node<'Msg>) (stateKey: string) : Node<'Msg> =
-    { Id = id; Kind = NodeKind.Switch { Cases = cases; Default = ``default``; StateKey = stateKey }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
+let mkSwitch (id: string) (cases: SwitchCase<'Msg> list) (``default``: Node<'Msg>) : Node<'Msg> =
+    { Id = id; Kind = NodeKind.Switch { Cases = cases; Default = ``default``; On = None; StateKey = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
 let mkMount (id: string) (capabilities: string list) (channel: GuestChannel) (scopeId: string) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Mount { Capabilities = capabilities; Channel = channel; Inputs = None; OnBubble = None; ScopeId = scopeId }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
