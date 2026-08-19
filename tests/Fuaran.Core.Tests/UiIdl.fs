@@ -1851,6 +1851,9 @@ let private badge1 =
 let private markdown1 =
     VNode("markdown-1", "Markdown", [ "text", lit "Updated hourly." ])
 
+let private markdown2 =
+    VNode("markdown-2", "Markdown", [ "text", lit "Updated hourly." ])
+
 let private math1 =
     VNode("math-1", "Math", [ "source", VStr "x^2 + y^2 = z^2"; "display", VEnum "Block" ])
 
@@ -1903,6 +1906,22 @@ let private progress1 =
 let private metric1 =
     VNode(
         "metric-1",
+        "Metric",
+        [ "label", lit "Revenue"
+          "value", staticFloat 1234.5
+          "format", VUnion("Currency", [ "code", VStr "GBP" ])
+          "tone", VEnum "Brand"
+          "weight", VEnum "Standard"
+          "emphasis", VEnum "Normal"
+          "trend", staticFloat 0.07
+          "trendFormat", VUnion("Percent", [ "decimals", VInt 1 ])
+          "icon", VStr "trending-up"
+          "subtext", lit "vs last month" ]
+    )
+
+let private metric2 =
+    VNode(
+        "metric-2",
         "Metric",
         [ "label", lit "Revenue"
           "value", staticFloat 1234.5
@@ -2116,12 +2135,12 @@ let private step1 =
         "step-1",
         "Stepper",
         [ "activeStep", staticInt 1
-          "children", VList [ markdown1; markdown1 ]
+          "children", VList [ markdown1; markdown2 ]
           "onSelect", VClosure ]
     )
 
 let private compositeCard =
-    box "composite-card" "Card" layoutFlexV (Some "Composite") [ metric1; lvr1 ]
+    box "composite-card" "Card" layoutFlexV (Some "Composite") [ metric2; lvr1 ]
 
 let private compositeRoot =
     box "composite-root" "Dashboard" layoutAuto None [ compositeCard; stackNode ]
