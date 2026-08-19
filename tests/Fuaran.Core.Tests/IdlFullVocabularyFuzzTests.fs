@@ -1,4 +1,4 @@
-module Fuaran.Core.Tests.IdlFullVocabularyFuzzTests
+﻿module Fuaran.Core.Tests.IdlFullVocabularyFuzzTests
 
 open System
 open System.IO
@@ -167,6 +167,10 @@ let tests =
               // green and meaningless, with every vector envelope-free.
               let vectors = Gen.sampleNodes uiIdl allKindTags seed vectorBudget
 
+              // Phase 945 — narrow Switch shapes to the canonical wire (the
+              // cross-field rule the IDL cannot state); see UiIdlSupport's note.
+              let vectors = vectors |> List.map UiIdlSupport.canonicaliseVector
+
               let enveloped =
                   vectors
                   |> List.sumBy (function
@@ -211,6 +215,10 @@ let tests =
 
           testCase "three-way: interpreter, generated F# and generated TypeScript agree on every vector" (fun _ ->
               let vectors = Gen.sampleNodes uiIdl allKindTags seed vectorBudget
+
+              // Phase 945 — narrow Switch shapes to the canonical wire (the
+              // cross-field rule the IDL cannot state); see UiIdlSupport's note.
+              let vectors = vectors |> List.map UiIdlSupport.canonicaliseVector
 
               Expect.equal (List.length vectors) vectorBudget "the sampler produced the requested vectors"
 

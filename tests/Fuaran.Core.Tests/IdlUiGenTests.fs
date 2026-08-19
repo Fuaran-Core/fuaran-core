@@ -517,7 +517,9 @@ let tests =
 
           testCase "drift guard: the generator still reproduces the committed UiGenerated.fs" (fun _ ->
               let generated =
-                  match Gen.fsharpModule "Fuaran.Core.Tests.UiGenerated" uiIdl allKindTags with
+                  match
+                      Gen.fsharpModuleWith UiIdlSupport.support "Fuaran.Core.Tests.UiGenerated" uiIdl allKindTags
+                  with
                   | Ok s -> s
                   | Error e -> failtestf "codegen rejected the UI vocabulary: %A" e
 

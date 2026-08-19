@@ -350,10 +350,16 @@ let private binding =
             Fields =
               [ req
                     "source"
+                    // Phase 818/945 - the source slot is the host `TransformSource` DU
+                    // (Data = the columnar/ref shape; Live = a binding-shaped source
+                    // preserved verbatim). A discriminated-BY-INSPECTION union - the
+                    // wire has no `$type: "Data"|"Live"` tag, the decode inspects the
+                    // shape - so it cannot be a TUnion; the type and both codecs are
+                    // Phase 945 support splices (UiIdlSupport.fs), reached by name.
                     (THosted
-                        { FSharp = "Fuaran.Core.DataSource"
-                          Encode = "Fuaran.Core.ColumnCodec.encodeJson"
-                          Decode = "(fun __j -> Fuaran.Core.ColumnCodec.decodeJson __j |> Result.mapError string)" })
+                        { FSharp = "TransformSource"
+                          Encode = "encTransformSource"
+                          Decode = "decTransformSource" })
                 req
                     "pipeline"
                     (TList(

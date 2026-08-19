@@ -10,6 +10,9 @@ type HeadingVariant =
     | Caption
     | Lead
 
+/// Phase 812 — anti-scraper render strategy for a `Link`. `Email` marks a
+/// `mailto:` link whose address must not appear in plaintext in emitted HTML
+/// (the renderers own the emission strategy).
 [<RequireQualifiedAccess>]
 type LinkProtection =
     | Email
@@ -110,18 +113,24 @@ type RelativeTimeUnit =
     | Month
     | Year
 
+/// Phase 819 — how `Format.Duration` / `CellFormat.Duration` interpret the
+/// numeric source: the unit the raw float counts.
 [<RequireQualifiedAccess>]
 type DurationUnit =
     | Seconds
     | Minutes
     | Hours
 
+/// Phase 819 — presentation style for a duration: `Compact` "1h 20m",
+/// `Clock` "1:20:00", `Long` "1 hour 20 minutes".
 [<RequireQualifiedAccess>]
 type DurationStyle =
     | Compact
     | Clock
     | Long
 
+/// Phase 821 — size class for the standalone `Icon` display kind; `Medium`
+/// is the default and is omitted on the wire.
 [<RequireQualifiedAccess>]
 type IconSize =
     | Small
@@ -137,21 +146,81 @@ type ChartKind =
     | Scatter
     | Heatmap
 
+/// Which edge of the chart the series legend occupies — or `None`, which
+/// suppresses it entirely (Phase 880).
+///
+/// A WIRE vocabulary, on the same side of the D8 line as `ChartSpec.Title`:
+/// WHERE an author wants the legend is their meaning; the geometry that puts it
+/// there — column widths, pitches, how the plot shrinks — stays the host's, in
+/// `ChartStyle`. `ChartStyle.LegendPosition` carries the DEFAULT (`Right`); an
+/// explicit `ChartSpec.LegendPosition` beats it.
+///
+/// The case set is the four an author can mean. `Left` was declared by Phase 885
+/// alongside the reserved field and is RETIRED here without ever having been
+/// consumed by a lowering path: the left edge is the y axis's, so a legend there
+/// competes with the tick column and the rotated axis title for the same band,
+/// and the vocabulary charter's demand gate found no evidence for it. Retiring
+/// an unconsumed case is cheaper than shipping a wire value that renders as a
+/// guess.
 [<RequireQualifiedAccess>]
 type ChartLegendPosition =
+    /// A horizontal row in the top margin, under the title (the pre-880 shape).
     | Top
+    /// A vertical column on the right — one row per series, the plot shrinking
+    /// by the column's width. The shipped default.
     | Right
+    /// The same horizontal row, mirrored below the x-axis title.
     | Bottom
+    /// No legend box at all.
     | None
 
+/// Whether a chart writes its values directly onto the picture, and where
+/// (Phase 881).
+///
+/// A WIRE vocabulary, on the D8 line's semantic side: whether the reader is
+/// meant to READ THE NUMBERS or read the shape is the author's meaning; the
+/// type size, the offsets and the fit rule that realise it stay the host's, in
+/// `ChartStyle`.
+///
+/// THE CASE SET IS TWO, AND THAT IS THE POINT. There is deliberately no
+/// "all points" case: a number on every interior point is the clutter this
+/// vocabulary exists to avoid, so no shape of this API can request one. `Ends`
+/// names the selective placements that read — a bar's cap, a line's last point
+/// — and the set is closed there. Adding an all-points case later would not be
+/// an extension; it would retract the guarantee.
 [<RequireQualifiedAccess>]
 type ChartDataLabels =
+    /// No data labels (the shipped default, and what an absent field means).
     | Off
+    /// Label the ENDS only: every bar's cap (a stacked bar's TOTAL at the stack
+    /// cap, never its interior segments) and the last point of every line or
+    /// area edge.
     | Ends
 
+/// What a chart's x axis MEANS — the scale its x column is read on (Phase 882).
+///
+/// A WIRE vocabulary on the D8 line's semantic side: whether a column is a set
+/// of CATEGORIES or a run of DATES is a fact about the data the author is
+/// declaring, not an appearance choice. Where the ticks land, how they are
+/// formatted and how much margin they need are the host's, in `ChartStyle`.
+///
+/// DECLARED, NOT INFERRED, and that is the point of the field. The chart's data
+/// schema is statically known only for an embedded table with an empty pipeline,
+/// so an inferred axis would make one wire tree draw a band axis or a temporal
+/// one depending on where its rows came from; and sniffing the cell strings for
+/// an ISO-8601 shape is a guess dressed as a rule. Declaring it lets the
+/// pre-emit validator GROUND the claim instead (FUARAN097 refuses a temporal
+/// axis over a non-date column) — the author says what the column is, and the
+/// language refuses to be wrong about it quietly.
 [<RequireQualifiedAccess>]
 type ChartXScale =
+    /// Discrete categories, one band per row, in row order (the shipped
+    /// default, and what an absent field means).
     | Category
+    /// Dates: the x column carries canonical ISO-8601 dates (`YYYY-MM-DD`, or a
+    /// timestamp whose time-of-day is discarded) and the axis is CONTINUOUS —
+    /// points sit at their date, ticks land on calendar boundaries, and the
+    /// tick labels adapt to the data's granularity.
     | Temporal
 
 [<RequireQualifiedAccess>]
@@ -237,7 +306,11 @@ and [<RequireQualifiedAccess>] Binding<'T> =
     | Local of flushOn: LocalFlushTrigger * format: ('T -> string) * initialFrom: Binding<'T> * onCommit: ('T -> obj) option * parse: (string -> Result<'T, string>)
     | Format of source: Binding<float> * format: Format * locale: LocaleSource
     | I18n of key: string * args: Map<string, Binding<JVal>> option
-    | Transform of source: Fuaran.Core.DataSource * pipeline: Fuaran.Core.Transform list * ``params``: TransformParam list option
+    // Phase 818 — the source slot widened from `Fuaran.Core.DataSource` to the
+    // host `TransformSource` DU so a binding-shaped wire source (State /
+    // Selection / Query) is PRESERVED for live re-evaluation instead of being
+    // snapshotted at decode (the Phase-815 leniency's semantics upgrade).
+    | Transform of source: TransformSource * pipeline: Fuaran.Core.Transform list * ``params``: TransformParam list option
     | Invoke of capabilityId: string * args: InvokeArg list
 
 and [<RequireQualifiedAccess>] CellFormat =
@@ -247,7 +320,11 @@ and [<RequireQualifiedAccess>] CellFormat =
     | Percent of decimals: int option
     | SignificantDigits of digits: int
     | Date of format: string
+    /// Phase 819 — trendable duration cells: the raw float counts `unit`s,
+    /// rendered per `style`.
     | Duration of unit: DurationUnit * style: DurationStyle
+    /// Phase 819 — cell-vocabulary parity with `Format.RelativeTime`: the
+    /// raw float is a signed count of `unit`.
     | RelativeTime of unit: RelativeTimeUnit
     | Custom of fn: (Fuaran.UI.HostPrelude.CellValue -> string)
 
@@ -261,6 +338,10 @@ and [<RequireQualifiedAccess>] Action<'Msg> =
     | Navigate of route: string
     | CommitLocal of nodeId: string
     | Notify of channel: string * payload: JVal
+    // Phase 818 — `valueFrom` (a Binding evaluated at dispatch time inside the
+    // existing gate) is a SIBLING of the literal `value`; decode enforces
+    // value XOR valueFrom. `value` became an option in the same change so the
+    // valueFrom-only wire shape is representable without a placeholder.
     | SetState of key: string * value: JVal option * valueFrom: Binding<JVal> option
     | AiTool of toolName: string * args: JVal
 
@@ -274,6 +355,8 @@ and [<RequireQualifiedAccess>] Format =
     | Percent of decimals: int option
     | Date of dateStyle: DateStyle
     | RelativeTime of unit: RelativeTimeUnit
+    /// Phase 819 — locale-independent duration formatting: the numeric
+    /// source counts `unit`s, rendered per `style`.
     | Duration of unit: DurationUnit * style: DurationStyle
 
 and [<RequireQualifiedAccess>] LocaleSource =
@@ -510,7 +593,20 @@ and TabHeader =
 and ColumnErased<'Msg> =
     {
       Field: string option
+      // Phase 861 — per-column sort NARROWING on the bound path (Phase 860's
+      // charter rule: a column flag narrows a behaviour, never widens it).
+      // Absent = inherit, i.e. sortable iff the column has a `field` and the
+      // grid declares `sortStateKey`. `false` opts this column out. `true` is
+      // the inherited default made explicit and is an ERROR where the grid
+      // declares no `sortStateKey` — a column cannot turn on a behaviour whose
+      // state key does not exist. Omitted on the wire when absent.
       Sortable: bool option
+      // Phase 863 — per-column EDITABILITY narrowing, the same rule on the
+      // write side. Absent = inherit the grid-level `editable`. `false` makes
+      // this column read-only under a grid-level `true` — the declaration
+      // "read-only implied by omission" could not express. `true` is the
+      // inherited default made explicit and is an ERROR where the grid is not
+      // editable: a column narrows, never widens. Omitted when absent.
       Editable: bool option
       Format: CellFormat
       Kind: CellKindErased<'Msg>
@@ -573,6 +669,11 @@ and SkeletonSpec =
     }
 
 // Display
+/// Phase 821 — the standalone icon-only display kind: a decorative or
+/// labelled glyph with no Button / Image envelope. `Icon` names a
+/// glyph from the existing icon vocabulary (the `data-icon` hook); `Label =
+/// None` is decorative (`aria-hidden="true"`), `Some` is meaningful
+/// (`role="img"` + `aria-label`).
 and IconSpec =
     {
       Icon: string
@@ -828,11 +929,50 @@ and DataGridSpec<'Msg> =
       Editable: bool
       RowKey: (Fuaran.Core.Row -> string) option
       RowKeyField: string option
+      // Phase 818 — the grid-sort header affordance for a DATA-BOUND grid:
+      // names the State key carrying the sort descriptor
+      // `{"column": <index>, "direction": "asc"|"desc"}`. When set, the
+      // runtime renders sortable column headers (a header click writes the
+      // toggled descriptor via the SetState path) and sorts its resolved rows
+      // by the state-carried descriptor before rendering. Sorting keys off the
+      // clicked column's `field` — a field-less closure column renders without
+      // the affordance. Omitted on the wire when absent; `staticRows`' own
+      // Phase-801 sort intent is untouched.
       SortStateKey: string option
+      // Phase 862 — declarative pagination, the second instance of the
+      // grid-behaviour rule (Phase 860's charter): a behaviour the user drives
+      // names the State key the grid both writes and reads. `pageStateKey`
+      // carries the descriptor `{"page": <1-based int>}`; `pageSize` is how
+      // many rows a page holds. When both are set the runtime renders a pager
+      // and shows one page at a time; the pager is renderer-owned, so a
+      // decorative pager (a button writing state nothing reads) cannot be
+      // authored. Where the source is a `Query` whose `dependsOn` names the
+      // page key, the HOST pages and the grid does not slice. Both omitted on
+      // the wire when absent.
       PageSize: int option
       PageStateKey: string option
+      // Phase 861 — the bound path's declared INITIAL order, reusing the same
+      // `DefaultSort` record and field name `staticRows` carries (Phase 801):
+      // same behaviour, same spelling. It applies when the sort state key
+      // carries nothing yet; once the user has sorted, the state wins. A grid
+      // may declare it with no `sortStateKey` at all — an initial order
+      // without interactive re-sorting, exactly as a static table may.
       DefaultSort: DefaultSort option
+      // Phase 863 — the DECLARED edit destination: the State key an edited
+      // cell's whole updated rows value is committed to. Absent keeps Phase
+      // 663's shipped behaviour exactly — write back to the grid's own
+      // `source` when that source is a direct `Binding.State`, display-only
+      // otherwise. Present, it names the destination explicitly, which is what
+      // census row #27 asked for: a decoded editable grid could not say where
+      // its edits land, because the only spelling was a closure erasing to
+      // `"<closure>"`. Omitted on the wire when absent.
       EditStateKey: string option
+      // Phase 934 — declarative row reorder. Omit-when-false, matching its nearest
+      // sibling `editable`: for an affordance flag "not stated" and "explicitly off"
+      // are the same state, so an option would carry a distinction the renderer
+      // cannot act on. The reordered rows commit to `editStateKey` above — a reorder
+      // IS a write of the whole updated rows value, so it needs no destination of
+      // its own.
       Reorderable: bool
       Source: Binding<Fuaran.Core.Row seq>
       StaticRows: StaticRows option
@@ -848,12 +988,67 @@ and ChartSpec<'Msg> =
       XField: string
       YFields: string list
       Title: TextSource option
+      // Phase 876 — the VALUE axis's number format, reusing the existing
+      // `Format` vocabulary (the Phase 819 family) rather than minting a
+      // parallel formatting DU. It is a SEMANTIC declaration ("these numbers
+      // are pounds / a ratio / two-decimal quantities"), which is why it is a
+      // wire field where `ChartStyle` is not (D8): appearance is the host's,
+      // meaning is the author's. Absent means "no declared meaning" — the
+      // lowering still applies its canonical default rendering (thousands
+      // separators + step-derived decimals), which is a LOWERING behaviour,
+      // not wire state. Omitted on the wire when absent.
       ValueFormat: Format option
+      // Phase 878 — the axis NAMES and the subtitle. Semantic wire fields for
+      // the same reason `Title` is one and `ChartStyle` is not (D8): what an
+      // axis is CALLED is the author's meaning; where and how it is drawn is
+      // the host's appearance.
+      //
+      // All three are DEFAULT-ON in the sense that matters: absent `XTitle` /
+      // `YTitle` fall back to the capitalised field name, so an axis is never
+      // nameless. Absent is therefore the ordinary shape, not an opt-out —
+      // omitted on the wire, and identical to what the author would have
+      // written by hand.
       XTitle: TextSource option
       YTitle: TextSource option
+      // The muted line under the visible title — the natural home for a units
+      // statement ("Revenue by quarter / £m"). An explicit subtitle SUPPRESSES
+      // the lowering's own display-unit slot (Phase 876): the author has said
+      // it, so the machine does not repeat it.
       Subtitle: TextSource option
+      // Phase 880 — WHERE the legend sits, and whether it sits anywhere at all.
+      // Semantic for the same reason the titles above are (D8): the edge an
+      // author wants the legend on is their meaning; the column widths and
+      // pitches that realise it are the host's, in `ChartStyle`.
+      //
+      // Absent means "the style's default" (`ChartStyle.LegendPosition`, which
+      // ships as `Right`) — NOT "no legend"; suppression is the explicit
+      // `ChartLegendPosition.None`. So absence stays the ordinary shape and is
+      // omitted on the wire, and an author who wants no legend says so.
       LegendPosition: ChartLegendPosition option
+      // Phase 881 — whether the values are written onto the picture. Semantic
+      // in the same way (D8): whether a reader is meant to read the NUMBERS or
+      // the shape is the author's meaning; the type size, the offsets and the
+      // fit rule that decide whether a given label actually draws are the
+      // host's, in `ChartStyle`.
+      //
+      // Absent means `Off`, and `Off` is also the shipped default — the one
+      // place this field differs from `LegendPosition`, deliberately: a legend
+      // is chrome an author is opting OUT of, where a data label is ink an
+      // author is opting IN to. So an absent field is byte-identical to the
+      // pre-881 wire and to the pre-881 picture.
       DataLabels: ChartDataLabels option
+      // Phase 882 — what the x column MEANS: discrete categories, or dates on a
+      // continuous temporal scale. Semantic in the same way (D8): whether a
+      // column is a set of categories or a run of dates is a fact about the
+      // data; the tick ladder, the label format and the margins that realise it
+      // are the host's, in `ChartStyle`.
+      //
+      // Absent means `Category`, which is also the shipped default, so an
+      // absent field is byte-identical to the pre-882 wire AND to the pre-882
+      // picture. `Temporal` is a DECLARATION the pre-emit validator grounds
+      // against the column type (FUARAN097) — never an inference from the data,
+      // which would make the same tree draw differently depending on where its
+      // rows came from.
       XScale: ChartXScale option
       OnPointClick: (Fuaran.Core.Row -> Action<'Msg>) option
     }
@@ -906,8 +1101,13 @@ and SwitchSpec<'Msg> =
     {
       Cases: SwitchCase<'Msg> list
       Default: Node<'Msg>
-      On: Binding<string> option
-      StateKey: string option
+      // Phase 768 — the branch SELECTOR is any Binding, not only a StateStore
+      // key: `on: {"$type":"Selection",…}` lets the branch follow the clicked
+      // row with no writer at all, which is what closes 032/c6 (the failing
+      // emissions wired a Switch to a stateKey nothing emittable could write).
+      // The state form keeps its compact spelling on the wire — see the
+      // encoder's collapse rule.
+      On: Binding<string>
     }
 
 // Meta
@@ -972,6 +1172,18 @@ and Node<'Msg> =
       State: StateBehaviour<'Msg> option
       Style: SemanticStyle option
     }
+
+/// Phase 818 — a `Binding.Transform`'s source slot. `Data` is the
+/// canonical columnar / `ref` source (the pre-818 shape, byte-identical on the
+/// wire). `Live` preserves a binding-shaped source (State / Selection / Query)
+/// verbatim so a runtime re-evaluates the Transform with subscription
+/// semantics when the binding's channel changes; `initial` is the decode-time
+/// snapshot table derived from the binding's carried default data (never
+/// encoded — the binding IS the wire form), which SSR / diagnostic evaluation
+/// reads, byte-identical to the Phase-815 snapshot for the same input.
+and [<RequireQualifiedAccess>] TransformSource =
+    | Data of source: Fuaran.Core.DataSource
+    | Live of binding: Binding<JVal> * initial: Fuaran.Core.DataSource
 
 let private encHeadingVariant (v: HeadingVariant) : JVal =
     match v with
@@ -1080,6 +1292,7 @@ let private encRelativeTimeUnit (v: RelativeTimeUnit) : JVal =
     | RelativeTimeUnit.Month -> JStr "Month"
     | RelativeTimeUnit.Year -> JStr "Year"
 
+// Phase 819 — Duration format enums.
 let private encDurationUnit (v: DurationUnit) : JVal =
     match v with
     | DurationUnit.Seconds -> JStr "Seconds"
@@ -1092,6 +1305,7 @@ let private encDurationStyle (v: DurationStyle) : JVal =
     | DurationStyle.Clock -> JStr "Clock"
     | DurationStyle.Long -> JStr "Long"
 
+// Phase 821 — Icon size class.
 let private encIconSize (v: IconSize) : JVal =
     match v with
     | IconSize.Small -> JStr "Small"
@@ -1256,7 +1470,7 @@ and private encBinding<'T> (encT: 'T -> JVal) (v: Binding<'T>) : JVal =
     | Binding.Local (flushOn, format, initialFrom, onCommit, parse) -> Canon.typed "Local" ([ Some("flushOn", encLocalFlushTrigger flushOn); Some("format", JStr "<closure>"); Some("initialFrom", (encBinding encT) initialFrom); (onCommit |> Option.map (fun v -> "onCommit", JStr "<closure>")); Some("parse", JStr "<closure>") ] |> List.choose id)
     | Binding.Format (source, format, locale) -> Canon.typed "Format" [ "source", (encBinding JFloat) source; "format", encFormat format; "locale", encLocaleSource locale ]
     | Binding.I18n (key, args) -> Canon.typed "I18n" ([ Some("key", JStr key); (args |> Option.map (fun v -> "args", (fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, (encBinding id) v))) v)) ] |> List.choose id)
-    | Binding.Transform (source, pipeline, ``params``) -> Canon.typed "Transform" ([ Some("source", Fuaran.Core.ColumnCodec.encodeJson source); Some("pipeline", JArr(List.map Fuaran.Core.DataFrameCodec.encodeTransform pipeline)); (``params`` |> Option.map (fun v -> "params", JArr(List.map encTransformParam v))) ] |> List.choose id)
+    | Binding.Transform (source, pipeline, ``params``) -> Canon.typed "Transform" ([ Some("source", encTransformSource source); Some("pipeline", JArr(List.map Fuaran.Core.DataFrameCodec.encodeTransform pipeline)); (``params`` |> Option.map (fun v -> "params", JArr(List.map encTransformParam v))) ] |> List.choose id)
     | Binding.Invoke (capabilityId, args) -> Canon.typed "Invoke" [ "capabilityId", JStr capabilityId; "args", JArr(List.map encInvokeArg args) ]
 
 and private encCellFormat (v: CellFormat) : JVal =
@@ -1282,6 +1496,8 @@ and private encAction<'Msg> (v: Action<'Msg>) : JVal =
     | Action.Navigate route -> Canon.typed "Navigate" [ "route", JStr route ]
     | Action.CommitLocal nodeId -> Canon.typed "CommitLocal" [ "nodeId", JStr nodeId ]
     | Action.Notify (channel, payload) -> Canon.typed "Notify" [ "channel", JStr channel; "payload", id payload ]
+    // Phase 818 — `value` / `valueFrom` are XOR siblings; each is emitted only
+    // when present (Canon sorts keys, so the field order stays alphabetical).
     | Action.SetState (key, value, valueFrom) -> Canon.typed "SetState" ([ Some("key", JStr key); (value |> Option.map (fun v -> "value", id v)); (valueFrom |> Option.map (fun v -> "valueFrom", (encBinding id) v)) ] |> List.choose id)
     | Action.AiTool (toolName, args) -> Canon.typed "AiTool" [ "toolName", JStr toolName; "args", id args ]
 
@@ -1485,6 +1701,9 @@ and private encMathSpec (s: MathSpec) : JVal =
 and private encSkeletonSpec (s: SkeletonSpec) : JVal =
     Canon.typed "Skeleton" ([ Some("rows", JInt s.Rows) ] |> List.choose id)
 
+// Phase 821 — Icon display kind.
+// `size` omitted-when-`Medium`, `tone` omitted-when-`Default`, `label`
+// omitted-when-`None` (decorative).
 and private encIconSpec (s: IconSpec) : JVal =
     Canon.typed "Icon" ([ Some("icon", JStr s.Icon); (if s.Size = IconSize.Medium then None else Some("size", encIconSize s.Size)); (if s.Tone = ToneVariant.Default then None else Some("tone", encToneVariant s.Tone)); (s.Label |> Option.map (fun v -> "label", JStr v)) ] |> List.choose id)
 
@@ -1585,10 +1804,19 @@ and private encFragmentRefSpec<'Msg> (s: FragmentRefSpec<'Msg>) : JVal =
     Canon.typed "FragmentRef" ([ Some("name", JStr s.Name); (s.Args |> Option.map (fun v -> "args", (fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, encFragmentArg v))) v)) ] |> List.choose id)
 
 and private encSwitchSpec<'Msg> (s: SwitchSpec<'Msg>) : JVal =
-    Canon.typed "Switch" ([ Some("cases", JArr(List.map encSwitchCase s.Cases)); Some("default", encNode s.Default); (s.On |> Option.map (fun v -> "on", (encBinding JStr) v)); (s.StateKey |> Option.map (fun v -> "stateKey", JStr v)) ] |> List.choose id)
+    Canon.typed "Switch" ([ Some("cases", JArr(List.map encSwitchCase s.Cases)); Some("default", encNode s.Default); (match s.On with | Binding.State (key, None) -> Some("stateKey", JStr key) | on -> Some("on", (encBinding JStr) on)) ] |> List.choose id)
 
 and private encMountSpec<'Msg> (s: MountSpec<'Msg>) : JVal =
     Canon.typed "Mount" ([ Some("capabilities", JArr(List.map JStr s.Capabilities)); Some("channel", encGuestChannel s.Channel); (s.Inputs |> Option.map (fun v -> "inputs", (fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, encFragmentArg v))) v)); (s.OnBubble |> Option.map (fun v -> "onBubble", JStr "<closure>")); Some("scopeId", JStr s.ScopeId) ] |> List.choose id)
+
+// Phase 818 — a `Data` source keeps the Core columnar encoding byte-identical; a
+// `Live` source re-encodes the preserved binding itself (one wire dialect — the
+// State/Selection/Query-shaped source round-trips byte-for-byte; the derived
+// `initial` snapshot is never encoded).
+and private encTransformSource (s: TransformSource) : JVal =
+    match s with
+    | TransformSource.Data ds -> Fuaran.Core.ColumnCodec.encodeJson ds
+    | TransformSource.Live (b, _) -> (encBinding id) b
 
 let encodeNode (n: Node<'Msg>) : string = Canon.render (encNode n)
 
@@ -1601,6 +1829,12 @@ let encodeNodeKindJson (k: NodeKind<'Msg>) : JVal = encNodeKind k
 let encodeStateBehaviourJson (s: StateBehaviour<'Msg>) : JVal = encStateBehaviour s
 
 let encodeSemanticStyleJson (s: SemanticStyle) : JVal = encSemanticStyle s
+
+// Phase 818 — JVal-level accessor for a data-shaped Action (the
+// `encodeNodeKindJson` precedent): the server resume script re-encodes a
+// `SetState` whose payload is a `valueFrom` Binding through the canonical
+// encoder rather than growing a second hand-rolled binding encoder.
+let encodeActionJson (a: Action<'Msg>) : JVal = encAction a
 
 let private dObj (j: JVal) : Result<(string * JVal) list, string> =
     match j with
@@ -1805,6 +2039,7 @@ let private decRelativeTimeUnit (j: JVal) : Result<RelativeTimeUnit, string> =
     | JStr "Year" -> Ok RelativeTimeUnit.Year
     | _ -> Error "not a RelativeTimeUnit"
 
+// Phase 819 — Duration format enums.
 let private decDurationUnit (j: JVal) : Result<DurationUnit, string> =
     match j with
     | JStr "Seconds" -> Ok DurationUnit.Seconds
@@ -1819,6 +2054,7 @@ let private decDurationStyle (j: JVal) : Result<DurationStyle, string> =
     | JStr "Long" -> Ok DurationStyle.Long
     | _ -> Error "not a DurationStyle"
 
+// Phase 821 — Icon size class.
 let private decIconSize (j: JVal) : Result<IconSize, string> =
     match j with
     | JStr "Small" -> Ok IconSize.Small
@@ -2035,6 +2271,10 @@ and private decBinding<'T> (decT: JVal -> Result<'T, string>) (j: JVal) : Result
             dReq "key" __fs dStr |> Result.bind (fun key ->
             dOpt "defaultValue" __fs decT |> Result.bind (fun defaultValue ->
             Ok(Binding.State(key, defaultValue))))
+        // Identity accessor (the Phase 427 Selection fix replayed): the
+        // host-furnished instant is already the wire-shaped string, so a
+        // decoded reader receives it as-is; a value-discarding placeholder
+        // would make every decoded `Now` resolve to nothing.
         | "Now" ->
             Ok ((fun (raw: obj) -> unbox raw)) |> Result.bind (fun accessor ->
             Ok(Binding.Now(accessor)))
@@ -2057,8 +2297,15 @@ and private decBinding<'T> (decT: JVal -> Result<'T, string>) (j: JVal) : Result
             dReq "key" __fs dStr |> Result.bind (fun key ->
             dOpt "args" __fs (dMap (decBinding dJson)) |> Result.bind (fun args ->
             Ok(Binding.I18n(key, args))))
+        // Phase 818 — a binding-shaped source (State / Selection / Query
+        // `$type`) is preserved as `TransformSource.Live`; the initial
+        // snapshot derives from the binding's carried default data via the
+        // host-prelude helpers (a State source must carry data — the
+        // Phase-815 posture; Selection/Query fall back to the empty
+        // table). Anything else decodes through Core's columnar codec as
+        // before, byte-identical.
         | "Transform" ->
-            dReq "source" __fs (fun __j -> Fuaran.Core.ColumnCodec.decodeJson __j |> Result.mapError string) |> Result.bind (fun source ->
+            dReq "source" __fs decTransformSource |> Result.bind (fun source ->
             dReq "pipeline" __fs (dList (fun __j -> Fuaran.Core.DataFrameCodec.decodeTransform __j |> Result.mapError string)) |> Result.bind (fun pipeline ->
             dOpt "params" __fs (dList decTransformParam) |> Result.bind (fun ``params`` ->
             Ok(Binding.Transform(source, pipeline, ``params``)))))
@@ -2146,7 +2393,12 @@ and private decAction (j: JVal) : Result<Action<obj>, string> =
             dReq "key" __fs dStr |> Result.bind (fun key ->
             dOpt "value" __fs dJson |> Result.bind (fun value ->
             dOpt "valueFrom" __fs (decBinding dJson) |> Result.bind (fun valueFrom ->
-            Ok(Action.SetState(key, value, valueFrom)))))
+            // Phase 818 — value XOR valueFrom (a literal, or a Binding
+            // evaluated at dispatch time); exactly one must be present.
+            match value, valueFrom with
+            | Some _, Some _ -> Error "SetState carries both 'value' and 'valueFrom' — exactly one is allowed ('value' is a literal; 'valueFrom' derives the written value from a Binding at dispatch time)"
+            | None, None -> Error "SetState requires 'value' (a literal JSON value) or 'valueFrom' (a Binding evaluated at dispatch time)"
+            | _ -> Ok(Action.SetState(key, value, valueFrom)))))
         | "AiTool" ->
             dReq "toolName" __fs dStr |> Result.bind (fun toolName ->
             dReq "args" __fs dJson |> Result.bind (fun args ->
@@ -2741,6 +2993,7 @@ and private decSkeletonSpec (j: JVal) : Result<SkeletonSpec, string> =
     dReq "rows" __fs dInt |> Result.bind (fun rows ->
     Ok { Rows = rows }))
 
+// Phase 821 — Icon display kind.
 and private decIconSpec (j: JVal) : Result<IconSpec, string> =
     dObj j |> Result.bind (fun __fs ->
     dReq "icon" __fs dStr |> Result.bind (fun icon ->
@@ -3041,9 +3294,14 @@ and private decSwitchSpec (j: JVal) : Result<SwitchSpec<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
     dReq "cases" __fs (dList decSwitchCase) |> Result.bind (fun cases ->
     dReq "default" __fs decNode |> Result.bind (fun ``default`` ->
-    dOpt "on" __fs (decBinding dStr) |> Result.bind (fun on ->
-    dOpt "stateKey" __fs dStr |> Result.bind (fun stateKey ->
-    Ok { Cases = cases; Default = ``default``; On = on; StateKey = stateKey })))))
+    // Phase 768 — `on` (any Binding) or the compact `stateKey` (State form).
+    // When both are absent the stateKey requirement carries the MISSING_FIELD,
+    // keeping the existing reject fixture's error byte-identical.
+    (match dOpt "on" __fs (decBinding dStr) with
+     | Ok (Some on) -> Ok on
+     | Ok None -> dReq "stateKey" __fs dStr |> Result.map (fun key -> Binding.State(key, None))
+     | Error e -> Error e) |> Result.bind (fun on ->
+    Ok { Cases = cases; Default = ``default``; On = on }))))
 
 and private decMountSpec (j: JVal) : Result<MountSpec<obj>, string> =
     dObj j |> Result.bind (fun __fs ->
@@ -3053,6 +3311,49 @@ and private decMountSpec (j: JVal) : Result<MountSpec<obj>, string> =
     (dPresent "onBubble" __fs |> Result.map (Option.map (fun () -> (fun (_: obj) -> Action.Chain [])))) |> Result.bind (fun onBubble ->
     dReq "scopeId" __fs dStr |> Result.bind (fun scopeId ->
     Ok { Capabilities = capabilities; Channel = channel; Inputs = inputs; OnBubble = onBubble; ScopeId = scopeId }))))))
+
+// Phase 818 — the Transform source slot. A `$type` of State / Selection / Query preserves the binding as
+// `TransformSource.Live` with the initial snapshot derived from its carried
+// default data (`Fuaran.UI.HostPrelude.TransformLive`); a State source with no
+// data is refused through the columnar codec so the didactic names the missing
+// canonical field (the Phase-815 posture). Every other shape decodes through
+// Core's columnar codec unchanged.
+and private decTransformSource (j: JVal) : Result<TransformSource, string> =
+    let asData (v: JVal) : Result<TransformSource, string> =
+        Fuaran.Core.ColumnCodec.decodeJson v |> Result.map TransformSource.Data |> Result.mapError string
+
+    match j with
+    | JObj fields ->
+        match fields |> List.tryFind (fun (k, _) -> k = "$type") with
+        | Some(_, JStr(("State" | "Selection" | "Query") as tag)) ->
+            decBinding dJson j |> Result.bind (fun b ->
+                let carried =
+                    match b with
+                    | Binding.State(_, dv) -> dv
+                    | Binding.Selection(_, _, dv, _) -> dv
+                    | _ -> None
+
+                match carried, tag with
+                | Some data, "State" ->
+                    // A State source's carried data IS the initial snapshot —
+                    // it must decode as a table (the Phase-815 posture).
+                    Fuaran.UI.HostPrelude.TransformLive.initialSource data
+                    |> Result.map (fun initial -> TransformSource.Live(b, initial))
+                    |> Result.mapError Fuaran.Core.ColumnCodec.errorString
+                | Some data, _ ->
+                    // A Selection default may legitimately be a scalar / row
+                    // shape rather than a table; fall back to the empty
+                    // initial (the runtime evaluation stays loud on mismatch).
+                    match Fuaran.UI.HostPrelude.TransformLive.initialSource data with
+                    | Ok initial -> Ok(TransformSource.Live(b, initial))
+                    | Error _ -> Ok(TransformSource.Live(b, Fuaran.UI.HostPrelude.TransformLive.emptySource))
+                | None, "State" ->
+                    // No carried data: surface the columnar codec's own
+                    // missing-field didactic (byte-identical to pre-818).
+                    asData j
+                | None, _ -> Ok(TransformSource.Live(b, Fuaran.UI.HostPrelude.TransformLive.emptySource)))
+        | _ -> asData j
+    | _ -> asData j
 
 /// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
 /// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
@@ -3259,8 +3560,8 @@ let mkFragmentDecl (id: string) (body: Node<'Msg>) (name: string) : Node<'Msg> =
 let mkFragmentRef (id: string) (name: string) : Node<'Msg> =
     { Id = id; Kind = NodeKind.FragmentRef { Name = name; Args = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
-let mkSwitch (id: string) (cases: SwitchCase<'Msg> list) (``default``: Node<'Msg>) : Node<'Msg> =
-    { Id = id; Kind = NodeKind.Switch { Cases = cases; Default = ``default``; On = None; StateKey = None }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
+let mkSwitch (id: string) (cases: SwitchCase<'Msg> list) (``default``: Node<'Msg>) (stateKey: string) : Node<'Msg> =
+    { Id = id; Kind = NodeKind.Switch { Cases = cases; Default = ``default``; On = Binding.State(stateKey, None) }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }
 
 let mkMount (id: string) (capabilities: string list) (channel: GuestChannel) (scopeId: string) : Node<'Msg> =
     { Id = id; Kind = NodeKind.Mount { Capabilities = capabilities; Channel = channel; Inputs = None; OnBubble = None; ScopeId = scopeId }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }

@@ -1,4 +1,4 @@
-namespace Fuaran.Core.Idl
+﻿namespace Fuaran.Core.Idl
 
 open Fuaran.Core
 
@@ -1054,6 +1054,62 @@ module Gen =
         | TRecord n -> applied n []
         | TMap vt -> "Map<string, " + fsType vt + ">"
 
+    /// Phase 945 — a per-kind HOST PROJECTION: the F# record, encoder and decoder for one
+    /// node kind are supplied verbatim instead of being derived from the kind's IDL fields.
+    /// The IDL fields REMAIN the wire truth (the artifact, the schema and the diff still
+    /// read them); the projection changes only what the generated F# looks like — the
+    /// escape for a kind whose ergonomic host shape is narrower than its wire shape
+    /// (`Switch` merges the `on` / `stateKey` wire keys into one required `On` binding).
+    type KindProjection =
+        {
+            /// Keyword-less type-group member body — the `and` keyword and RQA attribute
+            /// are the assembler's.
+            SpecDecl: string
+            /// The full `and private enc<Tag>Spec …` member, verbatim.
+            Encoder: string
+            /// The full `and private dec<Tag>Spec …` member, verbatim.
+            Decoder: string
+            /// The full `let mk<Tag> …` smart constructor, or None to emit none — the
+            /// generated ctor would construct the IDL-derived record, which under a
+            /// projection is not the record that exists.
+            Mk: string option
+        }
+
+    /// Phase 945 — the declared-support channel for `fsharpModuleWith`: doc comments,
+    /// verbatim splices and host projections that were previously HAND-EDITS to the
+    /// generated artefact (the "hand-added ahead of the IDL backfill" regions). Everything
+    /// here is versioned data beside the IDL, so the emission is reproducible and the
+    /// tier sync is a byte-copy again. `Docs` is keyed by declaration path —
+    /// `type:Name` / `case:Union.Tag` / `field:Owner.Field` / `enc:Name` / `dec:Name` /
+    /// `encarm:Union.Tag` / `decarm:Union.Tag` — each value the comment lines VERBATIM
+    /// (including their `///` or `//` markers), indented by the emitter.
+    type GenSupport =
+        {
+            Docs: Map<string, string list>
+            /// Verbatim `and …` member(s) appended to the type-recursion group.
+            TypeSplice: string option
+            /// Verbatim `and private …` member(s) appended to the encoder group.
+            EncodeSplice: string option
+            /// Verbatim `and private …` member(s) appended to the decoder group.
+            DecodeSplice: string option
+            /// Verbatim module-level lets emitted after the JVal accessor block.
+            AccessorSplice: string option
+            /// `"Union.Tag"` → the full final expression replacing `Ok(Case(…))` in that
+            /// case's decoder — decode POLICY (e.g. `SetState`'s value-XOR-valueFrom) that
+            /// the structural inversion cannot express. Field binder names are in scope.
+            CaseRefines: Map<string, string>
+            KindProjections: Map<string, KindProjection>
+        }
+
+        static member Empty =
+            { Docs = Map.empty
+              TypeSplice = None
+              EncodeSplice = None
+              DecodeSplice = None
+              AccessorSplice = None
+              CaseRefines = Map.empty
+              KindProjections = Map.empty }
+
     let private fsField (msg: Set<string>) (f: IdlField) =
         let fsType = fsTypeIn msg
 
@@ -1284,7 +1340,12 @@ module Gen =
 
     /// A union encoder (an `and`-member of the recursive group). Generic unions take one
     /// `encX : 'X -> JVal` codec per type parameter.
-    let private unionEncoder (msg: Set<string>) (enums: IdlEnum list) (u: IdlUnion) : string =
+    let private unionEncoder
+        (docFn: string -> string -> string)
+        (msg: Set<string>)
+        (enums: IdlEnum list)
+        (u: IdlUnion)
+        : string =
         let encArgs =
             u.Params
             |> List.map (fun p -> sprintf " (enc%s: '%s -> JVal)" p p)
@@ -1323,7 +1384,10 @@ module Gen =
                         c.Tag
                         pieces
 
-        let arms = u.Cases |> List.map arm |> String.concat "\n"
+        let arms =
+            u.Cases
+            |> List.map (fun c -> docFn ("encarm:" + u.Name + "." + c.Tag) "    " + arm c)
+            |> String.concat "\n"
         // The explicit `<'T>` type-parameter list (not just `'T` free in the signature) is
         // load-bearing for a generic union: `Binding.Format.source` is a fixed `Binding<float>`
         // *inside* `Binding<'T>`, so the generated `encBinding` recurses at a concrete type ≠ the
@@ -1491,7 +1555,13 @@ module Gen =
     /// A union decoder. Generic unions take one `decX` codec per type parameter,
     /// with the explicit type-parameter list [[unionEncoder]] needs for the same
     /// polymorphic-recursion reason (`Binding.Format.source` recurses at `float`).
-    let private unionDecoder (msg: Set<string>) (enums: IdlEnum list) (u: IdlUnion) : string =
+    let private unionDecoder
+        (docFn: string -> string -> string)
+        (refines: Map<string, string>)
+        (msg: Set<string>)
+        (enums: IdlEnum list)
+        (u: IdlUnion)
+        : string =
         let decArgs =
             u.Params
             |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, string>)" p p)
@@ -1512,13 +1582,25 @@ module Gen =
             | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
 
         let arm (c: IdlUnionCase) =
-            if List.isEmpty c.Fields then
-                sprintf "        | \"%s\" -> Ok %s" c.Tag (ctor c)
-            else
-                sprintf
-                    "        | \"%s\" ->\n%s"
-                    c.Tag
-                    (bindChain "            " (fieldBinders enums c.Fields) (sprintf "Ok(%s)" (ctor c)) 0)
+            // Phase 945 — a declared refine replaces the plain `Ok(Case(…))` final with a
+            // policy expression (field binder names in scope); the binder chain around it
+            // is untouched, so a refine cannot change WHICH fields decode, only what is
+            // accepted once they have.
+            let final =
+                match refines.TryFind(u.Name + "." + c.Tag) with
+                | Some r -> r
+                | None -> sprintf "Ok(%s)" (ctor c)
+
+            let body =
+                if List.isEmpty c.Fields then
+                    sprintf "        | \"%s\" -> Ok %s" c.Tag (ctor c)
+                else
+                    sprintf
+                        "        | \"%s\" ->\n%s"
+                        c.Tag
+                        (bindChain "            " (fieldBinders enums c.Fields) final 0)
+
+            docFn ("decarm:" + u.Name + "." + c.Tag) "        " + body
 
         // The transparent case (TextSource.Literal) is on the wire BARE, so it is
         // recognised by the ABSENCE of a `$type`, not by a tag.
@@ -1841,7 +1923,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
     /// IDL-declared default has no code emission (`defaultExpr` — GP4/GP5).
-    let private defaultsDecl (msg: Set<string>) (idl: Idl) (kinds: IdlKind list) : Result<string, CodegenError> =
+    let private defaultsDecl
+        (projections: Map<string, KindProjection>)
+        (msg: Set<string>)
+        (idl: Idl)
+        (kinds: IdlKind list)
+        : Result<string, CodegenError> =
         let nodeArgs = declParams msg "Node" []
         let fsType = fsTypeIn msg
 
@@ -1905,8 +1992,15 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                     envelope)
 
         kinds
-        |> List.map ctor
+        |> List.map (fun k ->
+            // Phase 945 — a projected kind's ctor is the projection's own (or absent):
+            // the generated one would construct the IDL-derived record, which under a
+            // projection is not the record that exists.
+            match projections.TryFind k.Tag with
+            | Some p -> Ok(p.Mk |> Option.toList)
+            | None -> ctor k |> Result.map List.singleton)
         |> sequenceR
+        |> Result.map List.concat
         |> Result.map (fun ctors ->
             "// Smart constructors — required-without-default fields are parameters; IDL-declared\n// defaults are filled, other optionals default to None."
             + "\n\n"
@@ -1920,7 +2014,26 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// `mk<Kind>` smart constructors applying the IDL-declared field defaults. `Error` on a
     /// construct the generator cannot yet emit (`CodegenError` — GP4/GP5), reported at generation
     /// time rather than as a `failwith`.
-    let fsharpModule (moduleName: string) (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
+    let fsharpModuleWith
+        (sup: GenSupport)
+        (moduleName: string)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<string, CodegenError> =
+        // Phase 945 — declared-doc lookup: a block of comment lines (markers included,
+        // "///" or "//" alike) attached to the named declaration path, indented to the
+        // emission site. Absent path ⇒ empty string, so an IDL with no docs emits
+        // byte-identically to the pre-945 generator.
+        let doc (path: string) (indent: string) : string =
+            match sup.Docs.TryFind path with
+            | Some lines -> (lines |> List.map (fun l -> indent + l) |> String.concat "\n") + "\n"
+            | None -> ""
+
+        // The same block as a type-group member's comment slot (no trailing newline —
+        // the renderer adds it).
+        let docOpt (path: string) : string option =
+            sup.Docs.TryFind path |> Option.map (fun lines -> lines |> String.concat "\n")
+
         let kinds =
             kindTags
             |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
@@ -1937,7 +2050,15 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         let kindArgs = declParams msg "NodeKind" []
 
         let rqaEnum (e: IdlEnum) =
-            "[<RequireQualifiedAccess>]\n" + enumDecl e
+            // Phase 945 — declared docs on the enum type and its cases.
+            let cases =
+                e.Cases
+                |> List.map (fun c -> doc ("case:" + e.Name + "." + c) "    " + sprintf "    | %s" c)
+                |> String.concat "\n"
+
+            doc ("type:" + e.Name) ""
+            + "[<RequireQualifiedAccess>]\n"
+            + sprintf "type %s =\n%s" e.Name cases
 
         // Value-unions, non-discriminated records, per-kind specs, `NodeKind` and `Node` form ONE
         // type-recursion cycle in the real tier — a union can hold a record (`CellKindErased`
@@ -1949,31 +2070,44 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // a keyword, and construction sites disambiguate by annotation).
         let typeGroup =
             let unionBody (u: IdlUnion) =
-                None,
+                docOpt ("type:" + u.Name),
                 true,
                 sprintf
                     "%s%s =\n%s"
                     u.Name
                     (declParams msg u.Name u.Params)
-                    (u.Cases |> List.map (unionCaseDecl msg) |> String.concat "\n")
+                    (u.Cases
+                     |> List.map (fun c -> doc ("case:" + u.Name + "." + c.Tag) "    " + unionCaseDecl msg c)
+                     |> String.concat "\n")
+
+            // Phase 945 — field docs land above the field line, at field indent.
+            let fieldDecls (owner: string) (fields: IdlField list) =
+                fields
+                |> List.map (fun f -> doc ("field:" + owner + "." + pascal f.Name) "      " + fsField msg f)
+                |> String.concat "\n"
 
             let recordBody (r: IdlRecord) =
-                None,
+                docOpt ("type:" + r.Name),
                 false,
-                sprintf
-                    "%s%s =\n    {\n%s\n    }"
-                    r.Name
-                    (declParams msg r.Name [])
-                    (r.Fields |> List.map (fsField msg) |> String.concat "\n")
+                sprintf "%s%s =\n    {\n%s\n    }" r.Name (declParams msg r.Name []) (fieldDecls r.Name r.Fields)
 
             let specBody (k: IdlKind) =
-                Some("// " + k.Category),
-                false,
-                sprintf
-                    "%sSpec%s =\n    {\n%s\n    }"
-                    k.Tag
-                    (declParams msg (k.Tag + "Spec") [])
-                    (k.Fields |> List.map (fsField msg) |> String.concat "\n")
+                let comment =
+                    match docOpt ("type:" + k.Tag + "Spec") with
+                    | Some d -> Some("// " + k.Category + "\n" + d)
+                    | None -> Some("// " + k.Category)
+
+                // Phase 945 — a projected kind's record body is the projection's, verbatim.
+                match sup.KindProjections.TryFind k.Tag with
+                | Some proj -> comment, false, proj.SpecDecl
+                | None ->
+                    comment,
+                    false,
+                    sprintf
+                        "%sSpec%s =\n    {\n%s\n    }"
+                        k.Tag
+                        (declParams msg (k.Tag + "Spec") [])
+                        (fieldDecls (k.Tag + "Spec") k.Fields)
 
             let nodeKindBody =
                 None,
@@ -2022,7 +2156,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
                 commentPrefix + keyword + " " + body
 
-            members |> List.mapi render |> String.concat "\n\n"
+            let rendered = members |> List.mapi render |> String.concat "\n\n"
+
+            // Phase 945 — verbatim members appended to the SAME type-recursion group
+            // (`and`-joined), so a spliced type may reference generated types freely.
+            match sup.TypeSplice with
+            | Some t -> rendered + "\n\n" + t
+            | None -> rendered
 
         let encNodeDecl =
             let arms =
@@ -2054,9 +2194,15 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
-            (encNodeDecl :: (unions |> List.map (unionEncoder msg idl.Enums))
+            (encNodeDecl :: (unions |> List.map (unionEncoder doc msg idl.Enums))
              @ (records |> List.map (recordEncoder msg idl.Enums))
-             @ (kinds |> List.map (specEncoder msg idl.Enums)))
+             @ (kinds
+                |> List.map (fun k ->
+                    // Phase 945 — a projected kind's encoder is the projection's, verbatim.
+                    match sup.KindProjections.TryFind k.Tag with
+                    | Some proj -> doc ("enc:" + k.Tag) "" + proj.Encoder
+                    | None -> doc ("enc:" + k.Tag) "" + specEncoder msg idl.Enums k))
+             @ (sup.EncodeSplice |> Option.toList))
             |> String.concat "\n\n"
 
         let header =
@@ -2105,17 +2251,23 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
             (decNodeKindDecl
              :: decNodeDecl
-             :: (unions |> List.map (unionDecoder msg idl.Enums))
+             :: (unions |> List.map (unionDecoder doc sup.CaseRefines msg idl.Enums))
              @ (records |> List.map (recordDecoder msg idl.Enums))
-             @ (kinds |> List.map (specDecoder msg idl.Enums)))
+             @ (kinds
+                |> List.map (fun k ->
+                    // Phase 945 — a projected kind's decoder is the projection's, verbatim.
+                    match sup.KindProjections.TryFind k.Tag with
+                    | Some proj -> doc ("dec:" + k.Tag) "" + proj.Decoder
+                    | None -> doc ("dec:" + k.Tag) "" + specDecoder msg idl.Enums k))
+             @ (sup.DecodeSplice |> Option.toList))
             |> String.concat "\n\n"
 
-        match witnessDecl msg kinds, defaultsDecl msg idl kinds with
+        match witnessDecl msg kinds, defaultsDecl sup.KindProjections msg idl kinds with
         | Ok witness, Ok defaults ->
             [ [ header ]
               enums |> List.map rqaEnum
               [ typeGroup ]
-              enums |> List.map enumEncoder
+              enums |> List.map (fun e -> doc ("enc:" + e.Name) "" + enumEncoder e)
               [ recGroup ]
               [ sprintf "let encodeNode (n: Node%s) : string = Canon.render (encNode n)" nodeArgs ]
               // Phase 694 — JVal-level accessors for host codecs that splice
@@ -2136,8 +2288,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                    [ "let encodeSemanticStyleJson (s: SemanticStyle) : JVal = encSemanticStyle s" ]
                else
                    [])
+              (sup.AccessorSplice |> Option.toList)
               [ decodeHelpers () ]
-              enums |> List.map enumDecoder
+              enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
               [ sprintf
                     "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\nlet decodeNode (s: string) : Result<Node%s, string> =\n    Json.parse s |> Result.bind decNode"
@@ -2150,6 +2303,11 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             |> Ok
         | Error e, _
         | _, Error e -> Error e
+
+    /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
+    /// emitting byte-identically to the generator before the support channel existed.
+    let fsharpModule (moduleName: string) (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
+        fsharpModuleWith GenSupport.Empty moduleName idl kindTags
 
     // -----------------------------------------------------------------------
     // Phase 317 increment 4 — the `schema.json` leg: emit a Draft 2020-12 JSON

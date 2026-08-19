@@ -1,4 +1,4 @@
-module Fuaran.Core.Tests.Program
+﻿module Fuaran.Core.Tests.Program
 
 open Expecto
 
@@ -53,8 +53,14 @@ let main argv =
 
         // Rewrite the committed generated F# modules (their encoders embed the
         // omit-when-default emission, so they change with the schema).
-        let writeGen (rel: string) (modName: string) (idl: Fuaran.Core.Idl.Idl) (kinds: string list) =
-            match Fuaran.Core.Idl.Gen.fsharpModule modName idl kinds with
+        let writeGen
+            (rel: string)
+            (modName: string)
+            (sup: Fuaran.Core.Idl.Gen.GenSupport)
+            (idl: Fuaran.Core.Idl.Idl)
+            (kinds: string list)
+            =
+            match Fuaran.Core.Idl.Gen.fsharpModuleWith sup modName idl kinds with
             | Ok src ->
                 let p = Snapshots.repoFile rel
                 System.IO.File.WriteAllText(p, src)
@@ -64,12 +70,14 @@ let main argv =
         writeGen
             "src/Fuaran.Core.Idl.Spike/Generated.fs"
             "Fuaran.Core.Idl.Spike.Generated"
+            Fuaran.Core.Idl.Gen.GenSupport.Empty
             Fuaran.Core.Idl.Spike.Fixtures.miniIdl
             [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown"; "Tabs" ]
 
         writeGen
             "tests/Fuaran.Core.Tests/UiGenerated.fs"
             "Fuaran.Core.Tests.UiGenerated"
+            UiIdlSupport.support
             UiIdl.uiIdl
             (UiIdl.uiIdl.Kinds |> List.map (fun k -> k.Tag))
 

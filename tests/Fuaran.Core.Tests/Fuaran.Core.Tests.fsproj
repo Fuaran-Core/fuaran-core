@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -49,6 +49,10 @@
          UiHostPrelude.fs stubs the consuming tier's `Fuaran.UI.HostPrelude` (THosted
          slot types + codecs) so the generated module compiles here too. -->
     <Compile Include="UiHostPrelude.fs" />
+    <!-- Phase 945: the declared-support record (docs / splices / the Switch host
+         projection) the UI emission is generated WITH - reads Gen.GenSupport, so after
+         the Idl reference, before the drift guard and the regen entry that pass it. -->
+    <Compile Include="UiIdlSupport.fs" />
     <Compile Include="UiGenerated.fs" />
     <Compile Include="IdlUiGenTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
