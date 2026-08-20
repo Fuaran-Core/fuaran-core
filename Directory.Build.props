@@ -22,7 +22,14 @@
          NTile), so consumers repin without source changes. MINOR rather than patch because
          STABILITY.md pins "adding a step kind is minor", and because an F# consumer that
          matches these DUs exhaustively will see new incomplete-match warnings. -->
-    <Version>0.3.0</Version>
+    <!-- 0.4.0 (2026-08-20): `Fuaran.Core.Idl` joins the packed set — the IDL engine was
+         IsPackable=false from its Phase 316 spike, so no domain workspace could consume it.
+         Adding a package to the repo's published set is a contract change even though no
+         existing package's surface moved: `dotnet pack Fuaran.Core.slnx` now emits a tenth
+         nupkg, and a consumer that pins 0.4.0 gets an id that did not exist at 0.3.0.
+         MINOR rather than patch on those grounds; purely additive for the nine existing
+         packages, so consumers repin without source changes. See DECISIONS.md D14. -->
+    <Version>0.4.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

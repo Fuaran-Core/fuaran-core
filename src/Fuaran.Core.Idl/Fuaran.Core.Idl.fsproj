@@ -2,8 +2,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- Spike-stage (Phase 316): not distributed yet. -->
-    <IsPackable>false</IsPackable>
+    <!-- Distributed from 0.4.0. It was held back as spike-stage from Phase 316, which had
+         the effect that no domain workspace could consume the engine at all — the one
+         domain using it reached across a sibling checkout for a byte-copy of its output.
+         The engine is domain-generic by construction (a vocabulary is a plain `Idl` value
+         a caller supplies), so shipping it is what makes a second vocabulary declarable
+         without the declarer living in this repo. See DECISIONS.md D14. -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Idl</PackageId>
+    <Description>Fuaran.Core.Idl — the interface-definition engine: a typed model of a domain's node vocabulary (kinds, unions, enums, records, four-way optionality, a declarable node envelope, hosted slots) plus the legs generated from it — a schema-driven canonical encoder/decoder, an F# structural-layer emitter with a declared-support channel (docs, splices, host projections), a JSON-schema emitter, a stability diff classifier over two artifact revisions, and the codegen trust boundary (allowlisted `Custom` resolution, sanitisation). The engine only; a vocabulary is DATA a domain declares and owns in its own repo. FSharp.Core + Fuaran.Core.Wire only.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Idl.fs" />

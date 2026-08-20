@@ -1,5 +1,61 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-08-20 — D14: the IDL engine ships; a vocabulary does not
+
+**Decided.** `Fuaran.Core.Idl` is packable from 0.4.0 and is distributed like the rest of the spine.
+A **vocabulary** — the `Idl` value describing one domain's kinds, unions, enums and records — is
+**not** distributed from here. It lives as data in the repo of the domain whose contract it is,
+which takes a `PackageReference` on the engine and declares against it. There will be no
+`Fuaran.Core.Idl.Vocabularies.*` package, and no vocabulary-shaped module in any existing one.
+
+**Rejected: a shared vocabularies package.** It reads as the tidier option — one place to look, one
+version to pin — and it is wrong on three counts.
+
+1. **A vocabulary is the domain's contract, so it must move at the domain's cadence.** Housed here,
+   every kind a domain admits becomes a release of *this* repo, and every domain's wire inherits one
+   release cadence and one reviewer. The admission gates that govern whether a kind may exist are
+   written per domain and enforced per domain; the artefact they govern should not sit somewhere the
+   gate does not run.
+2. **A domain-named type in the `Fuaran.Core.*` namespace outlives every later correction.** The
+   spine is domain-agnostic by charter — D7 already refuses a domain dependency even in tests,
+   holding the reference witness locally instead. A `Fuaran.Core.Idl.Vocabularies.Ui` would put a
+   single domain's vocabulary in the substrate's identity permanently, which is the one kind of
+   mistake a rename cannot undo cheaply.
+3. **It concedes the point the engine exists to prove.** The engine is generic because a vocabulary
+   is an ordinary value a caller supplies. Shipping vocabularies *with* it would make the generic
+   surface indistinguishable from a plugin registry, and the second domain's declaration would be
+   evidence of nothing.
+
+**What this unblocks, and it was genuinely blocked.** Until 0.4.0 the engine was `IsPackable=false`,
+so a domain workspace could not consume it at all. The one domain using it — the F# UI tier — got
+its generated structural layer by reaching across a sibling checkout and byte-copying the artefact
+this repo's tests happen to commit. That is not a distribution mechanism; it is the absence of one,
+and it is why no second vocabulary had been declared. With the engine packaged, a domain declares an
+`Idl`, calls `Gen.fsharpModuleWith`, and owns both the declaration and the output.
+
+**The one exception, and why it is an exception rather than a counter-example.**
+`tests/Fuaran.Core.Tests/UiIdl.fs` is a UI vocabulary living in this repo. Under the rule above its
+home is the UI tier's own repo, and it is not moved here. It is worth being exact about what it
+currently *is*: not the UI domain's vocabulary home, but **this repo's engine-certification
+fixture** — the only full-scale vocabulary the engine has ever been proven against, and the input to
+seven suites that between them certify corpus byte-parity, the compiled-codegen drift guard, the
+schema leg, the op leg, the diff classifier and the cross-host fuzz.
+
+It cannot follow the rule yet because neither available route is sound:
+
+- **A package dependency the other way closes a cycle.** The tier depends on `Fuaran.Core.Idl`; this
+  repo's tests depending on a tier package would make the two unbuildable from cold in either order.
+- **A compile-link across a sibling checkout is worse than the byte-copy it replaces.** It would
+  make this repo's build fail whenever a checkout it does not control is absent or moved — trading a
+  drift hazard for an availability one.
+
+So the migration is **staged, with a stated completion criterion**: the vocabulary moves to the UI
+tier's repo, taking its regeneration guard with it, once the engine's certification no longer rests
+on it — either because a Core-owned fixture is grown to comparable scale, or because a second domain
+certifies the engine in its own repo. Until then the duplication is bounded to one artefact and
+pinned rather than trusted: the tier's committed `Generated.fs` is byte-compared against the
+emission on every CI run, so a divergence fails a gate instead of accumulating silently.
+
 ## 2026-08-18 — D13: the compute vocabulary's closed sets, and what is deliberately absent (Phase 101)
 
 A demand-side census of the transform algebra (enumerate the intents a declarative pipeline must
