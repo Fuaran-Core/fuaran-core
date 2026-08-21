@@ -1,5 +1,47 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-08-21 — D15: the cryptographic digest is homed here; the default chain hash is not changed
+
+**Decided.** `Hash` ships a pinned pure SHA-256 (`sha256Hex`, `sha256Bytes`, `sha256HexOfBytes`, and
+the `utf8Bytes` encoder they hash through) from `0.5.0`. It is the spine's one cryptographic digest,
+and there will not be a second. `OpStream.defaultHash` stays FNV-1a.
+
+**Why it is here and not in each consumer.** It already existed twice — hand-ported, verbatim, into
+two separate tiers, the second port two days before this decision — because both needed a digest that
+was FSharp.Core-only and Fable-clean, and the spine offered only a 32-bit checksum. Two copies of one
+crypto primitive is not redundancy, it is a divergence waiting for the patch that reaches one of them:
+they were identical on the day of the second port and nothing structural kept them so. The FIPS
+vectors have to travel with the implementation for the same reason — a copy that is not itself pinned
+is a claim rather than a digest, and each porting tier had to re-derive that suite to know what it
+had.
+
+**Why the default chain hash does not move with it.** The tempting follow-on — now that a real digest
+is available, make `OpStream.defaultHash` use it — is refused. Every persisted chain in every domain
+was written under FNV-1a, so changing the default silently invalidates all of them: a store would
+verify before the upgrade and fail after, with nothing in the data saying why. A host that wants
+adversarial tamper-evidence supplies `Hash.sha256Hex` through the `HashFn` seam, which is what the
+seam is for, and a domain that migrates does so as a recorded event rather than a rebuild. Making it
+available and making it default are separate decisions, and only the first is taken here.
+
+**Why this reverses "no cryptographic hash ships in Core (GP3)".** That line conflated two things.
+GP3 asks that public surfaces be FSharp.Core-only and Fable-clean; this implementation is both — pure
+`uint32` arithmetic, no `System.Security.Cryptography`, compiled by the same Fable gate as every
+other public package. What GP3 actually rules out is a host-side crypto *dependency*: keys, keyed
+MACs, signers, certified modules. None of those are here and none are proposed; they stay behind the
+host's attestation seam. The cost of the conflation was paid entirely by consumers, in ports.
+
+**The two regimes are named, and that naming is the contract.** `fnv1a` is a cache fingerprint — a
+staleness stamp over data the same process just produced, where forging it gains nobody anything.
+`sha256*` is the crypto digest — anything that becomes a signed head or a record a dispute is read
+from. A 32-bit second pre-image is seconds of search, so the two must never be interchanged; they are
+separately named so that a call site says which regime it is in, and they differ in output length so
+that a silent fallback is caught by shape rather than by review.
+
+**`fnv1a` moved file and did not change.** The `Hash` module now lives in its own `Hash.fs` rather
+than at the head of `Tree.fs`, because the digest is consumed across the spine and by domains that
+never touch a tree. `fnv1a` and `foldSep` are byte-identical through the move — pinned by their own
+vectors in the suite, since every stored content hash in the estate folds through them.
+
 ## 2026-08-20 — D14: the IDL engine ships; a vocabulary does not
 
 **Decided.** `Fuaran.Core.Idl` is packable from 0.4.0 and is distributed like the rest of the spine.

@@ -10,6 +10,15 @@ open Fuaran.Core
 // Tree — content hashing + the portable FNV-1a.
 let private treeTouch = Hash.fnv1a "smoke"
 
+// Hash — the pinned pure SHA-256. Both public forms, because the byte form and the hex form take
+// different paths out of the compression pass and only the hex one would otherwise be compiled.
+// This is the primitive whose Fable-cleanliness is load-bearing rather than incidental: a digest
+// taken by a server has to verify in a browser, so a construct that does not transpile here is a
+// cross-host verification failure, not a missing feature. The vectors themselves are pinned in
+// `Fuaran.Core.Tests.HashTests`; what this file adds is that the code reaches the browser at all.
+let private sha256Touch =
+    sprintf "%s/%d" (Hash.sha256Hex "smoke") (Hash.sha256Bytes (Hash.utf8Bytes "smoke")).Length
+
 // Ops — reference the skeleton-op type so Ops.fs compiles.
 let private opsTouch: SkeletonOp<int, string> option = None
 
@@ -194,6 +203,7 @@ let private attributedTouch =
 let main _ =
     // Reference each touch so nothing is dead-code-eliminated before the compiler sees it.
     [ treeTouch
+      sha256Touch
       attributedTouch
       (sprintf "%A" opsTouch)
       wireTouch

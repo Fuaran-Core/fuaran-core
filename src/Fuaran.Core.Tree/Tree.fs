@@ -25,27 +25,6 @@ type NodeWitness<'Node, 'Id> =
       Children: 'Node -> 'Node list
       ReplaceChildren: 'Node -> 'Node list -> 'Node }
 
-/// Portable, deterministic content hashing (FNV-1a, 32-bit, hex). Used by the
-/// content-hashed bounded-escape regions; not cryptographic. A host may swap in
-/// SHA-256 at its own boundary.
-module Hash =
-
-    let fnv1a (s: string) : string =
-        let mutable h = 2166136261u
-
-        for ch in s do
-            h <- h ^^^ uint32 ch
-            h <- h * 16777619u
-
-        h.ToString("x8")
-
-    /// The fold/join separator shared by the content-hash folds (`Tree.contentHash` /
-    /// `Tree.encodeHash`) and the cross-host parity projections (`Validator.canonicalCodes`):
-    /// the ASCII unit-separator-class control byte `U+0001` (SOH). No canonical wire encoding
-    /// emits it unescaped, so two adjacent fields cannot run together into a colliding pre-image.
-    /// Named once here so the parity-relevant constant is defined in a single place.
-    let foldSep = ""
-
 /// Generic tree addressing / walking / structural update, generic over the `'Node`
 /// and `'Id` witnesses. No domain `NodeKind` is ever in scope here.
 module Tree =

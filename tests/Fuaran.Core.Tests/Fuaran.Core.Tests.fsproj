@@ -8,6 +8,10 @@
   <ItemGroup>
     <Compile Include="Reference.fs" />
     <Compile Include="Reference2.fs" />
+    <!-- The `Hash` pin suite — the FIPS 180-4 known-answer vectors and platform byte-equality for
+         SHA-256, plus the pinned FNV-1a values. First: everything below folds through one or the
+         other, so a digest defect should surface as itself rather than as a downstream mismatch. -->
+    <Compile Include="HashTests.fs" />
     <Compile Include="TreeTests.fs" />
     <Compile Include="TreeExtTests.fs" />
     <Compile Include="OpsTests.fs" />

@@ -41,6 +41,12 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   `StreamConfig` / `append` / `merge` actor field+parameter (typed as of `0.0.1-alpha.13`).
   The typed actor is **folded into the chain hash** — a breaking hash-format bump.
   See "Typed, attested provenance" below (migration notes shipped with that release).
+- **`Hash.fnv1a` / `Hash.sha256Hex` / `Hash.sha256Bytes`** (`Core.Tree`) — the two hashing
+  regimes. Their **values** are the contract, not merely their signatures: `fnv1a` is folded
+  into every stored content hash and `sha256Hex` is pinned to the FIPS 180-4 vectors, so a
+  change to what either returns invalidates persisted data rather than breaking a compile.
+  Which regime a call site is in is part of its meaning — a cache fingerprint quietly
+  substituted for the crypto digest would still typecheck.
 - **`ArtifactWitness<'Node, 'Id>`** (`{ Tree; IdW; Holes; Effect; Bind }`) — the
   artifact-function witness.
 - **`SkeletonOp` carries no ordinal** (`0.2.0`, 2026-07-26). `InsertChild` and `MoveNode` are
@@ -326,8 +332,39 @@ bit-flip caught by `verifyChain`). The crypto posture itself is pinned by
 `Conformance.hashFnAdversarialLaws`: a collision-resistant `HashFn` admits **no** pre-image collision
 within the search budget (a re-hashed forgery cannot land a chosen head, so it is caught), whereas the
 32-bit default FNV-1a **does** — the documented forgery primitive, asserted so a silent widening of the
-default would be flagged as a posture regression. No cryptographic hash ships in Core (GP3): the
-adversarial branch uses a wide, test-side stand-in that models collision resistance in-budget.
+default would be flagged as a posture regression. The adversarial branch uses a wide, test-side
+stand-in that models collision resistance in-budget, so the law certifies the *contract* rather than
+any particular digest.
+
+**A cryptographic digest now ships in Core (`0.5.0`), and the default is deliberately unchanged.**
+`Hash.sha256Hex` / `Hash.sha256Bytes` are a pinned pure FIPS 180-4 SHA-256 — FSharp.Core-only and
+Fable-clean, so a digest taken by a server verifies in a browser. What moved is availability, not
+posture: `OpStream.defaultHash` is still FNV-1a, because changing it would silently invalidate every
+persisted chain in every domain, and a host that wants adversarial tamper-evidence still supplies
+`Hash.sha256Hex` through the `HashFn` seam as an explicit act. The two are separately named for that
+reason — a **cache fingerprint** (`fnv1a`: staleness stamps, bounded-escape content hashes, where
+nobody gains by forging) and a **crypto digest** (`sha256*`: anything that becomes a signed head or a
+record a dispute is read from), never interchanged.
+
+**`sha256Hex` is certified .NET/Fable value-identical; `fnv1a` is NOT, and that was measured rather
+than assumed (`0.5.0`).** Compiling the two pipelines against the same corpus — including the
+one-million-`a` vector — gives byte-identical SHA-256 on both, which is what the masked add in its
+inner loop exists for. The same probe found `fnv1a "a"` to be `e40c292c` on .NET and `e40c2930`
+under Fable: `h * 16777619u` transpiles to a plain JS multiply whose product passes 2^53, so
+precision is lost inside the operation and a trailing mask cannot recover it. **The Fable-compile
+gate cannot catch this class** — it proves a construct transpiles, not that it computes the same
+number — so nothing in the repo had reason to report it. A value fingerprinted with `fnv1a` on one
+pipeline must not be compared with one fingerprinted on the other until that is fixed (a split-half
+32-bit multiply, which moves every Fable-side value and is therefore its own change).
+
+This reverses the earlier "no cryptographic hash ships in Core (GP3)" line, and the reason is worth
+stating: GP3 asks that public surfaces stay FSharp.Core-only and Fable-clean, which this
+implementation is — it is pure `uint32` arithmetic and compiles under the Fable gate like everything
+else. What GP3 rules out is a *host-side* crypto dependency (`System.Security.Cryptography`, a keyed
+MAC, a signer), and none of that is here. The previous line conflated "no crypto dependency" with "no
+cryptographic algorithm", and the cost of that conflation was two domains each hand-porting the same
+primitive, which is a divergence waiting for a patch that reaches one of them. Keys, signing and
+attestation remain host-side behind the `IAttestationSink` seam, exactly as before.
 
 Integrity is also **opt-in on load**: `OpStream.fromJsonl` / `Dag.fromJsonl` decode *structurally*
 and do not verify — a tampered, dangling-parent, or cyclic input decodes to a clean `Ok`. Use

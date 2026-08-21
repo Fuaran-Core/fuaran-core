@@ -29,7 +29,14 @@
          nupkg, and a consumer that pins 0.4.0 gets an id that did not exist at 0.3.0.
          MINOR rather than patch on those grounds; purely additive for the nine existing
          packages, so consumers repin without source changes. See DECISIONS.md D14. -->
-    <Version>0.4.0</Version>
+    <!-- 0.5.0 (2026-08-21): `Hash` gains the pinned pure SHA-256 — `sha256Hex` over a string,
+         `sha256Bytes` / `sha256HexOfBytes` over arbitrary bytes, and the `utf8Bytes` encoder they
+         hash through. Purely additive: `fnv1a` and `foldSep` are byte-identical and merely moved
+         into their own file, so every stored content hash is unchanged and consumers repin without
+         source changes. MINOR rather than patch because a new public function in a shipped module
+         is a contract a consumer can pin against, and because this reverses a stated posture —
+         STABILITY.md previously said no cryptographic hash ships in Core. See DECISIONS.md D15. -->
+    <Version>0.5.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
