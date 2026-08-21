@@ -47,7 +47,17 @@
          every value changes: the pre-0.6.0 transpiled multiply overflowed 2^53 and was not FNV-1a.
          A patch bump would tell a Fable consumer nothing observable moved, which is false. See
          DECISIONS.md D16 and the "Digest changes" entry in STABILITY.md. -->
-    <Version>0.6.0</Version>
+    <!-- 0.7.0 (2026-08-21): the null-tolerant read. `Fuaran.Core.Wire.NullPolicy` +
+         `Json.parseDetailedWithPolicy` / `parseWithPolicy` / `parseTolerantOfNull*` and
+         `Decode.parseTolerantOfNull`, so a consumer can read a foreign document that spells
+         absent members `null` without the wire model gaining one; plus the
+         `Conformance.WireNullTolerance` vector family that pins it. Purely additive — the
+         strict policy is the default, every pre-existing entry point is byte-identical under
+         it (same errors, positions and messages), and nothing on the encode path moved, so
+         consumers repin without source changes. MINOR rather than patch because a new public
+         type and new public functions in a shipped module are contracts a consumer can pin
+         against, and because a consumer matching `NullPolicy` is now possible at all. -->
+    <Version>0.7.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
