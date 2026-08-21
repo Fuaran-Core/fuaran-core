@@ -69,7 +69,16 @@
          Additive for the nine non-IDL packages, which repin with no change at all. Eleven nupkgs
          where 0.7.0 emitted ten. See DECISIONS.md D17 and STABILITY.md "The IDL engine — two
          packages, two promises". -->
-    <!-- 0.9.0 (2026-08-21): Phase 100 — the fold-confluence pack. `Fuaran.Core.OpStream.Dag` gains
+    <!-- 0.9.0 (2026-08-21): `Fuaran.Core.DataFrame` gains the typed delta representation for the
+         column layer — `TableDelta` / `RowSetDelta` / `RowRef` / `RowChange` / `DeltaDefect` /
+         `RowIdentity<'Id>`, the `Delta` algebra (associative composition, `FullRefresh` absorbing,
+         validation that refuses a delta whole) and `DeltaCodec`. Purely additive: no existing type,
+         function or wire byte moved, and `DataFrame`'s three new public helpers (`cellToken` /
+         `rowToken` / `rowTokenString`) merely expose the canonicalisation `groupKey` already used,
+         so consumers repin without source changes. MINOR rather than patch because new public types
+         and modules in a shipped package are a contract a consumer can pin against. See DECISIONS.md
+         D18. -->
+    <!-- 0.10.0 (2026-08-21): Phase 100 — the fold-confluence pack. `Fuaran.Core.OpStream.Dag` gains
          `Dag.reconcileMany` (the N-lane generalisation of `reconcile`, identical to it at N = 2),
          and `Fuaran.Core.Conformance` gains the `FoldConfluence` module — `laneFoldLaws` /
          `certifyFold` plus the pieces a domain drives directly when investigating a counterexample
@@ -79,7 +88,7 @@
          changes. MINOR rather than patch because new public types and functions in shipped packages
          are a contract a consumer can pin against — the same grounds as 0.5.0. See STABILITY.md
          "Fold-confluence pack: N-lane arrival-order invariance". -->
-    <Version>0.9.0</Version>
+    <Version>0.10.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

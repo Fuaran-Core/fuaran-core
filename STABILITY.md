@@ -49,6 +49,10 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   substituted for the crypto digest would still typecheck.
 - **`ArtifactWitness<'Node, 'Id>`** (`{ Tree; IdW; Holes; Effect; Bind }`) — the
   artifact-function witness.
+- **`RowIdentity<'Id>`** (`{ Scheme; KeyOf; KeyString }`, `0.9.0`) — the columnar strand's
+  row-identity witness, the seam every `TableDelta` producer is parameterised over. A per-call
+  argument, never a field on `Table` / `Column` / `Transform`: the columnar strand stays
+  witness-free, and a delta is told how to key a row without Core learning what a key means.
 - **`SkeletonOp` carries no ordinal** (`0.2.0`, 2026-07-26). `InsertChild` and `MoveNode` are
   `(parent, node)` and `(target, newParent)`; both **append**, and `ReorderChildren` states order by
   naming ids. Placing a node anywhere but last is `Batch [InsertChild …; ReorderChildren …]`.
@@ -879,6 +883,60 @@ any host claiming the tolerant read, in any language, satisfies or does not have
 omission (including nested, and inside array elements), the strict path's refusal unchanged, the
 non-member positions rejected by name with a distinguishable message, near-misses of the token not
 absorbed, `null`-free controls unaffected by the policy, and the render-and-re-parse round trip.
+
+## Column-layer deltas (Phase 98, `0.9.0`)
+
+`Fuaran.Core.DataFrame` carries `TableDelta` — a typed description of what changed in one columnar
+table — with the `Delta` algebra over it and `DeltaCodec` for its canonical wire. **Purely
+additive**: nothing that shipped before moved, and every pre-existing wire byte is unchanged.
+
+**The shape.** `TableDelta` is `FullRefresh | RowSet of RowSetDelta`. `RowSetDelta` carries the
+identity `Scheme` its keys were minted under, canonically-ordered `Rows` (`RowRef * RowChange`), and
+`InvalidatedColumns` — columns whose values can no longer be trusted **without** naming rows, which
+is the honest shape for a change whose row extent is unknown or is all of them. `RowChange` is
+`RowAdded | RowChanged | RowRemoved | RowTransient`.
+
+**`FullRefresh` is the top element, not an error value.** A structural schema change, a wholesale
+replacement, or a change that cannot be located IS "everything may have changed", and the type says
+so precisely rather than emitting a `RowSet` that under-reports.
+
+**The algebra is a monoid and it is pinned as one.** `Delta.compose` is **total and associative for
+every pair of inputs** — not merely for consistent ones — `FullRefresh` absorbs on both sides, and
+`Delta.empty scheme` is a two-sided identity within that scheme. `RowTransient` is load-bearing to
+that claim: a row change is a `(existed-before, exists-after)` pair, composition is relational
+composition of those pairs, and `Added ∘ Removed` is `(absent, absent)` — a state the three obvious
+cases cannot represent. The laws are exhaustive over the four-element change space rather than
+sampled. Composing across **different identity schemes** yields `FullRefresh` (the truthful coarse
+answer); `Delta.composeChecked` refuses instead, with `SchemeMismatch`.
+
+**Addressing.** A row is named by identity (`ByKey`). `ByOrdinal` is reserved for a source with no
+identity at all, under the reserved scheme name `RowIdentity.ordinalScheme` (`"ordinal"`), and the
+two addressing modes may **not** be mixed inside one delta — `Delta.validate` and the wire decoder
+both enforce it in both directions. This is the `SkeletonOp` rule of `0.2.0` applied to the columnar
+strand: where a collection's members have identity, they are addressed by it.
+
+**Totality.** Nothing throws. `Delta.defects` enumerates every fault; `Delta.validate` refuses the
+delta **whole** with the first, never partially applying it. `DeltaDefect` is a `Rejection`-class
+envelope — a new case is additive, removing one is breaking. `DeltaCodec.decode` refuses a
+structurally-decodable but *inconsistent* delta as `ColumnError.Malformed`, naming the defect: the
+wire carries no delta the in-memory algebra would reject.
+
+**Wire.** `"$type"`-tagged and rendered through `Canon`, so keys are Ordinal-sorted and the bytes are
+identical on every host. `encode` normalises first, so two spellings of one delta are the same bytes.
+Decode returns the columnar strand's six-code `ColumnError` envelope. The pinned canonical forms are
+`{"$type":"fullRefresh"}` and
+`{"$type":"rowSet","columns":[…],"rows":[{"$type":"added","key":"…"},…],"scheme":"…"}`.
+
+**Relationship to `Change` (Phase 34).** `Change` is now a **projection** of the delta rather than a
+rival vocabulary: `Delta.ofChange` lifts, `Delta.toChange` projects back for a consumer still on it
+(`DataFrame.evalFrom`). The projection is deliberately **conservative** — anything the four `Change`
+cases cannot express precisely becomes `FullChange`, so a consumer acting on it recomputes too much
+and never too little — and it returns an **option**, because "nothing changed" is a statement
+`Change` has no case for.
+
+**`DataFrame.cellToken` / `rowToken` / `rowTokenString`** are public as of `0.9.0` — the pinned
+canonical row token `GroupBy` / `Distinct` / `Intersect` already partition by. They are exposed, not
+duplicated, so "did this row's content change" has exactly one answer across the strand.
 
 ## Fold-confluence pack: N-lane arrival-order invariance (Phase 100)
 
