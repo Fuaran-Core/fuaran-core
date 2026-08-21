@@ -1065,3 +1065,24 @@ what catches it.** An op that requires an address to EXIST must READ it, not mer
 an op creating an entity and an op depending on that entity are not independent, and a projection
 that omits the read declares them so. The two then fold under one arrival order and reject under the
 other — which is exactly the classification law, and exactly the reason it is stated separately.
+
+**A one-time behaviour change: the kit's sampler moved to the high-order bits (0.12.0).**
+`ConfRng.intBelow` — the small-integer draw every generator in `Fuaran.Core.Conformance` is built
+from, and therefore `choose` and `shuffle` with it — reduced by `v % n` until 0.12.0. The state is a
+linear congruential generator taken mod 2^32, in which bit `k` has period 2^(k+1), so a modulo by a
+small `n` read the weakest bits in the word, and read them *in phase*: generators drawn consecutively
+off one stream chose in lockstep rather than independently. The coverage guards above are what
+surfaced it — a three-lane generator halted on 150 of 150 trials and the fold law never executed
+once. `intBelow` now takes the top `bitWidth (n - 1)` bits and redraws an out-of-range candidate:
+full-period bits only, and exactly uniform rather than modulo-biased, from shifts and comparisons
+alone so the kit stays value-identical under Fable.
+
+The signatures did not move; **every value did**. A consumer pinning a seed will see different
+generated data, so a law that certified green over one sample is now certifying over another — which
+is the point, since a weak generator in a conformance kit does not produce failures, it produces
+false assurance. Treat a repin as a **read**: check that a coverage or vacuity guard which passes
+still passes for a reason, rather than raising the iteration count until it does. In this repo's own
+suite the change moved exactly one expectation — a four-lane reference-witness certification whose
+lanes were a fixed two ops each, a shape that essentially never has mutually-independent footprints
+over a six-node tree; its lane length is now drawn, which restores a mixture of both outcome classes
+at every lane count.

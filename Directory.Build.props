@@ -103,7 +103,26 @@
          address set), and two same-named types in one namespace across two packages is a
          collision a consumer opening both would hit. See DECISIONS.md D19 and STABILITY.md
          "Incremental column-layer evaluation". -->
-    <Version>0.11.0</Version>
+    <!-- 0.12.0 (2026-08-21): `Fuaran.Core.Conformance`'s `ConfRng.intBelow` draws from the
+         HIGH-ORDER bits by rejection instead of reducing `v % n`. The state is an LCG taken mod
+         2^32, in which bit `k` has period 2^(k+1), so a modulo by a small `n` read the weakest
+         bits in the word — and, worse, read them IN PHASE, so generators drawn consecutively off
+         one stream chose in lockstep rather than independently. Measured while building the
+         fold-confluence pack: a three-lane generator halted on 150 of 150 trials and the fold law
+         never executed, which the pack's own vacuity guard reported. The replacement takes the top
+         `bitWidth (n - 1)` bits and redraws an out-of-range candidate: only full-period bits, and
+         exactly uniform rather than modulo-biased. Built from shifts and comparisons alone — no
+         `uint64`, no 32-bit multiply — so the kit stays Fable-value-identical (the `Hash.fs`
+         constraint 0.6.0 was cut for).
+         NOT additive, unlike every bump since 0.5.0: no signature moves, but every value
+         `intBelow` / `choose` / `shuffle` emits does, so a consumer pinning a seed sees different
+         generated data and a law that certified green over one sample is certifying over another.
+         That is the whole point — a weak generator in a conformance kit does not produce failures,
+         it produces false assurance — but it means repinning is a READ, not a version swap. MINOR
+         rather than patch on the same grounds as 0.6.0: this package's contract is its VALUES, and
+         pre-1.0 MINOR is the lane that says look before you repin. See STABILITY.md
+         "Fold-confluence pack: N-lane arrival-order invariance". -->
+    <Version>0.12.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

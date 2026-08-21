@@ -45,13 +45,45 @@ module ConfRng =
         let s = (r.State * 1664525u) + 1013904223u
         int (s >>> 1), { State = s }
 
+    /// The number of bits needed to represent `v` (0 for 0, 31 for `Int32.MaxValue`).
+    let rec private bitWidth (acc: int) (v: int) : int =
+        if v = 0 then acc else bitWidth (acc + 1) (v >>> 1)
+
     /// A value in `[0, n)` (0 when `n <= 0`).
+    ///
+    /// Drawn from the HIGH-ORDER bits by rejection, never `v % n`. The state is a linear
+    /// congruential generator taken mod 2^32, in which bit `k` has period 2^(k+1) — bit 0
+    /// alternates, bit 1 cycles every four draws — so reducing modulo a small `n` reads the
+    /// weakest bits in the word. Worse than the short period itself, it is a short period
+    /// *in phase*: generators drawn consecutively off one advancing stream then choose in
+    /// lockstep rather than independently, which is invisible in a generator that consumes a
+    /// whole word (a fresh id) and decisive in one that makes a handful of small choices per
+    /// step. Taking the top `bitWidth (n - 1)` bits instead reads only full-period bits, and
+    /// rejecting an out-of-range candidate leaves the result exactly uniform rather than
+    /// modulo-biased. Acceptance is above one half, so fewer than two draws in expectation.
+    ///
+    /// Built from shifts and comparisons alone: no `uint64` (JavaScript cannot carry one
+    /// exactly) and no 32-bit multiply (which does not wrap identically on both pipelines), so
+    /// the kit stays value-identical under Fable. See `Hash.fs` on the same constraint.
     let intBelow (n: int) (r: T) : int * T =
         if n <= 0 then
             0, r
+        elif n = 1 then
+            // Still one draw, so a stream advances at the same rate whatever `n` is.
+            let _, r' = next r
+            0, r'
         else
-            let v, r' = next r
-            v % n, r'
+            // `next` yields the top 31 bits of the state; this drops all but the top `bits`.
+            let shift = 31 - bitWidth 0 (n - 1)
+            let mutable rng = r
+            let mutable candidate = n
+
+            while candidate >= n do
+                let v, r' = next rng
+                rng <- r'
+                candidate <- v >>> shift
+
+            candidate, rng
 
     let choose (xs: 'a list) (r: T) : 'a * T =
         let i, r' = intBelow (List.length xs) r

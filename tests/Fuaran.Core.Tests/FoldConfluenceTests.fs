@@ -104,7 +104,16 @@ let private treeLaneGen: LaneGen<SkeletonOp<RNode, string>, RNode> =
             let mutable lanes = []
 
             for _ in 1..n do
-                let s, r' = treeScript 2 r
+                // A lane is 0, 1 or 2 ops rather than always 2. Four full lanes of skeleton ops
+                // over a six-node tree essentially never have mutually-independent footprints —
+                // every address is within two hops of the root — so a fixed length of 2 leaves the
+                // FOLD-coverage guard with nothing to certify at 4 lanes (measured: 1 folding set
+                // in 300 trials, and the vacuity guard duly fired). Varying the length restores a
+                // mixture of both outcome classes at every lane count (measured at 4 lanes,
+                // seed 2200: 73 folded / 227 halted in 300), which is what makes the fold law and
+                // the halt law both real. An empty lane is explicitly legitimate — see `LaneGen`.
+                let len, rl = ConfRng.intBelow 3 r
+                let s, r' = treeScript len rl
                 r <- r'
                 lanes <- lanes @ [ s ]
 
@@ -240,34 +249,24 @@ let private basePlan: Plan =
             Deps = Set.empty } ]
     |> Map.ofList
 
-/// A draw from the HIGH bits of the kit's LCG. `ConfRng.intBelow` takes `v % n`, and an LCG modulo
-/// 2^32 gives bit k a period of 2^(k+1) — so a small `n` cycles in step across consecutively-drawn
-/// lanes. That is invisible on the tree generator (its fresh ids draw a whole word) and decisive
-/// here: with `intBelow`, all three lanes picked colliding addresses in lockstep and 150 of 150
-/// trials halted — the fold law never ran, which the coverage guard duly reported. Local to this
-/// generator; the kit's own sampling is unchanged.
-let private pick (n: int) (r: ConfRng.T) : int * ConfRng.T =
-    let v, r' = ConfRng.next r
-    (v / 4096) % n, r'
-
 let private genPlanOp (p: Plan) (rng: ConfRng.T) : PlanOp * ConfRng.T =
     let ids = p |> Map.toList |> List.map fst
 
     let choose (r: ConfRng.T) =
-        let i, r' = pick (List.length ids) r in List.item i ids, r'
+        let i, r' = ConfRng.intBelow (List.length ids) r in List.item i ids, r'
 
-    let kind, r1 = pick 4 rng
+    let kind, r1 = ConfRng.intBelow 4 rng
 
     match kind with
     | 0 ->
         // A deliberately SMALL fresh-id pool, so two lanes routinely add the same id — the
         // halting path has to be exercised or the halt law certifies nothing.
-        let v, r2 = pick 4 r1
-        let t, r3 = pick 3 r2
+        let v, r2 = ConfRng.intBelow 4 r1
+        let t, r3 = ConfRng.intBelow 3 r2
         AddItem("n" + string v, "title-" + string t), r3
     | 1 ->
         let i, r2 = choose r1
-        let t, r3 = pick 3 r2
+        let t, r3 = ConfRng.intBelow 3 r2
         Retitle(i, "title-" + string t), r3
     | 2 ->
         let i, r2 = choose r1
