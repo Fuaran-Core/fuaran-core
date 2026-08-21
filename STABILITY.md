@@ -766,3 +766,77 @@ total partition, pairwise independence, rejection actionability, and any-order c
 (`concurrencyLaws`, Phase 80, is the stronger op-level-interleaving form of the same claim — a domain
 that arbitrates runs both). `ArbitrationRejection<'Id>` is a `Rejection`-class envelope — a new case
 is additive; removing a case is breaking.
+
+## Fold-confluence pack: N-lane arrival-order invariance (Phase 100)
+
+Phase 80 certifies confluence for a domain's TREE ops (interleavings of two independence-declared
+skeleton-op scripts replay to the same tree); Phase 83 certifies that a two-head `Dag.reconcile`
+folds order-independently. Both are pinned to the skeleton-op algebra and both stop at two branches.
+A local-first deployment converges neither: it converges **N lanes** — one op-stream per writer,
+off one shared base, arriving in whatever order the network delivered them — over its own `'Op` and
+`'State`. Phase 100 is that claim, made runnable per domain.
+
+Two surfaces, one in each half of the boundary.
+
+- **`Dag.reconcileMany : ('Op -> Footprint) -> Dag.T<'Op> -> string -> string list -> Result<'Op list, MergeConflict<'Op> list>`**
+  — the N-lane generalisation of `reconcile`: every UNORDERED pair of lane deltas is checked with
+  `conflicts`, then the whole set is composed at once. `reconcileMany fp dag b [x; y]` is
+  `reconcile fp dag b x y`, so #78's conservativity contract is inherited verbatim — `Ok` still
+  carries the promise that the deltas provably commute, never a false "clean merge". Pairwise is
+  sufficient because set disjointness IS pairwise: there is no N-way interference the sweep can
+  miss. The `heads` order is **canonical form, not semantics**, exactly as `reconcile`'s pin is.
+  Folding by repeated pairwise `reconcile` is deliberately NOT the same operation: it would mint
+  intermediate merge nodes and let the pairing order leak into the result.
+
+- **`FoldConfluence.laneFoldLaws`** (in `Fuaran.Core.Conformance`) — the teeth. Given a domain's
+  `StreamWitness`, its footprint projection, a state hash and a lane generator, it folds each
+  generated lane set under every sampled arrival order and certifies five laws: **lane-fold
+  determinism** (a folding set folds to one state hash under every order — a reducer that rejects
+  under one order and not another fails here too), **lane-halt determinism** (a halting set halts
+  with the same canonical report under every order), **outcome classification invariance** (no lane
+  set folds under one order and halts under another), and two **coverage vacuity guards** (the
+  sample must have exercised both a folding and a halting set — a run that never collided has not
+  tested the halt law at all). Seed-replayable; every divergence is **shrunk** by greedy
+  delta-debugging before it is reported, so the counterexample is a minimal reproducer in the
+  domain's own op encoding rather than the generated trial that happened to expose it.
+
+**Three outcomes, not two — and the third is the point.** A lane set that folds under one arrival
+order and halts under another is named as its own defect rather than folded into "not confluent",
+because it is the worse failure: the deployment that received the lanes the other way round
+proceeds, and two replicas then disagree about whether they diverged at all. Distinguishing "folds
+identically" from "halts identically" is what makes that observable.
+
+**The halt report is canonicalised, and it has to be.** `Dag.conflicts` is symmetric only up to a
+`Left`/`Right` swap (`mergeConflictLaws` pins exactly that), so handing it the same two deltas the
+other way round yields a report that differs in presentation. `FoldConfluence.canonicalConflictReport`
+renders each interference as shape + address + its UNORDERED op pair, deduplicated and sorted — so
+"halts identically" is a claim about the interference, not about the printing.
+
+**Sampling bound.** N lanes admit N! arrival orders. `FoldConfluence.arrivalOrders` enumerates all of
+them up to `permutationBound` (24 = 4!) and above that samples deterministically — the identity, the
+reverse, and shuffles from a fixed seed. The order set is a pure function of the lane count, which is
+what lets a shrunk counterexample be re-measured against the same orders. A green verdict therefore
+means "certified over the sampled orders", never "proved for all N!".
+
+**What it deliberately does not certify.** Not **resolution** — the pack says a halt is
+order-invariant, never that it was correct, and picks no winner (GP6). Not **necessity** — as with
+Phase 80, footprint independence is sufficient for a clean fold and never necessary, so a lane set
+the footprints declare interfering is required to halt *consistently*, not required to be genuinely
+unmergeable. Both surfaces are additive; `laneFoldLaws` is opt-in like `footprintLaws` — a domain
+that converges concurrent lanes runs it.
+
+**How a domain runs it.** Supply a `StreamWitness<'Op, 'State, 'Rej>`, an address projection
+`'Op -> Footprint` over the domain's own vocabulary (a tree domain feeds `Ops.footprint`; a non-tree
+domain writes its own), a canonical `'State -> string` hash, and a `LaneGen` naming the base state, a
+genesis op and a lane source; then call
+`FoldConfluence.laneFoldLaws witness footprintOf hashState gen laneCount seed iterations` (or
+`certifyFold` for the aggregate verdict). The in-repo suite certifies the reference witness and a
+second, non-tree domain whose state is a `Map` and whose footprint is its own, and proves the pack
+can FAIL: an openly order-sensitive reducer whose footprint declares everything independent produces
+a shrunk two-lane, one-op-per-lane counterexample.
+
+**The clause that is easiest to get wrong is the address projection, and the classification law is
+what catches it.** An op that requires an address to EXIST must READ it, not merely write its own:
+an op creating an entity and an op depending on that entity are not independent, and a projection
+that omits the read declares them so. The two then fold under one arrival order and reject under the
+other — which is exactly the classification law, and exactly the reason it is stated separately.

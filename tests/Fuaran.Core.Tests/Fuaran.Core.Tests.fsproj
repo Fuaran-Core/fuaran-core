@@ -76,6 +76,9 @@
          generated F# vs generated TypeScript). Appended at the end of the list: it
          reads UiIdl.fs + UiGenerated.fs, so it must compile after both. -->
     <Compile Include="IdlFullVocabularyFuzzTests.fs" />
+    <!-- Phase 100 - the fold-confluence pack: N-lane arrival-order invariance over the
+         reference witness, a second non-tree domain, and the order-sensitive go-red case. -->
+    <Compile Include="FoldConfluenceTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

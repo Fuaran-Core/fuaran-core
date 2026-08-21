@@ -8,6 +8,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Conformance.fs" />
+    <!-- Phase 100 — the fold-confluence pack (N-lane arrival-order invariance). Appended after
+         Conformance.fs: it reads `ConfRng`, `LawResult` and `ConformanceReport` from there. -->
+    <Compile Include="FoldConfluence.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

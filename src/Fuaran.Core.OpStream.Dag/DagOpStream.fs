@@ -798,3 +798,44 @@ module Dag =
         match conflicts footprintOf deltaA deltaB with
         | [] -> Ok(deltaA @ deltaB)
         | cs -> Error cs
+
+    // ---- N-lane reconciliation (Phase 100) ----
+    // `reconcile` folds TWO heads. A local-first deployment routinely converges N concurrent lanes
+    // (one per writer/session) off one shared base, and folding them by repeated pairwise reconcile
+    // is not the same operation: it would have to mint intermediate merge nodes, and the *order* in
+    // which those pairings happen would leak into the result. `reconcileMany` states the N-lane fold
+    // directly — every unordered lane pair is checked, then the whole set is composed at once — so
+    // the arrival order of the lanes is canonical form and never semantics.
+
+    /// The N-lane generalisation of `reconcile` (Phase 100): fold `heads` — N branch heads over one
+    /// common `baseId` — into a single merge script. Every UNORDERED pair of lane deltas is checked
+    /// with `conflicts`; any interference ⇒ `Error` the concatenated reports, **nothing applied**
+    /// (GP6, exactly as `reconcile`); otherwise `Ok` the concatenation of the lane deltas in the
+    /// order `heads` names them.
+    ///
+    /// `reconcileMany fp dag b [x; y]` is `reconcile fp dag b x y` — the two-head form is the N = 2
+    /// case, and the check is `conflicts` per pair, so #78's conservativity contract is inherited
+    /// unchanged: `Ok` still carries the promise that the deltas provably commute, never a false
+    /// "clean merge". The `heads` order therefore pins **canonical form only** — a conflict-free lane
+    /// set replays to the same state under any arrival order, which is the claim
+    /// `Conformance.FoldConfluence.laneFoldLaws` certifies for a domain's own witness.
+    ///
+    /// Pairwise, not joint: set disjointness IS pairwise, so N mutually-independent lanes are jointly
+    /// independent — there is no N-way interference the pairwise sweep can miss.
+    let reconcileMany
+        (footprintOf: 'Op -> Footprint)
+        (dag: T<'Op>)
+        (baseId: string)
+        (heads: string list)
+        : Result<'Op list, MergeConflict<'Op> list> =
+        let deltas = heads |> List.map (betweenOps dag baseId) |> List.indexed
+
+        let cs =
+            [ for (i, a) in deltas do
+                  for (j, b) in deltas do
+                      if i < j then
+                          yield! conflicts footprintOf a b ]
+
+        match cs with
+        | [] -> Ok(deltas |> List.collect snd)
+        | _ -> Error cs
