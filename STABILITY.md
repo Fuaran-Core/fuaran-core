@@ -248,15 +248,28 @@ but a domain that *persists* a digest as a content-address should note one-time 
   joins sorted codes with the `U+0001` byte instead of `,`, so a code containing the separator can
   no longer alias. **The projected string changes once**; defect codes are stable identifiers, so a
   host that persisted the old `,`-joined parity string should re-derive it.
-- **`Hash.fnv1a` (`0.6.0`) — a ONE-SIDED change, and the asymmetry is the whole of it.** The
-  multiply now goes through a split-half 32-bit form so the function computes true 32-bit FNV-1a on
-  both pipelines. **On .NET nothing changes**: every digest, content-address and staleness stamp
-  minted by a .NET process is byte-for-byte what it was, which is the constraint the fix was built
-  to satisfy, and the pinned vectors enforce it. **Under Fable every value changes**, because the
-  pre-`0.6.0` transpiled multiply overflowed 2^53 and was not FNV-1a at all. A host that persisted a
-  JavaScript-minted `fnv1a` digest as a content-address must re-derive it from its source data. This
-  is stated as a one-time digest change rather than a bug fix precisely because a caller cannot tell
-  the two apart from the outside.
+- **FNV-1a everywhere in the spine (`0.6.0`) — a ONE-SIDED change, and the asymmetry is the whole
+  of it.** The multiply now goes through a split-half 32-bit form so the function computes true
+  32-bit FNV-1a on both pipelines. **On .NET nothing changes**: every digest, content-address,
+  chain hash and staleness stamp minted by a .NET process is byte-for-byte what it was, which is
+  the constraint the fix was built to satisfy, and the pinned vectors enforce it. **Under Fable
+  every value changes**, because the pre-`0.6.0` transpiled multiply overflowed 2^53 and was not
+  FNV-1a at all. A host that persisted a JavaScript-minted FNV digest as a content-address must
+  re-derive it from its source data. This is stated as a one-time digest change rather than a bug
+  fix precisely because a caller cannot tell the two apart from the outside.
+
+  **The surface is wider than `Hash.fnv1a`, and that is the part worth reading.** The spine shipped
+  *six* copies of FNV-1a, inlined at various times so a package need not take a `Tree` dependency.
+  Fixing only the canonical one would have left **`OpStream.defaultHash` — the op-stream chain
+  hash — still divergent**, which is the exact harm the fix existed to prevent: two hosts replaying
+  one log computing two different chains. All six are fixed in `0.6.0`. Three are now gone
+  entirely (`Capability.invocationKey`, the pipeline node key, and `Query.invocationKey` call
+  `Hash.fnv1a` directly — their packages already depended on `Tree`). Three remain by necessity —
+  `Hash.fnv1a`, `OpStream`'s copy (standalone by DECISIONS D2) and `Column`'s (references only
+  `Wire`) — and the two copies are now **checked against the canonical one by test and by probe**
+  rather than kept in step by discipline. Affected values: `Tree.contentHash`, `Tree.encodeHash`,
+  `Tree.Index.fingerprintOf`, `Projection.digestOf`, `ContentPack.signatureFingerprint`,
+  `Function.Memo` keys, `OpStream.defaultHash`, `Schema.fingerprint`, and both `invocationKey`s.
 
 ## Typed, attested provenance (Phase 320, `0.0.1-alpha.13`)
 

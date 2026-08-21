@@ -90,18 +90,6 @@ module Query =
     let determinismTag (q: Query) : string =
         Effect.determinismTag q.Effect.Determinism
 
-    // FNV-1a over the canonical param string — the same arithmetic class as the rest of the
-    // substrate's portable hashing (mirrors `Capability.invocationKey`), inlined so `Query` takes
-    // no `OpStream` dependency.
-    let private fnv1a (s: string) : string =
-        let mutable h = 2166136261u
-
-        for ch in s do
-            h <- h ^^^ uint32 ch
-            h <- h * 16777619u
-
-        h.ToString("x8")
-
     /// A canonical scalar rendering of a bound `Cell`, for the capture key (a `Null` is `"∅"`).
     let private cellKey (c: Cell) : string =
         match c with
@@ -124,7 +112,7 @@ module Query =
             |> List.map (fun (n, v) -> n + "=" + cellKey v)
             |> String.concat ""
 
-        q.Id + "#" + fnv1a canonical
+        q.Id + "#" + Hash.fnv1a canonical
 
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any
     /// fetch: every arg must address a declared param and its cell type must match (or be `Null`);

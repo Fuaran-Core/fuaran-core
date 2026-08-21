@@ -220,10 +220,59 @@ let tests =
                       (sprintf "the split multiply agrees with the 64-bit reference: %A" s)
 
               // What a .NET suite structurally CANNOT hold is the other pipeline's answer — a
-              // compile gate cannot disagree about a number. That half is measured by a probe: a
-              // scratch Fable build of a corpus, run under node and byte-compared against this run.
-              // Re-run it if you touch the multiply; the result is recorded with the change.
+              // compile gate cannot disagree about a number. That half is measured by
+              // `tests/hash-parity-probe/run-parity-probe.ps1`, which compiles this corpus both ways
+              // and byte-compares. Re-run it if you touch the multiply.
               ()
+
+          testCase "the two deliberate fnv1a copies stay value-identical to the canonical one"
+          <| fun _ ->
+              // `OpStream` and `Column` each carry their own private `fnv1a` because neither takes a
+              // `Tree` dependency — `OpStream` is standalone by DECISIONS D2, and `Column`
+              // references only `Wire`. Copies of a hash are exactly how a substrate forks quietly,
+              // and this one did: the canonical `fnv1a` was made cross-pipeline exact while these
+              // sat unfixed for a while, which meant the op-stream CHAIN hash — the thing the fix
+              // was motivated by — was still divergent. So the copies are checked, not trusted.
+              //
+              // Both are reached through their public wrappers, which is the only way in from
+              // outside, and each is compared against the canonical function over the same input it
+              // is documented to hash.
+              for s in
+                  [ ""
+                    "a"
+                    "abc"
+                    "foobar"
+                    "message digest"
+                    "ab"
+                    "café"
+                    "\U0001F600"
+                    String.replicate 80 "a" ] do
+                  // `defaultHash prev payload` is documented as FNV-1a over `prev + "|" + payload`.
+                  Expect.equal
+                      (OpStream.defaultHash "" s)
+                      (Hash.fnv1a ("|" + s))
+                      (sprintf "OpStream's copy agrees with Hash.fnv1a: %A" s)
+
+                  Expect.equal
+                      (OpStream.defaultHash "deadbeef" s)
+                      (Hash.fnv1a ("deadbeef|" + s))
+                      (sprintf "…including with a non-empty prev: %A" s)
+
+              for cols in
+                  [ []
+                    [ "a", IntType ]
+                    [ "n", IntType; "s", StringType ]
+                    [ "café", FloatType; "日本語", BoolType ] ] do
+                  // `Schema.fingerprint` is documented as the `name:type` list joined by U+0001.
+                  let canonical =
+                      cols
+                      |> List.map (fun (n, t) -> n + ":" + ColumnType.tag t)
+                      |> String.concat Hash.foldSep
+
+                  Expect.equal
+                      (Schema.fingerprint cols)
+                      (Hash.fnv1a canonical)
+                      (sprintf "Column's copy agrees with Hash.fnv1a: %A" cols)
 
           testCase "sha256Hex is deterministic and sensitive to a single bit"
           <| fun _ ->

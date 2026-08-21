@@ -19,7 +19,16 @@
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
+    <!--
+      Three references, because there are three FNV-1a implementations in the spine and the probe
+      has to reach all of them: the canonical `Hash.fnv1a` in Tree, and the deliberate copies in
+      OpStream (standalone by DECISIONS D2) and Column (references only Wire). The copies are the
+      reason this probe covers more than one module — a fix that reached only the canonical one
+      would leave the op-stream CHAIN hash divergent, which is how this was found.
+    -->
     <ProjectReference Include="..\..\src\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

@@ -962,17 +962,6 @@ module Capability =
     /// `"clock"` / `"random"` / `"network"`).
     let determinismTag (c: Capability) : string = Effect.determinismTag c.Determinism
 
-    // FNV-1a over the canonical arg string — the same arithmetic class as the rest of the
-    // substrate's portable hashing, inlined so `Function` takes no `OpStream` dependency.
-    let private fnv1a (s: string) : string =
-        let mutable h = 2166136261u
-
-        for ch in s do
-            h <- h ^^^ uint32 ch
-            h <- h * 16777619u
-
-        h.ToString("x8")
-
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic invocation
     /// under: the capability id + a hash of the canonical (addr-sorted) arg string. So two
     /// invocations with the same args replay the same captured value, and different args do not
@@ -984,7 +973,7 @@ module Capability =
             |> List.map (fun (a, v) -> a + "=" + v)
             |> String.concat ""
 
-        c.Id + "#" + fnv1a canonical
+        c.Id + "#" + Hash.fnv1a canonical
 
     /// Validate typed `args` (addr → string value) against the capability's signature *before*
     /// dispatch: every arg must address a declared value/repeat hole and lie in its space; every
@@ -1782,16 +1771,6 @@ module CapabilityPipeline =
         | AnyString, AnyString -> true
         | a, b -> a = b
 
-    // FNV-1a inlined (same arithmetic class as the rest of the substrate's portable hashing).
-    let private fnv1a (s: string) : string =
-        let mutable h = 2166136261u
-
-        for ch in s do
-            h <- h ^^^ uint32 ch
-            h <- h * 16777619u
-
-        h.ToString("x8")
-
     /// Type-check the pipeline against the registry (Phase 35): node ids are unique; every `Invoke`'s
     /// capability resolves (default-deny); every arg addresses a declared scalar hole; a `Literal` is
     /// in-space; a `FromNode` edge's producer output-type `feeds` the arg's value-space (an ill-typed
@@ -1886,7 +1865,7 @@ module CapabilityPipeline =
                 |> List.sort
                 |> String.concat ""
 
-            capId + "#" + id + "#" + fnv1a canon
+            capId + "#" + id + "#" + Hash.fnv1a canon
 
     // ---- wire codec ----
 

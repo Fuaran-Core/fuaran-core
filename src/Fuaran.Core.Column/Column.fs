@@ -507,14 +507,24 @@ module Schema =
         | [] -> Compatible
         | reasons -> Breaking reasons
 
-    // FNV-1a inlined (Column references only `Wire`; `Hash` lives in `Tree`) — the same arithmetic class
-    // as the rest of the substrate's portable hashing, so the fingerprint is portable + Fable-clean.
+    // A DELIBERATE COPY of `Hash.fnv1a` (`Fuaran.Core.Tree`), kept because `Column` references only
+    // `Wire` and taking a `Tree` dependency to reach one 8-line function would add a package edge
+    // for every consumer. It must stay VALUE-IDENTICAL to the canonical one, which
+    // `tests\hash-parity-probe` checks over a shared corpus rather than leaving to discipline.
+    //
+    // The multiply is split into 16-bit halves — see `Hash.mul32` for why a plain `h * 16777619u`
+    // is not portable (the product passes 2^53 under Fable's doubles, losing precision inside the
+    // operation). .NET values are unchanged by the split. Do not "simplify" it back.
     let private fnv1a (s: string) : string =
         let mutable h = 2166136261u
 
         for ch in s do
             h <- h ^^^ uint32 ch
-            h <- h * 16777619u
+            // 16777619 = 0x01000193 = 256 * 65536 + 403, so the prime's halves are 256 and 403.
+            let lo = h &&& 0xFFFFu
+            let hi = h >>> 16
+            let cross = ((lo * 256u) + (hi * 403u)) &&& 0xFFFFu
+            h <- ((lo * 403u) + (cross * 65536u)) &&& 0xFFFFFFFFu
 
         h.ToString("x8")
 

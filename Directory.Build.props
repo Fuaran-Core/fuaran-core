@@ -36,8 +36,11 @@
          source changes. MINOR rather than patch because a new public function in a shipped module
          is a contract a consumer can pin against, and because this reverses a stated posture —
          STABILITY.md previously said no cryptographic hash ships in Core. See DECISIONS.md D15. -->
-    <!-- 0.6.0 (2026-08-21): `Hash.fnv1a`'s multiply is routed through a private split-half 32-bit
-         form so it computes true 32-bit FNV-1a on BOTH pipelines. No public surface changed and
+    <!-- 0.6.0 (2026-08-21): every FNV-1a in the spine routes its multiply through a split-half
+         32-bit form so it computes true 32-bit FNV-1a on BOTH pipelines. Six implementations, not
+         one: the canonical `Hash.fnv1a`, `OpStream.defaultHash` (the CHAIN hash), `Column`'s
+         `Schema.fingerprint`, and three duplicates now deleted in favour of the canonical one.
+         No public surface changed and
          .NET values are byte-for-byte unchanged — the pinned vectors enforce that — so a .NET
          consumer repins with no source change and no persisted digest moves. MINOR rather than
          patch because STABILITY.md makes these functions' VALUES the contract, and under Fable

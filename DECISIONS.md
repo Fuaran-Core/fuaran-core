@@ -28,6 +28,26 @@ not merely their signatures — and on a supported pipeline the values change. A
 a Fable consumer that nothing observable moved, which is false. Pre-1.0, MINOR is the lane that says
 "look before you repin", and this is exactly that.
 
+**The fix had to reach six implementations, not one — and that is the substantive part.** The spine
+carried six copies of FNV-1a, each inlined at some point so a package need not take a `Tree`
+dependency, and each commented as "the same arithmetic class as the rest of the substrate's portable
+hashing" — a claim that was false in every copy. Fixing only `Hash.fnv1a` would have left
+**`OpStream.defaultHash` divergent**, which is precisely the harm being fixed: it is the op-stream
+chain hash, so two hosts replaying one log would still compute two different chains, while the
+release notes said the hash was now portable. That is a worse outcome than not fixing it, because it
+converts a known limit into a false assurance. Three copies are deleted outright — `Function` and
+`Query` already depended on `Tree`, and `Function.fs` was calling `Hash.fnv1a` two lines from its own
+duplicate. Three remain because the dependency genuinely forbids consolidation, and they are now
+**verified rather than trusted**: `HashTests` compares each against the canonical function over a
+corpus, and the parity probe carries a column per implementation.
+
+**Why the probe covers every implementation rather than the canonical one.** This is the general
+lesson, not a detail of this change. A probe that samples the function you were thinking about will
+report green for the reason you expected while the copy nobody was thinking about stays broken —
+which is what the estate's own audit found here, hours after the canonical fix was written and
+believed complete. Going red was verified per implementation, not once: perturbing `OpStream`'s copy
+alone turns exactly its column red and leaves the other three untouched.
+
 **Why the guard is a probe and not a test.** A compile gate cannot disagree about a number, and
 neither can a .NET suite: reintroducing the naive multiply was measured to leave all 720 tests green
 while the transpiled side was wrong on 120 of 124 inputs. So the certification is bought twice over —

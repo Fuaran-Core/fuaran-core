@@ -48,9 +48,25 @@ let corpus: string list =
     @ [ for n in 0..80 -> String.replicate n "a" ]
     @ [ for n in [ 1; 2; 3; 55; 56; 57; 63; 64; 65; 119; 120; 127; 128; 129; 256; 1000 ] -> String.replicate n "xy" ]
 
+/// A `Schema` built from the corpus entry, so `Column`'s copy is exercised over the same inputs as
+/// the other two — including the non-ASCII ones, which is where a code-unit-vs-byte fold would show.
+let private schemaOf (s: string) : Schema =
+    [ (if s = "" then "c" else s), IntType; "n" + s, FloatType ]
+
 [<EntryPoint>]
 let main _ =
+    // FOUR columns per line, one per implementation the spine actually ships: the canonical
+    // `Hash.fnv1a`, the pinned SHA-256 beside it, `OpStream`'s copy (reached through
+    // `defaultHash`, the op-stream CHAIN hash), and `Column`'s copy (through `Schema.fingerprint`).
+    // Probing only the canonical one is what let the chain hash stay divergent after it was fixed.
     corpus
-    |> List.iteri (fun i s -> printfn "%03d %s %s" i (Hash.fnv1a s) (Hash.sha256Hex s))
+    |> List.iteri (fun i s ->
+        printfn
+            "%03d %s %s %s %s"
+            i
+            (Hash.fnv1a s)
+            (Hash.sha256Hex s)
+            (OpStream.defaultHash "deadbeef" s)
+            (Schema.fingerprint (schemaOf s)))
 
     0

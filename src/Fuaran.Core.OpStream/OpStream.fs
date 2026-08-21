@@ -269,16 +269,35 @@ module KeyIndex =
 /// generic over the `StreamWitness`. The highest-genericity core layer.
 module OpStream =
 
+    // A DELIBERATE COPY of `Hash.fnv1a` (`Fuaran.Core.Tree`), kept because `OpStream` is standalone
+    // by design — it takes no `Tree` dependency (DECISIONS D2), and this is the one hash the layer
+    // cannot do without. It must stay VALUE-IDENTICAL to the canonical one: `Hash.fnv1a` and this
+    // are compared over a shared corpus by `tests\hash-parity-probe`, so a copy that drifts is
+    // caught rather than discovered in a forked chain.
+    //
+    // The multiply is split into 16-bit halves for the reason spelled out at `Hash.mul32`: a plain
+    // `h * 16777619u` transpiles to a JavaScript multiply whose product passes 2^53, so precision is
+    // lost INSIDE the operation and no trailing mask can recover it. Here that mattered more than
+    // anywhere else in the substrate — this function IS the op-stream chain hash, so a divergence
+    // means two hosts replaying the same log compute two different chains. No partial product below
+    // exceeds 2^32. The .NET values are unchanged by the split, which is what keeps every persisted
+    // chain verifying. Do not "simplify" it back.
     let private fnv1a (s: string) : string =
         let mutable h = 2166136261u
 
         for ch in s do
             h <- h ^^^ uint32 ch
-            h <- h * 16777619u
+            // 16777619 = 0x01000193 = 256 * 65536 + 403, so the prime's halves are 256 and 403.
+            let lo = h &&& 0xFFFFu
+            let hi = h >>> 16
+            let cross = ((lo * 256u) + (hi * 403u)) &&& 0xFFFFu
+            h <- ((lo * 403u) + (cross * 65536u)) &&& 0xFFFFFFFFu
 
         h.ToString("x8")
 
-    /// The default portable hash: FNV-1a over `prevHash | payload`.
+    /// The default portable hash: FNV-1a over `prevHash | payload`. **Portable is meant literally** —
+    /// value-identical on .NET and under Fable, so a browser replaying a chain a server wrote
+    /// computes the same hashes. That was not true before `0.6.0`; see the copy note above.
     let defaultHash: HashFn = fun prev payload -> fnv1a (prev + "|" + payload)
 
     /// Minimal JSON string escaping (Fable-clean — no System.Text.Json on the encode path).
