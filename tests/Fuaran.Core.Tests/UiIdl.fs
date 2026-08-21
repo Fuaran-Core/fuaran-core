@@ -124,6 +124,25 @@ let private fileReadEncoding =
 let private dateVariant =
     Declare.enumOf "DateVariant" [ "Date"; "Time"; "DateTime" ]
 
+/// Fuaran-UI Phase 864 — the named input format a `FieldRule` accepts. Lower-case
+/// on the wire (the `LinkProtection` posture), so the enum declares an explicit
+/// case-to-wire mapping. The set is deliberately three: `password` / `search` /
+/// `number` / `color` are HTML input types with no demand evidence behind them,
+/// and `number` would collide with `RangedNumber` and re-open the reuse rule.
+///
+/// Not to be confused with the `Format` union, which is a `Binding` case about
+/// OUTPUT presentation. This enum is about which values are ACCEPTED on input.
+let private textFormat =
+    Declare.enumWith "TextFormat" [ "Email", "email"; "Url", "url"; "Tel", "tel" ]
+
+/// Fuaran-UI Phase 864 — the comparison a cross-field `FieldRule` makes. Six
+/// operators, one operand, and deliberately nothing else: no boolean
+/// combinators, no arithmetic, no nesting. An expression language on the wire is
+/// an evaluator every host must agree on to the bit, forever, and that remains
+/// the standing rejection.
+let private compareOp =
+    Declare.enumWith "CompareOp" [ "Eq", "eq"; "Neq", "neq"; "Lt", "lt"; "Lte", "lte"; "Gt", "gt"; "Gte", "gte" ]
+
 let private dateStyle =
     Declare.enumOf "DateStyle" [ "Short"; "Medium"; "Long"; "Full" ]
 
@@ -877,6 +896,50 @@ let private staticRowsRecord =
           req "rows" (TList(TList(TUnion("TextSource", []))))
           opt "sortable" TBool ] }
 
+/// The comparison operand of a cross-field `FieldRule` (Fuaran-UI Phase 864).
+///
+/// `against` is a `Binding` at `JVal` — the typed verbatim carrier, the same
+/// instantiation `TransformParam.from` uses for a slot whose value type is
+/// whatever the compared control holds. That it is a Binding at all is the whole
+/// cross-field mechanism: the reactive-derivation rule (any read slot may take a
+/// Binding) plus the auto-bind rule (a form field's absent `value` binds
+/// `State(<field id>)`) means `{"$type":"State","key":"<sibling id>"}` reads the
+/// sibling field's live value with no coordination vocabulary at all.
+///
+/// The slot has no literal form ON PURPOSE. A literal-only operand would be
+/// `Date.min` again, and the charter's reuse rule forbids the rule slot
+/// duplicating a bound the control already carries.
+let private compareRuleRecord =
+    { Name = "CompareRule"
+      Fields = [ req "against" (TUnion("Binding", [ TJson ])); req "op" (TEnum "CompareOp") ] }
+
+/// A `FormField`'s declared constraint (Fuaran-UI Phase 864) — the accepted SET,
+/// where `FormFieldKind` names the CONTROL. Every slot is `Optional`, so a form
+/// authored before the addition encodes byte-identically: absence is absence.
+///
+/// **No numeric or temporal bound lives here.** `RangedNumber` already carries
+/// `min`/`max` and `Date` already carries `min`/`max`; the charter's reuse rule
+/// is that the rule slot never duplicates a bound the control carries. What is
+/// left is format, pattern, length, and the cross-field operand.
+///
+/// A rule with EVERY slot absent is refused by the tier's policy decoder — a
+/// rule that constrains nothing is a defect, not a no-op — as is a `minLength`
+/// above its `maxLength` (the `DateRangePair` ordered-pair rule applied to a
+/// length pair). Both are decoder POLICY, not structure, so they live in the
+/// tier's reject layer and not here, exactly as the `from <= to` rule does.
+let private fieldRuleRecord =
+    { Name = "FieldRule"
+      Fields =
+        [ opt "compare" (TRecord "CompareRule")
+          opt "format" (TEnum "TextFormat")
+          opt "maxLength" TInt
+          opt "message" (TUnion("TextSource", []))
+          opt "minLength" TInt
+          opt "pattern" TStr ] }
+
+/// Phase 864 adds one OPTIONAL `rule` slot. `required` stays where it is: it is
+/// the pre-existing degenerate rule, and moving it under `rule` would be a
+/// breaking change to a field every existing fixture carries.
 let private formFieldRecord =
     { Name = "FormField"
       Fields =
@@ -884,7 +947,8 @@ let private formFieldRecord =
           req "kind" (TUnion("FormFieldKind", []))
           req "label" (TUnion("TextSource", []))
           req "required" TBool
-          opt "help" (TUnion("TextSource", [])) ] }
+          opt "help" (TUnion("TextSource", []))
+          opt "rule" (TRecord "FieldRule") ] }
 
 let private filterSpecRecord =
     { Name = "FilterSpec"
@@ -1752,6 +1816,8 @@ let uiIdl: Idl =
           buttonVariant
           fileReadEncoding
           dateVariant
+          textFormat
+          compareOp
           dateStyle
           relativeTimeUnit
           durationUnit
@@ -1785,6 +1851,8 @@ let uiIdl: Idl =
           mapMarkerRecord
           defaultSortRecord
           staticRowsRecord
+          compareRuleRecord
+          fieldRuleRecord
           formFieldRecord
           filterSpecRecord
           transformParamRecord

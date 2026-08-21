@@ -133,7 +133,11 @@ let private form1: G.Node<unit> =
           Kind = kind
           Label = lit label
           Required = required
-          Help = help |> Option.map lit }
+          Help = help |> Option.map lit
+          // Fuaran-UI Phase 864 — the declared-constraint slot. `None` here on
+          // purpose: `form-1` is the byte-parity fixture for the PRE-864 wire,
+          // and an absent `rule` must keep encoding to nothing at all.
+          Rule = None }
 
     { Id = "form-1"
       Accessibility = None
