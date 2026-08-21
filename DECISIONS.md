@@ -2,7 +2,7 @@
 
 ## 2026-08-21 — D19: incremental evaluation is a RESTRICTION of the reference evaluator, and the boundary is data
 
-**Decided.** From `0.10.0`, `Fuaran.Core.DataFrame` carries `Incremental` — a `Transform` pipeline
+**Decided.** From `0.11.0`, `Fuaran.Core.DataFrame` carries `Incremental` — a `Transform` pipeline
 evaluated against a `TableDelta` (D18) instead of from scratch. `plan` classifies every step as
 `PropagateRows`, `MaintainGroups`, or `FallBack` with a typed reason; `prime` builds a state over a
 source; `refresh` advances that state against a delta. Every result is equal to

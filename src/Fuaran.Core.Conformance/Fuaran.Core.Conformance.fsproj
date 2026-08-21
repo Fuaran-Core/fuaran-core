@@ -11,9 +11,15 @@
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->
     <Compile Include="WireNullTolerance.fs" />
-    <!-- Phase 99 — the incremental-evaluation equivalence family. Independent of the op-algebra
-         law kit above (it drives Fuaran.Core.DataFrame's evaluator only), so it is appended at
-         the end. -->
+    <!-- Phase 100 — the fold-confluence pack (N-lane arrival-order invariance). After
+         Conformance.fs: it reads `ConfRng`, `LawResult` and `ConformanceReport` from there.
+         Independent of the null-tolerance family beside it; the order between those two is
+         free, so each simply keeps the position it arrived in. -->
+    <Compile Include="FoldConfluence.fs" />
+    <!-- Phase 99 — the incremental-evaluation equivalence family. Independent of both families
+         above (it drives Fuaran.Core.DataFrame's evaluator only), so it is appended at the end;
+         it reads `ConfRng` and `LawResult` from Conformance.fs, which is the only ordering
+         constraint it has. -->
     <Compile Include="IncrementalDelta.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -86,6 +86,10 @@
          strict-parser-unchanged pins. Appended at the end of the list; it depends on
          nothing here. -->
     <Compile Include="WireNullToleranceTests.fs" />
+    <!-- Phase 100 - the fold-confluence pack: N-lane arrival-order invariance over the
+         reference witness, a second non-tree domain, and the order-sensitive go-red case.
+         Depends on nothing here either, so it simply follows. -->
+    <Compile Include="FoldConfluenceTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

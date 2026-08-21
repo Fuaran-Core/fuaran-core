@@ -290,6 +290,32 @@ let private attributedTouch =
     | Ok a' -> sprintf "%d/%A" a'.Op a'.Turn
     | Error e -> e
 
+// FoldConfluence (Phase 100) — the N-lane fold pack over a tiny inline string witness: the DAG
+// carriage, the pairwise conflict sweep, the canonical report and the shrinker must all be
+// Fable-clean, since a local-first client folds its own lanes in the browser.
+let private foldConfluenceTouch =
+    let sw: StreamWitness<string, string, string> =
+        { Apply = fun op st -> Ok(st + op)
+          Encode = id
+          Decode = Ok }
+
+    let noAddr: Set<string> = Set.empty
+
+    let fp (_: string) : Footprint =
+        { Reads = noAddr
+          StructureWrites = noAddr
+          ContentWrites = noAddr
+          UnknownParentWrites = noAddr }
+
+    let gen: LaneGen<string, string> =
+        { State0 = ""
+          BaseOp = "base"
+          Lanes = fun n r -> [ for i in 1..n -> [ "op" + string i ] ], r }
+
+    let results = FoldConfluence.laneFoldLaws sw fp id gen 2 3 2
+
+    sprintf "%d/%d" (List.length results) (List.length (FoldConfluence.arrivalOrders 3))
+
 [<EntryPoint>]
 let main _ =
     // Reference each touch so nothing is dead-code-eliminated before the compiler sees it.
@@ -314,7 +340,8 @@ let main _ =
       projectionTouch
       propagationTouch
       aiSurfaceTouch
-      idlTouch ]
+      idlTouch
+      foldConfluenceTouch ]
     |> List.iter (printfn "%s")
 
     0

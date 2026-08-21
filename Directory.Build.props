@@ -78,7 +78,17 @@
          so consumers repin without source changes. MINOR rather than patch because new public types
          and modules in a shipped package are a contract a consumer can pin against. See DECISIONS.md
          D18. -->
-    <!-- 0.10.0 (2026-08-21): `Fuaran.Core.DataFrame` gains the incremental evaluation seam —
+    <!-- 0.10.0 (2026-08-21): Phase 100 — the fold-confluence pack. `Fuaran.Core.OpStream.Dag` gains
+         `Dag.reconcileMany` (the N-lane generalisation of `reconcile`, identical to it at N = 2),
+         and `Fuaran.Core.Conformance` gains the `FoldConfluence` module — `laneFoldLaws` /
+         `certifyFold` plus the pieces a domain drives directly when investigating a counterexample
+         (`foldOnce`, `shrinkLanes`, `arrivalOrders`, `canonicalConflictReport`, `renderLanes`) and
+         the two new public types `LaneFoldOutcome` / `LaneGen`. Purely additive: no existing
+         function's behaviour, signature or emitted bytes moved, so consumers repin without source
+         changes. MINOR rather than patch because new public types and functions in shipped packages
+         are a contract a consumer can pin against — the same grounds as 0.5.0. See STABILITY.md
+         "Fold-confluence pack: N-lane arrival-order invariance". -->
+    <!-- 0.11.0 (2026-08-21): `Fuaran.Core.DataFrame` gains the incremental evaluation seam —
          `Incremental` (`plan` / `prime` / `refresh` / `evalDelta` and their embedded-source
          variants) over the new `StepIncrementality` / `IncrementalStrategy` / `IncrementalPlan` /
          `Recompute` / `RecomputeFootprint` / `IncrementalEval` / `FallBackReason` types, plus the
@@ -93,7 +103,7 @@
          address set), and two same-named types in one namespace across two packages is a
          collision a consumer opening both would hit. See DECISIONS.md D19 and STABILITY.md
          "Incremental column-layer evaluation". -->
-    <Version>0.10.0</Version>
+    <Version>0.11.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
