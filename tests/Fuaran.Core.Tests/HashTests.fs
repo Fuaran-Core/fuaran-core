@@ -160,13 +160,70 @@ let tests =
               Expect.equal (Hash.sha256Hex "anything").Length 64 "the crypto digest is 256-bit"
               Expect.notEqual (Hash.fnv1a "abc") (Hash.sha256Hex "abc") "and they are not the same function"
 
-          testCase "fnv1a is unchanged by the move — its pinned values still hold"
+          testCase "fnv1a's pinned values hold — the .NET side is canonical and has never moved"
           <| fun _ ->
-              // `fnv1a` moved file in this change and nothing else. Content hashes across the estate
-              // fold through it, so a value that shifted would silently invalidate every stored one.
+              // These three have now survived both a file move and a rewrite of the multiply, which
+              // is the point of pinning them: content hashes across the estate fold through `fnv1a`,
+              // so a value that shifted here would silently invalidate every stored one. The
+              // split-half multiply was adopted precisely because it leaves this side alone.
               Expect.equal (Hash.fnv1a "") "811c9dc5" "the empty string is the FNV-1a offset basis"
               Expect.equal (Hash.fnv1a "a") "e40c292c" "a"
               Expect.equal (Hash.fnv1a "foobar") "bf9cf968" "foobar"
+
+          testCase "fnv1a is cross-pipeline value-identical — the divergence pair pinned"
+          <| fun _ ->
+              // The finding this test exists for, kept as data rather than prose. Before the
+              // split-half multiply, `fnv1a "a"` was `e40c292c` here and `e40c2930` under Fable: the
+              // multiply overflowed the 2^53 exact-integer ceiling of JavaScript's doubles, so
+              // precision was lost INSIDE the operation and the two pipelines minted different
+              // chains from the same input. The .NET value is the canonical one; what moved is the
+              // other side.
+              Expect.equal (Hash.fnv1a "a") "e40c292c" "the canonical value, unmoved by the fix"
+
+              Expect.notEqual
+                  (Hash.fnv1a "a")
+                  "e40c2930"
+                  "and not the value the overflowing multiply produced under Fable"
+
+              // An INDEPENDENT check that the split-half multiply computes true 32-bit FNV-1a
+              // rather than something merely self-consistent: 64-bit arithmetic masked back to 32,
+              // which cannot lose precision and shares no code with the implementation it checks.
+              // Pinned vectors alone would not catch a split multiply that is wrong only for inputs
+              // nobody pinned.
+              let reference (s: string) =
+                  let mutable h = 2166136261UL
+
+                  for ch in s do
+                      h <- (h ^^^ uint64 (uint32 ch)) &&& 0xFFFFFFFFUL
+                      h <- (h * 16777619UL) &&& 0xFFFFFFFFUL
+
+                  (uint32 h).ToString "x8"
+
+              for s in
+                  [ ""
+                    "a"
+                    "b"
+                    "abc"
+                    "foobar"
+                    "message digest"
+                    "" // the foldSep control byte
+                    "ab"
+                    "café"
+                    "日本語"
+                    "\U0001F600" // a surrogate pair — `fnv1a` folds UTF-16 code units
+                    "￿"
+                    String.replicate 80 "a"
+                    String.replicate 257 "xy" ] do
+                  Expect.equal
+                      (Hash.fnv1a s)
+                      (reference s)
+                      (sprintf "the split multiply agrees with the 64-bit reference: %A" s)
+
+              // What a .NET suite structurally CANNOT hold is the other pipeline's answer — a
+              // compile gate cannot disagree about a number. That half is measured by a probe: a
+              // scratch Fable build of a corpus, run under node and byte-compared against this run.
+              // Re-run it if you touch the multiply; the result is recorded with the change.
+              ()
 
           testCase "sha256Hex is deterministic and sensitive to a single bit"
           <| fun _ ->

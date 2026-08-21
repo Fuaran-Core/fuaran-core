@@ -248,6 +248,15 @@ but a domain that *persists* a digest as a content-address should note one-time 
   joins sorted codes with the `U+0001` byte instead of `,`, so a code containing the separator can
   no longer alias. **The projected string changes once**; defect codes are stable identifiers, so a
   host that persisted the old `,`-joined parity string should re-derive it.
+- **`Hash.fnv1a` (`0.6.0`) — a ONE-SIDED change, and the asymmetry is the whole of it.** The
+  multiply now goes through a split-half 32-bit form so the function computes true 32-bit FNV-1a on
+  both pipelines. **On .NET nothing changes**: every digest, content-address and staleness stamp
+  minted by a .NET process is byte-for-byte what it was, which is the constraint the fix was built
+  to satisfy, and the pinned vectors enforce it. **Under Fable every value changes**, because the
+  pre-`0.6.0` transpiled multiply overflowed 2^53 and was not FNV-1a at all. A host that persisted a
+  JavaScript-minted `fnv1a` digest as a content-address must re-derive it from its source data. This
+  is stated as a one-time digest change rather than a bug fix precisely because a caller cannot tell
+  the two apart from the outside.
 
 ## Typed, attested provenance (Phase 320, `0.0.1-alpha.13`)
 
@@ -346,16 +355,43 @@ reason — a **cache fingerprint** (`fnv1a`: staleness stamps, bounded-escape co
 nobody gains by forging) and a **crypto digest** (`sha256*`: anything that becomes a signed head or a
 record a dispute is read from), never interchanged.
 
-**`sha256Hex` is certified .NET/Fable value-identical; `fnv1a` is NOT, and that was measured rather
-than assumed (`0.5.0`).** Compiling the two pipelines against the same corpus — including the
-one-million-`a` vector — gives byte-identical SHA-256 on both, which is what the masked add in its
-inner loop exists for. The same probe found `fnv1a "a"` to be `e40c292c` on .NET and `e40c2930`
-under Fable: `h * 16777619u` transpiles to a plain JS multiply whose product passes 2^53, so
-precision is lost inside the operation and a trailing mask cannot recover it. **The Fable-compile
-gate cannot catch this class** — it proves a construct transpiles, not that it computes the same
-number — so nothing in the repo had reason to report it. A value fingerprinted with `fnv1a` on one
-pipeline must not be compared with one fingerprinted on the other until that is fixed (a split-half
-32-bit multiply, which moves every Fable-side value and is therefore its own change).
+**BOTH hashes are now certified .NET/Fable value-identical, and both were measured rather than
+assumed (`sha256*` at `0.5.0`, `fnv1a` at `0.6.0`).** Compiling the two pipelines against the same
+corpus — including the one-million-`a` vector — gives byte-identical SHA-256 on both, which is what
+the masked add in its inner loop exists for. **`fnv1a` did not agree until `0.6.0`**, and the way
+that was found is the part worth keeping: the `0.5.0` probe measured it as a by-product and reported
+`fnv1a "a"` as `e40c292c` on .NET but `e40c2930` under Fable, because `h * 16777619u` transpiled to a
+plain JS multiply whose product passes 2^53 — precision lost inside the operation, where a trailing
+mask cannot reach it. `0.6.0` routes the multiply through a split-half 32-bit form that never builds
+a product above 2^32, and a re-run of the same probe over a 124-entry corpus is byte-identical on
+both pipelines.
+
+**The .NET values did not move, and that was the constraint the fix was designed around** — the .NET
+side is canonical, and `fnv1a` is folded into every stored content hash, so a change here would
+invalidate persisted data rather than break a compile. The pinned vectors hold it to that
+byte-for-byte. What moved is the transpiled side, which now agrees with .NET instead of disagreeing
+with it. **A `fnv1a` value minted by a JavaScript host before `0.6.0` will not re-verify** — see the
+migration note below.
+
+**The Fable-compile gate cannot catch this class, and that has not changed** — it proves a construct
+transpiles, not that it computes the same number, so nothing in the repo had reason to report the
+divergence for as long as it existed. Two guards replace it, and neither is a compile: the `fnv1a`
+vectors and an independent 64-bit reference comparison in `HashTests` pin the .NET half, and the
+cross-pipeline half is `tests/hash-parity-probe/run-parity-probe.ps1`, which compiles a 124-entry
+corpus both ways and byte-compares. Both were taken go-red before being trusted. **Anyone touching
+either multiply-safe helper (`mul32`, `.+.`) must re-run that probe**; a green .NET suite is not
+evidence about the other pipeline, and reintroducing the naive multiply was measured to leave the
+suite fully green while 120 of the 124 entries diverged. The probe is deliberately **not** in
+`./verify.ps1` — it needs a Node runtime and the default gate stays dependency-free — which means
+nothing runs it for you.
+
+**Migration (`0.6.0`).** No action is needed for a value minted on .NET: those are unchanged, so
+every persisted chain, content hash and staleness stamp written by a .NET process re-verifies
+exactly as before. A value minted by a **JavaScript/Fable host** before `0.6.0` was never the true
+FNV-1a of its input and will not re-verify under `0.6.0`; such a value must be re-minted from its
+source data rather than carried across. Note that the pre-`0.6.0` guidance in this file was that
+such a value must not be compared across pipelines at all, so it was never usable as a portable
+identity — which is what makes re-minting a correction rather than a loss.
 
 This reverses the earlier "no cryptographic hash ships in Core (GP3)" line, and the reason is worth
 stating: GP3 asks that public surfaces stay FSharp.Core-only and Fable-clean, which this
@@ -595,6 +631,14 @@ construct that is not Fable-clean fails the green gate in-repo rather than surfa
 with the round-trip specifier is *not* Fable-supported — float→string must route through
 `Wire.Canon.canonicalFloat`; `Double.TryParse`'s style/provider arguments are ignored under Fable but
 parse invariantly, which is a benign warning, not a gate failure.)
+
+**A compile gate is not a VALUE gate, and the difference has cost real defects here.** It proves a
+construct transpiles; it cannot notice that the transpiled code computes a different number. That is
+exactly how `fnv1a` sat divergent behind a green gate until `0.6.0` (see "Hash-chain integrity
+posture"). Where a value must agree across pipelines, the claim is bought by a **probe** —
+`tests/hash-parity-probe/run-parity-probe.ps1`, which compiles a corpus both ways and byte-compares —
+and by an independent in-suite reference implementation on the .NET side. Both hashes are certified
+that way; anything new making a cross-pipeline value claim should be too.
 
 ## Canonical float layout (Phase 55)
 

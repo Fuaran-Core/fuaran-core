@@ -3,31 +3,55 @@ namespace Fuaran.Core
 /// Deterministic content hashing. Two regimes, separately named so a call site says which one it is
 /// in: `fnv1a` — 32-bit, fast, NOT cryptographic — for staleness fingerprints and the
 /// content-hashed bounded-escape regions; `sha256Hex` / `sha256Bytes` — the pinned pure FIPS 180-4
-/// digest — wherever an adversary would gain by forging the value. Both are FSharp.Core-only and
-/// both compile under Fable, but only `sha256*` is certified to produce the SAME VALUE on both
-/// pipelines; see the warning on `fnv1a`.
+/// digest — wherever an adversary would gain by forging the value. Both are FSharp.Core-only, both
+/// compile under Fable, and both are certified to produce the SAME VALUE on either pipeline — see
+/// `mul32` and `.+.`, the two places that certification is actually bought.
 module Hash =
+
+    /// 32-bit wrapping multiply that stays exact under Fable's float-backed numerics — the same
+    /// problem `.+.` solves for addition, an order of magnitude worse. Fable emits `uint32` `*` as a
+    /// plain JS multiply on doubles, and `h * 16777619u` reaches ~3.6e16: past the 2^53
+    /// exact-integer ceiling, so precision is lost INSIDE the operation and a trailing
+    /// `&&& 0xFFFFFFFFu` cannot recover it — by then the low bits are already gone. Measured before
+    /// this existed: `fnv1a "a"` was `e40c292c` on .NET and `e40c2930` under Fable.
+    ///
+    /// The fix is to never form a product above 2^32. Split both operands into 16-bit halves: the
+    /// `aHi*bHi` term is a multiple of 2^32 and vanishes mod 2^32, the cross terms contribute only
+    /// their low 16 bits, and every partial product is at most (2^16-1)^2, comfortably exact as a
+    /// double. Recombination is `* 65536u` rather than `<<< 16` so no signed-shift semantics enter.
+    /// On .NET each step is ordinary `uint32` arithmetic and both masks are no-ops, so .NET values
+    /// are UNCHANGED by this — the pinned vectors below hold them to that byte-for-byte.
+    ///
+    /// **Protected by measurement, not by the compile gate** — the same caveat `.+.` carries, for
+    /// the same reason: a compile cannot disagree about a number. Reverting this to a plain `a * b`
+    /// leaves the whole .NET suite green — measured — while 120 of a 124-entry corpus diverge. The
+    /// .NET half is pinned by the `fnv1a` vectors and the independent 64-bit reference in
+    /// `HashTests`; the cross-pipeline half is `tests/hash-parity-probe/run-parity-probe.ps1`, which
+    /// compiles this corpus both ways and byte-compares. **Re-run that probe if you touch this** —
+    /// it is not in `./verify.ps1` (it needs a Node runtime), so nothing will do it for you.
+    let inline private mul32 (a: uint32) (b: uint32) : uint32 =
+        let aLo = a &&& 0xFFFFu
+        let aHi = a >>> 16
+        let bLo = b &&& 0xFFFFu
+        let bHi = b >>> 16
+        // Masking the cross terms to 16 bits BEFORE recombining is what keeps the two pipelines
+        // agreeing: .NET wraps that sum at 2^32 and JS does not, and the low 16 bits — the only
+        // part that survives the shift — are identical either way.
+        let cross = ((aLo * bHi) + (aHi * bLo)) &&& 0xFFFFu
+        ((aLo * bLo) + (cross * 65536u)) &&& 0xFFFFFFFFu
 
     /// A 32-bit non-cryptographic content fingerprint (FNV-1a, lowercase hex). Cheap, and a second
     /// pre-image is seconds of search — so it belongs on a cache key or a rebuild stamp, never under
     /// a signature. Use `sha256Hex` for anything an adversary would gain by forging.
     ///
-    /// **NOT .NET/Fable value-portable — measured, 2026-08-21.** `h * 16777619u` is emitted by Fable
-    /// as a plain JS multiply. The product reaches ~3.6e16, past the 2^53 exact-integer ceiling, so
-    /// precision is lost INSIDE the operation: `fnv1a "a"` is `e40c292c` on .NET and `e40c2930`
-    /// under Fable. A trailing `&&& 0xFFFFFFFFu` does not repair it — by then the low bits are
-    /// already gone — which is why this is left as a recorded limit rather than patched in passing;
-    /// the fix is a split-half 32-bit multiply, and it changes every Fable-side value. The
-    /// Fable-compile gate cannot see this: it proves the code transpiles, not that it agrees.
-    /// So: a value hashed here on one pipeline must not be compared with one hashed on the other.
-    /// `sha256Hex` has no such limit — it is byte-identical on both, which is what the masked add
-    /// in its inner loop exists for.
+    /// **Value-identical on .NET and under Fable** — measured, not asserted. The multiply goes
+    /// through `mul32` for that reason; read its comment before simplifying the loop.
     let fnv1a (s: string) : string =
         let mutable h = 2166136261u
 
         for ch in s do
             h <- h ^^^ uint32 ch
-            h <- h * 16777619u
+            h <- mul32 h 16777619u
 
         h.ToString("x8")
 

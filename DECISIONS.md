@@ -1,5 +1,42 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-08-21 — D16: `fnv1a` is made cross-pipeline exact, and the .NET side is the canonical one
+
+**Decided.** From `0.6.0`, `Hash.fnv1a`'s multiply goes through a private split-half 32-bit form
+(`mul32`), so the function computes true 32-bit FNV-1a on .NET **and** under Fable. The .NET values
+are unchanged; the transpiled values move to meet them. Released as a MINOR bump, not a patch.
+
+**Why there was anything to fix.** Fable emits `uint32` `*` as a plain JavaScript multiply on
+doubles. `h * 16777619u` reaches roughly 3.6e16 — past the 2^53 exact-integer ceiling — so precision
+is lost *inside* the operation, and a trailing `&&& 0xFFFFFFFFu` cannot recover what is already gone.
+Measured: `fnv1a "a"` was `e40c292c` on .NET and `e40c2930` under Fable, and 120 of a 124-entry
+corpus diverged. This is the same hazard the `.+.` masked add solves for addition, one order of
+magnitude worse, and it went unnoticed for the same reason: nothing in the repo compared the two
+pipelines' *numbers*.
+
+**Why .NET is canonical rather than "whichever is cheaper to change".** `fnv1a` is folded into every
+stored content hash, and essentially all of them were minted by .NET processes. Moving the .NET
+values would invalidate persisted data across every consuming domain; moving the transpiled values
+invalidates only digests minted by a JavaScript host, which the pre-`0.6.0` documentation already
+declared non-portable and unusable as a cross-pipeline identity. So the direction was not a
+preference — one side had data behind it and the other had a warning label. The fix was designed
+around keeping .NET fixed, and the pinned vectors hold it to that.
+
+**Why MINOR and not PATCH.** By the .NET-only reading this is invisible: same signature, same values,
+a private helper added. But STABILITY.md declares that these functions' *values* are the contract,
+not merely their signatures — and on a supported pipeline the values change. A patch bump would tell
+a Fable consumer that nothing observable moved, which is false. Pre-1.0, MINOR is the lane that says
+"look before you repin", and this is exactly that.
+
+**Why the guard is a probe and not a test.** A compile gate cannot disagree about a number, and
+neither can a .NET suite: reintroducing the naive multiply was measured to leave all 720 tests green
+while the transpiled side was wrong on 120 of 124 inputs. So the certification is bought twice over —
+an independent 64-bit reference implementation inside `HashTests` pins the .NET half against a
+mistake in the split multiply itself, and a scratch Fable build of a corpus run under node and
+byte-compared pins the cross-pipeline half. Both were taken go-red before being trusted. The standing
+obligation, recorded in `Hash.fs` and STABILITY.md: re-run the probe when either multiply-safe helper
+is touched.
+
 ## 2026-08-21 — D15: the cryptographic digest is homed here; the default chain hash is not changed
 
 **Decided.** `Hash` ships a pinned pure SHA-256 (`sha256Hex`, `sha256Bytes`, `sha256HexOfBytes`, and

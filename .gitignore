@@ -8,3 +8,7 @@ artifacts/
 tests/fable-smoke/out/
 fable_modules/
 .fable/
+
+# The parity probe (tests/hash-parity-probe/) emits throwaway JS, same as the Fable smoke gate.
+tests/hash-parity-probe/out/
+tests/hash-parity-probe/probe-*.txt

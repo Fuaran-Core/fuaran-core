@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Cross-pipeline VALUE probe. Deliberately NOT in Fuaran.Core.slnx and NOT wired into
+    ./run.ps1 or ./verify.ps1: it needs a Node runtime, and the default gate stays
+    dependency-free. Run it with ./run-parity-probe.ps1.
+
+    It exists because the Fable step in ./verify.ps1 is a COMPILE gate, and a compile cannot
+    disagree about a number. `Hash.fnv1a` was divergent between the two pipelines behind a fully
+    green suite until 0.6.0 — see STABILITY.md "Hash-chain integrity posture". This project is the
+    only thing in the repo that can catch that class, so it is kept rather than reconstructed.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+    <PackageReference Include="Fable.Core" />
+  </ItemGroup>
+</Project>

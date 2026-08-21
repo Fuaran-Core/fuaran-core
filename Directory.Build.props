@@ -36,7 +36,15 @@
          source changes. MINOR rather than patch because a new public function in a shipped module
          is a contract a consumer can pin against, and because this reverses a stated posture —
          STABILITY.md previously said no cryptographic hash ships in Core. See DECISIONS.md D15. -->
-    <Version>0.5.0</Version>
+    <!-- 0.6.0 (2026-08-21): `Hash.fnv1a`'s multiply is routed through a private split-half 32-bit
+         form so it computes true 32-bit FNV-1a on BOTH pipelines. No public surface changed and
+         .NET values are byte-for-byte unchanged — the pinned vectors enforce that — so a .NET
+         consumer repins with no source change and no persisted digest moves. MINOR rather than
+         patch because STABILITY.md makes these functions' VALUES the contract, and under Fable
+         every value changes: the pre-0.6.0 transpiled multiply overflowed 2^53 and was not FNV-1a.
+         A patch bump would tell a Fable consumer nothing observable moved, which is false. See
+         DECISIONS.md D16 and the "Digest changes" entry in STABILITY.md. -->
+    <Version>0.6.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
