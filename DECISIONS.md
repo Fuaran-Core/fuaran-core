@@ -1,5 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-08-21 — D17: the column layer's delta is a monoid with four row states, and identity is a per-call witness
+
+**Decided.** From `0.7.0`, `Fuaran.Core.DataFrame` carries `TableDelta` — what changed in a columnar
+table — as a two-case type: `FullRefresh`, and a `RowSet` of identity-addressed row changes plus
+column invalidation. `compose` is total and associative for every pair of inputs, `FullRefresh`
+absorbs, and `empty scheme` is a two-sided identity within one identity scheme. Identity arrives as
+`RowIdentity<'Id>`, a per-call argument.
+
+**Why there are FOUR row states rather than three.** `RowAdded` / `RowChanged` / `RowRemoved` is the
+obvious set and it is not closed under composition. A row change is exactly a
+`(existed-before, exists-after)` pair, composition takes the first's *before* and the second's
+*after*, and `Added ∘ Removed` is therefore `(absent, absent)` — a shape none of the three has.
+Collapsing it to "no change" is what a first draft does, and it costs associativity on precisely the
+inputs a re-add-then-drop sequence produces: `(Added ∘ Removed) ∘ Changed` is `Changed` while
+`Added ∘ (Removed ∘ Changed)` is nothing. So `RowTransient` is not a fourth case bolted on for the
+algebra's convenience; it is the missing element, and naming it is what makes the associativity claim
+true for *all* inputs instead of true for the consistent ones. It also earns its keep on its own
+terms: a consumer holding a per-row cache keyed by identity must evict a transient key, which the
+three-case reading would have told it nothing about.
+
+**Why a scheme mismatch degrades to `FullRefresh` rather than throwing.** Two deltas minted under
+different identity schemes describe incomparable key spaces, so no precise composite exists. The top
+element is not a failure value here — it is the accurate one, and it says exactly what is true
+("everything may have changed"). A caller that would rather be stopped than be given a coarse answer
+calls `composeChecked`, which refuses with `SchemeMismatch`. Both are available because the two
+postures are genuinely different jobs: a folding pipeline wants the total function, an operator-facing
+path wants the refusal.
+
+**Why identity is a per-call witness and not a field.** The columnar strand is deliberately
+witness-free — `Column` / `DataFrame` introduce no base type and no permanent witness field — and
+that property is worth more than the convenience of a `RowId` column baked into `Table`. So the
+delta is told *how* to key a row (`RowIdentity<'Id>`: a scheme name, a reader, a string rendering)
+and knows nothing about what a key means, the same posture `Propagation` takes with its dependency
+relation. `RowIdentity.byColumn` / `byColumns` are reference witnesses, sufficient to exercise the
+whole surface with no domain dependency of any kind.
+
+**Ordinals are a checked exception, not a fallback.** A delta declares its scheme, and the reserved
+scheme `"ordinal"` is the only one whose refs may be positional; every other scheme must address by
+key, and the two may not be mixed inside one delta. `validate` enforces both directions and the wire
+decoder runs the same check, so "ordinals only where no identity exists" is a property of the type
+rather than a note in a doc comment. This is the same rule `SkeletonOp` established for the tree
+strand at `0.2.0` — where a collection's members have identity, they are addressed by it.
+
+**One canonicalisation, called twice.** Deciding whether a row's content changed uses the pinned
+`cellToken` the columnar strand already partitions by, exposed rather than re-implemented. D16's
+lesson was that a hand-copied canonicalisation diverges silently and the copy nobody was thinking
+about is the one that breaks; a delta layer that answered "are these two rows the same" by a second
+rule would be exactly that, with the added cost that its answer would disagree with `Distinct`'s.
+
 ## 2026-08-21 — D16: `fnv1a` is made cross-pipeline exact, and the .NET side is the canonical one
 
 **Decided.** From `0.6.0`, `Hash.fnv1a`'s multiply goes through a private split-half 32-bit form

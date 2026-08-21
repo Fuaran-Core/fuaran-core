@@ -51,6 +51,20 @@ let private functionTouch =
 let private columnTouch = Cell.typeOf (Int 1)
 let private dataFrameTouch = DataFrame.cellString (Float 1.5)
 
+// Delta (Phase 98) — the delta algebra's encode AND decode, plus the identity witness. Named here
+// rather than left to ride along on the DataFrame project reference: the point of this file is that
+// each surface is reached DELIBERATELY, so a package that stops being Fable-clean is a compile error
+// attached to the line that names it.
+let private deltaTouch =
+    let d =
+        Delta.compose
+            (Delta.ofRows (RowIdentity.byColumn "id").Scheme [ ByKey "s:a", RowAdded ])
+            (Delta.ofColumns (RowIdentity.byColumn "id").Scheme [ "amount" ])
+
+    match DeltaCodec.decode (DeltaCodec.encode d) with
+    | Ok back -> Delta.toChange back
+    | Error e -> Some(ColumnValuesChanged(ColumnCodec.errorString e))
+
 // Query — declaration codec round-trip.
 let private queryTouch =
     let q: Query =

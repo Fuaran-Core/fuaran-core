@@ -47,7 +47,16 @@
          every value changes: the pre-0.6.0 transpiled multiply overflowed 2^53 and was not FNV-1a.
          A patch bump would tell a Fable consumer nothing observable moved, which is false. See
          DECISIONS.md D16 and the "Digest changes" entry in STABILITY.md. -->
-    <Version>0.6.0</Version>
+    <!-- 0.7.0 (2026-08-21): `Fuaran.Core.DataFrame` gains the typed delta representation for the
+         column layer — `TableDelta` / `RowSetDelta` / `RowRef` / `RowChange` / `DeltaDefect` /
+         `RowIdentity<'Id>`, the `Delta` algebra (associative composition, `FullRefresh` absorbing,
+         validation that refuses a delta whole) and `DeltaCodec`. Purely additive: no existing type,
+         function or wire byte moved, and `DataFrame`'s two new public helpers (`cellToken` /
+         `rowToken` / `rowTokenString`) merely expose the canonicalisation `groupKey` already used,
+         so consumers repin without source changes. MINOR rather than patch because new public types
+         and modules in a shipped package are a contract a consumer can pin against. See DECISIONS.md
+         D17. -->
+    <Version>0.7.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

@@ -40,6 +40,9 @@
     <Compile Include="ColumnTests.fs" />
     <Compile Include="DataFrameTests.fs" />
     <Compile Include="ColumnOpsTests.fs" />
+    <!-- Phase 98 — the column layer's typed delta: the algebra laws, the wire, and the
+         reference identity witness. After the columnar suites it builds on. -->
+    <Compile Include="DeltaTests.fs" />
     <Compile Include="QueryTests.fs" />
     <Compile Include="Snapshots.fs" />
     <Compile Include="IdlSpikeTests.fs" />
