@@ -76,6 +76,10 @@
          generated F# vs generated TypeScript). Appended at the end of the list: it
          reads UiIdl.fs + UiGenerated.fs, so it must compile after both. -->
     <Compile Include="IdlFullVocabularyFuzzTests.fs" />
+    <!-- Phase 102 - the null-tolerant read: the conformance family plus the
+         strict-parser-unchanged pins. Appended at the end of the list; it depends on
+         nothing here. -->
+    <Compile Include="WireNullToleranceTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

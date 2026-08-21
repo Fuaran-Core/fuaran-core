@@ -620,9 +620,9 @@ these two", never "one of these is wrong". The footprint function is injectable
 (`concurrencyLawsWith`) purely as the teeth seam — the in-repo suite proves the law bites under a
 falsely-independent footprint; domains run `concurrencyLaws` (pinned to the real `Ops.footprint`).
 
-## The IDL engine — two packages, two promises (Phase 97, `0.7.0`)
+## The IDL engine — two packages, two promises (Phase 97, `0.8.0`)
 
-The IDL engine ships as **two** packages from `0.7.0`, and the split is by what each one
+The IDL engine ships as **two** packages from `0.8.0`, and the split is by what each one
 commits to rather than by size.
 
 **`Fuaran.Core.Idl` — the model half. What it promises:**
@@ -705,12 +705,13 @@ operate over the resulting `JVal`, and `Fuaran.Core.OpStream.fromJsonl` ships it
 self-contained line scanner — so a Fable-compiled host can decode, `verifyChain`, and replay
 in-browser without a host-side boundary. `Json.render` and `Json.parse` are inverses over
 canonical wire JSON. The Fuaran wire `JVal` model has no `null`; a bare `null` token is
-rejected by name on decode.
+rejected by name on decode (and see "Null-tolerant read" below for the opt-in, read-side-only
+tolerance that lets a foreign document spell an absent member `null` without the model gaining one).
 
 **Enforced, not asserted (Phase 54).** `./verify.ps1` includes a **Fable-compile gate**: the
 `tests/fable-smoke/` project references every public package and is compiled with `dotnet fable`, so a
 construct that is not Fable-clean fails the green gate in-repo rather than surfacing downstream.
-`Fuaran.Core.Idl` joined that set at `0.7.0` — it was the one `src/` package absent from it, which
+`Fuaran.Core.Idl` joined that set at `0.8.0` — it was the one `src/` package absent from it, which
 made its portability an unprovable claim rather than a certified one. What had blocked it was not the
 model but the emitters sharing its project; splitting them into `Fuaran.Core.Idl.Codegen` (Phase 97)
 removed the obstacle rather than working around it. `Idl.Codegen`, `Idl.Spike` and `Observer` stay off
@@ -840,3 +841,41 @@ total partition, pairwise independence, rejection actionability, and any-order c
 (`concurrencyLaws`, Phase 80, is the stronger op-level-interleaving form of the same claim — a domain
 that arbitrates runs both). `ArbitrationRejection<'Id>` is a `Rejection`-class envelope — a new case
 is additive; removing a case is breaking.
+
+## Null-tolerant read (Phase 102, `0.7.0`)
+
+`Fuaran.Core.Wire.NullPolicy` is the **read-side** policy for the JSON `null` token, and it changes
+nothing about the wire model: `JVal` gains no constructor, `Json.render` / `Canon.render` never emit
+`null` whichever policy a read ran under, and the encode side is untouched. What it adds is an opt-in
+way to *read* a foreign, spec-conformant document that spells an absent member `null` — which a great
+many JSON producers do, and which no amount of consumer-side work can route around.
+
+- **`RejectNull` is the pinned default.** `parse` / `parseWith` / `parseDetailed` /
+  `parseDetailedWith` are byte-identical under it — same errors, same `Kind`s, same positions, same
+  messages, including the `NullNotRepresentable` refusal consumers branch on. The core parser now
+  takes the policy as a parameter (`parseDetailedWithPolicy`); the pre-existing entry points pass
+  `RejectNull` and are wrappers over it.
+- **`EraseMemberNull` erases a `null` in object-member value position to member absence**, so
+  `{"a":null}` reads exactly as `{}` — the same "absence is structural" rule the encode side already
+  applies to a null cell (`RowCodec.encodeCell` rule 4, WIRE_FORMAT §2 rule 4). Entry points:
+  `Json.parseTolerantOfNull` / `parseTolerantOfNullWith` / `parseDetailedTolerantOfNull` /
+  `parseWithPolicy`, and `Decode.parseTolerantOfNull` for the combinator path. A consumer swaps one
+  call; every combinator downstream behaves as it does against the `null`-free spelling
+  (`getProp` on an erased member returns `missing property: <name>`, not a null).
+- **The position rules are part of the contract, not an implementation accident.** A bare top-level
+  `null` (the whole document would vanish) and a `null` **array element** (erasing it would silently
+  renumber every later index) have no absence to erase to and stay `NullNotRepresentable` under the
+  tolerant policy too — with a **different message** from the strict refusal, because the two have
+  different remedies and a consumer must not read one as the other. Array-position tolerance is a
+  deliberate future extension if a real need surfaces, never a thing this policy quietly already does.
+- **Tolerance is a read normalisation, never a new emission.** `render` of a tolerantly-parsed
+  document is exactly the canonical `null`-free form, and that form re-parses under the strict policy —
+  so nothing downstream (a hash chain, a byte-comparing conformance corpus, another host) can tell
+  a tolerantly-read document from one written without the token. This is the leg that keeps the
+  tolerance from leaking into the format.
+
+`Fuaran.Core.Conformance.WireNullTolerance` is the executable form of all four bullets — the vectors
+any host claiming the tolerant read, in any language, satisfies or does not have it: erasure ≡
+omission (including nested, and inside array elements), the strict path's refusal unchanged, the
+non-member positions rejected by name with a distinguishable message, near-misses of the token not
+absorbed, `null`-free controls unaffected by the policy, and the render-and-re-parse round trip.

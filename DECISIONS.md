@@ -2,7 +2,7 @@
 
 ## 2026-08-21 — D17: the IDL splits into a model half and a codegen half, and both ship
 
-**Decided.** From `0.7.0` the IDL engine is two packages. `Fuaran.Core.Idl` holds the model, the
+**Decided.** From `0.8.0` the IDL engine is two packages. `Fuaran.Core.Idl` holds the model, the
 codec, the sampler, the `idl.json` artifact projection and the sanitisation floor; a new
 `Fuaran.Core.Idl.Codegen` holds the source emitters, `CodegenError`, the codegen trust boundary and
 the stability diff classifier. Both are packable. The namespace does not split — `Gen`, `Trust` and
@@ -46,7 +46,7 @@ keyed on a hard-coded vocabulary name in a domain-generic engine — and publish
 that visible rather than fixing it.
 
 **Not decided here.** Whether the two halves should ever run on separate version lines. They move
-together at `0.7.0` because they were one package a commit ago; a divergence needs a reason, and none
+together at `0.8.0` because they were one package a commit ago; a divergence needs a reason, and none
 exists yet.
 
 ## 2026-08-21 — D16: `fnv1a` is made cross-pipeline exact, and the .NET side is the canonical one

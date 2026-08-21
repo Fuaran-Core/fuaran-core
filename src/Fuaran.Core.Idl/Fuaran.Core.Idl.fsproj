@@ -9,7 +9,7 @@
          a caller supplies), so shipping it is what makes a second vocabulary declarable
          without the declarer living in this repo. See DECISIONS.md D14.
 
-         Split from the codegen half at 0.7.0 (Phase 97, DECISIONS.md D17): this package is
+         Split from the codegen half at 0.8.0 (Phase 97, DECISIONS.md D17): this package is
          the model, the codec, the sampler and the sanitisation floor — values in, values
          out — and is Fable-clean, gated by `tests/fable-smoke`. The source emitters and the
          diff classifier ship beside it as `Fuaran.Core.Idl.Codegen`, whose real contract is
