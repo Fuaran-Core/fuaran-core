@@ -44,6 +44,31 @@ type JsonError =
       Message: string
       Kind: JsonErrorKind }
 
+/// The **read-side** policy for the JSON `null` token — the position rules as data.
+///
+/// The Fuaran wire model itself is unchanged by this type: `JVal` gains no constructor,
+/// `Json.render` / `Canon.render` never emit `null` whichever policy a read ran under, and the
+/// strict policy is the pinned default (`parse` / `parseWith` / `parseDetailed` / `parseDetailedWith`
+/// are byte-identical under it — same errors, same positions, same messages). The policy governs
+/// exactly one thing: what the parser does when a **foreign** document spells an absent member
+/// `null`, as a great many JSON producers do.
+///
+/// Tolerance is a *read* normalisation, never a new emission — a tolerantly-parsed document
+/// re-renders in the canonical `null`-free form, so nothing downstream can tell it apart from the
+/// same document spelled without the token.
+type NullPolicy =
+    /// Every `null` token, in every position, is a `NullNotRepresentable` rejection. The pinned
+    /// default behaviour, which consumers branch on.
+    | RejectNull
+    /// A `null` in **object-member value position** is erased to member absence, so `{"a":null}`
+    /// reads exactly as `{}` — the same "absence is structural" rule the encode side already
+    /// applies to a null cell (`RowCodec.encodeCell` rule 4). Every other position has no absence
+    /// to erase to and stays a named `NullNotRepresentable` rejection: a bare top-level `null` (the
+    /// whole document would vanish) and a `null` array element (erasing it would silently renumber
+    /// every later index). Array-position tolerance, if a consumer ever surfaces a genuine need for
+    /// it, is a deliberate extension — not a thing this case quietly already does.
+    | EraseMemberNull
+
 /// Accessors over `JVal` that absorb the wire's numeric normalization (see the type doc:
 /// a whole-valued `JFloat` round-trips as `JInt`, because JSON has one number type).
 [<RequireQualifiedAccess>]
@@ -138,9 +163,17 @@ module Json =
     [<Literal>]
     let defaultMaxDepth = 512
 
-    /// `parseDetailed` under an explicit nesting cap (Phases 10 + 22) — the core parser. Returns a
-    /// structured `JsonError` on failure; `parseWith` / `parse` are the string-error wrappers.
-    let parseDetailedWith (maxDepth: int) (input: string) : Result<JVal, JsonError> =
+    /// `parseDetailed` under an explicit nesting cap **and an explicit `NullPolicy`** — the core
+    /// parser every other entry point is a wrapper over. Under `RejectNull` (the default every
+    /// pre-existing entry point passes) it is the parser as it has always been, byte-for-byte.
+    /// Returns a structured `JsonError` on failure; the `parseWith` family are the string-error
+    /// wrappers.
+    let parseDetailedWithPolicy (policy: NullPolicy) (maxDepth: int) (input: string) : Result<JVal, JsonError> =
+        let tolerateMemberNull =
+            match policy with
+            | RejectNull -> false
+            | EraseMemberNull -> true
+
         let n = input.Length
         let mutable i = 0
 
@@ -327,7 +360,19 @@ module Json =
             | '[' -> parseArray depth
             | 't' -> parseLiteral "true" (JBool true)
             | 'f' -> parseLiteral "false" (JBool false)
-            | 'n' -> fail NullNotRepresentable "null is not representable in the Fuaran wire JVal model"
+            | 'n' ->
+                // Under `EraseMemberNull` a member-position null never reaches here — `parseObject`
+                // absorbs it before calling `parseValue` — so a null arriving at this arm under the
+                // tolerant policy is at a position with NO absence to erase it to (bare root, or an
+                // array element). Say so: a consumer reading the tolerant path's rejection must not
+                // mistake it for the strict policy's blanket refusal, since the remedy is different
+                // (the strict one is fixed by choosing the tolerant policy; this one is not).
+                if tolerateMemberNull then
+                    fail
+                        NullNotRepresentable
+                        "null is not representable in the Fuaran wire JVal model, and this position has no absence to erase it to (only an object-member null is erased)"
+                else
+                    fail NullNotRepresentable "null is not representable in the Fuaran wire JVal model"
             | c when c = '-' || (c >= '0' && c <= '9') -> parseNumber ()
             | c -> fail UnexpectedChar ("unexpected character '" + string c + "'")
 
@@ -356,8 +401,24 @@ module Json =
                     let key = parseString ()
                     skipWs ()
                     expect ':'
-                    let v = parseValue (depth + 1)
-                    fields.Add((key, v))
+                    skipWs ()
+
+                    // The one behavioural fork of `EraseMemberNull`, and the only place in the
+                    // parser that can erase anything: a member whose value is exactly the `null`
+                    // token is consumed and NOT added, so the object reads as though the member had
+                    // been omitted. Nothing malformed is absorbed: a truncated near-miss (`nul`)
+                    // fails this test and falls through to `parseValue`, which names it exactly as
+                    // the strict policy does, and a trailing-garbage one (`nullish`) is caught by
+                    // the ',' / '}' expectation below. Under `RejectNull` the test is never taken
+                    // and the member path is the pre-existing one, unchanged.
+                    let erased = tolerateMemberNull && i + 4 <= n && input.Substring(i, 4) = "null"
+
+                    if erased then
+                        i <- i + 4
+                    else
+                        let v = parseValue (depth + 1)
+                        fields.Add((key, v))
+
                     skipWs ()
 
                     match peek () with
@@ -413,6 +474,11 @@ module Json =
                   Message = msg
                   Kind = kind }
 
+    /// `parseDetailed` under an explicit nesting cap (Phases 10 + 22) — the strict parser. Returns a
+    /// structured `JsonError` on failure; `parseWith` / `parse` are the string-error wrappers.
+    let parseDetailedWith (maxDepth: int) (input: string) : Result<JVal, JsonError> =
+        parseDetailedWithPolicy RejectNull maxDepth input
+
     /// Render a `JsonError` as the byte-identical legacy string (`"not valid JSON: <msg> at
     /// position <pos>"`) that `parse` / `parseWith` have always returned.
     let private formatJsonError (e: JsonError) : string =
@@ -433,8 +499,32 @@ module Json =
     /// `null` token is rejected by name (the wire model has no null). On failure the
     /// `Error` names what was expected — the same envelope discipline as the combinators.
     /// Nesting is capped at `defaultMaxDepth` (Phase 10) so deep input is a named `Error`,
-    /// not a stack-overflow crash; use `parseWith` to override the cap.
+    /// not a stack-overflow crash; use `parseWith` to override the cap. For a *foreign* document
+    /// that spells absent members `null`, see `parseTolerantOfNull`.
     let parse (input: string) : Result<JVal, string> = parseWith defaultMaxDepth input
+
+    /// `parse` under an explicit `NullPolicy` — the string-error wrapper over
+    /// `parseDetailedWithPolicy`. `parseWithPolicy RejectNull` is exactly `parseWith`.
+    let parseWithPolicy (policy: NullPolicy) (maxDepth: int) (input: string) : Result<JVal, string> =
+        parseDetailedWithPolicy policy maxDepth input |> Result.mapError formatJsonError
+
+    /// The **null-tolerant read** at an explicit nesting cap: a `null` in object-member position is
+    /// erased to member absence (`{"a":null}` reads as `{}`); a bare or array-element `null` is a
+    /// named rejection, as under the strict policy. See `NullPolicy.EraseMemberNull`.
+    let parseTolerantOfNullWith (maxDepth: int) (input: string) : Result<JVal, string> =
+        parseWithPolicy EraseMemberNull maxDepth input
+
+    /// The **null-tolerant read** at the default nesting cap — the entry point a consumer of a
+    /// foreign, spec-conformant document reaches for when that document spells absent members
+    /// `null`. Strict `parse` is untouched; this is an opt-in, read-side-only tolerance, and what it
+    /// produces is an ordinary `JVal` that re-renders in the canonical `null`-free form.
+    let parseTolerantOfNull (input: string) : Result<JVal, string> =
+        parseTolerantOfNullWith defaultMaxDepth input
+
+    /// `parseTolerantOfNull` with the structured `JsonError` (the tolerant path's non-member
+    /// rejections keep `Kind = NullNotRepresentable`; the `Message` names the missing absence).
+    let parseDetailedTolerantOfNull (input: string) : Result<JVal, JsonError> =
+        parseDetailedWithPolicy EraseMemberNull defaultMaxDepth input
 
 /// The canonical `$type` wire discipline — the single
 /// platform-wide canonical-JSON convention `Fuaran.Core` and `Fuaran.UI` share, so a value
@@ -602,6 +692,12 @@ module Decode =
 
     /// Parse a JSON string to a `JVal` root.
     let parse (json: string) : Result<JVal, string> = Json.parse json
+
+    /// Parse a **foreign** JSON string that spells absent members `null` — object-member `null` is
+    /// erased to absence, so every combinator below (`getProp` → `missing property: <name>`) behaves
+    /// exactly as it does against the same document written without the token. The one-word swap a
+    /// consumer makes to read a spec-conformant foreign document; everything downstream is unchanged.
+    let parseTolerantOfNull (json: string) : Result<JVal, string> = Json.parseTolerantOfNull json
 
     let getProp (name: string) (el: JVal) : Result<JVal, string> =
         match el with

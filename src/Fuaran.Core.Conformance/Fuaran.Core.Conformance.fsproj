@@ -8,6 +8,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Conformance.fs" />
+    <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
+         above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->
+    <Compile Include="WireNullTolerance.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
@@ -24,6 +27,10 @@
     <ProjectReference Include="..\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
+    <!-- Phase 102 — declared explicitly for WireNullTolerance.fs. It already arrived
+         transitively (via Column); a family that drives the parser directly should not
+         depend on another project's reference list to keep doing so. -->
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

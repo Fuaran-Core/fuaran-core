@@ -206,7 +206,7 @@ let tests =
 
               let sampled =
                   [ for seed in 1..40 do
-                        for v in Gen.sampleNodes idl [ "Note" ] seed 1 do
+                        for v in Sample.sampleNodes idl [ "Note" ] seed 1 do
                             match v with
                             | VNode(_, _, fields) ->
                                 match fields |> List.tryFind (fun (n, _) -> n = "live") with
@@ -221,7 +221,7 @@ let tests =
 
               // …and the sample actually encodes, which a case-name leak would not.
               for seed in 1..40 do
-                  for v in Gen.sampleNodes idl [ "Note" ] seed 1 do
+                  for v in Sample.sampleNodes idl [ "Note" ] seed 1 do
                       match Encode.encode idl v with
                       | Ok _ -> ()
                       | Error e -> failtestf "a sampled node failed to encode: %s" e)
