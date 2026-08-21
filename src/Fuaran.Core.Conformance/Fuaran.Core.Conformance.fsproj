@@ -11,6 +11,10 @@
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->
     <Compile Include="WireNullTolerance.fs" />
+    <!-- Phase 99 — the incremental-evaluation equivalence family. Independent of the op-algebra
+         law kit above (it drives Fuaran.Core.DataFrame's evaluator only), so it is appended at
+         the end. -->
+    <Compile Include="IncrementalDelta.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

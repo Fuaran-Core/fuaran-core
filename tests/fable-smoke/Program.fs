@@ -66,6 +66,29 @@ let private deltaTouch =
     | Ok back -> Delta.toChange back
     | Error e -> Some(ColumnValuesChanged(ColumnCodec.errorString e))
 
+// Incremental (Phase 99) — the classification, a primed state, and a delta-driven refresh. Named
+// deliberately for the same reason `deltaTouch` is: the seam is the piece a browser-side consumer
+// most wants (a re-render that re-evaluates only the rows that moved), so a package that stopped
+// being Fable-clean here would be discovered by the consumer rather than by this file.
+let private incrementalTouch =
+    let idw = RowIdentity.byColumn "id"
+
+    let t: Table =
+        { Schema = [ "id", StringType; "a", IntType ]
+          Columns =
+            [ Column.create "id" StringType [ Str "r0"; Str "r1" ]
+              Column.create "a" IntType [ Int 1; Int 2 ] ] }
+
+    let pipeline = [ Filter(Binary(Gt, Col "a", Lit(Int 0))) ]
+    let declared = Incremental.isIncremental (Incremental.plan pipeline)
+
+    match Incremental.primeOn idw pipeline t with
+    | Ok primed ->
+        match Incremental.refreshOn idw pipeline primed (Delta.empty idw.Scheme) t with
+        | Ok next -> declared, Incremental.footprintString (Incremental.footprint next)
+        | Error e -> declared, DataFrame.errorString e
+    | Error e -> declared, DataFrame.errorString e
+
 // Query — declaration codec round-trip.
 let private queryTouch =
     let q: Query =
@@ -282,6 +305,10 @@ let main _ =
       functionTouch
       (sprintf "%A" columnTouch)
       dataFrameTouch
+      // `deltaTouch` was defined by Phase 98 but never referenced here, so the whole point of the
+      // file — a compile error attached to the line that names the surface — did not apply to it.
+      (sprintf "%A" deltaTouch)
+      (sprintf "%A" incrementalTouch)
       queryTouch
       (sprintf "%A" (List.length conformanceTouch))
       projectionTouch

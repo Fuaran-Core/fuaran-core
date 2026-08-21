@@ -91,3 +91,5 @@ adoption prints `conformance: GREEN`.
 - [`samples/adoption/Program.fs`](../samples/adoption/Program.fs) — the runnable template.
 - [`CORE-ADOPTION-PILOT.md`](../../Fuaran-Documents/docs/CORE-ADOPTION-PILOT.md) — the Documents pilot (the worked example + the findings).
 - [`STABILITY.md`](../STABILITY.md) — which witness surfaces are stability-critical.
+- [`incremental-evaluation.md`](incremental-evaluation.md) — adopting incremental `Transform`
+  evaluation (a refresh that costs the rows that changed).

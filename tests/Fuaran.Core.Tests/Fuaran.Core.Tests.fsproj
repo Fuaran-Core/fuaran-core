@@ -43,6 +43,9 @@
     <!-- Phase 98 — the column layer's typed delta: the algebra laws, the wire, and the
          reference identity witness. After the columnar suites it builds on. -->
     <Compile Include="DeltaTests.fs" />
+    <!-- Phase 99 — the incremental evaluation seam: the generated equivalence family, the
+         measured footprints, and one case per way out of the incremental path. -->
+    <Compile Include="IncrementalTests.fs" />
     <Compile Include="QueryTests.fs" />
     <Compile Include="Snapshots.fs" />
     <Compile Include="IdlSpikeTests.fs" />

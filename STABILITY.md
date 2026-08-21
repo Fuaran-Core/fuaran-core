@@ -937,3 +937,58 @@ and never too little — and it returns an **option**, because "nothing changed"
 **`DataFrame.cellToken` / `rowToken` / `rowTokenString`** are public as of `0.9.0` — the pinned
 canonical row token `GroupBy` / `Distinct` / `Intersect` already partition by. They are exposed, not
 duplicated, so "did this row's content change" has exactly one answer across the strand.
+
+## Incremental column-layer evaluation (Phase 99, `0.10.0`)
+
+`Fuaran.Core.DataFrame` carries `Incremental` — a `Transform` pipeline evaluated against a
+`TableDelta` rather than from scratch — with the `IncrementalDelta` equivalence family in
+`Fuaran.Core.Conformance` certifying it. **Purely additive**: nothing that shipped before moved, no
+wire byte changed, and no evaluation result changed.
+
+**The contract is an equality, and it is the whole contract.** For every pipeline, every state and
+every delta, `Incremental.refresh … |> Result.map Incremental.result` equals
+`DataFrame.evalPipelineWithInEnv resolve env pipeline source` over the same source — the same table,
+or the same `EvalError`. The reference evaluator remains the single cross-host semantics; the
+incremental path is a restriction of it that recomputes less, and it computes what it does recompute
+through the reference evaluator's own primitives. A consumer may switch a pipeline between the two at
+any time and observe nothing but the cost.
+
+**The caller's obligation.** The delta must truthfully describe the change from the source the state
+was last evaluated against to the source now passed in; `Delta.diff` produces exactly that. A delta
+that under-reports is a false statement about the data, and no evaluator can detect one without
+recomputing the answer it was asked to avoid recomputing.
+
+**The declared boundary.** `Incremental.plan` classifies every step before any evaluation:
+`PropagateRows` (`Filter` / `Project` / `Derive`), `MaintainGroups` (a `GroupBy` as the pipeline's
+**last** step), or `FallBack` with a typed `FallBackReason`. `IncrementalStrategy` is the induced
+verdict. Adding a `FallBackReason` case, or reclassifying a step from `FallBack` to a restricted
+class, is **additive** — the answers do not move, only the cost. Reclassifying a step the other way
+(from restricted to `FallBack`) is likewise answer-preserving but is a **performance** regression a
+consumer may be asserting on through the footprint, so it is announced in the release note.
+
+**The footprint is part of the surface, not diagnostics.** `RecomputeFootprint`
+(`{ SourceRows; ResultRows; Recompute }`) and `Recompute` (`Primed` / `ReusedPrior` /
+`RowsRecomputed` / `GroupsRecomputed` / `FullRecompute`) carry **counts only, no clock**, so they are
+deterministic and identical on every host and a consumer may assert on them. `Recompute` is a
+closed-set envelope — a new case is additive, removing one is breaking.
+
+**The type is `RecomputeFootprint`, deliberately.** `Fuaran.Core.Ops` publishes
+`Fuaran.Core.Footprint` (the op-script address set). Two same-named types in one namespace across two
+packages collide for a consumer that opens both, so the columnar one carries the longer name.
+
+**`IncrementalEval`'s fields are public but engine-owned.** Build one with `Incremental.prime` and
+advance it with `Incremental.refresh`. The record is transparent because the columnar strand keeps
+its data transparent, not because a hand-built state is supported: one whose caches disagree with its
+source is a claim the evaluator cannot check. Its shape is **not** a stability promise the way a
+witness record is — treat `Incremental.result` / `Incremental.footprint` as the surface.
+
+**Ordinal-addressed deltas are declined.** The reserved `ordinal` scheme names positions, and a cache
+keyed by position is invalidated wholesale by any insert, so a `RowSet` under it takes the full-
+evaluation path with `OrdinalAddressing` recorded. An identity witness that cannot key the source
+degrades the same way rather than failing the call: identity is what the seam needs, not what the
+answer needs.
+
+**Four new `DataFrame` entry points**, each a one-line wrapper over a primitive the reference
+evaluator already used privately: `evalExprInRow`, `aggregateCells`, `aggregateType`,
+`inferCellType`. They exist so the incremental path computes through the reference implementation
+rather than a copy, and they are stable in the ordinary way.

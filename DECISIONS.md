@@ -1,5 +1,64 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-08-21 — D19: incremental evaluation is a RESTRICTION of the reference evaluator, and the boundary is data
+
+**Decided.** From `0.10.0`, `Fuaran.Core.DataFrame` carries `Incremental` — a `Transform` pipeline
+evaluated against a `TableDelta` (D18) instead of from scratch. `plan` classifies every step as
+`PropagateRows`, `MaintainGroups`, or `FallBack` with a typed reason; `prime` builds a state over a
+source; `refresh` advances that state against a delta. Every result is equal to
+`DataFrame.evalPipelineWithInEnv` over the same source, for every delta, whichever internal path ran.
+
+**Why it computes through the reference evaluator rather than beside it.** An incremental evaluator
+recomputes a subset of what a full evaluation recomputes, so the two agree only if the subset is
+computed by the same code. Three private primitives were therefore exposed as one-line wrappers —
+`evalExprInRow`, `aggregateCells`, `inferCellType` — rather than reimplemented behind the seam. This
+is D16's lesson applied one layer up: a hand-copied semantics diverges silently, and the copy nobody
+is thinking about is the one that breaks. The alternative on offer was a second evaluator kept in
+step by a test suite, which is a maintenance promise rather than a property.
+
+**Why the fall-back is a first-class typed outcome and not an internal detail.** A sort, a window, a
+join and a whole-relation set op each produce a row whose value depends on rows the delta does not
+name. There is no honest incremental answer for them, and an approximation would be a wrong one. So
+the seam declines, in the type, before evaluating anything: a consumer can ASK
+`Incremental.plan` whether a pipeline will be restricted and read the reason if not. That makes
+adoption per pipeline rather than per application — a declined pipeline costs exactly what it costs
+today and sits beside an adopted one. Every runtime condition the path cannot honour (a changed
+pipeline or env, a moved schema, a `FullRefresh` delta, an ordinal-addressed delta, an unusable
+identity witness) takes the same route: full evaluation, reason recorded in the footprint. Degrading
+is always available and always correct, which is what makes the seam safe to adopt gradually.
+
+**Why the footprint is part of the contract and not diagnostics.** An incremental evaluator that
+quietly recomputed everything would pass an equality suite perfectly — the answers would all be
+right. So the work done is recorded as data (`Recompute`: `Primed` / `ReusedPrior` /
+`RowsRecomputed` / `GroupsRecomputed` / `FullRecompute reason`) and the conformance family asserts on
+it alongside the equality. Counts only, no clock, so the numbers are deterministic and identical on
+every host — which is what lets a consumer assert on them in its own tests, and lets the regression
+"this refresh started recomputing everything" be a failing assertion rather than a stopwatch reading.
+
+**The two order-sensitivities that are handled rather than assumed.** Both are silent when got
+wrong, and both are exactly what a first implementation misses. (1) A `Derive`d column's TYPE is
+inferred from the whole column, so it is recomputed from the rows alive AT THAT STEP even when no
+cell moved — a filter later in the pipeline that drops the only typed row moves the type, and no
+per-row cache can know that. (2) A group's aggregate depends on its members' ORDER — `First` / `Last`
+read position outright and a float `Sum` is order-sensitive in its last bits — so a cached aggregate
+is reused only when the group's ordered member list is byte-identical, never merely because no row in
+it was named. This is sharper than it looks: `Delta.diff` reports a pure row REORDERING as *quiet*,
+because every key is present at both ends with identical content, so "the delta named nothing"
+cannot be allowed to mean "nothing moved". The wholesale reuse of a prior result is therefore
+conditioned on the source itself being unchanged, not on the delta being quiet.
+
+**Ordinal-addressed deltas are declined, not supported at reduced quality.** D18 reserves the
+`ordinal` scheme for a source with no identity. A cache keyed by position is invalidated wholesale by
+any insert, so the seam refuses rather than offering a saving that evaporates on the first
+non-append. Identity is what the SEAM needs; it is not what the ANSWER needs, which is why a witness
+that cannot key the source degrades to a correct full evaluation rather than failing the call.
+
+**The footprint type is `RecomputeFootprint`, not `Footprint`.** `Fuaran.Core.Ops` already publishes
+`Fuaran.Core.Footprint` (the op-script address set from the arbitration work). Two same-named types
+in one namespace across two packages is a collision for any consumer that opens both, and the
+compiler found it the moment the conformance project referenced both — which is the argument for
+keeping the estate's law kit referencing every package rather than only the ones it tests.
+
 ## 2026-08-21 — D18: the column layer's delta is a monoid with four row states, and identity is a per-call witness
 
 **Decided.** From `0.9.0`, `Fuaran.Core.DataFrame` carries `TableDelta` — what changed in a columnar
