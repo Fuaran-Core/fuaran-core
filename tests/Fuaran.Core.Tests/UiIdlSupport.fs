@@ -412,7 +412,7 @@ let encodeActionJson (a: Action<'Msg>) : JVal = encAction a"""
 // canonical spelling collapsing a plain no-default State binding to the compact
 // `stateKey` form (Phase 768; the projection's encoder implements the collapse,
 // its decoder the fallback). Field-level optionality cannot express any of
-// that, so `Gen.sampleNodes` — which samples every combination the field
+// that, so `Sample.sampleNodes` — which samples every combination the field
 // declarations allow — generates Switch shapes OFF the canonical wire: both
 // keys, neither key, or an `on` the canonical encoder would respell. The
 // generated-F# leg (this projection) is then honestly lossy or refusing on

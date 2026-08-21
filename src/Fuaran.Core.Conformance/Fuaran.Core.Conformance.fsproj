@@ -8,8 +8,13 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Conformance.fs" />
-    <!-- Phase 100 — the fold-confluence pack (N-lane arrival-order invariance). Appended after
-         Conformance.fs: it reads `ConfRng`, `LawResult` and `ConformanceReport` from there. -->
+    <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
+         above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->
+    <Compile Include="WireNullTolerance.fs" />
+    <!-- Phase 100 — the fold-confluence pack (N-lane arrival-order invariance). After
+         Conformance.fs: it reads `ConfRng`, `LawResult` and `ConformanceReport` from there.
+         Independent of the null-tolerance family beside it; the order between those two is
+         free, so each simply keeps the position it arrived in. -->
     <Compile Include="FoldConfluence.fs" />
   </ItemGroup>
   <ItemGroup>
@@ -27,6 +32,10 @@
     <ProjectReference Include="..\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
+    <!-- Phase 102 — declared explicitly for WireNullTolerance.fs. It already arrived
+         transitively (via Column); a family that drives the parser directly should not
+         depend on another project's reference list to keep doing so. -->
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

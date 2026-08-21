@@ -587,7 +587,7 @@ let tests =
               // escaping and float formatting — so this reaches shapes the corpus
               // does not contain: control characters, surrogate pairs, whole-valued
               // floats, empty collections, and both sides of every presence rule.
-              let vectors = Gen.sampleNodes miniIdl generatedKinds 20260726 500
+              let vectors = Sample.sampleNodes miniIdl generatedKinds 20260726 500
 
               Expect.equal (List.length vectors) 500 "the sampler produced the requested vectors"
 

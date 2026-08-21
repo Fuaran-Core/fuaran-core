@@ -7,15 +7,23 @@
          domain using it reached across a sibling checkout for a byte-copy of its output.
          The engine is domain-generic by construction (a vocabulary is a plain `Idl` value
          a caller supplies), so shipping it is what makes a second vocabulary declarable
-         without the declarer living in this repo. See DECISIONS.md D14. -->
+         without the declarer living in this repo. See DECISIONS.md D14.
+
+         Split from the codegen half at 0.8.0 (Phase 97, DECISIONS.md D17): this package is
+         the model, the codec, the sampler and the sanitisation floor — values in, values
+         out — and is Fable-clean, gated by `tests/fable-smoke`. The source emitters and the
+         diff classifier ship beside it as `Fuaran.Core.Idl.Codegen`, whose real contract is
+         the shape of what it EMITS. A consumer that wants to decode a tree or sample a
+         vocabulary no longer takes a generator's output cadence to do it. -->
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Idl</PackageId>
-    <Description>Fuaran.Core.Idl — the interface-definition engine: a typed model of a domain's node vocabulary (kinds, unions, enums, records, four-way optionality, a declarable node envelope, hosted slots) plus the legs generated from it — a schema-driven canonical encoder/decoder, an F# structural-layer emitter with a declared-support channel (docs, splices, host projections), a JSON-schema emitter, a stability diff classifier over two artifact revisions, and the codegen trust boundary (allowlisted `Custom` resolution, sanitisation). The engine only; a vocabulary is DATA a domain declares and owns in its own repo. FSharp.Core + Fuaran.Core.Wire only.</Description>
+    <Description>Fuaran.Core.Idl — the interface-definition model: a typed description of a domain's node vocabulary (kinds, unions, enums, records, four-way optionality, a declarable node envelope, hosted slots), the schema-driven canonical encoder/decoder derived from it, a deterministic adversarial sampler over a vocabulary, the canonical `idl.json` artifact projection, and the host-neutral sanitisation floor. Fable-clean on both the encode and the decode path. The source emitters (F#, TypeScript, JSON Schema), the codegen trust boundary and the stability diff classifier ship separately as Fuaran.Core.Idl.Codegen. The engine only; a vocabulary is DATA a domain declares and owns in its own repo. FSharp.Core + Fuaran.Core.Wire only.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Idl.fs" />
-    <Compile Include="Diff.fs" />
-    <Compile Include="Trust.fs" />
+    <Compile Include="Sanitize.fs" />
+    <Compile Include="Sample.fs" />
+    <Compile Include="Artifact.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />

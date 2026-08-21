@@ -6,6 +6,7 @@ module FableSmoke.Program
 // the COMPILE is the gate.
 
 open Fuaran.Core
+open Fuaran.Core.Idl
 
 // Tree — content hashing + the portable FNV-1a.
 let private treeTouch = Hash.fnv1a "smoke"
@@ -177,6 +178,59 @@ let private aiSurfaceTouch =
     | Proposals.SubmitApplied s -> AiSurface.catalogueJson w + sprintf "%d/%A" (List.length s) resolved
     | other -> sprintf "%A" other
 
+// Idl (Phase 97) — the domain-neutral half of the IDL engine: declare a two-kind vocabulary, then
+// touch every leg a consumer can reach without the generator. This is the leg the split exists for:
+// the browser hosts are Fable, so "the model, codec, sampler and sanitisation floor are portable" was
+// an unprovable claim while the emitters sat in the same project and dragged
+// `CultureInfo.InvariantCulture` in with them. Sampling is here rather than only encode/decode
+// because the sampler's LCG is 64-bit arithmetic, which is exactly the shape that transpiles
+// differently — compile-checked here, value-checked by the suite's seeded vectors on .NET.
+let private idlTouch =
+    let vocab: Idl =
+        { Kinds =
+            [ { Tag = "Note"
+                Category = "leaf"
+                Fields =
+                  [ { Name = "text"
+                      Type = TStr
+                      Opt = Required }
+                    { Name = "weight"
+                      Type = TFloat
+                      Opt = Optional } ] }
+              { Tag = "Box"
+                Category = "container"
+                Fields =
+                  [ { Name = "children"
+                      Type = TList TNode
+                      Opt = Required } ] } ]
+          Unions = []
+          Enums = [ Declare.enumOf "Tone" [ "Calm"; "Loud" ] ]
+          Records = []
+          Defaults = []
+          NodeFields = []
+          Ops = [] }
+
+    let sampled = Sample.sampleNodes vocab [ "Note"; "Box" ] 20260821 4
+
+    let roundTripped =
+        sampled
+        |> List.map (fun v ->
+            match Encode.encode vocab v with
+            | Error e -> e
+            | Ok json ->
+                match Decode.decode vocab json with
+                | Ok _ -> json
+                | Error e -> e)
+        |> String.concat "|"
+
+    sprintf
+        "%d/%s/%s/%s/%d"
+        (String.length (Artifact.render vocab))
+        (Sanitize.sanitizeUrlOrBlank "javascript:alert(1)")
+        (Sanitize.scrubMarkdown "[x](javascript:alert(1))")
+        roundTripped
+        (Map.count (Sanitize.sanitizeAttributes (Map.ofList [ "onclick", "x"; "title", "t" ])))
+
 // OpStream.Attributed (Phase 81) — the attributed-stream lift + envelope codec must be Fable-clean on
 // encode AND decode (GP3): liftWitness derives an attributed witness, whose Encode/Decode wrap the inner
 // codec in an attribution envelope decoded via the self-contained JSONL scanner.
@@ -245,6 +299,7 @@ let main _ =
       projectionTouch
       propagationTouch
       aiSurfaceTouch
+      idlTouch
       foldConfluenceTouch ]
     |> List.iter (printfn "%s")
 

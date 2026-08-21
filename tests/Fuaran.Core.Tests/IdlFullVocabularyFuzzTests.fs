@@ -165,7 +165,7 @@ let tests =
               // envelopes shows up HERE as a precise failure rather than as the
               // three-way sweep quietly going vacuous — that sweep would still pass,
               // green and meaningless, with every vector envelope-free.
-              let vectors = Gen.sampleNodes uiIdl allKindTags seed vectorBudget
+              let vectors = Sample.sampleNodes uiIdl allKindTags seed vectorBudget
 
               // Phase 945 — narrow Switch shapes to the canonical wire (the
               // cross-field rule the IDL cannot state); see UiIdlSupport's note.
@@ -214,7 +214,7 @@ let tests =
                       (sprintf "host-only envelope field '%s' was sampled onto the wire" f.Name))
 
           testCase "three-way: interpreter, generated F# and generated TypeScript agree on every vector" (fun _ ->
-              let vectors = Gen.sampleNodes uiIdl allKindTags seed vectorBudget
+              let vectors = Sample.sampleNodes uiIdl allKindTags seed vectorBudget
 
               // Phase 945 — narrow Switch shapes to the canonical wire (the
               // cross-field rule the IDL cannot state); see UiIdlSupport's note.

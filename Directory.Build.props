@@ -47,7 +47,29 @@
          every value changes: the pre-0.6.0 transpiled multiply overflowed 2^53 and was not FNV-1a.
          A patch bump would tell a Fable consumer nothing observable moved, which is false. See
          DECISIONS.md D16 and the "Digest changes" entry in STABILITY.md. -->
-    <!-- 0.7.0 (2026-08-21): Phase 100 — the fold-confluence pack. `Fuaran.Core.OpStream.Dag` gains
+    <!-- 0.7.0 (2026-08-21): the null-tolerant read. `Fuaran.Core.Wire.NullPolicy` +
+         `Json.parseDetailedWithPolicy` / `parseWithPolicy` / `parseTolerantOfNull*` and
+         `Decode.parseTolerantOfNull`, so a consumer can read a foreign document that spells
+         absent members `null` without the wire model gaining one; plus the
+         `Conformance.WireNullTolerance` vector family that pins it. Purely additive — the
+         strict policy is the default, every pre-existing entry point is byte-identical under
+         it (same errors, positions and messages), and nothing on the encode path moved, so
+         consumers repin without source changes. MINOR rather than patch because a new public
+         type and new public functions in a shipped module are contracts a consumer can pin
+         against, and because a consumer matching `NullPolicy` is now possible at all. -->
+    <!-- 0.8.0 (2026-08-21): the IDL engine splits — `Fuaran.Core.Idl` keeps the model, the codec,
+         the sampler, the `idl.json` artifact and the sanitisation floor, and is now Fable-gated;
+         a new `Fuaran.Core.Idl.Codegen` package takes the source emitters, `CodegenError`, the
+         codegen trust boundary and the diff classifier. BREAKING for a consumer of
+         `Fuaran.Core.Idl` 0.4.0-0.6.0 that called `Gen`, `Trust` or `Diff`: those types are still
+         `Fuaran.Core.Idl.*` and still compile unchanged, but they arrive from a second package now,
+         so the fix is one added PackageReference and no source edit. `Gen.sampleNodes` is the one
+         genuine source change — it is `Sample.sampleNodes`, and it moved the other way, INTO the
+         model half. MINOR rather than major under the pre-1.0 policy at the head of STABILITY.md.
+         Additive for the nine non-IDL packages, which repin with no change at all. Eleven nupkgs
+         where 0.7.0 emitted ten. See DECISIONS.md D17 and STABILITY.md "The IDL engine — two
+         packages, two promises". -->
+    <!-- 0.9.0 (2026-08-21): Phase 100 — the fold-confluence pack. `Fuaran.Core.OpStream.Dag` gains
          `Dag.reconcileMany` (the N-lane generalisation of `reconcile`, identical to it at N = 2),
          and `Fuaran.Core.Conformance` gains the `FoldConfluence` module — `laneFoldLaws` /
          `certifyFold` plus the pieces a domain drives directly when investigating a counterexample
@@ -57,7 +79,7 @@
          changes. MINOR rather than patch because new public types and functions in shipped packages
          are a contract a consumer can pin against — the same grounds as 0.5.0. See STABILITY.md
          "Fold-confluence pack: N-lane arrival-order invariance". -->
-    <Version>0.7.0</Version>
+    <Version>0.9.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

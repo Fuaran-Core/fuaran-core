@@ -14,6 +14,7 @@
     <Project Path="src/Fuaran.Core.Column.Ops/Fuaran.Core.Column.Ops.fsproj" />
     <Project Path="src/Fuaran.Core.Query/Fuaran.Core.Query.fsproj" />
     <Project Path="src/Fuaran.Core.Idl/Fuaran.Core.Idl.fsproj" />
+    <Project Path="src/Fuaran.Core.Idl.Codegen/Fuaran.Core.Idl.Codegen.fsproj" />
     <Project Path="src/Fuaran.Core.Idl.Spike/Fuaran.Core.Idl.Spike.fsproj" />
     <Project Path="src/Fuaran.Core.Projection/Fuaran.Core.Projection.fsproj" />
     <Project Path="src/Fuaran.Core.AiSurface/Fuaran.Core.AiSurface.fsproj" />
