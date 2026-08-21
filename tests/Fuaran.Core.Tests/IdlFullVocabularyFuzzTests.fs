@@ -129,10 +129,7 @@ let private runNode (source: string) : string option =
     File.WriteAllText(tmp, source)
 
     try
-        let psi = ProcessStartInfo("node", "\"" + tmp + "\"")
-        psi.RedirectStandardOutput <- true
-        psi.RedirectStandardError <- true
-        psi.UseShellExecute <- false
+        let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
 
         match
             (try

@@ -458,10 +458,7 @@ let tests =
               File.WriteAllText(tmp, harness)
 
               try
-                  let psi = Diagnostics.ProcessStartInfo("node", "\"" + tmp + "\"")
-                  psi.RedirectStandardOutput <- true
-                  psi.RedirectStandardError <- true
-                  psi.UseShellExecute <- false
+                  let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
 
                   let proc =
                       try
@@ -531,10 +528,7 @@ let tests =
               File.WriteAllText(tmp, harness)
 
               try
-                  let psi = Diagnostics.ProcessStartInfo("node", "\"" + tmp + "\"")
-                  psi.RedirectStandardOutput <- true
-                  psi.RedirectStandardError <- true
-                  psi.UseShellExecute <- false
+                  let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
 
                   let proc =
                       try
@@ -627,10 +621,7 @@ let tests =
               File.WriteAllText(tmp, harness)
 
               try
-                  let psi = Diagnostics.ProcessStartInfo("node", "\"" + tmp + "\"")
-                  psi.RedirectStandardOutput <- true
-                  psi.RedirectStandardError <- true
-                  psi.UseShellExecute <- false
+                  let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
 
                   let proc =
                       try
@@ -719,10 +710,7 @@ let tests =
                   File.WriteAllText(path, fsx)
 
                   try
-                      let psi = ProcessStartInfo("dotnet", "fsi \"" + path + "\"")
-                      psi.RedirectStandardOutput <- true
-                      psi.RedirectStandardError <- true
-                      psi.UseShellExecute <- false
+                      let psi = ChildProcess.redirected "dotnet" ("fsi \"" + path + "\"")
 
                       match
                           (try
@@ -767,10 +755,7 @@ let tests =
                   File.WriteAllText(path, harness)
 
                   try
-                      let psi = ProcessStartInfo("node", "\"" + path + "\"")
-                      psi.RedirectStandardOutput <- true
-                      psi.RedirectStandardError <- true
-                      psi.UseShellExecute <- false
+                      let psi = ChildProcess.redirected "node" ("\"" + path + "\"")
 
                       match
                           (try

@@ -48,6 +48,10 @@
     <Compile Include="IncrementalTests.fs" />
     <Compile Include="QueryTests.fs" />
     <Compile Include="Snapshots.fs" />
+    <!-- Pins the UTF-8 decoding of a redirected child's stdout, so the cross-host
+         suites below do not depend on the console code page the runner inherited.
+         Before its first consumer; it references nothing here. -->
+    <Compile Include="ChildProcess.fs" />
     <Compile Include="IdlSpikeTests.fs" />
     <Compile Include="UiIdl.fs" />
     <Compile Include="IdlUiTests.fs" />
