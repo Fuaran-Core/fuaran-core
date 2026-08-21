@@ -47,7 +47,19 @@
          every value changes: the pre-0.6.0 transpiled multiply overflowed 2^53 and was not FNV-1a.
          A patch bump would tell a Fable consumer nothing observable moved, which is false. See
          DECISIONS.md D16 and the "Digest changes" entry in STABILITY.md. -->
-    <Version>0.6.0</Version>
+    <!-- 0.7.0 (2026-08-21): the IDL engine splits — `Fuaran.Core.Idl` keeps the model, the codec,
+         the sampler, the `idl.json` artifact and the sanitisation floor, and is now Fable-gated;
+         a new `Fuaran.Core.Idl.Codegen` package takes the source emitters, `CodegenError`, the
+         codegen trust boundary and the diff classifier. BREAKING for a consumer of
+         `Fuaran.Core.Idl` 0.4.0-0.6.0 that called `Gen`, `Trust` or `Diff`: those types are still
+         `Fuaran.Core.Idl.*` and still compile unchanged, but they arrive from a second package now,
+         so the fix is one added PackageReference and no source edit. `Gen.sampleNodes` is the one
+         genuine source change — it is `Sample.sampleNodes`, and it moved the other way, INTO the
+         model half. MINOR rather than major under the pre-1.0 policy at the head of STABILITY.md.
+         Additive for the nine non-IDL packages, which repin with no change at all. Eleven nupkgs
+         where 0.6.0 emitted ten. See DECISIONS.md D17 and STABILITY.md "The IDL engine — two
+         packages, two promises". -->
+    <Version>0.7.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

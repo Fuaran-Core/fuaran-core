@@ -620,6 +620,75 @@ these two", never "one of these is wrong". The footprint function is injectable
 (`concurrencyLawsWith`) purely as the teeth seam — the in-repo suite proves the law bites under a
 falsely-independent footprint; domains run `concurrencyLaws` (pinned to the real `Ops.footprint`).
 
+## The IDL engine — two packages, two promises (Phase 97, `0.7.0`)
+
+The IDL engine ships as **two** packages from `0.7.0`, and the split is by what each one
+commits to rather than by size.
+
+**`Fuaran.Core.Idl` — the model half. What it promises:**
+
+- **The model** — `IdlType`, `IdlValue`, `Idl`, `IdlKind`, `IdlField`, `IdlUnion`, `IdlEnum`,
+  `IdlRecord`, `IdlDefault`, `Optionality` — plus the `Declare` helpers.
+- **The codec** — `Encode.encode` / `encodeOp` and `Decode.decode` / `decodeOp`, schema-driven
+  from an `Idl`. Both return `Result<_, string>`: a vocabulary the codec cannot honour is a
+  named failure, never an exception. The bytes are canonical because the codec builds a `JVal`
+  and renders it through `Canon` — the canonical number / key / escape rules are **inherited**
+  from `Fuaran.Core.Wire`, not re-implemented, so a change to them is a `Canon` event and is
+  governed by "Canonical float layout" and "Digest changes" below, not here.
+- **The sampler** — `Sample.sampleNodes`, deterministic from `(seed, index)` alone. Its LCG is
+  explicit rather than `System.Random` precisely so a vector that fails on another host
+  reproduces here from its seed. **The sampled sequence for a given `(idl, tags, seed, count)`
+  is part of the contract**: a change to the draw order is a wire-visible change for anyone
+  storing vectors, and is treated as breaking even though no signature moves.
+- **`Sanitize`** — the host-neutral URL / attribute / markdown floor. Its **behaviour** is the
+  contract, not its signatures: it is a security floor, and a change that admits something it
+  previously rejected is breaking regardless of what compiles. Phase 96 is the standing lesson
+  — a lift that dropped two behaviours, both failing open, survived because the claim was
+  written in a comment rather than pinned by a test.
+- **`Artifact.render`** — the canonical `idl.json` projection, with the ordering contract stated
+  at the module. `Artifact.version` pins the ENCODING; a consumer pins that, not the contents.
+- **Fable-cleanliness**, gated rather than asserted: `tests/fable-smoke` compiles the whole of
+  this package, so every one of the above reaches a browser. That is the reason the split exists
+  — see "Fable cleanliness" below.
+
+**`Fuaran.Core.Idl.Codegen` — the generation half.** `Gen` (the F# structural-layer emitter and
+its declared-support channel, the TypeScript encoder backend, the JSON-schema emitter, the
+scaffold writer), `CodegenError`, `Trust` (the codegen trust boundary) and `Diff` (the stability
+classifier over two `idl.json` revisions). **.NET-only and build-time only**: it ships no Fable
+source, because `StringBuilder` and `CultureInfo.InvariantCulture` serve the TypeScript backend
+and a portability it cannot keep should not be offered.
+
+**Its real contract is the shape of what it EMITS, and that is deliberately weaker than an API
+promise.** A consumer compiles and ships generated source, so a change to the emitted prelude is
+a downstream source change for everyone — which is a harder thing to version than a signature.
+The posture, pre-1.0: **the emitted shape may move on a minor**, and a phase that moves it says
+so in its outcome and in the migration note for the generated layer. A consumer who cannot
+absorb that pins the package rather than tracking it. `Fuaran.Core.Idl.Spike` is the standing
+proof the emitters produce valid F#: it compiles the generated module against the **model half
+alone**, so generated source that needed the generator present would fail the build.
+
+**The open-DU consequence, accepted knowingly rather than designed around.** `IdlType` is an
+open DU that has gained `TClosure`, `TOpaque`, `TJson`, `TRecord`, `TMap`, `TFn` and `THosted`,
+several of them recently, and `IdlValue` tracks it. **Every future case is a breaking change for
+a consumer matching exhaustively**, and more cases are expected: the engine grows a case each
+time a domain declares a slot shape it cannot yet express. Hiding the DU behind constructors
+would buy source-compatibility for a consumer set that is currently two, at the cost of the
+exhaustiveness that makes a vocabulary total — the same trade "The load-bearing invariant"
+refuses at the top of this document. So the DU stays open in both senses, the pre-1.0 status at
+the head of this document applies with full force here, and a consumer that matches `IdlType`
+exhaustively should expect to revisit that match on a minor bump.
+
+**A vocabulary is not distributed from either package.** See DECISIONS.md D14: the `Idl` value
+describing a domain's kinds is data the domain owns in its own repo. There will be no
+`Fuaran.Core.Idl.Vocabularies.*`.
+
+**One known wart, stated rather than hidden.** `TransparentUnion.tag` keys bare-value encoding on
+a hard-coded vocabulary name (`TextSource`) inside an otherwise domain-generic engine. Phase 97
+made it public because the split made the dependency real — an independent emitter must agree
+with this codec about which cases are bare, or it generates a host that disagrees on the wire.
+Publishing the accessor does not endorse the hard-coding; declaring transparency in the `Idl`
+value is a later change with its own artifact and diff-classifier consequences.
+
 ## Open-core posture
 
 Apache-2.0, abstractions-tier. The contract (protocol + witness records + signature/
@@ -640,7 +709,12 @@ rejected by name on decode.
 
 **Enforced, not asserted (Phase 54).** `./verify.ps1` includes a **Fable-compile gate**: the
 `tests/fable-smoke/` project references every public package and is compiled with `dotnet fable`, so a
-construct that is not Fable-clean fails the green gate in-repo rather than surfacing downstream. (`Double.ToString`
+construct that is not Fable-clean fails the green gate in-repo rather than surfacing downstream.
+`Fuaran.Core.Idl` joined that set at `0.7.0` — it was the one `src/` package absent from it, which
+made its portability an unprovable claim rather than a certified one. What had blocked it was not the
+model but the emitters sharing its project; splitting them into `Fuaran.Core.Idl.Codegen` (Phase 97)
+removed the obstacle rather than working around it. `Idl.Codegen`, `Idl.Spike` and `Observer` stay off
+the surface deliberately: they are build-time tools, not a Fable-targeted surface. (`Double.ToString`
 with the round-trip specifier is *not* Fable-supported — float→string must route through
 `Wire.Canon.canonicalFloat`; `Double.TryParse`'s style/provider arguments are ignored under Fable but
 parse invariantly, which is a benign warning, not a gate failure.)

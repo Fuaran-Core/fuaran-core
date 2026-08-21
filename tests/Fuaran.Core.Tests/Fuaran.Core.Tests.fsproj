@@ -93,6 +93,11 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Column.Ops\Fuaran.Core.Column.Ops.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Query\Fuaran.Core.Query.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
+    <!-- The suite certifies BOTH halves: the model / codec / sampler / sanitisation floor
+         from Fuaran.Core.Idl, and the emitters + trust boundary + diff classifier from
+         Fuaran.Core.Idl.Codegen (the compiled-codegen drift guard, the schema leg, the
+         cross-host fuzz). It is the one consumer that legitimately wants everything. -->
+    <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Codegen\Fuaran.Core.Idl.Codegen.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Spike\Fuaran.Core.Idl.Spike.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />

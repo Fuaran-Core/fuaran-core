@@ -6,8 +6,10 @@
     package's encode + decode surface enforces the GP3 / STABILITY.md "Fable-clean on encode
     AND decode" claim in-repo, instead of leaving it to be discovered downstream. The emitted
     JS is throwaway (output dir is git-ignored); the COMPILE is the gate.
-    Idl / Idl.Spike / Observer are intentionally excluded — they are not part of the
-    Fable-targeted public surface.
+    Idl.Codegen / Idl.Spike / Observer are intentionally excluded — they are not part of the
+    Fable-targeted public surface. `Fuaran.Core.Idl` itself IS, as of Phase 97: the split moved
+    the source emitters (and their non-portable constructs) into Idl.Codegen, so the model,
+    codec, sampler and sanitisation floor are now gated here like every other public package.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -43,6 +45,14 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
+    <!-- Phase 97 — the MODEL half of the IDL engine joins the Fable surface. It could not
+         before: the project held the source emitters too, and their `StringBuilder` +
+         `CultureInfo.InvariantCulture` are the reason the exclusion note above existed. With
+         those in Fuaran.Core.Idl.Codegen, what remains — the model, the codec, the sampler,
+         the sanitisation floor — has no obstacle, so the portability claim is gated here
+         rather than asserted in a comment. Codegen stays off the surface, deliberately and
+         permanently: it emits source and is build-time-only. -->
+    <ProjectReference Include="..\..\src\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Split out of Fuaran.Core.Idl at 0.7.0 (Phase 97, DECISIONS.md D17). Packable,
+         because D14 shipped the generator deliberately and named `Gen.fsharpModuleWith`
+         as the call a second domain makes; un-publishing it here would withdraw that a
+         day after it was granted. What the split changes is that a consumer now CHOOSES
+         the generator rather than inheriting it with the model. -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.Idl.Codegen</PackageId>
+    <Description>Fuaran.Core.Idl.Codegen — the generation half of the IDL engine: the F# structural-layer emitter with its declared-support channel (docs, splices, host projections), the TypeScript encoder backend, the JSON-schema emitter, the scaffold writer, the codegen trust boundary (allowlisted `Custom` resolution, sanitisation applied before emission), and the stability diff classifier over two `idl.json` revisions. Build-time only and .NET-only — it emits source, so its contract is the shape of what it emits; the model, codec and sampler it reads ship separately as Fuaran.Core.Idl. FSharp.Core + Fuaran.Core.Idl + Fuaran.Core.Wire only.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- No Fable source distribution. The packable-project convention in
+         Directory.Build.props ships every `.fs` under `fable/` so a Fable consumer compiles
+         from source; that is exactly the promise this half cannot keep — `StringBuilder` and
+         `CultureInfo.InvariantCulture` serve the TypeScript backend — and shipping the
+         source anyway would offer a portability the smoke gate does not certify. -->
+    <Content Remove="$(MSBuildProjectFile)" />
+    <Content Remove="*.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Codegen.fs" />
+    <Compile Include="Diff.fs" />
+    <Compile Include="Trust.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

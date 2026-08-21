@@ -1,5 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-08-21 — D17: the IDL splits into a model half and a codegen half, and both ship
+
+**Decided.** From `0.7.0` the IDL engine is two packages. `Fuaran.Core.Idl` holds the model, the
+codec, the sampler, the `idl.json` artifact projection and the sanitisation floor; a new
+`Fuaran.Core.Idl.Codegen` holds the source emitters, `CodegenError`, the codegen trust boundary and
+the stability diff classifier. Both are packable. The namespace does not split — `Gen`, `Trust` and
+`Diff` stay `Fuaran.Core.Idl`, so an existing call site changes its package reference and nothing
+else.
+
+**The reason is portability, and it was measurable rather than aesthetic.** `Fuaran.Core.Idl` was the
+one project under `src/` absent from `tests/fable-smoke`, so "Core is Fable-clean on encode and
+decode" had an exception nobody had proven either way — and the estate's browser hosts are Fable. The
+obstruction was entirely emitter-side: one `CultureInfo.InvariantCulture` and two `StringBuilder`s,
+all three serving the TypeScript source backend. The model, the codec, the sampler and `Sanitize`
+touch none of it. Splitting therefore turned an unprovable claim into a gated one by moving the
+obstruction rather than by working around it, and `tests/fable-smoke` now compiles the model half like
+every other public package.
+
+**The split boundary was already there; it did not have to be invented.** `Encode.encode` returns
+`Result<string, string>` and never mentions `CodegenError`, so the error type genuinely belongs with
+the emitters that raise it. The sampler's `Rng`, `nextInt`, `pick` and three pools are private to it
+and used by no emitter — it sat inside `Gen` by where it was written, not by what it depends on, and
+extracting it into `Sample` was a lift.
+
+**Rejected: making the codegen half `IsPackable=false`.** The phase that specified this split was
+authored when the whole project was unpackable, and proposed keeping the emitters that way on the
+grounds that publishing a generator creates a second, implicit contract — consumers depend on its
+OUTPUT, which is harder to version than an API. That argument is sound and is now written down (see
+STABILITY.md's "two packages, two promises"), but the conclusion no longer follows: **D14 published
+the generator one day earlier, deliberately and with reasons, and named `Gen.fsharpModuleWith` as the
+call a second domain makes.** Un-publishing it as a side effect of a portability fix would have
+withdrawn that the day after it was granted, and would have left the second domain back where D14
+found it. What the split changes is that a consumer now **chooses** the generator instead of
+inheriting it with the model — which is the part of the original argument that was actually about
+coupling.
+
+**Two smaller consequences, both deliberate.** `Fuaran.Core.Idl.Codegen` ships **no** `fable/` source,
+unlike every other packable project here: the dual-pack convention promises a Fable consumer can
+compile from source, and this is the one package that cannot keep that promise. And
+`TransparentUnion` became public: the split made a genuine cross-package dependency out of what
+`internal` had been hiding, since an independent emitter must agree with this codec about which union
+cases encode bare or it generates a host that disagrees on the wire. It remains a wart — the rule is
+keyed on a hard-coded vocabulary name in a domain-generic engine — and publishing the accessor makes
+that visible rather than fixing it.
+
+**Not decided here.** Whether the two halves should ever run on separate version lines. They move
+together at `0.7.0` because they were one package a commit ago; a divergence needs a reason, and none
+exists yet.
+
 ## 2026-08-21 — D16: `fnv1a` is made cross-pipeline exact, and the .NET side is the canonical one
 
 **Decided.** From `0.6.0`, `Hash.fnv1a`'s multiply goes through a private split-half 32-bit form

@@ -12,6 +12,11 @@
     <Compile Include="Spike.fs" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Phase 97 — deliberately the MODEL half only, not Fuaran.Core.Idl.Codegen. This
+         project's whole job is to compile the generator's OUTPUT, and generated source that
+         needed the generator to compile would not be a standalone artefact at all. That it
+         builds against the model alone is the check, not an accident of what it happens to
+         call: adding the codegen reference here would silently retire the proof. -->
     <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
     <!-- Phase 317 increment 5 — the generated `nodeWitness` is a `NodeWitness<Node, string>`
