@@ -5,7 +5,9 @@ obj/
 .idea/
 artifacts/
 # Fable-compile smoke gate (Phase 54) — the emitted JS + Fable cache are throwaway (the compile is the gate).
+# Both spellings: the gate emitted to out/ when this entry was written and emits to output/ now.
 tests/fable-smoke/out/
+tests/fable-smoke/output/
 fable_modules/
 .fable/
 
