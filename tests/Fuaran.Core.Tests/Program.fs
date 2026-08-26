@@ -35,6 +35,84 @@ let main argv =
         | Error e ->
             eprintfn "idl-diff: %s" e
             1
+    // Phase 702 — the SPIKE harness: price a vocabulary-change proposal against the
+    // live vocabulary without cutting a branch or writing a declaration.
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --spike-proposal <proposal.json>
+    //       [--out <report.md>] [--seed <int>] [--vectors <int>]
+    //
+    // The entry point lives here for the same reason `--emit-idl` does: the spike
+    // needs BOTH the engine and the vocabulary, and `UiIdl.uiIdl` is local to this
+    // test project. It is branchless by construction — the delta is applied to an
+    // in-memory `Idl` value that exists for the duration of the call — so an
+    // abandoned spike leaves no residue anywhere, which is exactly the property that
+    // makes spiking every candidate affordable.
+    //
+    // The corpus leg reads the `nodes/` family of the wire-format corpus clone when
+    // one is present. When it is ABSENT the leg reports "not checked" and the run is
+    // not green: a spike whose additive claim went unexamined must not read as a
+    // spike that examined it and found nothing.
+    //
+    // Exit: 0 every leg passed · 1 a leg failed · 2 the document did not read. A
+    // green exit is the removal of one objection, never a recommendation — nothing
+    // downstream of this command may treat 0 as an admission.
+    | "--spike-proposal" :: proposalPath :: rest ->
+        let flag name =
+            rest
+            |> List.pairwise
+            |> List.tryPick (fun (a, b) -> if a = name then Some b else None)
+
+        let intFlag name fallback =
+            match flag name with
+            | Some v ->
+                match System.Int32.TryParse v with
+                | true, n -> n
+                | _ -> fallback
+            | None -> fallback
+
+        let corpus =
+            match IdlArtifactTests.tryFindCorpusRoot () with
+            | None -> []
+            | Some root ->
+                let dir = System.IO.Path.Combine(root, "nodes")
+
+                if not (System.IO.Directory.Exists dir) then
+                    []
+                else
+                    System.IO.Directory.GetFiles(dir, "*.json")
+                    |> Array.filter (fun p -> not ((System.IO.Path.GetFileName p).EndsWith ".expected.json"))
+                    |> Array.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
+                    |> Array.map (fun p -> System.IO.Path.GetFileName p, System.IO.File.ReadAllText p)
+                    |> List.ofArray
+
+        match Fuaran.Core.Idl.Proposal.parse (System.IO.File.ReadAllText proposalPath) with
+        | Error e ->
+            eprintfn "spike-proposal: the document did not read — %s" e
+            2
+        | Ok proposal ->
+            match
+                Fuaran.Core.Idl.ProposalSpike.run
+                    { Base = UiIdl.uiIdl
+                      Proposal = proposal
+                      Corpus = corpus
+                      // Pinned, not clock-derived: a divergence a spike finds has to
+                      // reproduce from the report alone on another machine.
+                      FuzzSeed = intFlag "--seed" 20260826
+                      FuzzVectors = intFlag "--vectors" 200
+                      External = [] }
+            with
+            | Error e ->
+                eprintfn "spike-proposal: %s" e
+                2
+            | Ok report ->
+                let text = Fuaran.Core.Idl.ProposalSpike.render report
+
+                match flag "--out" with
+                | Some out ->
+                    System.IO.File.WriteAllText(out, text)
+                    printfn "wrote %s" out
+                | None -> printf "%s" text
+
+                if report.Green then 0 else 1
     // Re-vendor the IDL-inversion golden snapshots from the authored cases:
     //   dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots
     | "--regen-snapshots" :: _ ->

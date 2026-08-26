@@ -75,6 +75,10 @@
     <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named
          IdlDiffTests, not DiffTests: the latter is Phase 245's TREE diff. -->
     <Compile Include="IdlDiffTests.fs" />
+    <!-- Phase 702 — the vocabulary-change proposal document and the branchless spike
+         that prices it. Reads the mini IDL from Fuaran.Core.Idl.Spike, so after the
+         Idl families above. -->
+    <Compile Include="IdlProposalTests.fs" />
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="ProjectionTests.fs" />

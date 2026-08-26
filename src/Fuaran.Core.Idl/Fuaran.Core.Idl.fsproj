@@ -24,6 +24,13 @@
     <Compile Include="Sanitize.fs" />
     <Compile Include="Sample.fs" />
     <Compile Include="Artifact.fs" />
+    <!-- Phase 702 — the vocabulary-change PROPOSAL document: its reader, its
+         admissibility checks, and `applyDelta`, which returns a new `Idl` value and
+         never writes one. The model half deliberately: a proposal is data about a
+         vocabulary, so it belongs beside the vocabulary rather than beside the
+         generator. The SPIKE that prices it ships in Fuaran.Core.Idl.Codegen, which
+         is where `Gen` and `Diff` live. -->
+    <Compile Include="Proposal.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />

@@ -24,6 +24,11 @@
     <Compile Include="Codegen.fs" />
     <Compile Include="Diff.fs" />
     <Compile Include="Trust.fs" />
+    <!-- Phase 702 — the branchless spike over a `Proposal`. It lives on this side of
+         the 0.8.0 split because it RUNS the generator (the generate leg) and the
+         stability classifier (the cost report); the proposal document it reads ships
+         with the model in Fuaran.Core.Idl. After Diff.fs, which it calls. -->
+    <Compile Include="ProposalSpike.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
