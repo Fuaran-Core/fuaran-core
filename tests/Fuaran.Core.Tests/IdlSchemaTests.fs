@@ -58,9 +58,15 @@ let private schema = JsonSchema.FromText schemaText
 /// Evaluate a wire payload. `None` ⇒ not parseable JSON (a rejection in its own
 /// right); `Some isValid` ⇒ parsed and schema-evaluated.
 let private validate (wire: string) : bool option =
+    // `JsonDocument.Parse` defaults to a 64-level depth cap, which is BELOW the 256
+    // WIRE_FORMAT §21 pins — so the §21 at-the-limit node fixture (72 JSON levels)
+    // reported "not parseable JSON" and failed the certification on the reader's own
+    // cap rather than on anything the schema said. Parse at the format's own bound.
+    let parseOptions = JsonDocumentOptions(MaxDepth = 256)
+
     let parsed =
         try
-            Some(JsonDocument.Parse wire)
+            Some(JsonDocument.Parse(wire, parseOptions))
         with _ ->
             None
 

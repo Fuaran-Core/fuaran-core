@@ -432,7 +432,10 @@ module Gen =
         | TStr -> "JStr"
         | TInt -> "JInt"
         | TBool -> "JBool"
-        | TFloat -> "JFloat"
+        // NOT the bare `JFloat` constructor: a non-finite double has no JSON number
+        // spelling and rides as a quoted sentinel string (`encodeHelpers` below).
+        // `TInt` keeps its constructor — WIRE_FORMAT §7 truncates at a float slot.
+        | TFloat -> "encFloat"
         | TEnum n -> "enc" + n
         | TVar v -> "enc" + v
         | TUnion(n, []) -> "enc" + n
@@ -473,6 +476,26 @@ module Gen =
         | TFn _ -> "JStr \"<closure>\""
         | TOpaque -> "JStr \"<opaque>\""
         | _ -> sprintf "%s %s" (encFn t) var
+
+    /// The encode-side helper prelude, emitted once per module — the mirror of
+    /// [[decodeHelpers]]. Only the float slot needs one: every other primitive is
+    /// its `JVal` constructor.
+    let private encodeHelpers () : string =
+        """// WIRE_FORMAT §5 — a non-finite double has no JSON *number* spelling, so it rides as
+// one of the three quoted sentinel strings, which §7 requires a decoder to read back
+// AT A FLOAT SLOT (`dFloat` below; `dInt` is deliberately not widened — §7 stops at
+// the float slot, and an integer slot has no sentinel).
+//
+// Building the `JStr` HERE rather than leaving `Canon.render` to spell a non-finite
+// `JFloat` is what keeps the emitted `JVal` renderable by the GUARDED
+// `Fuaran.Core.Wire.tryRender`, which refuses a non-finite `JFloat` outright. The core
+// wire model still has no non-finite float — the sentinel is a string, which it carries
+// perfectly — so this widens the generated float slot's spelling, not the model.
+let private encFloat (f: float) : JVal =
+    if System.Double.IsNaN f then JStr "NaN"
+    elif System.Double.IsPositiveInfinity f then JStr "Infinity"
+    elif System.Double.IsNegativeInfinity f then JStr "-Infinity"
+    else JFloat f"""
 
     /// The host case name behind a `VEnum`'s WIRE string (Phase 707). `VEnum`
     /// carries the wire form like every other `IdlValue` case, so the F# emitter —
@@ -921,7 +944,7 @@ module Gen =
               "let private dStr (j: JVal) : Result<string, string> =\n    match j with\n    | JStr s -> Ok s\n    | _ -> Error \"expected a string\""
               "let private dInt (j: JVal) : Result<int, string> =\n    match j with\n    | JInt i -> Ok i\n    | _ -> Error \"expected an int\""
               "let private dBool (j: JVal) : Result<bool, string> =\n    match j with\n    | JBool b -> Ok b\n    | _ -> Error \"expected a bool\""
-              "// A whole-valued float renders without a decimal point, so it parses back as JInt.\nlet private dFloat (j: JVal) : Result<float, string> =\n    match j with\n    | JFloat f -> Ok f\n    | JInt i -> Ok(float i)\n    | _ -> Error \"expected a number\""
+              "// A whole-valued float renders without a decimal point, so it parses back as JInt.\n// WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which\n// is how §5 spells a number JSON has no literal for. The value decodes to the FLOAT, never\n// to the string: a host that answered the string would hand a consumer a different tree on\n// the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at\n// the float slot.\nlet private dFloat (j: JVal) : Result<float, string> =\n    match j with\n    | JFloat f -> Ok f\n    | JInt i -> Ok(float i)\n    | JStr \"NaN\" -> Ok System.Double.NaN\n    | JStr \"Infinity\" -> Ok System.Double.PositiveInfinity\n    | JStr \"-Infinity\" -> Ok System.Double.NegativeInfinity\n    | _ -> Error \"expected a number\""
               "let private dUnit (_: JVal) : Result<unit, string> = Ok()"
               "// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
@@ -1510,6 +1533,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
               enums |> List.map rqaEnum
               [ typeGroup ]
               enums |> List.map (fun e -> doc ("enc:" + e.Name) "" + enumEncoder e)
+              [ encodeHelpers () ]
               [ recGroup ]
               [ sprintf "let encodeNode (n: Node%s) : string = Canon.render (encNode n)" nodeArgs ]
               // Phase 694 — JVal-level accessors for host codecs that splice
@@ -1564,7 +1588,15 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TStr -> JObj [ "type", JStr "string" ]
         | TInt -> JObj [ "type", JStr "integer" ]
         | TBool -> JObj [ "type", JStr "boolean" ]
-        | TFloat -> JObj [ "type", JStr "number" ]
+        // WIRE_FORMAT §5/§7 — a float slot admits a JSON number OR one of the three
+        // quoted non-finite sentinels. `TInt` above is deliberately untouched: §7
+        // stops at the float slot, so an integer slot still refuses them.
+        | TFloat ->
+            JObj
+                [ "anyOf",
+                  JArr
+                      [ JObj [ "type", JStr "number" ]
+                        JObj [ "enum", JArr [ JStr "NaN"; JStr "Infinity"; JStr "-Infinity" ] ] ] ]
         | TEnum n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TUnion(n, _) -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TVar _ -> JObj []
@@ -2160,7 +2192,16 @@ const isTagged = (j) => j !== null && typeof j === 'object' && !Array.isArray(j)
 const dObj = (j) => (j !== null && typeof j === 'object' && !Array.isArray(j)) ? j : dFail('expected an object');
 const dStr = (j) => (typeof j === 'string') ? j : dFail('expected a string');
 const dInt = (j) => (typeof j === 'number' && Number.isInteger(j)) ? j : dFail('expected an int');
-const dFloat = (j) => (typeof j === 'number') ? j : dFail('expected a number');
+// §7 — a float slot also accepts the three quoted non-finite sentinels `encFloat` emits
+// (§5), and decodes them to the NUMBER, never the string. `dInt` above is not widened:
+// §7 stops at the float slot.
+const dFloat = (j) => {
+  if (typeof j === 'number') return j;
+  if (j === 'NaN') return NaN;
+  if (j === 'Infinity') return Infinity;
+  if (j === '-Infinity') return -Infinity;
+  return dFail('expected a number');
+};
 const dBool = (j) => (typeof j === 'boolean') ? j : dFail('expected a bool');
 const dList = (dec) => (j) => Array.isArray(j) ? j.map(dec) : dFail('expected an array');
 const dMap = (dec) => (j) => {

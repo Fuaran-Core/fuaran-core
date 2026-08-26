@@ -122,7 +122,29 @@
          rather than patch on the same grounds as 0.6.0: this package's contract is its VALUES, and
          pre-1.0 MINOR is the lane that says look before you repin. See STABILITY.md
          "Fold-confluence pack: N-lane arrival-order invariance". -->
-    <Version>0.12.0</Version>
+    <!-- 0.13.0 (2026-08-26): `Fuaran.Core.Idl.Codegen` models the NON-FINITE float. This
+         package's declared contract IS THE SHAPE OF WHAT IT EMITS, so all four backends move
+         together: the F# encoder routes every `TFloat` slot through a new `encFloat` helper
+         that emits the WIRE_FORMAT §5 sentinel string (`"NaN"` / `"Infinity"` /
+         `"-Infinity"`) for a non-finite and `JFloat` otherwise; the F# and TypeScript
+         decoders read those three back AT A FLOAT SLOT per §7; and the JSON-schema leg emits
+         `anyOf [ number, enum [the three] ]` there. `TInt` is untouched in all four — §7
+         truncates at the float slot, so an integer slot still refuses a sentinel, and the
+         corpus's two integer controls pin that.
+         This does NOT overturn the wire model's stated no-non-finite-float posture: the
+         sentinel is a JSON string, which `JVal` carries perfectly, and `Wire.tryRender`'s
+         refusal of a non-finite `JFloat` is unchanged — building the `JStr` in the generated
+         encoder is precisely what keeps the emitted value renderable by the guarded path.
+         Additive to the generated layer's ACCEPT set (a document that decodes today still
+         decodes) and byte-neutral on emission, since `Canon.render` already spelled a
+         non-finite `JFloat` the same way. MINOR rather than patch because the emitted shape
+         is this package's contract and a consumer's committed generated copy moves with it —
+         `fuaran-dotnet`'s byte-pinned `src/Fuaran.UI/Generated.fs` is regenerated in the same
+         change-set. Also fixes the corpus-certification leg's own reader: `IdlSchemaTests`
+         parsed fixtures at `JsonDocument`'s default 64-level cap, below the 256 §21 pins, so
+         the §21 at-the-limit node fixture failed on the READER rather than on the schema.
+         See fuaran#1063. -->
+    <Version>0.13.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

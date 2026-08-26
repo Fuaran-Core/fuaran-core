@@ -203,6 +203,22 @@ let private encBoxRole (v: BoxRole) : JVal =
     | BoxRole.Card -> JStr "Card"
     | BoxRole.Group -> JStr "Group"
 
+// WIRE_FORMAT §5 — a non-finite double has no JSON *number* spelling, so it rides as
+// one of the three quoted sentinel strings, which §7 requires a decoder to read back
+// AT A FLOAT SLOT (`dFloat` below; `dInt` is deliberately not widened — §7 stops at
+// the float slot, and an integer slot has no sentinel).
+//
+// Building the `JStr` HERE rather than leaving `Canon.render` to spell a non-finite
+// `JFloat` is what keeps the emitted `JVal` renderable by the GUARDED
+// `Fuaran.Core.Wire.tryRender`, which refuses a non-finite `JFloat` outright. The core
+// wire model still has no non-finite float — the sentinel is a string, which it carries
+// perfectly — so this widens the generated float slot's spelling, not the model.
+let private encFloat (f: float) : JVal =
+    if System.Double.IsNaN f then JStr "NaN"
+    elif System.Double.IsPositiveInfinity f then JStr "Infinity"
+    elif System.Double.IsNegativeInfinity f then JStr "-Infinity"
+    else JFloat f
+
 let rec private encNodeKind (k: NodeKind<'Msg>) : JVal =
     match k with
     | NodeKind.Heading s -> encHeadingSpec s
@@ -254,7 +270,7 @@ and private encButtonSpec (s: ButtonSpec) : JVal =
     Canon.typed "Button" ([ (s.Disabled |> Option.map (fun v -> "disabled", (encBinding JBool) v)); (s.Icon |> Option.map (fun v -> "icon", JStr v)); Some("label", encTextSource s.Label); Some("onClick", encAction s.OnClick); Some("variant", encButtonVariant s.Variant) ] |> List.choose id)
 
 and private encMetricSpec (s: MetricSpec) : JVal =
-    Canon.typed "Metric" ([ (if s.Emphasis = Emphasis.Normal then None else Some("emphasis", encEmphasis s.Emphasis)); Some("format", encFormat s.Format); (s.Icon |> Option.map (fun v -> "icon", JStr v)); Some("label", encTextSource s.Label); (s.Subtext |> Option.map (fun v -> "subtext", encTextSource v)); (if s.Tone = ToneVariant.Default then None else Some("tone", encToneVariant s.Tone)); (s.Trend |> Option.map (fun v -> "trend", (encBinding JFloat) v)); (s.TrendFormat |> Option.map (fun v -> "trendFormat", encFormat v)); Some("value", (encBinding JFloat) s.Value); (if s.Weight = StyleWeight.Standard then None else Some("weight", encStyleWeight s.Weight)) ] |> List.choose id)
+    Canon.typed "Metric" ([ (if s.Emphasis = Emphasis.Normal then None else Some("emphasis", encEmphasis s.Emphasis)); Some("format", encFormat s.Format); (s.Icon |> Option.map (fun v -> "icon", JStr v)); Some("label", encTextSource s.Label); (s.Subtext |> Option.map (fun v -> "subtext", encTextSource v)); (if s.Tone = ToneVariant.Default then None else Some("tone", encToneVariant s.Tone)); (s.Trend |> Option.map (fun v -> "trend", (encBinding encFloat) v)); (s.TrendFormat |> Option.map (fun v -> "trendFormat", encFormat v)); Some("value", (encBinding encFloat) s.Value); (if s.Weight = StyleWeight.Standard then None else Some("weight", encStyleWeight s.Weight)) ] |> List.choose id)
 
 and private encBoxSpec<'Msg> (s: BoxSpec<'Msg>) : JVal =
     Canon.typed "Box" ([ Some("children", JArr(List.map encNode s.Children)); (s.Heading |> Option.map (fun v -> "heading", encTextSource v)); Some("layout", encLayoutMode s.Layout); Some("role", encBoxRole s.Role) ] |> List.choose id)
@@ -299,10 +315,18 @@ let private dBool (j: JVal) : Result<bool, string> =
     | _ -> Error "expected a bool"
 
 // A whole-valued float renders without a decimal point, so it parses back as JInt.
+// WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
+// is how §5 spells a number JSON has no literal for. The value decodes to the FLOAT, never
+// to the string: a host that answered the string would hand a consumer a different tree on
+// the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
+// the float slot.
 let private dFloat (j: JVal) : Result<float, string> =
     match j with
     | JFloat f -> Ok f
     | JInt i -> Ok(float i)
+    | JStr "NaN" -> Ok System.Double.NaN
+    | JStr "Infinity" -> Ok System.Double.PositiveInfinity
+    | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
     | _ -> Error "expected a number"
 
 let private dUnit (_: JVal) : Result<unit, string> = Ok()
