@@ -1579,9 +1579,62 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     // Phase 317 increment 4 — the `schema.json` leg: emit a Draft 2020-12 JSON
     // Schema describing the canonical wire, from the same IDL. The third of the
     // §11 "triple mirror" (encoder + decoder already IDL-driven), so one IDL now
-    // drives all three. (JSON Schema has no type parameters; a generic union's
-    // `'T`-typed fields are emitted as permissive `{}` — noted in the findings.)
+    // drives all three.
+    //
+    // Phase 1068 — a GENERIC union is emitted once per INSTANTIATED type argument
+    // rather than once, type-erased. JSON Schema has no type parameters, which is
+    // why the leg originally emitted a generic union's `'T`-typed fields as the
+    // permissive `{}`; but a schema needs no type parameters to state the
+    // instantiations, because the IDL names every one of them at the slot. The
+    // erased form's cost was measurable and was measured: a `Binding<float>` slot
+    // accepted a boolean and a `Binding<int>` slot accepted a §7 non-finite
+    // sentinel, both of which the decoder refuses.
     // -----------------------------------------------------------------------
+
+    /// Substitute a generic union's type parameters into a case field's type
+    /// (`'T` → the type argument). Mirrors the identically-shaped substitution the
+    /// encode / decode legs perform; kept local because those are private to their
+    /// own modules and a shared one would put a codegen detail on the Idl surface.
+    let rec private substType (subst: Map<string, IdlType>) (t: IdlType) : IdlType =
+        match t with
+        | TVar v ->
+            match Map.tryFind v subst with
+            | Some r -> r
+            | None -> t
+        | TList inner -> TList(substType subst inner)
+        | TMap inner -> TMap(substType subst inner)
+        | TUnion(n, args) -> TUnion(n, List.map (substType subst) args)
+        | other -> other
+
+    /// The `$defs` NAME of a type — for a non-generic declaration its own name,
+    /// and for an instantiated generic union the name plus its mangled arguments
+    /// (`Binding_float`, `Binding_list_SelectOption`). Total over `IdlType`, which
+    /// is what makes it safe for `schemaOf` to name a `$def` for any slot it meets:
+    /// the instantiation walk below uses this same function, so the set of names
+    /// EMITTED and the set of names REFERENCED are computed one way, and a dangling
+    /// `$ref` (an ERROR to a strict validator, never a permissive skip) cannot arise
+    /// from the two disagreeing.
+    let rec private defName (t: IdlType) : string =
+        match t with
+        | TStr -> "str"
+        | TInt -> "int"
+        | TBool -> "bool"
+        | TFloat -> "float"
+        | TJson -> "json"
+        | THosted _ -> "hosted"
+        | TOpaque -> "opaque"
+        | TClosure
+        | TFn _ -> "closure"
+        | TNode -> "Node"
+        | TKind -> "NodeKind"
+        | TOp -> "TreeOp"
+        | TEnum n
+        | TRecord n -> n
+        | TVar v -> v
+        | TList inner -> "list_" + defName inner
+        | TMap vt -> "map_" + defName vt
+        | TUnion(n, []) -> n
+        | TUnion(n, args) -> n + "_" + (args |> List.map defName |> String.concat "_")
 
     let rec private schemaOf (t: IdlType) : JVal =
         match t with
@@ -1598,7 +1651,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                       [ JObj [ "type", JStr "number" ]
                         JObj [ "enum", JArr [ JStr "NaN"; JStr "Infinity"; JStr "-Infinity" ] ] ] ]
         | TEnum n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
-        | TUnion(n, _) -> JObj [ "$ref", JStr("#/$defs/" + n) ]
+        // Phase 1068 — an instantiated generic union names ITS OWN definition. A
+        // non-generic one is `defName`'s identity case, so this line is unchanged
+        // for every union that has no parameters.
+        | TUnion _ -> JObj [ "$ref", JStr("#/$defs/" + defName t) ]
+        // Reached only for a parameter no instantiation bound — a declaration read
+        // outside any instantiation walk. The permissive `{}` is the pre-1068
+        // behaviour, kept as the honest answer to "this slot's type is not yet known".
         | TVar _ -> JObj []
         | TNode -> JObj [ "$ref", JStr "#/$defs/Node" ]
         | TKind -> JObj [ "$ref", JStr "#/$defs/NodeKind" ]
@@ -1673,8 +1732,14 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // The `enum` array is a WIRE contract — wire strings, not host case names.
             e.Name, JObj [ "type", JStr "string"; "enum", JArr(e.WireCases |> List.map JStr) ]
 
-        let unionDef (u: IdlUnion) =
-            let tagged = u.Cases |> List.map (fun c -> objectSchema c.Tag c.Fields)
+        /// One union definition, under a substitution for its type parameters
+        /// (empty for a non-generic union, so its emission is byte-identical to
+        /// what it always was).
+        let unionDefWith (subst: Map<string, IdlType>) (name: string) (u: IdlUnion) =
+            let fieldsOf (c: IdlUnionCase) =
+                c.Fields |> List.map (fun f -> { f with Type = substType subst f.Type })
+
+            let tagged = u.Cases |> List.map (fun c -> objectSchema c.Tag (fieldsOf c))
 
             // A transparent case is on the wire BARE — its single field's value with
             // no `$type` envelope (`TextSource.Literal`: `"x"`, not
@@ -1688,10 +1753,102 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 | Some ttag ->
                     u.Cases
                     |> List.tryFind (fun c -> c.Tag = ttag)
-                    |> Option.map (fun c -> c.Fields |> List.map (fun f -> schemaOf f.Type))
+                    |> Option.map (fun c -> fieldsOf c |> List.map (fun f -> schemaOf f.Type))
                     |> Option.defaultValue []
 
-            u.Name, JObj [ "oneOf", JArr(bare @ tagged) ]
+            name, JObj [ "oneOf", JArr(bare @ tagged) ]
+
+        let unionDef (u: IdlUnion) = unionDefWith Map.empty u.Name u
+
+        // ── Phase 1068: the instantiations of every GENERIC union ─────────────
+        //
+        // A generic union has no single wire shape — `Binding<float>` and
+        // `Binding<int>` accept different `Static` payloads — so it is emitted once
+        // per instantiation the vocabulary actually names, and never under its bare
+        // name (nothing would reference it, and its `'T` slots would be the
+        // permissive `{}` that made the erasure invisible).
+        //
+        // The walk is a worklist over the same traversal `schemaOf` performs, so
+        // the two agree by construction (see `defName`). It closes because an
+        // instantiation's own case fields are substituted before being walked, and
+        // the vocabulary's recursion is regular: `Binding<'T>.Local.initialFrom` is
+        // `Binding<'T>` at the SAME argument (a self-reference, already visited) and
+        // `Binding<'T>.Format.source` is the FIXED `Binding<float>`. A vocabulary
+        // whose recursion grows its argument (`Binding<'T>` containing a
+        // `Binding<'T list>`) has no finite `$defs`, and the bound below says so out
+        // loud rather than hanging.
+        let generics =
+            idl.Unions
+            |> List.filter (fun u -> not (List.isEmpty u.Params))
+            |> List.map (fun u -> u.Name, u)
+            |> Map.ofList
+
+        let instantiations: Map<string, string * IdlUnion * Map<string, IdlType>> =
+            let mutable found = Map.empty
+            let mutable queue: IdlType list = []
+
+            let rec discover (t: IdlType) =
+                match t with
+                | TList inner -> discover inner
+                | TMap vt -> discover vt
+                | TUnion(n, args) when not (List.isEmpty args) ->
+                    args |> List.iter discover
+                    let key = defName t
+
+                    if not (Map.containsKey key found) then
+                        match Map.tryFind n generics with
+                        | None -> ()
+                        | Some u when List.length u.Params <> List.length args -> ()
+                        | Some u ->
+                            let subst = Map.ofList (List.zip u.Params args)
+                            found <- Map.add key (key, u, subst) found
+                            queue <- t :: queue
+                | _ -> ()
+
+            let discoverFields (fields: IdlField list) =
+                wireFields fields |> List.iter (fun f -> discover f.Type)
+
+            for u in idl.Unions do
+                if List.isEmpty u.Params then
+                    for c in u.Cases do
+                        discoverFields c.Fields
+
+            for r in idl.Records do
+                discoverFields r.Fields
+
+            for k in idl.Kinds do
+                discoverFields k.Fields
+
+            for o in idl.Ops do
+                discoverFields o.Fields
+
+            discoverFields idl.NodeFields
+
+            // Expand: an instantiation's own case fields can name further ones.
+            let mutable guard = 0
+
+            while not (List.isEmpty queue) do
+                guard <- guard + 1
+
+                if guard > 1000 then
+                    failwith
+                        "generic-union instantiation walk did not close after 1000 expansions — the vocabulary's recursion grows its type argument, which has no finite JSON-Schema `$defs`"
+
+                let head = List.head queue
+                queue <- List.tail queue
+
+                match Map.tryFind (defName head) found with
+                | None -> ()
+                | Some(_, u, subst) ->
+                    for c in u.Cases do
+                        wireFields c.Fields |> List.iter (fun f -> discover (substType subst f.Type))
+
+            found
+
+        let genericDefs =
+            instantiations
+            |> Map.toList
+            |> List.map (fun (_, (name, u, subst)) -> unionDefWith subst name u)
 
         let recordDef (r: IdlRecord) = r.Name, recordSchema r
 
@@ -1754,9 +1911,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // `FormField` / `FilterSpec` / `TabHeader` / `ColumnErased` / … — under a
         // strict validator an unresolvable `$ref` is an error, not a permissive
         // skip, so the leg could never have certified against the corpus.
+        // A generic union contributes its INSTANTIATIONS (Phase 1068), never its
+        // bare erased name. An unparameterised union is unchanged.
         let defs =
             (idl.Enums |> List.map enumDef)
-            @ (idl.Unions |> List.map unionDef)
+            @ (idl.Unions |> List.filter (fun u -> List.isEmpty u.Params) |> List.map unionDef)
+            @ genericDefs
             @ (idl.Records |> List.map recordDef)
             @ (idl.Kinds |> List.map kindDef)
             @ [ nodeKindDef; nodeDef ]

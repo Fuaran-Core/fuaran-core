@@ -144,7 +144,26 @@
          parsed fixtures at `JsonDocument`'s default 64-level cap, below the 256 §21 pins, so
          the §21 at-the-limit node fixture failed on the READER rather than on the schema.
          See fuaran#1063. -->
-    <Version>0.13.0</Version>
+    <!-- 0.14.0 (2026-08-26): `Gen.jsonSchema` emits a GENERIC union once per INSTANTIATED
+         type argument, not once type-erased. JSON Schema has no type parameters, which is
+         why the leg emitted a generic union's `'T`-typed fields as the permissive `{}`; but
+         a schema needs no type parameters to state the INSTANTIATIONS, because the IDL names
+         every one of them at the slot it is used from. So `Binding<'T>` now emits as
+         `Binding_float` / `Binding_int` / `Binding_str` / `Binding_list_SelectOption` / …,
+         each with its `Static.value` and three `defaultValue`s constrained by the element
+         type — and `Local.initialFrom` pointing back at its OWN instantiation, which is the
+         polymorphic recursion the IDL declares.
+         The cost of the erased form was measured rather than supposed (fuaran#1064): a
+         `Binding<float>` slot admitted a JSON boolean and a `Binding<int>` slot admitted a
+         §7 non-finite sentinel, both of which the decoder refuses, so the published schema
+         could not state a rule it was perfectly able to express.
+         MINOR on the 0.13.0 precedent directly above — the emitted shape IS this package's
+         contract — and a fresh version rather than a repack, because 0.13.0 is tagged and
+         published, so re-packing that slot would make one machine's 0.13.0 differ from the
+         world's. `Fuaran.Core.Idl.Codegen` is the only package whose delivered content moves;
+         the other nine `Fuaran.Core.*` are byte-unchanged and carry the new stamp only.
+         See fuaran#1068. -->
+    <Version>0.14.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

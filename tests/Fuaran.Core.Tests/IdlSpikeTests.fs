@@ -426,10 +426,19 @@ let tests =
                       (schema.Contains("\"" + k.Tag + "\""))
                       (sprintf "schema missing a def for kind '%s'" k.Tag)
 
+              // Phase 1068 — a GENERIC union has no bare definition any more: it is
+              // emitted once per INSTANTIATED type argument (`Binding_str`,
+              // `Binding_float`), because `Binding<float>` and `Binding<int>` are
+              // different wire shapes and one erased definition could state neither.
+              // An unparameterised union is unchanged and keeps its own name.
               for u in miniIdl.Unions do
-                  Expect.isTrue
-                      (schema.Contains("\"" + u.Name + "\""))
-                      (sprintf "schema missing a def for union '%s'" u.Name))
+                  let expected =
+                      if List.isEmpty u.Params then
+                          "\"" + u.Name + "\""
+                      else
+                          "\"" + u.Name + "_"
+
+                  Expect.isTrue (schema.Contains expected) (sprintf "schema missing a def for union '%s'" u.Name))
 
           // ---- Phase 317 increment 8: the SECOND BACKEND (TypeScript) ----
 
