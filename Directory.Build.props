@@ -127,8 +127,8 @@
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <Copyright>Copyright 2026 Diametrical Ltd</Copyright>
-    <PackageProjectUrl>https://github.com/fuaran-ui/fuaran-core</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/fuaran-ui/fuaran-core</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Fuaran-Core/fuaran-core</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Fuaran-Core/fuaran-core</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
