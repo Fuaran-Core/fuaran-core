@@ -710,6 +710,38 @@ let private formFieldKind =
 // since the 0.2.0 filters-unification. `filters-declarative`'s Range chip is
 // what surfaced it.)_
 
+/// `MediaKind` — WHICH media surface a `Media` node is (Fuaran-UI Phase 1076).
+///
+/// One kind with a variant union, never two kinds: the vocabulary charter's
+/// Appendix A `Media` row pre-ruled the shape, and the reasoning is visible in
+/// the declaration itself. Everything a video and an audio element share —
+/// the source, the accessible label, the transport, the repeat — lives ONCE on
+/// `MediaSpec`; the only slots that differ are video-only, and they live here,
+/// on the `Video` case. An `Audio` case with no fields is not a poorer twin of
+/// `Video`, it is the honest statement that an audio surface has nothing extra
+/// to say.
+///
+/// `autoplay` is video-only BY CONSTRUCTION, and its absence from `Audio` is
+/// the design rather than an omission: an audio surface that starts itself is a
+/// defect shape, so the knob does not exist rather than defaulting to off. It
+/// is an omit-at-default bool on `Video`, so a video that does not ask for it
+/// costs no key — the `Toast.dismissable` / `Image.expandable` precedent, with
+/// the polarity of the latter.
+///
+/// `poster` is a full `Binding<string>` for the same reason `MediaSpec.src` is,
+/// and it routes through the same render-time URL floor: a poster frame is a
+/// URL the browser fetches with no user act, which is the whole of the `Media`
+/// egress class.
+let private mediaKind =
+    { Name = "MediaKind"
+      Params = []
+      Cases =
+        [ { Tag = "Video"
+            Fields =
+              [ omit "autoplay" TBool (VBool false)
+                opt "poster" (TUnion("Binding", [ TStr ])) ] }
+          { Tag = "Audio"; Fields = [] } ] }
+
 /// `ColumnWidth` — a `DataGrid` column's sizing intent.
 let private columnWidth =
     { Name = "ColumnWidth"
@@ -1262,6 +1294,32 @@ let displayKinds: IdlKind list =
             omit "srcSet" (TList(TRecord "SrcSetEntry")) (VList [])
             omit "expandable" TBool (VBool false)
             opt "caption" TS ] }
+      // Phase 1076 — `Media`: the playback surface. ONE kind carrying a
+      // `MediaKind` variant (Video / Audio), which is the shape the vocabulary
+      // charter's Appendix A pre-ruled and this declaration honours rather than
+      // overrules. Shared invariants sit here; the video-only slots sit in the
+      // case payload above.
+      //
+      // `label` is REQUIRED and is the a11y floor — `ImageSpec.alt`'s rule
+      // applied to a control surface. A `<video>` / `<audio>` element with no
+      // accessible name is announced by its element type alone, which tells a
+      // screen-reader user that a media player exists and nothing about what it
+      // plays; unlike an image there is no decorative case, because a transport
+      // is always an interactive control.
+      //
+      // `controls` omits when TRUE — the `Toast.dismissable` polarity, and for
+      // the same kind of reason: a media element with no transport is a surface
+      // a keyboard user cannot pause, so the default is the accessible one and
+      // the DECLARATION is the deviation. `loop` omits at false, the ordinary
+      // polarity.
+      { Tag = "Media"
+        Category = "Display"
+        Fields =
+          [ omit "controls" TBool (VBool true)
+            req "kind" (TUnion("MediaKind", []))
+            req "label" TS
+            omit "loop" TBool (VBool false)
+            req "src" (bindingOf TStr) ] }
       { Tag = "Link"
         Category = "Display"
         Fields =
@@ -1900,6 +1958,7 @@ let uiIdl: Idl =
           localFlushTrigger
           layoutMode
           formFieldKind
+          mediaKind
           columnWidth
           cellKindErased
           holeValueSpace
@@ -2128,6 +2187,63 @@ let private imageSrcset1 =
                 VRecord [ "src", staticStr "/harbour-400.jpg"; "width", VInt 400 ] ] ]
     )
 
+/// Phase 1076 — the `Media` kind at its minimum: a video with nothing declared
+/// beyond the four mandatory slots. `controls` is at its TRUE default and
+/// `loop` at its false one, so neither appears; the `kind` payload is the bare
+/// `{"$type":"Video"}` because `autoplay` omits at false and `poster` is
+/// absent. A generated encoder that emitted either polarity the wrong way round
+/// fails on these bytes and on no other fixture in the family.
+let private mediaVideo1 =
+    VNode(
+        "media-video-1",
+        "Media",
+        [ "kind", VUnion("Video", [])
+          "label", lit "Studio walkthrough"
+          "src", staticStr "/walkthrough.mp4" ]
+    )
+
+/// Phase 1076 — the poster frame, the one video-only slot that is a URL. It
+/// certifies that the case payload carries a full `Binding<string>` rather than
+/// a narrowed string, and that a present optional slot inside a `$type`-tagged
+/// case encodes in the case object rather than beside it.
+let private mediaVideoPoster1 =
+    VNode(
+        "media-video-poster-1",
+        "Media",
+        [ "kind", VUnion("Video", [ "poster", staticStr "/walkthrough-poster.jpg" ])
+          "label", lit "Studio walkthrough"
+          "src", staticStr "/walkthrough.mp4" ]
+    )
+
+/// Phase 1076 — `autoplay` declared, plus both shared bools moved OFF their
+/// defaults, so this one fixture pins the emit half of three omit rules whose
+/// polarities disagree (`controls` omits at true, `loop` and `autoplay` at
+/// false). The wire says only that autoplay is declared; that a host must not
+/// emit it without a muted attribute is a RENDER obligation, stated normatively
+/// in the spec and pinned by the SSR corpus — not something bytes can carry.
+let private mediaVideoAutoplay1 =
+    VNode(
+        "media-video-autoplay-1",
+        "Media",
+        [ "controls", VBool false
+          "kind", VUnion("Video", [ "autoplay", VBool true ])
+          "label", lit "Ambient loop"
+          "loop", VBool true
+          "src", staticStr "/ambient.mp4" ]
+    )
+
+/// Phase 1076 — the `Audio` variant. Its payload is `{"$type":"Audio"}` and
+/// nothing else, which is the whole point of the variant shape: there is no
+/// autoplay key to omit here, because the slot does not exist on this case.
+let private mediaAudio1 =
+    VNode(
+        "media-audio-1",
+        "Media",
+        [ "kind", VUnion("Audio", [])
+          "label", lit "Curator's commentary"
+          "src", staticStr "/commentary.mp3" ]
+    )
+
 let private link1 =
     VNode(
         "link-1",
@@ -2290,6 +2406,10 @@ let displayCases: (string * IdlValue) list =
       "image-caption-1", imageCaption1
       "image-caption-i18n-1", imageCaptionI18n1
       "image-srcset-1", imageSrcset1
+      "media-video-1", mediaVideo1
+      "media-video-poster-1", mediaVideoPoster1
+      "media-video-autoplay-1", mediaVideoAutoplay1
+      "media-audio-1", mediaAudio1
       "link-1", link1
       "callout-1", callout1
       "progress-1", progress1
