@@ -74,6 +74,31 @@ let private mathDisplay = Declare.enumOf "MathDisplay" [ "Inline"; "Block" ]
 let private imageVariant =
     Declare.enumOf "ImageVariant" [ "Default"; "Avatar"; "Rounded" ]
 
+/// Phase 1077 — `Image.fit`: how the decoded pixels fill the box the layout
+/// gives the element. `Natural` is the pre-phase behaviour (intrinsic aspect,
+/// `height: auto` — no `object-fit` rule at all); `Cover` fills and crops;
+/// `Contain` fits the whole image inside and letterboxes. A closed vocabulary
+/// mapped to a class, never a free-form CSS value — the `ImageVariant`
+/// precedent.
+let private imageFit = Declare.enumOf "ImageFit" [ "Natural"; "Cover"; "Contain" ]
+
+/// Phase 1077 — `Image.aspectRatio`: the box the element reserves BEFORE the
+/// image arrives. This is the cumulative-layout-shift fix: with `Natural` the
+/// browser learns the shape only once the bytes land and everything below
+/// jumps; a declared ratio reserves the space in the first layout pass. The
+/// vocabulary is the four ratios a page actually asks for and no more —
+/// admitting arbitrary ratios would mean a numeric slot reaching a style
+/// attribute, which is the free-form escape this language does not have.
+let private imageAspect =
+    Declare.enumOf "ImageAspect" [ "Natural"; "Square"; "FourThree"; "ThreeTwo"; "SixteenNine" ]
+
+/// Phase 1077 — `Image.loading`: whether the browser fetches this image during
+/// the initial load or defers it until it approaches the viewport. `Eager` is
+/// the pre-phase behaviour and stays the default, because deferring an
+/// above-the-fold image is a REGRESSION, not an optimisation — the choice
+/// belongs to the author, who knows where the image sits.
+let private imageLoading = Declare.enumOf "ImageLoading" [ "Eager"; "Lazy" ]
+
 let private toneVariant =
     Declare.enumOf "ToneVariant" [ "Default"; "Subdued"; "Brand"; "Success"; "Warning"; "Critical"; "Info" ]
 
@@ -1169,12 +1194,18 @@ let displayKinds: IdlKind list =
       { Tag = "List"
         Category = "Display"
         Fields = [ req "items" (TList TS); req "ordered" TBool ] }
+      // Phase 1077 — the three presentation slots. Every one is
+      // omitted-at-default on BOTH boundaries, so a pre-phase document (which
+      // carries none of them) decodes and renders exactly as it did.
       { Tag = "Image"
         Category = "Display"
         Fields =
           [ req "alt" TS
             req "src" (bindingOf TStr)
-            req "variant" (TEnum "ImageVariant") ] }
+            req "variant" (TEnum "ImageVariant")
+            omit "fit" (TEnum "ImageFit") (VEnum "Natural")
+            omit "aspectRatio" (TEnum "ImageAspect") (VEnum "Natural")
+            omit "loading" (TEnum "ImageLoading") (VEnum "Eager") ] }
       { Tag = "Link"
         Category = "Display"
         Fields =
@@ -1829,6 +1860,9 @@ let uiIdl: Idl =
           boxRole
           mathDisplay
           imageVariant
+          imageFit
+          imageAspect
+          imageLoading
           toneVariant
           styleWeight
           emphasis
