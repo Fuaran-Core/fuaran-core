@@ -1237,6 +1237,19 @@ let displayKinds: IdlKind list =
       // makes it the missing-list-field decode class — absent decodes to `[]`,
       // never to a null or an undefined, and the corpus pins the absent case
       // explicitly so no host has to guess.
+      //
+      // Phase 1079 — `expandable` is the sixth addition and the only one that
+      // declares an INTERACTION rather than a picture. It is a plain
+      // omit-at-default bool (`false` is the identity, so it costs no key on
+      // any image that does not ask for it), and what it declares is that the
+      // full-size asset is reachable from the rendered image. Its whole design
+      // lives in what a host must emit for it: a REAL `<a href>` to the asset,
+      // so the affordance works with no script at all, plus a
+      // `data-fuaran-expandable` marker an enhancement tier reads to upgrade
+      // that link into an in-page overlay. The wire says the intent; it says
+      // nothing about lightboxes, because a declaration whose only honest
+      // rendering needed JavaScript would be a dead control on every host that
+      // does not run any.
       { Tag = "Image"
         Category = "Display"
         Fields =
@@ -1247,6 +1260,7 @@ let displayKinds: IdlKind list =
             omit "aspectRatio" (TEnum "ImageAspect") (VEnum "Natural")
             omit "loading" (TEnum "ImageLoading") (VEnum "Eager")
             omit "srcSet" (TList(TRecord "SrcSetEntry")) (VList [])
+            omit "expandable" TBool (VBool false)
             opt "caption" TS ] }
       { Tag = "Link"
         Category = "Display"
