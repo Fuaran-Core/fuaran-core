@@ -1078,6 +1078,26 @@ let private contentHashRecord =
           req "hash" TStr
           req "strictness" (TEnum "HashStrictness") ] }
 
+/// Phase 1080 — one candidate source of a responsive `Image`. `width` is the
+/// intrinsic pixel width of THIS candidate (the `w` descriptor a browser picks
+/// from), and `src` is a full `Binding<string>` for the same reason the primary
+/// `src` is: a candidate can come from a query or a computed value, not only a
+/// literal path.
+///
+/// `width` must be POSITIVE. The IDL has no refined-integer type (the
+/// `DefaultSort.column` precedent above), so that floor lives in the policy
+/// decoder and the published JSON Schema, and the corpus carries a reject vector
+/// for it — which is what makes it a wire rule rather than one host's opinion.
+///
+/// Deliberately NOT modelled: an `x`-descriptor (device-pixel-ratio) form, and a
+/// per-entry media condition. Both are alternative candidate-selection algebras,
+/// and admitting either alongside `w` would make a `srcset` list heterogeneous —
+/// a browser refuses a mixed list outright, so the wire would be able to state a
+/// document no host can render.
+let private srcSetEntryRecord =
+    { Name = "SrcSetEntry"
+      Fields = [ req "src" (TUnion("Binding", [ TStr ])); req "width" TInt ] }
+
 /// A `FragmentDecl`'s two-axis effect class (omitted on the wire when pure +
 /// deterministic — modelled here as an optional field on the kind).
 let private effectClassRecord =
@@ -1208,6 +1228,15 @@ let displayKinds: IdlKind list =
       // as every other authored string. Present, it makes the renderers emit
       // `<figure>` / `<figcaption>`; absent, the emission is the bare `<img>`
       // it always was.
+      //
+      // Phase 1080 — `srcSet` is the fifth addition and the first REPEATED slot
+      // on this record. It is omitted-at-default like the presentation tokens,
+      // but its default is the EMPTY LIST rather than a token: an absent list
+      // and an empty one denote the same document, so a slot that is empty on
+      // almost every image must not cost a key on almost every image. That
+      // makes it the missing-list-field decode class — absent decodes to `[]`,
+      // never to a null or an undefined, and the corpus pins the absent case
+      // explicitly so no host has to guess.
       { Tag = "Image"
         Category = "Display"
         Fields =
@@ -1217,6 +1246,7 @@ let displayKinds: IdlKind list =
             omit "fit" (TEnum "ImageFit") (VEnum "Natural")
             omit "aspectRatio" (TEnum "ImageAspect") (VEnum "Natural")
             omit "loading" (TEnum "ImageLoading") (VEnum "Eager")
+            omit "srcSet" (TList(TRecord "SrcSetEntry")) (VList [])
             opt "caption" TS ] }
       { Tag = "Link"
         Category = "Display"
@@ -1929,6 +1959,7 @@ let uiIdl: Idl =
           columnErasedRecord
           buttonGroupItemRecord
           contentHashRecord
+          srcSetEntryRecord
           effectClassRecord ]
       Defaults = []
       // Phase 690 — the node envelope, Ordinal-ordered like every other field list.
@@ -2062,6 +2093,25 @@ let private imageCaptionI18n1 =
               [ "key", VStr "gallery.caption.harbour"
                 "args", VMap [ "year", VJson(Fuaran.Core.JInt 1908) ] ]
           ) ]
+    )
+
+/// Phase 1080 — a multi-entry `srcSet`. The entries are authored DESCENDING by
+/// width on purpose: the wire preserves authored array order (a JSON array is
+/// ordered data, and the canonical encoder sorts object KEYS only), so the
+/// ascending order the renderers emit is the RENDERER's canonicalisation, not
+/// the codec's. A fixture authored already-sorted could not tell the two apart.
+let private imageSrcset1 =
+    VNode(
+        "image-srcset-1",
+        "Image",
+        [ "alt", lit "Fishing boats moored at first light"
+          "src", staticStr "/harbour.jpg"
+          "variant", VEnum "Default"
+          "srcSet",
+          VList
+              [ VRecord [ "src", staticStr "/harbour-1600.jpg"; "width", VInt 1600 ]
+                VRecord [ "src", staticStr "/harbour-800.jpg"; "width", VInt 800 ]
+                VRecord [ "src", staticStr "/harbour-400.jpg"; "width", VInt 400 ] ] ]
     )
 
 let private link1 =
@@ -2225,6 +2275,7 @@ let displayCases: (string * IdlValue) list =
       "image-presentation-1", imagePresentation1
       "image-caption-1", imageCaption1
       "image-caption-i18n-1", imageCaptionI18n1
+      "image-srcset-1", imageSrcset1
       "link-1", link1
       "callout-1", callout1
       "progress-1", progress1

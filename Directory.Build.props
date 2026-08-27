@@ -163,7 +163,30 @@
          world's. `Fuaran.Core.Idl.Codegen` is the only package whose delivered content moves;
          the other nine `Fuaran.Core.*` are byte-unchanged and carry the new stamp only.
          See fuaran#1068. -->
-    <Version>0.14.0</Version>
+    <!-- 0.15.0 (2026-08-27): the codegen backends learn the EMPTY LIST as an omit-when-default
+         value. Before this, `omit <field> (TList _) (VList [])` was an unrenderable default:
+         `fsDefaultLit` / `tsDefaultLit` returned `None`, and the documented consequence of that
+         is a silent FALLBACK TO ALWAYS-EMIT — so the declaration read as "omitted when empty"
+         and emitted `"srcSet":[]` on every node that did not use the slot. A default the model
+         accepts and the generator quietly ignores is worse than one it refuses.
+         Four one-line additions, each mirroring the enum/nullary-union case beside it:
+         `fsDefaultLit` and `defaultExpr` render `[]`; `tsDefaultLit` renders `[]` so an absent
+         list decodes to the empty ARRAY rather than to `undefined` (the missing-list-field
+         decode class); `tsIsDefault` renders `.length === 0`, because a JS array compares by
+         reference. Plus one that is NOT a mirror and is the interesting half: the F# encoder's
+         omit TEST emits `List.isEmpty s.X`, never `s.X = []`. That is Phase 691's union lesson
+         reaching lists — an element type whose fields reach a closure (a `Binding` does) carries
+         no equality, so the equality form does not COMPILE for the first list this feature was
+         built for. Found by the compiler at the first regeneration, not reasoned out.
+         MINOR on the 0.14.0 precedent directly above — the emitted shape IS this package's
+         contract — and a fresh version rather than a repack, because v0.14.0 is tagged, so
+         re-packing that slot would make one machine's 0.14.0 emit source the world's does not.
+         `Fuaran.Core.Idl.Codegen` is the only package whose delivered content moves; the other
+         nine `Fuaran.Core.*` are byte-unchanged and carry the new stamp only. Purely additive:
+         every default shape that rendered before renders identically, and no existing IDL
+         declares a list default, so no emitted artefact in the estate changes but the one this
+         phase adds. See fuaran#1080. -->
+    <Version>0.15.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

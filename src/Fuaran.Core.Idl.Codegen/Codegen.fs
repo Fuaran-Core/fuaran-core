@@ -509,14 +509,23 @@ let private encFloat (f: float) : JVal =
         |> Option.defaultValue wire
 
     /// The F# literal for an omit-when-default field's identity default — enums
-    /// (`ToneVariant.Default`) and nullary unions (`CellFormat.None`), the only
-    /// default shapes the omit-when-default wire (Phase 147 / 460) uses. `None` ⇒
-    /// the emitter can't render it, and the encoder falls back to always-emit.
+    /// (`ToneVariant.Default`), nullary unions (`CellFormat.None`), booleans, and
+    /// the EMPTY LIST (Phase 1080). `None` ⇒ the emitter can't render it, and the
+    /// encoder falls back to always-emit.
+    ///
+    /// The empty-list case is the one default whose *absence* is expressible on the
+    /// wire without ambiguity in the other direction: an absent list slot and an
+    /// empty one denote the same document, so a repeated slot that is empty by
+    /// default costs a key on every node that does not use it. `[]` is a legal F#
+    /// literal at any list type and list equality is structural, so both halves —
+    /// the encoder's `= []` omit test and the decoder's restore — fall out of the
+    /// same one-line literal the enum case does.
     let private fsDefaultLit (enums: IdlEnum list) (t: IdlType) (v: IdlValue) : string option =
         match t, v with
         | TEnum n, VEnum c -> Some(n + "." + fsEnumCase enums n c)
         | TUnion(n, _), VUnion(tag, []) -> Some(n + "." + tag)
         | TBool, VBool b -> Some(if b then "true" else "false")
+        | TList _, VList [] -> Some "[]"
         | _ -> None
 
     /// One field of a record-spec encoder, as a `(string * JVal) option` for `List.choose id`
@@ -554,6 +563,18 @@ let private encFloat (f: float) : JVal =
                  | _ -> false)
                 ->
                 sprintf "(match %s with | %s -> None | _ -> Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
+            // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
+            // `= []`, and for the same reason the union arm above exists: an element
+            // type that reaches a closure carries no equality, so `SrcSetEntry`
+            // (whose `src` is a `Binding`) fails the constraint the moment the
+            // generated encoder is compiled. `List.isEmpty` imposes none, and it is
+            // the better test anyway — it says what it means.
+            | Some _ when
+                (match f.Type with
+                 | TList _ -> true
+                 | _ -> false)
+                ->
+                sprintf "(if List.isEmpty %s then None else Some(\"%s\", %s))" src f.Name (encApplied src f.Type)
             | Some dexpr ->
                 sprintf "(if %s = %s then None else Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
             | None -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
@@ -589,6 +610,18 @@ let private encFloat (f: float) : JVal =
                  | _ -> false)
                 ->
                 sprintf "(match %s with | %s -> None | _ -> Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
+            // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
+            // `= []`, and for the same reason the union arm above exists: an element
+            // type that reaches a closure carries no equality, so `SrcSetEntry`
+            // (whose `src` is a `Binding`) fails the constraint the moment the
+            // generated encoder is compiled. `List.isEmpty` imposes none, and it is
+            // the better test anyway — it says what it means.
+            | Some _ when
+                (match f.Type with
+                 | TList _ -> true
+                 | _ -> false)
+                ->
+                sprintf "(if List.isEmpty %s then None else Some(\"%s\", %s))" src f.Name (encApplied src f.Type)
             | Some dexpr ->
                 sprintf "(if %s = %s then None else Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
             | None -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
@@ -1184,6 +1217,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TBool, VBool b -> Ok(if b then "true" else "false")
         | TEnum n, VEnum c -> Ok(n + "." + fsEnumCase enums n c)
         | TUnion(n, _), VUnion(tag, []) -> Ok(n + "." + tag)
+        // Phase 1080 — the empty list, so a smart constructor can fill an
+        // omitted-when-empty repeated slot without taking it as a parameter.
+        | TList _, VList [] -> Ok "[]"
         | _ -> Error(CodegenError.UnsupportedDefault(t, v))
 
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
@@ -2098,6 +2134,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         match t, d with
         | TEnum _, VEnum c -> Some(src + " === " + tsSourceStr c)
         | TUnion _, VUnion(tag, []) -> Some(src + ".$type === " + tsSourceStr tag)
+        // Phase 1080 — an omitted-when-empty repeated slot. `.length === 0` rather
+        // than an equality test, because JS arrays compare by reference.
+        | TList _, VList [] -> Some(src + ".length === 0")
         | TBool, VBool b -> Some(src + " === " + (if b then "true" else "false"))
         | _ -> None
 
@@ -2247,6 +2286,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TEnum _, VEnum c -> Some(tsSourceStr c)
         | TUnion _, VUnion(tag, []) -> Some("{ $type: " + tsSourceStr tag + " }")
         | TBool, VBool b -> Some(if b then "true" else "false")
+        // Phase 1080 — an absent repeated slot decodes to the EMPTY ARRAY, never to
+        // `undefined` or `null`: the missing-list-field decode class, pinned here
+        // rather than left to each host's own reading of an absent key.
+        | TList _, VList [] -> Some "[]"
         | _ -> None
 
     let private tsDecField (f: IdlField) : string =
