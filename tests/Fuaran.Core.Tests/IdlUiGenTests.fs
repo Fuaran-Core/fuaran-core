@@ -86,6 +86,8 @@ let private metric1: G.Node<unit> =
               Emphasis = G.Emphasis.Normal
               Trend = Some(G.Binding.Static(Some 0.07))
               TrendFormat = Some(G.CellFormat.Percent(Some 1))
+              // Phase 867 — the default, so `metric-1` stays byte-unchanged.
+              TrendPolarity = G.TrendPolarity.HigherIsBetter
               Icon = Some "trending-up"
               Subtext = Some(lit "vs last month") } }
 

@@ -82,6 +82,20 @@ let private styleWeight =
 
 let private emphasis = Declare.enumOf "Emphasis" [ "Quiet"; "Normal"; "Loud" ]
 
+/// `Metric.trendPolarity` — which direction of the measured quantity is GOOD.
+/// A falling wait time, error rate, cost, churn or latency is an improvement; a
+/// falling revenue is not, and until this slot existed the wire could not tell
+/// the two apart. It is a property of the QUANTITY (permanent, every reading),
+/// where `tone` is a property of THIS READING — so the two are never the same
+/// statement and a host derives neither from the other.
+///
+/// `Neutral` (a quantity with no better direction) is deliberately NOT a case:
+/// there is no demand evidence for it. It is reserved as the name a third case
+/// would take, which is the whole reason this is an enum rather than a boolean
+/// — a later admission is then a bare-string addition, not a type replacement.
+let private trendPolarity =
+    Declare.enumOf "TrendPolarity" [ "HigherIsBetter"; "LowerIsBetter" ]
+
 // ─── Phase 690: the node envelope (WIRE_FORMAT.md §3.1) ────────────────────
 //
 // `style` / `state` / `accessibility` sit on the NODE, beside `id` and `kind`,
@@ -1199,6 +1213,12 @@ let displayKinds: IdlKind list =
             omit "emphasis" (TEnum "Emphasis") (VEnum "Normal")
             opt "trend" (bindingOf TFloat)
             opt "trendFormat" CF
+            // Phase 867 — which direction of this quantity is GOOD. Omitted at
+            // its `HigherIsBetter` default, which is the reading every existing
+            // document already has, so no pre-existing fixture moves a byte.
+            // Says nothing about `value`: a Metric with no `trend` that declares
+            // a polarity is legal-but-inert.
+            omit "trendPolarity" (TEnum "TrendPolarity") (VEnum "HigherIsBetter")
             opt "icon" icon
             opt "subtext" TS ] }
       { Tag = "LabelValueRow"
@@ -1812,6 +1832,7 @@ let uiIdl: Idl =
           toneVariant
           styleWeight
           emphasis
+          trendPolarity
           scrollOrientation
           buttonVariant
           fileReadEncoding
@@ -1989,6 +2010,9 @@ let private metric1 =
           "emphasis", VEnum "Normal"
           "trend", staticFloat 0.07
           "trendFormat", VUnion("Percent", [ "decimals", VInt 1 ])
+          // Phase 867 - authored at the default, so the wire stays byte-unchanged
+          // while decode's materialised default still round-trips to this value.
+          "trendPolarity", VEnum "HigherIsBetter"
           "icon", VStr "trending-up"
           "subtext", lit "vs last month" ]
     )
@@ -2005,6 +2029,9 @@ let private metric2 =
           "emphasis", VEnum "Normal"
           "trend", staticFloat 0.07
           "trendFormat", VUnion("Percent", [ "decimals", VInt 1 ])
+          // Phase 867 - authored at the default, so the wire stays byte-unchanged
+          // while decode's materialised default still round-trips to this value.
+          "trendPolarity", VEnum "HigherIsBetter"
           "icon", VStr "trending-up"
           "subtext", lit "vs last month" ]
     )
@@ -2624,6 +2651,7 @@ let private metricInvoke =
           "tone", VEnum "Brand"
           "weight", VEnum "Standard"
           "emphasis", VEnum "Normal"
+          "trendPolarity", VEnum "HigherIsBetter"
           "icon", VStr "trending-up"
           "subtext", lit "vs last month" ]
     )
