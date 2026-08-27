@@ -2000,6 +2000,23 @@ let private image1 =
           "variant", VEnum "Avatar" ]
     )
 
+/// Phase 1077 — the three presentation slots at NON-default values. `image1`
+/// above carries none of them and its wire is byte-unchanged, which certifies
+/// the omit half; this certifies the emit half, so the generated encoder is
+/// held to both directions of the omit-at-default rule rather than only to
+/// silence.
+let private imagePresentation1 =
+    VNode(
+        "image-presentation-1",
+        "Image",
+        [ "alt", lit "The harbour at dawn"
+          "src", staticStr "/hero.jpg"
+          "variant", VEnum "Default"
+          "fit", VEnum "Cover"
+          "aspectRatio", VEnum "SixteenNine"
+          "loading", VEnum "Lazy" ]
+    )
+
 let private link1 =
     VNode(
         "link-1",
@@ -2158,6 +2175,7 @@ let displayCases: (string * IdlValue) list =
       "icon-1", icon1
       "list-1", list1
       "image-1", image1
+      "image-presentation-1", imagePresentation1
       "link-1", link1
       "callout-1", callout1
       "progress-1", progress1
