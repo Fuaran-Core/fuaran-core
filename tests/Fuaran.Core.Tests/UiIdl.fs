@@ -305,9 +305,12 @@ let private textSource =
           { Tag = "Bound"
             Fields = [ req "binding" (TUnion("Binding", [ TStr ])) ] }
           // i18n catalog lookup (Phase 692 swap-prep — the last TextSource case;
-          // no corpus fixture carries it, but the hand-written encoder emits it,
-          // so the generated union must hold it for the swap). `args` is a
-          // name-keyed JVal bag, always emitted (matching the hand-written arm).
+          // modelled with no corpus fixture behind it, because the hand-written
+          // encoder emits it and the generated union had to hold it for the
+          // swap). Phase 1078 closed that gap: `image-caption-i18n-1` carries an
+          // `I18n` caption, so the case is now certified rather than merely
+          // declared. `args` is a name-keyed JVal bag, always emitted (matching
+          // the hand-written arm).
           { Tag = "I18n"
             Fields = [ req "key" TStr; req "args" (TMap TJson) ] } ] }
 
@@ -1197,6 +1200,14 @@ let displayKinds: IdlKind list =
       // Phase 1077 — the three presentation slots. Every one is
       // omitted-at-default on BOTH boundaries, so a pre-phase document (which
       // carries none of them) decodes and renders exactly as it did.
+      //
+      // Phase 1078 — `caption` is the fourth addition and the only one that is
+      // NOT a presentation token: it is content, so it is an ordinary optional
+      // field (omitted when absent, rule 4) rather than an identity default,
+      // and it is a `TextSource` so a caption is i18n-capable on the same terms
+      // as every other authored string. Present, it makes the renderers emit
+      // `<figure>` / `<figcaption>`; absent, the emission is the bare `<img>`
+      // it always was.
       { Tag = "Image"
         Category = "Display"
         Fields =
@@ -1205,7 +1216,8 @@ let displayKinds: IdlKind list =
             req "variant" (TEnum "ImageVariant")
             omit "fit" (TEnum "ImageFit") (VEnum "Natural")
             omit "aspectRatio" (TEnum "ImageAspect") (VEnum "Natural")
-            omit "loading" (TEnum "ImageLoading") (VEnum "Eager") ] }
+            omit "loading" (TEnum "ImageLoading") (VEnum "Eager")
+            opt "caption" TS ] }
       { Tag = "Link"
         Category = "Display"
         Fields =
@@ -2017,6 +2029,41 @@ let private imagePresentation1 =
           "loading", VEnum "Lazy" ]
     )
 
+/// Phase 1078 — the caption at its simplest, a `Literal`. Everything else sits
+/// where `image1` has it, so the byte difference between the two snapshots is
+/// exactly one key: a generated encoder that emitted the slot in the wrong
+/// position, or spelled it differently, cannot pass both.
+let private imageCaption1 =
+    VNode(
+        "image-caption-1",
+        "Image",
+        [ "alt", lit "Fishing boats moored at first light"
+          "src", staticStr "/harbour.jpg"
+          "variant", VEnum "Default"
+          "caption", lit "The harbour at dawn, 1908. Oil on canvas." ]
+    )
+
+/// Phase 1078 — the caption as an `I18n` TextSource, and the FIRST fixture on
+/// any side to carry that case (the `TextSource.I18n` declaration above was
+/// modelled for the swap with no fixture behind it). It certifies two things at
+/// once: that the caption slot is a full `TextSource` rather than a narrowed
+/// string, and that the generated encoder's `I18n` arm — key, then the
+/// always-emitted `args` bag — emits what the hand-written tier does.
+let private imageCaptionI18n1 =
+    VNode(
+        "image-caption-i18n-1",
+        "Image",
+        [ "alt", lit "Fishing boats moored at first light"
+          "src", staticStr "/harbour.jpg"
+          "variant", VEnum "Default"
+          "caption",
+          VUnion(
+              "I18n",
+              [ "key", VStr "gallery.caption.harbour"
+                "args", VMap [ "year", VJson(Fuaran.Core.JInt 1908) ] ]
+          ) ]
+    )
+
 let private link1 =
     VNode(
         "link-1",
@@ -2176,6 +2223,8 @@ let displayCases: (string * IdlValue) list =
       "list-1", list1
       "image-1", image1
       "image-presentation-1", imagePresentation1
+      "image-caption-1", imageCaption1
+      "image-caption-i18n-1", imageCaptionI18n1
       "link-1", link1
       "callout-1", callout1
       "progress-1", progress1
