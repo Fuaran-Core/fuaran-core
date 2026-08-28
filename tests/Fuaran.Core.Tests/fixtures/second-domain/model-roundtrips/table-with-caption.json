@@ -1,0 +1,36 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Tabular",
+    "locale": "EnGB",
+    "numbering": "NoNumbering",
+    "children": [
+      {
+        "kind": "Table",
+        "id": "t1",
+        "caption": [ { "kind": "Text", "value": "Quarterly results" } ],
+        "children": [
+          {
+            "kind": "Row",
+            "id": "r1",
+            "isHeader": true,
+            "children": [
+              { "kind": "Cell", "id": "c11", "runs": [ { "kind": "Strong", "runs": [ { "kind": "Text", "value": "Quarter" } ] } ] },
+              { "kind": "Cell", "id": "c12", "runs": [ { "kind": "Strong", "runs": [ { "kind": "Text", "value": "Amount" } ] } ] }
+            ]
+          },
+          {
+            "kind": "Row",
+            "id": "r2",
+            "isHeader": false,
+            "children": [
+              { "kind": "Cell", "id": "c21", "runs": [ { "kind": "Text", "value": "Q1" } ] },
+              { "kind": "Cell", "id": "c22", "runs": [ { "kind": "Text", "value": "100" } ] }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

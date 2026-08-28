@@ -1,0 +1,39 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Lists and notes",
+    "locale": "EnGB",
+    "numbering": "NoNumbering",
+    "children": [
+      {
+        "kind": "ListBlock",
+        "id": "lb1",
+        "style": "Bulleted",
+        "children": [
+          {
+            "kind": "ListItem",
+            "id": "li1",
+            "children": [
+              { "kind": "Paragraph", "id": "p1", "runs": [ { "kind": "Text", "value": "First point." } ] }
+            ]
+          },
+          {
+            "kind": "ListItem",
+            "id": "li2",
+            "children": [
+              { "kind": "Paragraph", "id": "p2", "runs": [ { "kind": "Text", "value": "Second point." } ] }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "Footnote",
+        "id": "fn1",
+        "children": [
+          { "kind": "Paragraph", "id": "p3", "runs": [ { "kind": "Text", "value": "A clarifying note." } ] }
+        ]
+      }
+    ]
+  }
+}

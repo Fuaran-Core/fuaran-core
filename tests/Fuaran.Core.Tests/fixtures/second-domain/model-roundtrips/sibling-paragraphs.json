@@ -1,0 +1,32 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Sibling paragraphs",
+    "locale": "EnGB",
+    "numbering": "NoNumbering",
+    "children": [
+      {
+        "kind": "Paragraph",
+        "id": "p1",
+        "runs": [
+          { "kind": "Text", "value": "The first paragraph states the matter plainly." }
+        ]
+      },
+      {
+        "kind": "Paragraph",
+        "id": "p2",
+        "runs": [
+          { "kind": "Text", "value": "The second paragraph continues without a heading between them." }
+        ]
+      },
+      {
+        "kind": "Paragraph",
+        "id": "p3",
+        "runs": [
+          { "kind": "Text", "value": "The third paragraph closes the sequence." }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Figured",
+    "locale": "EnGB",
+    "numbering": "NoNumbering",
+    "children": [
+      {
+        "kind": "Figure",
+        "id": "fig1",
+        "source": "diagram.svg",
+        "children": [
+          {
+            "kind": "Caption",
+            "id": "cap1",
+            "runs": [ { "kind": "Text", "value": "An overview diagram." } ]
+          }
+        ]
+      }
+    ]
+  }
+}

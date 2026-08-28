@@ -1,0 +1,37 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Sectioned",
+    "locale": "EnGB",
+    "numbering": "DecimalNumbering",
+    "children": [
+      {
+        "kind": "Section",
+        "id": "s1",
+        "heading": [ { "kind": "Text", "value": "Introduction" } ],
+        "depth": "H1",
+        "children": [
+          {
+            "kind": "Paragraph",
+            "id": "p1",
+            "runs": [ { "kind": "Text", "value": "Opening prose." } ]
+          },
+          {
+            "kind": "Section",
+            "id": "s2",
+            "heading": [ { "kind": "Text", "value": "Background" } ],
+            "depth": "H2",
+            "children": [
+              {
+                "kind": "Paragraph",
+                "id": "p2",
+                "runs": [ { "kind": "Text", "value": "Nested prose." } ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

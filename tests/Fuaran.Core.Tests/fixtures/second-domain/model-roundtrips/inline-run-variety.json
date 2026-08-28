@@ -1,0 +1,22 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Richer inline runs",
+    "locale": "EnGB",
+    "numbering": "NoNumbering",
+    "children": [
+      {
+        "kind": "Paragraph",
+        "id": "p1",
+        "runs": [
+          { "kind": "Text", "value": "See the " },
+          { "kind": "Link", "text": "reference guide", "url": "https://example.com/guide" },
+          { "kind": "Text", "value": " and run " },
+          { "kind": "Code", "value": "build --release" },
+          { "kind": "Text", "value": " to start." }
+        ]
+      }
+    ]
+  }
+}

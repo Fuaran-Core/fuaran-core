@@ -13,10 +13,11 @@ open Fuaran.Core.Idl
 // exercised against ONE vocabulary: the tree language whose needs chose the 16
 // `IdlType` cases in the first place. One data point cannot tell a general model
 // from a well-fitted one. This file declares a slice of a SECOND vocabulary — a
-// document-shaped tree language from another Fuaran domain, whose conformance
-// corpus is read out-of-band and never vendored here — and certifies it against
-// that domain's real fixtures, so what the engine cannot express surfaces as a
-// failing certification rather than as an opinion.
+// document-shaped tree language, deliberately not this repository's own — and
+// certifies it against a corpus of sample structured documents written in that
+// vocabulary's wire shape, so what the engine cannot express surfaces as a
+// failing certification rather than as an opinion. The corpus is vendored beside
+// this file (`fixtures/second-domain/`), so the certification runs in any clone.
 //
 // The deliverable is the MEASUREMENT, not a shipped vocabulary. Nothing below is
 // consumed by any other suite, no engine behaviour is changed by it, and the
@@ -58,9 +59,9 @@ open Fuaran.Core.Idl
 //     interpreter cannot reach it. The WRITE half is deliberately absent — the
 //     estate's canonical form is null-free by decision — so the honest
 //     disposition is `tolerate`: an adopting vocabulary omits rather than nulls.
-//     Worth recording that the stored corpus does NOT exercise this: every
-//     fixture populates its optionals, so a corpus-only probe would have missed
-//     it entirely. See `an explicit null is not representable`.
+//     Worth recording that the corpus does NOT exercise this: every fixture
+//     populates its optionals, so a corpus-only probe would have missed it
+//     entirely. See `an explicit null is not representable`.
 //
 //  5. NEGATIVE RESULT — transparent unions are NOT demanded by this vocabulary.
 //     Every union position is tag-discriminated; no case is encoded bare. The
@@ -259,18 +260,26 @@ module private Shape =
         | other -> other
 
 // ---------------------------------------------------------------------------
-// Corpus resolution — out-of-band, never vendored
+// Corpus resolution — vendored by default, overridable
 //
-// The foreign fixtures are not copied into this repo. `FUARAN_SPIKE_CORPUS`
-// names the corpus directory; failing that, a bounded search looks for a corpus
-// that IDENTIFIES ITSELF through its own manifest, so no foreign path or repo
-// name is baked in here. Absent ⇒ the certification legs report themselves
-// skipped; they never report green without their oracle.
+// The certification legs used to resolve their fixtures out-of-band and report
+// themselves SKIPPED when nothing was found, which made them inert in a fresh
+// clone — the measurement was durable, the check was not. A bounded search for a
+// corpus that identifies itself through its own manifest is also not sound: a
+// workspace holding more than one such corpus resolves whichever the directory
+// walk reaches first, and a certification pointed at the WRONG vocabulary fails
+// with an empty fixture set, which reads as a defect in the declaration.
+//
+// So the vendored corpus beside this file is the DEFAULT and is always present:
+// the legs run, or they fail — they never pass by resolving nothing, and they no
+// longer skip. `FUARAN_SPIKE_CORPUS` remains, for pointing the same declaration
+// at a richer corpus in the same layout; it is validated by shape and refused by
+// name rather than falling back silently, because a typo that degrades to the
+// vendored set would report a certification the operator did not ask for.
 // ---------------------------------------------------------------------------
 
-let private uninteresting (name: string) =
-    name.StartsWith "." || name = "bin" || name = "obj" || name = "node_modules"
-
+/// A directory is a corpus when it identifies itself as one: a manifest naming
+/// the round-trip family, beside the directory holding it.
 let private isCorpus (dir: string) =
     try
         let manifest = Path.Combine(dir, "manifest.json")
@@ -281,32 +290,45 @@ let private isCorpus (dir: string) =
     with _ ->
         false
 
-let private childrenOf (dir: string) =
-    try
-        Directory.GetDirectories dir
-        |> Array.filter (Path.GetFileName >> uninteresting >> not)
-        |> List.ofArray
-    with _ ->
-        []
+/// The vendored corpus, located the way this project's other fixture stores are:
+/// climb from the CWD / test binary to `tests/Fuaran.Core.Tests` by probing for a
+/// stable marker file, rather than baking in a build-output-relative path.
+let private vendoredCorpus () : string option =
+    let rec climb (dir: string) (budget: int) : string option =
+        if budget < 0 || isNull dir then
+            None
+        else
+            let cand = Path.Combine(dir, "tests", "Fuaran.Core.Tests")
 
-let private tryFindCorpus () : string option =
-    match Environment.GetEnvironmentVariable "FUARAN_SPIKE_CORPUS" with
-    | e when not (String.IsNullOrWhiteSpace e) && isCorpus e -> Some e
-    | _ ->
-        let rec climb (dir: string) (budget: int) =
-            if budget < 0 || isNull dir then
-                None
+            if File.Exists(Path.Combine(cand, "UiIdl.fs")) then
+                Some cand
             else
-                let near = childrenOf dir |> List.collect (fun c -> c :: childrenOf c)
+                match Directory.GetParent dir with
+                | null -> None
+                | parent -> climb parent.FullName (budget - 1)
 
-                match near |> List.tryFind isCorpus with
-                | Some hit -> Some hit
-                | None ->
-                    match Directory.GetParent dir with
-                    | null -> None
-                    | parent -> climb parent.FullName (budget - 1)
+    [ Directory.GetCurrentDirectory(); AppContext.BaseDirectory ]
+    |> List.tryPick (fun start -> climb start 12)
+    |> Option.map (fun projectDir -> Path.Combine(projectDir, "fixtures", "second-domain"))
 
-        climb AppContext.BaseDirectory 12
+/// The corpus this run certifies against, with the reason on the failure path —
+/// there is no third outcome in which the legs quietly do nothing.
+let private resolveCorpus () : Result<string, string> =
+    match Environment.GetEnvironmentVariable "FUARAN_SPIKE_CORPUS" with
+    | ovr when not (String.IsNullOrWhiteSpace ovr) ->
+        if isCorpus ovr then
+            Ok ovr
+        else
+            Error(
+                sprintf
+                    "FUARAN_SPIKE_CORPUS is set to '%s', which is not a corpus: it must hold a manifest.json naming \"modelRoundTrips\" and a model-roundtrips/ directory. Unset it to use the vendored corpus."
+                    ovr
+            )
+    | _ ->
+        match vendoredCorpus () with
+        | Some dir when isCorpus dir -> Ok dir
+        | Some dir -> Error(sprintf "the vendored corpus at '%s' is missing or malformed" dir)
+        | None -> Error "could not locate tests/Fuaran.Core.Tests (UiIdl.fs marker) from the CWD or the test binary"
 
 /// Every `kind` tag reachable in a parsed fixture — the fixture is IN SLICE only
 /// when the declaration covers all of them, so the selection is derived from the
@@ -349,6 +371,11 @@ let private inSliceFixtures (corpus: string) =
 /// Byte-identity here means every field the fixture carries is declared with the
 /// right name, type and optionality — a dropped, added, retyped or mis-optional
 /// field all move the bytes.
+///
+/// The bytes it is measured against are the CORPUS's own, whichever corpus this
+/// run resolved. The claim is that the declared slice round-trips these
+/// documents; it is not a claim of byte-parity with any other corpus, and the
+/// key-ORDER finding (3) above already says that such parity would not hold.
 let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
     let expected = Canon.render (Shape.toIdl root)
 
@@ -500,9 +527,9 @@ let tests =
           // ---- the certification against the foreign corpus ----
 
           test "the declared slice round-trips the foreign corpus byte-identically" {
-              match tryFindCorpus () with
-              | None -> skiptest "the second vocabulary's corpus is not resolvable — set FUARAN_SPIKE_CORPUS"
-              | Some corpus ->
+              match resolveCorpus () with
+              | Error e -> failtestf "corpus: %s" e
+              | Ok corpus ->
                   let fixtures = inSliceFixtures corpus
 
                   Expect.isGreaterThanOrEqual
@@ -517,9 +544,9 @@ let tests =
           }
 
           test "the certification can go red — a field dropped from the declaration is caught" {
-              match tryFindCorpus () with
-              | None -> skiptest "the second vocabulary's corpus is not resolvable — set FUARAN_SPIKE_CORPUS"
-              | Some corpus ->
+              match resolveCorpus () with
+              | Error e -> failtestf "corpus: %s" e
+              | Ok corpus ->
                   let fixtures = inSliceFixtures corpus
 
                   let failures =

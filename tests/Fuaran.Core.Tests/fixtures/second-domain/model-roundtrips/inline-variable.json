@@ -1,0 +1,19 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Placeholder substitution",
+    "locale": "EnGB",
+    "numbering": "NoNumbering",
+    "children": [
+      {
+        "kind": "Paragraph",
+        "id": "p1",
+        "runs": [
+          { "kind": "Text", "value": "Total: " },
+          { "kind": "InlineVariable", "field": "total" }
+        ]
+      }
+    ]
+  }
+}

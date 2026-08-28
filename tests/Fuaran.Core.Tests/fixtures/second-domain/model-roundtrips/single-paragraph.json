@@ -1,0 +1,16 @@
+{
+  "root": {
+    "kind": "Document",
+    "id": "doc",
+    "title": "Untitled",
+    "locale": "EnGB",
+    "numbering": "NoNumbering",
+    "children": [
+      {
+        "kind": "Paragraph",
+        "id": "p1",
+        "runs": [ { "kind": "Text", "value": "Hello, world." } ]
+      }
+    ]
+  }
+}

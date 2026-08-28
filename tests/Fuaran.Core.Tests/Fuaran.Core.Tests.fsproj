@@ -100,8 +100,9 @@
     <Compile Include="FoldConfluenceTests.fs" />
     <!-- The second-vocabulary readiness spike - throwaway measurement code, kept for its
          findings. Declares a slice of a foreign vocabulary against the IDL and certifies it
-         against that vocabulary's own corpus (read out-of-band; skipped when absent). Reads
-         nothing here, so it simply follows. -->
+         against a corpus of sample documents written in that vocabulary's wire shape,
+         vendored at fixtures/second-domain/ so the legs run in any clone. Reads nothing
+         here, so it simply follows. -->
     <Compile Include="SecondDomainSpike.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

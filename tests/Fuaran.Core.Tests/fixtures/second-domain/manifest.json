@@ -1,0 +1,15 @@
+{
+  "kind": "second-domain-spike-corpus",
+  "version": "1",
+  "description": "Sample structured documents exercising the second-vocabulary slice declared in SecondDomainSpike.fs. Each document is a node tree in that vocabulary's own wire shape: a bare-string 'kind' discriminator, and a flat node envelope in which the tag, the id and the kind's fields share one object.",
+  "modelRoundTrips": [
+    "model-roundtrips/figure-with-caption.json",
+    "model-roundtrips/inline-run-variety.json",
+    "model-roundtrips/inline-variable.json",
+    "model-roundtrips/list-and-footnote.json",
+    "model-roundtrips/section-nesting.json",
+    "model-roundtrips/sibling-paragraphs.json",
+    "model-roundtrips/single-paragraph.json",
+    "model-roundtrips/table-with-caption.json"
+  ]
+}
