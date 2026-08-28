@@ -98,6 +98,11 @@
          reference witness, a second non-tree domain, and the order-sensitive go-red case.
          Depends on nothing here either, so it simply follows. -->
     <Compile Include="FoldConfluenceTests.fs" />
+    <!-- The second-vocabulary readiness spike - throwaway measurement code, kept for its
+         findings. Declares a slice of a foreign vocabulary against the IDL and certifies it
+         against that vocabulary's own corpus (read out-of-band; skipped when absent). Reads
+         nothing here, so it simply follows. -->
+    <Compile Include="SecondDomainSpike.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
