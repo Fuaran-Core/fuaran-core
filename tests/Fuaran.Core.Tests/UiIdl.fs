@@ -582,7 +582,7 @@ let private localFlushTrigger =
 
 /// `Box.layout` — the container-layout mode (Fuaran-UI 0.2.0 Box unification). `Auto`
 /// (was `Dashboard`), `Flex` (was `Stack`, carries `direction` + `wrap`), `Grid` (was
-/// `GridLayout`, carries `cols` + an optional `templateColumns`).
+/// `GridLayout`, carries `cols` + an optional `templateColumns`), `Masonry` (column-fill).
 let private layoutMode =
     { Name = "LayoutMode"
       Params = []
@@ -594,7 +594,22 @@ let private layoutMode =
           { Tag = "Flex"
             Fields = [ req "direction" (TEnum "Orientation"); req "wrap" TBool; opt "gap" TInt ] }
           { Tag = "Grid"
-            Fields = [ req "cols" TInt; opt "templateColumns" TStr; opt "gap" TInt ] } ] }
+            Fields = [ req "cols" TInt; opt "templateColumns" TStr; opt "gap" TInt ] }
+          // `Masonry` — column-FILL, where `Grid` is row-fill. A separate case
+          // rather than a field on `Grid` for the reason the vocabulary charter
+          // §2.1 names: widening `Grid` changes its arity and stops every
+          // pattern match on it compiling in every host, where a new case raises
+          // an exhaustiveness error only where a match is exhaustive.
+          //
+          // It carries `cols` (spelled as `Grid` spells it — the same quantity,
+          // deliberately not a second name) and `gap`, and NOT `templateColumns`:
+          // that field is a verbatim CSS sizing function for the row-fill track
+          // model, and masonry is realised through the multi-column property
+          // family, which has no track list for it to name. Omitting it is what
+          // keeps this case BOUNDED — it reaches only known CSS properties, so it
+          // opens no escape hatch (Phase 900).
+          { Tag = "Masonry"
+            Fields = [ req "cols" TInt; opt "gap" TInt ] } ] }
 
 /// `FormFieldKind<'Msg>` — the per-field input-shape union, shared by `Form`
 /// fields AND `Filters` chips (the 0.2.0 filters-unification — the separate
