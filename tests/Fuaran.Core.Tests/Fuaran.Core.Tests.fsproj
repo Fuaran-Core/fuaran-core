@@ -70,6 +70,9 @@
     <Compile Include="UiGenerated.fs" />
     <Compile Include="IdlUiGenTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
+    <!-- Phases 108/109 - the declared wire shape (discriminator key + node envelope),
+         exercised on the axes the readiness spikes do not cover. -->
+    <Compile Include="IdlWireShapeTests.fs" />
     <Compile Include="IdlSchemaTests.fs" />
     <Compile Include="IdlOpTests.fs" />
     <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named
@@ -103,6 +106,11 @@
          against a corpus of sample documents written in that vocabulary's wire shape,
          vendored at fixtures/second-domain/ so the legs run in any clone. Reads nothing
          here, so it simply follows. -->
+    <!-- Phases 108/109 - the second-vocabulary slice's generated F# module in its
+         DECLARED wire shape (kind discriminator, flat envelope). AUTO-GENERATED:
+         regenerate via the regen-snapshots entry point; the drift guard in
+         SecondDomainSpike.fs fails when it and the generator disagree. -->
+    <Compile Include="DocGenerated.fs" />
     <Compile Include="SecondDomainSpike.fs" />
     <!-- The third-vocabulary (score-shaped) readiness spike - same posture as the second:
          throwaway measurement code, kept for its findings. Certifies a score-shaped slice

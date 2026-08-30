@@ -245,7 +245,8 @@ let private idlTouch =
           Records = []
           Defaults = []
           NodeFields = []
-          Ops = [] }
+          Ops = []
+          Wire = WireShape.Default }
 
     let sampled = Sample.sampleNodes vocab [ "Note"; "Box" ] 20260821 4
 

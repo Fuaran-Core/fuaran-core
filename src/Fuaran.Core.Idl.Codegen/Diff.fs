@@ -115,6 +115,10 @@ module Diff =
             /// (`IdlDefault`), NOT the wire-visible `omitDefault` optionality.
             Defaults: Map<string * string, string>
             NodeFields: FieldSnap list
+            /// The declared wire shape (Phases 108/109), as `discriminator/envelope`
+            /// — `"$type/nestedKind"` when the artifact predates the key or the
+            /// vocabulary declares the default.
+            Wire: string
         }
 
     // -----------------------------------------------------------------------
@@ -297,7 +301,14 @@ module Diff =
                         | Some k, Some f, Some v -> Some((k, f), Canon.render v)
                         | _ -> None)
                     |> Map.ofList
-                  NodeFields = arr "nodeFields" artifact |> List.choose readField }
+                  NodeFields = arr "nodeFields" artifact |> List.choose readField
+                  Wire =
+                    match field "wire" artifact with
+                    | Some w ->
+                        (str "discriminator" w |> Option.defaultValue "$type")
+                        + "/"
+                        + (str "nodeEnvelope" w |> Option.defaultValue "nestedKind")
+                    | None -> "$type/nestedKind" }
         | _ -> Error "idl.json: expected a JSON object at the root"
 
     /// Parse + read in one step.
@@ -309,6 +320,8 @@ module Diff =
 
     type Change =
         | ArtifactVersionChanged of before: int * after: int
+        /// The declared wire shape moved (Phases 108/109) — `discriminator/envelope`.
+        | WireShapeChanged of before: string * after: string
         | KindAdded of tag: string
         | KindRemoved of tag: string
         /// Inferred, never declared — see `renamePairs`. Reported ALONGSIDE the
@@ -427,6 +440,7 @@ module Diff =
 
         match c with
         | ArtifactVersionChanged _ -> k "00" ""
+        | WireShapeChanged _ -> k "01" ""
         | KindAdded t -> k "10" t
         | KindRemoved t -> k "11" t
         | KindRenamed(o, n) -> k "12" (o + ">" + n)
@@ -459,6 +473,9 @@ module Diff =
         let unordered =
             [ if before.Version <> after.Version then
                   ArtifactVersionChanged(before.Version, after.Version)
+
+              if before.Wire <> after.Wire then
+                  WireShapeChanged(before.Wire, after.Wire)
 
               yield!
                   diffNamed KindAdded KindRemoved (fun tag b a -> diffFields (OKind tag) b a) before.Kinds after.Kinds
@@ -610,6 +627,14 @@ module Diff =
                     b
                     a,
                 "Artifact.version"
+
+            | WireShapeChanged(b, a) ->
+                BreakingWire,
+                sprintf
+                    "the declared WIRE SHAPE moved %s → %s — the discriminator key and/or the node-envelope nesting relocate every tag on the wire, so every document's bytes move and no document valid under one shape decodes under the other. A `/v2/` major event by definition."
+                    b
+                    a,
+                "Idl.WireShape (Phases 108/109); VOCABULARY.md §4.2"
 
             | KindAdded t ->
                 Additive,
@@ -1112,6 +1137,7 @@ module Diff =
     let private summarise (c: Change) : string =
         match c with
         | ArtifactVersionChanged(b, a) -> sprintf "artifact encoding version %d -> %d" b a
+        | WireShapeChanged(b, a) -> sprintf "wire shape changed: %s -> %s" b a
         | KindAdded t -> sprintf "kind added: %s" t
         | KindRemoved t -> sprintf "kind removed: %s" t
         | KindRenamed(o, n) -> sprintf "kind renamed (inferred): %s -> %s" o n

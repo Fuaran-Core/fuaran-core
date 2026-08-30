@@ -272,6 +272,21 @@ module Artifact =
                    []
                else
                    [ "ops", JArr(idl.Ops |> sortedBy _.Tag |> List.map kindJson) ])
+            // The declared wire shape (Phases 108/109). Emitted only when it
+            // differs from the default, so every `$type`-nested vocabulary's
+            // artefact is byte-for-byte what it was — the `ops` posture again.
+            @ (if idl.Wire = WireShape.Default then
+                   []
+               else
+                   [ "wire",
+                     JObj
+                         [ "discriminator", JStr idl.Wire.Discriminator
+                           "nodeEnvelope",
+                           JStr(
+                               match idl.Wire.NodeEnvelope with
+                               | NodeEnvelopeShape.NestedKind -> "nestedKind"
+                               | NodeEnvelopeShape.FlatKind -> "flatKind"
+                           ) ] ])
         )
 
     /// The `idl.json` bytes — indented, canonically ordered, newline-terminated

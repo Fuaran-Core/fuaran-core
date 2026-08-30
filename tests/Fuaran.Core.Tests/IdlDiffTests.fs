@@ -40,7 +40,8 @@ let private empty: Idl =
       Records = []
       Defaults = []
       NodeFields = []
-      Ops = [] }
+      Ops = []
+      Wire = WireShape.Default }
 
 let private kind tag fields : IdlKind =
     { Tag = tag

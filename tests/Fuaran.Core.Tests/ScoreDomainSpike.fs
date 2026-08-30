@@ -30,19 +30,20 @@ open Fuaran.Core.Idl
 // produced it (each item is asserted by a test in this file, so it cannot rot
 // silently into prose):
 //
-//  1. BLOCKER CONFIRMED (second instance) — the discriminator KEY is hard-coded
-//     to `$type` and this vocabulary, like the document-shaped one, tags its
-//     nodes with a bare-string `kind`. Same disposition as the second spike's
-//     finding (1); the demand for a declarable discriminator key now has two
-//     independent foreign vocabularies behind it. See `direct decode of the
-//     foreign envelope fails`.
+//  1. BLOCKER CONFIRMED (second instance), now CLOSED (Phase 108) — the
+//     discriminator KEY was hard-coded to `$type` and this vocabulary, like the
+//     document-shaped one, tags its nodes with a bare-string `kind`. Two
+//     independent foreign vocabularies demanded the declarable key, and it is
+//     now a declared slot (`Idl.Wire.Discriminator`) this file exercises
+//     directly.
 //
-//  2. BLOCKER CONFIRMED (second instance) — the node ENVELOPE's SHAPE is
-//     hard-coded, and this vocabulary's node is FLAT (tag, id and kind fields
-//     share one object), again exactly as the document-shaped vocabulary's is.
-//     Two of two foreign vocabularies measured so far chose the flat shape —
-//     the interpreter's nested `{ id, kind: { $type, ... } }` is so far the
-//     outlier, which sharpens what "declarable envelope shape" has to cover.
+//  2. BLOCKER CONFIRMED (second instance), now CLOSED (Phase 109) — the node
+//     ENVELOPE's SHAPE was hard-coded, and this vocabulary's node is FLAT (tag,
+//     id and kind fields share one object), again exactly as the
+//     document-shaped vocabulary's is. Two of two foreign vocabularies chose
+//     the flat shape — which is what `NodeEnvelopeShape.FlatKind` now declares;
+//     the shape adapter that quarantined both blockers is DELETED and the
+//     certification below runs the corpus in its NATIVE shape.
 //
 //  3. HEADLINE NEGATIVE RESULT — transparent unions are NOT demanded by this
 //     vocabulary either, and more strongly than the second spike could say it:
@@ -104,11 +105,12 @@ open Fuaran.Core.Idl
 //     node-vocabulary tool. Same disposition as the second spike's finding (8);
 //     the corpus reduces the envelope to its `root` member.
 //
-// The useful shape of the headline: the two blockers that stop an adopter at
-// the first byte are now TWICE-confirmed and still the unclosed work, while the
-// queued transparency generalisation has two domains of measured counter-
-// evidence and none in favour. Findings (4) and (5) are the inverse lesson —
-// the two model features this vocabulary leans on hardest already exist.
+// The useful shape of the headline: the two blockers that stopped an adopter at
+// the first byte were TWICE-confirmed here and then CLOSED as Phases 108/109 on
+// exactly this evidence, while the queued transparency generalisation has two
+// domains of measured counter-evidence and none in favour. Findings (4) and (5)
+// are the inverse lesson — the two model features this vocabulary leans on
+// hardest already existed.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -287,92 +289,20 @@ let scoreIdl: Idl =
           record "FormSection" [ req "label" TStr; children ] ]
       Defaults = []
       NodeFields = []
-      Ops = [] }
+      Ops = []
+      // Findings (1)/(2), closed: the wire shape is DECLARED (Phases 108/109) —
+      // a bare-string `kind` discriminator, and the flat node envelope.
+      Wire =
+        { Discriminator = "kind"
+          NodeEnvelope = NodeEnvelopeShape.FlatKind } }
 
 let private nodeTags = scoreIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
 
 // ---------------------------------------------------------------------------
-// The shape adapter — the twice-confirmed blockers (1) and (2), quarantined
-//
-// Same role and same caveat as the second spike's adapter: NOT a workaround a
-// real adopter could ship — it re-shapes every wire boundary in both
-// directions, which is precisely the cost the engine exists to remove. It is
-// here so the rest of the model can be certified against the corpus instead of
-// stopping at the first structural mismatch.
-// ---------------------------------------------------------------------------
-
-module private Shape =
-
-    let private tagOf (fields: (string * JVal) list) =
-        fields
-        |> List.tryPick (function
-            | "kind", JStr t -> Some t
-            | _ -> None)
-
-    let private strOf (name: string) (fields: (string * JVal) list) =
-        fields
-        |> List.tryPick (function
-            | k, JStr s when k = name -> Some s
-            | _ -> None)
-
-    let private without (name: string) (fields: (string * JVal) list) =
-        fields |> List.filter (fun (k, _) -> k <> name)
-
-    /// Foreign shape → the interpreter's shape: rename the discriminator, and
-    /// lift a node's kind body under a `kind` member beside its `id`.
-    let rec toIdl (j: JVal) : JVal =
-        match j with
-        | JArr xs -> JArr(List.map toIdl xs)
-        | JObj fields ->
-            match tagOf fields with
-            | Some tag ->
-                let body = fields |> without "kind" |> List.map (fun (k, v) -> k, toIdl v)
-
-                if nodeTags.Contains tag then
-                    match strOf "id" body with
-                    | Some id -> JObj [ "id", JStr id; "kind", Canon.typed tag (without "id" body) ]
-                    | None -> Canon.typed tag body
-                else
-                    Canon.typed tag body
-            | None -> JObj(fields |> List.map (fun (k, v) -> k, toIdl v))
-        | other -> other
-
-    /// The inverse — the foreign document must be recoverable from the
-    /// interpreter's round-trip, or the adapter is hiding a loss rather than
-    /// isolating a shape.
-    let rec fromIdl (j: JVal) : JVal =
-        match j with
-        | JArr xs -> JArr(List.map fromIdl xs)
-        | JObj fields ->
-            let asNode =
-                match strOf "id" fields with
-                | Some id ->
-                    fields
-                    |> List.tryPick (function
-                        | "kind", JObj kf -> Some(id, kf)
-                        | _ -> None)
-                | None -> None
-
-            match asNode with
-            | Some(id, kf) ->
-                match strOf "$type" kf with
-                | Some tag ->
-                    JObj(
-                        ("kind", JStr tag)
-                        :: ("id", JStr id)
-                        :: (kf |> without "$type" |> List.map (fun (k, v) -> k, fromIdl v))
-                    )
-                | None -> JObj(fields |> List.map (fun (k, v) -> k, fromIdl v))
-            | None ->
-                match strOf "$type" fields with
-                | Some tag ->
-                    JObj(
-                        ("kind", JStr tag)
-                        :: (fields |> without "$type" |> List.map (fun (k, v) -> k, fromIdl v))
-                    )
-                | None -> JObj(fields |> List.map (fun (k, v) -> k, fromIdl v))
-        | other -> other
-
+// The shape adapter that used to sit here is DELETED (Phases 108/109) — both
+// hard-codings it quarantined are declared slots on the `Idl` now (`Wire`), so
+// the corpus decodes and encodes in its native shape and there is nothing left
+// to adapt. Same retirement as the second spike's.
 // ---------------------------------------------------------------------------
 // Corpus resolution — vendored by default, overridable; same contract as the
 // second spike's resolver (the legs run, or they fail — never skip, never fall
@@ -455,10 +385,10 @@ let private allFixtures (corpus: string) =
         | Ok _ -> None)
 
 /// The certification of one fixture against the IDL — identical in mechanism to
-/// the second spike's: foreign root shaped into the interpreter's wire, decoded,
-/// re-encoded, bytes compared, and the foreign document recovered.
+/// the second spike's: the foreign root, in its NATIVE shape and with no
+/// adapter, is canonically rendered, decoded, re-encoded, and the bytes compared.
 let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
-    let expected = Canon.render (Shape.toIdl root)
+    let expected = Canon.render root
 
     match Decode.decode idl expected with
     | Error e -> Error("decode: " + e)
@@ -467,17 +397,7 @@ let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
         | Error e -> Error("encode: " + e)
         | Ok actual when actual <> expected ->
             Error(sprintf "bytes differ:\n  expected %s\n  actual   %s" expected actual)
-        | Ok actual ->
-            match Json.parse actual with
-            | Error e -> Error("re-parse: " + e)
-            | Ok reparsed ->
-                let recovered = Canon.render (Shape.fromIdl reparsed)
-                let original = Canon.render root
-
-                if recovered <> original then
-                    Error(sprintf "foreign document not recovered:\n  original  %s\n  recovered %s" original recovered)
-                else
-                    Ok()
+        | Ok _ -> Ok()
 
 /// The declaration with `Note`'s duration removed — the go-red control.
 let private noteMissingDuration =
@@ -506,6 +426,7 @@ let tests =
 
           test "the declared slice is well-formed" {
               Expect.isEmpty (Declare.enumWireErrors scoreIdl) "every enum's case/wire mapping is well-formed"
+              Expect.isEmpty (Declare.wireShapeErrors scoreIdl) "the declared wire shape is well-formed"
 
               Expect.equal
                   (List.length (List.distinct (scoreIdl.Kinds |> List.map (fun k -> k.Tag))))
@@ -540,33 +461,37 @@ let tests =
                   | Choice2Of2 n -> Expect.isTrue (recordNames.Contains n) (sprintf "record '%s' is declared" n)
           }
 
-          // ---- findings (1) + (2): the twice-confirmed blockers ----
+          // ---- findings (1) + (2), CLOSED: the declared shape decodes the
+          // ---- native wire directly, with the go-red partner pinning the slot ----
 
-          test
-              "direct decode of the foreign envelope fails — the discriminator key and the envelope shape are hard-coded" {
+          test "the foreign envelope decodes DIRECTLY under the declared shape — findings (1)/(2) are closed" {
               let authored =
                   VNode("n1", "Note", [ "pitch", pitchC4; "duration", VRecord [ "base", VEnum "Quarter" ] ])
 
-              let idlBytes =
+              let bytes =
                   match Encode.encode scoreIdl authored with
                   | Ok s -> s
-                  | Error e -> failtestf "control: the slice must encode its own authored node (%s)" e
+                  | Error e -> failtestf "the slice must encode its own authored node (%s)" e
 
-              Expect.isTrue
-                  (Result.isOk (Decode.decode scoreIdl idlBytes))
-                  "control: the interpreter decodes its own shape"
+              Expect.isTrue (bytes.Contains "\"kind\":\"Note\"") "the declared discriminator tags the node"
+              Expect.isFalse (bytes.Contains "$type") "nothing on this wire is $type-tagged"
 
-              let foreign =
-                  match Json.parse idlBytes with
-                  | Ok j -> Canon.render (Shape.fromIdl j)
-                  | Error e -> failtestf "control: %s" e
+              match Decode.decode scoreIdl bytes with
+              | Ok roundTripped ->
+                  match Encode.encode scoreIdl roundTripped with
+                  | Ok again -> Expect.equal again bytes "the native shape round-trips byte-identically"
+                  | Error e -> failtestf "re-encode: %s" e
+              | Error e -> failtestf "the declared shape must decode its own wire (%s)" e
 
-              Expect.notEqual foreign idlBytes "the two shapes really are different bytes"
-
-              match Decode.decode scoreIdl foreign with
-              | Ok _ ->
-                  failtest
-                      "the interpreter decoded the foreign envelope — findings (1)/(2) are stale and this file must be re-measured"
+              // The go-red partner: the same wire under a DEFAULT-shape
+              // declaration is refused — the declaration is doing the work.
+              match
+                  Decode.decode
+                      { scoreIdl with
+                          Wire = WireShape.Default }
+                      bytes
+              with
+              | Ok _ -> failtest "the default-shape declaration decoded the flat kind-tagged wire"
               | Error e ->
                   Expect.stringContains
                       e

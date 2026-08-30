@@ -159,5 +159,15 @@ let main argv =
             UiIdl.uiIdl
             (UiIdl.uiIdl.Kinds |> List.map (fun k -> k.Tag))
 
+        // Phases 108/109 — the second-vocabulary slice's generated F# module, in
+        // its DECLARED wire shape (bare-string `kind` discriminator, flat node
+        // envelope). The leg the original readiness spike skipped as blocked.
+        writeGen
+            "tests/Fuaran.Core.Tests/DocGenerated.fs"
+            "Fuaran.Core.Tests.DocGenerated"
+            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            SecondDomainSpike.docIdl
+            (SecondDomainSpike.docIdl.Kinds |> List.map (fun k -> k.Tag))
+
         0
     | _ -> runTestsInAssemblyWithCLIArgs [] argv

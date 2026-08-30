@@ -186,7 +186,19 @@
          every default shape that rendered before renders identically, and no existing IDL
          declares a list default, so no emitted artefact in the estate changes but the one this
          phase adds. See fuaran#1080. -->
-    <Version>0.15.0</Version>
+    <!-- 0.16.0 (2026-08-30): fuaran-core#108/#109 — the declared WIRE SHAPE. `Idl` gains a
+         `Wire: WireShape` slot (discriminator key + node-envelope nesting); the interpreter,
+         the generated F#/TS legs and the schema all derive from it, and both readiness-spike
+         vocabularies now certify their corpora in their NATIVE shape with no adapter. MINOR,
+         and genuinely BREAKING at compile time: widening the `Idl` record fails every
+         full-literal construction (FS0764) until it declares `Wire = WireShape.Default` — the
+         one-line, behaviour-identical fix. Every WIRE byte is unchanged for default-shape
+         declarations (the drift guards over the three committed generated modules and the
+         artifact prove it), so no corpus, snapshot or emitted artefact moves. A fresh version
+         rather than a repack on the standing grounds: v0.15.0 is tagged, and a same-version
+         swap of a compile-breaking contract is the packall-incremental skew defect by
+         construction. -->
+    <Version>0.16.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

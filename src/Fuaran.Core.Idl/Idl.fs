@@ -1,4 +1,4 @@
-﻿namespace Fuaran.Core.Idl
+namespace Fuaran.Core.Idl
 
 open Fuaran.Core
 
@@ -126,6 +126,40 @@ type IdlType =
     /// exactly one wire position: `TreeOp.Batch`'s `ops` list. Resolves against
     /// [[Idl]]'s `Ops`, the way [[TNode]] resolves against `Kinds`.
     | TOp
+
+/// Where a node's KIND BODY sits relative to its `id` on the wire (Phase 109).
+/// Both readiness spikes (`SecondDomainSpike.fs`, `ScoreDomainSpike.fs`) measured
+/// foreign vocabularies whose node is FLAT — and both chose the same flat shape,
+/// which is what made the axis declarable rather than speculative.
+[<RequireQualifiedAccess>]
+type NodeEnvelopeShape =
+    /// `{ "id": …, "kind": { <discriminator>: tag, …fields } }` — the kind body
+    /// nested under a `kind` member beside `id`. The default; the UI domain's shape.
+    | NestedKind
+    /// `{ <discriminator>: tag, "id": …, …fields }` — the tag, the id, the kind's
+    /// fields (and any declared node envelope) share ONE object. In this shape the
+    /// names `id` and the discriminator are RESERVED — see [[Declare.wireShapeErrors]].
+    | FlatKind
+
+/// The declared WIRE SHAPE of a vocabulary (Phases 108/109): the discriminator
+/// key its unions / kinds / ops are tagged with, and where a node's kind body
+/// sits. Declared on [[Idl]] rather than hard-coded in the engine, because both
+/// are properties of the DOMAIN's wire, not of the interpreter — the second- and
+/// third-vocabulary spikes each stopped at exactly these two hard-codings.
+type WireShape =
+    {
+        /// The union/kind/op discriminator key (Phase 108). `"$type"` is the
+        /// default and reproduces every pre-declarable encoding byte-for-byte.
+        Discriminator: string
+        /// The node envelope nesting (Phase 109).
+        NodeEnvelope: NodeEnvelopeShape
+    }
+
+    /// The shape every declaration had before the shape was declarable —
+    /// `$type`-discriminated, kind body nested beside `id`.
+    static member Default =
+        { Discriminator = "$type"
+          NodeEnvelope = NodeEnvelopeShape.NestedKind }
 
 /// Whether a field is always present, omitted on the wire when absent, or
 /// omitted on the wire when equal to an identity default (omit-on-absence and
@@ -317,6 +351,12 @@ type Idl =
         /// hand-written above this, exactly as decode policy does for nodes. The IDL
         /// states what is on the wire, never what applying it does.
         Ops: IdlKind list
+        /// The declared wire shape (Phases 108/109) — the discriminator key and
+        /// the node-envelope nesting. [[WireShape.Default]] reproduces every
+        /// pre-declarable encoding byte-for-byte; a vocabulary whose wire tags
+        /// with another key or lays its nodes flat declares that HERE, and every
+        /// leg (interpreter, generated F#/TS, schema) derives from it.
+        Wire: WireShape
     }
 
 /// Declaration helpers for the IDL's hand-authored parts.
@@ -366,6 +406,73 @@ module Declare =
               then
                   sprintf "enum '%s': two cases share a wire string — decoding would not be invertible" e.Name ]
 
+    /// Well-formedness of the declared wire shape (Phases 108/109). Empty list ⇒
+    /// well-formed. The discriminator shares an object with a tagged body's own
+    /// fields in EVERY shape, and in [[NodeEnvelopeShape.FlatKind]] the node's
+    /// `id`, its kind fields and its declared envelope all share one object — so
+    /// the reserved names are checked here rather than colliding silently on the
+    /// wire.
+    let wireShapeErrors (idl: Idl) : string list =
+        let disc = idl.Wire.Discriminator
+        let flat = idl.Wire.NodeEnvelope = NodeEnvelopeShape.FlatKind
+
+        let fieldClash (owner: string) (fields: IdlField list) =
+            [ for f in fields do
+                  if f.Name = disc then
+                      sprintf "%s: field '%s' collides with the declared discriminator key" owner f.Name
+
+                  if flat && f.Name = "id" then
+                      sprintf "%s: field 'id' is reserved in the flat node envelope" owner ]
+
+        [ if System.String.IsNullOrWhiteSpace disc then
+              "wire shape: the discriminator key must be a non-empty string"
+
+          // The emitters splice the key into generated JS/F# source literals, so
+          // quote-class characters are refused at declaration rather than emitted.
+          if
+              disc
+              |> Seq.exists (fun c -> c = '"' || c = '\'' || c = '\\' || System.Char.IsControl c)
+          then
+              "wire shape: the discriminator key must not contain quotes, backslashes or control characters"
+
+          if disc = "id" then
+              "wire shape: the discriminator key 'id' collides with the node id"
+
+          yield!
+              idl.Kinds
+              |> List.collect (fun k -> fieldClash ("kind '" + k.Tag + "'") k.Fields)
+          yield! idl.Ops |> List.collect (fun o -> fieldClash ("op '" + o.Tag + "'") o.Fields)
+
+          yield!
+              idl.Unions
+              |> List.collect (fun u ->
+                  u.Cases
+                  |> List.collect (fun c ->
+                      [ for f in c.Fields do
+                            if f.Name = disc then
+                                sprintf
+                                    "union '%s' case '%s': field '%s' collides with the declared discriminator key"
+                                    u.Name
+                                    c.Tag
+                                    f.Name ]))
+
+          yield! fieldClash "node envelope" idl.NodeFields
+
+          // Flat only: the envelope and every kind body share one object, so an
+          // envelope name reappearing as a kind field is ambiguous on the wire.
+          if flat then
+              let envNames = idl.NodeFields |> List.map (fun f -> f.Name) |> Set.ofList
+
+              yield!
+                  idl.Kinds
+                  |> List.collect (fun k ->
+                      [ for f in k.Fields do
+                            if envNames.Contains f.Name then
+                                sprintf
+                                    "kind '%s': field '%s' collides with a node-envelope field in the flat shape"
+                                    k.Tag
+                                    f.Name ]) ]
+
 /// A "transparent" union case is encoded/decoded as a bare JSON value (its single
 /// field's value) rather than a `$type`-tagged object — the Fuaran-UI 0.2.0
 /// bare-string canonical `TextSource.Literal` (`{"$type":"Literal","text":"x"}` →
@@ -404,6 +511,11 @@ module Encode =
 
     let private findRecord (name: string) (idl: Idl) =
         idl.Records |> List.tryFind (fun r -> r.Name = name)
+
+    /// [[Canon.typed]] under the DECLARED discriminator key (Phase 108) — the
+    /// default key reproduces `Canon.typed` byte-for-byte.
+    let private typedWith (key: string) (tag: string) (fields: (string * JVal) list) : JVal =
+        JObj((key, JStr tag) :: fields)
 
     let private provided (name: string) (fields: (string * IdlValue) list) =
         fields |> List.tryFind (fun (n, _) -> n = name) |> Option.map snd
@@ -466,7 +578,9 @@ module Encode =
                                     sprintf "transparent union '%s' case '%s' missing field '%s'" name tag single.Name
                                 )
                         | _ -> Error(sprintf "transparent union case '%s' must have exactly one field" tag)
-                    | _ -> encodeFields idl caseFields fields |> Result.map (Canon.typed tag)
+                    | _ ->
+                        encodeFields idl caseFields fields
+                        |> Result.map (typedWith idl.Wire.Discriminator tag)
         | TVar v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
         | TClosure, VClosure
         | TFn _, VClosure -> Ok(JStr "<closure>")
@@ -503,11 +617,15 @@ module Encode =
         | TKind, VUnion(tag, fields) ->
             match findKind tag idl with
             | None -> Error(sprintf "unknown kind '%s'" tag)
-            | Some k -> encodeFields idl k.Fields fields |> Result.map (Canon.typed tag)
+            | Some k ->
+                encodeFields idl k.Fields fields
+                |> Result.map (typedWith idl.Wire.Discriminator tag)
         | TOp, VUnion(tag, fields) ->
             match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
             | None -> Error(sprintf "unknown op '%s'" tag)
-            | Some o -> encodeFields idl o.Fields fields |> Result.map (Canon.typed tag)
+            | Some o ->
+                encodeFields idl o.Fields fields
+                |> Result.map (typedWith idl.Wire.Discriminator tag)
         | TList inner, VList xs ->
             let rec go acc =
                 function
@@ -556,7 +674,15 @@ module Encode =
         | None -> Error(sprintf "unknown kind '%s'" kindTag)
         | Some k ->
             encodeFields idl k.Fields fields
-            |> Result.map (fun fs -> JObj [ "id", JStr id; "kind", Canon.typed kindTag fs ])
+            |> Result.map (fun fs ->
+                // Phase 109 — the declared node envelope shape. Nested is the
+                // default and byte-identical to the pre-declarable emission; flat
+                // puts the tag, the id and the kind fields in ONE object (key
+                // order is irrelevant — `Canon.render` sorts Ordinal).
+                match idl.Wire.NodeEnvelope with
+                | NodeEnvelopeShape.NestedKind ->
+                    JObj [ "id", JStr id; "kind", typedWith idl.Wire.Discriminator kindTag fs ]
+                | NodeEnvelopeShape.FlatKind -> JObj((idl.Wire.Discriminator, JStr kindTag) :: ("id", JStr id) :: fs))
 
     /// The enveloped partner of [[encodeNode]] (Phase 698) — `id` + `kind` + the
     /// declared node envelope. The envelope rides the SAME [[encodeFields]] the kind
@@ -579,7 +705,20 @@ module Encode =
             | Ok kindFs ->
                 match encodeFields idl idl.NodeFields envelope with
                 | Error m -> Error(sprintf "node envelope: %s" m)
-                | Ok envFs -> Ok(JObj(("id", JStr id) :: ("kind", Canon.typed kindTag kindFs) :: envFs))
+                | Ok envFs ->
+                    match idl.Wire.NodeEnvelope with
+                    | NodeEnvelopeShape.NestedKind ->
+                        Ok(
+                            JObj(
+                                ("id", JStr id)
+                                :: ("kind", typedWith idl.Wire.Discriminator kindTag kindFs)
+                                :: envFs
+                            )
+                        )
+                    // Flat: envelope and kind fields share the node object — the
+                    // collision [[Declare.wireShapeErrors]] refuses at declaration.
+                    | NodeEnvelopeShape.FlatKind ->
+                        Ok(JObj(("id", JStr id) :: (idl.Wire.Discriminator, JStr kindTag) :: (kindFs @ envFs)))
 
     /// Encode an authored node to canonical wire JSON — byte-identical to the UI host.
     let encode (idl: Idl) (v: IdlValue) : Result<string, string> =
@@ -607,10 +746,14 @@ module Decode =
     let private field (name: string) (fields: (string * JVal) list) =
         fields |> List.tryFind (fun (n, _) -> n = name) |> Option.map snd
 
-    let private dollarType (fields: (string * JVal) list) =
-        match field "$type" fields with
+    /// The tag under the DECLARED discriminator key (Phase 108) — `"$type"` on a
+    /// default-shape vocabulary, so the error text is byte-identical there.
+    let private tagUnder (key: string) (fields: (string * JVal) list) =
+        match field key fields with
         | Some(JStr t) -> Ok t
-        | _ -> Error "missing or non-string $type"
+        | _ -> Error("missing or non-string " + key)
+
+    let private dollarType (idl: Idl) (fields: (string * JVal) list) = tagUnder idl.Wire.Discriminator fields
 
     let rec private substitute (subst: Map<string, IdlType>) (t: IdlType) : IdlType =
         match t with
@@ -645,7 +788,7 @@ module Decode =
             | Some u ->
                 let subst = Map.ofList (List.zip u.Params args)
 
-                dollarType fs
+                dollarType idl fs
                 |> Result.bind (fun tag ->
                     match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
                     | None -> Error(sprintf "union '%s' has no case '%s'" name tag)
@@ -712,13 +855,13 @@ module Decode =
             go [] fs
         | TNode, JObj _ -> decodeNode idl j
         | TKind, JObj fs ->
-            dollarType fs
+            dollarType idl fs
             |> Result.bind (fun tag ->
                 match idl.Kinds |> List.tryFind (fun k -> k.Tag = tag) with
                 | None -> Error(sprintf "unknown kind '%s'" tag)
                 | Some k -> decodeFields idl k.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
         | TOp, JObj fs ->
-            dollarType fs
+            dollarType idl fs
             |> Result.bind (fun tag ->
                 match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
                 | None -> Error(sprintf "unknown op '%s'" tag)
@@ -758,11 +901,11 @@ module Decode =
         go [] fields
 
     and private decodeNode (idl: Idl) (j: JVal) : Result<IdlValue, string> =
-        match j with
-        | JObj fs ->
+        match j, idl.Wire.NodeEnvelope with
+        | JObj fs, NodeEnvelopeShape.NestedKind ->
             match field "id" fs, field "kind" fs with
             | Some(JStr id), Some(JObj kindFs) ->
-                dollarType kindFs
+                dollarType idl kindFs
                 |> Result.bind (fun kindTag ->
                     match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
                     | None -> Error(sprintf "unknown kind '%s'" kindTag)
@@ -780,7 +923,24 @@ module Decode =
                                 | [] -> VNode(id, kindTag, fields)
                                 | envelope -> VNodeEnv(id, envelope, kindTag, fields))))
             | _ -> Error "node must have a string 'id' and an object 'kind'"
-        | _ -> Error "node must be an object"
+        // Phase 109 — the FLAT envelope: the tag, the id, the kind's fields (and
+        // any declared node envelope) share this one object. `decodeFields` reads
+        // only declared names, so the discriminator and the id are tolerated as
+        // the extra keys they are.
+        | JObj fs, NodeEnvelopeShape.FlatKind ->
+            match field "id" fs, dollarType idl fs with
+            | Some(JStr id), Ok kindTag ->
+                match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+                | None -> Error(sprintf "unknown kind '%s'" kindTag)
+                | Some k ->
+                    decodeFields idl k.Fields fs
+                    |> Result.bind (fun fields ->
+                        decodeFields idl idl.NodeFields fs
+                        |> Result.map (function
+                            | [] -> VNode(id, kindTag, fields)
+                            | envelope -> VNodeEnv(id, envelope, kindTag, fields)))
+            | _ -> Error(sprintf "node must have a string 'id' and a string '%s' discriminator" idl.Wire.Discriminator)
+        | _, _ -> Error "node must be an object"
 
     /// Decode canonical wire JSON to an authored `IdlValue`, driven by the IDL.
     let decode (idl: Idl) (json: string) : Result<IdlValue, string> =

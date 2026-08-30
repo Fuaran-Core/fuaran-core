@@ -27,20 +27,23 @@ open Fuaran.Core.Idl
 // produced it (each item is asserted by a test in this file, so it cannot rot
 // silently into prose):
 //
-//  1. BLOCKER — the discriminator KEY is hard-coded to `$type`. `Canon.typed`
-//     writes it and `Decode`'s `dollarType` reads it, so a vocabulary that tags
-//     its unions with any other key (this one uses a bare-string `kind`) cannot
-//     be decoded or encoded by the interpreter at all. Not a type-model gap: the
-//     `Idl` value has no slot in which to say what the key is. See
-//     `direct decode of the foreign envelope fails`.
+//  1. BLOCKER, now CLOSED (Phase 108) — the discriminator KEY was hard-coded to
+//     `$type`, so a vocabulary that tags its unions with any other key (this one
+//     uses a bare-string `kind`) could not be decoded or encoded by the
+//     interpreter at all. The key is now DECLARED (`Idl.Wire.Discriminator`);
+//     this vocabulary declares `"kind"` and the corpus decodes directly. The
+//     go-red partner below pins that the slot is load-bearing: the same corpus
+//     under a default-shape declaration is refused.
 //
-//  2. BLOCKER — the node ENVELOPE's SHAPE is hard-coded. `encodeNode` emits
-//     `{ id, kind: { $type, ...fields } }`: the kind body is NESTED under a
-//     `kind` member and `id` is its sibling. The second vocabulary's node is
-//     FLAT — tag, id and kind fields share one object. `Idl.NodeFields` declares
-//     WHICH fields the envelope carries (Phase 690/698) but not WHERE they sit,
-//     and the nesting is what differs. Same disposition as (1), and plausibly the
-//     same change: a declared envelope SHAPE, not merely a declared field list.
+//  2. BLOCKER, now CLOSED (Phase 109) — the node ENVELOPE's SHAPE was
+//     hard-coded to `{ id, kind: { $type, ...fields } }` where this vocabulary's
+//     node is FLAT — tag, id and kind fields share one object. The nesting is
+//     now DECLARED (`Idl.Wire.NodeEnvelope`); this vocabulary declares
+//     `FlatKind`, and the shape adapter that quarantined both blockers is
+//     DELETED — the certification below runs the corpus in its NATIVE shape
+//     through the interpreter, the generated F# module (`DocGenerated.fs`) and
+//     the generated TypeScript module (the leg the original spike skipped as
+//     blocked on exactly this).
 //
 //  3. GAP, tolerable for a new adopter / blocking for a retrofit — canonical key
 //     ORDER is Ordinal-sorted and not declarable. `Canon.render` sorts; this
@@ -84,7 +87,9 @@ open Fuaran.Core.Idl
 //
 // (5)–(7) are the useful shape of a negative result: they say the two gap
 // closures already queued behind this evidence draw NO demand from this pilot,
-// while (1) and (2) — which were not on the list at all — are hard blockers.
+// while (1) and (2) — which were not on the list at all — were hard blockers.
+// Phases 108/109 closed both from exactly this evidence (re-confirmed by the
+// third-vocabulary spike, `ScoreDomainSpike.fs`, before the closure).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -161,10 +166,14 @@ let docIdl: Idl =
       Records = []
       Defaults = []
       // The second vocabulary's node carries nothing beside its identity and its
-      // kind — an empty envelope, which is the `Idl` default and is exactly what
-      // finding (2) is about: what it carries is declarable, where it sits is not.
+      // kind — an empty envelope, which is the `Idl` default.
       NodeFields = []
-      Ops = [] }
+      Ops = []
+      // Findings (1)/(2), closed: the wire shape is DECLARED (Phases 108/109) —
+      // a bare-string `kind` discriminator, and the flat node envelope.
+      Wire =
+        { Discriminator = "kind"
+          NodeEnvelope = NodeEnvelopeShape.FlatKind } }
 
 let private nodeTags = docIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
 
@@ -176,89 +185,13 @@ let private runTags =
 let private declaredTags = Set.union nodeTags runTags
 
 // ---------------------------------------------------------------------------
-// The shape adapter — findings (1) and (2), isolated to fifty lines
-//
-// This is NOT a workaround a real adopter could ship: it re-shapes every wire
-// boundary in both directions, which is precisely the cost the engine exists to
-// remove. It is here so the rest of the model can be certified against real
-// fixtures instead of stopping at the first structural mismatch — the two
-// blockers are quarantined into this module and nothing else in the file
-// compensates for anything.
-// ---------------------------------------------------------------------------
-
-module private Shape =
-
-    let private tagOf (fields: (string * JVal) list) =
-        fields
-        |> List.tryPick (function
-            | "kind", JStr t -> Some t
-            | _ -> None)
-
-    let private strOf (name: string) (fields: (string * JVal) list) =
-        fields
-        |> List.tryPick (function
-            | k, JStr s when k = name -> Some s
-            | _ -> None)
-
-    let private without (name: string) (fields: (string * JVal) list) =
-        fields |> List.filter (fun (k, _) -> k <> name)
-
-    /// Foreign shape → the interpreter's shape: rename the discriminator, and
-    /// lift a node's kind body under a `kind` member beside its `id`.
-    let rec toIdl (j: JVal) : JVal =
-        match j with
-        | JArr xs -> JArr(List.map toIdl xs)
-        | JObj fields ->
-            match tagOf fields with
-            | Some tag ->
-                let body = fields |> without "kind" |> List.map (fun (k, v) -> k, toIdl v)
-
-                if nodeTags.Contains tag then
-                    match strOf "id" body with
-                    | Some id -> JObj [ "id", JStr id; "kind", Canon.typed tag (without "id" body) ]
-                    // A kind WITHOUT an identity — the bare-kind wire position.
-                    | None -> Canon.typed tag body
-                else
-                    Canon.typed tag body
-            | None -> JObj(fields |> List.map (fun (k, v) -> k, toIdl v))
-        | other -> other
-
-    /// The inverse — the foreign document must be recoverable from the
-    /// interpreter's round-trip, or the adapter is hiding a loss rather than
-    /// isolating a shape.
-    let rec fromIdl (j: JVal) : JVal =
-        match j with
-        | JArr xs -> JArr(List.map fromIdl xs)
-        | JObj fields ->
-            let asNode =
-                match strOf "id" fields with
-                | Some id ->
-                    fields
-                    |> List.tryPick (function
-                        | "kind", JObj kf -> Some(id, kf)
-                        | _ -> None)
-                | None -> None
-
-            match asNode with
-            | Some(id, kf) ->
-                match strOf "$type" kf with
-                | Some tag ->
-                    JObj(
-                        ("kind", JStr tag)
-                        :: ("id", JStr id)
-                        :: (kf |> without "$type" |> List.map (fun (k, v) -> k, fromIdl v))
-                    )
-                | None -> JObj(fields |> List.map (fun (k, v) -> k, fromIdl v))
-            | None ->
-                match strOf "$type" fields with
-                | Some tag ->
-                    JObj(
-                        ("kind", JStr tag)
-                        :: (fields |> without "$type" |> List.map (fun (k, v) -> k, fromIdl v))
-                    )
-                | None -> JObj(fields |> List.map (fun (k, v) -> k, fromIdl v))
-        | other -> other
-
+// The shape adapter that used to sit here is DELETED (Phases 108/109). It
+// quarantined findings (1) and (2) — renaming the discriminator and re-nesting
+// every node boundary in both directions — so the rest of the model could be
+// certified at all. Both hard-codings are now declared slots on the `Idl`
+// (`Wire`), so the corpus decodes and encodes in its native shape and there is
+// nothing left to adapt: its retirement onto the real slots was Phase 108's own
+// closing task.
 // ---------------------------------------------------------------------------
 // Corpus resolution — vendored by default, overridable
 //
@@ -366,18 +299,18 @@ let private inSliceFixtures (corpus: string) =
                     None)
         | Ok _ -> None)
 
-/// The certification of one fixture against one IDL: the foreign root is shaped
-/// into the interpreter's wire, decoded, re-encoded, and the bytes compared.
-/// Byte-identity here means every field the fixture carries is declared with the
-/// right name, type and optionality — a dropped, added, retyped or mis-optional
-/// field all move the bytes.
+/// The certification of one fixture against one IDL: the foreign root — in its
+/// NATIVE shape, no adapter — is canonically rendered, decoded, re-encoded, and
+/// the bytes compared. Byte-identity here means every field the fixture carries
+/// is declared with the right name, type and optionality — a dropped, added,
+/// retyped or mis-optional field all move the bytes.
 ///
 /// The bytes it is measured against are the CORPUS's own, whichever corpus this
 /// run resolved. The claim is that the declared slice round-trips these
 /// documents; it is not a claim of byte-parity with any other corpus, and the
 /// key-ORDER finding (3) above already says that such parity would not hold.
 let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
-    let expected = Canon.render (Shape.toIdl root)
+    let expected = Canon.render root
 
     match Decode.decode idl expected with
     | Error e -> Error("decode: " + e)
@@ -386,19 +319,7 @@ let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
         | Error e -> Error("encode: " + e)
         | Ok actual when actual <> expected ->
             Error(sprintf "bytes differ:\n  expected %s\n  actual   %s" expected actual)
-        | Ok actual ->
-            // And the foreign document must come back out — otherwise the adapter
-            // is absorbing a loss rather than isolating a shape.
-            match Json.parse actual with
-            | Error e -> Error("re-parse: " + e)
-            | Ok reparsed ->
-                let recovered = Canon.render (Shape.fromIdl reparsed)
-                let original = Canon.render root
-
-                if recovered <> original then
-                    Error(sprintf "foreign document not recovered:\n  original  %s\n  recovered %s" original recovered)
-                else
-                    Ok()
+        | Ok _ -> Ok()
 
 /// The declaration with `Paragraph`'s run list removed — the go-red control. A
 /// certification that cannot fail is not a certification.
@@ -416,6 +337,7 @@ let tests =
 
           test "the declared slice is well-formed" {
               Expect.isEmpty (Declare.enumWireErrors docIdl) "every enum's case/wire mapping is well-formed"
+              Expect.isEmpty (Declare.wireShapeErrors docIdl) "the declared wire shape is well-formed"
 
               Expect.equal
                   (List.length (List.distinct (docIdl.Kinds |> List.map (fun k -> k.Tag))))
@@ -446,40 +368,64 @@ let tests =
                   | Choice2Of2 n -> Expect.isTrue (unionNames.Contains n) (sprintf "union '%s' is declared" n)
           }
 
-          // ---- finding (1) + (2): the two blockers, shown rather than asserted in prose ----
+          // ---- findings (1) + (2), CLOSED: the declared shape decodes the native
+          // ---- wire directly, and the go-red partners pin that the slots are
+          // ---- load-bearing rather than decorative ----
 
-          test
-              "direct decode of the foreign envelope fails — the discriminator key and the envelope shape are hard-coded" {
+          test "the foreign envelope decodes DIRECTLY under the declared shape — findings (1)/(2) are closed" {
               let authored =
                   VNode("p1", "Paragraph", [ "runs", VList [ VUnion("Text", [ "value", VStr "x" ]) ] ])
 
-              let idlBytes =
+              let bytes =
                   match Encode.encode docIdl authored with
                   | Ok s -> s
-                  | Error e -> failtestf "control: the slice must encode its own authored node (%s)" e
+                  | Error e -> failtestf "the slice must encode its own authored node (%s)" e
 
-              // Control: the interpreter's own shape round-trips.
-              Expect.isTrue
-                  (Result.isOk (Decode.decode docIdl idlBytes))
-                  "control: the interpreter decodes its own shape"
+              // The emitted wire IS the vocabulary's native shape: a bare-string
+              // `kind` discriminator sharing one flat object with the id.
+              Expect.isTrue (bytes.Contains "\"kind\":\"Paragraph\"") "the declared discriminator tags the node"
+              Expect.isFalse (bytes.Contains "$type") "nothing on this wire is $type-tagged"
 
-              // The SAME document in the foreign shape — one adapter step away — does not.
-              let foreign =
-                  match Json.parse idlBytes with
-                  | Ok j -> Canon.render (Shape.fromIdl j)
+              match Decode.decode docIdl bytes with
+              | Ok roundTripped ->
+                  match Encode.encode docIdl roundTripped with
+                  | Ok again -> Expect.equal again bytes "the native shape round-trips byte-identically"
+                  | Error e -> failtestf "re-encode: %s" e
+              | Error e -> failtestf "the declared shape must decode its own wire (%s)" e
+          }
+
+          test "the go-red partner: the same wire under a DEFAULT-shape declaration is refused" {
+              // Phase 108's acceptance shape: the fixture that round-trips under
+              // the declared key is REFUSED under the default one — proof the
+              // declaration, not some widened tolerance, is doing the work.
+              let defaultShaped = { docIdl with Wire = WireShape.Default }
+
+              let native =
+                  match
+                      Encode.encode
+                          docIdl
+                          (VNode("p1", "Paragraph", [ "runs", VList [ VUnion("Text", [ "value", VStr "x" ]) ] ]))
+                  with
+                  | Ok s -> s
                   | Error e -> failtestf "control: %s" e
 
-              Expect.notEqual foreign idlBytes "the two shapes really are different bytes"
-
-              match Decode.decode docIdl foreign with
+              match Decode.decode defaultShaped native with
               | Ok _ ->
                   failtest
-                      "the interpreter decoded the foreign envelope — findings (1)/(2) are stale and this file must be re-measured"
+                      "the default-shape declaration decoded the flat kind-tagged wire — nothing is declared any more"
               | Error e ->
                   Expect.stringContains
                       e
                       "node"
                       (sprintf "the failure names the node envelope rather than a field-level defect (got: %s)" e)
+
+              // And the inverse: the declared shape refuses the interpreter's
+              // OLD nested `$type` shape — the two wires are disjoint, not lenient.
+              let nested = """{"id":"p1","kind":{"$type":"Paragraph","runs":["x"]}}"""
+
+              Expect.isTrue
+                  (Result.isError (Decode.decode docIdl nested))
+                  "the declared flat shape refuses the nested $type wire"
           }
 
           // ---- finding (4): the optionality model has no explicit-null case ----
@@ -493,7 +439,7 @@ let tests =
               // The interpreter's strict parser has no null at all: `JVal` does not
               // model it, so a vocabulary that spells an absent optional `null`
               // cannot even be PARSED, let alone decoded.
-              let withNull = """{"id":"d","kind":{"$type":"Paragraph","runs":[]},"title":null}"""
+              let withNull = """{"kind":"Document","id":"d","title":null,"children":[]}"""
               Expect.isTrue (Result.isError (Json.parse withNull)) "strict parse rejects a null member"
 
               // Core's null-tolerant read (the erase-to-absence policy) handles the
@@ -556,4 +502,136 @@ let tests =
                   Expect.isNonEmpty
                       failures
                       "removing a declared field must break the certification — otherwise it is not certifying"
+          }
+
+          // ---- the generated F# leg, in the vocabulary's NATIVE shape — the leg
+          // ---- the original spike skipped as blocked on findings (1)/(2) ----
+
+          test "drift guard: the generator still reproduces the committed DocGenerated.fs" {
+              let generated =
+                  match
+                      Gen.fsharpModuleWith
+                          Gen.GenSupport.Empty
+                          "Fuaran.Core.Tests.DocGenerated"
+                          docIdl
+                          (docIdl.Kinds |> List.map (fun k -> k.Tag))
+                  with
+                  | Ok s -> s
+                  | Error e -> failtestf "codegen rejected the second vocabulary: %A" e
+
+              // Located by the same climb the corpus resolver uses.
+              let path =
+                  match vendoredCorpus () with
+                  | Some corpus -> Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName corpus), "DocGenerated.fs")
+                  | None -> failtest "could not locate tests/Fuaran.Core.Tests from the CWD or the test binary"
+
+              if not (File.Exists path) then
+                  failtestf "DocGenerated.fs not found at %s — regenerate with --regen-snapshots" path
+
+              if Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
+                  File.WriteAllText(path, generated)
+
+              let strip (s: string) =
+                  s |> Seq.filter (Char.IsWhiteSpace >> not) |> Seq.toArray |> String
+
+              Expect.equal
+                  (strip generated)
+                  (strip (File.ReadAllText path))
+                  "the generator no longer reproduces DocGenerated.fs — regenerate it (--regen-snapshots)"
+          }
+
+          test "the generated F# module round-trips the corpus in the native shape" {
+              match resolveCorpus () with
+              | Error e -> failtestf "corpus: %s" e
+              | Ok corpus ->
+                  let fixtures = inSliceFixtures corpus
+
+                  Expect.isGreaterThanOrEqual
+                      (List.length fixtures)
+                      6
+                      "the slice covers enough of the corpus for the certification to mean something"
+
+                  for (name, root) in fixtures do
+                      let expected = Canon.render root
+
+                      match DocGenerated.decodeNode expected with
+                      | Error e -> failtestf "%s: generated decode: %s" name e
+                      | Ok node ->
+                          let actual = DocGenerated.encodeNode node
+
+                          Expect.equal actual expected (sprintf "%s: generated round-trip bytes differ" name)
+          }
+
+          // ---- the generated TypeScript leg, in the vocabulary's NATIVE shape —
+          // ---- one of the two legs the original spike skipped as blocked ----
+
+          test "the generated TypeScript module round-trips the corpus in the native shape" {
+              match resolveCorpus () with
+              | Error e -> failtestf "corpus: %s" e
+              | Ok corpus ->
+                  let fixtures = inSliceFixtures corpus
+                  let tags = docIdl.Kinds |> List.map (fun k -> k.Tag)
+                  let tsModule = Gen.typescriptModule docIdl tags
+
+                  let jsStr (s: string) = Text.Json.JsonSerializer.Serialize s
+
+                  let wireJs =
+                      fixtures
+                      |> List.map (fun (name, root) -> sprintf "  [%s, %s]," (jsStr name) (jsStr (Canon.render root)))
+                      |> String.concat "\n"
+
+                  let harness =
+                      tsModule
+                      + "\n\nconst __wire = [\n"
+                      + wireJs
+                      + "\n];\n"
+                      + "for (const [name, s] of __wire) {\n"
+                      + "  const r = decodeNode(s);\n"
+                      + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + r.error));\n"
+                      + "}\n"
+
+                  let tmp =
+                      Path.Combine(Path.GetTempPath(), sprintf "fuaran-doc-ts-%s.mjs" (Guid.NewGuid().ToString("N")))
+
+                  File.WriteAllText(tmp, harness)
+
+                  try
+                      let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+
+                      let proc =
+                          try
+                              Some(Diagnostics.Process.Start psi)
+                          with _ ->
+                              None
+
+                      match proc with
+                      | None -> skiptest "node not on PATH — TS leg skipped"
+                      | Some p ->
+                          let stdout = p.StandardOutput.ReadToEnd()
+                          let stderr = p.StandardError.ReadToEnd()
+                          p.WaitForExit()
+
+                          if p.ExitCode <> 0 then
+                              failtestf "node failed running the generated TS module: %s" stderr
+
+                          let got =
+                              stdout.Replace("\r\n", "\n").Split('\n')
+                              |> Array.filter (fun l -> l <> "")
+                              |> Array.map (fun l ->
+                                  let parts = l.Split('\u0001')
+                                  parts.[0], parts.[1])
+                              |> Map.ofArray
+
+                          for (name, root) in fixtures do
+                              let expectedWire = Canon.render root
+
+                              match Map.tryFind name got with
+                              | Some actual ->
+                                  Expect.equal actual expectedWire (sprintf "TS wire mismatch for '%s'" name)
+                              | None -> failtestf "TS module produced no output for '%s'" name
+                  finally
+                      try
+                          File.Delete tmp
+                      with _ ->
+                          ()
           } ]

@@ -1,4 +1,4 @@
-﻿module Fuaran.Core.Tests.UiIdl
+module Fuaran.Core.Tests.UiIdl
 
 open Fuaran.Core.Idl
 
@@ -2069,7 +2069,8 @@ let uiIdl: Idl =
           hostOnly "motion" "Motion option" "None"
           opt "state" (TRecord "StateBehaviour")
           opt "style" (TRecord "SemanticStyle") ]
-      Ops = treeOps }
+      Ops = treeOps
+      Wire = WireShape.Default }
 
 /// Back-compat alias — the Display tests grew up against this name.
 let uiDisplayIdl: Idl = uiIdl
