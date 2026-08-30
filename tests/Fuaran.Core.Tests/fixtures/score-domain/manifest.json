@@ -1,0 +1,18 @@
+{
+  "kind": "score-domain-spike-corpus",
+  "version": "1",
+  "description": "Sample scores exercising the third-vocabulary slice declared in ScoreDomainSpike.fs. Each document is a node tree in that vocabulary's own wire shape: a bare-string 'kind' discriminator, a flat node envelope in which the tag, the id and the kind's fields share one object, and omit-at-default wire economy (a voice of 1, zero dots and false flags are omitted rather than written).",
+  "modelRoundTrips": [
+    "model-roundtrips/chord-hold.json",
+    "model-roundtrips/crescendo.json",
+    "model-roundtrips/form-arrangement.json",
+    "model-roundtrips/grace-ornament-fermata.json",
+    "model-roundtrips/marks-and-shifts.json",
+    "model-roundtrips/multi-rest.json",
+    "model-roundtrips/satb-partgroup.json",
+    "model-roundtrips/scale-passage.json",
+    "model-roundtrips/single-dotted-note.json",
+    "model-roundtrips/slur-phrase.json",
+    "model-roundtrips/volta-endings.json"
+  ]
+}

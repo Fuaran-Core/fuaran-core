@@ -1,0 +1,25 @@
+{
+  "root": {
+    "kind": "Staff",
+    "id": "st1",
+    "staffNumber": 1,
+    "children": [
+      { "kind": "RehearsalMark", "id": "r1", "label": "A" },
+      {
+        "kind": "Note",
+        "id": "n1",
+        "pitch": { "letter": "C", "accidental": "Natural", "octave": 5, "midi": 72 },
+        "duration": { "base": "Quarter" }
+      },
+      { "kind": "OctaveShiftStart", "id": "os1", "octaveShift": "Ottava" },
+      {
+        "kind": "Note",
+        "id": "n2",
+        "pitch": { "letter": "C", "accidental": "Natural", "octave": 5, "midi": 72 },
+        "duration": { "base": "Quarter" }
+      },
+      { "kind": "OctaveShiftEnd", "id": "os2" },
+      { "kind": "NavigationMark", "id": "nav1", "navigation": "Fine" }
+    ]
+  }
+}

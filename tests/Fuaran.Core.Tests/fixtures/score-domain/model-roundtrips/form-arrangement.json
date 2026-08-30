@@ -1,0 +1,25 @@
+{
+  "root": {
+    "kind": "Form",
+    "id": "f1",
+    "name": "32-bar song form",
+    "sections": [
+      {
+        "label": "A",
+        "children": [
+          {
+            "kind": "Note",
+            "id": "n1",
+            "pitch": { "letter": "A", "accidental": "Natural", "octave": 4, "midi": 69 },
+            "duration": { "base": "Whole" }
+          }
+        ]
+      },
+      {
+        "label": "B",
+        "children": []
+      }
+    ],
+    "arrangement": [ "A", "A", "B", "A" ]
+  }
+}

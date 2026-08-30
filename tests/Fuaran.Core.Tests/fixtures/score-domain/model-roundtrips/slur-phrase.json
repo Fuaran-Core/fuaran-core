@@ -1,0 +1,29 @@
+{
+  "root": {
+    "kind": "Staff",
+    "id": "st1",
+    "staffNumber": 1,
+    "children": [
+      { "kind": "SlurStart", "id": "s1" },
+      {
+        "kind": "Note",
+        "id": "n1",
+        "pitch": { "letter": "C", "accidental": "Natural", "octave": 4, "midi": 60 },
+        "duration": { "base": "Quarter" }
+      },
+      {
+        "kind": "Note",
+        "id": "n2",
+        "pitch": { "letter": "D", "accidental": "Flat", "octave": 4, "midi": 61 },
+        "duration": { "base": "Quarter" }
+      },
+      {
+        "kind": "Note",
+        "id": "n3",
+        "pitch": { "letter": "E", "accidental": "Natural", "octave": 4, "midi": 64 },
+        "duration": { "base": "Half" }
+      },
+      { "kind": "SlurEnd", "id": "s2" }
+    ]
+  }
+}

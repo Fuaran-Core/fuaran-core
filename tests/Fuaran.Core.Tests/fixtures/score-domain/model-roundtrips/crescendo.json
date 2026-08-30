@@ -1,0 +1,25 @@
+{
+  "root": {
+    "kind": "Staff",
+    "id": "st1",
+    "staffNumber": 1,
+    "children": [
+      { "kind": "Dynamic", "id": "d1", "level": "Piano" },
+      { "kind": "HairpinStart", "id": "h1", "hairpin": "Crescendo" },
+      {
+        "kind": "Note",
+        "id": "n1",
+        "pitch": { "letter": "C", "accidental": "Natural", "octave": 4, "midi": 60 },
+        "duration": { "base": "Half" }
+      },
+      {
+        "kind": "Note",
+        "id": "n2",
+        "pitch": { "letter": "E", "accidental": "Natural", "octave": 4, "midi": 64 },
+        "duration": { "base": "Half" }
+      },
+      { "kind": "HairpinEnd", "id": "h2" },
+      { "kind": "Dynamic", "id": "d2", "level": "Forte" }
+    ]
+  }
+}

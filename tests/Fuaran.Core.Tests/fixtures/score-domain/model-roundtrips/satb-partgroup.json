@@ -1,0 +1,87 @@
+{
+  "root": {
+    "kind": "Score",
+    "id": "sc1",
+    "title": "Two-voice hold",
+    "children": [
+      {
+        "kind": "PartGroup",
+        "id": "pg1",
+        "name": "Choir",
+        "bracket": "Square",
+        "children": [
+          {
+            "kind": "Part",
+            "id": "p1",
+            "name": "Upper",
+            "staves": [
+              {
+                "number": 1,
+                "clef": "Treble",
+                "initialKey": { "tonic": "C", "tonicAccidental": "Natural", "mode": "Ionian" },
+                "initialTime": { "numerator": 4, "denominator": 4 }
+              }
+            ],
+            "children": [
+              {
+                "kind": "Measure",
+                "id": "m1",
+                "number": 1,
+                "children": [
+                  {
+                    "kind": "Staff",
+                    "id": "st1",
+                    "staffNumber": 1,
+                    "children": [
+                      {
+                        "kind": "Note",
+                        "id": "n1",
+                        "pitch": { "letter": "C", "accidental": "Natural", "octave": 5, "midi": 72 },
+                        "duration": { "base": "Whole" }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "Part",
+            "id": "p2",
+            "name": "Lower",
+            "staves": [
+              {
+                "number": 1,
+                "clef": "Bass",
+                "initialKey": { "tonic": "C", "tonicAccidental": "Natural", "mode": "Ionian" },
+                "initialTime": { "numerator": 4, "denominator": 4 }
+              }
+            ],
+            "children": [
+              {
+                "kind": "Measure",
+                "id": "m2",
+                "number": 1,
+                "children": [
+                  {
+                    "kind": "Staff",
+                    "id": "st2",
+                    "staffNumber": 1,
+                    "children": [
+                      {
+                        "kind": "Note",
+                        "id": "n2",
+                        "pitch": { "letter": "E", "accidental": "Natural", "octave": 3, "midi": 52 },
+                        "duration": { "base": "Whole" }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

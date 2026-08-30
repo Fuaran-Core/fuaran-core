@@ -1,0 +1,109 @@
+{
+  "root": {
+    "kind": "Score",
+    "id": "sc1",
+    "title": "First and second endings",
+    "children": [
+      {
+        "kind": "Part",
+        "id": "p1",
+        "name": "Melody",
+        "staves": [
+          {
+            "number": 1,
+            "clef": "Treble",
+            "initialKey": { "tonic": "G", "tonicAccidental": "Natural", "mode": "Ionian" },
+            "initialTime": { "numerator": 3, "denominator": 4 }
+          }
+        ],
+        "children": [
+          {
+            "kind": "Measure",
+            "id": "m0",
+            "number": 0,
+            "isAnacrusis": true,
+            "children": [
+              {
+                "kind": "Staff",
+                "id": "st0",
+                "staffNumber": 1,
+                "children": [
+                  {
+                    "kind": "Note",
+                    "id": "n0",
+                    "pitch": { "letter": "D", "accidental": "Natural", "octave": 4, "midi": 62 },
+                    "duration": { "base": "Quarter" }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "Measure",
+            "id": "m1",
+            "number": 1,
+            "repeatStart": true,
+            "children": [
+              {
+                "kind": "Staff",
+                "id": "st1",
+                "staffNumber": 1,
+                "children": [
+                  {
+                    "kind": "Note",
+                    "id": "n1",
+                    "pitch": { "letter": "G", "accidental": "Natural", "octave": 4, "midi": 67 },
+                    "duration": { "base": "Half" }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "Measure",
+            "id": "m7",
+            "number": 7,
+            "repeatEnd": true,
+            "volta": [ 1 ],
+            "children": [
+              {
+                "kind": "Staff",
+                "id": "st7",
+                "staffNumber": 1,
+                "children": [
+                  {
+                    "kind": "Note",
+                    "id": "n7",
+                    "pitch": { "letter": "A", "accidental": "Natural", "octave": 4, "midi": 69 },
+                    "duration": { "base": "Half" }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "Measure",
+            "id": "m8",
+            "number": 8,
+            "volta": [ 2 ],
+            "children": [
+              {
+                "kind": "Staff",
+                "id": "st8",
+                "staffNumber": 1,
+                "children": [
+                  {
+                    "kind": "Note",
+                    "id": "n8",
+                    "pitch": { "letter": "G", "accidental": "Natural", "octave": 4, "midi": 67 },
+                    "duration": { "base": "Half", "dots": 1 }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

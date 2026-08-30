@@ -1,0 +1,27 @@
+{
+  "root": {
+    "kind": "Measure",
+    "id": "m1",
+    "number": 1,
+    "children": [
+      {
+        "kind": "Staff",
+        "id": "st1",
+        "staffNumber": 1,
+        "children": [
+          {
+            "kind": "Chord",
+            "id": "c1",
+            "pitches": [
+              { "letter": "C", "accidental": "Natural", "octave": 4, "midi": 60 },
+              { "letter": "E", "accidental": "Natural", "octave": 4, "midi": 64 },
+              { "letter": "G", "accidental": "Natural", "octave": 4, "midi": 67 }
+            ],
+            "duration": { "base": "Whole" },
+            "tiedToNext": true
+          }
+        ]
+      }
+    ]
+  }
+}

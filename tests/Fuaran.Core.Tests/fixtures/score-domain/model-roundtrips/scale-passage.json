@@ -1,0 +1,57 @@
+{
+  "root": {
+    "kind": "Score",
+    "id": "sc1",
+    "title": "Scale passage",
+    "composer": "Traditional",
+    "children": [
+      {
+        "kind": "Part",
+        "id": "p1",
+        "name": "Melody",
+        "staves": [
+          {
+            "number": 1,
+            "clef": "Treble",
+            "initialKey": { "tonic": "C", "tonicAccidental": "Natural", "mode": "Ionian" },
+            "initialTime": { "numerator": 4, "denominator": 4 }
+          }
+        ],
+        "children": [
+          {
+            "kind": "Measure",
+            "id": "m1",
+            "number": 1,
+            "children": [
+              {
+                "kind": "Staff",
+                "id": "st1",
+                "staffNumber": 1,
+                "children": [
+                  {
+                    "kind": "Note",
+                    "id": "n1",
+                    "pitch": { "letter": "C", "accidental": "Natural", "octave": 4, "midi": 60 },
+                    "duration": { "base": "Quarter" }
+                  },
+                  {
+                    "kind": "Note",
+                    "id": "n2",
+                    "pitch": { "letter": "D", "accidental": "Natural", "octave": 4, "midi": 62 },
+                    "duration": { "base": "Quarter" }
+                  },
+                  {
+                    "kind": "Note",
+                    "id": "n3",
+                    "pitch": { "letter": "E", "accidental": "Natural", "octave": 4, "midi": 64 },
+                    "duration": { "base": "Half" }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

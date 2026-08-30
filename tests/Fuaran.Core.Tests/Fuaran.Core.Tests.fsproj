@@ -104,6 +104,10 @@
          vendored at fixtures/second-domain/ so the legs run in any clone. Reads nothing
          here, so it simply follows. -->
     <Compile Include="SecondDomainSpike.fs" />
+    <!-- The third-vocabulary (score-shaped) readiness spike - same posture as the second:
+         throwaway measurement code, kept for its findings. Certifies a score-shaped slice
+         against samples vendored at fixtures/score-domain/. -->
+    <Compile Include="ScoreDomainSpike.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

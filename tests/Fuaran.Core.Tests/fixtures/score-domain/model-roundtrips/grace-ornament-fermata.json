@@ -1,0 +1,29 @@
+{
+  "root": {
+    "kind": "Staff",
+    "id": "st1",
+    "staffNumber": 1,
+    "children": [
+      {
+        "kind": "GraceNote",
+        "id": "g1",
+        "pitch": { "letter": "D", "accidental": "Natural", "octave": 4, "midi": 62 },
+        "grace": "Acciaccatura"
+      },
+      {
+        "kind": "Note",
+        "id": "n1",
+        "pitch": { "letter": "C", "accidental": "Natural", "octave": 4, "midi": 60 },
+        "duration": { "base": "Half" }
+      },
+      { "kind": "Ornament", "id": "o1", "ornament": "Trill" },
+      {
+        "kind": "Note",
+        "id": "n2",
+        "pitch": { "letter": "G", "accidental": "Sharp", "octave": 4, "midi": 68 },
+        "duration": { "base": "Half" }
+      },
+      { "kind": "Fermata", "id": "f1" }
+    ]
+  }
+}

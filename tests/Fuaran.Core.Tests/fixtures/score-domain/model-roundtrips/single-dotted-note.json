@@ -1,0 +1,10 @@
+{
+  "root": {
+    "kind": "Note",
+    "id": "n1",
+    "pitch": { "letter": "C", "accidental": "Natural", "octave": 4, "midi": 60 },
+    "duration": { "base": "Quarter", "dots": 1 },
+    "voice": 2,
+    "tiedToNext": true
+  }
+}
