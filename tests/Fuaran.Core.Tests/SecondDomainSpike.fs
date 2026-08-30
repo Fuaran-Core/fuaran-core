@@ -45,13 +45,17 @@ open Fuaran.Core.Idl
 //     the generated TypeScript module (the leg the original spike skipped as
 //     blocked on exactly this).
 //
-//  3. GAP, tolerable for a new adopter / blocking for a retrofit — canonical key
-//     ORDER is Ordinal-sorted and not declarable. `Canon.render` sorts; this
-//     vocabulary's own canonical encoder emits DECLARATION order. So even with
-//     (1) and (2) closed, generated hosts would not be byte-compatible with an
-//     existing corpus. A vocabulary that adopts the IDL before it has a shipped
-//     wire pays nothing here; one that adopts after pays a corpus migration.
-//     This is the §4.1 adopt-before-calcification lesson, priced.
+//  3. GAP, now CLOSED (Phase 111) — canonical key ORDER was Ordinal-sorted and
+//     not declarable, where this vocabulary's own canonical encoder emits
+//     DECLARATION order; a retrofitting adopter paid a corpus migration even
+//     with (1) and (2) closed. The order is now the third declared axis
+//     (`Idl.Wire.KeyOrder`); this vocabulary declares `Declared`, and every leg
+//     below certifies against the corpus's OWN byte order — the interpreter,
+//     the generated F# module and the generated TS module are byte-compatible
+//     with the pre-existing corpus, which is the retrofit cost gone. Re-encode
+//     NORMALISES any input key order to the declared one, so canonical form
+//     stays unique; the go-red partner pins that a `Sorted` declaration
+//     produces different bytes.
 //
 //  4. GAP, half-closed — no explicit-null optionality. `Optionality` offers
 //     `Required | Optional | OmitDefault | HostOnly`; none of them says "always
@@ -169,11 +173,13 @@ let docIdl: Idl =
       // kind — an empty envelope, which is the `Idl` default.
       NodeFields = []
       Ops = []
-      // Findings (1)/(2), closed: the wire shape is DECLARED (Phases 108/109) —
-      // a bare-string `kind` discriminator, and the flat node envelope.
+      // Findings (1)/(2)/(3), closed: the wire shape is DECLARED (Phases
+      // 108/109/111) — a bare-string `kind` discriminator, the flat node
+      // envelope, and declaration-order canonical keys.
       Wire =
         { Discriminator = "kind"
-          NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+          NodeEnvelope = NodeEnvelopeShape.FlatKind
+          KeyOrder = KeyOrder.Declared } }
 
 let private nodeTags = docIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
 
@@ -305,12 +311,12 @@ let private inSliceFixtures (corpus: string) =
 /// is declared with the right name, type and optionality — a dropped, added,
 /// retyped or mis-optional field all move the bytes.
 ///
-/// The bytes it is measured against are the CORPUS's own, whichever corpus this
-/// run resolved. The claim is that the declared slice round-trips these
-/// documents; it is not a claim of byte-parity with any other corpus, and the
-/// key-ORDER finding (3) above already says that such parity would not hold.
+/// The bytes it is measured against are the CORPUS's own — in the corpus's OWN
+/// key order (finding (3), closed by Phase 111: this vocabulary's canonical
+/// form is declaration order, and `renderOrdered` of the parsed fixture IS the
+/// fixture's authored byte order, compacted).
 let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
-    let expected = Canon.render root
+    let expected = Canon.renderOrdered root
 
     match Decode.decode idl expected with
     | Error e -> Error("decode: " + e)
@@ -426,6 +432,33 @@ let tests =
               Expect.isTrue
                   (Result.isError (Decode.decode docIdl nested))
                   "the declared flat shape refuses the nested $type wire"
+          }
+
+          test "the key-order go-red partner: a Sorted declaration produces different bytes — finding (3)" {
+              match resolveCorpus () with
+              | Error e -> failtestf "corpus: %s" e
+              | Ok corpus ->
+                  let sorted =
+                      { docIdl with
+                          Wire =
+                              { docIdl.Wire with
+                                  KeyOrder = KeyOrder.Sorted } }
+
+                  let divergent =
+                      inSliceFixtures corpus
+                      |> List.filter (fun (_, root) ->
+                          let ordered = Canon.renderOrdered root
+
+                          match Decode.decode docIdl ordered with
+                          | Error _ -> false
+                          | Ok v ->
+                              match Encode.encode sorted v with
+                              | Ok bytes -> bytes <> ordered
+                              | Error _ -> false)
+
+                  Expect.isNonEmpty
+                      divergent
+                      "at least one fixture's declared order differs from Ordinal — the key-order axis is load-bearing"
           }
 
           // ---- finding (4): the optionality model has no explicit-null case ----
@@ -552,7 +585,7 @@ let tests =
                       "the slice covers enough of the corpus for the certification to mean something"
 
                   for (name, root) in fixtures do
-                      let expected = Canon.render root
+                      let expected = Canon.renderOrdered root
 
                       match DocGenerated.decodeNode expected with
                       | Error e -> failtestf "%s: generated decode: %s" name e
@@ -577,7 +610,8 @@ let tests =
 
                   let wireJs =
                       fixtures
-                      |> List.map (fun (name, root) -> sprintf "  [%s, %s]," (jsStr name) (jsStr (Canon.render root)))
+                      |> List.map (fun (name, root) ->
+                          sprintf "  [%s, %s]," (jsStr name) (jsStr (Canon.renderOrdered root)))
                       |> String.concat "\n"
 
                   let harness =
@@ -623,7 +657,7 @@ let tests =
                               |> Map.ofArray
 
                           for (name, root) in fixtures do
-                              let expectedWire = Canon.render root
+                              let expectedWire = Canon.renderOrdered root
 
                               match Map.tryFind name got with
                               | Some actual ->

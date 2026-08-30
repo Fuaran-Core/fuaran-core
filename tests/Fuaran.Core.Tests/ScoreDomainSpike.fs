@@ -294,7 +294,8 @@ let scoreIdl: Idl =
       // a bare-string `kind` discriminator, and the flat node envelope.
       Wire =
         { Discriminator = "kind"
-          NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+          NodeEnvelope = NodeEnvelopeShape.FlatKind
+          KeyOrder = KeyOrder.Declared } }
 
 let private nodeTags = scoreIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
 
@@ -388,7 +389,7 @@ let private allFixtures (corpus: string) =
 /// the second spike's: the foreign root, in its NATIVE shape and with no
 /// adapter, is canonically rendered, decoded, re-encoded, and the bytes compared.
 let private certify (idl: Idl) (root: JVal) : Result<unit, string> =
-    let expected = Canon.render root
+    let expected = Canon.renderOrdered root
 
     match Decode.decode idl expected with
     | Error e -> Error("decode: " + e)

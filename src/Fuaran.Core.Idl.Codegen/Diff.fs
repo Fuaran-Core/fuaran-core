@@ -308,7 +308,9 @@ module Diff =
                         (str "discriminator" w |> Option.defaultValue "$type")
                         + "/"
                         + (str "nodeEnvelope" w |> Option.defaultValue "nestedKind")
-                    | None -> "$type/nestedKind" }
+                        + "/"
+                        + (str "keyOrder" w |> Option.defaultValue "sorted")
+                    | None -> "$type/nestedKind/sorted" }
         | _ -> Error "idl.json: expected a JSON object at the root"
 
     /// Parse + read in one step.
@@ -631,10 +633,10 @@ module Diff =
             | WireShapeChanged(b, a) ->
                 BreakingWire,
                 sprintf
-                    "the declared WIRE SHAPE moved %s → %s — the discriminator key and/or the node-envelope nesting relocate every tag on the wire, so every document's bytes move and no document valid under one shape decodes under the other. A `/v2/` major event by definition."
+                    "the declared WIRE SHAPE moved %s → %s — the discriminator key, the node-envelope nesting and/or the canonical key order relocate every tag or every byte on the wire, so every document's bytes move. A `/v2/` major event by definition."
                     b
                     a,
-                "Idl.WireShape (Phases 108/109); VOCABULARY.md §4.2"
+                "Idl.WireShape (Phases 108/109/111); VOCABULARY.md §4.2"
 
             | KindAdded t ->
                 Additive,

@@ -198,7 +198,17 @@
          rather than a repack on the standing grounds: v0.15.0 is tagged, and a same-version
          swap of a compile-breaking contract is the packall-incremental skew defect by
          construction. -->
-    <Version>0.16.0</Version>
+    <!-- 0.17.0 (2026-08-30): fuaran-core#111 — declarable KEY ORDER, the wire shape's third
+         axis and the readiness spikes' finding 3. `WireShape` gains `KeyOrder` (Sorted, the
+         default | Declared — declaration-order canonical form via the new `Canon.renderOrdered`);
+         the interpreter and the generated F#/TS legs derive from it, and both spike corpora now
+         certify in their OWN byte order. MINOR and compile-breaking for `WireShape` literals
+         (they add `KeyOrder = KeyOrder.Sorted`, or move to `{ WireShape.Default with … }`);
+         every default-shape wire byte and generated artefact is unchanged. Supersedes 0.16.0
+         within the same working day — 0.16.0 was packed to the local feed only, never tagged or
+         published, and widening the same record twice across two unreleased versions is cheaper
+         for every consumer than adopting it twice. -->
+    <Version>0.17.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

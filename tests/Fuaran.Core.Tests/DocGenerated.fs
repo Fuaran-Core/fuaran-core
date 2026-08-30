@@ -195,7 +195,7 @@ and private encNode (n: Node) : JVal =
     let kind = encNodeKind n.Kind
 
     match kind with
-    | JObj __kf -> JObj(("id", JStr n.Id) :: __kf)
+    | JObj(__d :: __kf) -> JObj(__d :: ("id", JStr n.Id) :: __kf)
     | __other -> __other
 
 and private encRun (v: Run) : JVal =
@@ -241,7 +241,7 @@ and private encCaptionSpec (s: CaptionSpec) : JVal =
 and private encFootnoteSpec (s: FootnoteSpec) : JVal =
     typedTag "Footnote" ([ Some("children", JArr(List.map encNode s.Children)) ] |> List.choose id)
 
-let encodeNode (n: Node) : string = Canon.render (encNode n)
+let encodeNode (n: Node) : string = Canon.renderOrdered (encNode n)
 
 /// JVal-level accessors (Phase 694) — for host codecs that splice generated
 /// encodings into a larger canonical document (e.g. a TreeOp codec).

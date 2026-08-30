@@ -667,6 +667,26 @@ module Canon =
                |> String.concat ",")
             + "}"
 
+    /// Render a `JVal` with the SAME canonical escaping and pinned float layout as [[render]],
+    /// but object keys in AUTHORED order — no sort. The declared-key-order leg (a vocabulary
+    /// whose canonical form is DECLARATION order rather than Ordinal; the IDL's
+    /// `WireShape.KeyOrder`): there the ENCODER is the order authority — it constructs each
+    /// object's pairs in the declared order and this renderer preserves them, so canonical form
+    /// stays unique without a sort. [[render]] is untouched and remains the cross-host default.
+    let rec renderOrdered (v: JVal) : string =
+        match v with
+        | JStr s -> "\"" + escape s + "\""
+        | JInt i -> string i
+        | JBool b -> (if b then "true" else "false")
+        | JFloat f -> canonicalFloat f
+        | JArr xs -> "[" + (xs |> List.map renderOrdered |> String.concat ",") + "]"
+        | JObj fields ->
+            "{"
+            + (fields
+               |> List.map (fun (k, v) -> "\"" + escape k + "\":" + renderOrdered v)
+               |> String.concat ",")
+            + "}"
+
     /// Build a `$type`-discriminated object — the DU-position convention. `$type` (0x24) sorts
     /// before every lower-case data key, so it is always the canonical first key after `render`.
     let typed (tag: string) (fields: (string * JVal) list) : JVal = JObj(("$type", JStr tag) :: fields)

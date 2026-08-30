@@ -286,6 +286,12 @@ module Artifact =
                                match idl.Wire.NodeEnvelope with
                                | NodeEnvelopeShape.NestedKind -> "nestedKind"
                                | NodeEnvelopeShape.FlatKind -> "flatKind"
+                           )
+                           "keyOrder",
+                           JStr(
+                               match idl.Wire.KeyOrder with
+                               | KeyOrder.Sorted -> "sorted"
+                               | KeyOrder.Declared -> "declared"
                            ) ] ])
         )
 

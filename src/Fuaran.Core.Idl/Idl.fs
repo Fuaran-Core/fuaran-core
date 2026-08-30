@@ -141,11 +141,31 @@ type NodeEnvelopeShape =
     /// names `id` and the discriminator are RESERVED — see [[Declare.wireShapeErrors]].
     | FlatKind
 
-/// The declared WIRE SHAPE of a vocabulary (Phases 108/109): the discriminator
-/// key its unions / kinds / ops are tagged with, and where a node's kind body
-/// sits. Declared on [[Idl]] rather than hard-coded in the engine, because both
-/// are properties of the DOMAIN's wire, not of the interpreter — the second- and
-/// third-vocabulary spikes each stopped at exactly these two hard-codings.
+/// How a vocabulary's canonical form lays each object's KEYS (Phase 111 — the
+/// readiness spikes' finding 3). Both foreign vocabularies' own canonical
+/// encoders emit DECLARATION order, so a sorted-only engine could never be
+/// byte-compatible with their pre-existing corpora — the "§4.1
+/// adopt-before-calcification lesson", now declarable instead of priced.
+[<RequireQualifiedAccess>]
+type KeyOrder =
+    /// Ordinal-sorted at render (`Canon.render`) — the default, and the
+    /// cross-host discipline every shipped corpus uses.
+    | Sorted
+    /// DECLARATION order: the discriminator, then `id`, then fields exactly as
+    /// the vocabulary declares them (kind fields before the node envelope's).
+    /// The ENCODER is the order authority — re-encode of any input key order
+    /// NORMALISES to the declared one, so canonical form stays unique. `TMap`
+    /// entries stay Ordinal-sorted in both modes (a map has no declared order),
+    /// and a `TJson` value is carried in its authored order, per its verbatim
+    /// contract.
+    | Declared
+
+/// The declared WIRE SHAPE of a vocabulary (Phases 108/109/111): the
+/// discriminator key its unions / kinds / ops are tagged with, where a node's
+/// kind body sits, and how its canonical form orders object keys. Declared on
+/// [[Idl]] rather than hard-coded in the engine, because all three are
+/// properties of the DOMAIN's wire, not of the interpreter — the second- and
+/// third-vocabulary spikes each stopped at exactly these hard-codings.
 type WireShape =
     {
         /// The union/kind/op discriminator key (Phase 108). `"$type"` is the
@@ -153,13 +173,16 @@ type WireShape =
         Discriminator: string
         /// The node envelope nesting (Phase 109).
         NodeEnvelope: NodeEnvelopeShape
+        /// The canonical key order (Phase 111).
+        KeyOrder: KeyOrder
     }
 
     /// The shape every declaration had before the shape was declarable —
-    /// `$type`-discriminated, kind body nested beside `id`.
+    /// `$type`-discriminated, kind body nested beside `id`, keys Ordinal-sorted.
     static member Default =
         { Discriminator = "$type"
-          NodeEnvelope = NodeEnvelopeShape.NestedKind }
+          NodeEnvelope = NodeEnvelopeShape.NestedKind
+          KeyOrder = KeyOrder.Sorted }
 
 /// Whether a field is always present, omitted on the wire when absent, or
 /// omitted on the wire when equal to an identity default (omit-on-absence and
@@ -606,7 +629,13 @@ module Encode =
                     | Ok j -> go ((k, j) :: acc) rest
                     | Error m -> Error m
 
-            go [] entries
+            // Phase 111 — a map has no DECLARED order, so its entries are
+            // Ordinal-sorted at encode: a no-op under `Sorted` rendering, and
+            // what keeps `Declared`-order canonical form deterministic.
+            go
+                []
+                (entries
+                 |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b)))
         | TNode, VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields
         // Phase 698 — the enveloped form, at ANY depth: a nested child carries its
         // envelope through exactly this arm, so the sweep is not root-only.
@@ -717,15 +746,25 @@ module Encode =
                         )
                     // Flat: envelope and kind fields share the node object — the
                     // collision [[Declare.wireShapeErrors]] refuses at declaration.
+                    // Discriminator first, then id, kind fields, envelope: the
+                    // Phase 111 declared order (irrelevant under Sorted rendering).
                     | NodeEnvelopeShape.FlatKind ->
-                        Ok(JObj(("id", JStr id) :: (idl.Wire.Discriminator, JStr kindTag) :: (kindFs @ envFs)))
+                        Ok(JObj((idl.Wire.Discriminator, JStr kindTag) :: ("id", JStr id) :: (kindFs @ envFs)))
+
+    /// The declared canonical renderer (Phase 111): Ordinal-sorted by default,
+    /// authored order under `KeyOrder.Declared` — where the encoder's own
+    /// construction order (discriminator, id, declared fields) is normative.
+    let private render (idl: Idl) : JVal -> string =
+        match idl.Wire.KeyOrder with
+        | KeyOrder.Sorted -> Canon.render
+        | KeyOrder.Declared -> Canon.renderOrdered
 
     /// Encode an authored node to canonical wire JSON — byte-identical to the UI host.
     let encode (idl: Idl) (v: IdlValue) : Result<string, string> =
         match v with
-        | VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields |> Result.map Canon.render
+        | VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields |> Result.map (render idl)
         | VNodeEnv(id, envelope, kindTag, fields) ->
-            encodeNodeEnv idl id envelope kindTag fields |> Result.map Canon.render
+            encodeNodeEnv idl id envelope kindTag fields |> Result.map (render idl)
         | _ -> Error "top-level authored value must be a node"
 
     /// Encode an authored TREE OP to canonical wire JSON (Phase 703) — the wire's
@@ -734,7 +773,7 @@ module Encode =
     /// top-level `$type`), but which one a caller MEANT is not the codec's guess to
     /// make. The schema states the same thing as `oneOf`.
     let encodeOp (idl: Idl) (v: IdlValue) : Result<string, string> =
-        encodeValue idl TOp v |> Result.map Canon.render
+        encodeValue idl TOp v |> Result.map (render idl)
 
 /// The symmetric decode leg — the IDL also drives JSON → `IdlValue`, so the codec
 /// round-trips (`encode (decode wire) = wire`). Parsing is the shared portable

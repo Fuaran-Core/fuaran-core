@@ -61,8 +61,9 @@ let tests =
               let idl =
                   { baseIdl with
                       Wire =
-                          { Discriminator = "tag"
-                            NodeEnvelope = NodeEnvelopeShape.NestedKind } }
+                          { WireShape.Default with
+                              Discriminator = "tag"
+                              NodeEnvelope = NodeEnvelopeShape.NestedKind } }
 
               let bytes = roundTrip idl
               Expect.isTrue (bytes.Contains "\"tag\":\"Note\"") "the declared key tags the kind body"
@@ -80,8 +81,9 @@ let tests =
               let idl =
                   { baseIdl with
                       Wire =
-                          { Discriminator = "$type"
-                            NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+                          { WireShape.Default with
+                              Discriminator = "$type"
+                              NodeEnvelope = NodeEnvelopeShape.FlatKind } }
 
               let bytes = roundTrip idl
               Expect.isTrue (bytes.Contains "\"$type\":\"Note\"") "the default key tags the flat node"
@@ -101,8 +103,9 @@ let tests =
               let shaped disc env =
                   { baseIdl with
                       Wire =
-                          { Discriminator = disc
-                            NodeEnvelope = env } }
+                          { WireShape.Default with
+                              Discriminator = disc
+                              NodeEnvelope = env } }
 
               Expect.isEmpty (Declare.wireShapeErrors baseIdl) "the default shape is well-formed"
 
@@ -130,8 +133,9 @@ let tests =
                               Category = "leaf"
                               Fields = [ f "id" TStr Required ] } ]
                       Wire =
-                          { Discriminator = "tag"
-                            NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+                          { WireShape.Default with
+                              Discriminator = "tag"
+                              NodeEnvelope = NodeEnvelopeShape.FlatKind } }
 
               Expect.isNonEmpty (Declare.wireShapeErrors withIdField) "a flat kind field named 'id' is refused"
 
@@ -139,8 +143,9 @@ let tests =
                   (Declare.wireShapeErrors
                       { withIdField with
                           Wire =
-                              { Discriminator = "tag"
-                                NodeEnvelope = NodeEnvelopeShape.NestedKind } })
+                              { WireShape.Default with
+                                  Discriminator = "tag"
+                                  NodeEnvelope = NodeEnvelopeShape.NestedKind } })
                   "the same field is legal under the nested envelope — the reservation is flat-only"
           }
 
@@ -152,12 +157,56 @@ let tests =
                   Artifact.render
                       { baseIdl with
                           Wire =
-                              { Discriminator = "tag"
-                                NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+                              { WireShape.Default with
+                                  Discriminator = "tag"
+                                  NodeEnvelope = NodeEnvelopeShape.FlatKind } }
 
               Expect.isTrue (shaped.Contains "\"wire\"") "a shaped artifact declares its wire key"
               Expect.isTrue (shaped.Contains "\"discriminator\": \"tag\"") "…the discriminator"
               Expect.isTrue (shaped.Contains "\"nodeEnvelope\": \"flatKind\"") "…and the envelope"
+              Expect.isTrue (shaped.Contains "\"keyOrder\": \"sorted\"") "…and the key order (Phase 111)"
+          }
+
+          test "DECLARED key order preserves declaration order — and re-encode normalises to it" {
+              // Fields deliberately declared in REVERSE alphabetical order, so the
+              // two orderings are distinguishable on the wire.
+              let idl =
+                  { baseIdl with
+                      Kinds =
+                          [ { Tag = "Note"
+                              Category = "leaf"
+                              Fields = [ f "zeta" TStr Required; f "alpha" TStr Required ] } ]
+                      Unions = []
+                      Wire =
+                          { WireShape.Default with
+                              KeyOrder = KeyOrder.Declared } }
+
+              let node = VNode("a", "Note", [ "zeta", VStr "z"; "alpha", VStr "y" ])
+
+              let bytes =
+                  match Encode.encode idl node with
+                  | Ok s -> s
+                  | Error e -> failtestf "encode: %s" e
+
+              Expect.isTrue
+                  (bytes.Contains "\"$type\":\"Note\",\"zeta\":\"z\",\"alpha\":\"y\"")
+                  "the kind body lays its keys in DECLARATION order — discriminator first, zeta before alpha"
+
+              // The sorted variant produces DIFFERENT bytes — the axis is load-bearing.
+              match Encode.encode { idl with Wire = WireShape.Default } node with
+              | Ok sortedBytes -> Expect.notEqual sortedBytes bytes "Sorted and Declared orders differ on this kind"
+              | Error e -> failtestf "sorted encode: %s" e
+
+              // Re-encode NORMALISES: a document authored in any key order decodes
+              // and re-encodes to the declared order, so canonical form is unique.
+              let shuffled = """{"kind":{"alpha":"y","zeta":"z","$type":"Note"},"id":"a"}"""
+
+              match Decode.decode idl shuffled with
+              | Error e -> failtestf "decode of shuffled input: %s" e
+              | Ok v ->
+                  match Encode.encode idl v with
+                  | Ok again -> Expect.equal again bytes "re-encode of a shuffled document normalises to declared order"
+                  | Error e -> failtestf "re-encode: %s" e
           }
 
           test "a wire-shape change diffs as BREAKING (wire)" {
@@ -172,15 +221,16 @@ let tests =
                           Artifact.render
                               { baseIdl with
                                   Wire =
-                                      { Discriminator = "tag"
-                                        NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+                                      { WireShape.Default with
+                                          Discriminator = "tag"
+                                          NodeEnvelope = NodeEnvelopeShape.FlatKind } }
                       )
                   with
                   | Ok s -> s
                   | Error e -> failtestf "after: %s" e
 
-              Expect.equal before.Wire "$type/nestedKind" "a wire-less artifact reads as the default shape"
-              Expect.equal after.Wire "tag/flatKind" "the shaped artifact reads back"
+              Expect.equal before.Wire "$type/nestedKind/sorted" "a wire-less artifact reads as the default shape"
+              Expect.equal after.Wire "tag/flatKind/sorted" "the shaped artifact reads back"
 
               let shapeChanges =
                   Diff.changes before after
@@ -199,8 +249,9 @@ let tests =
               let idl =
                   { baseIdl with
                       Wire =
-                          { Discriminator = "tag"
-                            NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+                          { WireShape.Default with
+                              Discriminator = "tag"
+                              NodeEnvelope = NodeEnvelopeShape.FlatKind } }
 
               let schema = Gen.jsonSchema idl
               Expect.isTrue (schema.Contains "\"tag\"") "the schema's const key is the declared discriminator"

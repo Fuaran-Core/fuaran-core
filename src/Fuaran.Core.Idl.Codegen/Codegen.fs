@@ -1521,14 +1521,17 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                         idl.NodeFields |> List.map (specPieceOf idl.Enums "n") |> String.concat "; "
 
                     sprintf "\n    JObj([ Some(\"id\", JStr n.Id); Some(\"kind\", kind); %s ] |> List.choose id)" pieces
+                // Discriminator first, then id, kind fields, envelope — the
+                // Phase 111 declared order (irrelevant under Sorted rendering,
+                // where `Canon.render` re-sorts; normative under Declared).
                 | NodeEnvelopeShape.FlatKind, [] ->
-                    "\n    match kind with\n    | JObj __kf -> JObj((\"id\", JStr n.Id) :: __kf)\n    | __other -> __other"
+                    "\n    match kind with\n    | JObj(__d :: __kf) -> JObj(__d :: (\"id\", JStr n.Id) :: __kf)\n    | __other -> __other"
                 | NodeEnvelopeShape.FlatKind, _ ->
                     let pieces =
                         idl.NodeFields |> List.map (specPieceOf idl.Enums "n") |> String.concat "; "
 
                     sprintf
-                        "\n    match kind with\n    | JObj __kf -> JObj(([ Some(\"id\", JStr n.Id); %s ] |> List.choose id) @ __kf)\n    | __other -> __other"
+                        "\n    match kind with\n    | JObj(__d :: __kf) -> JObj(__d :: (\"id\", JStr n.Id) :: (__kf @ ([ %s ] |> List.choose id)))\n    | __other -> __other"
                         pieces
 
             // Phase 694 — the kind dispatch is its own function (was inline in
@@ -1630,7 +1633,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
               enums |> List.map (fun e -> doc ("enc:" + e.Name) "" + enumEncoder e)
               [ encodeHelpers idl ]
               [ recGroup ]
-              [ sprintf "let encodeNode (n: Node%s) : string = Canon.render (encNode n)" nodeArgs ]
+              [ sprintf
+                    "let encodeNode (n: Node%s) : string = %s (encNode n)"
+                    nodeArgs
+                    (match idl.Wire.KeyOrder with
+                     | KeyOrder.Sorted -> "Canon.render"
+                     | KeyOrder.Declared -> "Canon.renderOrdered") ]
               // Phase 694 — JVal-level accessors for host codecs that splice
               // generated encodings into a larger canonical document (the
               // tier's TreeOp codec re-points at these when the hand-written
@@ -2704,19 +2712,44 @@ const ordinal = (a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);"""
             // build IS canonical order and interpolates to exactly the
             // pre-declarable bytes; any other key must be SORTED into place
             // among the pairs, or the emission diverges from `Canon.render`.
-            + (if idl.Wire.Discriminator = "$type" then
+            //
+            // Phase 111 — under DECLARED key order there is no sort at all: the
+            // pairs arrive in declaration order and the discriminator leads, so
+            // `typed` / `plain` preserve construction order, exactly as the F#
+            // side's `Canon.renderOrdered` does.
+            + (match idl.Wire.KeyOrder with
+               | KeyOrder.Declared ->
+                   "\nconst typed = (tag, pairs) =>\n  '{"
+                   + Canon.render (JStr idl.Wire.Discriminator)
+                   + ":' + encStr(tag) + pairs.filter((p) => p !== null).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';\n"
+               | KeyOrder.Sorted when idl.Wire.Discriminator = "$type" ->
                    "\nconst typed = (tag, pairs) =>\n  '{\"$type\":' + encStr(tag) + pairs.filter((p) => p !== null).sort(ordinal).map(([k, v]) => ',' + encStr(k) + ':' + v).join('') + '}';\n"
-               else
+               | KeyOrder.Sorted ->
                    "\nconst typed = (tag, pairs) =>\n  plain([['"
                    + idl.Wire.Discriminator
                    + "', encStr(tag)]].concat(pairs));\n")
-            + """// `typed` without the discriminator: a plain object (a non-discriminated record, or
+            + (match idl.Wire.KeyOrder with
+               | KeyOrder.Sorted ->
+                   """// `typed` without the discriminator: a plain object (a non-discriminated record, or
 // the node envelope).
 const plain = (pairs) =>
   '{' + pairs.filter((p) => p !== null).sort(ordinal).map(([k, v]) => encStr(k) + ':' + v).join(',') + '}';"""
+               | KeyOrder.Declared ->
+                   """// `typed` without the discriminator: a plain object (a non-discriminated record, or
+// the node envelope). Declared key order — construction order is preserved.
+const plain = (pairs) =>
+  '{' + pairs.filter((p) => p !== null).map(([k, v]) => encStr(k) + ':' + v).join(',') + '}';""")
 
         let disc = idl.Wire.Discriminator
         let flat = idl.Wire.NodeEnvelope = NodeEnvelopeShape.FlatKind
+
+        // Phase 111 — a TJson value under declared order is carried in its
+        // authored order (the map encoder, a different receiver, stays sorted).
+        let prelude =
+            match idl.Wire.KeyOrder with
+            | KeyOrder.Sorted -> prelude
+            | KeyOrder.Declared ->
+                prelude.Replace("const keys = Object.keys(v).sort();", "const keys = Object.keys(v);")
 
         let kindDispatch =
             if not flat then
@@ -2728,11 +2761,19 @@ const plain = (pairs) =>
                 // Phase 690 — `id` / `kind` / the envelope, merged and sorted Ordinal so
                 // the TS emission order matches F#'s canonical key sort. With no envelope
                 // this is `id` then `kind`, i.e. exactly the previous hand-built literal.
-                let nodePairs =
+                // Phase 111 — declared order keeps the construction order instead:
+                // id, kind, then the envelope as declared.
+                let nodePairsUnsorted =
                     ("id", "[\"id\", encStr(n.id)]")
                     :: ("kind", "[\"kind\", encKind(n.kind)]")
                     :: (idl.NodeFields |> List.map (fun f -> f.Name, tsSpecPieceOf disc "n" f))
-                    |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
+
+                let nodePairs =
+                    (match idl.Wire.KeyOrder with
+                     | KeyOrder.Sorted ->
+                         nodePairsUnsorted
+                         |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
+                     | KeyOrder.Declared -> nodePairsUnsorted)
                     |> List.map snd
                     |> String.concat ", "
 
@@ -2746,17 +2787,22 @@ const plain = (pairs) =>
             else
                 // Phase 109 — the FLAT shape: the in-memory node IS the flat wire
                 // object, so the kind pairs are read from the node itself and
-                // `typed` merges the discriminator, the id and the envelope into
-                // the one object (`typed` sorts pairs, so splice order is free).
+                // `typed` merges the discriminator, the id, the kind fields and the
+                // envelope into the one object — in that order, which is the Phase
+                // 111 declared order (under Sorted rendering `typed` re-sorts, so
+                // the order is free there).
                 let arms =
                     kinds
                     |> List.map (fun k -> "    case " + tsSourceStr k.Tag + ": return enc" + k.Tag + "SpecPairs(n);")
                     |> String.concat "\n"
 
-                let extraPairs =
-                    "[\"id\", encStr(n.id)]"
-                    :: (idl.NodeFields |> List.map (tsSpecPieceOf disc "n"))
-                    |> String.concat ", "
+                let envelopeConcat =
+                    match idl.NodeFields with
+                    | [] -> ""
+                    | fields ->
+                        ".concat(["
+                        + (fields |> List.map (tsSpecPieceOf disc "n") |> String.concat ", ")
+                        + "])"
 
                 "function encKindPairs(n) {\n  switch ("
                 + tsDiscProp disc "n"
@@ -2764,9 +2810,9 @@ const plain = (pairs) =>
                 + arms
                 + "\n  }\n}\n\nfunction encodeNode(n) {\n  return typed("
                 + tsDiscProp disc "n"
-                + ", ["
-                + extraPairs
-                + "].concat(encKindPairs(n)));\n}"
+                + ", [[\"id\", encStr(n.id)]].concat(encKindPairs(n))"
+                + envelopeConcat
+                + ");\n}"
 
         let enums, _, records = referenced idl kinds
 
