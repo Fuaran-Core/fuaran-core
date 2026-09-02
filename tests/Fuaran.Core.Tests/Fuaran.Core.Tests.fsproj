@@ -127,6 +127,10 @@
          which leg each neutral vocabulary carries, so it must follow both spikes. -->
     <Compile Include="ReferenceIdl.fs" />
     <Compile Include="IdlCertificationTests.fs" />
+    <!-- Phase 115 - the incremental seam run against the vendored `incremental-recompute`
+         corpus vectors at fixtures/incremental-recompute/ (the control that must not move,
+         and the sort vector whose class does). Reads nothing here, so it simply follows. -->
+    <Compile Include="IncrementalCorpusTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

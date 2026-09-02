@@ -1084,6 +1084,45 @@ evaluator already used privately: `evalExprInRow`, `aggregateCells`, `aggregateT
 `inferCellType`. They exist so the incremental path computes through the reference implementation
 rather than a copy, and they are stable in the ordinary way.
 
+### The merged order — `Sort` admitted (Phase 115, `0.18.0`)
+
+`Incremental` no longer declines a `Sort`. `plan` classifies one as
+`StepIncrementality.MergeOrder by`, and a pipeline whose only non-row-local step is a sort is
+`RowLocal` rather than `ReferenceOnly (StepNotRowLocal "sort")`. **This is the additive
+reclassification the paragraph above names**: the answers do not move, only the cost. Every other
+order-dependent verb (`Limit`, `Window`, `Distinct`, the joins and the whole-relation set ops) is
+still declined, still by type, still naming the verb.
+
+**A sort is admitted at ANY position in the pipeline, not only as the last step.** It carries no
+condition of the kind a `GroupBy` does, because it emits the rows it was handed rather than a
+different relation: every step admitted after it — `Filter`, `Project`, `Derive`, and a final
+maintained `GroupBy` — reads the order it produced exactly as it would have read the reference's.
+
+**The saving is NOT in the sorting.** A sort evaluates no expression, so it contributes nothing to
+`rowsEvaluated` — the same accounting a `GroupBy` gets, and for the same reason. What a widened sort
+buys is that the steps *before* it stop re-evaluating every row: on the estate's recompute fixture
+family, a filter-then-sort pipeline over six rows with one cell edited falls from six row-evaluations
+to one. A sort-bearing row-local pipeline therefore reports `RowsRecomputed`, and the footprint
+vocabulary gains no case.
+
+**`IncrementalEval` gains one engine-owned field, `SortOrders`** — per sort step, the token order its
+rows arrived in and the token order it produced. Both halves are load-bearing: the produced order is
+what a merge reuses, and the arrival order is the only thing that says the reuse is still valid,
+because a stable sort breaks ties by arrival position. This is the ordered-member condition the
+maintained groups already carry, one verb along, and it is live for the same reason: `Delta.diff`
+reports a pure row reordering as *quiet*, so a merge that trusted its cached order without checking
+arrival order would answer a delta that named nothing with a table in the wrong order.
+
+**One new `DataFrame` entry point**, on the same terms as the four above: `rowCompareBy`, the
+reference `Sort`'s own row comparator (multi-key, nulls last regardless of direction, unknown columns
+skipped). The merge sorts through it rather than through a copy — a second comparator would agree on
+every corpus anyone thought to write and disagree on the first null, the first tie and the first
+misspelled key.
+
+**`Window` remains declined, deliberately and by type.** The estate's fixture family records no
+footprint for it, and this phase's own gate is that a class is not widened before it is measured — so
+a bounded-frame window stays `StepNotRowLocal "window"` until a vector exists to measure it against.
+
 ## Static output-schema derivation (Phase 112, `0.18.0`)
 
 `Fuaran.Core.DataFrame` carries `SchemaWalk` — a pipeline's OUTPUT columns derived from its input

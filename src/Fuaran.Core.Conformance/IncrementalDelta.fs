@@ -19,6 +19,19 @@ namespace Fuaran.Core
 //  the ones the seam declines, because "falls back correctly" is a claim about
 //  the answer as much as "propagates correctly" is.
 //
+//  Phase 115 admitted `Sort`, and the corpus grew to meet it rather than
+//  merely to cover it. A merged order is wrong in exactly one way that an
+//  equality over a tie-free corpus cannot see, so the generated tables draw
+//  their sort keys from a range of three over up to six rows — ties are the
+//  common case, not the edge — and the sort-bearing pipelines put a sort in
+//  every position that matters: last (the shape the estate's recompute fixture
+//  family carries), before a type-inferring `Derive` and a `Filter`, and
+//  feeding an order-sensitive maintained `GroupBy` whose `First` / `Last`
+//  aggregates read the order the sort produced. The `reverse` edit is what
+//  makes those load-bearing: an identity diff reports it as quiet, so a merge
+//  that trusted its cached order without checking arrival order would answer
+//  a delta that named nothing with a table in the wrong order.
+//
 //  Every sample also records its FOOTPRINT — what the prime evaluated and what
 //  the refresh evaluated — so the family certifies not only that the answer is
 //  right but that the seam did less work to reach it. An incremental evaluator
@@ -82,8 +95,10 @@ module IncrementalDelta =
               Column.create "b" IntType (rows |> List.map (fun (_, _, b) -> b))
               Column.create "c" IntType (rows |> List.map (fun _ -> Int 1)) ] }
 
-    /// The pipelines. `0`–`4` and `9`–`10` are incrementalisable; `5`–`8` are the declined ones,
-    /// present because a fall-back that returns the wrong answer is the worse failure.
+    /// The pipelines. `0`–`5` and `9`–`13` are incrementalisable; `6`–`8` are the declined ones,
+    /// present because a fall-back that returns the wrong answer is the worse failure. `11`–`13`
+    /// are the sort-bearing shapes (Phase 115): a sort last, a sort before the steps that read the
+    /// order it produced, and a sort feeding an order-sensitive maintained group.
     let private pipelineOf (k: int) : Transform list =
         match k with
         | 0 -> [ Filter(Binary(Gt, Col "a", Lit(Int 0))) ]
@@ -95,7 +110,7 @@ module IncrementalDelta =
         | 4 ->
             [ Filter(Binary(Gt, Col "a", Lit(Int -5)))
               GroupBy([ "b" ], [ agg "mx" Max "a"; agg "f" First "id"; agg "l" Last "id" ]) ]
-        | 5 -> [ Sort [ "a", Asc ] ] // declined: order-dependent
+        | 5 -> [ Sort [ "b", Asc ] ] // merged order over the TIE-HEAVY key (Phase 115)
         | 6 -> [ Project [ "b", "b" ]; Distinct ] // declined: whole-relation
         | 7 ->
             // declined: a maintainable step that is not last
@@ -107,9 +122,24 @@ module IncrementalDelta =
             // can drop the only typed row — the inferred-type trap.
             [ Derive("d", Case([ Binary(Gt, Col "a", Lit(Int 0)), Lit(Str "pos") ], Lit Null))
               Filter(Binary(Lt, Col "a", Lit(Int 0))) ]
-        | _ -> [ Derive("a", Binary(Add, Col "a", Lit(Int 1))) ] // Derive OVERWRITING a column
+        | 10 -> [ Derive("a", Binary(Add, Col "a", Lit(Int 1))) ] // Derive OVERWRITING a column
+        | 11 ->
+            // the shape the estate's recompute fixture family carries: a filter, then a sort.
+            [ Filter(Binary(Gt, Col "a", Lit(Int 0))); Sort [ "a", Asc ] ]
+        | 12 ->
+            // a sort that is NOT last, followed by the two steps that read the order it produced —
+            // a derive whose column TYPE is inferred over the frame, and a filter.
+            [ Sort [ "b", Asc ]
+              Derive("d", Case([ Binary(Gt, Col "a", Lit(Int 0)), Lit(Str "pos") ], Lit Null))
+              Filter(Binary(Lt, Col "a", Lit(Int 3))) ]
+        | _ ->
+            // a sort feeding an order-sensitive maintained group: `First` and `Last` read the
+            // position the sort put each row in, and `b` ties heavily, so the sort's STABILITY is
+            // what decides the answer rather than its comparator alone.
+            [ Sort [ "b", Asc; "a", Desc ]
+              GroupBy([ "b" ], [ agg "f" First "id"; agg "l" Last "id"; agg "n" Count "a" ]) ]
 
-    let private pipelineCount = 11
+    let private pipelineCount = 14
 
     /// Apply one edit to the base rows, returning the new table and a tag naming the edit.
     let private editOf (k: int) (rows: (string * Cell * Cell) list) (n: int) : Table * string =
@@ -134,9 +164,22 @@ module IncrementalDelta =
              | [] -> mkTable rows, "changeLast(empty)"
              | (i, a, _) :: revRest -> mkTable (List.rev ((i, a, Int((n + 1) % 3)) :: revRest)), "regroupLast")
         | 7 -> mkWideTable rows, "schemaWiden"
+        | 8 ->
+            // A MIDDLE row's non-key column. Under a sort keyed on `b` this is the tie scenario a
+            // merge gets wrong silently: the changed row is lifted out of the cached order and put
+            // back among rows it ties with, and only the arrival-position tiebreak decides where.
+            // Changing the FIRST row (edit 3) reaches it far less often — the earliest arrival wins
+            // its ties under a merge that has no tiebreak at all.
+            (match rows with
+             | [] -> mkTable rows, "changeMiddle(empty)"
+             | _ ->
+                 let m = List.length rows / 2
+
+                 mkTable (rows |> List.mapi (fun j (i, a, b) -> if j = m then i, Int 77, b else i, a, b)),
+                 "changeMiddleA")
         | _ -> mkTable (rows @ [ "z3", Int 7, Int 0 ]), "appendOne"
 
-    let private editCount = 9
+    let private editCount = 10
 
     /// The delta the refresh is driven by. The identity diff is the normal producer; the other
     /// three are the honest coarse answers a source may give instead, and each must still yield the
@@ -163,7 +206,7 @@ module IncrementalDelta =
         let mutable rng = ConfRng.ofSeed seed
 
         [ for i in 0 .. iterations - 1 do
-              let nRows, r0 = ConfRng.intBelow 5 rng
+              let nRows, r0 = ConfRng.intBelow 9 rng
               let mutable r = r0
 
               let rows =
@@ -266,7 +309,11 @@ module IncrementalDelta =
     ///  - **plan is pure and total** — every step is classified, recomputing agrees, and
     ///    `isIncremental` agrees with the strategy;
     ///  - **the declined verbs are actually reached** — the run observes both fall-back classes the
-    ///    corpus contains, so the boundary is exercised rather than merely asserted.
+    ///    corpus contains, so the boundary is exercised rather than merely asserted;
+    ///  - **a sort is merged, not declined and not re-primed** — the run observes a pipeline whose
+    ///    plan carries a `MergeOrder` step answering a delta with a RESTRICTED refresh. Without this
+    ///    the equivalence laws would stay green over a seam that had quietly gone back to evaluating
+    ///    every sort-bearing pipeline in full, since a full evaluation is always the right answer.
     let laws (seed: int) (iterations: int) : LawResult list =
         let xs = samples seed iterations
 
@@ -349,6 +396,18 @@ module IncrementalDelta =
                 | ReusedPrior -> true
                 | _ -> false)
 
+        let sawMergedOrder =
+            xs
+            |> List.exists (fun s ->
+                (Incremental.plan s.Pipeline).Steps
+                |> List.exists (function
+                    | MergeOrder _ -> true
+                    | _ -> false)
+                && (match s.Refresh.Recompute with
+                    | RowsRecomputed _
+                    | GroupsRecomputed _ -> true
+                    | _ -> false))
+
         [ { Law = "every generated pair produced a sample (no base failed to evaluate)"
             Passed = List.length xs = iterations
             Counterexample =
@@ -379,6 +438,13 @@ module IncrementalDelta =
           { Law = "plan is pure, total, and agrees with isIncremental"
             Passed = planPurity.IsNone
             Counterexample = planPurity }
+          { Law = "a sort-bearing pipeline answered a delta with a restricted refresh"
+            Passed = sawMergedOrder
+            Counterexample =
+              if sawMergedOrder then
+                  None
+              else
+                  Some("seed=" + string seed + ": no MergeOrder step reached a restricted refresh") }
           { Law = "the corpus reaches both sides of the boundary (a declined pipeline and a restricted refresh)"
             Passed = sawDeclined && sawRestricted
             Counterexample =

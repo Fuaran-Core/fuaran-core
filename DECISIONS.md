@@ -1,5 +1,63 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-02 — D20: a `Sort` is merged, not declined — and a class is widened only after it is measured
+
+**Decided.** From `0.18.0`, `Incremental.plan` classifies a `Sort` as `MergeOrder by` rather than
+`FallBack (StepNotRowLocal "sort")`, and admits it at **any** position in a pipeline. D19's contract
+is untouched: every result still equals `DataFrame.evalPipelineWithInEnv` over the same source, and
+the widening is the additive reclassification `STABILITY.md` already declared — the answers do not
+move, only the cost.
+
+**Why a sort is not a fall-back, and not row-local either.** A sort computes nothing. What a delta
+moves is a row's POSITION, and a position is recoverable: the rows the delta did not name are still
+in the order the previous evaluation put them in, so the new order is that order with the named rows
+lifted out and merged back under the reference's own comparator. So `PropagateRows` would be a wrong
+answer to "does this step's output for a row depend only on that row", and `FallBack` would be a
+wrong answer to "can this step answer a delta". It gets its own case, which is what "the boundary is
+declared as data" means when the boundary moves.
+
+**Why any position, when a `GroupBy` is admitted only as the last step.** The `GroupBy` condition is
+not about position, it is about what the step EMITS: a group table, over which no delta was supplied,
+so the steps after it would be reasoning about a change nobody described. A sort emits the rows it
+was handed. Every step admitted after it reads the order it produced exactly as it would have read
+the reference's, including the two order-sensitive readers the seam already has — a derived column's
+whole-column type inference, and a group's ordered member list — both of which are computed from the
+walked frame rather than from a cache.
+
+**The saving is not in the sorting, and saying so is the point.** A sort evaluates no expression, so
+it contributes nothing to `rowsEvaluated`, exactly as a `GroupBy` contributes none. What the widening
+buys is that the steps BEFORE the sort stop re-evaluating every row — which is the whole cost a
+declined pipeline was paying. Measured on the estate's recompute fixture family: a filter-then-sort
+pipeline over six rows with one cell edited falls from six row-evaluations to one. The footprint
+vocabulary therefore gains no case; a sort-bearing row-local pipeline reports `RowsRecomputed`.
+
+**The third order-sensitivity, and why it is a stored ARRIVAL order rather than a cleverness.** A
+stable sort is a sort by (key, arrival position). Reusing a cached order for the unnamed rows is
+therefore sound only while those rows ARRIVE in the same relative order as they did when it was
+recorded — so `IncrementalEval` stores, per sort step, both the order the step's rows arrived in and
+the order it produced, and the merge is taken only when the unnamed subsequences agree. This is D19's
+ordered-member condition one verb along, and it is live for exactly the reason D19 gives: `Delta.diff`
+reports a pure reordering as *quiet*, so "the delta named nothing" must never be read as "nothing
+moved". A merge that skipped the check answers a delta that named no row with a table in the wrong
+order, and nothing in the delta would have said so.
+
+**A class is widened only after a fixture records what it costs, and `Window` is the standing case.**
+The estate's `incremental-recompute` fixture family records a footprint for the declined sort and none
+for a window, so `Window` stays `StepNotRowLocal "window"` — not because a bounded frame is
+unanswerable, but because widening it would be an unmeasured claim. The rule is the phase's own gate
+and it is kept as a decision: measure, then widen. Two vectors of that family are vendored under
+`tests/Fuaran.Core.Tests/fixtures/incremental-recompute/` so the claim is checked in this repository
+rather than asserted about another one — one being the control whose recorded footprints must not
+move, the other the sort vector whose result must not move and whose class must.
+
+**One finding that outlives the phase: the equivalence family's tables were too small to test an
+ORDER law.** Its generated tables held one to five rows and most held one, which is ample for the
+row-local and group-local laws D19 wrote it for and cannot exercise a tie between a named row and an
+unnamed one — so a merge with no stability tiebreak passed the whole family. The corpus now generates
+one to nine rows and sorts on the deliberately tie-heavy column, and it catches that defect. A
+generative family is only as strong as the shapes its generator can reach, and a law about ORDER needs
+rows to have an order worth getting wrong.
+
 ## 2026-08-21 — D19: incremental evaluation is a RESTRICTION of the reference evaluator, and the boundary is data
 
 **Decided.** From `0.11.0`, `Fuaran.Core.DataFrame` carries `Incremental` — a `Transform` pipeline

@@ -79,15 +79,21 @@ let private incrementalTouch =
             [ Column.create "id" StringType [ Str "r0"; Str "r1" ]
               Column.create "a" IntType [ Int 1; Int 2 ] ] }
 
-    let pipeline = [ Filter(Binary(Gt, Col "a", Lit(Int 0))) ]
+    // The sort is deliberately part of the touched pipeline (Phase 115): the merge path is the
+    // only place in the seam that reaches `List.sortWith`, `List.indexed` and a stored order, and a
+    // pipeline without it would compile this file while leaving that path untouched.
+    let pipeline = [ Filter(Binary(Gt, Col "a", Lit(Int 0))); Sort [ "a", Asc ] ]
     let declared = Incremental.isIncremental (Incremental.plan pipeline)
+
+    let ordering =
+        DataFrame.rowCompareBy [ "a", IntType ] [ "a", Asc ] [ Int 1 ] [ Int 2 ]
 
     match Incremental.primeOn idw pipeline t with
     | Ok primed ->
         match Incremental.refreshOn idw pipeline primed (Delta.empty idw.Scheme) t with
-        | Ok next -> declared, Incremental.footprintString (Incremental.footprint next)
-        | Error e -> declared, DataFrame.errorString e
-    | Error e -> declared, DataFrame.errorString e
+        | Ok next -> declared, ordering, Incremental.footprintString (Incremental.footprint next)
+        | Error e -> declared, ordering, DataFrame.errorString e
+    | Error e -> declared, ordering, DataFrame.errorString e
 
 // Query — declaration codec round-trip.
 let private queryTouch =
