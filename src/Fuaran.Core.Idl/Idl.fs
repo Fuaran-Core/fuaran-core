@@ -184,6 +184,79 @@ type WireShape =
           NodeEnvelope = NodeEnvelopeShape.NestedKind
           KeyOrder = KeyOrder.Sorted }
 
+/// The vocabulary tokens the ENGINE would otherwise HARD-CODE — a domain's own
+/// names for the members three engine behaviours have to address by name.
+///
+/// **Why this exists (Phase 116).** D14 says the engine is generic because a
+/// vocabulary is a value the caller supplies. The hardening floor was not: the
+/// codegen trust boundary (`Trust.harden`) branched on the kind tag `Custom`,
+/// minted its inert placeholder as a `Markdown` node carrying a `Literal` text,
+/// sanitised a `Static` binding, and [[TransparentUnion]] keyed bare-value
+/// encoding on the union name `TextSource` — all five names belonging to one
+/// domain's vocabulary. A vocabulary that wanted the floor therefore had to adopt
+/// that domain's spelling, which is the opposite of what D14 promises.
+///
+/// **[[Default]] is exactly the set the engine hard-coded**, so a vocabulary that
+/// declares nothing behaves byte-for-byte as it did and every pre-Phase-116
+/// `idl.json` is unchanged (the artifact omits the block at the default).
+///
+/// **What is NOT here, deliberately.** Which of a domain's `(kind, field)` pairs
+/// carry a URL or markdown was ALREADY caller-supplied (`Trust.Policy`), so moving
+/// it here would close no leak — and it would move a security floor onto a record
+/// whose default is empty, so a vocabulary migrating by writing `Default` would
+/// silently stop sanitising. The `Custom` allowlist stays caller-side for a second
+/// reason: it is deployment trust state (module ids and content hashes), not
+/// vocabulary, and this record is projected into `idl.json`.
+type HardenPolicy =
+    {
+        /// The kind tag the trust boundary GATES — a node that resolves a foreign
+        /// component and is therefore inert unless allowlisted and hash-verified.
+        /// `"Custom"` by default.
+        GatedKind: string
+        /// The kind tag of the inert placeholder a gated-out node becomes — a
+        /// benign node that renders text and never a live call. `"Markdown"`.
+        PlaceholderKind: string
+        /// The placeholder kind's single field, which carries the label text.
+        /// `"text"`. Distinct from [[TextLiteralField]] on purpose: this names a
+        /// KIND's field, that one a UNION CASE's, and a domain may spell them
+        /// differently.
+        PlaceholderField: string
+        /// The union case carrying literal (already-resolved) TEXT — what the
+        /// placeholder label is wrapped in, and what the markdown scrub matches.
+        /// `"Literal"`.
+        TextLiteralCase: string
+        /// [[TextLiteralCase]]'s single field. `"text"`.
+        TextLiteralField: string
+        /// The union case carrying a literal (inline, not by-name) VALUE — what
+        /// the URL sanitiser matches on a declared URL field. `"Static"`.
+        ValueLiteralCase: string
+        /// [[ValueLiteralCase]]'s single field. `"value"`.
+        ValueLiteralField: string
+        /// The unions that have a TRANSPARENT case, as `(unionName, caseTag)` —
+        /// a case encoded and decoded as a BARE JSON value rather than a
+        /// discriminator-tagged object (see [[TransparentUnion]]). The transparent
+        /// case carries exactly one field; the union's other cases stay tagged.
+        ///
+        /// Wire-visible, and the one member here that is: a change moves the bytes
+        /// of every document using the case, which is why the artifact surfaces the
+        /// derived `transparentCase` per union and the stability classifier reports
+        /// it as a breaking wire event.
+        TransparentUnions: (string * string) list
+    }
+
+    /// The tokens the engine hard-coded before they were declarable — the
+    /// Fuaran-UI vocabulary's names, which is where they came from. A vocabulary
+    /// carrying this behaves exactly as every vocabulary did before Phase 116.
+    static member Default =
+        { GatedKind = "Custom"
+          PlaceholderKind = "Markdown"
+          PlaceholderField = "text"
+          TextLiteralCase = "Literal"
+          TextLiteralField = "text"
+          ValueLiteralCase = "Static"
+          ValueLiteralField = "value"
+          TransparentUnions = [ "TextSource", "Literal" ] }
+
 /// A DEPRECATION note (Phase 113) — the retirement half of the annotation set.
 ///
 /// Both slots are optional, and `Replacement = None` is the ordinary case rather
@@ -454,6 +527,16 @@ type Idl =
         /// with another key or lays its nodes flat declares that HERE, and every
         /// leg (interpreter, generated F#/TS, schema) derives from it.
         Wire: WireShape
+        /// The vocabulary tokens the engine addresses BY NAME (Phase 116) — the
+        /// gated kind, the inert placeholder it becomes, the literal text and value
+        /// cases the sanitisation floor matches, and which unions have a transparent
+        /// case. [[HardenPolicy.Default]] is the set the engine hard-coded, so a
+        /// vocabulary that declares nothing is byte-for-byte unchanged.
+        ///
+        /// Declared rather than hard-coded for the same reason [[NodeFields]] and
+        /// [[Wire]] are: what a vocabulary CALLS the node it refuses to resolve live
+        /// is a property of the domain, not of the engine.
+        Harden: HardenPolicy
     }
 
 /// Declaration helpers for the IDL's hand-authored parts.
@@ -583,15 +666,19 @@ module Declare =
 /// hiding a genuine contract behind an assembly boundary that no longer holds — and
 /// the same fact is what any third-party emitter needs, so stating it is right.
 ///
-/// It remains a **known wart**: the rule is keyed on a hard-coded vocabulary name in
-/// an engine that is otherwise domain-generic (D14). Declaring transparency in the
-/// `Idl` value, where it belongs, is a separate change with its own artifact and
-/// diff-classifier consequences; publishing the accessor does not endorse the
-/// hard-coding, it makes it visible.
+/// **The wart is closed since Phase 116.** The rule used to be keyed on a hard-coded
+/// vocabulary name (`TextSource`) inside an engine that is otherwise domain-generic
+/// (D14); it is now read from [[HardenPolicy.TransparentUnions]], which the vocabulary
+/// declares on its own [[Idl]] value and the artifact carries. `HardenPolicy.Default`
+/// still names that union, so a vocabulary that declares nothing encodes exactly as it
+/// did — the hard-coding became a DEFAULT rather than disappearing, which is what keeps
+/// every shipped corpus byte-identical.
 module TransparentUnion =
-    /// The transparent case tag for a union, or `None` if the union has none.
-    let tag (u: IdlUnion) : string option =
-        if u.Name = "TextSource" then Some "Literal" else None
+    /// The transparent case tag for a union under a declared policy, or `None` if the
+    /// union has none. Pass the owning vocabulary's `idl.Harden`.
+    let tag (policy: HardenPolicy) (u: IdlUnion) : string option =
+        policy.TransparentUnions
+        |> List.tryPick (fun (name, case) -> if name = u.Name then Some case else None)
 
 /// The schema-driven encoder: an authored `IdlValue`, validated against the IDL,
 /// becomes a canonical `JVal`; `Canon.render` then gives the wire bytes.
@@ -663,9 +750,9 @@ module Encode =
                             { f with
                                 Type = substitute subst f.Type })
 
-                    match TransparentUnion.tag u with
+                    match TransparentUnion.tag idl.Harden u with
                     | Some ttag when ttag = tag ->
-                        // Transparent case (TextSource.Literal): emit the single field's value bare.
+                        // Transparent case (the declared one): emit the single field's value bare.
                         match caseFields with
                         | [ single ] ->
                             match provided single.Name fields with
@@ -923,7 +1010,7 @@ module Decode =
             match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
             | None -> Error(sprintf "unknown union '%s'" name)
             | Some u ->
-                match TransparentUnion.tag u with
+                match TransparentUnion.tag idl.Harden u with
                 | None -> Error(sprintf "union '%s' expects an object" name)
                 | Some ttag ->
                     let subst = Map.ofList (List.zip u.Params args)

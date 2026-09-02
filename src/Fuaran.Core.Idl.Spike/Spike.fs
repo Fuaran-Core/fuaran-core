@@ -352,7 +352,8 @@ let miniIdl: Idl =
       // is also what keeps the Phase 690 generator change provably additive here.
       NodeFields = []
       Ops = []
-      Wire = WireShape.Default }
+      Wire = WireShape.Default
+      Harden = HardenPolicy.Default }
 
 /// `TextSource.Literal` — the most-used value-union, sugared.
 let lit (s: string) : IdlValue = VUnion("Literal", [ "text", VStr s ])

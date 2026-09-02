@@ -66,7 +66,8 @@ let private plainIdl: Idl =
       Defaults = []
       NodeFields = []
       Ops = []
-      Wire = WireShape.Default }
+      Wire = WireShape.Default
+      Harden = HardenPolicy.Default }
 
 /// The same vocabulary, annotated. Nothing about the SHAPE differs — same kinds,
 /// same cases, same fields, same optionality — which is what makes every "the

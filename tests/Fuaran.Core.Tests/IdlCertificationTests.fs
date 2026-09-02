@@ -185,9 +185,9 @@ let byteIdentity =
 
           testCase "negative control: a mutated field diverges from its wire" (fun _ ->
               let mutated =
-                  VNode("markdown-1", "Markdown", [ "text", VUnion("Literal", [ "text", VStr "Updated hourly" ]) ])
+                  VNode("note-1", "Note", [ "body", VUnion("Inline", [ "text", VStr "Updated hourly" ]) ])
 
-              let _, _, expected = nodeCases |> List.find (fun (n, _, _) -> n = "markdown-1")
+              let _, _, expected = nodeCases |> List.find (fun (n, _, _) -> n = "note-1")
 
               match Encode.encode refIdl mutated with
               | Ok actual -> Expect.notEqual actual expected "negative control unexpectedly matched"
@@ -299,30 +299,56 @@ let artifactRoundTrip =
               | Error m -> failtestf "parse rejected the reshuffled rendering: %s" m
               | Ok reparsed -> Expect.equal reparsed valueCoverageIdl "the reshuffled artifact reads back canonically")
 
+          // Phase 116 — the acceptance stated as a test rather than as a claim about
+          // bytes nobody re-renders. A vocabulary carrying the tokens the engine used to
+          // hard-code emits NO harden block, so its artifact cannot have moved; one that
+          // declares its own emits it. Both branches are exercised, because
+          // `refIdl` declares its own and every other vocabulary here does not.
+          testCase "the harden block is omitted at the default and present when declared" (fun _ ->
+              for name, idl in roundTripVocabularies do
+                  let text = Artifact.render idl
+
+                  if idl.Harden = HardenPolicy.Default then
+                      Expect.isFalse
+                          (text.Contains "\"harden\"")
+                          (sprintf "'%s' declares the default tokens, so its artifact must be byte-unchanged" name)
+                  else
+                      Expect.stringContains
+                          text
+                          "\"harden\""
+                          (sprintf "'%s' declares its own tokens, so the artifact must carry them" name))
+
           testCase "canonicalise is idempotent" (fun _ ->
               for name, idl in roundTripVocabularies do
                   let once = Artifact.canonicalise idl
 
                   Expect.equal (Artifact.canonicalise once) once (sprintf "'%s': canonicalise is not a fixpoint" name))
 
-          // `transparentCase` is DERIVED — the engine hard-codes the transparent set by
-          // name — so the projection publishes it for a third-party reader and the
-          // reader deliberately ignores it. Pinned, because "ignored on purpose" and
-          // "forgotten" look identical in a passing round-trip otherwise.
+          // `transparentCase` is DERIVED — from the vocabulary's declared
+          // `Harden.TransparentUnions` since Phase 116 — so the projection publishes it
+          // per union for a third-party decoder and the reader deliberately ignores it,
+          // reconstructing it from the declaration instead. Pinned, because "ignored on
+          // purpose" and "forgotten" look identical in a passing round-trip otherwise.
+          //
+          // The union is named in this vocabulary's own words, which is the point: the
+          // transparent set used to be a hard-coded name and is a declaration now.
           testCase "a derived transparentCase key is published and read back as derived" (fun _ ->
               let transparent =
                   { refIdl with
                       Unions =
-                          [ { Name = "TextSource"
+                          [ { Name = "Text"
                               Params = []
                               Cases =
-                                [ { Tag = "Literal"
+                                [ { Tag = "Inline"
                                     Fields =
                                       [ { Name = "text"
                                           Type = TStr
                                           Opt = Required
                                           Annotations = Annotations.Empty } ]
                                     Annotations = Annotations.Empty } ] } ]
+                      Harden =
+                          { refIdl.Harden with
+                              TransparentUnions = [ "Text", "Inline" ] }
                       Kinds = []
                       Ops = []
                       Records = []
@@ -330,7 +356,12 @@ let artifactRoundTrip =
                       NodeFields = [] }
 
               let text = Artifact.render transparent
-              Expect.stringContains text "\"transparentCase\": \"Literal\"" "the derived key is published"
+              Expect.stringContains text "\"transparentCase\": \"Inline\"" "the derived key is published"
+
+              Expect.stringContains
+                  text
+                  "\"transparentUnions\""
+                  "the DECLARATION the key derives from is published beside it"
 
               match Artifact.parse text with
               | Error m -> failtestf "parse rejected a transparent union: %s" m
@@ -521,35 +552,67 @@ let sanitisationFloor =
 let trustBoundary =
     testList
         "Phase 114 — the codegen trust boundary (domain-neutral)"
-        [ testCase "an unhashed Custom becomes an inert placeholder (never a live call)" (fun _ ->
-              match Trust.harden (hardenPolicy [ allow "analytics" "trend-card" "whatever" ]) custom1 with
-              | VNode(id, "Markdown", fields) ->
-                  Expect.equal id "custom-1" "the placeholder preserves the node id"
+        [
+          // Phase 116 — the claim this whole list rests on, stated as an assertion
+          // rather than as the header comment it used to be. A vocabulary that
+          // "supplies its own policy" and one that "happens to agree with the engine's
+          // default" are indistinguishable in every test below; only this one can tell
+          // them apart, and without it the floor could drift back to being hard-coded
+          // while the suite stayed green.
+          testCase "the reference vocabulary shares NO hardening token with the default" (fun _ ->
+              let d = HardenPolicy.Default
+              let r = refIdl.Harden
+
+              let distinct =
+                  [ "gatedKind", d.GatedKind, r.GatedKind
+                    "placeholderKind", d.PlaceholderKind, r.PlaceholderKind
+                    "placeholderField", d.PlaceholderField, r.PlaceholderField
+                    "textLiteralCase", d.TextLiteralCase, r.TextLiteralCase
+                    "valueLiteralCase", d.ValueLiteralCase, r.ValueLiteralCase ]
+
+              for name, engineToken, ours in distinct do
+                  Expect.notEqual ours engineToken (sprintf "'%s' still spells the default's token" name)
+
+              // The two field members are separate for a reason — a vocabulary may
+              // spell the placeholder KIND's field and the literal CASE's field
+              // differently, and this one does. Merging them would make such a
+              // vocabulary unmodellable.
+              Expect.notEqual
+                  r.PlaceholderField
+                  r.TextLiteralField
+                  "the placeholder field and the literal-case field are separately declared")
+
+          testCase "an unhashed gated node becomes an inert placeholder (never a live call)" (fun _ ->
+              match Trust.harden refIdl (trustPolicy [ allow "analytics" "trend-card" "whatever" ]) embed1 with
+              | VNode(id, "Note", fields) ->
+                  Expect.equal id "embed-1" "the placeholder preserves the node id"
 
                   match fields with
-                  | [ (_, VUnion("Literal", [ (_, VStr label) ])) ] ->
+                  | [ (_, VUnion("Inline", [ (_, VStr label) ])) ] ->
                       Expect.stringContains label "inert placeholder" "labelled as inert"
                       Expect.stringContains label "trend-card" "names the gated component"
                   | _ -> failtest "unexpected placeholder shape"
-              | VNode(_, "Custom", _) -> failtest "an unhashed Custom must NOT stay live"
+              | VNode(_, "Embed", _) -> failtest "an unhashed gated node must NOT stay live"
               | _ -> failtest "unexpected node")
 
-          testCase "allowlisted + hash-verified Custom passes through live" (fun _ ->
-              match Trust.harden (hardenPolicy [ allow "deal-flow" "QualityRing" "abc123def456" ]) customBounded1 with
-              | VNode(_, "Custom", _) -> ()
-              | _ -> failtest "an allowlisted + hash-matched Custom should stay live"
+          testCase "allowlisted + hash-verified gated node passes through live" (fun _ ->
+              match
+                  Trust.harden refIdl (trustPolicy [ allow "deal-flow" "QualityRing" "abc123def456" ]) embedBounded1
+              with
+              | VNode(_, "Embed", _) -> ()
+              | _ -> failtest "an allowlisted + hash-matched gated node should stay live"
 
-              match Trust.harden (hardenPolicy []) customBounded1 with
-              | VNode(_, "Markdown", _) -> ()
-              | _ -> failtest "a non-allowlisted Custom must be gated to inert")
+              match Trust.harden refIdl (trustPolicy []) embedBounded1 with
+              | VNode(_, "Note", _) -> ()
+              | _ -> failtest "a non-allowlisted gated node must be gated to inert")
 
           testCase "hash mismatch is inert under StrictReplay, advisory-live under AdvisoryWarning" (fun _ ->
-              match Trust.harden (hardenPolicy [ allow "deal-flow" "QualityRing" "WRONG" ]) customBounded1 with
-              | VNode(_, "Markdown", _) -> ()
+              match Trust.harden refIdl (trustPolicy [ allow "deal-flow" "QualityRing" "WRONG" ]) embedBounded1 with
+              | VNode(_, "Note", _) -> ()
               | _ -> failtest "a StrictReplay hash mismatch must be gated to inert"
 
-              match Trust.harden (hardenPolicy [ allow "deal-flow" "TrendCard" "WRONG" ]) customAdvisory1 with
-              | VNode(_, "Custom", _) -> ()
+              match Trust.harden refIdl (trustPolicy [ allow "deal-flow" "TrendCard" "WRONG" ]) embedAdvisory1 with
+              | VNode(_, "Embed", _) -> ()
               | _ -> failtest "an AdvisoryWarning hash mismatch should stay live (advisory)")
 
           testCase "a hostile URL and a hostile markdown body are cleaned before emission" (fun _ ->
@@ -557,29 +620,29 @@ let trustBoundary =
                   VNode(
                       "l",
                       "Link",
-                      [ "href", VUnion("Static", [ "value", VStr "javascript:alert(document.cookie)" ])
-                        "label", VUnion("Literal", [ "text", VStr "Click" ])
+                      [ "href", VUnion("Fixed", [ "value", VStr "javascript:alert(document.cookie)" ])
+                        "label", VUnion("Inline", [ "text", VStr "Click" ])
                         "onClick", VClosure ]
                   )
 
-              match Trust.harden (hardenPolicy []) hostileLink |> Encode.encode refIdl with
+              match Trust.harden refIdl (trustPolicy []) hostileLink |> Encode.encode refIdl with
               | Ok wire ->
                   Expect.isFalse (wire.Contains "javascript:") "the javascript: URL was sanitised out of the wire"
                   Expect.stringContains wire "about:blank" "replaced with the deny sentinel"
               | Error m -> failtestf "hostile link encode failed: %s" m
 
               let hostileMd =
-                  VNode("m", "Markdown", [ "text", VUnion("Literal", [ "text", VStr "hi <script>evil()</script>" ]) ])
+                  VNode("m", "Note", [ "body", VUnion("Inline", [ "text", VStr "hi <script>evil()</script>" ]) ])
 
-              match Trust.harden (hardenPolicy []) hostileMd |> Encode.encode refIdl with
+              match Trust.harden refIdl (trustPolicy []) hostileMd |> Encode.encode refIdl with
               | Ok wire -> Expect.isFalse (wire.Contains "<script") "the script tag was scrubbed"
               | Error m -> failtestf "hostile markdown encode failed: %s" m)
 
-          testCase "harden → scaffold emits inert, provenance-stamped source (no live Custom)" (fun _ ->
-              match Trust.scaffoldFSharp (hardenPolicy []) refIdl "wirehash-abc" "agent:reference" custom1 with
+          testCase "harden → scaffold emits inert, provenance-stamped source (no live gated node)" (fun _ ->
+              match Trust.scaffoldFSharp (trustPolicy []) refIdl "wirehash-abc" "agent:reference" embed1 with
               | Ok src ->
                   Expect.stringContains src "INERT" "carries the provenance trust-split invariant"
                   Expect.stringContains src "wirehash-abc" "carries the source wire hash"
-                  Expect.stringContains src "NodeKind.Markdown" "emits the inert placeholder, not a live component"
-                  Expect.isFalse (src.Contains "NodeKind.Custom") "no live Custom construction in the generated source"
+                  Expect.stringContains src "NodeKind.Note" "emits the inert placeholder, not a live component"
+                  Expect.isFalse (src.Contains "NodeKind.Embed") "no live gated construction in the generated source"
               | Error m -> failtestf "scaffold failed: %s" m) ]

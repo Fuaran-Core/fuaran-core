@@ -691,12 +691,52 @@ exhaustively should expect to revisit that match on a minor bump.
 describing a domain's kinds is data the domain owns in its own repo. There will be no
 `Fuaran.Core.Idl.Vocabularies.*`.
 
-**One known wart, stated rather than hidden.** `TransparentUnion.tag` keys bare-value encoding on
-a hard-coded vocabulary name (`TextSource`) inside an otherwise domain-generic engine. Phase 97
-made it public because the split made the dependency real — an independent emitter must agree
-with this codec about which cases are bare, or it generates a host that disagrees on the wire.
-Publishing the accessor does not endorse the hard-coding; declaring transparency in the `Idl`
-value is a later change with its own artifact and diff-classifier consequences.
+**One known wart, stated rather than hidden — now closed; kept because the reason it was
+public still holds.** `TransparentUnion.tag` used to key bare-value encoding on a hard-coded
+vocabulary name (`TextSource`) inside an otherwise domain-generic engine. Phase 97 made the
+accessor public because the split made the dependency real — an independent emitter must agree
+with this codec about which cases are bare, or it generates a host that disagrees on the wire —
+and that is still why it is public. What changed is where the answer comes from.
+
+**The wart above is CLOSED (Phase 116, `0.19.0`) — the hardening vocabulary is a seam a
+domain supplies.** `Idl` carries a `Harden: HardenPolicy`: the kind the codegen trust
+boundary GATES, the placeholder kind (and its field) a gated-out node becomes, the literal
+TEXT case and field the markdown scrub matches, the literal VALUE case and field the URL
+sanitiser matches, and — the transparency rule this section named as the wart — which unions
+have a bare-encoded case, as `(unionName, caseTag)` pairs. `TransparentUnion.tag` now takes
+that policy instead of testing a hard-coded name, and `Trust.harden` takes the `Idl` beside
+the caller's trust decisions.
+
+**`HardenPolicy.Default` is exactly the set the engine hard-coded**, so a vocabulary that
+declares nothing behaves byte-for-byte as it did in both directions, and the artifact omits
+the block at the default — every `idl.json` written before this release is byte-identical and
+reads back as the same vocabulary. That is deliberate rather than incidental: the hard-coding
+became a DEFAULT rather than disappearing, which is what lets the seam land without a
+migration for anyone.
+
+**What did NOT move onto the `Idl`, and why the split is where it is.** `Trust.Policy`
+(renamed from `Trust.HardenPolicy`, whose name this record took) still carries the caller's
+side: the `Custom`-gate allowlist, and which `(kind, field)` pairs carry a URL or markdown.
+Two different reasons. The allowlist is deployment trust state — module ids and content
+hashes — and the `Idl` is projected into `idl.json`, so carrying it there would publish it as
+though it were vocabulary. And the two field sets are a security floor whose empty value is
+silent: a vocabulary migrating by writing the default would stop sanitising, and nothing would
+say so. Those sets were never hard-coded, so moving them would have closed no leak while
+opening that one.
+
+**One member is wire-visible and the rest are not**, which is the distinction a reader of
+`idl.json` needs. `transparentUnions` moves the bytes of every document using a transparent
+case, and the artifact keeps surfacing the derived `transparentCase` per union for exactly
+that reason — the stability classifier still reports the effect as `UnionTransparencyChanged`
+(`BreakingWire`), unchanged. The remaining members are codegen-boundary spec: they change what
+`Trust.scaffoldFSharp` EMITS and nothing a decoder reads, and a move is reported as
+`HardenPolicyChanged` (`HostSurfaceOnly`), whose remedy is to re-scaffold.
+
+**Source-breaking, on the pre-1.0 posture at the head of this document.** `Idl` gains a
+required field, so every record-literal construction adds `Harden = HardenPolicy.Default`;
+`Trust.HardenPolicy` is `Trust.Policy`; `Trust.harden` takes the `Idl` first; and
+`TransparentUnion.tag` takes a policy. `Trust.scaffoldFSharp`'s signature is unchanged — it
+already had the `Idl`, and now reads the tokens from it.
 
 ### Declared annotations on cases and fields (Phase 113, `0.18.0`)
 

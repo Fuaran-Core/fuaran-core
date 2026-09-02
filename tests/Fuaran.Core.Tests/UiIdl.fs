@@ -2199,7 +2199,8 @@ let uiIdl: Idl =
           opt "state" (TRecord "StateBehaviour")
           opt "style" (TRecord "SemanticStyle") ]
       Ops = treeOps
-      Wire = WireShape.Default }
+      Wire = WireShape.Default
+      Harden = HardenPolicy.Default }
 
 /// Back-compat alias — the Display tests grew up against this name.
 let uiDisplayIdl: Idl = uiIdl

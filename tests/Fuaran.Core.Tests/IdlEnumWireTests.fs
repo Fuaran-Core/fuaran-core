@@ -51,7 +51,8 @@ let private idl: Idl =
       Defaults = []
       NodeFields = []
       Ops = []
-      Wire = WireShape.Default }
+      Wire = WireShape.Default
+      Harden = HardenPolicy.Default }
 
 let private note (live: string) (tone: string) =
     VNode("n1", "Note", [ "live", VEnum live; "tone", VEnum tone ])

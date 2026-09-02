@@ -799,6 +799,7 @@ let private encFloat (f: float) : JVal =
     let private unionEncoder
         (typedName: string)
         (docFn: string -> string -> string)
+        (tokens: HardenPolicy)
         (msg: Set<string>)
         (enums: IdlEnum list)
         (u: IdlUnion)
@@ -817,9 +818,9 @@ let private encFloat (f: float) : JVal =
                 | [ f ] -> " " + ident f.Name
                 | fs -> " (" + (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ") + ")"
 
-            // A transparent case (TextSource.Literal) emits its single field's value BARE — no
-            // `Canon.typed` wrapper — the Fuaran-UI 0.2.0 bare-string canonical literal.
-            match TransparentUnion.tag u with
+            // A DECLARED transparent case emits its single field's value BARE — no
+            // `Canon.typed` wrapper — the bare-string canonical literal shape.
+            match TransparentUnion.tag tokens u with
             | Some ttag when ttag = c.Tag ->
                 match c.Fields with
                 | [ f ] -> sprintf "    | %s.%s%s -> %s" u.Name c.Tag pat (encApplied (ident f.Name) f.Type)
@@ -1018,6 +1019,7 @@ let private encFloat (f: float) : JVal =
         (docFn: string -> string -> string)
         (refines: Map<string, string>)
         (disc: string)
+        (tokens: HardenPolicy)
         (msg: Set<string>)
         (enums: IdlEnum list)
         (u: IdlUnion)
@@ -1062,10 +1064,10 @@ let private encFloat (f: float) : JVal =
 
             docFn ("decarm:" + u.Name + "." + c.Tag) "        " + body
 
-        // The transparent case (TextSource.Literal) is on the wire BARE, so it is
-        // recognised by the ABSENCE of a `$type`, not by a tag.
+        // The declared transparent case is on the wire BARE, so it is recognised by
+        // the ABSENCE of a discriminator, not by a tag.
         let transparent =
-            match TransparentUnion.tag u with
+            match TransparentUnion.tag tokens u with
             | Some ttag ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
                 | Some c when c.Fields.Length = 1 ->
@@ -1688,7 +1690,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
-            (encNodeDecl :: (unions |> List.map (unionEncoder typedName doc msg idl.Enums))
+            (encNodeDecl
+             :: (unions |> List.map (unionEncoder typedName doc idl.Harden msg idl.Enums))
              @ (records |> List.map (recordEncoder msg idl.Enums))
              @ (kinds
                 |> List.map (fun k ->
@@ -1770,7 +1773,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             (decNodeKindDecl
              :: decNodeDecl
              :: (unions
-                 |> List.map (unionDecoder doc sup.CaseRefines idl.Wire.Discriminator msg idl.Enums))
+                 |> List.map (unionDecoder doc sup.CaseRefines idl.Wire.Discriminator idl.Harden msg idl.Enums))
              @ (records |> List.map (recordDecoder msg idl.Enums))
              @ (kinds
                 |> List.map (fun k ->
@@ -2010,7 +2013,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // every literal string in the corpus. The tagged branch stays: §16
             // lenient-accept admits the envelope on input.
             let bare =
-                match TransparentUnion.tag u with
+                match TransparentUnion.tag idl.Harden u with
                 | None -> []
                 | Some ttag ->
                     u.Cases
@@ -2531,7 +2534,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | [] -> ""
         | ls -> (ls |> String.concat "\n") + "\n"
 
-    let private tsUnionEncoder (disc: string) (u: IdlUnion) : string =
+    let private tsUnionEncoder (disc: string) (tokens: HardenPolicy) (u: IdlUnion) : string =
         let argList =
             match u.Params with
             | [] -> "v"
@@ -2544,7 +2547,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 | ls -> (ls |> String.concat "\n") + "\n"
 
             ann
-            + match TransparentUnion.tag u with
+            + match TransparentUnion.tag tokens u with
               | Some ttag when ttag = c.Tag ->
                   // Transparent case: return the single field's value bare (no `typed(...)`).
                   match c.Fields with
@@ -2711,7 +2714,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
         "const dec" + e.Name + " = dEnum(" + tsSourceStr e.Name + ", [" + cases + "]);"
 
-    let private tsUnionDecoder (disc: string) (u: IdlUnion) =
+    let private tsUnionDecoder (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
         let argList =
             match u.Params with
             | [] -> "j"
@@ -2744,7 +2747,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // A transparent union also accepts its single-field case bare, and re-wraps
         // it so the encoder can flatten it back to the same bytes.
         let untagged =
-            match TransparentUnion.tag u with
+            match TransparentUnion.tag tokens u with
             | Some ttag ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
                 | Some({ Fields = [ f ] }) ->
@@ -3093,13 +3096,13 @@ const plain = (pairs) =>
 
         [ [ prelude ]
           records |> List.map (tsRecordEncoder disc)
-          unions |> List.map (tsUnionEncoder disc)
+          unions |> List.map (tsUnionEncoder disc idl.Harden)
           kinds |> List.map (tsSpecEncoder disc flat)
           [ kindDispatch ]
           [ tsDecodePrelude disc ]
           enums |> List.map tsEnumDecoder
           records |> List.map (tsRecordDecoder disc)
-          unions |> List.map (tsUnionDecoder disc)
+          unions |> List.map (tsUnionDecoder disc idl.Harden)
           kinds |> List.map (tsSpecDecoder disc)
           [ kindDecodeDispatch ]
           [ "export { encodeNode, decodeNode };" ] ]

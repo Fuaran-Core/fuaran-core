@@ -72,7 +72,11 @@ open Fuaran.Core.Idl
 //
 //  5. NEGATIVE RESULT — transparent unions are NOT demanded by this vocabulary.
 //     Every union position is tag-discriminated; no case is encoded bare. The
-//     `TransparentUnion` hard-coding (a known wart) costs this domain nothing.
+//     `TransparentUnion` rule costs this domain nothing — and since Phase 116 it is
+//     DECLARED rather than hard-coded, so the negative result is now a property of
+//     this vocabulary's own policy rather than of a name the engine happened to know.
+//     It keeps `HardenPolicy.Default`, which names a union this vocabulary does not
+//     have, so the answer is `None` for every union either way.
 //
 //  6. NEGATIVE RESULT — enum wire-strings are NOT demanded by this vocabulary.
 //     Every closed set's wire string is already a legal F# case identifier, so
@@ -190,7 +194,8 @@ let docIdl: Idl =
       Wire =
         { Discriminator = "kind"
           NodeEnvelope = NodeEnvelopeShape.FlatKind
-          KeyOrder = KeyOrder.Declared } }
+          KeyOrder = KeyOrder.Declared }
+      Harden = HardenPolicy.Default }
 
 let private nodeTags = docIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
 
@@ -498,7 +503,7 @@ let tests =
           test "no transparent union is demanded by this vocabulary" {
               for u in docIdl.Unions do
                   Expect.isNone
-                      (TransparentUnion.tag u)
+                      (TransparentUnion.tag docIdl.Harden u)
                       (sprintf "union '%s' has no transparent case — finding (5)" u.Name)
           }
 

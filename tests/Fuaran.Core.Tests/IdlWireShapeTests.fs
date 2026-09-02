@@ -39,7 +39,8 @@ let private baseIdl: Idl =
       Defaults = []
       NodeFields = []
       Ops = []
-      Wire = WireShape.Default }
+      Wire = WireShape.Default
+      Harden = HardenPolicy.Default }
 
 let private authored =
     VNode("a", "Note", [ "label", VStr "x"; "src", VUnion("Lit", [ "value", VStr "y" ]) ])

@@ -135,6 +135,15 @@ module Diff =
             /// — `"$type/nestedKind"` when the artifact predates the key or the
             /// vocabulary declares the default.
             Wire: string
+            /// The declared hardening vocabulary (Phase 116), rendered canonically —
+            /// the default block when the artifact predates the key or the vocabulary
+            /// declares the default, so the two read alike, which is what they mean.
+            ///
+            /// Carried as ONE string rather than a member-per-field for the reason
+            /// [[Wire]] is: the classifier's job here is to say the declaration moved
+            /// and why that matters, and the WIRE consequence of the only wire-visible
+            /// member is already reported per union as `UnionTransparencyChanged`.
+            Harden: string
         }
 
     // -----------------------------------------------------------------------
@@ -341,7 +350,29 @@ module Diff =
                         + (str "nodeEnvelope" w |> Option.defaultValue "nestedKind")
                         + "/"
                         + (str "keyOrder" w |> Option.defaultValue "sorted")
-                    | None -> "$type/nestedKind/sorted" }
+                    | None -> "$type/nestedKind/sorted"
+                  Harden =
+                    match field "harden" artifact with
+                    | Some h ->
+                        [ "gatedKind"
+                          "placeholderKind"
+                          "placeholderField"
+                          "textLiteralCase"
+                          "textLiteralField"
+                          "valueLiteralCase"
+                          "valueLiteralField" ]
+                        |> List.map (fun k -> str k h |> Option.defaultValue "")
+                        |> String.concat "/"
+                        |> fun tokens ->
+                            tokens
+                            + "/"
+                            + (arr "transparentUnions" h
+                               |> List.map (fun e ->
+                                   (str "union" e |> Option.defaultValue "")
+                                   + "."
+                                   + (str "case" e |> Option.defaultValue ""))
+                               |> String.concat ",")
+                    | None -> "Custom/Markdown/text/Literal/text/Static/value/TextSource.Literal" }
         | _ -> Error "idl.json: expected a JSON object at the root"
 
     /// Parse + read in one step.
@@ -355,6 +386,10 @@ module Diff =
         | ArtifactVersionChanged of before: int * after: int
         /// The declared wire shape moved (Phases 108/109) — `discriminator/envelope`.
         | WireShapeChanged of before: string * after: string
+        /// The declared HARDENING vocabulary moved (Phase 116) — which kind the codegen
+        /// trust boundary gates, what it mints in its place, which cases it sanitises,
+        /// and which unions have a transparent case.
+        | HardenPolicyChanged of before: string * after: string
         | KindAdded of tag: string
         | KindRemoved of tag: string
         /// Inferred, never declared — see `renamePairs`. Reported ALONGSIDE the
@@ -483,6 +518,7 @@ module Diff =
         match c with
         | ArtifactVersionChanged _ -> k "00" ""
         | WireShapeChanged _ -> k "01" ""
+        | HardenPolicyChanged _ -> k "02" ""
         | KindAdded t -> k "10" t
         | KindRemoved t -> k "11" t
         | KindRenamed(o, n) -> k "12" (o + ">" + n)
@@ -520,6 +556,9 @@ module Diff =
 
               if before.Wire <> after.Wire then
                   WireShapeChanged(before.Wire, after.Wire)
+
+              if before.Harden <> after.Harden then
+                  HardenPolicyChanged(before.Harden, after.Harden)
 
               yield!
                   diffNamed KindAdded KindRemoved (fun tag b a -> diffFields (OKind tag) b a) before.Kinds after.Kinds
@@ -722,6 +761,14 @@ module Diff =
                     b
                     a,
                 "Idl.WireShape (Phases 108/109/111); VOCABULARY.md §4.2"
+
+            | HardenPolicyChanged(b, a) ->
+                HostSurfaceOnly,
+                sprintf
+                    "the declared HARDENING vocabulary moved %s → %s — the codegen trust boundary now gates a different kind, or mints a different placeholder, or matches a different literal case. Nothing here moves a document's bytes BY ITSELF: the one wire-visible member is the transparent-case set, whose effect is reported per union as its own row. What changes is what SCAFFOLDED source contains, so re-scaffold anything generated against the old declaration."
+                    b
+                    a,
+                "Idl.HardenPolicy (Phase 116); STABILITY.md the IDL engine"
 
             | KindAdded t ->
                 Additive,
@@ -1229,6 +1276,7 @@ module Diff =
         match c with
         | ArtifactVersionChanged(b, a) -> sprintf "artifact encoding version %d -> %d" b a
         | WireShapeChanged(b, a) -> sprintf "wire shape changed: %s -> %s" b a
+        | HardenPolicyChanged(b, a) -> sprintf "harden policy changed: %s -> %s" b a
         | KindAdded t -> sprintf "kind added: %s" t
         | KindRemoved t -> sprintf "kind removed: %s" t
         | KindRenamed(o, n) -> sprintf "kind renamed (inferred): %s -> %s" o n

@@ -236,7 +236,7 @@ module Artifact =
               "category", JStr k.Category
               "fields", fieldsJson k.Fields ]
 
-    let private unionJson (u: IdlUnion) : JVal =
+    let private unionJson (policy: HardenPolicy) (u: IdlUnion) : JVal =
         let cases =
             u.Cases
             |> List.map (fun c ->
@@ -253,11 +253,11 @@ module Artifact =
               "cases", cases ]
 
         // A transparent case encodes as a BARE value rather than a `$type`-tagged
-        // object, so a consumer that missed it would decode the union wrongly. The
-        // engine hard-codes the set by name ([[TransparentUnion]]) rather than
-        // declaring it in the vocabulary; surfacing it here keeps the artifact
-        // faithful instead of inheriting that gap.
-        match TransparentUnion.tag u with
+        // object, so a consumer that missed it would decode the union wrongly. DERIVED
+        // from the vocabulary's declared [[HardenPolicy.TransparentUnions]] (Phase 116;
+        // it was derived from a hard-coded union name before that), and surfaced per
+        // union because that is where a third-party decoder needs it.
+        match TransparentUnion.tag policy u with
         | Some tag -> JObj(baseFields @ [ "transparentCase", JStr tag ])
         | None -> JObj baseFields
 
@@ -356,7 +356,12 @@ module Artifact =
                 | c -> c)
           NodeFields = canonFields idl.NodeFields
           Ops = idl.Ops |> List.map canonKind |> sortedBy _.Tag
-          Wire = idl.Wire }
+          Wire = idl.Wire
+          Harden =
+            { idl.Harden with
+                // Addressed by union name, so the authored order carries nothing —
+                // sorted here for the same reason every other named collection is.
+                TransparentUnions = idl.Harden.TransparentUnions |> List.sortWith (fun (a, _) (b, _) -> ordinal a b) } }
 
     /// The whole IDL as a `JVal`.
     ///
@@ -379,7 +384,7 @@ module Artifact =
                   + "WIRE_FORMAT.md section 13."
               )
               "kinds", JArr(idl.Kinds |> List.map kindJson)
-              "unions", JArr(idl.Unions |> List.map unionJson)
+              "unions", JArr(idl.Unions |> List.map (unionJson idl.Harden))
               "enums",
               JArr(
                   idl.Enums
@@ -436,6 +441,33 @@ module Artifact =
                                match idl.Wire.KeyOrder with
                                | KeyOrder.Sorted -> "sorted"
                                | KeyOrder.Declared -> "declared"
+                           ) ] ])
+            // The declared hardening vocabulary (Phase 116). Emitted only when it
+            // differs from the default, so every vocabulary that inherits the tokens
+            // the engine used to hard-code has a byte-identical artifact — the `ops`
+            // and `wire` posture a third time.
+            //
+            // `transparentUnions` is the one member here a WIRE consumer must read:
+            // the per-union `transparentCase` above is derived from it, and a decoder
+            // that missed it would read a bare value as a tagged object. The rest is
+            // codegen-boundary spec — what the trust boundary gates and what it mints
+            // in its place — and a decoder ignores it.
+            @ (if idl.Harden = HardenPolicy.Default then
+                   []
+               else
+                   [ "harden",
+                     JObj
+                         [ "gatedKind", JStr idl.Harden.GatedKind
+                           "placeholderKind", JStr idl.Harden.PlaceholderKind
+                           "placeholderField", JStr idl.Harden.PlaceholderField
+                           "textLiteralCase", JStr idl.Harden.TextLiteralCase
+                           "textLiteralField", JStr idl.Harden.TextLiteralField
+                           "valueLiteralCase", JStr idl.Harden.ValueLiteralCase
+                           "valueLiteralField", JStr idl.Harden.ValueLiteralField
+                           "transparentUnions",
+                           JArr(
+                               idl.Harden.TransparentUnions
+                               |> List.map (fun (union, case) -> JObj [ "union", JStr union; "case", JStr case ])
                            ) ] ])
         )
 
@@ -757,10 +789,12 @@ module Artifact =
                                       Annotations = ann }))))
                 )
                 |> Result.map (fun cases ->
-                    // `transparentCase` is DERIVED — the engine hard-codes the set by
-                    // name and the projection surfaces it for a third-party reader.
-                    // Reading it back would let an artifact claim a transparency the
-                    // engine does not implement, so it is deliberately ignored here.
+                    // `transparentCase` is DERIVED from the vocabulary's declared
+                    // [[HardenPolicy.TransparentUnions]], which `readHarden` reads
+                    // back, so the round-trip reproduces it without this reader
+                    // touching it. Reading it back HERE would let an artifact claim a
+                    // per-union transparency the declared policy does not state, and
+                    // the two could then disagree — so it stays ignored.
                     { Name = name
                       Params = ps
                       Cases = cases })))
@@ -849,6 +883,48 @@ module Artifact =
                                   NodeEnvelope = e
                                   KeyOrder = k })))))
 
+    /// The declared hardening vocabulary. Absent means [[HardenPolicy.Default]] — the
+    /// projection omits the block at the default, so every artifact written before the
+    /// tokens were declarable reads back as the tokens the engine hard-coded.
+    let private readHarden (root: JVal) : Result<HardenPolicy, string> =
+        match atKey "harden" root with
+        | None -> Ok HardenPolicy.Default
+        | Some block ->
+            let str name = strAt name block
+
+            let transparent =
+                arrAt "transparentUnions" block
+                |> Result.bind (
+                    traverse (fun e ->
+                        strAt "union" e
+                        |> Result.bind (fun u -> strAt "case" e |> Result.map (fun c -> u, c)))
+                )
+
+            str "gatedKind"
+            |> Result.bind (fun gated ->
+                str "placeholderKind"
+                |> Result.bind (fun placeholder ->
+                    str "placeholderField"
+                    |> Result.bind (fun placeholderField ->
+                        str "textLiteralCase"
+                        |> Result.bind (fun textCase ->
+                            str "textLiteralField"
+                            |> Result.bind (fun textField ->
+                                str "valueLiteralCase"
+                                |> Result.bind (fun valueCase ->
+                                    str "valueLiteralField"
+                                    |> Result.bind (fun valueField ->
+                                        transparent
+                                        |> Result.map (fun unions ->
+                                            { GatedKind = gated
+                                              PlaceholderKind = placeholder
+                                              PlaceholderField = placeholderField
+                                              TextLiteralCase = textCase
+                                              TextLiteralField = textField
+                                              ValueLiteralCase = valueCase
+                                              ValueLiteralField = valueField
+                                              TransparentUnions = unions }))))))))
+
     /// Read a vocabulary from the artifact's parsed root.
     ///
     /// The encoding version is checked FIRST and refused by name when it is not this
@@ -888,15 +964,18 @@ module Artifact =
                                      | Some _ -> listAt "ops" readKind)
                                     |> Result.bind (fun ops ->
                                         readWire root
-                                        |> Result.map (fun wire ->
-                                            { Kinds = kinds
-                                              Unions = unions
-                                              Enums = enums
-                                              Records = records
-                                              Defaults = defaults
-                                              NodeFields = nodeFields
-                                              Ops = ops
-                                              Wire = wire }))))))))
+                                        |> Result.bind (fun wire ->
+                                            readHarden root
+                                            |> Result.map (fun harden ->
+                                                { Kinds = kinds
+                                                  Unions = unions
+                                                  Enums = enums
+                                                  Records = records
+                                                  Defaults = defaults
+                                                  NodeFields = nodeFields
+                                                  Ops = ops
+                                                  Wire = wire
+                                                  Harden = harden })))))))))
         | Some _ -> Error "idl.json 'version' is not an integer"
 
     /// Read a vocabulary from `idl.json` bytes — the inverse of [[render]], up to the
