@@ -35,6 +35,11 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# Value-parity leg (Phase 118): the emitted JS is not throwaway any more — the smoke prints the committed
+# parity vectors under node and they must be byte-identical to the .NET table. A missing node FAILS.
+pwsh ./tests/fable-smoke/parity.ps1 -UseFreshlyEmitted tests/fable-smoke/out
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 dotnet run --project tests/Fuaran.Core.Tests --no-build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
