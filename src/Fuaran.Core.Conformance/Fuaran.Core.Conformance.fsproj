@@ -7,12 +7,17 @@
     <Description>Fuaran.Core.Conformance — a property-based law kit a domain runs against its own witness to certify it conforms to the Fuaran.Core op algebra + op-stream: apply totality, canApply≡apply, apply∘invert=identity, verifyChain, and replay determinism. FSharp.Core only (a deterministic uint32-LCG generator, no FsCheck), Fable-clean.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Phase 121 — the sample-adequacy guard, and with it `LawResult`. FIRST, because every
+         family below declares its demands through it, and because the guard deliberately depends
+         on no family it guards — which is also why the shared verdict type moved here. -->
+    <Compile Include="SampleAdequacy.fs" />
     <Compile Include="Conformance.fs" />
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->
     <Compile Include="WireNullTolerance.fs" />
     <!-- Phase 100 — the fold-confluence pack (N-lane arrival-order invariance). After
-         Conformance.fs: it reads `ConfRng`, `LawResult` and `ConformanceReport` from there.
+         Conformance.fs: it reads `ConfRng` and `ConformanceReport` from there, and `LawResult`
+         plus the adequacy guard from SampleAdequacy.fs above.
          Independent of the null-tolerance family beside it; the order between those two is
          free, so each simply keeps the position it arrived in. -->
     <Compile Include="FoldConfluence.fs" />

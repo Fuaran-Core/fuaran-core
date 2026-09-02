@@ -343,32 +343,10 @@ module FoldConfluence =
               "outcome classification is arrival-order-invariant (no lane set folds under one order and halts under another)"
             Passed = classCx.IsNone
             Counterexample = classCx }
-          { Law = "fold coverage (the sample exercised at least one folding lane set — vacuity guard)"
-            Passed = folded > 0
-            Counterexample =
-              if folded > 0 then
-                  None
-              else
-                  Some(
-                      "seed="
-                      + string seed
-                      + ": "
-                      + string iterations
-                      + " iterations produced no lane set that folded — the fold-determinism law was never tested"
-                  ) }
-          { Law = "conflict coverage (the sample exercised at least one halting lane set — vacuity guard)"
-            Passed = halted > 0
-            Counterexample =
-              if halted > 0 then
-                  None
-              else
-                  Some(
-                      "seed="
-                      + string seed
-                      + ": "
-                      + string iterations
-                      + " iterations produced no lane set that halted — the halt-determinism law was never tested; widen the lane generator until lanes collide"
-                  ) } ]
+          // The two coverage guards this pack shipped by hand in Phase 100 — the ones that caught
+          // 150 halting trials out of 150 — expressed through the kit's shared adequacy guard
+          // (Phase 121), so the remedy sentence and the counts read the same here as everywhere.
+          SampleAdequacy.reached "FoldConfluence" "lane-fold outcome" seed [ "folded", folded; "halted", halted ] ]
 
     /// The fold-confluence laws (Phase 100) pinned to `OpStream.defaultHash` — the shape a domain
     /// runs. See `laneFoldLawsWith` for the law text, the sampling bound, and the coverage guards.

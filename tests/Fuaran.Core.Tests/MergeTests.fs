@@ -242,7 +242,11 @@ let mergeLawTests =
         [ testCase "mergeConflictLaws certify symmetric + deterministic + #78-agreement green"
           <| fun _ ->
               let results = Conformance.mergeConflictLaws nodew idw opGen 7171 300
-              Expect.equal (List.length results) 3 "symmetry + determinism + agreement laws reported"
+
+              Expect.equal
+                  (List.length results)
+                  4
+                  "symmetry + determinism + agreement laws + the Phase 121 interference adequacy guard reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -260,7 +264,11 @@ let mergeLawTests =
           testCase "reconcileLaws certify clean-fold + cross-validation + inert-conflict + determinism green"
           <| fun _ ->
               let results = Conformance.reconcileLaws nodew idw opGen encNode 5353 300
-              Expect.equal (List.length results) 4 "clean + cross + conflicted + determinism laws reported"
+
+              Expect.equal
+                  (List.length results)
+                  6
+                  "clean + cross + conflicted + determinism laws + the Phase 121 outcome and independence adequacy guards reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

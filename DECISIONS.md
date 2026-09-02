@@ -1,5 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-02 — D22: whether a sample was adequate is a law, not a review step
+
+**Decided.** From `0.18.0` the conformance kit carries `SampleAdequacy`: a family DECLARES what its
+sample must contain — every verdict its laws branch on, and the width its order-sensitive laws read
+— and a sample that does not contain it FAILS the family, with the counts, rather than certifying
+it. Every law family the kit ships is classified in `SampleAdequacy.census` as either `Guarded` or
+`Unconditional` with its reason, and the suite reflects over the kit's public law entry points and
+refuses any family the census does not name.
+
+**Why a law rather than a convention.** A `LawResult` records that a law HELD. It cannot record how
+many samples the law was reached BY, so a law gated on a generated condition reports exactly the
+same green whether the condition arose two hundred times or never. This kit has had that defect
+twice, and both times the sample was wrong rather than the law: the fold-confluence pack producing
+150 halting trials out of 150, so the folding branch never executed; and the incremental-equivalence
+family drawing tables that mostly held ONE row, so no tie between a named and an unnamed row ever
+arose and a merge with no stability tiebreak passed every seed. Each was found by someone who
+happened to look, in a kit that certifies eight domains. "Look each time" is not a property; a
+declared demand that goes red is.
+
+**Two demand shapes, because the two findings are different questions.** A verdict the laws
+distinguish must be REACHED — the first finding's shape, and the one the earlier hand-written
+coverage guards already had. A per-sample measure must SPAN the width the law needs — the second
+finding's shape, and one nothing in the kit was watching at all, because table width is not a
+verdict and no branch names it. The minimum is per-family and named by the family, since only the
+family knows what its own laws read.
+
+**Why the census is a declaration WITH a reflection check, rather than either alone.** A declaration
+quantifies over what it names, so a family nobody enrolled produces no finding at any grade — the
+blind spot every manifest-shaped check has, and the reason a store can hold nine files while the
+class it governs holds twelve. Reflection alone would be the opposite error: it can tell that a
+family exists, never that its evidence is built rather than drawn, which is a judgement about the
+code that a reason string has to carry. So the census states the judgement and the suite refuses any
+family missing from it — in both directions, since a row naming a family that was renamed away reads
+as coverage while covering nothing.
+
+**A guard reached once is not a guard passed.** The counterexamples say to WIDEN THE GENERATOR, in
+those words, because the tempting remedies are both wrong: raising the iteration count and hunting a
+seed until the count turns positive each leave the law certified by a single trial. Phase 106
+measured that trap — across seeds 2200-2260 only three produced any folding lane set, and the best
+produced one in three hundred.
+
+**And the seeds did NOT move.** The phase that raised this anticipated re-baselining every pinned
+seed under a re-drawn `ConfRng`. That work was already done: `ConfRng.intBelow` has drawn from the
+high-order bits by rejection since `0.12.0`, kit-wide, with the single expectation it moved
+inspected rather than re-pinned, and the only remaining `%` reductions in the kit's generators
+consume a whole word to mint a fresh id, which is the case that argument explicitly exempts. So the
+answer here is a confirmation, not a second re-seed — and re-drawing values a second time to
+discharge a task would have moved every consumer's generated data for no reason at all.
+
 ## 2026-09-02 — D21: the footprint is one scale, and a prime reports what a prime did
 
 **Decided.** From `0.18.0`, `Incremental.rowsEvaluated` counts row evaluations at steps in **every**

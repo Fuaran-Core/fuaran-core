@@ -131,7 +131,7 @@ let tests =
           testCase "dirtyPropagationLaws certify sound+minimal dirty set + byte-identity + cycle-as-data (Phase 68)"
           <| fun _ ->
               let results = Conformance.dirtyPropagationLaws 4242 200
-              Expect.equal (List.length results) 4 "four laws reported"
+              Expect.equal (List.length results) 5 "four laws + the Phase 121 dirty-frontier adequacy guard reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -239,7 +239,7 @@ let tests =
           testCase "propagationEvalLaws certify byte-identity + minimality + unknown-change (Phase 69)"
           <| fun _ ->
               let results = Conformance.propagationEvalLaws 4242 200
-              Expect.equal (List.length results) 3 "three laws reported"
+              Expect.equal (List.length results) 4 "three laws + the Phase 121 node-reuse adequacy guard reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

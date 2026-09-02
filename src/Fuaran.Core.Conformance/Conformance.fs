@@ -118,12 +118,11 @@ type StreamGen<'Op, 'State> =
     { State0: 'State
       Op: ConfRng.T -> 'Op * ConfRng.T }
 
-/// One law's verdict. `Counterexample` carries the seed + iteration so a failure is
-/// reproducible (deterministic seed-replay).
-type LawResult =
-    { Law: string
-      Passed: bool
-      Counterexample: string option }
+// `LawResult` — one law's verdict — is defined in `SampleAdequacy.fs`, which is compiled ahead of
+// this file. It moved there in Phase 121 for one reason: the adequacy guard produces `LawResult`s
+// like every family here does, and every family here declares its demands through the guard, so the
+// guard has to precede them — and it deliberately depends on no family, which makes it the right
+// place for the type they all share.
 
 /// The aggregate certification report.
 type ConformanceReport =
@@ -3411,6 +3410,8 @@ module Conformance =
         let mutable byteIdentical = None
         let mutable minimal = None
         let mutable honesty = None
+        let mutable dirtyNodes = 0
+        let mutable cleanNodes = 0
 
         // s1 → a, s2 → b : two independent branches.
         let pipeline: CapabilityPipeline =
@@ -3491,6 +3492,17 @@ module Conformance =
                 | Ok result ->
                     let allIds = pipeline.Nodes |> List.map CapabilityPipeline.nodeId
 
+                    // Phase 121 — the honesty law has two halves and each needs its own class of
+                    // node to exist. A sample in which every node is dirty says nothing about reuse;
+                    // one in which none is says nothing about re-invocation.
+                    dirtyNodes <-
+                        dirtyNodes
+                        + (allIds |> List.filter (fun id -> Set.contains id dirty) |> List.length)
+
+                    cleanNodes <-
+                        cleanNodes
+                        + (allIds |> List.filter (fun id -> not (Set.contains id dirty)) |> List.length)
+
                     let fault =
                         allIds
                         |> List.tryPick (fun id ->
@@ -3521,7 +3533,12 @@ module Conformance =
             Counterexample = minimal }
           { Law = "a clean node reuses its prior value (not re-invoked); a dirty node re-invokes (effect-honesty)"
             Passed = honesty.IsNone
-            Counterexample = honesty } ]
+            Counterexample = honesty }
+          SampleAdequacy.reached
+              "capabilityPipelineIncrementalLaws"
+              "node reuse"
+              seed
+              [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
 
     // ---- tree-level dirty propagation (Phase 68) ----
     // The teeth on `Propagation.dirtyFromChangedIds`: over random acyclic reference graphs + a toy pull
@@ -3549,6 +3566,11 @@ module Conformance =
         let mutable soundMinimal = None
         let mutable frontier = None
         let mutable byteIdentity = None
+        // Phase 121 — frontier soundness quantifies over CLEAN nodes and the reuse half of the
+        // byte-identity law over DIRTY ones, so a sample in which every node is dirty (or none is)
+        // certifies one of them green having never applied it.
+        let mutable dirtyNodes = 0
+        let mutable cleanNodes = 0
 
         // an independent oracle: the read-edges reachable from `start` (inclusive) — a per-node forward walk,
         // computed differently from `dirtyFromChangedIds`' inverted BFS, so it genuinely cross-checks it.
@@ -3628,6 +3650,12 @@ module Conformance =
             if dirty <> oracle && soundMinimal.IsNone then
                 soundMinimal <- Some(sprintf "seed=%d iter=%d: dirty=%A ≠ oracle=%A (deps=%A)" seed i dirty oracle deps)
 
+            dirtyNodes <- dirtyNodes + (ids |> List.filter (fun n -> Set.contains n dirty) |> List.length)
+
+            cleanNodes <-
+                cleanNodes
+                + (ids |> List.filter (fun n -> not (Set.contains n dirty)) |> List.length)
+
             // (2) frontier soundness: no node outside `dirty` changes value under the edit.
             let leaked =
                 ids
@@ -3691,7 +3719,12 @@ module Conformance =
               (if cycleOk then
                    None
                else
-                   Some(sprintf "cycles=%A through-b=%A" cyclesResult.Cycles throughB)) } ]
+                   Some(sprintf "cycles=%A through-b=%A" cyclesResult.Cycles throughB)) }
+          SampleAdequacy.reached
+              "dirtyPropagationLaws"
+              "dirty frontier"
+              seed
+              [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
 
     // ---- tree-level incremental recompute driver (Phase 69) ----
     // The teeth on `Propagation.evalFrom`: over random acyclic DAGs + a toy pull evaluator, the incremental
@@ -3709,6 +3742,10 @@ module Conformance =
         let mutable byteIdentical = None
         let mutable minimal = None
         let mutable unknownChange = None
+        // Phase 121 — the minimality law is what says work was AVOIDED, and it says nothing at all
+        // over a sample in which every node is dirty. Both classes have to arise.
+        let mutable dirtyNodes = 0
+        let mutable cleanNodes = 0
 
         // a toy pull evaluator over the DAG: value(n) = base(n) + Σ value(reads). Records the ids it is
         // invoked on (for the minimality assertion).
@@ -3781,6 +3818,12 @@ module Conformance =
                     minimal <-
                         Some(sprintf "seed=%d iter=%d: invoked=%A ≠ dirty=%A" seed i (Set.ofSeq incrInvoked) dirty)
 
+                dirtyNodes <- dirtyNodes + (ids |> List.filter (fun n -> Set.contains n dirty) |> List.length)
+
+                cleanNodes <-
+                    cleanNodes
+                    + (ids |> List.filter (fun n -> not (Set.contains n dirty)) |> List.length)
+
                 // (3) unknown-change envelope: a changed id not in the graph is a named error
                 match
                     Propagation.evalFrom
@@ -3803,7 +3846,12 @@ module Conformance =
             Counterexample = minimal }
           { Law = "a changed id absent from the dependency map is a named EvalUnknownChange (GP5)"
             Passed = unknownChange.IsNone
-            Counterexample = unknownChange } ]
+            Counterexample = unknownChange }
+          SampleAdequacy.reached
+              "propagationEvalLaws"
+              "node reuse"
+              seed
+              [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
 
     // ---- cross-witness composition pilot (Phase 51) ----
     // Validate the Wave-13 frontier operators (`composeAcross`, Phase 47; `applyMemo`, Phase 49)
@@ -5211,6 +5259,9 @@ module Conformance =
         let mutable soundness = None
         let mutable monotonicity = None
         let mutable determinism = None
+        // Phase 121 — the soundness law only runs on an INDEPENDENT pair, so a generator that never
+        // produced one would certify it green having never applied it once.
+        let mutable independentPairs = 0
 
         // Thread up to `n` random ops through `apply`, keeping the accepted ones — an applyable script.
         let collectScript n (tree: 'Node) (r0: ConfRng.T) =
@@ -5259,6 +5310,7 @@ module Conformance =
 
             // soundness: an independent pair must commute under apply (content-hash equality).
             if Ops.independent fa fb then
+                independentPairs <- independentPairs + 1
                 let applyAll ops t = Ops.applyAll nodew idw ops t
 
                 let ab =
@@ -5291,7 +5343,12 @@ module Conformance =
             Counterexample = monotonicity }
           { Law = "footprint determinism (a pure function of the script)"
             Passed = determinism.IsNone
-            Counterexample = determinism } ]
+            Counterexample = determinism }
+          SampleAdequacy.reached
+              "footprintLaws"
+              "script-pair independence"
+              seed
+              [ "independent pair", independentPairs ] ]
 
     /// The merge-conflict enumeration laws (Phase 64) — the teeth on `Dag.conflicts` and the
     /// "detection is the negation of #78 independence, decomposed by shape" claim. Over a
@@ -5323,6 +5380,10 @@ module Conformance =
         let mutable symmetryCx = None
         let mutable determinismCx = None
         let mutable agreementCx = None
+        // Phase 121 — the agreement law is an `iff` over generated op pairs, so it is satisfied
+        // trivially by a sample in which no pair is ever reported (or in which every pair is).
+        let mutable reportedPairs = 0
+        let mutable unreportedPairs = 0
 
         // Thread up to `n` random ops through `apply`, keeping the accepted ones — an applyable script.
         let collectScript n (tree: 'Node) (r0: ConfRng.T) =
@@ -5382,6 +5443,11 @@ module Conformance =
                     let reported = Dag.conflicts fp [ oa ] [ ob ] |> List.isEmpty |> not
                     let dependent = not (Ops.independent (fp oa) (fp ob))
 
+                    if reported then
+                        reportedPairs <- reportedPairs + 1
+                    else
+                        unreportedPairs <- unreportedPairs + 1
+
                     if reported <> dependent && agreementCx.IsNone then
                         agreementCx <-
                             Some(
@@ -5403,7 +5469,12 @@ module Conformance =
             Counterexample = determinismCx }
           { Law = "conflicts agrees with #78 (a pair is reported iff its footprints are not independent)"
             Passed = agreementCx.IsNone
-            Counterexample = agreementCx } ]
+            Counterexample = agreementCx }
+          SampleAdequacy.reached
+              "mergeConflictLaws"
+              "op-pair interference"
+              seed
+              [ "reported pair", reportedPairs; "unreported pair", unreportedPairs ] ]
 
     /// The branch-reconciliation laws (Phase 83) — the teeth on `Dag.reconcile` and its "fold what
     /// commutes, hand conflicts back untouched" contract (GP6). Over a seed-replayable sample it builds
@@ -5467,6 +5538,13 @@ module Conformance =
         let mutable crossCx = None
         let mutable conflictedCx = None
         let mutable determinismCx = None
+        // Phase 121 — three of the four laws below only run on a sample that reached their branch:
+        // the clean-fold law needs an `Ok`, the conflicted-path law needs an `Error`, and the
+        // cross-validation law needs a footprint-independent delta pair. A run that reached only
+        // one of them certifies the other two green having never applied them.
+        let mutable cleanFolds = 0
+        let mutable conflictedFolds = 0
+        let mutable independentDeltas = 0
 
         let collectScript n (tree: 'Node) (r0: ConfRng.T) =
             let mutable cur = tree
@@ -5521,6 +5599,8 @@ module Conformance =
 
             match result with
             | Ok script ->
+                cleanFolds <- cleanFolds + 1
+
                 if script <> deltaA @ deltaB && determinismCx.IsNone then
                     determinismCx <-
                         Some(sprintf "seed=%d iter=%d: clean script ≠ betweenOps A ++ betweenOps B (order pin)" seed i)
@@ -5545,12 +5625,16 @@ module Conformance =
                                     ba
                             )
             | Error cs ->
+                conflictedFolds <- conflictedFolds + 1
+
                 // the conflicted path returns exactly Dag.conflicts' report, nothing applied.
                 if cs <> Dag.conflicts fp deltaA deltaB && conflictedCx.IsNone then
                     conflictedCx <- Some(sprintf "seed=%d iter=%d: Error payload ≠ Dag.conflicts report" seed i)
 
             // footprint cross-validation: footprint-independent deltas ⇒ conflict-free (Ok).
             if Ops.independent (Ops.footprint nodew idw deltaA) (Ops.footprint nodew idw deltaB) then
+                independentDeltas <- independentDeltas + 1
+
                 match result with
                 | Ok _ -> ()
                 | Error _ ->
@@ -5571,7 +5655,17 @@ module Conformance =
             Counterexample = conflictedCx }
           { Law = "reconcile is deterministic + order-pinned (pure fn of (base, headA, headB))"
             Passed = determinismCx.IsNone
-            Counterexample = determinismCx } ]
+            Counterexample = determinismCx }
+          SampleAdequacy.reached
+              "reconcileLaws"
+              "reconcile outcome"
+              seed
+              [ "clean fold", cleanFolds; "conflicted fold", conflictedFolds ]
+          SampleAdequacy.reached
+              "reconcileLaws"
+              "delta-pair independence"
+              seed
+              [ "independent delta pair", independentDeltas ] ]
 
     // ---- lease strand (Phase 84) ----
     // The teeth on `Fuaran.Core.Lease`: claims over a resource axis with a total apply, a conflict
@@ -6069,6 +6163,11 @@ module Conformance =
         let mutable independence = None
         let mutable actionability = None
         let mutable confluence = None
+        // Phase 121 — pairwise independence and any-order confluence are trivially true of an EMPTY
+        // accepted set, and the actionability law quantifies over rejections. A sample that never
+        // accepted, or never rejected, certifies those green having never applied them.
+        let mutable acceptedSeen = 0
+        let mutable rejectedSeen = 0
 
         // An applyable script: up to `n` random ops threaded from `tree`, keeping the accepted.
         let collectScript n (tree: 'Node) (r0: ConfRng.T) =
@@ -6142,6 +6241,8 @@ module Conformance =
             // total partition: accepted + rejected = input, each exactly once.
             let acceptedIds = result.Accepted |> List.map (fun p -> p.Id)
             let rejectedIds = result.Rejected |> List.map (fun (p, _) -> p.Id)
+            acceptedSeen <- acceptedSeen + List.length acceptedIds
+            rejectedSeen <- rejectedSeen + List.length rejectedIds
             let inputIds = proposals |> List.map (fun p -> p.Id) |> List.sort
 
             if List.sort (acceptedIds @ rejectedIds) <> inputIds && partition.IsNone then
@@ -6228,7 +6329,12 @@ module Conformance =
             Counterexample = actionability }
           { Law = "the accepted scripts apply confluently in any order (the whole-script any-order claim)"
             Passed = confluence.IsNone
-            Counterexample = confluence } ]
+            Counterexample = confluence }
+          SampleAdequacy.reached
+              "arbitrationLaws"
+              "arbitration bucket"
+              seed
+              [ "accepted proposal", acceptedSeen; "rejected proposal", rejectedSeen ] ]
 
     // ---- idempotent append (Phase 82) ----
     // The at-least-once claim the agent retry loop rests on: a re-sent invocation key converges

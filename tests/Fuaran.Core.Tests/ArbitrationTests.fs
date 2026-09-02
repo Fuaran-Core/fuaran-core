@@ -200,7 +200,11 @@ let arbitrationLawTests =
         [ testCase "the reference witness certifies the arbitration laws green"
           <| fun _ ->
               let results = Conformance.arbitrationLaws nodew idw opGen encNode 8585 300
-              Expect.equal (List.length results) 5 "determinism/partition/independence/actionability/confluence"
+
+              Expect.equal
+                  (List.length results)
+                  6
+                  "determinism/partition/independence/actionability/confluence + the Phase 121 bucket adequacy guard"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

@@ -915,7 +915,11 @@ let memoTests =
           testCase "capabilityPipelineIncrementalLaws certify evalFrom ≡ eval + minimal reuse (Phase 62)"
           <| fun _ ->
               let results = Conformance.capabilityPipelineIncrementalLaws 4242 200
-              Expect.equal (List.length results) 3 "byte-identical + minimal + effect-honesty reported"
+
+              Expect.equal
+                  (List.length results)
+                  4
+                  "byte-identical + minimal + effect-honesty + the Phase 121 node-reuse adequacy guard reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

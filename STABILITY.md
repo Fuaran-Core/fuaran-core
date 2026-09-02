@@ -1332,9 +1332,10 @@ Two surfaces, one in each half of the boundary.
   determinism** (a folding set folds to one state hash under every order — a reducer that rejects
   under one order and not another fails here too), **lane-halt determinism** (a halting set halts
   with the same canonical report under every order), **outcome classification invariance** (no lane
-  set folds under one order and halts under another), and two **coverage vacuity guards** (the
-  sample must have exercised both a folding and a halting set — a run that never collided has not
-  tested the halt law at all). Seed-replayable; every divergence is **shrunk** by greedy
+  set folds under one order and halts under another), and — since `0.18.0`, where the pack's two
+  hand-written coverage guards became one **sample-adequacy** law (see below) — a guard demanding
+  that the sample exercised both a folding and a halting set, reported with the counts it did reach.
+  A run that never collided has not tested the halt law at all. Seed-replayable; every divergence is **shrunk** by greedy
   delta-debugging before it is reported, so the counterexample is a minimal reproducer in the
   domain's own op encoding rather than the generated trial that happened to expose it.
 
@@ -1399,3 +1400,56 @@ suite the change moved exactly one expectation — a four-lane reference-witness
 lanes were a fixed two ops each, a shape that essentially never has mutually-independent footprints
 over a six-node tree; its lane length is now drawn, which restores a mixture of both outcome classes
 at every lane count.
+
+## Sample adequacy: what a family's sample must contain (Phase 121, `0.18.0`)
+
+A `LawResult` says a law HELD. It cannot say how many samples the law was reached BY — so a law
+gated on a generated condition ("an independent pair", "a halting lane set", "a declined refresh")
+reports the same green whether the condition arose two hundred times or never. `SampleAdequacy` is
+the missing half: a family declares what its sample must contain, and a sample that does not contain
+it fails the family with the counts rather than certifying it quietly.
+
+**New public surface.** `AdequacyDemand<'Sample>` — `ReachesEvery (dimension, verdicts, classify)`
+and `Spans (measure, atLeast, measureOf)`; `AdequacyClass` — `Guarded` / `Unconditional`;
+`SampleAdequacy.check` (demands over a materialised sample), `SampleAdequacy.reached` /
+`SampleAdequacy.spanned` (over counts a family already keeps), and `SampleAdequacy.census` — every
+law family the kit ships and how each answers the adequacy question. A domain gets the same guard
+for its own families: declare the verdicts your laws branch on and the width they read.
+
+**The remedy for a red guard is to widen the generator.** Not to raise the iteration count, and not
+to hunt a seed until the count turns positive: a coverage guard is satisfied by one folding trial in
+three hundred, so both of those leave the law certified by that one trial. The counterexamples say
+so in those words.
+
+**What moved in the reports, and what a consumer must do.** No law changed its meaning and no
+generated value moved. Nine families gained an adequacy law, so **their reported law LISTS grew** —
+a consumer asserting a law count, or indexing into `ConformanceReport.Results` positionally, has to
+adjust; a consumer reading `AllPassed` or matching on `Law` does not:
+
+| Family | Was | Now |
+|---|---|---|
+| `IncrementalDelta.laws` | 9 laws, two of them hand-written coverage laws | 7 laws + 2 adequacy demands |
+| `FoldConfluence.laneFoldLaws` | 5 (3 invariance + 2 coverage) | 4 (3 invariance + 1 adequacy) |
+| `Conformance.footprintLaws` | 3 | 4 |
+| `Conformance.mergeConflictLaws` | 3 | 4 |
+| `Conformance.reconcileLaws` | 4 | 6 |
+| `Conformance.arbitrationLaws` | 5 | 6 |
+| `Conformance.capabilityPipelineIncrementalLaws` | 3 | 4 |
+| `Conformance.dirtyPropagationLaws` | 4 | 5 |
+| `Conformance.propagationEvalLaws` | 3 | 4 |
+
+Those seven `Conformance` families are the ones whose laws only run on a sample that reached their
+branch — an independent pair, a clean fold beside a conflicted one, an accepted proposal beside a
+rejected one, a dirty node beside a clean one. None of them was vacuous on its pinned seeds; each
+could have become so silently, which is what a guard is for.
+
+**Two `*With` entry points, added so the guards have go-red proofs in the suite.**
+`IncrementalDelta.samplesWith` / `lawsWith` take the generated table's row bound, which is the exact
+lever Phase 115 had to move (from five rows to nine, having measured that most tables held one).
+Narrowing it back turns that family's span demand red, in the suite, rather than in a session's
+memory. `samples` / `laws` pin the shipped bound and are unchanged in behaviour.
+
+**`LawResult` moved file** — from `Conformance.fs` to `SampleAdequacy.fs`, which compiles ahead of
+it. Same namespace, same shape, same name: nothing a consumer can observe. It moved because the
+guard produces `LawResult`s and every family declares its demands through the guard, so the guard
+has to precede them, and it deliberately depends on no family it guards.

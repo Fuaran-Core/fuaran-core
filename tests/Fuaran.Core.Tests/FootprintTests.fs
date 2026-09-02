@@ -263,7 +263,11 @@ let footprintLawTests =
         [ testCase "the reference witness certifies footprint soundness + monotonicity + determinism green"
           <| fun _ ->
               let results = Conformance.footprintLaws nodew idw opGen encNode 4242 300
-              Expect.equal (List.length results) 3 "soundness + monotonicity + determinism laws reported"
+
+              Expect.equal
+                  (List.length results)
+                  4
+                  "soundness + monotonicity + determinism laws + the Phase 121 independence adequacy guard reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

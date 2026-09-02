@@ -339,6 +339,27 @@ let private foldConfluenceTouch =
 
     sprintf "%d/%d" (List.length results) (List.length (FoldConfluence.arrivalOrders 3))
 
+// Phase 121 — the sample-adequacy guard. `laneFoldLaws` above reaches `reached` already, so this
+// touch exists for the parts it does not: the generic `check` over an `AdequacyDemand` list, both
+// demand shapes, and the census. A Fable-clean claim about a surface nothing compiles is a claim
+// about nothing.
+let private sampleAdequacyTouch =
+    let demands: AdequacyDemand<int> list =
+        [ ReachesEvery("parity", [ "even"; "odd" ], (fun n -> [ (if n % 2 = 0 then "even" else "odd") ]))
+          Spans("magnitude", 2, id) ]
+
+    let results = SampleAdequacy.check "smoke" 1 demands [ 1; 2 ]
+
+    let censusKinds =
+        SampleAdequacy.census
+        |> List.map (fun (_, cls) ->
+            match cls with
+            | Guarded ds -> List.length ds
+            | Unconditional _ -> 0)
+        |> List.sum
+
+    sprintf "%d/%b/%d" (List.length results) (results |> List.forall (fun r -> r.Passed)) censusKinds
+
 [<EntryPoint>]
 let main _ =
     // Reference each touch so nothing is dead-code-eliminated before the compiler sees it.
@@ -364,7 +385,8 @@ let main _ =
       propagationTouch
       aiSurfaceTouch
       idlTouch
-      foldConfluenceTouch ]
+      foldConfluenceTouch
+      sampleAdequacyTouch ]
     |> List.iter (printfn "%s")
 
     0

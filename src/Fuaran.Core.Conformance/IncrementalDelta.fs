@@ -208,13 +208,18 @@ module IncrementalDelta =
 
     // ---- generation ----
 
-    /// Generate the samples for a seed — each one a base table, a pipeline, an edit, and a delta,
-    /// with both evaluators run and both footprints recorded.
-    let samples (seed: int) (iterations: int) : IncrementalSample list =
+    /// Generate the samples for a seed, drawing tables of one to `rowBound` rows.
+    ///
+    /// The bound is a parameter for one reason: it is the exact lever Phase 115 had to move (from 5
+    /// to 9, because most tables held ONE row and no tie between a named and an unnamed row ever
+    /// arose), so the go-red proof for this family's span demand is to narrow it again and watch the
+    /// guard fail. A probe that lives in the suite is a proof; a probe that lived in one session's
+    /// memory is a claim. `samples` pins the shipped bound.
+    let samplesWith (rowBound: int) (seed: int) (iterations: int) : IncrementalSample list =
         let mutable rng = ConfRng.ofSeed seed
 
         [ for i in 0 .. iterations - 1 do
-              let nRows, r0 = ConfRng.intBelow 9 rng
+              let nRows, r0 = ConfRng.intBelow rowBound rng
               let mutable r = r0
 
               let rows =
@@ -268,6 +273,49 @@ module IncrementalDelta =
                         Equivalent = (refreshed |> Result.map Incremental.result) = reference
                         PrimeEquivalent = (Ok primed.Output = DataFrame.evalPipeline pipeline before)
                         Edit = edit } ]
+
+    /// The table width this family's laws need, and the reason the number is what it is.
+    ///
+    /// The tie-heavy sort key `b` is drawn from three values, so a table has to hold more than twice
+    /// that before an arrival-position tiebreak decides anything more than once — which is the only
+    /// way the merged-order laws can see a stability defect at all. Phase 115 measured the cost of
+    /// getting this wrong: at one-to-five rows most tables held ONE row, and a merge with no
+    /// stability tiebreak passed every seed.
+    let rowsTheLawsNeed = 7
+
+    /// The shipped bound: one to nine rows (Phase 115).
+    let samples (seed: int) (iterations: int) : IncrementalSample list = samplesWith 9 seed iterations
+
+    /// What this family's sample must contain for its laws to have been tested — the verdicts the
+    /// laws branch on, and the table width the order-sensitive ones read.
+    let demands: AdequacyDemand<IncrementalSample> list =
+        [ ReachesEvery(
+              "refresh class",
+              [ "declined"; "row-restricted"; "group-restricted"; "merged-order-restricted" ],
+              fun s ->
+                  let restricted =
+                      match s.Refresh.Recompute with
+                      | RowsRecomputed _
+                      | GroupsRecomputed _ -> true
+                      | _ -> false
+
+                  let mergesOrder =
+                      (Incremental.plan s.Pipeline).Steps
+                      |> List.exists (function
+                          | MergeOrder _ -> true
+                          | _ -> false)
+
+                  [ match s.Strategy with
+                    | ReferenceOnly _ -> "declined"
+                    | _ -> ()
+                    match s.Refresh.Recompute with
+                    | RowsRecomputed _ -> "row-restricted"
+                    | GroupsRecomputed _ -> "group-restricted"
+                    | _ -> ()
+                    if mergesOrder && restricted then
+                        "merged-order-restricted" ]
+          )
+          Spans("source rows", rowsTheLawsNeed, fun s -> s.Prime.SourceRows) ]
 
     /// The recorded footprint lines — one per sample, counts only, so two hosts print the same
     /// report. This is the instrument: it is what shows the seam did less work, which an equality
@@ -325,14 +373,17 @@ module IncrementalDelta =
     ///    the law total;
     ///  - **plan is pure and total** — every step is classified, recomputing agrees, and
     ///    `isIncremental` agrees with the strategy;
-    ///  - **the declined verbs are actually reached** — the run observes both fall-back classes the
-    ///    corpus contains, so the boundary is exercised rather than merely asserted;
-    ///  - **a sort is merged, not declined and not re-primed** — the run observes a pipeline whose
-    ///    plan carries a `MergeOrder` step answering a delta with a RESTRICTED refresh. Without this
-    ///    the equivalence laws would stay green over a seam that had quietly gone back to evaluating
-    ///    every sort-bearing pipeline in full, since a full evaluation is always the right answer.
-    let laws (seed: int) (iterations: int) : LawResult list =
-        let xs = samples seed iterations
+    /// and, alongside them, this family's **sample-adequacy demands** (Phase 121, `demands` above):
+    /// every refresh class the laws branch on was reached, and the tables were wide enough for the
+    /// order-sensitive laws to read. Both were hand-rolled coverage laws here until Phase 121 moved
+    /// them onto the kit's shared guard — the boundary-coverage one since Phase 99, the merged-order
+    /// one since Phase 115 — and the width demand did not exist at all, which is precisely how the
+    /// family passed every seed over one-row tables.
+    ///
+    /// `rowBound` is the table-width lever, parameterised so the span demand has a go-red proof in
+    /// the suite rather than in a session's memory; `laws` pins the shipped bound.
+    let lawsWith (rowBound: int) (seed: int) (iterations: int) : LawResult list =
+        let xs = samplesWith rowBound seed iterations
 
         let cite (s: IncrementalSample) (what: string) =
             "seed="
@@ -410,34 +461,6 @@ module IncrementalDelta =
             then
                 work <- Some(cite s "a refresh evaluated more rows than a full evaluation would")
 
-        let sawDeclined =
-            xs
-            |> List.exists (fun s ->
-                match s.Strategy with
-                | ReferenceOnly _ -> true
-                | _ -> false)
-
-        let sawRestricted =
-            xs
-            |> List.exists (fun s ->
-                match s.Refresh.Recompute with
-                | RowsRecomputed _
-                | GroupsRecomputed _
-                | ReusedPrior -> true
-                | _ -> false)
-
-        let sawMergedOrder =
-            xs
-            |> List.exists (fun s ->
-                (Incremental.plan s.Pipeline).Steps
-                |> List.exists (function
-                    | MergeOrder _ -> true
-                    | _ -> false)
-                && (match s.Refresh.Recompute with
-                    | RowsRecomputed _
-                    | GroupsRecomputed _ -> true
-                    | _ -> false))
-
         [ { Law = "every generated pair produced a sample (no base failed to evaluate)"
             Passed = List.length xs = iterations
             Counterexample =
@@ -470,25 +493,8 @@ module IncrementalDelta =
             Counterexample = work }
           { Law = "plan is pure, total, and agrees with isIncremental"
             Passed = planPurity.IsNone
-            Counterexample = planPurity }
-          { Law = "a sort-bearing pipeline answered a delta with a restricted refresh"
-            Passed = sawMergedOrder
-            Counterexample =
-              if sawMergedOrder then
-                  None
-              else
-                  Some("seed=" + string seed + ": no MergeOrder step reached a restricted refresh") }
-          { Law = "the corpus reaches both sides of the boundary (a declined pipeline and a restricted refresh)"
-            Passed = sawDeclined && sawRestricted
-            Counterexample =
-              if sawDeclined && sawRestricted then
-                  None
-              else
-                  Some(
-                      "seed="
-                      + string seed
-                      + ": declined="
-                      + string sawDeclined
-                      + " restricted="
-                      + string sawRestricted
-                  ) } ]
+            Counterexample = planPurity } ]
+        @ SampleAdequacy.check "IncrementalDelta" seed demands xs
+
+    /// The incremental-evaluation equivalence laws at the shipped table-width bound.
+    let laws (seed: int) (iterations: int) : LawResult list = lawsWith 9 seed iterations

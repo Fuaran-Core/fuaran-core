@@ -132,6 +132,7 @@
          corpus vectors at fixtures/incremental-recompute/ (the control that must not move,
          and the sort vector whose class does). Reads nothing here, so it simply follows. -->
     <Compile Include="IncrementalCorpusTests.fs" />
+    <Compile Include="SampleAdequacyTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

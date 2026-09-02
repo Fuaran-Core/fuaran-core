@@ -373,12 +373,12 @@ let foldConfluenceTests =
 
           // ---- the reference witness ----
 
-          testCase "the reference witness certifies fold + halt determinism, classification and both coverage guards"
+          testCase "the reference witness certifies fold + halt determinism, classification and sample adequacy"
           <| fun _ ->
               let results =
                   FoldConfluence.laneFoldLaws treeW treeFootprint treeHash treeLaneGen 3 1000 120
 
-              Expect.equal (List.length results) 5 "three invariance laws + two coverage guards reported"
+              Expect.equal (List.length results) 4 "three invariance laws + the sample-adequacy guard reported"
               expectGreen "the reference witness's laneFoldLaws" results
 
           testCase "the reference certification is seed-replayable"
@@ -409,8 +409,12 @@ let foldConfluenceTests =
               let results =
                   FoldConfluence.laneFoldLaws planW planFootprint planHash planLaneGen 3 4100 150
 
-              Expect.isTrue (lawNamed "fold coverage" results).Passed "a folding lane set was exercised"
-              Expect.isTrue (lawNamed "conflict coverage" results).Passed "a halting lane set was exercised"
+              // One guard, both counts: Phase 121 moved this pack's two hand-written coverage laws
+              // onto the kit's shared adequacy guard, which reports every verdict it demanded and
+              // names the ones it never reached.
+              Expect.isTrue
+                  (lawNamed "sample adequacy" results).Passed
+                  "both the folding and the halting lane set were exercised"
 
           testCase "the work-plan op codec round-trips (the witness a consumer copies is complete)"
           <| fun _ ->
@@ -429,7 +433,7 @@ let foldConfluenceTests =
                   FoldConfluence.certifyFold planW planFootprint planHash planLaneGen 3 4100 80
 
               Expect.isTrue report.AllPassed "the aggregate verdict is green"
-              Expect.equal (List.length report.Results) 5 "the aggregate carries every law"
+              Expect.equal (List.length report.Results) 4 "the aggregate carries every law"
 
           // ---- the teeth: the pack can fail, and shrinks what it reports ----
 
@@ -442,14 +446,18 @@ let foldConfluenceTests =
               Expect.isFalse fold.Passed "an order-sensitive reducer cannot fold order-independently"
 
               // The halt law is vacuously green (a blind footprint never conflicts) — and the
-              // conflict-coverage guard is what refuses to let that read as a certification.
+              // sample-adequacy guard is what refuses to let that read as a certification.
               Expect.isTrue
                   (lawNamed "lane-halt determinism" results).Passed
                   "nothing halted, so nothing halted wrongly"
 
-              Expect.isFalse
-                  (lawNamed "conflict coverage" results).Passed
-                  "the vacuity guard reports that the halt law was never tested"
+              let adequacy = lawNamed "sample adequacy" results
+              Expect.isFalse adequacy.Passed "the vacuity guard reports that the halt law was never tested"
+
+              match adequacy.Counterexample with
+              | Some c ->
+                  Expect.stringContains c "halted=0" "the guard reports the count it reached, not merely that it failed"
+              | None -> failtest "the failing adequacy guard carried no counts"
 
           testCase "the reported counterexample is SHRUNK to two lanes of one op"
           <| fun _ ->
