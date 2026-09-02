@@ -208,7 +208,7 @@
          within the same working day — 0.16.0 was packed to the local feed only, never tagged or
          published, and widening the same record twice across two unreleased versions is cheaper
          for every consumer than adopting it twice. -->
-    <Version>0.17.0</Version>
+    <Version>0.18.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
