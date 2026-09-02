@@ -32,6 +32,15 @@ namespace Fuaran.Core
 //  that trusted its cached order without checking arrival order would answer
 //  a delta that named nothing with a table in the wrong order.
 //
+//  Phase 120 admitted two more classes and the corpus grew to meet each of
+//  them. A BOUNDED-FRAME window (`lag` here) reads the row before this one in
+//  its partition's order, so an edit moves its neighbour's output as well as
+//  its own; an unbounded one (`cumulSum`) is present as a decline, because a
+//  fall-back that returns the wrong answer is the worse failure. A FILTERING
+//  join (`semi` / `anti`) is a filter whose predicate reads a relation, so it
+//  appears both with a row-local step after it and feeding an order-sensitive
+//  maintained group; a combining join (`inner`) is present as its decline.
+//
 //  Every sample also records its FOOTPRINT — what the prime evaluated and what
 //  the refresh evaluated — so the family certifies not only that the answer is
 //  right but that the seam did less work to reach it. An incremental evaluator
@@ -103,10 +112,20 @@ module IncrementalDelta =
               Column.create "b" IntType (rows |> List.map (fun (_, _, b) -> b))
               Column.create "c" IntType (rows |> List.map (fun _ -> Int 1)) ] }
 
-    /// The pipelines. `0`–`5` and `9`–`13` are incrementalisable; `6`–`8` are the declined ones,
-    /// present because a fall-back that returns the wrong answer is the worse failure. `11`–`13`
-    /// are the sort-bearing shapes (Phase 115): a sort last, a sort before the steps that read the
-    /// order it produced, and a sort feeding an order-sensitive maintained group.
+    /// The relation the filtering-join pipelines match against (Phase 120): a two-row lookup on
+    /// `k`, holding two of the three values `b` is drawn from. A semi join over it therefore keeps
+    /// roughly two thirds of any generated table and an anti join the rest, so both sides of the
+    /// verdict arise in every table rather than in the lucky ones.
+    let private lookup: Table =
+        { Schema = [ "k", IntType ]
+          Columns = [ Column.create "k" IntType [ Int 0; Int 2 ] ] }
+
+    /// The pipelines. `0`–`5`, `9`–`14`, `16` and `17` are incrementalisable; `6`–`8`, `15` and
+    /// `18` are the declined ones, present because a fall-back that returns the wrong answer is the
+    /// worse failure. `11`–`13` are the sort-bearing shapes (Phase 115): a sort last, a sort before
+    /// the steps that read the order it produced, and a sort feeding an order-sensitive maintained
+    /// group. `14`–`18` are Phase 120: a bounded-frame window and an unbounded one, a filtering
+    /// join with a step after it, another feeding a maintained group, and a combining join.
     let private pipelineOf (k: int) : Transform list =
         match k with
         | 0 -> [ Filter(Binary(Gt, Col "a", Lit(Int 0))) ]
@@ -140,14 +159,48 @@ module IncrementalDelta =
             [ Sort [ "b", Asc ]
               Derive("d", Case([ Binary(Gt, Col "a", Lit(Int 0)), Lit(Str "pos") ], Lit Null))
               Filter(Binary(Lt, Col "a", Lit(Int 3))) ]
-        | _ ->
+        | 13 ->
             // a sort feeding an order-sensitive maintained group: `First` and `Last` read the
             // position the sort put each row in, and `b` ties heavily, so the sort's STABILITY is
             // what decides the answer rather than its comparator alone.
             [ Sort [ "b", Asc; "a", Desc ]
               GroupBy([ "b" ], [ agg "f" First "id"; agg "l" Last "id"; agg "n" Count "a" ]) ]
+        | 14 ->
+            // Phase 120 — a BOUNDED-frame window: a filter, then a lag over the tie-heavy partition
+            // key. The lag reads the row before this one in the partition's order, so an edit to any
+            // row moves its neighbour's output as well as its own.
+            [ Filter(Binary(Gt, Col "a", Lit(Int -5)))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" } ]
+        | 15 ->
+            // Phase 120 — declined by FRAME: a cumulative aggregate reads every preceding row of
+            // its partition, so no bounded neighbourhood of a row determines its output.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" } ]
+        | 16 ->
+            // Phase 120 — a filtering join with a row-local step AFTER it, so the verdict is not the
+            // last thing the walk does and the derived column is typed over the rows it left alive.
+            [ Join(Embedded lookup, [ "b", "k" ], Semi)
+              Derive("d", Binary(Mul, Col "a", Lit(Int 2))) ]
+        | 17 ->
+            // Phase 120 — the ANTI verdict feeding an order-sensitive maintained group: what the
+            // join decides is which rows are in the group at all.
+            [ Join(Embedded lookup, [ "b", "k" ], Anti)
+              GroupBy([ "b" ], [ agg "n" Count "a"; agg "f" First "id" ]) ]
+        | _ ->
+            // Phase 120 — declined by KIND: a combining join fans a left row out across its matches
+            // and appends the right schema, so one source row is no longer one output row.
+            [ Join(Embedded lookup, [ "b", "k" ], Inner) ]
 
-    let private pipelineCount = 14
+    let private pipelineCount = 19
 
     /// Apply one edit to the base rows, returning the new table and a tag naming the edit.
     let private editOf (k: int) (rows: (string * Cell * Cell) list) (n: int) : Table * string =
@@ -291,7 +344,12 @@ module IncrementalDelta =
     let demands: AdequacyDemand<IncrementalSample> list =
         [ ReachesEvery(
               "refresh class",
-              [ "declined"; "row-restricted"; "group-restricted"; "merged-order-restricted" ],
+              [ "declined"
+                "row-restricted"
+                "group-restricted"
+                "merged-order-restricted"
+                "window-restricted"
+                "relation-filtered-restricted" ],
               fun s ->
                   let restricted =
                       match s.Refresh.Recompute with
@@ -299,10 +357,23 @@ module IncrementalDelta =
                       | GroupsRecomputed _ -> true
                       | _ -> false
 
+                  let steps = (Incremental.plan s.Pipeline).Steps
+
+                  let carries f = steps |> List.exists f
+
                   let mergesOrder =
-                      (Incremental.plan s.Pipeline).Steps
-                      |> List.exists (function
+                      carries (function
                           | MergeOrder _ -> true
+                          | _ -> false)
+
+                  let framesWindow =
+                      carries (function
+                          | RecomputeFrame _ -> true
+                          | _ -> false)
+
+                  let filtersByRelation =
+                      carries (function
+                          | FilterByRelation _ -> true
                           | _ -> false)
 
                   [ match s.Strategy with
@@ -313,7 +384,11 @@ module IncrementalDelta =
                     | GroupsRecomputed _ -> "group-restricted"
                     | _ -> ()
                     if mergesOrder && restricted then
-                        "merged-order-restricted" ]
+                        "merged-order-restricted"
+                    if framesWindow && restricted then
+                        "window-restricted"
+                    if filtersByRelation && restricted then
+                        "relation-filtered-restricted" ]
           )
           Spans("source rows", rowsTheLawsNeed, fun s -> s.Prime.SourceRows) ]
 

@@ -133,7 +133,13 @@ let motivatingInstanceTests =
 
               Expect.equal
                   verdicts
-                  (Some [ "declined"; "row-restricted"; "group-restricted"; "merged-order-restricted" ])
+                  (Some
+                      [ "declined"
+                        "row-restricted"
+                        "group-restricted"
+                        "merged-order-restricted"
+                        "window-restricted"
+                        "relation-filtered-restricted" ])
                   "every class the family's laws distinguish is demanded"
 
           // The Phase 100 instance — 150 halting trials out of 150, the folding branch never

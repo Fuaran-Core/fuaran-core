@@ -265,9 +265,20 @@ let miniIdl: Idl =
                   Type = TEnum "StyleWeight"
                   Opt = OmitDefault(VEnum "Standard")
                   Annotations = Annotations.Empty } ] }
+          // Phase 119 follow-up (operator, 2026-09-02) — a FIXTURE-SCOPED deprecation, so the
+          // `Obsolete`-bearing kind placement is COMPILED in-repo rather than only pinned by
+          // exact-text emitter assertions. This vocabulary has no real retirement; the message
+          // says so, and no test constructs `MarkdownSpec` through the generated module.
           { Tag = "Markdown"
             Category = "Display"
-            Annotations = Annotations.Empty
+            Annotations =
+              { Annotations.Empty with
+                  Deprecated =
+                      Some
+                          { Replacement = None
+                            Message =
+                              Some
+                                  "fixture-scoped: this spike vocabulary retires nothing; the marking exists so the kind-level Obsolete placement compiles" } }
             Fields =
               [ { Name = "text"
                   Type = TUnion("TextSource", [])

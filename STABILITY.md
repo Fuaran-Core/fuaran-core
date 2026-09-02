@@ -1234,7 +1234,9 @@ rather than a copy, and they are stable in the ordinary way.
 `RowLocal` rather than `ReferenceOnly (StepNotRowLocal "sort")`. **This is the additive
 reclassification the paragraph above names**: the answers do not move, only the cost. Every other
 order-dependent verb (`Limit`, `Window`, `Distinct`, the joins and the whole-relation set ops) is
-still declined, still by type, still naming the verb.
+still declined, still by type, still naming the verb. _(Phase 120 admitted a bounded-frame `Window`
+and the filtering `Join` kinds, and moved their declines onto reasons that name the frame and the
+kind — see that section below.)_
 
 **A sort is admitted at ANY position in the pipeline, not only as the last step.** It carries no
 condition of the kind a `GroupBy` does, because it emits the rows it was handed rather than a
@@ -1265,6 +1267,10 @@ misspelled key.
 **`Window` remains declined, deliberately and by type.** The estate's fixture family records no
 footprint for it, and this phase's own gate is that a class is not widened before it is measured — so
 a bounded-frame window stays `StepNotRowLocal "window"` until a vector exists to measure it against.
+_(SUPERSEDED by Phase 120, under an operator decision of 2026-09-02 that waived the corpus-side gate
+for `Window` and `Join`: this repository vendors its own before/after vectors for both, and the
+corpus records the family's own afterwards. The rule itself — measure, then widen — is unchanged; see
+DECISIONS D24.)_
 
 ### One scale for `rowsEvaluated`, and a declined prime is `Primed` (Phase 117, `0.18.0`) — BREAKING
 
@@ -1308,6 +1314,70 @@ where they stand, and every other verb, evaluating no per-row expression, is cha
 with the before/after in that directory's `README.md`. Only the sort vector moved; the control
 vector's footprints were already on this scale, which is the control working. Re-recording them on
 the corpus side is that specification's act, not this repository's.
+
+### The bounded frame and the filtering join — `Window` and `Join` partly admitted (Phase 120, `0.18.0`)
+
+`Incremental` no longer declines every `Window` or every `Join`. **The additive reclassification the
+Phase 99 paragraph names, applied twice more**: the answers do not move, only the cost.
+
+**A `Window` whose frame is BOUNDED is admitted** — `Lag`, `Lead`, `RollingMean`, `RollingSum`, the
+four whose output for a row is a function of the rows within a fixed offset of it in its partition's
+order. `plan` classifies one as `StepIncrementality.RecomputeFrame (partitionBy, orderBy)`, at any
+position, on the same argument a `Sort` is admitted at any position: it emits the rows it was
+handed, in the order it was handed them, so every step after it reads what the reference would have
+handed it. The other eight — the ranking family, `NTile` and the three cumulative aggregates — read
+the WHOLE partition and stay declined, now with `FallBackReason.WindowFrameUnbounded fn` naming the
+function rather than `StepNotRowLocal "window"` naming the verb, because "window" alone no longer
+says which frame declined.
+
+**The appended column is RECOMPUTED over the walked frame, not read from a cache, and that is the
+honest accounting rather than a shortcut.** A window evaluates no expression, so it costs nothing on
+this seam's instrument in either path; and a row's frame moves when its NEIGHBOUR moves, which a
+delta naming one row does not say — so knowing which rows were displaced would mean recomputing the
+partitions and their orders anyway. What the admission buys is what a widened `Sort` buys: the steps
+*before* it stop re-evaluating every row. On the vendored fixture family, a filter-then-lag pipeline
+over six rows with one cell edited falls from six row-evaluations to one.
+
+**A FILTERING `Join` is admitted** — `Semi` and `Anti`, which keep or drop each left row once and
+emit it unchanged with the left schema only. `plan` classifies one as
+`StepIncrementality.FilterByRelation (kind, on)`: a `Filter` whose predicate reads a relation. The
+combining kinds — `Inner` and `Left`, which fan one left row out across every right row it matches
+and append the right schema, and `Right` / `Outer`, which additionally emit rows no left row
+produced — stay declined, now with `FallBackReason.JoinNotRowPreserving kind` naming the kind.
+
+**`IncrementalEval` gains one engine-owned field, `JoinKeys`** — per admitted join step, the joined
+relation's key cells in its own row order. It is what says a cached verdict is still valid: the delta
+describes the SOURCE, so a row it did not name can still have a different verdict when the relation
+gained or lost the key that row matched on. A relation whose key index has not moved keeps the
+reuse; one whose keys moved has every verdict recomputed at that step, with the prefix's reuse
+untouched.
+
+**One behaviour outside the two new classes did change, and it is a correctness fix.** The wholesale
+reuse of a prior result (`ReusedPrior`, for a quiet delta over a byte-identical source) now
+additionally requires that no step names a **`Ref`** relation. That reuse asks whether anything the
+answer depends on has moved, and it can only ask about the pipeline, the env and the source; a `Ref`
+relation is whatever `resolve` returns at the moment it is called, so handing back the prior result
+answered the previous relation's question with the previous relation's answer. An `Embedded`
+relation is part of the pipeline and is already pinned by `PipelineChanged`, and the convenience
+entry points resolve through `noResolve`, which refuses a `Ref` — so no pipeline that could
+previously reach this path is affected. A `Ref`-bearing pipeline now takes the ordinary path, where
+the relation is resolved and compared; an unmoved one still costs nothing, because a join evaluates
+no expression.
+
+**Four new `DataFrame` entry points**, on the terms of the six above — the incremental path computes
+through the reference implementation rather than a copy of it: `windowFrameBounded` (is this window
+function's frame bounded), `windowStep` (the reference `Window` step over a frame given as its
+schema and rows), `joinKeyIndices` (the join's key resolution, refusing the FIRST unresolvable name
+in the order the reference reports it) and `joinKeysMatch` (the join's `cellEq` key predicate, in
+which a `Null` matches nothing — not even another `Null`, unlike the canonical row token the set ops
+dedup on). `evalJoin` was refactored onto the private definitions these wrap, so there is one
+implementation of each.
+
+**Two more vectors are vendored** under `tests/Fuaran.Core.Tests/fixtures/incremental-recompute/` —
+`window-declines-in-full` and `join-declines-in-full` — each recording the declined triple its class
+produced before this phase as the measured "before", exactly as the sort vector does. See that
+directory's `README.md`, including the one spelling this repository had to invent (`{"null": true}`
+for a cell, which a `lag` column cannot avoid).
 
 ## Static output-schema derivation (Phase 112, `0.18.0`)
 

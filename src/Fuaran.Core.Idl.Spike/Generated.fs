@@ -131,7 +131,9 @@ and BoxSpec<'Msg> =
     }
 
 // Display
-and MarkdownSpec =
+/// **Deprecated.**
+/// fixture-scoped: this spike vocabulary retires nothing; the marking exists so the kind-level Obsolete placement compiles
+and [<System.Obsolete("deprecated: fixture-scoped: this spike vocabulary retires nothing; the marking exists so the kind-level Obsolete placement compiles", false)>] MarkdownSpec =
     {
       Text: TextSource
     }
