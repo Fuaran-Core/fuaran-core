@@ -834,6 +834,23 @@ let private mediaKind =
             Fields = []
             Annotations = Annotations.Empty } ] }
 
+/// `TrackKind` — what a `Media` timed-text track IS (Fuaran-UI Phase 1110).
+///
+/// Four kinds, and deliberately only four: they are the set a user agent already
+/// distinguishes, each with its own presentation and its own place in the track
+/// menu. `Subtitles` translate dialogue for a reader who cannot follow the
+/// language; `Captions` transcribe dialogue AND the non-speech sound a reader who
+/// cannot hear it would otherwise lose — which is why the two are separate kinds
+/// rather than one kind carrying a flag. `Descriptions` narrate what is visible
+/// for a reader who cannot see it; `Chapters` name the navigable sections.
+///
+/// Deliberately NOT modelled: a `metadata` kind. Its cues are rendered by no user
+/// agent and read only by script, so a declarative document naming it would state
+/// an intent no host can honour without leaving the vocabulary — the `srcSet`
+/// x-descriptor ruling, applied to a track menu.
+let private trackKind =
+    Declare.enumOf "TrackKind" [ "Subtitles"; "Captions"; "Descriptions"; "Chapters" ]
+
 /// `ColumnWidth` — a `DataGrid` column's sizing intent.
 let private columnWidth =
     { Name = "ColumnWidth"
@@ -1259,6 +1276,44 @@ let private srcSetEntryRecord =
     { Name = "SrcSetEntry"
       Fields = [ req "src" (TUnion("Binding", [ TStr ])); req "width" TInt ] }
 
+/// Phase 1110 — one timed-text track of a `Media` node. The list-of-records shape
+/// follows the `SrcSetEntry` precedent above, and for the same reason: a repeated
+/// structured slot is a record list, never a parallel family of flat fields.
+///
+/// `srcLang` is REQUIRED, and that is the one place this record is stricter than
+/// the element it renders to. HTML makes `srclang` mandatory on a subtitles track
+/// and optional elsewhere; making it mandatory here for every kind costs an
+/// author one attribute and buys a track menu whose entries a user agent can
+/// order, a speech engine can pronounce, and a reader can tell apart. A track
+/// with no language is one nothing downstream can route.
+///
+/// `label` is a `TextSource` rather than a bare string because it is CONTENT — it
+/// is the text a user agent puts in its track menu, so it is i18n-capable on the
+/// same terms as every other authored string (the `Image.caption` ruling). It is
+/// required for the same reason `MediaSpec.label` is: an unlabelled track is
+/// announced by its kind alone, which tells a reader that a captions track exists
+/// and nothing about which one it is.
+///
+/// `src` is a full `Binding<string>` and routes through the same render-time URL
+/// floor `MediaSpec.src` and `MediaKind.Video.poster` do — a track file is
+/// fetched by the browser with no user act, which is the whole of the `Media`
+/// egress class.
+///
+/// `default` omits at `false`, the ordinary polarity. It is a per-KIND election
+/// rather than a per-node one, and that constraint is a render obligation rather
+/// than a decode rule: a document electing two default captions tracks is legal
+/// bytes that no user agent can honour, so the host resolves it deterministically
+/// (first wins) instead of the decoder refusing a shape a lenient host would
+/// simply render.
+let private trackEntryRecord =
+    { Name = "TrackEntry"
+      Fields =
+        [ omit "default" TBool (VBool false)
+          req "kind" (TEnum "TrackKind")
+          req "label" (TUnion("TextSource", []))
+          req "src" (TUnion("Binding", [ TStr ]))
+          req "srcLang" TStr ] }
+
 /// A `FragmentDecl`'s two-axis effect class (omitted on the wire when pure +
 /// deterministic — modelled here as an optional field on the kind).
 let private effectClassRecord =
@@ -1449,6 +1504,27 @@ let displayKinds: IdlKind list =
       // a keyboard user cannot pause, so the default is the accessible one and
       // the DECLARATION is the deviation. `loop` omits at false, the ordinary
       // polarity.
+      //
+      // Phase 1110 — `tracks` and `transcript`, the two additions that make the
+      // charter's "captioning a11y no existing kind expresses" claim TRUE rather
+      // than merely asserted. Both are field-tier (§2.1): no new kind, no new
+      // case, so the confusion delta is structurally zero and a host that has
+      // never met either renders exactly what it rendered before.
+      //
+      // `tracks` is the second REPEATED structured slot in the vocabulary (after
+      // `Image.srcSet`) and takes the same omit-at-EMPTY-LIST rule: an absent
+      // list and an empty one denote the same document, so a slot that is empty
+      // on most media must not cost a key on most media. Absent decodes to `[]`,
+      // never to a null.
+      //
+      // `transcript` is the AUDIO floor and is an ordinary optional `TextSource`
+      // rather than an omit-at-default one, because it is CONTENT (the
+      // `Image.caption` ruling): absent means the document offers no transcript,
+      // which is a different statement from offering an empty one. It lives on
+      // the SPEC rather than on `MediaKind.Video`, because a transcript is the
+      // one accessibility affordance an audio surface needs MORE than a video
+      // one — captions ride the timeline a video already has, while a recording
+      // with no visual channel has nowhere else to put its words.
       { Tag = "Media"
         Category = "Display"
         Annotations = Annotations.Empty
@@ -1457,7 +1533,9 @@ let displayKinds: IdlKind list =
             req "kind" (TUnion("MediaKind", []))
             req "label" TS
             omit "loop" TBool (VBool false)
-            req "src" (bindingOf TStr) ] }
+            req "src" (bindingOf TStr)
+            omit "tracks" (TList(TRecord "TrackEntry")) (VList [])
+            opt "transcript" TS ] }
       { Tag = "Link"
         Category = "Display"
         Annotations = Annotations.Empty
@@ -2202,7 +2280,8 @@ let uiIdl: Idl =
           fontVoice
           motion
           liveRegionKind
-          sortDirection ]
+          sortDirection
+          trackKind ]
       Records =
         [ semanticStyleRecord
           stateBehaviourRecord
@@ -2229,6 +2308,7 @@ let uiIdl: Idl =
           buttonGroupItemRecord
           contentHashRecord
           srcSetEntryRecord
+          trackEntryRecord
           effectClassRecord ]
       Defaults = []
       // Phase 690 — the node envelope, Ordinal-ordered like every other field list.
