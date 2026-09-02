@@ -698,7 +698,7 @@ accessor public because the split made the dependency real — an independent em
 with this codec about which cases are bare, or it generates a host that disagrees on the wire —
 and that is still why it is public. What changed is where the answer comes from.
 
-**The wart above is CLOSED (Phase 116, `0.19.0`) — the hardening vocabulary is a seam a
+**The wart above is CLOSED (Phase 116, `0.18.0`) — the hardening vocabulary is a seam a
 domain supplies.** `Idl` carries a `Harden: HardenPolicy`: the kind the codegen trust
 boundary GATES, the placeholder kind (and its field) a gated-out node becomes, the literal
 TEXT case and field the markdown scrub matches, the literal VALUE case and field the URL
