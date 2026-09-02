@@ -1,5 +1,17 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-02 — D23: D12 reaffirmed — no list-valued cell, and a demand for list-valued PARAMS is not a demand for one
+
+Phase 122 asked whether the list-valued cell (`Explode` / `Split`, declined by Phase 101 under D12 and D13)
+should be admitted now that the capability catalog records demand for `ListValuedParams`. It should not, and
+the phase is retired without building. The recorded demand is for list-valued *parameters* — a multi-select
+chip driving an `in` membership test — which D12 resolves by substitution with no change to the cell model.
+A list-valued *cell* is a different thing: it reopens the closed flat scalar `Cell` set that the canonical wire
+layout, `SchemaWalk` and every conformance law are total over, for two verbs no consumer has asked for. A
+domain that needs to split a delimited string into rows does so as a source-side transform in that domain.
+D12 and D13 stand; this entry exists so the next suggestion pass does not re-derive the question from the
+same mislabelled signal.
+
 ## 2026-09-02 — D22: whether a sample was adequate is a law, not a review step
 
 **Decided.** From `0.18.0` the conformance kit carries `SampleAdequacy`: a family DECLARES what its
