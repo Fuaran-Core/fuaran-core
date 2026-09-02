@@ -1,5 +1,64 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-02 — D24: the frame, not the verb — `Window` and `Join` widened one class each, and the gate waived once
+
+**Decided.** From `0.18.0`, `Incremental.plan` admits a `Window` whose frame is BOUNDED
+(`RecomputeFrame`) and a `Join` whose kind is FILTERING (`FilterByRelation`), at any position, and
+declines the rest by type with reasons that name the window function and the join kind rather than
+the verb. D19's contract is untouched: every result still equals `DataFrame.evalPipelineWithInEnv`
+over the same source; the widening is the additive reclassification `STABILITY.md` already declared.
+
+**The gate D20 set was WAIVED for these two classes by operator decision, not met.** D20's rule is
+that a class is widened only after a fixture records what it costs, and the estate corpus still
+records no window or join footprint. The waiver's reasoning is that the consumer is not
+hypothetical — the UI tier's live-transform grids are ranked and running-total columns and a live
+table joined to a static lookup — and that the corpus vectors will be recorded from that consumer
+after the fact. So this repository measured each class against its OWN vectors: the Phase 99/115
+equivalence family, extended to generate both classes and both of their declines, and two vendored
+before/after vectors written exactly as Phase 115's sort vector was. **The rule is unchanged and the
+waiver is a one-off**: a future class still measures before it widens, and what a waiver buys is the
+order of two acts, never the absence of one.
+
+**Why a bounded frame is the line, and what it is NOT.** A bounded frame is the class whose output
+for a row is a function of a fixed neighbourhood of it in its partition's order, so it is the class a
+later phase can restrict to the rows a delta names or displaces. A partition-global one — a rank, a
+bucket, a cumulative aggregate — never can: every row's output reads every preceding row. Declaring
+the two alike would say the seam knows something about a cumulative aggregate that it does not.
+
+**A FINDING that outlives the phase, and it should be read before the boundary is treated as
+settled.** In THIS evaluator the admitted window column is recomputed wholesale over the walked
+frame, and that is correct for every window function, not only the bounded ones — a window evaluates
+no expression, so it costs nothing on the seam's instrument either way, and what actually admits a
+`Window` to the restricted walk is that it PRESERVES THE ROW SET (one row in, one row out, in input
+order, plus a column), which every member has. So the partition-global family could be admitted on
+identical terms, with the identical saving, by relaxing one predicate. It was not, because the phase's
+declared scope is the bounded frame and because the honest declaration of a step that reads the whole
+partition is not "this step answers a delta". Whether the seam should trade that honesty for the
+prefix saving on `rank` and `cumulSum` — which are precisely the two shapes the waiver's named
+consumer wants — is an OPERATOR decision, recorded here rather than taken.
+
+**Why a filtering join is admitted and a combining one is not, in the walk's own terms.** `Semi` and
+`Anti` emit each left row at most once and unchanged, with the left schema only: that is a `Filter`
+whose predicate reads a relation, and the walk's per-row model holds it with no new machinery — the
+verdict is one cell in the per-row cache a filter already writes. `Inner` and `Left` fan one left row
+out across every right row it matches, so one source row stops corresponding to one output row, and
+the walk's token-to-row invariant — which the merged order, the maintained group and the whole cache
+all rest on — no longer holds; admitting them means the in-flight row carrying a MULTISET, which is a
+change to the seam's load-bearing shape rather than an extra case. `Right` and `Outer` additionally
+emit rows for right rows no left row matched, which no left-row-local rule can produce at all.
+
+**The cached verdict is conditioned on the RELATION, not only on the delta, and this is the part that
+was nearly wrong.** A delta describes the source. A row it did not name can still have a different
+verdict, because the relation may have gained or lost the key that row matched on — so
+`IncrementalEval` carries the relation's key index per join step, and reuse is taken only while that
+index is unchanged. The same reasoning forced a correctness fix one level up: the wholesale reuse of
+a prior result (a quiet delta over a byte-identical source) now also requires that no step names a
+**`Ref`** relation, because such a relation is whatever `resolve` returns at the moment it is called
+and none of the state's three comparisons — pipeline, env, source — can see it move. That path could
+hand back the previous relation's answer, and could do so for a DECLINED join too; no shipped
+pipeline could reach it (an `Embedded` relation is pinned by `PipelineChanged`, and the convenience
+entry points refuse a `Ref` outright), which is why it went unnoticed rather than unreported.
+
 ## 2026-09-02 — D23: D12 reaffirmed — no list-valued cell, and a demand for list-valued PARAMS is not a demand for one
 
 Phase 122 asked whether the list-valued cell (`Explode` / `Split`, declined by Phase 101 under D12 and D13)
