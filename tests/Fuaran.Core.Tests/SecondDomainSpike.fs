@@ -121,6 +121,7 @@ let private runList = TList runType
 let private kind tag category fields : IdlKind =
     { Tag = tag
       Category = category
+      Annotations = Annotations.Empty
       Fields = fields }
 
 /// A slice of a second domain's node vocabulary — eleven kinds chosen to span

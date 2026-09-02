@@ -357,9 +357,21 @@ and IdlField =
 
 /// A node kind — flat `$type`-discriminated on the wire (`Category` is metadata, not serialised).
 and IdlKind =
-    { Tag: string
-      Category: string
-      Fields: IdlField list }
+    {
+        Tag: string
+        Category: string
+        Fields: IdlField list
+        /// What is true ABOUT this kind (Phase 119) — see [[IdlField.Annotations]].
+        /// [[Annotations.Empty]] for a kind that says nothing.
+        ///
+        /// This is the vocabulary-growth charter's RETIREMENT half: the charter admits
+        /// kinds, and until a whole kind could be marked, a domain retiring one had no
+        /// way to say so that survived into the generated layer — a deprecated kind was
+        /// a doc comment somebody remembered. Because [[Idl.Ops]] is an `IdlKind list`
+        /// too, a tree-op is annotatable by the same slot and every leg that walks a
+        /// kind walks an op unchanged.
+        Annotations: Annotations
+    }
 
 and IdlUnionCase =
     {
@@ -395,9 +407,43 @@ and IdlUnion =
 /// invariant cannot be stated wrongly; [[Idl.enumWireErrors]] is the backstop
 /// for a record built by hand.
 and IdlEnum =
-    { Name: string
-      Cases: string list
-      Wires: string list }
+    {
+        Name: string
+        Cases: string list
+        Wires: string list
+        /// What is true ABOUT individual CASES (Phase 119), keyed by HOST case name —
+        /// the [[Cases]] entry, not the wire string, because the host name is what the
+        /// F# backend attaches the doc block and the attribute to, and [[WireOf]]
+        /// resolves the other direction wherever the wire name is wanted.
+        ///
+        /// **SPARSE, and keyed rather than positional — deliberately, and unlike
+        /// [[Wires]].** A parallel `Annotations list` would make annotating one case of
+        /// a ten-case enum cost nine `Annotations.Empty` entries, and it would restate
+        /// exactly the parallel-arity invariant [[Declare.enumWith]] exists to make
+        /// unstatable. Phase 113 put annotations ON the member for the opposite reason —
+        /// an `Idl`-level table addressed by owner AND member can name a member the
+        /// vocabulary no longer has — and that argument does not reach here: a case is a
+        /// bare string, so there is no member to put anything on, and the smallest
+        /// namespace available is this enum's own. The residual dangling-name class is
+        /// checked by [[Declare.enumWireErrors]].
+        ///
+        /// `[]` — the default, and every declaration written before Phase 119 — means no
+        /// case says anything. Read it through [[AnnotationsOf]] rather than by lookup.
+        CaseAnnotations: (string * Annotations) list
+    }
+
+    /// The annotation set declared for a HOST case name, or [[Annotations.Empty]] when
+    /// the enum says nothing about it. Total, like [[WireOf]]: an unknown case name
+    /// answers "nothing declared", and [[Declare.enumWireErrors]] is what reports one.
+    member this.AnnotationsOf(case: string) : Annotations =
+        this.CaseAnnotations
+        |> List.tryPick (fun (c, a) -> if c = case then Some a else None)
+        |> Option.defaultValue Annotations.Empty
+
+    /// Whether any case of this enum says anything — the condition the emitters and the
+    /// artifact branch on, so "absent is the default and omitted" has one definition.
+    member this.HasCaseAnnotations: bool =
+        this.CaseAnnotations |> List.exists (fun (_, a) -> not a.IsEmpty)
 
     /// The wire string for a host case name — the case name itself when the enum
     /// declares no mapping. Unknown case names come back unchanged, which keeps
@@ -548,7 +594,8 @@ module Declare =
     let enumOf (name: string) (cases: string list) : IdlEnum =
         { Name = name
           Cases = cases
-          Wires = [] }
+          Wires = []
+          CaseAnnotations = [] }
 
     /// An enum whose wire strings differ from its host case names, declared as
     /// `(case, wire)` pairs. Taking PAIRS rather than two lists is the point: the
@@ -558,7 +605,27 @@ module Declare =
     let enumWith (name: string) (cases: (string * string) list) : IdlEnum =
         { Name = name
           Cases = cases |> List.map fst
-          Wires = cases |> List.map snd }
+          Wires = cases |> List.map snd
+          CaseAnnotations = [] }
+
+    /// Declare what is true ABOUT some of an enum's cases (Phase 119), by HOST case
+    /// name. Sparse — name only the cases that say something; the rest read as
+    /// [[Annotations.Empty]] through [[IdlEnum.AnnotationsOf]].
+    ///
+    /// Present as a helper rather than left to `{ e with CaseAnnotations = … }` for the
+    /// reason [[enumWith]] is: it is the one construction site that can check the case
+    /// exists at the moment the claim is made, rather than leaving it to
+    /// [[enumWireErrors]] to find later. A name the enum does not declare is refused
+    /// here — an annotation on nothing is a typo, not a declaration.
+    let enumAnnotate (annotations: (string * Annotations) list) (e: IdlEnum) : IdlEnum =
+        match annotations |> List.filter (fun (c, _) -> not (List.contains c e.Cases)) with
+        | [] -> { e with CaseAnnotations = annotations }
+        | unknown ->
+            failwithf
+                "enum '%s': cannot annotate case(s) %s — the enum declares %A"
+                e.Name
+                (unknown |> List.map fst |> String.concat ", ")
+                e.Cases
 
     /// Well-formedness of every enum's case↔wire mapping — the backstop for a
     /// record built by literal rather than through [[enumOf]] / [[enumWith]].
@@ -584,7 +651,20 @@ module Declare =
                   not (List.isEmpty wires)
                   && List.length (List.distinct wires) <> List.length wires
               then
-                  sprintf "enum '%s': two cases share a wire string — decoding would not be invertible" e.Name ]
+                  sprintf "enum '%s': two cases share a wire string — decoding would not be invertible" e.Name
+
+              // Phase 119 — the one class the sparse, keyed [[IdlEnum.CaseAnnotations]]
+              // shape admits and the positional one could not: a name that is not a case.
+              // [[Declare.enumAnnotate]] refuses it at the construction site; this is the
+              // backstop for a record built by literal, exactly as the arity check above is.
+              let annotated = e.CaseAnnotations |> List.map fst
+
+              for c in annotated do
+                  if not (List.contains c cases) then
+                      sprintf "enum '%s': annotation names case '%s', which the enum does not declare" e.Name c
+
+              if List.length (List.distinct annotated) <> List.length annotated then
+                  sprintf "enum '%s': two annotation entries name the same case" e.Name ]
 
     /// Well-formedness of the declared wire shape (Phases 108/109). Empty list ⇒
     /// well-formed. The discriminator shares an object with a tagged body's own

@@ -77,6 +77,7 @@
          untouched, every other surface renders them. Appended here (append-only
          registration), after the wire-shape family it shares its fixture shape with. -->
     <Compile Include="IdlAnnotationTests.fs" />
+    <Compile Include="IdlKindAnnotationTests.fs" />
     <Compile Include="IdlSchemaTests.fs" />
     <Compile Include="IdlOpTests.fs" />
     <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named

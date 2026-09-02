@@ -257,6 +257,7 @@ let tests =
                             [ AddKind
                                   { Tag = "Badge"
                                     Category = "Display"
+                                    Annotations = Annotations.Empty
                                     Fields = [] } ]
                     with
                     | Ok _ -> failtest "an existing kind was re-declared"

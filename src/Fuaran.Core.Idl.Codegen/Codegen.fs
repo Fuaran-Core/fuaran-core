@@ -467,6 +467,12 @@ module Gen =
 
         (idl.Unions
          |> List.exists (fun u -> u.Cases |> List.exists (fun c -> (obsoleteAttr c.Annotations).IsSome)))
+        // Phase 119 — a kind, a tree-op, and an enum CASE each earn the attribute on the
+        // same terms, so each is a reason for the suppression on the same terms too.
+        || (idl.Kinds |> List.exists (fun k -> (obsoleteAttr k.Annotations).IsSome))
+        || (idl.Ops |> List.exists (fun o -> (obsoleteAttr o.Annotations).IsSome))
+        || (idl.Enums
+            |> List.exists (fun e -> e.CaseAnnotations |> List.exists (fun (_, a) -> (obsoleteAttr a).IsSome)))
         || (fieldSets
             |> List.exists (List.exists (fun f -> (obsoleteAttr f.Annotations).IsSome)))
 
@@ -495,8 +501,25 @@ module Gen =
 
         prefix + sprintf "      %s: %s" (pascal f.Name) ty
 
+    /// Phase 119 — an enum case takes its annotations exactly where a UNION case takes
+    /// them: the doc block above the bar, the single attribute INLINE after it, which is
+    /// where F# accepts an attribute on a DU case. An unannotated enum emits the line it
+    /// always did.
+    let private enumCaseDecl (e: IdlEnum) (case: string) =
+        let a = e.AnnotationsOf case
+
+        let docs =
+            annotationDocLines "    " a |> List.map (fun l -> l + "\n") |> String.concat ""
+
+        let attr =
+            match obsoleteAttr a with
+            | Some x -> x + " "
+            | None -> ""
+
+        docs + "    | " + attr + case
+
     let private enumDecl (e: IdlEnum) =
-        sprintf "type %s =\n%s" e.Name (e.Cases |> List.map (sprintf "    | %s") |> String.concat "\n")
+        sprintf "type %s =\n%s" e.Name (e.Cases |> List.map (enumCaseDecl e) |> String.concat "\n")
 
     let private unionCaseDecl (msg: Set<string>) (c: IdlUnionCase) =
         let fsType = fsTypeIn msg
@@ -542,9 +565,25 @@ module Gen =
             (u.Cases |> List.map (unionCaseDecl msg) |> String.concat "\n")
 
     let private kindDecl (msg: Set<string>) (k: IdlKind) =
+        // Phase 119 — the kind's own annotations sit on the generated SPEC TYPE: the doc
+        // block below the category comment (so it stays adjacent to the declaration it
+        // documents) and the single attribute on its own line above `type`, which is
+        // where F# accepts an attribute on a type definition.
+        let docs =
+            annotationDocLines "" k.Annotations
+            |> List.map (fun l -> l + "\n")
+            |> String.concat ""
+
+        let attr =
+            match obsoleteAttr k.Annotations with
+            | Some a -> a + "\n"
+            | None -> ""
+
         sprintf
-            "// %s\ntype %sSpec%s =\n    {\n%s\n    }"
+            "// %s\n%s%stype %sSpec%s =\n    {\n%s\n    }"
             k.Category
+            docs
+            attr
             k.Tag
             (declParams msg (k.Tag + "Spec") [])
             (k.Fields |> List.map (fsField msg) |> String.concat "\n")
@@ -1531,9 +1570,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
         let rqaEnum (e: IdlEnum) =
             // Phase 945 — declared docs on the enum type and its cases.
+            // Phase 119 — a case's declared ANNOTATIONS follow, in the same two places a
+            // union case takes them: doc lines above the bar, the single attribute inline
+            // after it. An unannotated enum emits exactly the lines it always did.
             let cases =
                 e.Cases
-                |> List.map (fun c -> doc ("case:" + e.Name + "." + c) "    " + sprintf "    | %s" c)
+                |> List.map (fun c -> doc ("case:" + e.Name + "." + c) "    " + enumCaseDecl e c)
                 |> String.concat "\n"
 
             doc ("type:" + e.Name) ""
@@ -1551,7 +1593,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         let typeGroup =
             let unionBody (u: IdlUnion) =
                 docOpt ("type:" + u.Name),
-                true,
+                [ "[<RequireQualifiedAccess>]" ],
                 sprintf
                     "%s%s =\n%s"
                     u.Name
@@ -1568,21 +1610,30 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
             let recordBody (r: IdlRecord) =
                 docOpt ("type:" + r.Name),
-                false,
+                [],
                 sprintf "%s%s =\n    {\n%s\n    }" r.Name (declParams msg r.Name []) (fieldDecls r.Name r.Fields)
 
             let specBody (k: IdlKind) =
+                // Phase 119 — the kind's own declared annotations: the doc block joins
+                // the category comment and any Phase-945 declared doc above the
+                // declaration, and the single `Obsolete` joins the attribute list, which
+                // is what puts it in the position an `and`-joined member needs.
+                let annDocs = annotationDocLines "" k.Annotations
+
                 let comment =
-                    match docOpt ("type:" + k.Tag + "Spec") with
-                    | Some d -> Some("// " + k.Category + "\n" + d)
-                    | None -> Some("// " + k.Category)
+                    ("// " + k.Category) :: (docOpt ("type:" + k.Tag + "Spec") |> Option.toList)
+                    @ annDocs
+                    |> String.concat "\n"
+                    |> Some
+
+                let attrs = obsoleteAttr k.Annotations |> Option.toList
 
                 // Phase 945 — a projected kind's record body is the projection's, verbatim.
                 match sup.KindProjections.TryFind k.Tag with
-                | Some proj -> comment, false, proj.SpecDecl
+                | Some proj -> comment, attrs, proj.SpecDecl
                 | None ->
                     comment,
-                    false,
+                    attrs,
                     sprintf
                         "%sSpec%s =\n    {\n%s\n    }"
                         k.Tag
@@ -1591,7 +1642,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
             let nodeKindBody =
                 None,
-                true,
+                [ "[<RequireQualifiedAccess>]" ],
                 "NodeKind"
                 + declParams msg "NodeKind" []
                 + " =\n"
@@ -1604,35 +1655,42 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // envelope keeps the original one-liner, so nothing about it changes.
             let nodeBody =
                 if List.isEmpty idl.NodeFields then
-                    None, false, sprintf "Node%s = { Id: string; Kind: NodeKind%s }" nodeArgs kindArgs
+                    None, [], sprintf "Node%s = { Id: string; Kind: NodeKind%s }" nodeArgs kindArgs
                 else
                     let fields =
                         "      Id: string"
                         :: sprintf "      Kind: NodeKind%s" kindArgs
                         :: (idl.NodeFields |> List.map (fsField msg))
 
-                    None, false, sprintf "Node%s =\n    {\n%s\n    }" nodeArgs (String.concat "\n" fields)
+                    None, [], sprintf "Node%s =\n    {\n%s\n    }" nodeArgs (String.concat "\n" fields)
 
-            // (comment, requiresQualifiedAccess, keyword-less body). The first member leads with
-            // `type` (RQA attribute on its own preceding line); the rest are `and`-joined.
+            // (comment, attributes, keyword-less body). The first member leads with `type`
+            // and carries its attributes on their own preceding lines; the rest are
+            // `and`-joined and carry theirs inline after the `and`, which is where F#
+            // accepts an attribute on a member of a recursive type group.
+            //
+            // A LIST since Phase 119 rather than the `requiresQualifiedAccess` flag it
+            // was: a kind can now earn an `Obsolete` beside — or instead of — the
+            // `RequireQualifiedAccess` the unions carry, and a boolean cannot say that.
+            // `[]` and `[ "[<RequireQualifiedAccess>]" ]` reproduce the two shapes the
+            // flag had, so every unannotated vocabulary's emission is byte-identical.
             let members =
                 (unions |> List.map unionBody)
                 @ (records |> List.map recordBody)
                 @ (kinds |> List.map specBody)
                 @ [ nodeKindBody; nodeBody ]
 
-            let render i (comment: string option, rqa: bool, body: string) =
+            let render i (comment: string option, attrs: string list, body: string) =
                 let commentPrefix =
                     match comment with
                     | Some c -> c + "\n"
                     | None -> ""
 
                 let keyword =
-                    match i = 0, rqa with
-                    | true, true -> "[<RequireQualifiedAccess>]\ntype"
-                    | true, false -> "type"
-                    | false, true -> "and [<RequireQualifiedAccess>]"
-                    | false, false -> "and"
+                    if i = 0 then
+                        (attrs |> List.map (fun a -> a + "\n") |> String.concat "") + "type"
+                    else
+                        "and" + (attrs |> List.map (fun a -> " " + a) |> String.concat "")
 
                 commentPrefix + keyword + " " + body
 
@@ -2534,6 +2592,20 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | [] -> ""
         | ls -> (ls |> String.concat "\n") + "\n"
 
+    /// Phase 119 — the header a kind's own annotations earn, on the two generated
+    /// functions that ARE the kind on this side: its spec encoder and its spec decoder.
+    /// The comment NAMES the kind, for the same reason a field's names the field — a
+    /// `@deprecated` JSDoc on `encFooSpec` would tell tooling the ENCODER is deprecated,
+    /// which is false. Combined with the field header, so an annotated kind whose fields
+    /// are also annotated says both, kind first.
+    let private tsKindAnnotationHeader (k: IdlKind) : string =
+        let lines = tsAnnotationLines "" k.Tag k.Annotations
+
+        (match lines with
+         | [] -> ""
+         | ls -> (ls |> String.concat "\n") + "\n")
+        + tsFieldAnnotationHeader k.Tag k.Fields
+
     let private tsUnionEncoder (disc: string) (tokens: HardenPolicy) (u: IdlUnion) : string =
         let argList =
             match u.Params with
@@ -2604,7 +2676,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// into the one flat object.
     let private tsSpecEncoder (disc: string) (flat: bool) (k: IdlKind) : string =
         let pieces = k.Fields |> List.map (tsSpecPieceOf disc "s") |> String.concat ", "
-        let ann = tsFieldAnnotationHeader k.Tag k.Fields
+        let ann = tsKindAnnotationHeader k
 
         if flat then
             ann + "function enc" + k.Tag + "SpecPairs(s) {\n  return [" + pieces + "];\n}"
@@ -2712,7 +2784,24 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // on this side, so the decoder's closed set is the wire strings.
         let cases = e.WireCases |> List.map tsSourceStr |> String.concat ", "
 
-        "const dec" + e.Name + " = dEnum(" + tsSourceStr e.Name + ", [" + cases + "]);"
+        // Phase 119 — a case's annotations render above the one line this backend emits
+        // for the whole enum, each naming `<Enum>."<wire>"`: the emission is a single
+        // `dEnum` call with no per-case declaration to sit on, and a case here IS its
+        // wire string. Absent for an unannotated enum, so the emitted JS is unchanged.
+        let ann =
+            e.Cases
+            |> List.collect (fun c -> tsAnnotationLines "" (e.Name + ".\"" + e.WireOf c + "\"") (e.AnnotationsOf c))
+
+        (match ann with
+         | [] -> ""
+         | ls -> (ls |> String.concat "\n") + "\n")
+        + "const dec"
+        + e.Name
+        + " = dEnum("
+        + tsSourceStr e.Name
+        + ", ["
+        + cases
+        + "]);"
 
     let private tsUnionDecoder (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
         let argList =
@@ -2785,7 +2874,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         + ";\n}"
 
     let private tsSpecDecoder (disc: string) (k: IdlKind) =
-        tsFieldAnnotationHeader k.Tag k.Fields
+        tsKindAnnotationHeader k
         + "function dec"
         + k.Tag
         + "Spec(j) {\n  const fs = dObj(j);\n  return "

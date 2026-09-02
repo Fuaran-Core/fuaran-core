@@ -50,6 +50,7 @@ let private plainIdl: Idl =
     { Kinds =
         [ { Tag = "Note"
             Category = "leaf"
+            Annotations = Annotations.Empty
             Fields = [ f "label" TStr Required; f "src" (TUnion("Src", [])) Optional ] } ]
       Unions =
         [ { Name = "Src"
@@ -77,6 +78,7 @@ let private withAnnotations (caseAnn: Annotations) (fieldAnn: Annotations) : Idl
         Kinds =
             [ { Tag = "Note"
                 Category = "leaf"
+                Annotations = Annotations.Empty
                 Fields =
                   [ f "label" TStr Required |> annotated fieldAnn
                     f "src" (TUnion("Src", [])) Optional ] } ]

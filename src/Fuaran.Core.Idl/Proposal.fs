@@ -365,7 +365,8 @@ module Proposal =
                         AddKind
                             { Tag = t
                               Category = defaultArg (str "category" k) "proposed"
-                              Fields = fs })
+                              Fields = fs
+                              Annotations = Annotations.Empty })
         | Some "addUnionCase" ->
             match str "union" v, field "case" v with
             | Some u, Some c ->

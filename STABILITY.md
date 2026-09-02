@@ -783,6 +783,58 @@ shape can name a member the vocabulary no longer has, which is a defect class th
 represent, and every emitter would have to thread the lookup rather than reading the member it is
 already holding.
 
+### Kind and enum-case annotations, and the declared retirement path (Phase 119, `0.18.0`)
+
+`IdlKind` and `IdlEnum` now carry annotations too, on the same bounded set and the same terms as
+Phase 113's cases and fields. `IdlKind` gains `Annotations`; because `Idl.Ops` is an `IdlKind list`,
+a tree-op is annotatable by the same slot. `IdlEnum` gains `CaseAnnotations` — `(hostCase,
+Annotations) list`, **sparse and keyed rather than positional** like `Wires`, because annotating one
+case of a ten-case set must not cost nine empty entries, and because the parallel-arity invariant is
+exactly what `Declare.enumWith` exists to make unstatable. Build it with `Declare.enumAnnotate`,
+which refuses a case the enum does not declare; `Declare.enumWireErrors` is the backstop for a
+record built by literal, and `IdlEnum.AnnotationsOf` is how the set is read.
+
+**The wire is untouched, as before.** `Encode` and `Decode` read neither; the artifact omits an
+empty set and omits `caseAnnotations` entirely when no case says anything, so every pre-`0.18.0`
+`idl.json` is byte-identical and `Artifact.version` does not move. `caseAnnotations` is keyed on the
+WIRE string, not the host case name: `cases` is the one key every revision carries, so a
+third-party reader resolves an entry without consulting the conditional `hostCases`. `Artifact.parse`
+reads both back, and **refuses** a `caseAnnotations` entry naming a case the enum does not declare
+rather than dropping it silently.
+
+**What the generated declaration gains.** F# puts a kind's doc block above its generated spec record
+and the single `[<System.Obsolete(msg, false)>]` on the declaration — on its own line above `type`
+for the group's first member, inline after the `and` for every other, which is the position
+`[<RequireQualifiedAccess>]` already occupies there. An enum case takes the union-case placement:
+doc block above the bar, attribute inline after it. TypeScript names the kind at its spec encoder
+AND its spec decoder, and names an enum case as `<Enum>."<wire>"` above the enum's decoder — line
+comments, for the reason Phase 113 records.
+
+#### The retirement clause of the vocabulary-growth charter
+
+The charter admits kinds; this is how one leaves, and it takes **two releases**:
+
+1. **Mark.** The retiring kind (or enum case) gains `Deprecated`, naming a replacement where there
+   is one. Nothing on the wire moves, every document still decodes, every conformant emitter stays
+   conformant, and the stability classifier grades it `Additive`. A consumer of the generated F#
+   sees FS0044 — a warning it escalates with `--warnaserror:44` or silences with `--nowarn:44` on
+   its own schedule. **The marking release is never a breaking bump**, which is the whole point: if
+   it were, no vocabulary could afford to announce a retirement before performing it.
+2. **Remove.** The next release deletes the kind. THAT is the breaking event — `KindRemoved`,
+   graded as the wire event it is — and it is priced where the cost actually falls.
+
+Withdrawing a marking between the two (an un-retirement) is `HostSurfaceOnly`, not breaking: the
+generated declaration moved and the wire did not. Skipping step 1 is not forbidden by anything
+mechanical, and is what the clause exists to make unnecessary: a removal with no marking release
+before it gives consumers no compiler-visible warning at any point.
+
+**Source-breaking for a consumer that builds `IdlKind` or `IdlEnum` by record literal** (FS0764) —
+the same pre-1.0 posture, and the same two shapes a caller needs (`Annotations.Empty`,
+`CaseAnnotations = []`, or the `Declare` helpers, which is why they exist). On the codegen side
+`Diff.Change` gains two cases (`KindAnnotationsChanged`, `EnumCaseAnnotationsChanged`),
+`Diff.Snapshot` gains `KindAnnotations` / `OpAnnotations`, and `Diff.EnumSnap` gains
+`CaseAnnotations` — breaking for a consumer that matches or destructures them exhaustively.
+
 ### The artifact reads back; the declaration triple (Phase 114, `0.18.0`)
 
 `Artifact.parse` is the total inverse of `Artifact.render`, and `SupportArtifact.render` /

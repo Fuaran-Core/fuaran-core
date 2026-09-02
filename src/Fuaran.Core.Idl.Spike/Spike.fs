@@ -169,6 +169,7 @@ let miniIdl: Idl =
       Kinds =
         [ { Tag = "Heading"
             Category = "Display"
+            Annotations = Annotations.Empty
             Fields =
               [ { Name = "level"
                   Type = TInt
@@ -184,6 +185,7 @@ let miniIdl: Idl =
                   Annotations = Annotations.Empty } ] }
           { Tag = "Badge"
             Category = "Display"
+            Annotations = Annotations.Empty
             Fields =
               [ { Name = "label"
                   Type = TUnion("TextSource", [])
@@ -195,6 +197,7 @@ let miniIdl: Idl =
                   Annotations = Annotations.Empty } ] }
           { Tag = "Button"
             Category = "Input"
+            Annotations = Annotations.Empty
             Fields =
               [ { Name = "disabled"
                   Type = TUnion("Binding", [ TBool ])
@@ -218,6 +221,7 @@ let miniIdl: Idl =
                   Annotations = Annotations.Empty } ] }
           { Tag = "Metric"
             Category = "Display"
+            Annotations = Annotations.Empty
             Fields =
               [ { Name = "emphasis"
                   Type = TEnum "Emphasis"
@@ -263,14 +267,27 @@ let miniIdl: Idl =
                   Annotations = Annotations.Empty } ] }
           { Tag = "Markdown"
             Category = "Display"
+            Annotations = Annotations.Empty
             Fields =
               [ { Name = "text"
                   Type = TUnion("TextSource", [])
                   Opt = Required
                   Annotations = Annotations.Empty } ] }
           // The unified `Box` container (was `Card` / `Stack` / `GridLayout` / `Dashboard`).
+          //
+          // Phase 119 — annotated at KIND level, for the reason `Binding.Computed` and
+          // `Tabs.onCommit` are annotated at case and field level: it is TRUE of this
+          // vocabulary — the line above already records that `Box` is the 0.2.0
+          // unification, so `0.2.0` is the version the kind first appeared in — and
+          // compiling `Generated.fs` is what proves the emitted doc block is valid F# in
+          // the placement this phase adds, above an `and`-joined member of the
+          // type-recursion group. `Since` earns no attribute, by design: there is nothing
+          // for a compiler to say about a fact concerning the past.
           { Tag = "Box"
             Category = "Layout"
+            Annotations =
+              { Annotations.Empty with
+                  Since = Some "0.2.0" }
             Fields =
               [ { Name = "children"
                   Type = TList TNode
@@ -303,6 +320,7 @@ let miniIdl: Idl =
           // recursion that would break a naive threading.
           { Tag = "Tabs"
             Category = "Layout"
+            Annotations = Annotations.Empty
             Fields =
               [ { Name = "children"
                   Type = TList TNode

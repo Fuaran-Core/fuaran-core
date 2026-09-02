@@ -55,6 +55,7 @@ let private annotated (ann: Annotations) (field: IdlField) = { field with Annota
 let private kind tag category fields : IdlKind =
     { Tag = tag
       Category = category
+      Annotations = Annotations.Empty
       Fields = fields }
 
 let private case tag fields : IdlUnionCase =

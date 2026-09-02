@@ -188,35 +188,41 @@ module Artifact =
     /// about the vocabulary itself that every consumer wants — a third-party codec
     /// reading this artifact needs to know a case is being retired quite as much as
     /// the reference host does.
+    /// The annotation set's own object — the value under an `annotations` key, and
+    /// (Phase 119) the value under each entry of an enum's `caseAnnotations` map. Split
+    /// out from [[annotationsJson]] so the two placements render one shape rather than
+    /// two that have to be kept equal.
+    let private annotationBlock (a: Annotations) : JVal =
+        let deprecated =
+            match a.Deprecated with
+            | None -> []
+            | Some d ->
+                [ "deprecated",
+                  JObj(
+                      (match d.Replacement with
+                       | Some r -> [ "replacement", JStr r ]
+                       | None -> [])
+                      @ (match d.Message with
+                         | Some m -> [ "message", JStr m ]
+                         | None -> [])
+                  ) ]
+
+        JObj(
+            deprecated
+            @ (if a.InProcessOnly then
+                   [ "inProcessOnly", JBool true ]
+               else
+                   [])
+            @ (match a.Since with
+               | Some v -> [ "since", JStr v ]
+               | None -> [])
+        )
+
     let private annotationsJson (a: Annotations) : (string * JVal) list =
         if a.IsEmpty then
             []
         else
-            let deprecated =
-                match a.Deprecated with
-                | None -> []
-                | Some d ->
-                    [ "deprecated",
-                      JObj(
-                          (match d.Replacement with
-                           | Some r -> [ "replacement", JStr r ]
-                           | None -> [])
-                          @ (match d.Message with
-                             | Some m -> [ "message", JStr m ]
-                             | None -> [])
-                      ) ]
-
-            [ "annotations",
-              JObj(
-                  deprecated
-                  @ (if a.InProcessOnly then
-                         [ "inProcessOnly", JBool true ]
-                     else
-                         [])
-                  @ (match a.Since with
-                     | Some v -> [ "since", JStr v ]
-                     | None -> [])
-              ) ]
+            [ "annotations", annotationBlock a ]
 
     /// Field lists keep their AUTHORED order (see the module's ordering contract).
     let private fieldsJson (fs: IdlField list) : JVal =
@@ -231,10 +237,15 @@ module Artifact =
         |> JArr
 
     let private kindJson (k: IdlKind) : JVal =
-        JObj
+        JObj(
             [ "tag", JStr k.Tag
               "category", JStr k.Category
               "fields", fieldsJson k.Fields ]
+            // Phase 119 — the kind's OWN annotations, spliced by the same helper and on
+            // the same terms as a field's: omitted entirely when the kind says nothing,
+            // so every pre-119 `idl.json` is byte-identical.
+            @ annotationsJson k.Annotations
+        )
 
     let private unionJson (policy: HardenPolicy) (u: IdlUnion) : JVal =
         let cases =
@@ -342,7 +353,20 @@ module Artifact =
                 { u with
                     Cases = u.Cases |> List.map (fun c -> { c with Fields = canonFields c.Fields }) })
             |> sortedBy _.Name
-          Enums = idl.Enums |> sortedBy _.Name
+          Enums =
+            idl.Enums
+            // Phase 119 — `CaseAnnotations` is an ADDRESSED collection (like
+            // `Harden.TransparentUnions`), so the authored order carries nothing and the
+            // projection cannot reproduce it: it is sorted by the key the artifact writes
+            // — the WIRE string — and an entry that says nothing is dropped, because the
+            // projection omits it and `parse` could never bring it back.
+            |> List.map (fun e ->
+                { e with
+                    CaseAnnotations =
+                        e.CaseAnnotations
+                        |> List.filter (fun (_, a) -> not a.IsEmpty)
+                        |> List.sortWith (fun (a, _) (b, _) -> ordinal (e.WireOf a) (e.WireOf b)) })
+            |> sortedBy _.Name
           Records =
             idl.Records
             |> List.map (fun r -> { r with Fields = canonFields r.Fields })
@@ -401,6 +425,24 @@ module Artifact =
                                  []
                              else
                                  [ "hostCases", JArr(e.Cases |> List.map JStr) ])
+                          // Phase 119 — per-case annotations, keyed by the WIRE string
+                          // rather than the host case name. `cases` is the one key every
+                          // revision carries, so a third-party reader resolves an entry
+                          // without consulting the conditional `hostCases`; and an
+                          // annotation is a statement about the vocabulary that every
+                          // consumer wants, not a hostSurface declaration a non-F#
+                          // reader must ignore (the argument at [[annotationsJson]]).
+                          // Emitted only when some case says something, so every pre-119
+                          // artefact is byte-identical.
+                          @ (if e.HasCaseAnnotations then
+                                 [ "caseAnnotations",
+                                   JObj(
+                                       e.CaseAnnotations
+                                       |> List.filter (fun (_, a) -> not a.IsEmpty)
+                                       |> List.map (fun (c, a) -> e.WireOf c, annotationBlock a)
+                                   ) ]
+                             else
+                                 [])
                       ))
               )
               "records",
@@ -691,47 +733,52 @@ module Artifact =
             | None -> Error "omitDefault has no 'default'"
         | Ok other -> Error("unknown optionality '" + other + "'")
 
-    /// The annotation set, or [[Annotations.Empty]] when the key is absent — the
-    /// projection omits an empty set entirely, so absence is the default and not a gap.
+    /// One annotation-set OBJECT — the value under an `annotations` key, and (Phase 119)
+    /// the value under each entry of an enum's `caseAnnotations` map. The inverse of
+    /// [[annotationBlock]], and split out for the same reason it was.
+    let private readAnnotationBlock (block: JVal) : Result<Annotations, string> =
+        let optStr name =
+            match atKey name block with
+            | None -> Ok None
+            | Some(JStr s) -> Ok(Some s)
+            | Some _ -> Error("'" + name + "' is not a string")
+
+        let deprecated =
+            match atKey "deprecated" block with
+            | None -> Ok None
+            | Some d ->
+                let slot name =
+                    match atKey name d with
+                    | None -> Ok None
+                    | Some(JStr s) -> Ok(Some s)
+                    | Some _ -> Error("deprecated '" + name + "' is not a string")
+
+                slot "replacement"
+                |> Result.bind (fun r -> slot "message" |> Result.map (fun m -> Some { Replacement = r; Message = m }))
+
+        let inProcessOnly =
+            match atKey "inProcessOnly" block with
+            | None -> Ok false
+            | Some(JBool b) -> Ok b
+            | Some _ -> Error "'inProcessOnly' is not a boolean"
+
+        deprecated
+        |> Result.bind (fun d ->
+            inProcessOnly
+            |> Result.bind (fun ipo ->
+                optStr "since"
+                |> Result.map (fun since ->
+                    { Deprecated = d
+                      InProcessOnly = ipo
+                      Since = since })))
+
+    /// The annotation set under an owner's `annotations` key, or [[Annotations.Empty]]
+    /// when the key is absent — the projection omits an empty set entirely, so absence
+    /// is the default and not a gap.
     let private readAnnotations (owner: JVal) : Result<Annotations, string> =
         match atKey "annotations" owner with
         | None -> Ok Annotations.Empty
-        | Some block ->
-            let optStr name =
-                match atKey name block with
-                | None -> Ok None
-                | Some(JStr s) -> Ok(Some s)
-                | Some _ -> Error("'" + name + "' is not a string")
-
-            let deprecated =
-                match atKey "deprecated" block with
-                | None -> Ok None
-                | Some d ->
-                    let slot name =
-                        match atKey name d with
-                        | None -> Ok None
-                        | Some(JStr s) -> Ok(Some s)
-                        | Some _ -> Error("deprecated '" + name + "' is not a string")
-
-                    slot "replacement"
-                    |> Result.bind (fun r ->
-                        slot "message" |> Result.map (fun m -> Some { Replacement = r; Message = m }))
-
-            let inProcessOnly =
-                match atKey "inProcessOnly" block with
-                | None -> Ok false
-                | Some(JBool b) -> Ok b
-                | Some _ -> Error "'inProcessOnly' is not a boolean"
-
-            deprecated
-            |> Result.bind (fun d ->
-                inProcessOnly
-                |> Result.bind (fun ipo ->
-                    optStr "since"
-                    |> Result.map (fun since ->
-                        { Deprecated = d
-                          InProcessOnly = ipo
-                          Since = since })))
+        | Some block -> readAnnotationBlock block
 
     let private readField (v: JVal) : Result<IdlField, string> =
         strAt "name" v
@@ -760,10 +807,13 @@ module Artifact =
             strAt "category" v
             |> Result.bind (fun category ->
                 readFields v
-                |> Result.map (fun fields ->
-                    { Tag = tag
-                      Category = category
-                      Fields = fields })))
+                |> Result.bind (fun fields ->
+                    readAnnotations v
+                    |> Result.map (fun ann ->
+                        { Tag = tag
+                          Category = category
+                          Fields = fields
+                          Annotations = ann }))))
 
     let private readUnion (v: JVal) : Result<IdlUnion, string> =
         strAt "name" v
@@ -810,6 +860,30 @@ module Artifact =
     /// `cases` is always the WIRE contract; `hostCases` appears only for a wire-mapped
     /// enum. So an entry with no `hostCases` is the identity mapping (`Wires = []`),
     /// which is what keeps a pre-mapping vocabulary's read exactly what it was.
+    /// Per-case annotations (Phase 119), keyed on the WIRE string the projection writes
+    /// and resolved back to the HOST case name the model keys on. A wire string the enum
+    /// does not declare is an ERROR rather than a silently dropped entry: the round-trip
+    /// law is what this reader exists to satisfy, and a hand-edited artifact naming a
+    /// case that is not there is the one thing the sparse shape can get wrong.
+    let private readCaseAnnotations (e: IdlEnum) (v: JVal) : Result<(string * Annotations) list, string> =
+        match atKey "caseAnnotations" v with
+        | None -> Ok []
+        | Some(JObj entries) ->
+            entries
+            |> List.map (fun (wire, block) ->
+                match e.CaseOf wire with
+                | None ->
+                    Error(
+                        "enum '"
+                        + e.Name
+                        + "': 'caseAnnotations' names case '"
+                        + wire
+                        + "', which it does not declare"
+                    )
+                | Some case -> readAnnotationBlock block |> Result.map (fun a -> case, a))
+            |> sequence
+        | Some _ -> Error("enum '" + e.Name + "': 'caseAnnotations' is not an object")
+
     let private readEnum (v: JVal) : Result<IdlEnum, string> =
         strAt "name" v
         |> Result.bind (fun name ->
@@ -820,7 +894,8 @@ module Artifact =
                     Ok
                         { Name = name
                           Cases = wireCases
-                          Wires = [] }
+                          Wires = []
+                          CaseAnnotations = [] }
                 | Some _ ->
                     readStrings "hostCases" v
                     |> Result.bind (fun hostCases ->
@@ -828,9 +903,16 @@ module Artifact =
                             Ok
                                 { Name = name
                                   Cases = hostCases
-                                  Wires = wireCases }
+                                  Wires = wireCases
+                                  CaseAnnotations = [] }
                         else
-                            Error("enum '" + name + "': 'hostCases' and 'cases' differ in length"))))
+                            Error("enum '" + name + "': 'hostCases' and 'cases' differ in length")))
+            // The case↔wire mapping has to be in hand before an entry keyed on a wire
+            // string can be resolved, so the annotations are read into the enum rather
+            // than alongside it.
+            |> Result.bind (fun e ->
+                readCaseAnnotations e v
+                |> Result.map (fun anns -> { e with CaseAnnotations = anns })))
 
     let private readRecord (v: JVal) : Result<IdlRecord, string> =
         strAt "name" v

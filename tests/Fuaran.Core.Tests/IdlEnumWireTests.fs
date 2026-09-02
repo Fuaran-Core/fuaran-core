@@ -36,6 +36,7 @@ let private idl: Idl =
     { Kinds =
         [ { Tag = "Note"
             Category = "display"
+            Annotations = Annotations.Empty
             Fields =
               [ { Name = "live"
                   Type = TEnum "LiveRegion"
@@ -105,7 +106,8 @@ let tests =
                       Enums =
                           [ { Name = "Bad"
                               Cases = [ "A"; "B" ]
-                              Wires = [ "a" ] } ] }
+                              Wires = [ "a" ]
+                              CaseAnnotations = [] } ] }
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"
@@ -117,7 +119,8 @@ let tests =
                       Enums =
                           [ { Name = "Bad"
                               Cases = [ "A"; "B" ]
-                              Wires = [ "x"; "x" ] } ] }
+                              Wires = [ "x"; "x" ]
+                              CaseAnnotations = [] } ] }
 
               let errs = Declare.enumWireErrors broken
               Expect.hasLength errs 1 "one finding"

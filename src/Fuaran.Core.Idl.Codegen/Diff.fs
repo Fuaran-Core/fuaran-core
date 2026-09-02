@@ -112,8 +112,14 @@ module Diff =
           TransparentCase: string option }
 
     type EnumSnap =
-        { WireCases: string list
-          HostCases: string list }
+        {
+            WireCases: string list
+            HostCases: string list
+            /// Per-case annotation sets (Phase 119), keyed by the WIRE string the artifact
+            /// keys them on and canonically rendered — a case that says nothing is absent
+            /// from the map, which is also how a revision predating the key reads.
+            CaseAnnotations: Map<string, string>
+        }
 
     /// One `idl.json` revision, keyed for lookup. Collections the artifact sorts
     /// are read into maps (order carries nothing); field lists keep their
@@ -123,7 +129,17 @@ module Diff =
             Version: int
             Kinds: Map<string, FieldSnap list>
             KindCategory: Map<string, string>
+            /// A kind's OWN annotation set (Phase 119), canonically rendered — `""` when
+            /// it declares none. A map beside [[Kinds]] rather than a field on it, for
+            /// the reason [[KindCategory]] is one: the diff walk pairs field LISTS by
+            /// tag, and a per-tag fact that is not a field belongs beside that walk
+            /// rather than inside it.
+            KindAnnotations: Map<string, string>
             Ops: Map<string, FieldSnap list>
+            /// A tree-op's own annotation set (Phase 119) — the same slot as
+            /// [[KindAnnotations]], read from the `ops` collection. Ops are `IdlKind`s,
+            /// so they are annotatable on identical terms.
+            OpAnnotations: Map<string, string>
             Unions: Map<string, UnionSnap>
             Enums: Map<string, EnumSnap>
             Records: Map<string, FieldSnap list>
@@ -301,7 +317,9 @@ module Diff =
                   KindCategory =
                     kinds
                     |> byName (str "tag") (fun k -> str "category" k |> Option.defaultValue "")
+                  KindAnnotations = kinds |> byName (str "tag") readAnnotations
                   Ops = ops |> byName (str "tag") readFields
+                  OpAnnotations = ops |> byName (str "tag") readAnnotations
                   Unions =
                     arr "unions" artifact
                     |> byName (str "name") (fun u ->
@@ -332,7 +350,14 @@ module Diff =
                                 | _ -> None)
 
                         { WireCases = strings "cases"
-                          HostCases = strings "hostCases" })
+                          HostCases = strings "hostCases"
+                          CaseAnnotations =
+                            match field "caseAnnotations" e with
+                            | Some(JObj entries) ->
+                                entries
+                                |> List.map (fun (wire, block) -> wire, Canon.render block)
+                                |> Map.ofList
+                            | _ -> Map.empty })
                   Records = arr "records" artifact |> byName (str "name") readFields
                   Defaults =
                     arr "defaults" artifact
@@ -424,6 +449,18 @@ module Diff =
         | FieldAnnotationsChanged of Owner * name: string * before: string * after: string
         /// The declared annotations on a union CASE moved (Phase 113).
         | UnionCaseAnnotationsChanged of union: string * case: string * before: string * after: string
+        /// The declared annotations on a KIND or a tree-OP itself moved (Phase 119) —
+        /// the vocabulary-growth charter's retirement half, and the one marking that can
+        /// say a whole node kind is going away.
+        ///
+        /// Carried on [[Owner]], which is always `OKind` or `OOp` here — the same
+        /// subject vocabulary [[FieldAnnotationsChanged]] already uses, so "kind X" and
+        /// "op X" read alike wherever a change is described.
+        | KindAnnotationsChanged of Owner * before: string * after: string
+        /// The declared annotations on an ENUM CASE moved (Phase 119). `wire` is the
+        /// case's wire string, which is how the artifact keys them and what a
+        /// third-party reader sees.
+        | EnumCaseAnnotationsChanged of enumName: string * wire: string * before: string * after: string
         | DefaultAdded of kind: string * field: string * value: string
         | DefaultRemoved of kind: string * field: string * value: string
         | DefaultChanged of kind: string * field: string * before: string * after: string
@@ -523,6 +560,7 @@ module Diff =
         | KindRemoved t -> k "11" t
         | KindRenamed(o, n) -> k "12" (o + ">" + n)
         | KindCategoryChanged(t, _, _) -> k "13" t
+        | KindAnnotationsChanged(o, _, _) -> k "14" o.Key
         | OpAdded t -> k "20" t
         | OpRemoved t -> k "21" t
         | UnionAdded n -> k "30" n
@@ -536,6 +574,7 @@ module Diff =
         | EnumCaseAdded(e, w) -> k "42" (e + "." + w)
         | EnumCaseRemoved(e, w) -> k "43" (e + "." + w)
         | EnumHostMappingChanged(n, _, _) -> k "44" n
+        | EnumCaseAnnotationsChanged(e, w, _, _) -> k "45" (e + "." + w)
         | RecordAdded n -> k "50" n
         | RecordRemoved n -> k "51" n
         | FieldAdded(o, f) -> k "60" (o.Key + "/" + f.Name)
@@ -570,7 +609,20 @@ module Diff =
                   | Some old when old <> cat -> KindCategoryChanged(tag, old, cat)
                   | _ -> ()
 
+              // Phase 119 — a kind's own annotations, reported only for a tag both
+              // revisions carry: a kind that arrived or left is already `KindAdded` /
+              // `KindRemoved`, and saying it also gained annotations adds nothing.
+              for KeyValue(tag, ann) in after.KindAnnotations do
+                  match Map.tryFind tag before.KindAnnotations with
+                  | Some old when old <> ann -> KindAnnotationsChanged(OKind tag, old, ann)
+                  | _ -> ()
+
               yield! diffNamed OpAdded OpRemoved (fun tag b a -> diffFields (OOp tag) b a) before.Ops after.Ops
+
+              for KeyValue(tag, ann) in after.OpAnnotations do
+                  match Map.tryFind tag before.OpAnnotations with
+                  | Some old when old <> ann -> KindAnnotationsChanged(OOp tag, old, ann)
+                  | _ -> ()
 
               yield!
                   diffNamed
@@ -611,7 +663,21 @@ module Diff =
                                     EnumCaseRemoved(name, w)
 
                             if b.HostCases <> a.HostCases then
-                                EnumHostMappingChanged(name, b.HostCases, a.HostCases) ])
+                                EnumHostMappingChanged(name, b.HostCases, a.HostCases)
+
+                            // Phase 119 — per-case annotations, over the cases both
+                            // revisions carry. A case that arrived or left is already
+                            // `EnumCaseAdded` / `EnumCaseRemoved`; an absent entry on
+                            // either side reads as `""`, so a first marking and a full
+                            // withdrawal both surface here, which is what the classifier
+                            // grades `Additive` and `HostSurfaceOnly` respectively.
+                            for w in a.WireCases do
+                                if List.contains w b.WireCases then
+                                    let bw = b.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
+                                    let aw = a.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
+
+                                    if bw <> aw then
+                                        EnumCaseAnnotationsChanged(name, w, bw, aw) ])
                       before.Enums
                       after.Enums
 
@@ -916,6 +982,13 @@ module Diff =
             | FieldAnnotationsChanged(owner, n, b, a) ->
                 classifyAnnotations (sprintf "field `%s` on %s" n owner.Describe) b a
             | UnionCaseAnnotationsChanged(u, c, b, a) -> classifyAnnotations (sprintf "case `%s` of `%s`" c u) b a
+            // Phase 119 — the same three grades, for the same reason: a kind-level or
+            // enum-case marking is no more on the wire than a field's, so marking a whole
+            // node kind for retirement costs no breaking bump and the two-release
+            // retirement path the charter needs is affordable.
+            | KindAnnotationsChanged(owner, b, a) -> classifyAnnotations owner.Describe b a
+            | EnumCaseAnnotationsChanged(e, w, b, a) ->
+                classifyAnnotations (sprintf "case `\"%s\"` of enum `%s`" w e) b a
 
             | FieldHostSurfaceChanged(owner, n, _, _) ->
                 HostSurfaceOnly,
@@ -1306,6 +1379,10 @@ module Diff =
             sprintf "field annotations %s: %s.%s" (if b = "" then "declared" else "changed") o.Describe n
         | UnionCaseAnnotationsChanged(u, c, b, _) ->
             sprintf "union case annotations %s: %s.%s" (if b = "" then "declared" else "changed") u c
+        | KindAnnotationsChanged(o, b, _) ->
+            sprintf "annotations %s: %s" (if b = "" then "declared" else "changed") o.Describe
+        | EnumCaseAnnotationsChanged(e, w, b, _) ->
+            sprintf "enum case annotations %s: %s.\"%s\"" (if b = "" then "declared" else "changed") e w
         | DefaultAdded(k, f, _) -> sprintf "authoring default added: %s.%s" k f
         | DefaultRemoved(k, f, _) -> sprintf "authoring default removed: %s.%s" k f
         | DefaultChanged(k, f, b, a) -> sprintf "authoring default changed: %s.%s : %s -> %s" k f b a

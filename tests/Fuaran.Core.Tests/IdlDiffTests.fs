@@ -47,6 +47,7 @@ let private empty: Idl =
 let private kind tag fields : IdlKind =
     { Tag = tag
       Category = "display"
+      Annotations = Annotations.Empty
       Fields = fields }
 
 let private f name ty opt : IdlField =
@@ -378,7 +379,8 @@ let tests =
                   { empty with
                       Kinds =
                           [ { kind "Heading" [ f "text" TStr Required ] with
-                                Category = "layout" } ] }
+                                Category = "layout"
+                                Annotations = Annotations.Empty } ] }
 
               Expect.equal (severities (diffOf oneKind after)) [ Diff.HostSurfaceOnly ] "Category is IDL metadata"
 
@@ -471,11 +473,13 @@ let tests =
               let insert =
                   { Tag = "InsertChild"
                     Category = "op"
+                    Annotations = Annotations.Empty
                     Fields = [ f "child" TNode Required ] }
 
               let edit =
                   { Tag = "EditNode"
                     Category = "op"
+                    Annotations = Annotations.Empty
                     Fields = [ f "newKind" TKind Required ] }
 
               Expect.equal

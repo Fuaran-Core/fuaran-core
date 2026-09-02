@@ -1351,18 +1351,23 @@ let private accessibilityRecord =
 let displayKinds: IdlKind list =
     [ { Tag = "Heading"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields = [ req "level" TInt; req "text" TS; req "variant" (TEnum "HeadingVariant") ] }
       { Tag = "Badge"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields = [ req "label" TS; req "variant" (TEnum "BadgeVariant") ] }
       { Tag = "Markdown"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields = [ req "text" TS ] }
       { Tag = "Math"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields = [ req "source" TStr; req "display" (TEnum "MathDisplay") ] }
       { Tag = "Skeleton"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields = [ req "rows" TInt ] }
       // Phase 821 — the standalone icon-only display kind: a decorative or
       // labelled glyph with no Button / Image envelope. `size` / `tone` carry
@@ -1370,6 +1375,7 @@ let displayKinds: IdlKind list =
       // (`aria-hidden`), present is meaningful (`role="img"` + `aria-label`).
       { Tag = "Icon"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ req "icon" icon
             omit "size" (TEnum "IconSize") (VEnum "Medium")
@@ -1377,6 +1383,7 @@ let displayKinds: IdlKind list =
             opt "label" TStr ] }
       { Tag = "List"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields = [ req "items" (TList TS); req "ordered" TBool ] }
       // Phase 1077 — the three presentation slots. Every one is
       // omitted-at-default on BOTH boundaries, so a pre-phase document (which
@@ -1413,6 +1420,7 @@ let displayKinds: IdlKind list =
       // does not run any.
       { Tag = "Image"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ req "alt" TS
             req "src" (bindingOf TStr)
@@ -1443,6 +1451,7 @@ let displayKinds: IdlKind list =
       // polarity.
       { Tag = "Media"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ omit "controls" TBool (VBool true)
             req "kind" (TUnion("MediaKind", []))
@@ -1451,6 +1460,7 @@ let displayKinds: IdlKind list =
             req "src" (bindingOf TStr) ] }
       { Tag = "Link"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ req "href" (bindingOf TStr)
             req "label" TS
@@ -1461,6 +1471,7 @@ let displayKinds: IdlKind list =
             opt "protection" (TEnum "LinkProtection") ] }
       { Tag = "Callout"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ req "body" TS
             omit "dismissable" TBool (VBool false)
@@ -1469,6 +1480,7 @@ let displayKinds: IdlKind list =
             opt "icon" icon ] }
       { Tag = "Progress"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ req "fraction" (bindingOf TFloat)
             omit "indeterminate" TBool (VBool false)
@@ -1477,6 +1489,7 @@ let displayKinds: IdlKind list =
             opt "caveat" TS ] }
       { Tag = "Metric"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ req "label" TS
             // Fuaran-UI 0.2.x renamed Metric's binding slot `source` → `value`.
@@ -1497,6 +1510,7 @@ let displayKinds: IdlKind list =
             opt "subtext" TS ] }
       { Tag = "LabelValueRow"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ omit "emphasis" TBool (VBool false)
             omit "format" CF (VUnion("None", []))
@@ -1509,6 +1523,7 @@ let displayKinds: IdlKind list =
       // behavioural bool, emitted only when true; `tone` omits at Default.
       { Tag = "Fact"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ omit "emphasis" TBool (VBool false)
             opt "help" TS
@@ -1518,6 +1533,7 @@ let displayKinds: IdlKind list =
             req "value" TS ] }
       { Tag = "Sparkline"
         Category = "Display"
+        Annotations = Annotations.Empty
         // Fuaran-UI 0.2.x typed-Static: a real numeric list on the wire. FLOAT, not
         // int — the hand tier's source is `Binding<float …>` and canonical JNum
         // rendering emits whole floats in integer form, so the corpus's `[1,2,3]`
@@ -1525,6 +1541,7 @@ let displayKinds: IdlKind list =
         Fields = [ req "source" (bindingOf (TList TFloat)) ] }
       { Tag = "CodeBlock"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ req "code" TStr
             req "copyable" TBool
@@ -1536,6 +1553,7 @@ let displayKinds: IdlKind list =
       // when false. Same field name, same type, inverted default.
       { Tag = "Toast"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ omit "dismissable" TBool (VBool true)
             req "message" TS
@@ -1545,6 +1563,7 @@ let displayKinds: IdlKind list =
       // CurveCommand / ViewBox / TextAnchor) is declared above the meta kinds.
       { Tag = "Drawing"
         Category = "Display"
+        Annotations = Annotations.Empty
         Fields =
           [ opt "description" TS
             req "shapes" (TList(TUnion("Shape", [])))
@@ -1570,6 +1589,7 @@ let layoutKinds: IdlKind list =
       // Tabs / Stepper) were NOT unified.
       { Tag = "Box"
         Category = "Layout"
+        Annotations = Annotations.Empty
         Fields =
           [ req "children" (TList TNode)
             opt "heading" TS
@@ -1577,12 +1597,15 @@ let layoutKinds: IdlKind list =
             req "role" (TEnum "BoxRole") ] }
       { Tag = "SplitPanel"
         Category = "Layout"
+        Annotations = Annotations.Empty
         Fields = [ req "children" (TList TNode); req "weight" TFloat ] }
       { Tag = "SummaryList"
         Category = "Layout"
+        Annotations = Annotations.Empty
         Fields = [ req "children" (TList TNode); opt "heading" TS ] }
       { Tag = "Disclosure"
         Category = "Layout"
+        Annotations = Annotations.Empty
         // Phase 671 step 2 — this comment used to read "OnToggle is a closure that
         // is NOT on the wire — no field declared", which was true before Phase 426
         // and false after: `onToggle` now rides as the `"<closure>"` sentinel when
@@ -1595,6 +1618,7 @@ let layoutKinds: IdlKind list =
             req "open" (bindingOf TBool) ] }
       { Tag = "Modal"
         Category = "Layout"
+        Annotations = Annotations.Empty
         // `onDismiss` optional since Fuaran-UI Phase 426: `Some action` encodes
         // exactly as before; `None` omits the key and arms the renderer's `Open`
         // write-back default. The IDL carried it Required until the Phase 692
@@ -1607,6 +1631,7 @@ let layoutKinds: IdlKind list =
             opt "heading" TS ] }
       { Tag = "ScrollArea"
         Category = "Layout"
+        Annotations = Annotations.Empty
         Fields =
           [ req "children" (TList TNode)
             req "orientation" (TEnum "ScrollOrientation")
@@ -1614,6 +1639,7 @@ let layoutKinds: IdlKind list =
             opt "maxWidth" TInt ] }
       { Tag = "Tabs"
         Category = "Layout"
+        Annotations = Annotations.Empty
         // onSelect is a closure that IS on the wire as the "<closure>" sentinel.
         // The tabHeaders / tabTags / activeTag overlays are optional (omitted in
         // tabs-1, present in tabs-explicit-1 — the TabHeader record slice).
@@ -1635,6 +1661,7 @@ let layoutKinds: IdlKind list =
             opt "activeTag" (bindingOf TStr) ] }
       { Tag = "Stepper"
         Category = "Layout"
+        Annotations = Annotations.Empty
         Fields =
           [ req "activeStep" (bindingOf TInt)
             req "children" (TList TNode)
@@ -1652,6 +1679,7 @@ let layoutKinds: IdlKind list =
 let inputKinds: IdlKind list =
     [ { Tag = "Button"
         Category = "Input"
+        Annotations = Annotations.Empty
         Fields =
           [ req "label" (TUnion("TextSource", []))
             req "onClick" (TUnion("Action", []))
@@ -1666,6 +1694,7 @@ let inputKinds: IdlKind list =
             opt "disabled" (bindingOf TBool) ] }
       { Tag = "Select"
         Category = "Input"
+        Annotations = Annotations.Empty
         // Fuaran-UI 0.2.x typed-Static: source is a real SelectOption list, value a real
         // string; onChange is a closure sentinel; multiple omitted when false. (`values`
         // rides multiselect-1, deferred — a `Static None` renders JSON null.)
@@ -1684,6 +1713,7 @@ let inputKinds: IdlKind list =
             opt "values" (bindingOf (TList TStr)) ] }
       { Tag = "FileUpload"
         Category = "Input"
+        Annotations = Annotations.Empty
         Fields =
           [ req "accept" (TList TStr)
             req "label" (TUnion("TextSource", []))
@@ -1694,6 +1724,7 @@ let inputKinds: IdlKind list =
             opt "disabled" (bindingOf TBool) ] }
       { Tag = "Form"
         Category = "Input"
+        Annotations = Annotations.Empty
         Fields =
           [ req "fields" (TList(TRecord "FormField"))
             req "onSubmit" (TUnion("Action", []))
@@ -1701,6 +1732,7 @@ let inputKinds: IdlKind list =
             opt "disabled" (bindingOf TBool) ] }
       { Tag = "Filters"
         Category = "Input"
+        Annotations = Annotations.Empty
         Fields = [ req "items" (TList(TRecord "FilterSpec")) ] } ]
 
 // ─── Visualisation kinds (data-bound; erased-row grid + chart/table/map) ────
@@ -1717,6 +1749,7 @@ let inputKinds: IdlKind list =
 let visKinds: IdlKind list =
     [ { Tag = "DataGrid"
         Category = "Visualisation"
+        Annotations = Annotations.Empty
         // Fuaran-UI 0.2.x: `editable` omit-when-false, `rowKey` optional (absent on a
         // static grid), + `staticRows` (the retired `Table` decode-upgrades into a static
         // DataGrid carrying its header/row grid).
@@ -1765,6 +1798,7 @@ let visKinds: IdlKind list =
             opt "onRowClick" (handlerOf "Fuaran.Core.Row" "unknown") ] }
       { Tag = "Chart"
         Category = "Visualisation"
+        Annotations = Annotations.Empty
         Fields =
           [ req "kind" (TEnum "ChartKind")
             // The row feed is HOSTED `Fuaran.Core.Row seq` (fuaran#665 — typed rows,
@@ -1800,6 +1834,7 @@ let visKinds: IdlKind list =
             opt "onPointClick" (handlerOf "Fuaran.Core.Row" "unknown") ] }
       { Tag = "Map"
         Category = "Visualisation"
+        Annotations = Annotations.Empty
         // Fuaran-UI 0.2.x typed-Static: the map source is a real MapMarker list.
         Fields =
           [ req "centreLatitude" TFloat
@@ -1973,6 +2008,7 @@ let private channelDirection =
 let metaKinds: IdlKind list =
     [ { Tag = "Custom"
         Category = "Meta"
+        Annotations = Annotations.Empty
         Fields =
           [ req "moduleId" TStr
             req "componentId" TStr
@@ -1984,9 +2020,11 @@ let metaKinds: IdlKind list =
             opt "exposedNodeIds" (TList TStr) ] }
       { Tag = "ErrorBoundary"
         Category = "Meta"
+        Annotations = Annotations.Empty
         Fields = [ req "child" TNode; req "fallback" TNode ] }
       { Tag = "FragmentDecl"
         Category = "Meta"
+        Annotations = Annotations.Empty
         // holes / effect are omitted for the degenerate fixed-body fragment.
         Fields =
           [ req "body" TNode
@@ -1995,6 +2033,7 @@ let metaKinds: IdlKind list =
             opt "effect" (TRecord "EffectClass") ] }
       { Tag = "FragmentRef"
         Category = "Meta"
+        Annotations = Annotations.Empty
         // args omitted for the degenerate name-only ref.
         Fields = [ req "name" TStr; opt "args" (TMap(TUnion("FragmentArg", []))) ] }
       // Phase 679 — `Switch`: declarative branch selection. Phase 768 widened the
@@ -2009,6 +2048,7 @@ let metaKinds: IdlKind list =
       // — and `reject-missing-switch-statekey` moves into that same set.
       { Tag = "Switch"
         Category = "Meta"
+        Annotations = Annotations.Empty
         Fields =
           [ req "cases" (TList(TRecord "SwitchCase"))
             req "default" TNode
@@ -2018,6 +2058,7 @@ let metaKinds: IdlKind list =
       // empty; `onBubble` is the closure sentinel.
       { Tag = "Mount"
         Category = "Meta"
+        Annotations = Annotations.Empty
         Fields =
           [ req "capabilities" (TList TStr)
             req "channel" (TRecord "GuestChannel")
@@ -2046,27 +2087,34 @@ let metaKinds: IdlKind list =
 let private treeOps: IdlKind list =
     [ { Tag = "Batch"
         Category = "op"
+        Annotations = Annotations.Empty
         // The op vocabulary's only recursion, and the only reason `TOp` exists.
         Fields = [ req "ops" (TList TOp) ] }
       { Tag = "EditNode"
         Category = "op"
+        Annotations = Annotations.Empty
         // `newKind` is a BARE kind — `{"$type":"Markdown",…}`, no `id` envelope —
         // which is why `TKind` is distinct from `TNode`.
         Fields = [ req "newKind" TKind; req "target" TStr ] }
       { Tag = "InsertChild"
         Category = "op"
+        Annotations = Annotations.Empty
         Fields = [ req "child" TNode; req "parentId" TStr ] }
       { Tag = "MoveNode"
         Category = "op"
+        Annotations = Annotations.Empty
         Fields = [ req "newParentId" TStr; req "target" TStr ] }
       { Tag = "RemoveNode"
         Category = "op"
+        Annotations = Annotations.Empty
         Fields = [ req "target" TStr ] }
       { Tag = "ReorderChildren"
         Category = "op"
+        Annotations = Annotations.Empty
         Fields = [ req "newOrder" (TList TStr); req "parentId" TStr ] }
       { Tag = "ReplaceBinding"
         Category = "op"
+        Annotations = Annotations.Empty
         // The binding's value type is erased at this position — the op replaces a
         // slot whose type the op itself does not name — so `Binding<Json>`.
         Fields =
@@ -2075,18 +2123,22 @@ let private treeOps: IdlKind list =
             req "target" TStr ] }
       { Tag = "ReplaceRoot"
         Category = "op"
+        Annotations = Annotations.Empty
         Fields = [ req "node" TNode ] }
       { Tag = "UpdateProp"
         Category = "op"
+        Annotations = Annotations.Empty
         // `value` is genuinely any JSON: the corpus carries a bare string, a
         // number, and a `$type`-tagged object (`Currency`) at this position,
         // because the target slot's type is whatever `path` addresses.
         Fields = [ req "path" TStr; req "target" TStr; req "value" TJson ] }
       { Tag = "UpdateState"
         Category = "op"
+        Annotations = Annotations.Empty
         Fields = [ req "state" (TRecord "StateBehaviour"); req "target" TStr ] }
       { Tag = "UpdateStyle"
         Category = "op"
+        Annotations = Annotations.Empty
         Fields = [ req "style" (TRecord "SemanticStyle"); req "target" TStr ] } ]
 
 let uiIdl: Idl =

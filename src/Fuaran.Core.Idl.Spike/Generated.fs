@@ -121,6 +121,7 @@ and MetricSpec =
     }
 
 // Layout
+/// Since `0.2.0`.
 and BoxSpec<'Msg> =
     {
       Children: Node<'Msg> list

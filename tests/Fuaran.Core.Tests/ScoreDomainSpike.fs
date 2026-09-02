@@ -130,6 +130,7 @@ let private omit name t d = f name t (OmitDefault d)
 let private kind tag category fields : IdlKind =
     { Tag = tag
       Category = category
+      Annotations = Annotations.Empty
       Fields = fields }
 
 let private record name fields : IdlRecord = { Name = name; Fields = fields }
