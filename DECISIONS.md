@@ -312,6 +312,34 @@ certifies the engine in its own repo. Until then the duplication is bounded to o
 pinned rather than trusted: the tier's committed `Generated.fs` is byte-compared against the
 emission on every CI run, so a divergence fails a gate instead of accumulating silently.
 
+**Amended 2026-09-02 (Phase 114) — the ENGINE side of that criterion is met; the move itself is
+not yet made.** Two things changed, and neither is the deletion.
+
+*The vocabulary is now LOADABLE.* `Artifact.parse` inverts the `idl.json` projection and
+`SupportArtifact` carries the declared-support record and the host-prelude declaration as a second
+document, so the three files a regeneration needs are files a domain holds. The route this entry
+called unsound — a compile-link across a sibling checkout — is no longer the only alternative to
+the byte copy, because there is now a data route that needs neither.
+
+*The certification no longer rests on the UI vocabulary.* Neither of the two routes above is the one
+taken. A Core-owned fixture was NOT grown to comparable scale — a 40-kind vocabulary in this repo
+would be a domain in all but name, and would re-make the mistake this entry refuses. Instead the
+load is split across three vocabularies no domain owns: the two vendored foreign ones, whose corpora
+were written outside this repo, and a small `refIdl` covering the part of the type model neither of
+them happens to use. The claim is **enforced, not asserted** — a test walks their union and fails if
+any `IdlType` or `Optionality` case is unreached, so "the certification rests on a domain's
+vocabulary" is a condition the suite detects rather than a judgement someone re-makes. The codegen
+trust boundary moved onto the neutral vocabulary in the same pass, because it is engine behaviour
+and would otherwise have left with a domain's contract.
+
+*What remains, deliberately.* `UiIdl.fs` and `UiGenerated.fs` stay, and the byte-pin with them,
+until the vocabulary lands in the domain's repo — deleting them here first would leave the domain
+with no vocabulary at all for the interval. That is a move in another repo and belongs to the phase
+that makes it. Note also that a module regenerated from the artifact declares its kinds in the
+artifact's Ordinal order rather than the authored order the committed `Generated.fs` carries; the
+emission is otherwise byte-identical, pinned at full scale, and the reordering is a one-time cost
+the move absorbs.
+
 ## 2026-08-18 — D13: the compute vocabulary's closed sets, and what is deliberately absent (Phase 101)
 
 A demand-side census of the transform algebra (enumerate the intents a declarative pipeline must

@@ -650,16 +650,20 @@ commits to rather than by size.
   previously rejected is breaking regardless of what compiles. Phase 96 is the standing lesson
   — a lift that dropped two behaviours, both failing open, survived because the claim was
   written in a comment rather than pinned by a test.
-- **`Artifact.render`** — the canonical `idl.json` projection, with the ordering contract stated
-  at the module. `Artifact.version` pins the ENCODING; a consumer pins that, not the contents.
+- **`Artifact.render` / `Artifact.parse`** — the canonical `idl.json` projection and its inverse,
+  with the ordering contract stated at the module and available as `Artifact.canonicalise`.
+  `Artifact.version` pins the ENCODING; a consumer pins that, not the contents. The law is
+  `parse (render idl) = canonicalise idl`, pinned over every vocabulary the suite declares —
+  see "The artifact reads back" below.
 - **Fable-cleanliness**, gated rather than asserted: `tests/fable-smoke` compiles the whole of
   this package, so every one of the above reaches a browser. That is the reason the split exists
   — see "Fable cleanliness" below.
 
 **`Fuaran.Core.Idl.Codegen` — the generation half.** `Gen` (the F# structural-layer emitter and
 its declared-support channel, the TypeScript encoder backend, the JSON-schema emitter, the
-scaffold writer), `CodegenError`, `Trust` (the codegen trust boundary) and `Diff` (the stability
-classifier over two `idl.json` revisions). **.NET-only and build-time only**: it ships no Fable
+scaffold writer), `CodegenError`, `SupportArtifact` (the declared-support record as a canonical
+data document), `Trust` (the codegen trust boundary) and `Diff` (the stability classifier over
+two `idl.json` revisions). **.NET-only and build-time only**: it ships no Fable
 source, because `StringBuilder` and `CultureInfo.InvariantCulture` serve the TypeScript backend
 and a portability it cannot keep should not be offered.
 
@@ -738,6 +742,47 @@ the classifier. It is deliberately NOT an `Idl`-level side table addressed by ow
 shape can name a member the vocabulary no longer has, which is a defect class this one cannot
 represent, and every emitter would have to thread the lookup rather than reading the member it is
 already holding.
+
+### The artifact reads back; the declaration triple (Phase 114, `0.18.0`)
+
+`Artifact.parse` is the total inverse of `Artifact.render`, and `SupportArtifact.render` /
+`.parse` do the same for the generator's declared-support record. Together with the host prelude
+those three files are everything a regeneration needs, so a domain holding its own vocabulary
+emits its structural layer against the packaged engine with no checkout of this repo present.
+That was the missing half of DECISIONS.md D14: the engine has shipped since `0.4.0`, but a
+vocabulary could only ever be an F# compile input, which is why the one domain using it reached
+across a sibling checkout for a byte copy.
+
+**Three additions to the promised surface, all additive.** `Artifact.parse` / `Artifact.ofJson`
+(bytes or a parsed root to an `Idl`); `Artifact.canonicalise` (the ordering contract as a function
+over the model, and now the single definition of it — `Artifact.json` applies it and no longer
+sorts inline); `Artifact.renderJson` (the indented canonical layout over any `JVal`, so a sibling
+document of a vocabulary lays out identically without a second stringifier appearing). On the
+codegen side, `SupportArtifact` with `SupportDocument` and `HostPreludeRef`. **No emitted bytes
+move**: every `idl.json` this engine writes is what it wrote before, which the corpus byte-guard
+enforces.
+
+**The encoding version is now REFUSED rather than ignored.** An `idl.json` (or `support.json`)
+declaring a version this engine does not read is an error naming both numbers. A newer encoder may
+spell a member this reader would silently drop, and a vocabulary that loses a field quietly emits
+a host that compiles and is wrong.
+
+**Two things the artifact deliberately does not carry back.** A `closure` / `opaque` type's `wire`
+key restates a sentinel the engine already knows, and a union's `transparentCase` is DERIVED from
+the engine's hard-coded transparent set (the wart recorded above). Both are published for a
+third-party reader and both are ignored on read, so a hand-edited artifact cannot redefine what
+`<closure>` means or claim a transparency the engine does not implement.
+
+**The host prelude is NAMED, not inlined.** `HostPreludeRef` carries a module name and a path
+relative to the document. The prelude is F# source the domain already compiles and the generator
+never reads it; copying its text into a JSON document would mint a second copy of a compiled
+artefact with nothing keeping the two equal.
+
+**One consequence for a domain taking its vocabulary home.** The artifact's ordering contract
+Ordinal-sorts the top-level collections, so a module regenerated from bytes declares its kinds in
+that order rather than in whatever order the vocabulary was authored in. The emission is otherwise
+identical — pinned at full scale, over the ~40-kind vocabulary, by the round-trip and triple
+proofs in the test suite. It is a one-time reordering of a generated file, absorbed once.
 
 ## Open-core posture
 

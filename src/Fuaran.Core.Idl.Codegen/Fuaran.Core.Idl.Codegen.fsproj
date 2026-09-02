@@ -29,6 +29,12 @@
          stability classifier (the cost report); the proposal document it reads ships
          with the model in Fuaran.Core.Idl. After Diff.fs, which it calls. -->
     <Compile Include="ProposalSpike.fs" />
+    <!-- Phase 114 - the declared-support record + host-prelude declaration as a
+         canonical data document (`support.json`), so the second and third members of
+         the regeneration triple travel with the vocabulary instead of existing only as
+         F# source in whichever repo compiled the generator. Reads Gen.GenSupport, so
+         after Codegen.fs; appended last (append-only registration). -->
+    <Compile Include="SupportArtifact.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />

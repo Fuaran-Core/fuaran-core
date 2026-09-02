@@ -120,6 +120,13 @@
          throwaway measurement code, kept for its findings. Certifies a score-shaped slice
          against samples vendored at fixtures/score-domain/. -->
     <Compile Include="ScoreDomainSpike.fs" />
+    <!-- Phase 114 - the engine's own domain-neutral reference VOCABULARY (the D7
+         reference-witness posture applied to the IDL) plus its declared-support
+         document, and the certification that runs over it and the two vendored foreign
+         vocabularies. Appended at the end of the list: the certification enumerates
+         which leg each neutral vocabulary carries, so it must follow both spikes. -->
+    <Compile Include="ReferenceIdl.fs" />
+    <Compile Include="IdlCertificationTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -545,4 +545,45 @@ let tests =
                   Expect.equal
                       (strip generated)
                       (strip (File.ReadAllText path))
-                      "the generator no longer reproduces UiGenerated.fs — regenerate it") ]
+                      "the generator no longer reproduces UiGenerated.fs — regenerate it")
+
+          // ---- Phase 114: the regeneration TRIPLE, at this vocabulary's scale ----
+          //
+          // The acceptance claim is that a domain holding three files — its `idl.json`,
+          // its declared-support document and its host prelude — regenerates its
+          // structural layer against the PACKAGED engine, with no sibling checkout. The
+          // neutral proof is in `IdlCertificationTests`; this is the same proof over the
+          // ~40-kind vocabulary, which is the one that would have found a gap.
+          //
+          // One consequence to know before the vocabulary moves, and it is not a defect:
+          // the artifact's ordering contract sorts the top-level collections, so a module
+          // regenerated FROM BYTES declares its kinds in Ordinal order rather than in the
+          // authored family order the committed `UiGenerated.fs` carries. The comparison
+          // below is therefore against the emission from the CANONICALISED vocabulary —
+          // which is exactly what the domain will regenerate, and a one-time reordering
+          // it absorbs when it takes the vocabulary home.
+          testCase "the vocabulary + support document loaded FROM BYTES regenerate the same module" (fun _ ->
+              let emit (idl: Idl) (support: Gen.GenSupport) =
+                  Gen.fsharpModuleWith support "Fuaran.Core.Tests.UiGenerated" idl (idl.Kinds |> List.map _.Tag)
+
+              let supportDoc: SupportDocument =
+                  { Support = UiIdlSupport.support
+                    HostPrelude =
+                      Some
+                          { Module = "Fuaran.UI.HostPrelude"
+                            Path = "UiHostPrelude.fs" } }
+
+              let fromCanonical = emit (Artifact.canonicalise uiIdl) UiIdlSupport.support
+
+              let fromBytes =
+                  match
+                      Artifact.parse (Artifact.render uiIdl), SupportArtifact.parse (SupportArtifact.render supportDoc)
+                  with
+                  | Ok idl, Ok doc -> emit idl doc.Support
+                  | Error m, _ -> failtestf "the UI vocabulary did not load from its artifact: %s" m
+                  | _, Error m -> failtestf "the declared-support document did not load: %s" m
+
+              match fromCanonical, fromBytes with
+              | Ok a, Ok b -> Expect.equal b a "the triple loaded from bytes emits a different module"
+              | Error e, _ -> failtestf "codegen rejected the in-memory triple: %A" e
+              | _, Error e -> failtestf "codegen rejected the loaded triple: %A" e) ]

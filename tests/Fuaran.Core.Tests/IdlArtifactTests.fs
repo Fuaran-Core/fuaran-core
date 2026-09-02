@@ -222,4 +222,47 @@ let staleIdlArtifactGuard =
                   Expect.equal
                       (hostCasesOf e.Name)
                       (Some None)
-                      (sprintf "'%s' is unmapped and adds no hostCases" e.Name)) ]
+                      (sprintf "'%s' is unmapped and adds no hostCases" e.Name))
+
+          // ---- Phase 114: the artifact is LOADABLE, not only readable ----
+          //
+          // The cases above pin that the projection carries the vocabulary. These pin
+          // that it carries it BACK - which is what makes the artifact a home a domain
+          // can own rather than a report it can read. The generic law is stated over the
+          // neutral vocabularies in `IdlCertificationTests`; this is the same law at the
+          // scale that matters, and it travels with the vocabulary.
+          testCase "the UI vocabulary round-trips through its own artifact" (fun () ->
+              let text = Artifact.render uiIdl
+
+              match Artifact.parse text with
+              | Error m -> failtestf "idl.json did not read back: %s" m
+              | Ok reparsed ->
+                  Expect.equal
+                      reparsed
+                      (Artifact.canonicalise uiIdl)
+                      "the artifact does not carry the whole UI vocabulary"
+
+                  Expect.equal (Artifact.render reparsed) text "re-rendering the loaded vocabulary is not byte-stable")
+
+          testCase "the COMMITTED idl.json loads as the vocabulary (when the corpus is checked out)" (fun () ->
+              // The case that answers the acceptance question directly: a domain holding
+              // this file, and nothing else of this repo, obtains the vocabulary from it.
+              match tryFindCorpusRoot () with
+              | None -> skiptest "wire-format-fixtures not checked out alongside - load check skipped"
+              | Some root ->
+                  let path = Path.Combine(root, artifactFileName)
+
+                  if not (File.Exists path) then
+                      failtestf
+                          "%s is missing from the corpus at %s - generate it with `%s`"
+                          artifactFileName
+                          root
+                          regenCommand
+
+                  match Artifact.parse (File.ReadAllText path) with
+                  | Error m -> failtestf "the committed %s did not load: %s" artifactFileName m
+                  | Ok loaded ->
+                      Expect.equal
+                          loaded
+                          (Artifact.canonicalise uiIdl)
+                          (sprintf "the committed %s does not load as the vocabulary it describes" artifactFileName)) ]
