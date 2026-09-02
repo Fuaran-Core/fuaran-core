@@ -2,3 +2,4 @@
 # generator's output is the source of truth and a drift guard keeps it in sync.
 src/Fuaran.Core.Idl.Spike/Generated.fs
 tests/Fuaran.Core.Tests/UiGenerated.fs
+tests/Fuaran.Core.Tests/DocGenerated.fs
