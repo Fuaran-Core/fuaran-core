@@ -133,6 +133,11 @@
          and the sort vector whose class does). Reads nothing here, so it simply follows. -->
     <Compile Include="IncrementalCorpusTests.fs" />
     <Compile Include="SampleAdequacyTests.fs" />
+    <!-- Phase 118 - the cross-pipeline vector table, LINKED from the Fable smoke rather than
+         copied: the .NET pin and the `node` diff have to be measuring the same source, or the
+         comparison certifies a coincidence. Reads nothing here, so it simply follows. -->
+    <Compile Include="..\fable-smoke\ParityVectors.fs" Link="ParityVectors.fs" />
+    <Compile Include="ParityVectorTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -14,3 +14,8 @@ fable_modules/
 # The parity probe (tests/hash-parity-probe/) emits throwaway JS, same as the Fable smoke gate.
 tests/hash-parity-probe/out/
 tests/hash-parity-probe/probe-*.txt
+
+# The Fable value-parity leg (tests/fable-smoke/parity.ps1) emits its own throwaway JS, and
+# -KeepOutput writes the two captured runs beside it for inspection.
+tests/fable-smoke/out-parity/
+tests/fable-smoke/parity-*.txt

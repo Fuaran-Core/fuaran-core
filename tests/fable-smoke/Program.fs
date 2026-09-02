@@ -360,33 +360,40 @@ let private sampleAdequacyTouch =
 
     sprintf "%d/%b/%d" (List.length results) (results |> List.forall (fun r -> r.Passed)) censusKinds
 
+// Phase 118 — the VALUE leg's entry point. `--vectors` prints the cross-pipeline table and nothing
+// else, which is what `parity.ps1` runs on both pipelines and byte-compares. It is a MODE of this
+// program rather than a project of its own on purpose: the table has to be transpiled by the same
+// Fable invocation that gates the surfaces it measures, or the two claims drift apart.
 [<EntryPoint>]
-let main _ =
-    // Reference each touch so nothing is dead-code-eliminated before the compiler sees it.
-    [ treeTouch
-      sha256Touch
-      attributedTouch
-      (sprintf "%A" opsTouch)
-      wireTouch
-      (sprintf "%A" opStreamTouch)
-      (sprintf "%A" dagTouch)
-      (sprintf "%A" hashTouch)
-      validatorTouch
-      functionTouch
-      (sprintf "%A" columnTouch)
-      dataFrameTouch
-      // `deltaTouch` was defined by Phase 98 but never referenced here, so the whole point of the
-      // file — a compile error attached to the line that names the surface — did not apply to it.
-      (sprintf "%A" deltaTouch)
-      (sprintf "%A" incrementalTouch)
-      queryTouch
-      (sprintf "%A" (List.length conformanceTouch))
-      projectionTouch
-      propagationTouch
-      aiSurfaceTouch
-      idlTouch
-      foldConfluenceTouch
-      sampleAdequacyTouch ]
-    |> List.iter (printfn "%s")
+let main argv =
+    if Array.contains "--vectors" argv then
+        ParityVectors.emit ()
+    else
+        // Reference each touch so nothing is dead-code-eliminated before the compiler sees it.
+        [ treeTouch
+          sha256Touch
+          attributedTouch
+          (sprintf "%A" opsTouch)
+          wireTouch
+          (sprintf "%A" opStreamTouch)
+          (sprintf "%A" dagTouch)
+          (sprintf "%A" hashTouch)
+          validatorTouch
+          functionTouch
+          (sprintf "%A" columnTouch)
+          dataFrameTouch
+          // `deltaTouch` was defined by Phase 98 but never referenced here, so the whole point of the
+          // file — a compile error attached to the line that names the surface — did not apply to it.
+          (sprintf "%A" deltaTouch)
+          (sprintf "%A" incrementalTouch)
+          queryTouch
+          (sprintf "%A" (List.length conformanceTouch))
+          projectionTouch
+          propagationTouch
+          aiSurfaceTouch
+          idlTouch
+          foldConfluenceTouch
+          sampleAdequacyTouch ]
+        |> List.iter (printfn "%s")
 
     0

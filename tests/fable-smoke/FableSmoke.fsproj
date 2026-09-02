@@ -27,6 +27,12 @@
       project-referenced, so no generator dependency enters the Fable compilation.
     -->
     <Compile Include="..\..\src\Fuaran.Core.Idl.Spike\Generated.fs" Link="SpikeGenerated.fs" />
+    <!--
+      Phase 118 — the cross-pipeline VALUE table. Compiled here so the transpiled side of the
+      comparison is the same source the .NET side runs; `tests/Fuaran.Core.Tests` links this very
+      file and pins the .NET values, and `parity.ps1` runs it under `node` and byte-compares.
+    -->
+    <Compile Include="ParityVectors.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

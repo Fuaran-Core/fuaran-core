@@ -26,9 +26,12 @@ module Hash =
     /// the same reason: a compile cannot disagree about a number. Reverting this to a plain `a * b`
     /// leaves the whole .NET suite green — measured — while 120 of a 124-entry corpus diverge. The
     /// .NET half is pinned by the `fnv1a` vectors and the independent 64-bit reference in
-    /// `HashTests`; the cross-pipeline half is `tests/hash-parity-probe/run-parity-probe.ps1`, which
-    /// compiles this corpus both ways and byte-compares. **Re-run that probe if you touch this** —
-    /// it is not in `./verify.ps1` (it needs a Node runtime), so nothing will do it for you.
+    /// `HashTests`; the cross-pipeline half is bought twice — `tests/fable-smoke/parity.ps1`, the
+    /// GATE leg (Phase 118), which carries `fnv1a` vectors including the non-ASCII and `foldSep`
+    /// cases and fails rather than skips when no JS runtime is present, and
+    /// `tests/hash-parity-probe/run-parity-probe.ps1`, the by-hand probe, whose 124-entry corpus and
+    /// per-implementation columns are wider than a gate leg should be. **Run the probe too if you
+    /// touch this** — the leg will catch a divergence, the probe says how far it reaches.
     let inline private mul32 (a: uint32) (b: uint32) : uint32 =
         let aLo = a &&& 0xFFFFu
         let aHi = a >>> 16
@@ -170,9 +173,17 @@ module Hash =
     /// **Which is exactly why NOTHING IN THE .NET SUITE GUARDS IT.** Measured 2026-08-21 by removing
     /// it: every test in `HashTests` still passes, while under Fable the single-block vectors stay
     /// correct, the two-block vector goes wrong, and the one-million-`a` vector collapses to all
-    /// zeros. So this line is protected by review and by this comment, not by a gate — do not
-    /// "simplify" it. Closing that hole needs a runtime .NET-vs-Fable value comparison; the
-    /// repo's Fable step is a COMPILE gate, and a compile cannot disagree about a number.
+    /// zeros.
+    ///
+    /// **A GATE GUARDS IT NOW (Phase 118), and the guard is a runtime cross-pipeline comparison
+    /// rather than a review.** `tests/fable-smoke/parity.ps1` runs the vector table on both
+    /// pipelines and byte-compares; its `sha256/two-block` vector is the 56-byte FIPS message,
+    /// chosen because it is the shortest input that reaches a SECOND compression block, which is
+    /// where the working variables first pass 2^53. Re-measured 2026-09-02 with the mask removed:
+    /// `HashTests` stays 12/12 green and the committed .NET vector table stays green — the mask is
+    /// a no-op on .NET, so neither can see it — while the parity leg reddens on exactly the
+    /// two-block vectors and leaves every single-block one untouched. Do not "simplify" this line;
+    /// the compile gate beside it still cannot disagree about a number, and never could.
     let inline private (.+.) (x: uint32) (y: uint32) : uint32 = (x + y) &&& 0xFFFFFFFFu
 
     /// UTF-8 encode a string to bytes (BMP + surrogate pairs), pure managed. `System.Text.Encoding`

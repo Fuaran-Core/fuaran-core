@@ -400,7 +400,11 @@ either multiply-safe helper (`mul32`, `.+.`) must re-run that probe**; a green .
 evidence about the other pipeline, and reintroducing the naive multiply was measured to leave the
 suite fully green while 120 of the 124 entries diverged. The probe is deliberately **not** in
 `./verify.ps1` — it needs a Node runtime and the default gate stays dependency-free — which means
-nothing runs it for you.
+nothing runs it for you. Since Phase 118 a narrower cross-pipeline check IS a gate leg
+(`tests/fable-smoke/parity.ps1`, "The value leg" under Fable cleanliness): it carries `fnv1a`,
+`sha256*` and `OpStream.defaultHash` vectors and fails rather than skips without `node`. Run the
+probe as well when you touch either multiply-safe helper — the leg says a divergence exists, the
+124-entry corpus says how far it reaches.
 
 **Migration (`0.6.0`).** No action is needed for a value minted on .NET: those are unchanged, so
 every persisted chain, content hash and staleness stamp written by a .NET process re-verifies
@@ -913,7 +917,52 @@ exactly how `fnv1a` sat divergent behind a green gate until `0.6.0` (see "Hash-c
 posture"). Where a value must agree across pipelines, the claim is bought by a **probe** —
 `tests/hash-parity-probe/run-parity-probe.ps1`, which compiles a corpus both ways and byte-compares —
 and by an independent in-suite reference implementation on the .NET side. Both hashes are certified
-that way; anything new making a cross-pipeline value claim should be too.
+that way; anything new making a cross-pipeline value claim should be too. Since Phase 118 that claim
+also has a GATE leg rather than only a by-hand probe — see "The value leg" below, and add the vector
+there when a new surface makes the claim.
+
+### The value leg (Phase 118, `0.18.0`)
+
+**The compile gate now has a VALUE leg beside it.** `tests/fable-smoke/parity.ps1` runs a committed
+vector table — `Hash.fnv1a`, `Hash.sha256Hex` / `sha256HexOfBytes` / `utf8Bytes`,
+`Wire.Canon.canonicalFloat`, `Wire.Json.render`'s own float layout, encode + decode of a reference
+witness document through both renderers, and `OpStream.defaultHash` over a two-op chain — on **both**
+pipelines and byte-compares the output. The table is one source
+(`tests/fable-smoke/ParityVectors.fs`), compiled into the Fable smoke and LINKED into
+`Fuaran.Core.Tests`, so the two sides cannot be measuring different things; the .NET half is pinned
+against committed expected bytes by `ParityVectorTests`. Those are two claims and neither implies the
+other: a change that moves both pipelines identically fails the pinned table and passes the diff, and
+one that moves only the transpiled side does the reverse. The leg runs standalone
+(`pwsh ./tests/fable-smoke/parity.ps1`) and is written to sit on the line after `./verify.ps1`'s
+Fable compile, reusing that emitted output (`-UseFreshlyEmitted tests/fable-smoke/out`) so the gate
+transpiles once.
+
+**It FAILS without a JS runtime; it never skips.** The older by-hand probe
+(`tests/hash-parity-probe/run-parity-probe.ps1`) skips green when `node` is absent, which is right
+for something run deliberately and wrong for a gate leg — a check that reports success on a machine
+where it did not run asserts exactly what was not checked. The probe is kept: its 124-entry corpus
+and per-implementation columns are wider than a gate leg should be, and it answers "how far does the
+agreement reach" where the leg answers "did it break".
+
+**What the leg found on its first run, and what changed as a result.** `Wire.Json.render` — a public
+encode surface — **threw under Fable for any `JFloat`**. Its float case was
+`System.String.Format(InvariantCulture, "{0:R}", f)`, and Fable's `String.format` refuses the
+round-trip specifier at RUNTIME ("The round-trip format is not supported by Fable"). It compiled
+cleanly, so the Fable gate had been green over it since the gate existed, and the smoke it gates had
+never been executed. From `0.18.0` the layout is one shared internal helper: the finite re-lay that
+`Canon.canonicalFloat` already carried is now `FloatLayout`, used by both, and `Json.render` renders
+through it. **The .NET bytes are unchanged and pinned** — `String.Format(inv, "{0:R}", f)` and
+`f.ToString("R", inv)` agree across the finite range, on `-0` (`"-0"`, which `Json.render` keeps and
+`canonicalFloat` deliberately collapses to `0`), and on the non-finite tokens (`NaN` / `Infinity` /
+`-Infinity`, which are not valid JSON and are exactly what `Json.tryRender` exists to refuse). What
+moved is the transpiled side, from throwing to agreeing. A Fable host that had been avoiding
+`Json.render` for floats can stop.
+
+**The go-red measurement, re-taken.** Removing the masked add `Hash.(.+.)` leaves `HashTests` 12/12
+green **and** the committed .NET vector table green — the mask is a no-op on .NET, so neither can see
+it — while the parity leg reddens on exactly the two-block SHA-256 vectors (the 56-byte FIPS message
+and the byte-form vector over it) and leaves every single-block vector untouched. That is the class
+this leg exists for, and it is now measured on the gate's own vectors rather than in a scratch probe.
 
 ## Canonical float layout (Phase 55)
 

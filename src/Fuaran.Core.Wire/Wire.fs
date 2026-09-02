@@ -84,6 +84,116 @@ module JVal =
         | JFloat f -> Some f
         | _ -> None
 
+/// The single float -> string LAYOUT, shared by `Json.render` and `Canon.canonicalFloat`, and
+/// value-identical on both pipelines. .NET's round-trip specifier (`"R"`) is what the layout IS,
+/// and it is also the one thing Fable will not do: `String.format` REFUSES `R` at RUNTIME, so a
+/// `"{0:R}"` on a Fable-targeted surface compiles cleanly and throws in the browser. The re-lay
+/// below reproduces that layout from JS's own shortest-round-trip digits, so both pipelines emit
+/// the same bytes (WIRE_FORMAT §2 rule 5). Certified rather than asserted since Phase 118:
+/// `tests/fable-smoke/parity.ps1` runs the vector table under `node` and byte-compares it against
+/// the .NET run.
+module internal FloatLayout =
+
+#if FABLE_COMPILER
+    [<Fable.Core.Emit("$0.toString()")>]
+    let private jsNumberToString (n: float) : string = Fable.Core.Util.jsNative
+
+    /// Re-lay JS's shortest-round-trip digits into .NET `ToString("R")` form (WIRE_FORMAT §2 rule 5)
+    /// so the Fable host is byte-identical to the .NET host across the whole finite-double range.
+    /// Ported verbatim from the UI host's `CanonicalJson.formatFiniteDouble`.
+    let private reLay (n: float) : string =
+        if n = 0.0 then
+            "0"
+        else
+            let neg = n < 0.0
+            let s = jsNumberToString (abs n)
+            let mutable digits = ""
+            let mutable exp = 0
+            let eIdx = s.IndexOf 'e'
+
+            if eIdx >= 0 then
+                let mant = s.Substring(0, eIdx)
+                let mantExp = int (s.Substring(eIdx + 1))
+                let dot = mant.IndexOf '.'
+
+                if dot < 0 then
+                    digits <- mant
+                    exp <- mantExp + (mant.Length - 1)
+                else
+                    digits <- mant.Substring(0, dot) + mant.Substring(dot + 1)
+                    exp <- mantExp + (dot - 1)
+            else
+                let dot = s.IndexOf '.'
+
+                if dot < 0 then
+                    digits <- s
+                    exp <- s.Length - 1
+                else
+                    let intPart = s.Substring(0, dot)
+                    let fracPart = s.Substring(dot + 1)
+
+                    if intPart = "0" then
+                        let trimmed = fracPart.TrimStart('0')
+                        let leadingZeros = fracPart.Length - trimmed.Length
+                        digits <- fracPart.Substring(leadingZeros)
+                        exp <- -(leadingZeros + 1)
+                    else
+                        digits <- intPart + fracPart
+                        exp <- intPart.Length - 1
+
+            digits <- digits.TrimEnd('0')
+
+            if digits = "" then
+                digits <- "0"
+
+            let out =
+                if exp >= -4 && exp <= 16 then
+                    if exp >= 0 then
+                        if digits.Length <= exp + 1 then
+                            digits + String.replicate (exp + 1 - digits.Length) "0"
+                        else
+                            digits.Substring(0, exp + 1) + "." + digits.Substring(exp + 1)
+                    else
+                        "0." + String.replicate (-exp - 1) "0" + digits
+                else
+                    let mantissa =
+                        if digits.Length = 1 then
+                            digits
+                        else
+                            string digits[0] + "." + digits.Substring(1)
+
+                    let expSign = if exp >= 0 then "+" else "-"
+                    let expDigits = (abs exp).ToString().PadLeft(2, '0')
+                    mantissa + "E" + expSign + expDigits
+
+            if neg then "-" + out else out
+#endif
+
+    /// A FINITE double in .NET's round-trip (`"R"`) layout, on either pipeline. `-0.0` keeps its
+    /// sign here — collapsing it is `Canon.canonicalFloat`'s wire rule, not the layout's.
+    let finite (n: float) : string =
+#if FABLE_COMPILER
+        if n = 0.0 then
+            // `reLay` short-circuits both zeroes to "0"; .NET's "R" spells the negative one "-0",
+            // and `1.0 / n` is the only way to read the sign of a JS negative zero.
+            (if 1.0 / n < 0.0 then "-0" else "0")
+        else
+            reLay n
+#else
+        n.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+#endif
+
+    /// The full `"{0:R}"` rendering, non-finite tokens included (`NaN` / `Infinity` / `-Infinity`,
+    /// the invariant-culture spellings). `Json.render`'s float case: those tokens are not valid
+    /// JSON, which is exactly why `Json.tryRender` exists to name them, so the layout keeps
+    /// producing them rather than quietly substituting something parseable.
+    let roundTrip (f: float) : string =
+        if System.Double.IsNaN f then "NaN"
+        elif System.Double.IsPositiveInfinity f then "Infinity"
+        elif System.Double.IsNegativeInfinity f then "-Infinity"
+        else finite f
+
+
 /// Fable-clean encode helpers + the wire-envelope discipline + a portable
 /// (FSharp.Core-only) parser. Per-kind cases stay domain-side; the core owns the
 /// envelope shape, the combinators, and the parser. `render` and `parse` are inverses
@@ -110,7 +220,7 @@ module Json =
         | JStr s -> "\"" + escape s + "\""
         | JInt i -> string i
         | JBool b -> (if b then "true" else "false")
-        | JFloat f -> System.String.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:R}", f)
+        | JFloat f -> FloatLayout.roundTrip f
         | JArr xs -> "[" + (xs |> List.map render |> String.concat ",") + "]"
         | JObj fields ->
             "{"
@@ -552,80 +662,6 @@ module Canon =
 
         sb.ToString()
 
-#if FABLE_COMPILER
-    [<Fable.Core.Emit("$0.toString()")>]
-    let private jsNumberToString (n: float) : string = Fable.Core.Util.jsNative
-
-    /// Re-lay JS's shortest-round-trip digits into .NET `ToString("R")` form (WIRE_FORMAT §2 rule 5)
-    /// so the Fable host is byte-identical to the .NET host across the whole finite-double range.
-    /// Ported verbatim from the UI host's `CanonicalJson.formatFiniteDouble`.
-    let private formatFiniteDouble (n: float) : string =
-        if n = 0.0 then
-            "0"
-        else
-            let neg = n < 0.0
-            let s = jsNumberToString (abs n)
-            let mutable digits = ""
-            let mutable exp = 0
-            let eIdx = s.IndexOf 'e'
-
-            if eIdx >= 0 then
-                let mant = s.Substring(0, eIdx)
-                let mantExp = int (s.Substring(eIdx + 1))
-                let dot = mant.IndexOf '.'
-
-                if dot < 0 then
-                    digits <- mant
-                    exp <- mantExp + (mant.Length - 1)
-                else
-                    digits <- mant.Substring(0, dot) + mant.Substring(dot + 1)
-                    exp <- mantExp + (dot - 1)
-            else
-                let dot = s.IndexOf '.'
-
-                if dot < 0 then
-                    digits <- s
-                    exp <- s.Length - 1
-                else
-                    let intPart = s.Substring(0, dot)
-                    let fracPart = s.Substring(dot + 1)
-
-                    if intPart = "0" then
-                        let trimmed = fracPart.TrimStart('0')
-                        let leadingZeros = fracPart.Length - trimmed.Length
-                        digits <- fracPart.Substring(leadingZeros)
-                        exp <- -(leadingZeros + 1)
-                    else
-                        digits <- intPart + fracPart
-                        exp <- intPart.Length - 1
-
-            digits <- digits.TrimEnd('0')
-
-            if digits = "" then
-                digits <- "0"
-
-            let out =
-                if exp >= -4 && exp <= 16 then
-                    if exp >= 0 then
-                        if digits.Length <= exp + 1 then
-                            digits + String.replicate (exp + 1 - digits.Length) "0"
-                        else
-                            digits.Substring(0, exp + 1) + "." + digits.Substring(exp + 1)
-                    else
-                        "0." + String.replicate (-exp - 1) "0" + digits
-                else
-                    let mantissa =
-                        if digits.Length = 1 then
-                            digits
-                        else
-                            string digits[0] + "." + digits.Substring(1)
-
-                    let expSign = if exp >= 0 then "+" else "-"
-                    let expDigits = (abs exp).ToString().PadLeft(2, '0')
-                    mantissa + "E" + expSign + expDigits
-
-            if neg then "-" + out else out
-#endif
 
     /// The single canonical, cross-host float → string encoder (Phase 55). Non-finite floats render to
     /// the fixed JSON-string tokens `"NaN"` / `"Infinity"` / `"-Infinity"`; `-0.0` collapses to `0`; a
@@ -641,13 +677,9 @@ module Canon =
         elif System.Double.IsNegativeInfinity f then
             "\"-Infinity\""
         else
-            // -0 collapses to 0 (WIRE_FORMAT §2 rule 5).
+            // -0 collapses to 0 (WIRE_FORMAT §2 rule 5) — the wire rule, applied before the layout.
             let v = if f = 0.0 then 0.0 else f
-#if FABLE_COMPILER
-            formatFiniteDouble v
-#else
-            v.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
-#endif
+            FloatLayout.finite v
 
     /// Render a `JVal` under the canonical `$type` discipline: object keys Ordinal-sorted
     /// (recursively), the pinned float layout, canonical escaping. The encoder enforces key order;
