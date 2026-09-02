@@ -1083,6 +1083,52 @@ answer needs.
 evaluator already used privately: `evalExprInRow`, `aggregateCells`, `aggregateType`,
 `inferCellType`. They exist so the incremental path computes through the reference implementation
 rather than a copy, and they are stable in the ordinary way.
+
+## Static output-schema derivation (Phase 112, `0.18.0`)
+
+`Fuaran.Core.DataFrame` carries `SchemaWalk` — a pipeline's OUTPUT columns derived from its input
+schema **without evaluating anything** — with `Conformance.schemaWalkLaws` certifying it against the
+reference evaluator. **Purely additive**: two new types (`ColumnKnowledge`, `SchemaKnowledge`) and one
+new module; nothing that shipped before moved, no wire byte changed, and no evaluation result changed.
+
+**Two verdicts, and only one of them supports a refusal.** `SchemaKnowledge.Closed cols` means *these
+columns, in this order, and no others* — it is the only case from which "that column is absent" may be
+concluded. `SchemaKnowledge.AtLeast(cols, reason)` means *these columns are present and the walk
+cannot name the rest*: a reader can be CONFIRMED against it and can never be REFUTED, and the reason
+names what cost the walk its certainty. A consumer that refutes on an `AtLeast` has written a check
+that refuses working pipelines; `isClosed` is the guard, and it is part of the contract rather than a
+convenience.
+
+**Three shapes open the set, and each is a fact about data rather than a gap in the walk.** A
+`Derive`'s column name is declared but its type is inferred from the cells its expression produced, so
+`ColumnKnowledge.Type` is `None` however simple the expression looks — a guess that disagreed with the
+evaluator would be worse than no answer. A `Pivot`'s value columns are named by the data, one per
+distinct present value in the `on` column, so not even their number is derivable. A `Ref` source's
+schema is whatever the caller declares (`ofPipelineFrom` with `ofMap`), and an undeclared name
+degrades to `AtLeast` with the name in the reason — never to a guess, and never to a refusal.
+
+**The contract is an agreement with the evaluator, and it is certified.** For every pipeline the
+reference evaluator accepts: where the walk says `Closed`, the derived names equal the evaluated
+schema's names **in order and with duplicates**; where it says `AtLeast`, every derived name is one
+the evaluated schema carries; and wherever the walk states a type, it is the type the evaluator gave
+that column. `Conformance.schemaWalkLaws` reports those three plus a fourth — that the generated
+sample reached BOTH verdicts, so a green is never half a claim.
+
+**Two mirrors of the evaluator that read as quirks and are not.** `Window` **appends** its output
+column unconditionally, so a window whose `As` collides with an existing column leaves the schema
+carrying that name twice and the walk says so; `Derive` **upserts** (retype in place, position kept).
+Both match what the evaluator does. A walk that tidied either away would be wrong about the shape the
+consumer actually receives.
+
+**Forward-coupled with no catch-all.** `ofTransform` matches `Transform`, `JoinKind`, `WindowFn` and
+`AggFn` exhaustively, so a new verb or kind is a **compile error here** rather than a silent drift in a
+downstream copy. That is why the walk lives beside the evaluator: the same growth that is additive for
+the algebra is a correctness event for anything deriving schemas from it.
+
+**Named `SchemaWalk`, not `Schema`.** `Fuaran.Core` already publishes the `Schema` type abbreviation
+and a `Schema` module of schema-level operations (`diff` / `classify` / `fingerprint`) beside it, and a
+second module of that name in one namespace does not compile.
+
 ## Fold-confluence pack: N-lane arrival-order invariance (Phase 100)
 
 Phase 80 certifies confluence for a domain's TREE ops (interleavings of two independence-declared

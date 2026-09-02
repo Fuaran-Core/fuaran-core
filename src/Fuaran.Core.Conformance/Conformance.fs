@@ -2995,6 +2995,210 @@ module Conformance =
             Passed = roundTrip.IsNone
             Counterexample = roundTrip } ]
 
+    // ---- Static output-schema derivation (Phase 112) ----
+    // The teeth on `SchemaWalk`: a walk that derives a pipeline's output columns WITHOUT evaluating
+    // it is only worth having if its answer is the one the evaluator would give, and the two live in
+    // different functions over the same closed DU — exactly the shape that drifts silently.
+
+    /// The static output-schema laws (Phase 112) — the agreement between `SchemaWalk.ofPipeline` and
+    /// the schema `DataFrame.evalPipelineWith` actually produces. Self-contained: it builds its own
+    /// tables and pipelines from the seed, over a verb menu that reaches every schema-shaping case
+    /// (the closing verbs, the appending verbs, the pivot that opens the set, the four combining
+    /// join kinds and the two filtering ones, an undeclared `Ref` right-hand source, and a window
+    /// whose output name COLLIDES with an existing column). Only samples the evaluator accepts are
+    /// judged — a pipeline it rejects has no output schema to be right or wrong about.
+    ///
+    ///  - **closed ⇒ exact** — where the walk says `Closed`, the derived column names equal the
+    ///    evaluated schema's names, IN ORDER and with duplicates: `Closed` is the only case a
+    ///    consumer may conclude an absence from, so anything less than equality would make a
+    ///    refusal unsound.
+    ///  - **open ⇒ sound** — where the walk says `AtLeast`, every derived name is a name the
+    ///    evaluated schema carries. The walk may know less than the truth; it may never claim a
+    ///    column the result does not have.
+    ///  - **declared types agree** — wherever the walk states a column's type (`Some`), it is the
+    ///    type the evaluator gave that column. `None` is the honest "decidable only from the data"
+    ///    and is not judged.
+    ///  - **the sample is not vacuous** — both verdicts were actually reached. A parity law whose
+    ///    generator never produced one of the two cases is a green that proves half of what it says.
+    let schemaWalkLaws (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable closedExact = None
+        let mutable openSound = None
+        let mutable typesAgree = None
+        let mutable closedSeen = 0
+        let mutable openSeen = 0
+
+        let col name ty cells : Column = Column.create name ty cells
+
+        // The left/base table: two int columns and a string grouping column.
+        let baseTable (n: int) : Table =
+            let a = [ for i in 1..n -> Int(i % 3) ]
+            let b = [ for i in 1..n -> if i % 4 = 0 then Null else Int(i * 2) ]
+            let g = [ for i in 1..n -> Str(if i % 2 = 0 then "x" else "y") ]
+
+            { Schema = [ "a", IntType; "b", IntType; "g", StringType ]
+              Columns = [ col "a" IntType a; col "b" IntType b; col "g" StringType g ] }
+
+        // The right-hand table a combining join reaches. Its `g` COLLIDES with the left's, so the
+        // evaluator's `_right` suffix rule is exercised on every combining sample.
+        let rightTable: Table =
+            { Schema = [ "g", StringType; "v", FloatType ]
+              Columns =
+                [ col "g" StringType [ Str "x"; Str "y" ]
+                  col "v" FloatType [ Float 1.0; Float 2.5 ] ] }
+
+        // A schema-identical peer, so the three set ops have something they accept.
+        let peerTable: Table =
+            { Schema = [ "a", IntType; "b", IntType; "g", StringType ]
+              Columns =
+                [ col "a" IntType [ Int 1; Int 2 ]
+                  col "b" IntType [ Int 8; Null ]
+                  col "g" StringType [ Str "x"; Str "z" ] ] }
+
+        let resolve (name: string) : Result<Table, EvalError> =
+            match name with
+            | "right" -> Ok rightTable
+            | "peer" -> Ok peerTable
+            | other -> Error(UnresolvedSource other)
+
+        let win partitionBy orderBy fn ofCol asCol : WindowSpec =
+            { PartitionBy = partitionBy
+              OrderBy = orderBy
+              Fn = fn
+              Of = ofCol
+              As = asCol }
+
+        let menu: Transform list =
+            [ Filter(Binary(Gt, Col "a", Lit(Int 0)))
+              Sort [ "b", Asc ]
+              Distinct
+              Limit(3, 0)
+              Derive("d", Binary(Add, Col "a", Lit(Int 1)))
+              // A derive onto an EXISTING name — the evaluator retypes in place, keeping position.
+              Derive("b", Cast(FloatType, Col "b"))
+              Window(win [ "g" ] [ "a", Asc ] RowNumber "a" "rn")
+              Window(win [] [ "a", Asc ] CumulSum "a" "cs")
+              Window(win [ "g" ] [ "a", Asc ] Lag "b" "lagb")
+              Window(win [] [ "a", Asc ] CumulMax "b" "runmax")
+              // `As` COLLIDES with an existing column: the evaluator appends regardless, leaving the
+              // name twice, and the walk must say the same rather than tidying it away.
+              Window(win [] [ "a", Asc ] Rank "a" "a")
+              Project [ "a", "a"; "g", "grp" ]
+              GroupBy(
+                  [ "g" ],
+                  [ { Name = "s"; Fn = Sum; Of = "a" }
+                    { Name = "n"; Fn = Count; Of = "b" }
+                    { Name = "m"; Fn = Mean; Of = "a" }
+                    { Name = "lo"; Fn = Min; Of = "b" } ]
+              )
+              Unpivot([ "g" ], [ "a"; "b" ])
+              Pivot
+                  { Index = [ "g" ]
+                    On = "g"
+                    Values = "a"
+                    Agg = Sum }
+              Join(Embedded rightTable, [ "g", "g" ], Inner)
+              Join(Embedded rightTable, [ "g", "g" ], Left)
+              Join(Embedded rightTable, [ "g", "g" ], Right)
+              Join(Ref "right", [ "g", "g" ], Outer)
+              Join(Embedded rightTable, [ "g", "g" ], Semi)
+              Join(Ref "right", [ "g", "g" ], Anti)
+              Union(Embedded peerTable)
+              Intersect(Ref "peer")
+              Except(Embedded peerTable) ]
+
+        for i in 0 .. iterations - 1 do
+            let rows, r1 = ConfRng.intBelow 4 rng
+            let steps, r2 = ConfRng.intBelow 3 r1
+            let mutable r = r2
+
+            let pipeline =
+                [ for _ in 0..steps do
+                      let k, r' = ConfRng.intBelow (List.length menu) r
+                      r <- r'
+                      yield List.item k menu ]
+
+            rng <- r
+
+            let table = baseTable (rows + 2)
+
+            match DataFrame.evalPipelineWith resolve pipeline table with
+            | Error _ -> () // the evaluator rejected it; there is no output schema to agree about
+            | Ok result ->
+                // The walk is given the input schema and NO source declarations, so an undeclared
+                // `Ref` is the honest "unknown" while the evaluator resolves it — which is precisely
+                // the asymmetry the `AtLeast` case exists to carry.
+                let derived = SchemaWalk.ofPipeline table.Schema pipeline
+                let actualNames = result.Schema |> List.map fst
+                let derivedCols = SchemaWalk.columns derived
+
+                let describe () =
+                    sprintf
+                        "seed=%d iter=%d: pipeline=%A derived=%A actual=%A"
+                        seed
+                        i
+                        pipeline
+                        (SchemaWalk.names derived)
+                        actualNames
+
+                match derived with
+                | SchemaKnowledge.Closed _ ->
+                    closedSeen <- closedSeen + 1
+
+                    if SchemaWalk.names derived <> actualNames && closedExact.IsNone then
+                        closedExact <- Some(describe ())
+
+                    // Positional, and only where the lengths agree — a name mismatch is already
+                    // reported above and zipping unequal lists would report it twice as a type fault.
+                    if List.length derivedCols = List.length result.Schema then
+                        let bad =
+                            List.zip derivedCols result.Schema
+                            |> List.tryFind (fun (d, (_, ty)) ->
+                                match d.Type with
+                                | Some t -> t <> ty
+                                | None -> false)
+
+                        if bad.IsSome && typesAgree.IsNone then
+                            typesAgree <- Some(sprintf "%s (closed, at %A)" (describe ()) bad)
+
+                | SchemaKnowledge.AtLeast _ ->
+                    openSeen <- openSeen + 1
+
+                    let unclaimed =
+                        derivedCols |> List.tryFind (fun d -> not (List.contains d.Name actualNames))
+
+                    if unclaimed.IsSome && openSound.IsNone then
+                        openSound <- Some(sprintf "%s (claimed %A)" (describe ()) unclaimed)
+
+                    // By name rather than position: an open derivation is a SUBSET, so its columns
+                    // need not sit where the evaluator put them.
+                    let badType =
+                        derivedCols
+                        |> List.tryFind (fun d ->
+                            match d.Type with
+                            | None -> false
+                            | Some t -> not (result.Schema |> List.exists (fun (n, ty) -> n = d.Name && ty = t)))
+
+                    if badType.IsSome && typesAgree.IsNone then
+                        typesAgree <- Some(sprintf "%s (open, at %A)" (describe ()) badType)
+
+        [ { Law = "a Closed derivation names exactly the columns evalPipeline produces, in order"
+            Passed = closedExact.IsNone
+            Counterexample = closedExact }
+          { Law = "an AtLeast derivation names only columns evalPipeline produces (never claims one)"
+            Passed = openSound.IsNone
+            Counterexample = openSound }
+          { Law = "a derived column's DECLARED type is the type evalPipeline gave that column"
+            Passed = typesAgree.IsNone
+            Counterexample = typesAgree }
+          { Law = "the generated sample reached both verdicts (the parity claim is not vacuous)"
+            Passed = closedSeen > 0 && openSeen > 0
+            Counterexample =
+              if closedSeen > 0 && openSeen > 0 then
+                  None
+              else
+                  Some(sprintf "seed=%d: closed=%d open=%d over %d iterations" seed closedSeen openSeen iterations) } ]
+
     // ---- Deferred async-result envelope (Phase 32) ----
     // The teeth on `Deferred<'T>` + its wire codec + its Phase-27 replay interplay.
 
