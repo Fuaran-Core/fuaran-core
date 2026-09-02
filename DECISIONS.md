@@ -1,5 +1,49 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-02 — D21: the footprint is one scale, and a prime reports what a prime did
+
+**Decided.** From `0.18.0`, `Incremental.rowsEvaluated` counts row evaluations at steps in **every**
+case — `Recompute.FullRecompute` carries the reference evaluator's own count rather than being
+projected onto `RecomputeFootprint.SourceRows` — and a pipeline the plan DECLINES primes to
+`Primed n` rather than to `FullRecompute`. An amendment to D19's instrument, not to its contract:
+every result still equals `DataFrame.evalPipelineWithInEnv` over the same source, and no evaluation
+result moves. What moves is the recorded values, which is why `STABILITY.md` records it as breaking.
+
+**Why the projection was wrong rather than merely coarse.** `SourceRows` and "row evaluations at
+steps" are different units. A pipeline with three evaluating steps over six rows performs eighteen
+row evaluations and was charged six, so a declined refresh compared against its own full baseline
+read as having done **less** work than the thing it fell back to. Every D20 measurement — and every
+measurement a future widening will be gated on, by D20's own rule — is taken through this
+instrument, so an instrument that reads backwards does not merely under-report: it inverts the
+comparison the rule depends on. That it read *correctly* on the vectors that motivated D20 is
+coincidence, not evidence — those pipelines have one evaluating step, where the two units agree.
+
+**Why the count is taken in the reference DRIVER.** D19's first property is that the reference
+evaluator stays the oracle, so deriving a full evaluation's cost anywhere else would be a second
+semantics — a second thing that could disagree with the evaluator, in exactly the class of way that
+is silent. `DataFrame.evalPipelineWithInEnvCounted` counts where the steps are actually taken, and
+the existing entry points delegate to it.
+
+**Why a declined pipeline's prime is `Primed`.** A prime evaluates everything whatever the plan
+says, and has no prior state to fall back from, so `FullRecompute` there described a fall-back that
+did not happen. The decline belongs to the REFRESH, which is where degrading is real, and the
+question "will refreshes be restricted" already has a better answer than a footprint: `plan`
+answers it before anything is evaluated, which is what D19 means by declaring the boundary as data.
+
+**And why that is scoped to the plan-level decline alone.** A prime whose identity witness cannot
+key the source still reports `FullRecompute (n, RowIdentityUnusable …)`. That defect depends on the
+source DATA, so `plan` cannot see it and the footprint is its only channel — the discriminator is
+not "is this a prime" but "could the consumer have asked beforehand". The unreachable `plan`/`split`
+disagreement keeps `FullRecompute` for the same reason a defensive branch exists at all.
+
+**The corpus consequence, and where it stops.** The two `incremental-recompute` vectors vendored
+here were re-pinned to the corrected readings — only the sort vector moved; the control vector was
+already on this scale, which is the control doing its job. Re-recording them in the specification
+that owns the family is that specification's act, not this repository's, so the vendored bytes
+deliberately lead the corpus until it happens, and the local `README.md` says so with the before and
+after side by side. The conformance family's work law, which could only be stated over the
+restricted classes while the two scales existed, now runs over every sample it generates.
+
 ## 2026-09-02 — D20: a `Sort` is merged, not declined — and a class is widened only after it is measured
 
 **Decided.** From `0.18.0`, `Incremental.plan` classifies a `Sort` as `MergeOrder by` rather than

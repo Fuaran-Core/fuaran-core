@@ -1153,7 +1153,9 @@ consumer may be asserting on through the footprint, so it is announced in the re
 (`{ SourceRows; ResultRows; Recompute }`) and `Recompute` (`Primed` / `ReusedPrior` /
 `RowsRecomputed` / `GroupsRecomputed` / `FullRecompute`) carry **counts only, no clock**, so they are
 deterministic and identical on every host and a consumer may assert on them. `Recompute` is a
-closed-set envelope — a new case is additive, removing one is breaking.
+closed-set envelope — a new case is additive, removing one is breaking. Because a consumer may assert
+on them, changing what a case's count MEANS is breaking too: see "One scale for `rowsEvaluated`"
+below, where `FullRecompute`'s reading was corrected in `0.18.0`.
 
 **The type is `RecomputeFootprint`, deliberately.** `Fuaran.Core.Ops` publishes
 `Fuaran.Core.Footprint` (the op-script address set). Two same-named types in one namespace across two
@@ -1214,6 +1216,49 @@ misspelled key.
 **`Window` remains declined, deliberately and by type.** The estate's fixture family records no
 footprint for it, and this phase's own gate is that a class is not widened before it is measured — so
 a bounded-frame window stays `StepNotRowLocal "window"` until a vector exists to measure it against.
+
+### One scale for `rowsEvaluated`, and a declined prime is `Primed` (Phase 117, `0.18.0`) — BREAKING
+
+**This is a BREAKING change for any consumer asserting on a footprint, and the reason it is breaking
+is that the recorded VALUES move**, not merely the type. Two corrections, both to the instrument the
+paragraphs above call part of the surface. `0.18.0` has not been tagged, so this ships under it
+alongside Phases 112–116 and 119; a consumer moving from `0.17.0` should re-read every footprint
+assertion it holds.
+
+**`Incremental.rowsEvaluated` now counts row evaluations AT STEPS in every case, a full evaluation
+included.** `Recompute.FullRecompute` gains that count as its first field —
+`FullRecompute of rowsEvaluated: int * reason: FallBackReason` — supplied by the reference evaluator
+itself through the new `DataFrame.evalPipelineWithInEnvCounted`. It was previously projected onto
+`RecomputeFootprint.SourceRows`, which is a different unit: a pipeline with three evaluating steps
+over six rows costs eighteen row evaluations and was charged six. So a decline compared against its
+own full baseline read as having done LESS work than the thing it fell back to, and the conformance
+family's work law could only be stated over the restricted classes, because the declined ones were
+not on a scale it could compare. `SourceRows` is unchanged and stays its own field.
+`Incremental.footprintString` renders the count for this case too, so that string moves as well.
+
+**A pipeline the plan DECLINES now primes to `Primed n`.** Priming avoids nothing whatever the plan
+says and has no prior state to fall back from, so reporting `FullRecompute` there described a
+fall-back that did not happen. The decline and its typed reason attach to a **refresh**, where the
+fall-back is real; `Incremental.plan` remains what a consumer asks beforehand, and it is unchanged.
+
+**The scope of that second correction is the PLAN-LEVEL decline only, deliberately.** A prime whose
+identity witness cannot key the source still reports `FullRecompute (n, RowIdentityUnusable …)`,
+because that defect depends on the source data and is invisible to `plan` — the footprint is its only
+channel, where a plan-level decline is askable before any evaluation. The unreachable
+`plan`/`split` disagreement likewise still reports `FullRecompute`, being a defect that should be
+visible wherever it surfaces.
+
+**`DataFrame.evalPipelineWithInEnvCounted` is a new public entry point** and is purely additive: it
+returns `Result<Table * int, EvalError>` and `evalPipelineWithInEnv` now delegates to it, so the
+existing four entry points evaluate byte-identically to before. The unit it counts is one evaluation
+of one step's expression against one row — a `Filter` and a `Derive` are charged the frame's row count
+where they stand, and every other verb, evaluating no per-row expression, is charged none.
+
+**The estate's `incremental-recompute` vectors vendored under
+`tests/Fuaran.Core.Tests/fixtures/incremental-recompute/` were re-pinned to the corrected readings**,
+with the before/after in that directory's `README.md`. Only the sort vector moved; the control
+vector's footprints were already on this scale, which is the control working. Re-recording them on
+the corpus side is that specification's act, not this repository's.
 
 ## Static output-schema derivation (Phase 112, `0.18.0`)
 

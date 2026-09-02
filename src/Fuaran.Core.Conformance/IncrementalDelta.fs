@@ -37,6 +37,14 @@ namespace Fuaran.Core
 //  right but that the seam did less work to reach it. An incremental evaluator
 //  that silently recomputed everything would pass an equality suite perfectly.
 //
+//  Phase 117 made that instrument comparable across the boundary. Its
+//  work law used to quantify over the restricted classes alone, because a full
+//  evaluation was reported as its SOURCE ROW COUNT while a restricted one
+//  counted row evaluations at steps — two scales, so the declined samples could
+//  not be measured at all and a declined refresh read as cheaper than the
+//  baseline it was measured against. Both sides now count the same unit, and
+//  the law runs over every sample the corpus generates.
+//
 //  FSharp.Core only, Fable-clean.
 // ============================================================================
 
@@ -300,12 +308,21 @@ module IncrementalDelta =
     ///    reports a `FullRecompute` footprint carrying that same reason (or `ReusedPrior`, which is
     ///    sound for any strategy when the source did not move), and an incrementalisable pipeline
     ///    given a well-formed identity delta does NOT report one;
-    ///  - **the refresh does no more work than a full evaluation** — the measured rows-evaluated
-    ///    of a restricted refresh never exceeds what priming over the SAME (changed) source costs.
-    ///    The baseline is the changed source deliberately: measuring against the BASE is wrong,
-    ///    because an append makes the new source larger and the appended row legitimately passes
-    ///    through more steps than the rows it joined. This is the claim an equality suite cannot
-    ///    make, and the one an evaluator that quietly recomputed everything would fail;
+    ///  - **a decline is reported by the REFRESH, never by the prime** (Phase 117) — priming a
+    ///    declined pipeline reports `Primed`, because a prime avoids nothing whatever the plan says
+    ///    and had no state to fall back from. A prime that reported the pipeline's declared decline
+    ///    would be describing a fall-back that did not happen;
+    ///  - **NO evaluation does more work than a full evaluation** (Phase 117 widened this from
+    ///    "restricted" to every sample) — the measured rows-evaluated of a refresh, declined or
+    ///    restricted, never exceeds what priming over the SAME (changed) source costs. The baseline
+    ///    is the changed source deliberately: measuring against the BASE is wrong, because an append
+    ///    makes the new source larger and the appended row legitimately passes through more steps
+    ///    than the rows it joined. This is the claim an equality suite cannot make, and the one an
+    ///    evaluator that quietly recomputed everything would fail. It could only be stated over the
+    ///    restricted classes while a full evaluation was projected onto its SOURCE ROW COUNT and a
+    ///    restricted one counted evaluations at steps: the two were not comparable, so a declined
+    ///    refresh read as cheaper than the baseline it was measured against. One scale is what makes
+    ///    the law total;
     ///  - **plan is pure and total** — every step is classified, recomputing agrees, and
     ///    `isIncremental` agrees with the strategy;
     ///  - **the declined verbs are actually reached** — the run observes both fall-back classes the
@@ -338,6 +355,7 @@ module IncrementalDelta =
             |> Option.map (fun s -> cite s "priming <> a full reference evaluation over the base")
 
         let mutable boundary = None
+        let mutable primeClass = None
         let mutable work = None
         let mutable planPurity = None
 
@@ -360,7 +378,7 @@ module IncrementalDelta =
                 planPurity <- Some(cite s "isIncremental disagrees with the strategy")
 
             match p.Strategy, s.Refresh.Recompute with
-            | ReferenceOnly r, FullRecompute r2 ->
+            | ReferenceOnly r, FullRecompute(_, r2) ->
                 if r <> r2 && boundary.IsNone then
                     boundary <- Some(cite s "a declined pipeline reported a different reason")
             | ReferenceOnly _, ReusedPrior ->
@@ -372,13 +390,25 @@ module IncrementalDelta =
             | ReferenceOnly _, _ ->
                 if boundary.IsNone then
                     boundary <- Some(cite s "a declined pipeline did not report a full evaluation")
-            | _, FullRecompute _ -> ()
-            | _ ->
-                if
-                    Incremental.rowsEvaluated s.Refresh > Incremental.rowsEvaluated s.Full
-                    && work.IsNone
-                then
-                    work <- Some(cite s "a restricted refresh evaluated more rows than a full evaluation would")
+            | _ -> ()
+
+            // A PRIME never reports the pipeline's declared decline (Phase 117). Stated against
+            // that specific reason rather than as "a prime is always `Primed`", because a prime
+            // legitimately reports `RowIdentityUnusable` — a defect `plan` cannot see, whose only
+            // channel is the footprint.
+            match p.Strategy, s.Prime.Recompute with
+            | ReferenceOnly r, FullRecompute(_, r2) when r = r2 ->
+                if primeClass.IsNone then
+                    primeClass <- Some(cite s "a declined pipeline's prime reported the decline instead of `Primed`")
+            | _ -> ()
+
+            // Every sample, declined or restricted: one scale, so the comparison is meaningful for
+            // all of them rather than only for the classes that already counted the same unit.
+            if
+                Incremental.rowsEvaluated s.Refresh > Incremental.rowsEvaluated s.Full
+                && work.IsNone
+            then
+                work <- Some(cite s "a refresh evaluated more rows than a full evaluation would")
 
         let sawDeclined =
             xs
@@ -432,7 +462,10 @@ module IncrementalDelta =
           { Law = "a declined pipeline reports a full evaluation carrying its declared reason"
             Passed = boundary.IsNone
             Counterexample = boundary }
-          { Law = "a restricted refresh evaluates no more rows than a full evaluation would"
+          { Law = "a declined pipeline's PRIME reports `Primed`, not the decline"
+            Passed = primeClass.IsNone
+            Counterexample = primeClass }
+          { Law = "a refresh evaluates no more rows than a full evaluation would — declined or restricted"
             Passed = work.IsNone
             Counterexample = work }
           { Law = "plan is pure, total, and agrees with isIncremental"
