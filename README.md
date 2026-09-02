@@ -1,5 +1,7 @@
 # Fuaran.Core
 
+[![CI](https://github.com/Fuaran-Core/fuaran-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Fuaran-Core/fuaran-core/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/Fuaran.Core.Tree.svg)](https://www.nuget.org/packages/Fuaran.Core.Tree) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 The shared cross-domain substrate for the Fuaran family — the genericity-extracted
 spine that the UI, Calc, Documents, CAD, Office (and future) domain tiers consume as a
 peer dependency, so each domain stops re-implementing the same op-stream / op-algebra /
