@@ -352,6 +352,124 @@ module Gen =
               CaseRefines = Map.empty
               KindProjections = Map.empty }
 
+    // -----------------------------------------------------------------------
+    // Phase 113 — declared annotations, rendered into the generated F#.
+    //
+    // Two surfaces, and they answer different questions. The `///` block is for a
+    // reader: it says what is true about the member and what to do instead. The
+    // `System.Obsolete` attribute is for the compiler: it makes the fact reach a
+    // consumer who never opens the generated file.
+    // -----------------------------------------------------------------------
+
+    /// An F# string literal — annotation prose reaches the generated source through
+    /// an attribute argument, so a quote or backslash in it must not end the literal
+    /// and a newline must not split the attribute across lines.
+    let private fsAttrStr (s: string) : string =
+        let b = System.Text.StringBuilder()
+        b.Append('"') |> ignore
+
+        for ch in s do
+            match ch with
+            | '"' -> b.Append("\\\"") |> ignore
+            | '\\' -> b.Append("\\\\") |> ignore
+            | '\n' -> b.Append("\\n") |> ignore
+            | '\r' -> b.Append("\\r") |> ignore
+            | '\t' -> b.Append("\\t") |> ignore
+            | c -> b.Append(c) |> ignore
+
+        b.Append('"').ToString()
+
+    /// A declared string slot that actually says something. An annotation authored
+    /// with an empty or whitespace replacement / message / version reads as UNSAID
+    /// rather than emitting `use `` instead` into the generated source — refusing
+    /// garbage at the point of emission is cheaper than a validator every caller has
+    /// to remember to run, and there is nothing else the slot could have meant.
+    let private said (v: string option) : string option =
+        v |> Option.filter (fun x -> not (System.String.IsNullOrWhiteSpace x))
+
+    /// The `///` doc lines for an annotation set, at the given indent. Empty for an
+    /// empty set, which is what keeps an unannotated vocabulary's emission
+    /// byte-identical.
+    let private annotationDocLines (indent: string) (a: Annotations) : string list =
+        [ match a.Deprecated with
+          | Some d ->
+              let replacement =
+                  match said d.Replacement with
+                  | Some r -> sprintf " Use `%s` instead." r
+                  | None -> ""
+
+              indent + "/// **Deprecated.**" + replacement
+
+              match said d.Message with
+              | Some m -> indent + "/// " + m
+              | None -> ()
+          | None -> ()
+
+          if a.InProcessOnly then
+              indent
+              + "/// **In-process only** — this member has no wire projection: a value here"
+
+              indent
+              + "/// is carried inside one host process and is LOST across any wire boundary."
+
+          match said a.Since with
+          | Some v -> indent + sprintf "/// Since `%s`." v
+          | None -> () ]
+
+    /// The single `System.Obsolete` attribute an annotation set earns, or `None`.
+    ///
+    /// **One attribute, never two.** `System.ObsoleteAttribute` is not
+    /// `AllowMultiple`, so a member that is both deprecated and in-process-only
+    /// composes into one message; a second attribute would not compile.
+    ///
+    /// **`isError = false` is load-bearing.** The generated layer must not decide
+    /// for its host that touching a marked member fails the build: FS0044 is a
+    /// warning the host escalates (`--warnaserror:44`) or silences (`--nowarn:44`)
+    /// on its own release schedule. An unconditional error would make the
+    /// two-release retirement this annotation exists to enable impossible to run —
+    /// the release that MARKS the member could never ship.
+    ///
+    /// `Since` earns no attribute: it is a fact about the past, and there is nothing
+    /// for a compiler to say about it.
+    let private obsoleteAttr (a: Annotations) : string option =
+        let parts =
+            [ match a.Deprecated with
+              | Some d ->
+                  "deprecated"
+                  + (match said d.Replacement with
+                     | Some r -> " — use `" + r + "` instead"
+                     | None -> "")
+                  + (match said d.Message with
+                     | Some m -> ": " + m
+                     | None -> "")
+              | None -> ()
+
+              if a.InProcessOnly then
+                  "in-process only — no wire projection; a value here is lost across a wire boundary" ]
+
+        match parts with
+        | [] -> None
+        | ps -> Some(sprintf "[<System.Obsolete(%s, false)>]" (fsAttrStr (String.concat "; " ps)))
+
+    /// Whether ANY declaration in the vocabulary earns an `Obsolete` attribute — the
+    /// condition for the generated module's `#nowarn "44"`. The generated structural
+    /// layer constructs and matches every declared member, marked ones included, so
+    /// the warning it raises is for CONSUMERS of the layer and never for the layer
+    /// itself; without the suppression a vocabulary could not mark anything without
+    /// making its own generated codec noisy.
+    let private emitsObsolete (idl: Idl) : bool =
+        let fieldSets =
+            [ idl.NodeFields
+              yield! idl.Kinds |> List.map _.Fields
+              yield! idl.Ops |> List.map _.Fields
+              yield! idl.Records |> List.map _.Fields
+              yield! idl.Unions |> List.collect (fun u -> u.Cases |> List.map _.Fields) ]
+
+        (idl.Unions
+         |> List.exists (fun u -> u.Cases |> List.exists (fun c -> (obsoleteAttr c.Annotations).IsSome)))
+        || (fieldSets
+            |> List.exists (List.exists (fun f -> (obsoleteAttr f.Annotations).IsSome)))
+
     let private fsField (msg: Set<string>) (f: IdlField) =
         let fsType = fsTypeIn msg
 
@@ -366,7 +484,16 @@ module Gen =
             | HostOnly
             | OmitDefault _ -> fsType f.Type
 
-        sprintf "      %s: %s" (pascal f.Name) ty
+        // Phase 113 — a record field's attribute sits on its own line above it.
+        let prefix =
+            (annotationDocLines "      " f.Annotations
+             @ (obsoleteAttr f.Annotations
+                |> Option.map (fun a -> "      " + a)
+                |> Option.toList))
+            |> List.map (fun l -> l + "\n")
+            |> String.concat ""
+
+        prefix + sprintf "      %s: %s" (pascal f.Name) ty
 
     let private enumDecl (e: IdlEnum) =
         sprintf "type %s =\n%s" e.Name (e.Cases |> List.map (sprintf "    | %s") |> String.concat "\n")
@@ -386,10 +513,26 @@ module Gen =
 
         let fields = c.Fields |> List.map fieldDecl |> String.concat " * "
 
-        if fields = "" then
-            sprintf "    | %s" c.Tag
-        else
-            sprintf "    | %s of %s" c.Tag fields
+        let body =
+            if fields = "" then
+                c.Tag
+            else
+                sprintf "%s of %s" c.Tag fields
+
+        // Phase 113 — a union case's attribute sits INLINE after the bar
+        // (`| [<Obsolete(...)>] Tag of ...`), which is where F# accepts it; the doc
+        // block sits above the bar, like any other.
+        let docs =
+            annotationDocLines "    " c.Annotations
+            |> List.map (fun l -> l + "\n")
+            |> String.concat ""
+
+        let attr =
+            match obsoleteAttr c.Annotations with
+            | Some a -> a + " "
+            | None -> ""
+
+        docs + "    | " + attr + body
 
     let private unionDecl (msg: Set<string>) (u: IdlUnion) =
         sprintf
@@ -1557,9 +1700,22 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             |> String.concat "\n\n"
 
         let header =
+            // Phase 113 — the generated layer constructs and matches EVERY declared
+            // member, marked ones included, so a vocabulary that deprecates anything
+            // would otherwise make its own codec noisy with FS0044. The suppression is
+            // file-local and conditional: a vocabulary that marks nothing emits exactly
+            // the header it always did, and a CONSUMER of this module still gets the
+            // warning, which is the whole point of emitting the attribute.
+            let nowarn =
+                if emitsObsolete idl then
+                    "\n#nowarn \"44\" // this layer implements every declared member, including deprecated ones"
+                else
+                    ""
+
             sprintf
-                "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.\nmodule %s\n\nopen Fuaran.Core"
+                "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.\nmodule %s%s\n\nopen Fuaran.Core"
                 moduleName
+                nowarn
 
         // Phase 672: the decoder's mutually-recursive group, mirroring `recGroup`.
         // `decNodeKind` dispatches `$type` to the per-kind spec decoder; `decNode`
@@ -2321,6 +2477,60 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             | Some pred -> "(" + pred + " ? null : " + pair + ")"
             | None -> pair
 
+    // -----------------------------------------------------------------------
+    // Phase 113 — declared annotations in the TypeScript backend.
+    //
+    // This backend emits plain JS: there is no per-field declaration to hang a
+    // JSDoc block on, because a field is an inline entry in a one-line object
+    // literal or pairs array. So an annotation renders as `//` line comments at the
+    // closest line the emission actually has — the `case "<Tag>":` arm for a union
+    // case, and the owning `function` for a field, NAMING the field.
+    //
+    // Line comments rather than a `/** … */` JSDoc block, deliberately: a
+    // `@deprecated` JSDoc attached to `encTextSource` would tell every editor that
+    // the ENCODER is deprecated, which is false. A comment that names its subject
+    // says the true thing in a place tooling will not misread.
+    // -----------------------------------------------------------------------
+
+    /// The annotation lines for one member, at the given indent, each naming
+    /// `subject`. Empty for an empty set — an unannotated vocabulary's emitted JS is
+    /// byte-for-byte what it was.
+    let private tsAnnotationLines (indent: string) (subject: string) (a: Annotations) : string list =
+        [ match a.Deprecated with
+          | Some d ->
+              indent
+              + "// @deprecated `"
+              + subject
+              + "`"
+              + (match said d.Replacement with
+                 | Some r -> " — use `" + r + "` instead."
+                 | None -> " — marked for retirement.")
+              + (match said d.Message with
+                 | Some m -> " " + m
+                 | None -> "")
+          | None -> ()
+
+          if a.InProcessOnly then
+              indent
+              + "// `"
+              + subject
+              + "` is in-process only: no wire projection, so a value here is lost across a wire boundary."
+
+          match said a.Since with
+          | Some v -> indent + "// `" + subject + "` — since " + v + "."
+          | None -> () ]
+
+    /// The comment block a generated function carries for its annotated FIELDS,
+    /// each named `<owner>.<field>`. Empty string when nothing is annotated.
+    let private tsFieldAnnotationHeader (owner: string) (fields: IdlField list) : string =
+        let lines =
+            fields
+            |> List.collect (fun f -> tsAnnotationLines "" (owner + "." + f.Name) f.Annotations)
+
+        match lines with
+        | [] -> ""
+        | ls -> (ls |> String.concat "\n") + "\n"
+
     let private tsUnionEncoder (disc: string) (u: IdlUnion) : string =
         let argList =
             match u.Params with
@@ -2328,29 +2538,38 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             | ps -> (ps |> List.map (fun p -> "enc" + p) |> String.concat ", ") + ", v"
 
         let arm (c: IdlUnionCase) =
-            match TransparentUnion.tag u with
-            | Some ttag when ttag = c.Tag ->
-                // Transparent case: return the single field's value bare (no `typed(...)`).
-                match c.Fields with
-                | [ f ] ->
-                    "    case "
-                    + tsSourceStr c.Tag
-                    + ": return "
-                    + tsEncApplied ("v." + f.Name) f.Type
-                    + ";"
-                | _ -> failwithf "transparent union case '%s' must have exactly one field" c.Tag
-            | _ ->
-                let pairs = c.Fields |> List.map (tsCasePair disc) |> String.concat ", "
+            let ann =
+                match tsAnnotationLines "    " c.Tag c.Annotations with
+                | [] -> ""
+                | ls -> (ls |> String.concat "\n") + "\n"
 
-                "    case "
-                + tsSourceStr c.Tag
-                + ": return typed("
-                + tsSourceStr c.Tag
-                + ", ["
-                + pairs
-                + "]);"
+            ann
+            + match TransparentUnion.tag u with
+              | Some ttag when ttag = c.Tag ->
+                  // Transparent case: return the single field's value bare (no `typed(...)`).
+                  match c.Fields with
+                  | [ f ] ->
+                      "    case "
+                      + tsSourceStr c.Tag
+                      + ": return "
+                      + tsEncApplied ("v." + f.Name) f.Type
+                      + ";"
+                  | _ -> failwithf "transparent union case '%s' must have exactly one field" c.Tag
+              | _ ->
+                  let pairs = c.Fields |> List.map (tsCasePair disc) |> String.concat ", "
 
-        "function enc"
+                  "    case "
+                  + tsSourceStr c.Tag
+                  + ": return typed("
+                  + tsSourceStr c.Tag
+                  + ", ["
+                  + pairs
+                  + "]);"
+
+        (u.Cases
+         |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
+         |> String.concat "")
+        + "function enc"
         + u.Name
         + "("
         + argList
@@ -2368,7 +2587,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// one — the node envelope is three of them.
     let private tsRecordEncoder (disc: string) (r: IdlRecord) : string =
         let pieces = r.Fields |> List.map (tsSpecPieceOf disc "s") |> String.concat ", "
-        "function enc" + r.Name + "(s) {\n  return plain([" + pieces + "]);\n}"
+
+        tsFieldAnnotationHeader r.Name r.Fields
+        + "function enc"
+        + r.Name
+        + "(s) {\n  return plain(["
+        + pieces
+        + "]);\n}"
 
     /// A kind's spec encoder. Nested (the default): the discriminator-tagged
     /// object, byte-identical to the pre-declarable emission. Flat (Phase 109):
@@ -2376,11 +2601,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// into the one flat object.
     let private tsSpecEncoder (disc: string) (flat: bool) (k: IdlKind) : string =
         let pieces = k.Fields |> List.map (tsSpecPieceOf disc "s") |> String.concat ", "
+        let ann = tsFieldAnnotationHeader k.Tag k.Fields
 
         if flat then
-            "function enc" + k.Tag + "SpecPairs(s) {\n  return [" + pieces + "];\n}"
+            ann + "function enc" + k.Tag + "SpecPairs(s) {\n  return [" + pieces + "];\n}"
         else
-            "function enc"
+            ann
+            + "function enc"
             + k.Tag
             + "Spec(s) {\n  return typed("
             + tsSourceStr k.Tag
@@ -2491,7 +2718,13 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             | ps -> (ps |> List.map (fun p -> "dec" + p) |> String.concat ", ") + ", j"
 
         let arm (c: IdlUnionCase) =
-            "    case "
+            let ann =
+                match tsAnnotationLines "    " c.Tag c.Annotations with
+                | [] -> ""
+                | ls -> (ls |> String.concat "\n") + "\n"
+
+            ann
+            + "    case "
             + tsSourceStr c.Tag
             + ": return "
             + tsFieldObject disc [ tsDiscKey disc, tsSourceStr c.Tag ] c.Fields
@@ -2527,7 +2760,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 | _ -> failwithf "transparent union case '%s' must have exactly one field" ttag
             | None -> "  return dFail(" + tsSourceStr ("expected a " + u.Name + " object") + ");"
 
-        "function dec"
+        (u.Cases
+         |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
+         |> String.concat "")
+        + "function dec"
         + u.Name
         + "("
         + argList
@@ -2538,14 +2774,16 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         + "\n}"
 
     let private tsRecordDecoder (disc: string) (r: IdlRecord) =
-        "function dec"
+        tsFieldAnnotationHeader r.Name r.Fields
+        + "function dec"
         + r.Name
         + "(j) {\n  const fs = dObj(j);\n  return "
         + tsFieldObject disc [] r.Fields
         + ";\n}"
 
     let private tsSpecDecoder (disc: string) (k: IdlKind) =
-        "function dec"
+        tsFieldAnnotationHeader k.Tag k.Fields
+        + "function dec"
         + k.Tag
         + "Spec(j) {\n  const fs = dObj(j);\n  return "
         + tsFieldObject disc [ tsDiscKey disc, tsSourceStr k.Tag ] k.Fields

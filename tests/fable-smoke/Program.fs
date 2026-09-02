@@ -230,16 +230,29 @@ let private idlTouch =
                 Fields =
                   [ { Name = "text"
                       Type = TStr
-                      Opt = Required }
+                      Opt = Required
+                      Annotations = Annotations.Empty }
+                    // Phase 113 — one ANNOTATED field, so the Fable leg actually reaches
+                    // `Artifact.annotationsJson`. An empty set short-circuits before any of
+                    // it runs, so an all-empty vocabulary would compile the type and prove
+                    // nothing about the projection that reads it.
                     { Name = "weight"
                       Type = TFloat
-                      Opt = Optional } ] }
+                      Opt = Optional
+                      Annotations =
+                        { Deprecated =
+                            Some
+                                { Replacement = Some "text"
+                                  Message = Some "carried by the text slot since 0.18.0" }
+                          InProcessOnly = false
+                          Since = Some "0.18.0" } } ] }
               { Tag = "Box"
                 Category = "container"
                 Fields =
                   [ { Name = "children"
                       Type = TList TNode
-                      Opt = Required } ] } ]
+                      Opt = Required
+                      Annotations = Annotations.Empty } ] } ]
           Unions = []
           Enums = [ Declare.enumOf "Tone" [ "Calm"; "Loud" ] ]
           Records = []

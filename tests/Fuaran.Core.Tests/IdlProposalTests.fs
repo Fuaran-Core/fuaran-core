@@ -67,7 +67,8 @@ let private postIdl =
                   OwnerKind "Badge",
                   { Name = "tooltip"
                     Type = TStr
-                    Opt = Optional }
+                    Opt = Optional
+                    Annotations = Annotations.Empty }
               ) ]
     with
     | Ok idl -> idl
@@ -209,7 +210,8 @@ let tests =
                               OwnerKind "Badge",
                               { Name = "x"
                                 Type = TStr
-                                Opt = Optional }
+                                Opt = Optional
+                                Annotations = Annotations.Empty }
                           ) ]
                     |> ignore
 
@@ -226,7 +228,8 @@ let tests =
                                   OwnerKind "Badge",
                                   { Name = "label"
                                     Type = TStr
-                                    Opt = Optional }
+                                    Opt = Optional
+                                    Annotations = Annotations.Empty }
                               ) ]
                     with
                     | Ok _ -> failtest "re-declaring an existing field was accepted"
@@ -240,7 +243,8 @@ let tests =
                                   OwnerKind "NoSuchKind",
                                   { Name = "x"
                                     Type = TStr
-                                    Opt = Optional }
+                                    Opt = Optional
+                                    Annotations = Annotations.Empty }
                               ) ]
                     with
                     | Ok _ -> failtest "a field was added to a kind that does not exist"

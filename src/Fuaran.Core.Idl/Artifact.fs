@@ -174,14 +174,59 @@ module Artifact =
         | HostOnly -> Canon.typed "hostOnly" []
         | OmitDefault d -> Canon.typed "omitDefault" [ "default", valueJson d ]
 
+    /// The declared annotation set (Phase 113), or `[]` when it says nothing.
+    ///
+    /// Returned as the key-value PAIRS to splice rather than as a `JVal`, so the
+    /// empty set contributes no key at all — an unannotated vocabulary's artifact is
+    /// byte-for-byte what it was, the posture `ops` / `hostCases` / `wire` all take.
+    /// Each slot is likewise omitted when absent, so `since` alone renders as
+    /// `{"since": "…"}` and nothing else.
+    ///
+    /// **Not a hostSurface key.** A `hostSurface` block is a host-LANGUAGE
+    /// declaration a non-F# consumer must ignore (§13); an annotation is a statement
+    /// about the vocabulary itself that every consumer wants — a third-party codec
+    /// reading this artifact needs to know a case is being retired quite as much as
+    /// the reference host does.
+    let private annotationsJson (a: Annotations) : (string * JVal) list =
+        if a.IsEmpty then
+            []
+        else
+            let deprecated =
+                match a.Deprecated with
+                | None -> []
+                | Some d ->
+                    [ "deprecated",
+                      JObj(
+                          (match d.Replacement with
+                           | Some r -> [ "replacement", JStr r ]
+                           | None -> [])
+                          @ (match d.Message with
+                             | Some m -> [ "message", JStr m ]
+                             | None -> [])
+                      ) ]
+
+            [ "annotations",
+              JObj(
+                  deprecated
+                  @ (if a.InProcessOnly then
+                         [ "inProcessOnly", JBool true ]
+                     else
+                         [])
+                  @ (match a.Since with
+                     | Some v -> [ "since", JStr v ]
+                     | None -> [])
+              ) ]
+
     /// Field lists keep their AUTHORED order (see the module's ordering contract).
     let private fieldsJson (fs: IdlField list) : JVal =
         fs
         |> List.map (fun f ->
-            JObj
+            JObj(
                 [ "name", JStr f.Name
                   "type", typeJson f.Type
-                  "optionality", optionalityJson f.Opt ])
+                  "optionality", optionalityJson f.Opt ]
+                @ annotationsJson f.Annotations
+            ))
         |> JArr
 
     let private kindJson (k: IdlKind) : JVal =
@@ -193,7 +238,11 @@ module Artifact =
     let private unionJson (u: IdlUnion) : JVal =
         let cases =
             u.Cases
-            |> List.map (fun c -> JObj [ "tag", JStr c.Tag; "fields", fieldsJson c.Fields ])
+            |> List.map (fun c ->
+                JObj(
+                    [ "tag", JStr c.Tag; "fields", fieldsJson c.Fields ]
+                    @ annotationsJson c.Annotations
+                ))
             |> JArr
 
         let baseFields =

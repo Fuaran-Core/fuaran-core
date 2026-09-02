@@ -61,6 +61,16 @@ module Diff =
             TypeHost: string
             OptClass: string
             Opt: string
+            /// The declared annotation set (Phase 113), canonically rendered — `""`
+            /// when the field declares none, which is what every revision predating
+            /// the key reads as.
+            ///
+            /// A FOURTH string beside the three above, for the same reason they are
+            /// three: an annotation is neither wire nor host-surface. It changes no
+            /// encoding in either direction and no generated SIGNATURE either — it
+            /// adds a doc comment and an `Obsolete` attribute — so folding it into
+            /// `TypeHost` would report a retirement marking as a signature move.
+            Annotations: string
         }
 
     /// What a field belongs to. `ONodeEnvelope` is the per-node field set beside
@@ -89,9 +99,15 @@ module Diff =
             | OUnionCase(u, c) -> "3:" + u + "." + c
             | ORecord n -> "4:" + n
 
+    /// One union case — its fields, and (Phase 113) its own annotation set, which
+    /// belongs to the CASE rather than to any of its fields.
+    type CaseSnap =
+        { Fields: FieldSnap list
+          Annotations: string }
+
     type UnionSnap =
         { Params: string list
-          Cases: Map<string, FieldSnap list>
+          Cases: Map<string, CaseSnap>
           CaseOrder: string list
           TransparentCase: string option }
 
@@ -221,6 +237,16 @@ module Diff =
         | Some t -> t
         | None -> "?"
 
+    /// The annotation set as a canonical string — `""` when the key is absent,
+    /// which is both "declares none" and "this revision predates the key". The two
+    /// are deliberately indistinguishable: an artifact written before Phase 113
+    /// describes a vocabulary that annotated nothing, so reading them alike is
+    /// correct rather than merely convenient.
+    let private readAnnotations (v: JVal) : string =
+        match field "annotations" v with
+        | Some a -> Canon.render a
+        | None -> ""
+
     let private readField (v: JVal) : FieldSnap option =
         match str "name" v, field "type" v, field "optionality" v with
         | Some name, Some ty, Some opt ->
@@ -234,7 +260,8 @@ module Diff =
                     |> List.map (fun (p, h) -> p + "=" + Canon.render h)
                     |> String.concat "; "
                   OptClass = str "$type" opt |> Option.defaultValue "?"
-                  Opt = optLabel opt }
+                  Opt = optLabel opt
+                  Annotations = readAnnotations v }
         | _ -> None
 
     let private readFields (owner: JVal) : FieldSnap list =
@@ -279,7 +306,11 @@ module Diff =
                                     | JStr s -> Some s
                                     | _ -> None)
                             | _ -> []
-                          Cases = cases |> byName (str "tag") readFields
+                          Cases =
+                            cases
+                            |> byName (str "tag") (fun c ->
+                                { Fields = readFields c
+                                  Annotations = readAnnotations c })
                           CaseOrder = cases |> List.choose (str "tag")
                           TransparentCase = str "transparentCase" u })
                   Enums =
@@ -352,6 +383,12 @@ module Diff =
         /// signature, a `THosted` slot's codec expressions.
         | FieldHostSurfaceChanged of Owner * name: string * before: string * after: string
         | FieldOptionalityChanged of Owner * name: string * before: FieldSnap * after: FieldSnap
+        /// The declared ANNOTATIONS on a field moved (Phase 113) — `""` on either
+        /// side means "declared none". Never a wire event: an annotation changes no
+        /// encoding in either direction.
+        | FieldAnnotationsChanged of Owner * name: string * before: string * after: string
+        /// The declared annotations on a union CASE moved (Phase 113).
+        | UnionCaseAnnotationsChanged of union: string * case: string * before: string * after: string
         | DefaultAdded of kind: string * field: string * value: string
         | DefaultRemoved of kind: string * field: string * value: string
         | DefaultChanged of kind: string * field: string * before: string * after: string
@@ -374,6 +411,9 @@ module Diff =
 
                   if old.Opt <> f.Opt then
                       yield FieldOptionalityChanged(owner, f.Name, old, f)
+
+                  if old.Annotations <> f.Annotations then
+                      yield FieldAnnotationsChanged(owner, f.Name, old.Annotations, f.Annotations)
 
           for f in before do
               if not (Map.containsKey f.Name a) then
@@ -467,6 +507,8 @@ module Diff =
         | FieldTypeChanged(o, n, _, _) -> k "62" (o.Key + "/" + n)
         | FieldOptionalityChanged(o, n, _, _) -> k "63" (o.Key + "/" + n)
         | FieldHostSurfaceChanged(o, n, _, _) -> k "64" (o.Key + "/" + n)
+        | FieldAnnotationsChanged(o, n, _, _) -> k "65" (o.Key + "/" + n)
+        | UnionCaseAnnotationsChanged(u, c, _, _) -> k "66" (u + "." + c)
         | DefaultAdded(kd, f, _) -> k "70" (kd + "/" + f)
         | DefaultRemoved(kd, f, _) -> k "71" (kd + "/" + f)
         | DefaultChanged(kd, f, _, _) -> k "72" (kd + "/" + f)
@@ -506,7 +548,11 @@ module Diff =
                                 diffNamed
                                     (fun c -> UnionCaseAdded(name, c))
                                     (fun c -> UnionCaseRemoved(name, c))
-                                    (fun c bf af -> diffFields (OUnionCase(name, c)) bf af)
+                                    (fun c bf af ->
+                                        [ if bf.Annotations <> af.Annotations then
+                                              UnionCaseAnnotationsChanged(name, c, bf.Annotations, af.Annotations)
+
+                                          yield! diffFields (OUnionCase(name, c)) bf.Fields af.Fields ])
                                     b.Cases
                                     a.Cases ])
                       before.Unions
@@ -618,6 +664,45 @@ module Diff =
                 f.OptClass
                 owner.Describe,
             "STABILITY.md: \"a new optional field that is omitted when absent\" is non-breaking"
+
+    /// A declared annotation set moved (Phase 113). Never a wire event in either
+    /// direction — the codec does not read annotations, so every document's bytes
+    /// are identical either side of any change here.
+    ///
+    /// **Two verdicts, and the split is the point of the annotation set.** MARKING a
+    /// member is `Additive`: nothing that was valid stops being valid, no emitter
+    /// that conformed stops conforming, and the generated declaration gains a doc
+    /// comment and a warning-grade `Obsolete` attribute that a consumer chooses what
+    /// to do about. That is what lets a vocabulary retire a case across two releases
+    /// — mark it in one, remove it in the next — without the MARKING itself costing
+    /// a breaking bump, which is the retirement path the vocabulary-growth charter
+    /// otherwise has no room for.
+    ///
+    /// Every other move — changing a marking, or withdrawing one — is
+    /// `HostSurfaceOnly`: still nothing on the wire, but the generated declaration
+    /// moved, which is a recompile event for the reference host (an `Obsolete`
+    /// attribute appearing or vanishing changes which warnings a consumer sees) and
+    /// invisible to every third-party codec. Withdrawing a `deprecated` is the case
+    /// worth naming: an un-retirement is a plain change, not a breaking one.
+    let private classifyAnnotations (subject: string) (before: string) (after: string) =
+        if before = "" then
+            Additive,
+            sprintf
+                "%s gained declared annotations. An annotation is never on the wire — the codec does not read it — so every existing document is byte-unchanged and every conformant emitter stays conformant. Marking a member is what makes a two-release retirement possible without a breaking bump for the marking itself."
+                subject,
+            "Idl.Annotations (Phase 113); VOCABULARY.md §4.1 (additive)"
+        elif after = "" then
+            HostSurfaceOnly,
+            sprintf
+                "%s had its declared annotations WITHDRAWN. Still nothing on the wire, but the generated declaration moved: the doc comment and any `System.Obsolete` attribute are gone, so a consumer that was being warned no longer is. A plain change — an un-retirement is not a breaking event."
+                subject,
+            "Idl.Annotations (Phase 113); WIRE_FORMAT.md §13 by the same argument"
+        else
+            HostSurfaceOnly,
+            sprintf
+                "%s changed its declared annotations. Nothing on the wire; the generated declaration's doc comment and `System.Obsolete` message moved. A recompile event for the reference host, invisible to every third-party codec."
+                subject,
+            "Idl.Annotations (Phase 113); WIRE_FORMAT.md §13 by the same argument"
 
     let classify (c: Change) : Classification =
         let sev, why, cite =
@@ -781,6 +866,10 @@ module Diff =
                         b.Label
                         a.Label,
                     "STABILITY.md wire-format section"
+            | FieldAnnotationsChanged(owner, n, b, a) ->
+                classifyAnnotations (sprintf "field `%s` on %s" n owner.Describe) b a
+            | UnionCaseAnnotationsChanged(u, c, b, a) -> classifyAnnotations (sprintf "case `%s` of `%s`" c u) b a
+
             | FieldHostSurfaceChanged(owner, n, _, _) ->
                 HostSurfaceOnly,
                 sprintf
@@ -1165,6 +1254,10 @@ module Diff =
         | FieldHostSurfaceChanged(o, n, _, _) -> sprintf "field hostSurface changed: %s.%s" o.Describe n
         | FieldOptionalityChanged(o, n, b, a) ->
             sprintf "field optionality changed: %s.%s : %s -> %s" o.Describe n b.Opt a.Opt
+        | FieldAnnotationsChanged(o, n, b, _) ->
+            sprintf "field annotations %s: %s.%s" (if b = "" then "declared" else "changed") o.Describe n
+        | UnionCaseAnnotationsChanged(u, c, b, _) ->
+            sprintf "union case annotations %s: %s.%s" (if b = "" then "declared" else "changed") u c
         | DefaultAdded(k, f, _) -> sprintf "authoring default added: %s.%s" k f
         | DefaultRemoved(k, f, _) -> sprintf "authoring default removed: %s.%s" k f
         | DefaultChanged(k, f, b, a) -> sprintf "authoring default changed: %s.%s : %s -> %s" k f b a

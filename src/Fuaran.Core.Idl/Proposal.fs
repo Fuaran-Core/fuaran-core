@@ -313,7 +313,15 @@ module Proposal =
             readType t
             |> Result.bind (fun ty ->
                 readOptionality o
-                |> Result.map (fun opt -> { Name = name; Type = ty; Opt = opt }))
+                |> Result.map (fun opt ->
+                    // Phase 113 — a proposal proposes a SHAPE. Annotations are
+                    // statements about a member that already exists (retirement,
+                    // in-process-only, the version it arrived in), so a delta that
+                    // MINTS a member has nothing to say with them.
+                    { Name = name
+                      Type = ty
+                      Opt = opt
+                      Annotations = Annotations.Empty }))
         | None, _, _ -> Error "field has no 'name'"
         | _, None, _ -> Error "field has no 'type'"
         | _, _, None -> Error "field has no 'optionality'"
@@ -363,7 +371,15 @@ module Proposal =
             | Some u, Some c ->
                 match str "tag" c with
                 | None -> Error "addUnionCase case has no 'tag'"
-                | Some t -> readFields c |> Result.map (fun fs -> AddUnionCase(u, { Tag = t; Fields = fs }))
+                | Some t ->
+                    readFields c
+                    |> Result.map (fun fs ->
+                        AddUnionCase(
+                            u,
+                            { Tag = t
+                              Fields = fs
+                              Annotations = Annotations.Empty }
+                        ))
             | _ -> Error "addUnionCase needs 'union' and 'case'"
         | Some "addEnumCase" ->
             match str "enum" v, str "wire" v with

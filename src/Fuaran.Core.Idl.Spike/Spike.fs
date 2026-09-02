@@ -31,7 +31,9 @@ let miniIdl: Idl =
                   Fields =
                     [ { Name = "text"
                         Type = TStr
-                        Opt = Required } ] } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty } ] }
           // The parameterised union — `Binding<'T>`; `'T` flows into the case fields.
           { Name = "Binding"
             Params = [ "T" ]
@@ -40,15 +42,20 @@ let miniIdl: Idl =
                   Fields =
                     [ { Name = "value"
                         Type = TVar "T"
-                        Opt = Required } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty }
                 { Tag = "State"
                   Fields =
                     [ { Name = "defaultValue"
                         Type = TVar "T"
-                        Opt = Required }
+                        Opt = Required
+                        Annotations = Annotations.Empty }
                       { Name = "key"
                         Type = TStr
-                        Opt = Required } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty }
                 // Phase 689 spike, leg 3 — a closure whose signature mentions the
                 // union's OWN type parameter rather than `'Msg`. It is here to prove
                 // the `'Msg` fixpoint does not over-reach: `Binding<'T>` must stay
@@ -67,7 +74,25 @@ let miniIdl: Idl =
                                 // generated one has no such channel yet, so the spike
                                 // records the gap rather than papering over it.
                                 Placeholder = "(fun _ -> Unchecked.defaultof<'T>)" }
-                        Opt = Required } ] } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  // Phase 113 — the spike's declared-annotation fixture, on the same
+                  // footing as Phase 676's `Action.Notify` (added so the generative
+                  // sweep exercised `TJson` at all): compiling `Generated.fs` is what
+                  // proves the emitted `[<Obsolete>]` is valid F# where the emitter
+                  // puts it — INLINE after the bar, inside a `[<RequireQualifiedAccess>]`
+                  // `and`-group member that is generic in `'T`.
+                  //
+                  // And it is TRUE of this case rather than decorative. `Computed`'s
+                  // entire content is a closure: the encoder writes the fixed
+                  // `"<closure>"` sentinel without reading it and the decoder restores
+                  // the declared placeholder, so what survives a wire boundary is the
+                  // shape and never the function. That is the same fact `Action.Dispatch`
+                  // carries in the real vocabulary, which is the case this annotation set
+                  // was asked for.
+                  Annotations =
+                    { Annotations.Empty with
+                        InProcessOnly = true } } ] }
           { Name = "Format"
             Params = []
             Cases =
@@ -75,12 +100,16 @@ let miniIdl: Idl =
                   Fields =
                     [ { Name = "code"
                         Type = TStr
-                        Opt = Required } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty }
                 { Tag = "Percent"
                   Fields =
                     [ { Name = "decimals"
                         Type = TInt
-                        Opt = Required } ] } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty } ] }
           { Name = "Action"
             Params = []
             Cases =
@@ -88,7 +117,9 @@ let miniIdl: Idl =
                   Fields =
                     [ { Name = "ops"
                         Type = TList(TUnion("Action", []))
-                        Opt = Required } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty }
                 // Phase 676 — a `TJson` case, present so the GENERATIVE cross-host
                 // test actually exercises the JSON passthrough. Without it the spike
                 // vocabulary has no `TJson` anywhere and both new legs (F# `id` /
@@ -98,129 +129,165 @@ let miniIdl: Idl =
                   Fields =
                     [ { Name = "channel"
                         Type = TStr
-                        Opt = Required }
+                        Opt = Required
+                        Annotations = Annotations.Empty }
                       { Name = "payload"
                         Type = TJson
-                        Opt = Required } ] } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty } ] }
           // Fuaran-UI 0.2.0 Box unification: Dashboard/Card/Stack/GridLayout → one `Box`
           // kind with `role` + a `layout` mode (Auto / Flex{direction,wrap} / Grid{cols}).
           { Name = "LayoutMode"
             Params = []
             Cases =
-              [ { Tag = "Auto"; Fields = [] }
+              [ { Tag = "Auto"
+                  Fields = []
+                  Annotations = Annotations.Empty }
                 { Tag = "Flex"
                   Fields =
                     [ { Name = "direction"
                         Type = TEnum "Orientation"
-                        Opt = Required }
+                        Opt = Required
+                        Annotations = Annotations.Empty }
                       { Name = "wrap"
                         Type = TBool
-                        Opt = Required } ] }
+                        Opt = Required
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty }
                 { Tag = "Grid"
                   Fields =
                     [ { Name = "cols"
                         Type = TInt
-                        Opt = Required }
+                        Opt = Required
+                        Annotations = Annotations.Empty }
                       { Name = "templateColumns"
                         Type = TStr
-                        Opt = Optional } ] } ] } ]
+                        Opt = Optional
+                        Annotations = Annotations.Empty } ]
+                  Annotations = Annotations.Empty } ] } ]
       Kinds =
         [ { Tag = "Heading"
             Category = "Display"
             Fields =
               [ { Name = "level"
                   Type = TInt
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "text"
                   Type = TUnion("TextSource", [])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "variant"
                   Type = TEnum "HeadingVariant"
-                  Opt = Required } ] }
+                  Opt = Required
+                  Annotations = Annotations.Empty } ] }
           { Tag = "Badge"
             Category = "Display"
             Fields =
               [ { Name = "label"
                   Type = TUnion("TextSource", [])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "variant"
                   Type = TEnum "BadgeVariant"
-                  Opt = Required } ] }
+                  Opt = Required
+                  Annotations = Annotations.Empty } ] }
           { Tag = "Button"
             Category = "Input"
             Fields =
               [ { Name = "disabled"
                   Type = TUnion("Binding", [ TBool ])
-                  Opt = Optional }
+                  Opt = Optional
+                  Annotations = Annotations.Empty }
                 { Name = "icon"
                   Type = TStr
-                  Opt = Optional }
+                  Opt = Optional
+                  Annotations = Annotations.Empty }
                 { Name = "label"
                   Type = TUnion("TextSource", [])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "onClick"
                   Type = TUnion("Action", [])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "variant"
                   Type = TEnum "ButtonVariant"
-                  Opt = Required } ] }
+                  Opt = Required
+                  Annotations = Annotations.Empty } ] }
           { Tag = "Metric"
             Category = "Display"
             Fields =
               [ { Name = "emphasis"
                   Type = TEnum "Emphasis"
-                  Opt = OmitDefault(VEnum "Normal") }
+                  Opt = OmitDefault(VEnum "Normal")
+                  Annotations = Annotations.Empty }
                 { Name = "format"
                   Type = TUnion("Format", [])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "icon"
                   Type = TStr
-                  Opt = Optional }
+                  Opt = Optional
+                  Annotations = Annotations.Empty }
                 { Name = "label"
                   Type = TUnion("TextSource", [])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "subtext"
                   Type = TUnion("TextSource", [])
-                  Opt = Optional }
+                  Opt = Optional
+                  Annotations = Annotations.Empty }
                 { Name = "tone"
                   Type = TEnum "ToneVariant"
-                  Opt = OmitDefault(VEnum "Default") }
+                  Opt = OmitDefault(VEnum "Default")
+                  Annotations = Annotations.Empty }
                 { Name = "trend"
                   Type = TUnion("Binding", [ TFloat ])
-                  Opt = Optional }
+                  Opt = Optional
+                  Annotations = Annotations.Empty }
                 { Name = "trendFormat"
                   Type = TUnion("Format", [])
-                  Opt = Optional }
+                  Opt = Optional
+                  Annotations = Annotations.Empty }
                 // Fuaran-UI 0.2.x renamed Metric's binding slot `source` → `value`. Declared in
                 // Ordinal key order (the TS backend emits in author order — no key sort).
                 { Name = "value"
                   Type = TUnion("Binding", [ TFloat ])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "weight"
                   Type = TEnum "StyleWeight"
-                  Opt = OmitDefault(VEnum "Standard") } ] }
+                  Opt = OmitDefault(VEnum "Standard")
+                  Annotations = Annotations.Empty } ] }
           { Tag = "Markdown"
             Category = "Display"
             Fields =
               [ { Name = "text"
                   Type = TUnion("TextSource", [])
-                  Opt = Required } ] }
+                  Opt = Required
+                  Annotations = Annotations.Empty } ] }
           // The unified `Box` container (was `Card` / `Stack` / `GridLayout` / `Dashboard`).
           { Tag = "Box"
             Category = "Layout"
             Fields =
               [ { Name = "children"
                   Type = TList TNode
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "heading"
                   Type = TUnion("TextSource", [])
-                  Opt = Optional }
+                  Opt = Optional
+                  Annotations = Annotations.Empty }
                 { Name = "layout"
                   Type = TUnion("LayoutMode", [])
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 { Name = "role"
                   Type = TEnum "BoxRole"
-                  Opt = Required } ] }
+                  Opt = Required
+                  Annotations = Annotations.Empty } ] }
           // ── Phase 689 spike, legs 1 + 2 ───────────────────────────────────
           //
           // A kind carrying `'Msg`-producing handlers. `Tabs` stands in for the
@@ -239,19 +306,30 @@ let miniIdl: Idl =
             Fields =
               [ { Name = "children"
                   Type = TList TNode
-                  Opt = Required }
+                  Opt = Required
+                  Annotations = Annotations.Empty }
                 // Declared in Ordinal key order — the TS backend emits in author
                 // order and does not sort, so `onCommit` precedes `onSelect` here.
                 //
                 // Required: always on the wire as the sentinel. A second argument
                 // type, so the emission cannot be accidentally monomorphic.
+                //
+                // Phase 113 — annotated for the same two reasons the `Binding.Computed`
+                // case is: it is true (the handler is written as a sentinel and read
+                // back as a placeholder, so the function itself never crosses the wire),
+                // and compiling `Generated.fs` is what proves the emitted attribute is
+                // valid F# in the OTHER placement the emitter uses — its own line above
+                // a record field, inside the generated spec record.
                 { Name = "onCommit"
                   Type =
                     TFn
                         { FSharp = "string -> 'Msg"
                           TypeScript = "(tag: string) => Msg"
                           Placeholder = "(fun (_: string) -> box \"<closure>\")" }
-                  Opt = Required }
+                  Opt = Required
+                  Annotations =
+                    { Annotations.Empty with
+                        InProcessOnly = true } }
                 // Optional: PRESENCE is wire-visible, so decode must restore
                 // `Some placeholder` — not `None`, and not `Some ()`.
                 { Name = "onSelect"
@@ -260,7 +338,8 @@ let miniIdl: Idl =
                         { FSharp = "int -> 'Msg"
                           TypeScript = "(index: number) => Msg"
                           Placeholder = "(fun (_: int) -> box \"<closure>\")" }
-                  Opt = Optional } ] } ]
+                  Opt = Optional
+                  Annotations = Annotations.Empty } ] } ]
       Records = []
       Defaults =
         [ { Kind = "Heading"

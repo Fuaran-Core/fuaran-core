@@ -632,7 +632,8 @@ commits to rather than by size.
 **`Fuaran.Core.Idl` — the model half. What it promises:**
 
 - **The model** — `IdlType`, `IdlValue`, `Idl`, `IdlKind`, `IdlField`, `IdlUnion`, `IdlEnum`,
-  `IdlRecord`, `IdlDefault`, `Optionality` — plus the `Declare` helpers.
+  `IdlRecord`, `IdlDefault`, `Optionality`, `Annotations`, `Deprecation` — plus the `Declare`
+  helpers.
 - **The codec** — `Encode.encode` / `encodeOp` and `Decode.decode` / `decodeOp`, schema-driven
   from an `Idl`. Both return `Result<_, string>`: a vocabulary the codec cannot honour is a
   named failure, never an exception. The bytes are canonical because the codec builds a `JVal`
@@ -692,6 +693,51 @@ made it public because the split made the dependency real — an independent emi
 with this codec about which cases are bare, or it generates a host that disagrees on the wire.
 Publishing the accessor does not endorse the hard-coding; declaring transparency in the `Idl`
 value is a later change with its own artifact and diff-classifier consequences.
+
+### Declared annotations on cases and fields (Phase 113, `0.18.0`)
+
+`IdlUnionCase` and `IdlField` each carry an `Annotations` record — a **bounded** set of three
+slots (`Deprecated` with an optional replacement and message, `InProcessOnly`, `Since`) saying
+what is true ABOUT a member rather than about its shape. `Annotations.Empty` is the default and
+means what every declaration written before this release means.
+
+**The wire is untouched, and that is the load-bearing claim.** `Encode` and `Decode` never read
+the record, so an annotated vocabulary's bytes are byte-for-byte its unannotated bytes in both
+directions. The artifact omits an empty set entirely, so every pre-`0.18.0` `idl.json` is
+byte-identical — the posture `ops` / `hostCases` / `wire` already take, and the reason
+`Artifact.version` does **not** move.
+
+**What DOES move is the generated declaration, and a consumer of the generator should know the
+shape.** The F# backend emits a `///` block plus at most **one** warning-grade
+`[<System.Obsolete(msg, false)>]` — one because `ObsoleteAttribute` is not `AllowMultiple`, and
+`isError = false` because the generated layer must not decide for its host that touching a marked
+member fails the build. FS0044 is a warning the host escalates (`--warnaserror:44`) or silences
+(`--nowarn:44`) on its own schedule; an unconditional error would make the two-release retirement
+this set exists to enable impossible to ship. A vocabulary that marks anything also gets
+`#nowarn "44"` in the generated module, because that layer constructs and matches every declared
+member including the marked ones — the warning is for CONSUMERS of the layer, never for the layer
+itself. The TypeScript backend emits `//` line comments naming the member, at the case arm for a
+case and on the owning function for a field: the emitted module is plain JS, where a field is an
+inline entry in a one-line object literal and has no declaration to hang a JSDoc on, and a
+`@deprecated` block above `encFooSpec` would tell tooling the encoder is deprecated, which is
+false.
+
+**In the stability classifier**, MARKING a member is `Additive` — nothing valid stops being valid
+and no conformant emitter stops conforming — while moving or withdrawing a marking is
+`HostSurfaceOnly`. Neither is ever a wire event. That split is what lets a vocabulary retire a
+case across two releases without the marking itself costing a breaking bump.
+
+**Source-breaking for a consumer that builds `IdlField` / `IdlUnionCase` by record literal**
+(FS0764), which is the pre-1.0 posture at the head of this document applied as written; a `0.18.0`
+minor carries it. `{ existing with Annotations = … }` and `Annotations.Empty` are the two shapes a
+caller needs. On the codegen side the same release moves `Diff.Change` (two new cases —
+`FieldAnnotationsChanged` and `UnionCaseAnnotationsChanged`) and `Diff.UnionSnap.Cases` (now
+`Map<string, CaseSnap>`, so a case's own annotations have somewhere to live), both breaking for a
+consumer that matches or destructures them exhaustively — the open-DU paragraph above, applied to
+the classifier. It is deliberately NOT an `Idl`-level side table addressed by owner and member: that
+shape can name a member the vocabulary no longer has, which is a defect class this one cannot
+represent, and every emitter would have to thread the lookup rather than reading the member it is
+already holding.
 
 ## Open-core posture
 

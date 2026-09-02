@@ -117,7 +117,11 @@ open Fuaran.Core.Idl
 // The declared slice
 // ---------------------------------------------------------------------------
 
-let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField = { Name = name; Type = t; Opt = opt }
+let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+    { Name = name
+      Type = t
+      Opt = opt
+      Annotations = Annotations.Empty }
 
 let private req name t = f name t Required
 let private opt name t = f name t Optional

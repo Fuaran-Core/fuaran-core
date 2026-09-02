@@ -73,6 +73,10 @@
     <!-- Phases 108/109 - the declared wire shape (discriminator key + node envelope),
          exercised on the axes the readiness spikes do not cover. -->
     <Compile Include="IdlWireShapeTests.fs" />
+    <!-- Phase 113 - declared annotations on union cases and fields: the wire is
+         untouched, every other surface renders them. Appended here (append-only
+         registration), after the wire-shape family it shares its fixture shape with. -->
+    <Compile Include="IdlAnnotationTests.fs" />
     <Compile Include="IdlSchemaTests.fs" />
     <Compile Include="IdlOpTests.fs" />
     <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named

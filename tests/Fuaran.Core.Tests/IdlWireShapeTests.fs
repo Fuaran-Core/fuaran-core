@@ -13,7 +13,11 @@ open Fuaran.Core.Idl
 // validation, the artifact key, and the diff classification.
 // ---------------------------------------------------------------------------
 
-let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField = { Name = name; Type = t; Opt = opt }
+let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+    { Name = name
+      Type = t
+      Opt = opt
+      Annotations = Annotations.Empty }
 
 let private baseIdl: Idl =
     { Kinds =
@@ -25,9 +29,11 @@ let private baseIdl: Idl =
             Params = []
             Cases =
               [ { Tag = "Lit"
-                  Fields = [ f "value" TStr Required ] }
+                  Fields = [ f "value" TStr Required ]
+                  Annotations = Annotations.Empty }
                 { Tag = "Ref"
-                  Fields = [ f "target" TStr Required ] } ] } ]
+                  Fields = [ f "target" TStr Required ]
+                  Annotations = Annotations.Empty } ] } ]
       Enums = []
       Records = []
       Defaults = []

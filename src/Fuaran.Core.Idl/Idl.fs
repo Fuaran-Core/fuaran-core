@@ -184,6 +184,68 @@ type WireShape =
           NodeEnvelope = NodeEnvelopeShape.NestedKind
           KeyOrder = KeyOrder.Sorted }
 
+/// A DEPRECATION note (Phase 113) — the retirement half of the annotation set.
+///
+/// Both slots are optional, and `Replacement = None` is the ordinary case rather
+/// than a degenerate one: the vocabulary-growth charter admits kinds but had no
+/// retirement path at all, and most retirements are "this is going away", not
+/// "this moved". A required replacement would have made the plain retirement
+/// unmodellable, and widening it to optional afterwards is a breaking change to a
+/// published shape.
+type Deprecation =
+    {
+        /// The member that supersedes this one, when one does — a case tag or a
+        /// field name, in the same namespace as the annotated member.
+        Replacement: string option
+        /// Free prose for the generated doc comment: why, and what to do instead.
+        Message: string option
+    }
+
+/// The bounded annotation set declarable on a union case or a field (Phase 113) —
+/// what is true ABOUT a member, as distinct from its shape.
+///
+/// **Bounded, and a record rather than a list, deliberately.** A `list` of
+/// annotation cases makes two `Since` stamps or two contradictory `Deprecated`
+/// notes representable, and nothing downstream could choose between them. Three
+/// named slots cannot state that.
+///
+/// **Nothing here is on the wire.** An annotation changes no encoding in either
+/// direction: [[Encode]] and [[Decode]] never read this record, so an annotated
+/// vocabulary's bytes are byte-for-byte its unannotated bytes. What it changes is
+/// the generated DECLARATION (a doc comment and a `System.Obsolete` attribute on
+/// the F# side, a comment on the TypeScript side) and the `idl.json` artifact —
+/// which is exactly why the stability classifier can grade a marking as
+/// non-breaking and a vocabulary can retire a member across two releases.
+type Annotations =
+    {
+        /// Marked for retirement — see [[Deprecation]].
+        Deprecated: Deprecation option
+        /// **In-process only** — the member is meaningful inside one host process
+        /// and has no wire projection, so a value in it is LOST across any wire
+        /// boundary. Distinct from [[Optionality.HostOnly]], which is a statement
+        /// about a FIELD's encoding; this is a statement about a member that a
+        /// reader of the generated declaration needs and the encoding cannot carry
+        /// (a union case whose payload is a host value, for instance).
+        InProcessOnly: bool
+        /// The vocabulary version the member first appeared in, verbatim. Carried
+        /// as a string rather than parsed: the engine is domain-generic and a
+        /// domain's version line is its own business.
+        Since: string option
+    }
+
+    /// No annotations — the default, and what every declaration written before
+    /// Phase 113 means. The artifact omits an empty set entirely, so an
+    /// unannotated vocabulary's `idl.json` is byte-for-byte what it was.
+    static member Empty =
+        { Deprecated = None
+          InProcessOnly = false
+          Since = None }
+
+    /// Whether this set says nothing. The emitters and the artifact both branch on
+    /// it, so the "absent is the default and omitted" rule has one definition.
+    member this.IsEmpty =
+        this.Deprecated.IsNone && not this.InProcessOnly && this.Since.IsNone
+
 /// Whether a field is always present, omitted on the wire when absent, or
 /// omitted on the wire when equal to an identity default (omit-on-absence and
 /// omit-at-default are both wire-visible). `OmitDefault d`: the field always has a
@@ -210,9 +272,15 @@ type Optionality =
     | HostOnly
 
 and IdlField =
-    { Name: string
-      Type: IdlType
-      Opt: Optionality }
+    {
+        Name: string
+        Type: IdlType
+        Opt: Optionality
+        /// What is true ABOUT this field, as opposed to its shape (Phase 113).
+        /// [[Annotations.Empty]] for a field that says nothing, which is every field
+        /// declared before the set existed.
+        Annotations: Annotations
+    }
 
 /// A node kind — flat `$type`-discriminated on the wire (`Category` is metadata, not serialised).
 and IdlKind =
@@ -220,7 +288,13 @@ and IdlKind =
       Category: string
       Fields: IdlField list }
 
-and IdlUnionCase = { Tag: string; Fields: IdlField list }
+and IdlUnionCase =
+    {
+        Tag: string
+        Fields: IdlField list
+        /// What is true ABOUT this case (Phase 113) — see [[IdlField.Annotations]].
+        Annotations: Annotations
+    }
 
 /// A `$type`-discriminated value union (e.g. `Binding` has cases `Static` / `State`).
 and IdlUnion =

@@ -48,7 +48,11 @@ let private kind tag fields : IdlKind =
       Category = "display"
       Fields = fields }
 
-let private f name ty opt : IdlField = { Name = name; Type = ty; Opt = opt }
+let private f name ty opt : IdlField =
+    { Name = name
+      Type = ty
+      Opt = opt
+      Annotations = Annotations.Empty }
 
 /// Diff two `Idl` values through the artifact, as the CLI does.
 let private diffOf (before: Idl) (after: Idl) =
@@ -390,11 +394,13 @@ let tests =
 
               let stat: IdlUnionCase =
                   { Tag = "Static"
-                    Fields = [ f "value" TStr Required ] }
+                    Fields = [ f "value" TStr Required ]
+                    Annotations = Annotations.Empty }
 
               let state: IdlUnionCase =
                   { Tag = "State"
-                    Fields = [ f "key" TStr Required ] }
+                    Fields = [ f "key" TStr Required ]
+                    Annotations = Annotations.Empty }
 
               let before, after = union [ stat ], union [ stat; state ]
               let cs = diffOf before after

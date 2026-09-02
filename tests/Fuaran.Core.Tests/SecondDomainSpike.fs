@@ -100,7 +100,11 @@ open Fuaran.Core.Idl
 // The declared slice
 // ---------------------------------------------------------------------------
 
-let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField = { Name = name; Type = t; Opt = opt }
+let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+    { Name = name
+      Type = t
+      Opt = opt
+      Annotations = Annotations.Empty }
 
 let private req name t = f name t Required
 let private opt name t = f name t Optional
@@ -149,19 +153,26 @@ let docIdl: Idl =
             Params = []
             Cases =
               [ { Tag = "Text"
-                  Fields = [ req "value" TStr ] }
+                  Fields = [ req "value" TStr ]
+                  Annotations = Annotations.Empty }
                 { Tag = "Emphasis"
-                  Fields = [ req "runs" runList ] }
+                  Fields = [ req "runs" runList ]
+                  Annotations = Annotations.Empty }
                 { Tag = "Strong"
-                  Fields = [ req "runs" runList ] }
+                  Fields = [ req "runs" runList ]
+                  Annotations = Annotations.Empty }
                 { Tag = "InlineRef"
-                  Fields = [ req "target" TStr ] }
+                  Fields = [ req "target" TStr ]
+                  Annotations = Annotations.Empty }
                 { Tag = "InlineVariable"
-                  Fields = [ req "field" TStr ] }
+                  Fields = [ req "field" TStr ]
+                  Annotations = Annotations.Empty }
                 { Tag = "Link"
-                  Fields = [ req "text" TStr; req "url" TStr ] }
+                  Fields = [ req "text" TStr; req "url" TStr ]
+                  Annotations = Annotations.Empty }
                 { Tag = "Code"
-                  Fields = [ req "value" TStr ] } ] } ]
+                  Fields = [ req "value" TStr ]
+                  Annotations = Annotations.Empty } ] } ]
       Enums =
         [ Declare.enumOf "Locale" [ "EnGB"; "EnUS" ]
           Declare.enumOf "Numbering" [ "NoNumbering"; "DecimalNumbering"; "LegalNumbering" ]

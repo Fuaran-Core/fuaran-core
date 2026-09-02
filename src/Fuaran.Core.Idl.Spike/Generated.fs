@@ -1,5 +1,6 @@
 // AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.
 module Fuaran.Core.Idl.Spike.Generated
+#nowarn "44" // this layer implements every declared member, including deprecated ones
 
 open Fuaran.Core
 
@@ -62,7 +63,9 @@ type TextSource =
 and [<RequireQualifiedAccess>] Binding<'T> =
     | Static of value: 'T
     | State of defaultValue: 'T * key: string
-    | Computed of fn: (obj -> 'T)
+    /// **In-process only** — this member has no wire projection: a value here
+    /// is carried inside one host process and is LOST across any wire boundary.
+    | [<System.Obsolete("in-process only — no wire projection; a value here is lost across a wire boundary", false)>] Computed of fn: (obj -> 'T)
 
 and [<RequireQualifiedAccess>] Format =
     | Currency of code: string
@@ -136,6 +139,9 @@ and MarkdownSpec =
 and TabsSpec<'Msg> =
     {
       Children: Node<'Msg> list
+      /// **In-process only** — this member has no wire projection: a value here
+      /// is carried inside one host process and is LOST across any wire boundary.
+      [<System.Obsolete("in-process only — no wire projection; a value here is lost across a wire boundary", false)>]
       OnCommit: (string -> 'Msg)
       OnSelect: (int -> 'Msg) option
     }
