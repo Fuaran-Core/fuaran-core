@@ -12,8 +12,8 @@ open Fuaran.Core.Idl
 // `Fuaran.UI.OpStream.Abstractions.CanonicalJson` — and proves the schema-driven
 // encoder reproduces the live `Fuaran-UI/wire-format-fixtures` corpus
 // byte-for-byte, one kind-family at a time (the staged migration the phase
-// mandates). Now covers Display (16 kinds) + Layout (11) + Input (5) +
-// Visualisation (4) + Meta (4) = 40 kinds.
+// mandates). Now covers Display (17 kinds) + Layout (11) + Input (5) +
+// Visualisation (4) + Meta (4) = 41 kinds.
 //
 // Why byte-identity is *already* guaranteed for modelled shapes: the spike's
 // encoder renders through `Fuaran.Core.Canon.render`, which Ordinal-sorts object
@@ -98,6 +98,31 @@ let private imageAspect =
 /// above-the-fold image is a REGRESSION, not an optimisation — the choice
 /// belongs to the author, who knows where the image sits.
 let private imageLoading = Declare.enumOf "ImageLoading" [ "Eager"; "Lazy" ]
+
+/// Phase 1111 — `Embed.permissions`: the closed set of deliberate relaxations of
+/// an otherwise fully-sandboxed third-party browsing context. The default is the
+/// EMPTY list, which is total denial, and every case here is a named step away
+/// from it — the inverse of a capability list that starts full and gets pruned.
+///
+/// Four cases, each earning its place by being jointly necessary for one of the
+/// three embed classes a page actually asks for: a video player (`AllowScripts`
+/// + `AllowSameOrigin` + `AllowFullscreen`), a map (`AllowScripts` +
+/// `AllowSameOrigin`), an embedded form (those two plus `AllowForms`). Three map
+/// to HTML `sandbox` tokens and the fourth to a permissions-policy directive;
+/// the enum names the RELAXATION, never the attribute, so a host maps each to
+/// whatever its own surface expresses it with.
+///
+/// The exclusions are the design rather than an oversight. `allow-top-navigation`
+/// lets a framed document navigate the TOP window, which is the drive-by
+/// redirect, and no ubiquitous embed needs it — excluded, not reserved.
+/// `allow-downloads` puts a file-save prompt in a third party's hands, likewise.
+/// `allow-popups`, `allow-modals`, `allow-pointer-lock`, `allow-presentation`
+/// and `allow-orientation-lock` have no recorded demand and are RESERVED as the
+/// names a later admission would take — which is the whole reason this is an
+/// enum rather than a bag of booleans (the `TrendPolarity` precedent: a fifth
+/// case is then a bare-string addition, not a type replacement).
+let private embedPermission =
+    Declare.enumOf "EmbedPermission" [ "AllowScripts"; "AllowSameOrigin"; "AllowForms"; "AllowFullscreen" ]
 
 let private toneVariant =
     Declare.enumOf "ToneVariant" [ "Default"; "Subdued"; "Brand"; "Success"; "Warning"; "Critical"; "Info" ]
@@ -1536,6 +1561,55 @@ let displayKinds: IdlKind list =
             req "src" (bindingOf TStr)
             omit "tracks" (TList(TRecord "TrackEntry")) (VList [])
             opt "transcript" TS ] }
+      // Phase 1111 — `Embed`: a third-party document rendered inside a
+      // maximally-sandboxed browsing context. A genuinely new kind rather than a
+      // `Mount` variant, and the charter's Appendix A row moved from "Covered by
+      // Mount" to ADMITTED in the same change-set on exactly that point: `Mount`
+      // composes a COOPERATING guest — a scope id, a declared message channel, a
+      // capability request list, a host-side loader — none of which a YouTube
+      // page has or could have. Widening `Mount` to admit an uncooperative third
+      // party would weaken every guarantee `Mount` currently makes; the two
+      // contracts are opposites (bidirectional cooperation vs default-deny
+      // isolation) and they get separate kinds.
+      //
+      // `title` is REQUIRED and is the a11y floor, on `MediaSpec.label`'s
+      // argument one kind over: a frame with no accessible name is announced as
+      // "frame" and nothing else, and there is no decorative embed — a frame is
+      // a focus container a reader tabs into. FUARAN114 refuses the empty
+      // literal that satisfies the requirement while meaning nothing.
+      //
+      // `permissions` is a LIST over the closed `EmbedPermission` enum, omitted
+      // at EMPTY — and empty is total denial, so the wire-cheapest document is
+      // also the safest one. That polarity is the point: `Image.srcSet`'s
+      // omit-at-empty rule reused for a security slot, where the default a lazy
+      // author gets is the locked one.
+      //
+      // `aspectRatio` REUSES `ImageAspect` rather than minting a parallel enum.
+      // The cases are pure layout ratios with nothing image-specific in them,
+      // the wire carries bare strings so the type name reaches no document, and
+      // two closed sets with identical cases that must be kept in step is the
+      // defect a rule-of-three would be protecting against, not the reuse. It is
+      // omit-at-`Natural` rather than an option for the same reason every other
+      // slot in this vocabulary is: an option over an enum already containing
+      // `Natural` would give one fact two spellings.
+      //
+      // `src` does NOT ride the ordinary §19 accept set. An embed's class is
+      // fetch-and-EXECUTE, where `Image`/`Media` are fetch-and-display, so the
+      // spec names a separate `embed` egress class admitting `https` and
+      // NOTHING else — no other scheme and no schemeless reference either. A
+      // relative reference names a same-origin document, which is precisely the
+      // shape where `AllowSameOrigin` + `AllowScripts` lets the framed document
+      // reach its own sandbox attribute; a host composing its own content has
+      // `Mount`. One accepted scheme, no positional tests, so the class cannot
+      // inherit §19 rule 5's evasion surface.
+      { Tag = "Embed"
+        Category = "Display"
+        Annotations = Annotations.Empty
+        Fields =
+          [ omit "aspectRatio" (TEnum "ImageAspect") (VEnum "Natural")
+            omit "permissions" (TList(TEnum "EmbedPermission")) (VList [])
+            req "src" (bindingOf TStr)
+            req "title" TS ] }
       { Tag = "Link"
         Category = "Display"
         Annotations = Annotations.Empty
@@ -2252,6 +2326,7 @@ let uiIdl: Idl =
           imageFit
           imageAspect
           imageLoading
+          embedPermission
           toneVariant
           styleWeight
           emphasis
@@ -2463,6 +2538,20 @@ let private imageSrcset1 =
               [ VRecord [ "src", staticStr "/harbour-1600.jpg"; "width", VInt 1600 ]
                 VRecord [ "src", staticStr "/harbour-800.jpg"; "width", VInt 800 ]
                 VRecord [ "src", staticStr "/harbour-400.jpg"; "width", VInt 400 ] ] ]
+    )
+
+/// Phase 1111 — the `Embed` kind at its minimum: the two mandatory slots and
+/// nothing else. `aspectRatio` is at its `Natural` identity and `permissions` at
+/// the EMPTY list, so neither appears — and the empty permission list is TOTAL
+/// DENIAL, which makes the wire-cheapest embed also the most locked-down one. A
+/// generated encoder that emitted `"permissions":[]` rather than omitting it
+/// fails on these bytes and on no other fixture in the family.
+let private embed1 =
+    VNode(
+        "embed-1",
+        "Embed",
+        [ "src", staticStr "https://player.example/embed/harbour"
+          "title", lit "Harbour restoration, part two" ]
     )
 
 /// Phase 1076 — the `Media` kind at its minimum: a video with nothing declared
@@ -2684,6 +2773,7 @@ let displayCases: (string * IdlValue) list =
       "image-caption-1", imageCaption1
       "image-caption-i18n-1", imageCaptionI18n1
       "image-srcset-1", imageSrcset1
+      "embed-1", embed1
       "media-video-1", mediaVideo1
       "media-video-poster-1", mediaVideoPoster1
       "media-video-autoplay-1", mediaVideoAutoplay1
