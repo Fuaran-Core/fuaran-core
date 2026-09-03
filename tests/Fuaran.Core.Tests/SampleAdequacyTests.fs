@@ -139,6 +139,7 @@ let motivatingInstanceTests =
                         "group-restricted"
                         "merged-order-restricted"
                         "window-restricted"
+                        "partition-global-window-restricted"
                         "relation-filtered-restricted" ])
                   "every class the family's laws distinguish is demanded"
 

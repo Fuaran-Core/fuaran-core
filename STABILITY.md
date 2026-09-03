@@ -1236,7 +1236,8 @@ reclassification the paragraph above names**: the answers do not move, only the 
 order-dependent verb (`Limit`, `Window`, `Distinct`, the joins and the whole-relation set ops) is
 still declined, still by type, still naming the verb. _(Phase 120 admitted a bounded-frame `Window`
 and the filtering `Join` kinds, and moved their declines onto reasons that name the frame and the
-kind — see that section below.)_
+kind; `0.19.0` then admitted the REST of the window family on row-set preservation, so `Window` is no
+longer a declining verb at all — see both sections below.)_
 
 **A sort is admitted at ANY position in the pipeline, not only as the last step.** It carries no
 condition of the kind a `GroupBy` does, because it emits the rows it was handed rather than a
@@ -1270,7 +1271,8 @@ a bounded-frame window stays `StepNotRowLocal "window"` until a vector exists to
 _(SUPERSEDED by Phase 120, under an operator decision of 2026-09-02 that waived the corpus-side gate
 for `Window` and `Join`: this repository vendors its own before/after vectors for both, and the
 corpus records the family's own afterwards. The rule itself — measure, then widen — is unchanged; see
-DECISIONS D24.)_
+DECISIONS D24. `0.19.0` then widened the remaining window functions, with its own vendored vector,
+under the same rule; see DECISIONS D25.)_
 
 ### One scale for `rowsEvaluated`, and a declined prime is `Primed` (Phase 117, `0.18.0`) — BREAKING
 
@@ -1378,6 +1380,59 @@ implementation of each.
 produced before this phase as the measured "before", exactly as the sort vector does. See that
 directory's `README.md`, including the one spelling this repository had to invent (`{"null": true}`
 for a cell, which a `lag` column cannot avoid).
+
+_(The window half of this section is SUPERSEDED by "The row-set-preserving window family" below:
+`0.19.0` admits every window function, so the eight declined here are declined no longer and
+`WindowFrameUnbounded` is no longer produced. The join half stands unchanged.)_
+
+### The row-set-preserving window family — every `Window` admitted (`0.19.0`)
+
+`Incremental` no longer declines any `Window`. `plan` classifies **every** window function as
+`StepIncrementality.RecomputeFrame (partitionBy, orderBy)`, at any position — the ranking family,
+`NTile` and the three cumulative aggregates alongside `Lag`, `Lead`, `RollingMean` and `RollingSum`.
+**The additive reclassification the Phase 99 paragraph names, once more**: the answers do not move,
+only the cost. See DECISIONS D25.
+
+**What admits a `Window` is that it PRESERVES THE ROW SET, not that its frame is bounded.** One row
+in, one row out, in input order, plus an appended column — which every member has. The appended
+column is recomputed wholesale over the walked frame through `DataFrame.windowStep` whatever the
+function is, so nothing in the walk ever consulted the frame's width; frame boundedness was a proxy,
+and the section above drew the line one class too narrow. `DataFrame.windowFrameBounded` is
+**unchanged and still public**: the distinction it draws is real and is the line a later phase
+restricting the recompute to the rows a delta *displaces* would draw. It is simply not the admission
+predicate, and `plan` no longer calls it.
+
+**`FallBackReason.WindowFrameUnbounded` is RETAINED and is no longer produced by `plan`.** Removing a
+case from a published DU is breaking for every consumer that matches on it, so the case stays and
+`Incremental.reasonString` still renders it — a reason recorded under `0.18.0` still reads. It is not
+repurposed. `Incremental.windowFnName` stays with it, on the same terms and for the same reason. A
+consumer that switched on `WindowFrameUnbounded` to route a pipeline away from the seam will now
+never see it, which is the point: that pipeline is restricted instead.
+
+**The saving is identical to the bounded frames', and so is the accounting.** On the vendored fixture
+family, a filter-then-`rank` pipeline over six rows with one cell edited falls from six
+row-evaluations to one — the same numbers `window-declines-in-full` records for a `lag`, asserted
+against each other directly. `rank-declines-in-full` is vendored beside it, recording as its "before"
+the decline Phase 120 itself produced (`windowFrameUnbounded` / `rank`) rather than the older
+`stepNotRowLocal` / `window`, because that is the evaluator this widening improves on.
+
+**What `rowsEvaluated` counts, stated so the saving is not misread.** It counts **expression
+evaluations at steps** — one evaluation of one step's expression against one row — and **ordering and
+windowing work is not on that scale**. `DataFrame.evalPipelineWithInEnvCounted` charges `Filter` and
+`Derive` and nothing else, so a `rank` refresh reports the six-to-one saving above while still sorting
+each partition on every refresh. That is the same accounting a `Sort` gets (Phase 115) and the bounded
+frames got (Phase 120), and it is what "one scale" means in the Phase 117 section: the scale measures
+expression evaluations in every case, so a refresh and the full evaluation it replaced are comparable.
+**The steps before the window stop re-evaluating every row; the window itself did not get cheaper.**
+The unit is deliberately unchanged — redefining it would move every recorded value in every law,
+fixture and consumer assertion, which is the breaking change Phase 117 was, and a consumer needing to
+compare ordering strategies needs a second instrument rather than a redefinition of this one.
+
+**The conformance family's sample-adequacy demand is extended, and this is what makes the widening
+measured rather than asserted.** `IncrementalDelta.demands` now requires a **partition-global** window
+to have been restricted, not merely "a window" — the older verdict is satisfied by the `lag` alone and
+would have gone on passing had this relaxation been reverted. The generated corpus grew to meet it: a
+bare `cumulSum` (which was the family's window decline) and a `rank` behind a filter.
 
 ## Static output-schema derivation (Phase 112, `0.18.0`)
 

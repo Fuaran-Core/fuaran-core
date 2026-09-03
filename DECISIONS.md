@@ -1,5 +1,69 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-03 — D25: the discriminator is ROW-SET PRESERVATION, not frame boundedness — and `rowsEvaluated` does not measure ordering work
+
+**Decided (operator, 2026-09-02).** D24's finding is resolved in the direction it pointed. From
+`0.19.0`, `Incremental.plan` admits **every** `Window` as `StepIncrementality.RecomputeFrame`, at any
+position — the ranking family, `NTile` and the three cumulative aggregates alongside the four bounded
+frames. D19's contract is untouched: every result still equals `DataFrame.evalPipelineWithInEnv` over
+the same source; this is the additive reclassification `STABILITY.md` has declared since Phase 99, and
+no answer moves.
+
+**The discriminator D24 used describes a distinction this evaluator does not make.** The admitted
+window column is recomputed wholesale over the walked frame, through the reference's own
+`DataFrame.windowStep` — for a `lag` exactly as for a `rank`. Nothing in the walk consults the frame's
+width, and nothing was going to: the reuse being claimed is of the steps BEFORE the window, not of the
+window's own column. What the walk actually requires of a step is that it PRESERVES THE ROW SET — one
+row in, one row out, in input order, plus an appended column — because the walk's token-to-row
+invariant is what the merged order, the maintained group and every cache rest on. Every window
+function has that. So frame boundedness was a proxy that happened to be conservative, and a
+conservative proxy for a property nothing tests is a declined class with no compensating claim.
+
+**Correctness is by construction, not by the widening being small.** The admitted column is the full
+evaluation of that column over the same rows in the same order, computed by the reference. That is the
+same sentence Phase 120 relied on, unchanged; it never mentioned the frame. It is covered where D19's
+contract is covered — the equivalence family, now generating a bare `cumulSum` and a `rank` behind a
+filter, with the Phase 121 adequacy declaration extended so a sample that reaches no
+**partition-global** window FAILS the family. That last part is the load-bearing half: "a window was
+restricted" is satisfied by the `lag` alone and would have gone on passing had this relaxation been
+reverted, so the demand names the narrower class.
+
+**And the consumer is the declined family.** The waiver D24 recorded named "ranked and running-total
+columns in live grids" as the consumer justifying the widening, and both of those were in the family
+it declined. Widening to what the waiver was granted for is closing that gap rather than opening a new
+one.
+
+**`FallBackReason.WindowFrameUnbounded` is RETAINED and no longer produced — the smallest reversible
+choice.** Removing a case from a published DU breaks every consumer that matches on it, so the case
+stays, `Incremental.reasonString` still renders it, and `Incremental.windowFnName` stays with it so a
+reason stored under `0.18.0` still reads. It is **not** repurposed for a hypothetical
+non-row-preserving step: a future step of that shape would decline for a different reason, and naming
+it with a case whose text says "reads the whole partition, not a bounded frame" would be wrong twice
+over. Nothing in `plan` branches on a window function now — a predicate that is constantly true is a
+branch that cannot be taken, so there is no predicate rather than one with a dead else.
+
+**`DataFrame.windowFrameBounded` stays public, and it now has one honest job.** The distinction it
+draws is real: it is the line a later phase restricting the recompute to the rows a delta names or
+DISPLACES would have to draw, and it is what the equivalence family uses to name the partition-global
+class its adequacy demand requires be reached. It is simply not what admits a step to the walk.
+
+**The instrument's unit, stated because the saving will be misread otherwise.**
+`Incremental.rowsEvaluated` counts **expression evaluations at steps** — one evaluation of one step's
+expression against one row — and **ordering and windowing work is not on that scale**.
+`DataFrame.evalPipelineWithInEnvCounted` charges `Filter` and `Derive` and nothing else, so a `rank`
+refresh reports the same six-to-one saving the bounded frames report while still sorting each
+partition on every refresh. That is consistent with `Sort` (D20, charged nothing) and with the bounded
+frames (D24, charged nothing), and it is exactly what D21 means by one scale: the scale measures
+expression evaluations, in every case, so a refresh and the full evaluation it replaced are
+comparable. **The saving is real and it is not the window getting cheaper** — it is the steps before
+the window no longer running over every row.
+
+**The unit is deliberately NOT changed here.** Charging ordering work would move every recorded value
+in every law, fixture and consumer assertion — the breaking change D21 was — and it would do so for no
+consumer that has asked. A consumer that needs to compare two ORDERING strategies needs a second
+instrument, not a redefinition of this one; that is its own decision, taken when such a consumer
+exists.
+
 ## 2026-09-02 — D24: the frame, not the verb — `Window` and `Join` widened one class each, and the gate waived once
 
 **Decided.** From `0.18.0`, `Incremental.plan` admits a `Window` whose frame is BOUNDED
@@ -36,6 +100,11 @@ declared scope is the bounded frame and because the honest declaration of a step
 partition is not "this step answers a delta". Whether the seam should trade that honesty for the
 prefix saving on `rank` and `cumulSum` — which are precisely the two shapes the waiver's named
 consumer wants — is an OPERATOR decision, recorded here rather than taken.
+
+_(TAKEN, 2026-09-02: relax. See **D25** — `0.19.0` admits every window function on row-set
+preservation, and the paragraph above is the reasoning it acted on. What survives of "why a bounded
+frame is the line" two paragraphs up is the frame distinction itself, which is still true and still
+the line a later per-row restriction would draw; it is no longer what admits a `Window` to the walk.)_
 
 **Why a filtering join is admitted and a combining one is not, in the walk's own terms.** `Semi` and
 `Anti` emit each left row at most once and unchanged, with the left schema only: that is a `Filter`

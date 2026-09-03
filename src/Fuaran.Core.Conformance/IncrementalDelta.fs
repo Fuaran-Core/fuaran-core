@@ -35,11 +35,21 @@ namespace Fuaran.Core
 //  Phase 120 admitted two more classes and the corpus grew to meet each of
 //  them. A BOUNDED-FRAME window (`lag` here) reads the row before this one in
 //  its partition's order, so an edit moves its neighbour's output as well as
-//  its own; an unbounded one (`cumulSum`) is present as a decline, because a
-//  fall-back that returns the wrong answer is the worse failure. A FILTERING
-//  join (`semi` / `anti`) is a filter whose predicate reads a relation, so it
-//  appears both with a row-local step after it and feeding an order-sensitive
-//  maintained group; a combining join (`inner`) is present as its decline.
+//  its own. A FILTERING join (`semi` / `anti`) is a filter whose predicate
+//  reads a relation, so it appears both with a row-local step after it and
+//  feeding an order-sensitive maintained group; a combining join (`inner`) is
+//  present as its decline, because a fall-back that returns the wrong answer
+//  is the worse failure.
+//
+//  `0.19.0` admitted the rest of the window family, on row-set preservation
+//  rather than frame boundedness, and the corpus grew again — a bare
+//  `cumulSum` (which was this family's window decline) and a `rank` behind a
+//  filter. Both are PARTITION-GLOBAL: every row's output reads every other row
+//  of its partition, and the column is recomputed wholesale over the walked
+//  frame, exactly as the bounded ones already were. The demands below insist
+//  on that narrower class being reached, because "a window was restricted" is
+//  satisfied by the `lag` alone and would have gone on passing had the
+//  relaxation been reverted.
 //
 //  Every sample also records its FOOTPRINT — what the prime evaluated and what
 //  the refresh evaluated — so the family certifies not only that the answer is
@@ -120,12 +130,20 @@ module IncrementalDelta =
         { Schema = [ "k", IntType ]
           Columns = [ Column.create "k" IntType [ Int 0; Int 2 ] ] }
 
-    /// The pipelines. `0`–`5`, `9`–`14`, `16` and `17` are incrementalisable; `6`–`8`, `15` and
-    /// `18` are the declined ones, present because a fall-back that returns the wrong answer is the
-    /// worse failure. `11`–`13` are the sort-bearing shapes (Phase 115): a sort last, a sort before
-    /// the steps that read the order it produced, and a sort feeding an order-sensitive maintained
-    /// group. `14`–`18` are Phase 120: a bounded-frame window and an unbounded one, a filtering
+    /// The pipelines. `0`–`5`, `9`–`17` and `19` are incrementalisable; `6`–`8` and `18` are the
+    /// declined ones, present because a fall-back that returns the wrong answer is the worse
+    /// failure. `11`–`13` are the sort-bearing shapes (Phase 115): a sort last, a sort before the
+    /// steps that read the order it produced, and a sort feeding an order-sensitive maintained
+    /// group. `14`–`18` are Phase 120: a bounded-frame window, a partition-global one, a filtering
     /// join with a step after it, another feeding a maintained group, and a combining join.
+    ///
+    /// `15` and `19` are the PARTITION-GLOBAL windows, and they are why the demand below can insist
+    /// on that class rather than on "a window" (`0.19.0`): `15` is a bare cumulative aggregate, so
+    /// the refresh's restriction is visible with nothing else in the pipeline to attribute it to,
+    /// and `19` is a `rank` behind a filter, which is the shape the saving is actually claimed on —
+    /// the filter stops re-evaluating every row while the ranked column is recomputed as the
+    /// reference computes it. `15` was this family's window DECLINE until the row-set-preserving
+    /// relaxation; keeping it and adding `19` is what makes the widening measurable here.
     let private pipelineOf (k: int) : Transform list =
         match k with
         | 0 -> [ Filter(Binary(Gt, Col "a", Lit(Int 0))) ]
@@ -177,8 +195,10 @@ module IncrementalDelta =
                     Of = "a"
                     As = "prev" } ]
         | 15 ->
-            // Phase 120 — declined by FRAME: a cumulative aggregate reads every preceding row of
-            // its partition, so no bounded neighbourhood of a row determines its output.
+            // A PARTITION-GLOBAL window, alone: a cumulative aggregate reads every preceding row of
+            // its partition, so it is precisely the shape frame boundedness declined and row-set
+            // preservation admits. It emits the rows it was handed, one for one, with the running
+            // total appended — which is all the walk needs.
             [ Window
                   { PartitionBy = [ "b" ]
                     OrderBy = [ "a", Asc ]
@@ -195,12 +215,24 @@ module IncrementalDelta =
             // join decides is which rows are in the group at all.
             [ Join(Embedded lookup, [ "b", "k" ], Anti)
               GroupBy([ "b" ], [ agg "n" Count "a"; agg "f" First "id" ]) ]
+        | 19 ->
+            // A partition-global window BEHIND A FILTER — the shape the saving is claimed on, and
+            // the one the widening's named consumer wants: a ranked column over a live grid. The
+            // rank is recomputed over the walked frame; what the admission buys is that the filter
+            // stops running over every row.
+            [ Filter(Binary(Gt, Col "a", Lit(Int -5)))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Rank
+                    Of = "a"
+                    As = "rk" } ]
         | _ ->
             // Phase 120 — declined by KIND: a combining join fans a left row out across its matches
             // and appends the right schema, so one source row is no longer one output row.
             [ Join(Embedded lookup, [ "b", "k" ], Inner) ]
 
-    let private pipelineCount = 19
+    let private pipelineCount = 20
 
     /// Apply one edit to the base rows, returning the new table and a tag naming the edit.
     let private editOf (k: int) (rows: (string * Cell * Cell) list) (n: int) : Table * string =
@@ -349,6 +381,7 @@ module IncrementalDelta =
                 "group-restricted"
                 "merged-order-restricted"
                 "window-restricted"
+                "partition-global-window-restricted"
                 "relation-filtered-restricted" ],
               fun s ->
                   let restricted =
@@ -371,6 +404,19 @@ module IncrementalDelta =
                           | RecomputeFrame _ -> true
                           | _ -> false)
 
+                  // `0.19.0` — the narrower demand, and the one that would go vacuous if the
+                  // relaxation were reverted. "A window was restricted" is satisfied by a `lag`
+                  // alone, which was already true at `0.18.0`; the claim this widening makes is
+                  // about the PARTITION-GLOBAL family, so that is what the sample has to reach.
+                  // Read off `DataFrame.windowFrameBounded`, which is no longer the seam's
+                  // admission predicate but is still the true statement about which frames those
+                  // are — the one place the two questions still meet.
+                  let framesPartitionGlobalWindow =
+                      s.Pipeline
+                      |> List.exists (function
+                          | Window spec -> not (DataFrame.windowFrameBounded spec.Fn)
+                          | _ -> false)
+
                   let filtersByRelation =
                       carries (function
                           | FilterByRelation _ -> true
@@ -387,6 +433,8 @@ module IncrementalDelta =
                         "merged-order-restricted"
                     if framesWindow && restricted then
                         "window-restricted"
+                    if framesPartitionGlobalWindow && restricted then
+                        "partition-global-window-restricted"
                     if filtersByRelation && restricted then
                         "relation-filtered-restricted" ]
           )
