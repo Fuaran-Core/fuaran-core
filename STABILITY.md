@@ -855,8 +855,9 @@ over the model, and now the single definition of it — `Artifact.json` applies 
 sorts inline); `Artifact.renderJson` (the indented canonical layout over any `JVal`, so a sibling
 document of a vocabulary lays out identically without a second stringifier appearing). On the
 codegen side, `SupportArtifact` with `SupportDocument` and `HostPreludeRef`. **No emitted bytes
-move**: every `idl.json` this engine writes is what it wrote before, which the corpus byte-guard
-enforces.
+move**: every `idl.json` this engine writes is what it wrote before — pinned here by the
+round-trip and canonicalisation laws over the neutral vocabularies, and by each consuming
+domain's own regenerate-and-byte-compare guard over its committed artifact.
 
 **The encoding version is now REFUSED rather than ignored.** An `idl.json` (or `support.json`)
 declaring a version this engine does not read is an error naming both numbers. A newer encoder may
@@ -877,8 +878,11 @@ artefact with nothing keeping the two equal.
 **One consequence for a domain taking its vocabulary home.** The artifact's ordering contract
 Ordinal-sorts the top-level collections, so a module regenerated from bytes declares its kinds in
 that order rather than in whatever order the vocabulary was authored in. The emission is otherwise
-identical — pinned at full scale, over the ~40-kind vocabulary, by the round-trip and triple
-proofs in the test suite. It is a one-time reordering of a generated file, absorbed once.
+identical. It is a one-time reordering of a generated file, absorbed once — and it has been: the
+first domain to take its vocabulary home absorbed it, and this repo's fixture was deleted
+afterwards (Phase 123, and see the D14 amendment). The proofs that remain here are stated over
+the neutral vocabularies; the full-scale instance of each is now the domain's own gate, which is
+what "a vocabulary lives in its domain's repo" has to mean to be worth anything.
 
 ## Open-core posture
 

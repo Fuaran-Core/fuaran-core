@@ -53,22 +53,6 @@
          Before its first consumer; it references nothing here. -->
     <Compile Include="ChildProcess.fs" />
     <Compile Include="IdlSpikeTests.fs" />
-    <Compile Include="UiIdl.fs" />
-    <Compile Include="IdlUiTests.fs" />
-    <!-- Phase 696 — the canonical `idl.json` spec artifact: its emit leg (driven by the
-         emit-idl switch in Program.fs) and the regenerate-and-byte-compare drift guard. -->
-    <Compile Include="IdlArtifactTests.fs" />
-    <!-- Phase 317 real-tier compiled codegen: the committed generated module (emitted by
-         Fuaran.Core.Idl.Gen from uiIdl; drift-guarded) + its byte-identity test.
-         UiHostPrelude.fs stubs the consuming tier's `Fuaran.UI.HostPrelude` (THosted
-         slot types + codecs) so the generated module compiles here too. -->
-    <Compile Include="UiHostPrelude.fs" />
-    <!-- Phase 945: the declared-support record (docs / splices / the Switch host
-         projection) the UI emission is generated WITH - reads Gen.GenSupport, so after
-         the Idl reference, before the drift guard and the regen entry that pass it. -->
-    <Compile Include="UiIdlSupport.fs" />
-    <Compile Include="UiGenerated.fs" />
-    <Compile Include="IdlUiGenTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
     <!-- Phases 108/109 - the declared wire shape (discriminator key + node envelope),
          exercised on the axes the readiness spikes do not cover. -->
@@ -78,11 +62,6 @@
          registration), after the wire-shape family it shares its fixture shape with. -->
     <Compile Include="IdlAnnotationTests.fs" />
     <Compile Include="IdlKindAnnotationTests.fs" />
-    <Compile Include="IdlSchemaTests.fs" />
-    <Compile Include="IdlOpTests.fs" />
-    <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named
-         IdlDiffTests, not DiffTests: the latter is Phase 245's TREE diff. -->
-    <Compile Include="IdlDiffTests.fs" />
     <!-- Phase 702 — the vocabulary-change proposal document and the branchless spike
          that prices it. Reads the mini IDL from Fuaran.Core.Idl.Spike, so after the
          Idl families above. -->
@@ -94,10 +73,6 @@
     <Compile Include="LeaseTests.fs" />
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
-    <!-- Phase 698 - the full-vocabulary generative cross-host fuzz (interpreter vs
-         generated F# vs generated TypeScript). Appended at the end of the list: it
-         reads UiIdl.fs + UiGenerated.fs, so it must compile after both. -->
-    <Compile Include="IdlFullVocabularyFuzzTests.fs" />
     <!-- Phase 102 - the null-tolerant read: the conformance family plus the
          strict-parser-unchanged pins. Appended at the end of the list; it depends on
          nothing here. -->
@@ -128,6 +103,11 @@
          which leg each neutral vocabulary carries, so it must follow both spikes. -->
     <Compile Include="ReferenceIdl.fs" />
     <Compile Include="IdlCertificationTests.fs" />
+    <!-- Phase 700 — the diff classifier over two `idl.json` revisions. Named
+         IdlDiffTests, not DiffTests: the latter is Phase 245's TREE diff. Moved
+         here by Phase 123: its scale cases read the reference vocabulary now that
+         the UI fixture has left, so it compiles after ReferenceIdl.fs. -->
+    <Compile Include="IdlDiffTests.fs" />
     <!-- Phase 115 - the incremental seam run against the vendored `incremental-recompute`
          corpus vectors at fixtures/incremental-recompute/ (the control that must not move,
          and the sort vector whose class does). Reads nothing here, so it simply follows. -->

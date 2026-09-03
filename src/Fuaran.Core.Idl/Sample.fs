@@ -273,10 +273,13 @@ module Sample =
     /// that a sampled node carried no envelope, so `state` / `style` /
     /// `accessibility` were reachable only by the GENERATED codecs and cross-host
     /// envelope parity was unproven — covered by one corpus fixture rather than by
-    /// the generative sweep. It is proven now: `IdlFullVocabularyFuzzTests` compares
-    /// the envelope across the interpreter, the generated F# module and the
-    /// generated TypeScript module on every vector, and removing it from any one leg
-    /// fails the sweep from vector 0.
+    /// the generative sweep. It is proven now: the generative sweep draws the envelope
+    /// and the cross-host legs compare it across the interpreter, the generated F#
+    /// module and the generated TypeScript module on every vector, so removing it
+    /// from any one leg fails from vector 0. The instance that ran at a whole
+    /// domain's scale left with that domain's vocabulary (DECISIONS.md D14); what
+    /// certifies the claim here is `IdlSpikeTests`' generative sweep and the vendored
+    /// second-vocabulary spike's three-way comparison.
     and private sampleEnvelope (idl: Idl) (r: Rng) (depth: int) : (string * IdlValue) list =
         sampleFields idl r depth idl.NodeFields
         |> List.filter (fun (_, v) -> v <> VAbsent)

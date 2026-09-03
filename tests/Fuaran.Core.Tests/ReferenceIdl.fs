@@ -298,8 +298,9 @@ let support: SupportDocument =
 //
 // The bytes are HAND-AUTHORED to the canonical rules (Ordinal-sorted keys, no
 // whitespace, `$type` first), not captured from the encoder: a captured expectation
-// only ever confirms the encoder back to itself, which is the trap `IdlUiTests`
-// records having fallen into once over `Binding.Query`'s accessor.
+// only ever confirms the encoder back to itself. That is not hypothetical: a
+// captured expectation once hid a real accessor defect in this repo's tests for as
+// long as it stood, which is why these bytes are written by hand.
 // ---------------------------------------------------------------------------
 
 let private literal (s: string) = VUnion("Inline", [ "text", VStr s ])

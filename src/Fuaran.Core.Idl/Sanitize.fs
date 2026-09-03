@@ -38,7 +38,7 @@ open System
 /// the semantics matched the UI module "byte-for-byte" and they did not: the lift
 /// copied a subset and dropped two behaviours, both failing open (Phase 96). The
 /// claim was load-bearing and unenforced, which is the combination that let the
-/// gap survive. The adversarial cases in `IdlUiTests` now pin the behaviours that
+/// gap survive. The adversarial cases in `IdlCertificationTests` now pin the behaviours that
 /// diverged; a change here that is not mirrored in `Fuaran.UI.Renderer.Sanitize`
 /// (and vice versa) is a defect until the two are consolidated behind one
 /// implementation.

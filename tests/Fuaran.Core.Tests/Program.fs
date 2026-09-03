@@ -5,16 +5,12 @@ open Expecto
 [<EntryPoint>]
 let main argv =
     match List.ofArray argv with
-    // Phase 696 — write the canonical `idl.json` vocabulary artifact into the
-    // wire-format-fixtures corpus clone:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-idl ..\Fuaran-UI\wire-format-fixtures
-    // The emitter lives here rather than beside the corpus regen in the UI tier
-    // because the IDL engine ships in no package and the vocabulary is local to
-    // this test project — see IdlArtifactTests.fs. The drift guard in that file
-    // fails whenever the committed artifact and a fresh emission disagree.
-    | "--emit-idl" :: dir :: _ ->
-        IdlArtifactTests.emit dir
-        0
+    // Phase 696's `--emit-idl` is GONE (Phase 123). It rendered ONE domain's
+    // vocabulary artifact into that domain's corpus clone, and lived here only
+    // because the engine shipped in no package and the vocabulary was local to
+    // this test project. Neither is true now: `Fuaran.Core.Idl` is packable from
+    // 0.4.0 and a domain holds its own vocabulary (DECISIONS.md D14), so a domain
+    // renders its own artifact in its own repository against the packaged engine.
     // Phase 700 — classify the delta between two `idl.json` revisions and print
     // the host-strand report:
     //   dotnet run --project tests/Fuaran.Core.Tests -- --idl-diff <old.json> <new.json> [<manifest.json>]
@@ -40,21 +36,25 @@ let main argv =
     //   dotnet run --project tests/Fuaran.Core.Tests -- --spike-proposal <proposal.json>
     //       [--out <report.md>] [--seed <int>] [--vectors <int>]
     //
-    // The entry point lives here for the same reason `--emit-idl` does: the spike
-    // needs BOTH the engine and the vocabulary, and `UiIdl.uiIdl` is local to this
-    // test project. It is branchless by construction — the delta is applied to an
+    // The vocabulary is an ARGUMENT (`--idl <idl.json>`), read through
+    // `Artifact.parse` — Phase 114's inversion is what makes that possible, and
+    // Phase 123 is where it was needed: the entry point used to name a domain's
+    // vocabulary because that vocabulary happened to live in this test project,
+    // which is exactly the coupling D14 removes. It is branchless by construction — the delta is applied to an
     // in-memory `Idl` value that exists for the duration of the call — so an
     // abandoned spike leaves no residue anywhere, which is exactly the property that
     // makes spiking every candidate affordable.
     //
-    // The corpus leg reads the `nodes/` family of the wire-format corpus clone when
-    // one is present. When it is ABSENT the leg reports "not checked" and the run is
-    // not green: a spike whose additive claim went unexamined must not read as a
+    // The corpus leg reads the `nodes/` family of the corpus directory named by
+    // `--corpus <dir>`. When none is named the leg reports "not checked" and the run
+    // is not green: a spike whose additive claim went unexamined must not read as a
     // spike that examined it and found nothing.
     //
     // Exit: 0 every leg passed · 1 a leg failed · 2 the document did not read. A
     // green exit is the removal of one objection, never a recommendation — nothing
     // downstream of this command may treat 0 as an admission.
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --spike-proposal <proposal.json>
+    //       --idl <idl.json> [--corpus <nodes-parent-dir>]
     | "--spike-proposal" :: proposalPath :: rest ->
         let flag name =
             rest
@@ -70,7 +70,7 @@ let main argv =
             | None -> fallback
 
         let corpus =
-            match IdlArtifactTests.tryFindCorpusRoot () with
+            match flag "--corpus" with
             | None -> []
             | Some root ->
                 let dir = System.IO.Path.Combine(root, "nodes")
@@ -84,14 +84,26 @@ let main argv =
                     |> Array.map (fun p -> System.IO.Path.GetFileName p, System.IO.File.ReadAllText p)
                     |> List.ofArray
 
-        match Fuaran.Core.Idl.Proposal.parse (System.IO.File.ReadAllText proposalPath) with
-        | Error e ->
+        let baseIdl =
+            match flag "--idl" with
+            | None -> Error "no --idl <idl.json> given — the spike prices a proposal AGAINST a vocabulary"
+            | Some path ->
+                if System.IO.File.Exists path then
+                    Fuaran.Core.Idl.Artifact.parse (System.IO.File.ReadAllText path)
+                else
+                    Error(sprintf "--idl names no file: %s" path)
+
+        match baseIdl, Fuaran.Core.Idl.Proposal.parse (System.IO.File.ReadAllText proposalPath) with
+        | Error e, _ ->
+            eprintfn "spike-proposal: the vocabulary did not read — %s" e
+            2
+        | _, Error e ->
             eprintfn "spike-proposal: the document did not read — %s" e
             2
-        | Ok proposal ->
+        | Ok baseVocabulary, Ok proposal ->
             match
                 Fuaran.Core.Idl.ProposalSpike.run
-                    { Base = UiIdl.uiIdl
+                    { Base = baseVocabulary
                       Proposal = proposal
                       Corpus = corpus
                       // Pinned, not clock-derived: a divergence a spike finds has to
@@ -119,16 +131,6 @@ let main argv =
         Snapshots.regen "spike" Fuaran.Core.Idl.Spike.Fixtures.miniIdl Fuaran.Core.Idl.Spike.Fixtures.cases
         |> ignore
 
-        Snapshots.regen
-            "ui"
-            UiIdl.uiIdl
-            (UiIdl.displayCases
-             @ UiIdl.layoutCases
-             @ UiIdl.inputCases
-             @ UiIdl.visCases
-             @ UiIdl.metaCases)
-        |> ignore
-
         // Rewrite the committed generated F# modules (their encoders embed the
         // omit-when-default emission, so they change with the schema).
         let writeGen
@@ -151,13 +153,6 @@ let main argv =
             Fuaran.Core.Idl.Gen.GenSupport.Empty
             Fuaran.Core.Idl.Spike.Fixtures.miniIdl
             [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown"; "Tabs" ]
-
-        writeGen
-            "tests/Fuaran.Core.Tests/UiGenerated.fs"
-            "Fuaran.Core.Tests.UiGenerated"
-            UiIdlSupport.support
-            UiIdl.uiIdl
-            (UiIdl.uiIdl.Kinds |> List.map (fun k -> k.Tag))
 
         // Phases 108/109 — the second-vocabulary slice's generated F# module, in
         // its DECLARED wire shape (bare-string `kind` discriminator, flat node

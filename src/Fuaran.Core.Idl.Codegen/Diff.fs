@@ -1274,7 +1274,7 @@ module Diff =
               { Surface = "artifact: idl.json"
                 Strength = Required
                 Note =
-                  "`--emit-idl` into the corpus clone; the Phase 696 drift guard fails when the committed artifact and a fresh emission disagree." }
+                  "re-render the vocabulary artifact beside the vocabulary it projects; the domain's regenerate-and-byte-compare guard fails when the committed artifact and a fresh emission disagree." }
 
               if isKindSetChange ch then
                   { Surface = "veneer: C# fluent factory (Fuaran.UI.CSharp)"

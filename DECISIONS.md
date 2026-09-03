@@ -623,13 +623,47 @@ vocabulary" is a condition the suite detects rather than a judgement someone re-
 trust boundary moved onto the neutral vocabulary in the same pass, because it is engine behaviour
 and would otherwise have left with a domain's contract.
 
-*What remains, deliberately.* `UiIdl.fs` and `UiGenerated.fs` stay, and the byte-pin with them,
-until the vocabulary lands in the domain's repo — deleting them here first would leave the domain
-with no vocabulary at all for the interval. That is a move in another repo and belongs to the phase
-that makes it. Note also that a module regenerated from the artifact declares its kinds in the
-artifact's Ordinal order rather than the authored order the committed `Generated.fs` carries; the
-emission is otherwise byte-identical, pinned at full scale, and the reordering is a one-time cost
-the move absorbs.
+*What remained, deliberately — and no longer does.* Phase 114 left `UiIdl.fs` and `UiGenerated.fs`
+in place, with the byte-pin, until the vocabulary landed in the domain's repo: deleting them first
+would have left that domain with no vocabulary at all for the interval. It has landed, and they are
+gone — see the amendment below.
+
+**Amended 2026-09-03 (Phase 123) — D14 is CLOSED: the fixture is deleted.** The first domain homed
+its vocabulary, its declared-support record and its host prelude in its own repository and now
+regenerates its structural layer in-process against the packaged engine, with nothing read from
+outside it. The interval this entry protected is over, so the exception this entry granted ends
+with it.
+
+*What left.* The four fixture files — `UiIdl.fs`, `UiIdlSupport.fs`, `UiHostPrelude.fs`,
+`UiGenerated.fs` — and the vendored `snapshots/ui.json` beside them; and, because a fixture is only
+ever as removable as the suites it feeds, **all seven of the suites named above**: `IdlUiTests`
+(corpus byte-parity), `IdlUiGenTests` (the compiled-codegen drift guard), `IdlArtifactTests` (the
+artifact leg), `IdlSchemaTests` (the schema leg), `IdlOpTests` (the op leg),
+`IdlFullVocabularyFuzzTests` (the cross-host fuzz), and the three scale cases of `IdlDiffTests`
+(the diff classifier), which are re-pointed at the reference vocabulary rather than deleted because
+the other twenty-two certify the classifier over vocabularies authored for the purpose. The
+`--emit-idl` entry point went with the artifact it rendered, and `--spike-proposal` — which named
+the vocabulary because the vocabulary happened to live here — now takes it as an argument, read
+through the `Artifact.parse` that Phase 114 added.
+
+*What the engine's certification rests on now, in full.* The union of three vocabularies no domain
+owns: the two vendored foreign ones and `refIdl`. That is not an assertion — `IdlCertificationTests`
+walks their union and fails if any `IdlType` or `Optionality` case is unreached, and the
+sanitisation floor and the codegen trust boundary run over `refIdl` against a policy that shares no
+token with the default. Every engine MECHANISM the seven suites exercised is still certified here:
+`Gen.jsonSchema` by the mini-IDL, wire-shape and enum-wire families; the op root's round-trip by
+`IdlCertificationTests` over `refIdl`, which declares ops where both foreign vocabularies declare
+none; and the three-way interpreter / generated-F# / generated-TypeScript comparison by the
+second-vocabulary spike and by the mini-IDL's generative sweep.
+
+*What left with them, stated rather than implied.* What those suites had that nothing here replaces
+is not a mechanism but a SCALE and a CORPUS: a generated schema evaluated by an off-the-shelf
+Draft 2020-12 validator against a real domain's committed wire corpus; an op codec round-tripped
+byte-for-byte against that corpus's op family; and a generative cross-host sweep over forty-odd
+kinds rather than eight. Those are certifications OF A DOMAIN'S CONTRACT, and this entry's whole
+argument is that a domain's contract is gated where the domain's gate runs. Re-standing them there
+is the domain's work and is recorded as such; a Core-side substitute would mean growing a
+full-scale vocabulary here, which is the route this entry rejected on its own terms.
 
 ## 2026-08-18 — D13: the compute vocabulary's closed sets, and what is deliberately absent (Phase 101)
 

@@ -431,8 +431,9 @@ let declarationTriple =
 
           // The acceptance criterion, on the neutral vocabulary: a domain holding the
           // three files regenerates its structural layer against the packaged engine,
-          // with no sibling checkout involved. The UI-scale demonstration of the same
-          // claim is in `IdlUiGenTests`, beside the vocabulary it uses.
+          // with no sibling checkout involved. A demonstration at a whole domain's
+          // scale is that domain's own gate, in that domain's repository — which is
+          // the point of the claim, not an omission from it (DECISIONS.md D14).
           testCase "a vocabulary + support document loaded FROM BYTES regenerates the same module" (fun _ ->
               let emit (idl: Idl) (s: Gen.GenSupport) =
                   Gen.fsharpModuleWith s "Fuaran.Core.Tests.ReferenceGenerated" idl (idl.Kinds |> List.map _.Tag)

@@ -3,7 +3,7 @@ module Fuaran.Core.Tests.IdlDiffTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
-open Fuaran.Core.Tests.UiIdl
+open Fuaran.Core.Tests.ReferenceIdl
 
 // ---------------------------------------------------------------------------
 // Phase 700 — the IDL diff classifier + host-strand report.
@@ -29,8 +29,8 @@ open Fuaran.Core.Tests.UiIdl
 // unrelated.
 // ---------------------------------------------------------------------------
 
-/// Render an `Idl` the way `--emit-idl` does, so the diff reads real artifact
-/// bytes.
+/// Render an `Idl` the way a domain renders its committed `idl.json`, so the diff
+/// reads real artifact bytes.
 let private art (idl: Idl) = Artifact.render idl
 
 let private empty: Idl =
@@ -96,10 +96,10 @@ let tests =
 
           testCase "identical revisions produce no change"
           <| fun _ ->
-              Expect.isEmpty (diffOf uiIdl uiIdl) "the live UI vocabulary against itself is not a change"
+              Expect.isEmpty (diffOf refIdl refIdl) "a whole vocabulary against itself is not a change"
 
               Expect.stringContains
-                  (reportOf uiIdl uiIdl)
+                  (reportOf refIdl refIdl)
                   "No change."
                   "the report says so rather than printing an empty section"
 
@@ -573,30 +573,37 @@ let tests =
                   "declared (WIRE_FORMAT.md §11.0"
                   "an unanchored roster must be visible as unanchored, not silently authoritative"
 
-          // --- the live vocabulary ---------------------------------------------
+          // --- a whole vocabulary, not a two-kind fixture -----------------------
+          //
+          // Phase 123: these two cases read the engine's domain-neutral reference
+          // vocabulary. They used to read the UI fixture, which was the only
+          // full-scale `Idl` this repo held; that fixture now lives in the domain's
+          // own repository (DECISIONS.md D14). What they certify is unchanged —
+          // that the classifier reads a complete artifact back, and reports a
+          // one-kind delta as one change rather than re-listing the vocabulary
+          // around it. The vocabulary is smaller, so the noise floor they probe is
+          // lower; certifying that at a domain's scale is the domain's own gate.
 
-          testCase "the live UI vocabulary reads back through the artifact"
+          testCase "a whole vocabulary reads back through the artifact"
           <| fun _ ->
-              match Diff.parse (art uiIdl) with
+              match Diff.parse (art refIdl) with
               | Ok s ->
-                  Expect.equal (Map.count s.Kinds) uiIdl.Kinds.Length "every kind survives the artifact round-trip"
-                  Expect.equal (Map.count s.Ops) uiIdl.Ops.Length "every op too"
-                  Expect.equal (Map.count s.Unions) uiIdl.Unions.Length "every union"
-                  Expect.equal (Map.count s.Enums) uiIdl.Enums.Length "every closed set"
-                  Expect.equal (Map.count s.Records) uiIdl.Records.Length "every record"
-                  Expect.equal (List.length s.NodeFields) uiIdl.NodeFields.Length "and the node envelope"
-              | Error e -> failtestf "the live artifact did not read back: %s" e
+                  Expect.equal (Map.count s.Kinds) refIdl.Kinds.Length "every kind survives the artifact round-trip"
+                  Expect.equal (Map.count s.Ops) refIdl.Ops.Length "every op too"
+                  Expect.equal (Map.count s.Unions) refIdl.Unions.Length "every union"
+                  Expect.equal (Map.count s.Enums) refIdl.Enums.Length "every closed set"
+                  Expect.equal (Map.count s.Records) refIdl.Records.Length "every record"
+                  Expect.equal (List.length s.NodeFields) refIdl.NodeFields.Length "and the node envelope"
+              | Error e -> failtestf "the artifact did not read back: %s" e
 
-          testCase "a single added kind on the live vocabulary reports one change"
+          testCase "a single added kind on a whole vocabulary reports one change"
           <| fun _ ->
-              // The realistic case, at real scale: the classifier must not drown
-              // a one-kind delta in noise from the other ~40.
-              // A tag the live vocabulary does not already carry — appending a
+              // A tag the vocabulary does not already carry — appending a
               // duplicate tag is a different (and also correctly-reported) case.
               let after =
-                  { uiIdl with
-                      Kinds = uiIdl.Kinds @ [ kind "Waveform" [ f "values" (TList TFloat) Required ] ] }
+                  { refIdl with
+                      Kinds = refIdl.Kinds @ [ kind "Waveform" [ f "values" (TList TFloat) Required ] ] }
 
-              let cs = diffOf uiIdl after
+              let cs = diffOf refIdl after
               Expect.equal (List.length cs) 1 "one change, not a re-listing of the vocabulary"
               Expect.equal (severities cs) [ Diff.Additive ] "and it is additive" ]

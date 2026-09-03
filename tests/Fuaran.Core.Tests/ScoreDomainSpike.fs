@@ -333,7 +333,7 @@ let private vendoredCorpus () : string option =
         else
             let cand = Path.Combine(dir, "tests", "Fuaran.Core.Tests")
 
-            if File.Exists(Path.Combine(cand, "UiIdl.fs")) then
+            if File.Exists(Path.Combine(cand, "Fuaran.Core.Tests.fsproj")) then
                 Some cand
             else
                 match Directory.GetParent dir with
@@ -359,7 +359,9 @@ let private resolveCorpus () : Result<string, string> =
         match vendoredCorpus () with
         | Some dir when isCorpus dir -> Ok dir
         | Some dir -> Error(sprintf "the vendored corpus at '%s' is missing or malformed" dir)
-        | None -> Error "could not locate tests/Fuaran.Core.Tests (UiIdl.fs marker) from the CWD or the test binary"
+        | None ->
+            Error
+                "could not locate tests/Fuaran.Core.Tests (Fuaran.Core.Tests.fsproj marker) from the CWD or the test binary"
 
 let rec private tagsIn (j: JVal) : Set<string> =
     match j with

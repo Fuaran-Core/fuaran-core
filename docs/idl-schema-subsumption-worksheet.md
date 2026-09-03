@@ -8,9 +8,17 @@ answer: **can it subsume the hand-written `Fuaran.UI.Ops.SchemaGen`?**
 remain, and neither is in the schema leg's core. The leg is corpus-certified for what it covers,
 which is the precondition for the decision, not the decision.
 
-Certification lives in `tests/Fuaran.Core.Tests/IdlSchemaTests.fs`, evaluated by JsonSchema.Net —
-the same Draft 2020-12 implementation the UI tier uses for the hand-written schema, so a
+Certification lived in `tests/Fuaran.Core.Tests/IdlSchemaTests.fs`, evaluated by JsonSchema.Net —
+the same Draft 2020-12 implementation the consuming tier uses for the hand-written schema, so a
 disagreement between the two is about the schemas, not the validators.
+
+> **Where this leg runs now (Phase 123, 2026-09-03).** That suite generated its schema from a
+> DOMAIN's vocabulary and evaluated it against that domain's committed wire corpus, and both left
+> this repo when the vocabulary went home (DECISIONS.md D14). Everything below is the record of
+> what the leg established while it ran here, and the verdict it reached is unchanged — but the
+> corpus-scale certification it rests on is a domain-side gate now, not a Core one. What this repo
+> still certifies about `Gen.jsonSchema` is the generator's own behaviour, over the mini-IDL,
+> wire-shape and enum-wire families.
 
 ## What the certification established
 

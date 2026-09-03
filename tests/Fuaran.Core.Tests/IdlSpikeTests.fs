@@ -266,7 +266,7 @@ let tests =
               match tryFindGenerated () with
               | None -> skiptest "Generated.fs not found on disk — drift guard skipped"
               | Some path ->
-                  // Regeneration escape hatch, same as IdlUiGenTests: FUARAN_REGEN=1
+                  // Regeneration escape hatch: FUARAN_REGEN=1
                   // rewrites the committed file instead of asserting, so a deliberate
                   // generator change is a one-command update, not a hand-edit of
                   // generated code.
