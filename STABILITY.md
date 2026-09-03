@@ -919,6 +919,72 @@ afterwards (Phase 123, and see the D14 amendment). The proofs that remain here a
 the neutral vocabularies; the full-scale instance of each is now the domain's own gate, which is
 what "a vocabulary lives in its domain's repo" has to mean to be worth anything.
 
+## Surface narrowing: the uncalled internals (`0.19.0`) — BREAKING
+
+A sweep of all nineteen packable `Fuaran.Core.*` packages measured 613 public functions against
+every F# source file in this repository and in every known consumer of these packages, and found 233
+with no caller outside the package that defines them. `0.19.0` acts on the part of that set where
+acting is safe and leaves the rest alone: **31 members become `internal`, 4 are deleted.**
+
+**Narrowing `public` to `internal` is a BREAKING surface change**, labelled as one here rather than
+filed as tidying: it removes a token from the published surface, and a consumer that was using it
+stops compiling. **No caller outside the defining assembly was found for any of them** — qualified
+and bare-name searches over every `.fs` / `.fsi` / `.fsx` file available, comment lines excluded,
+including `tests/` and `tests/fable-smoke/`, plus a name scan of the other language hosts. That is a
+measurement, not a guarantee: if you are the caller it could not see, say so and the member returns.
+
+**Narrowed to `internal` (31):**
+
+| Package | Members |
+|---|---|
+| `AiSurface` | `PatternBank.tryMatch` |
+| `Conformance` | `FoldConfluence.renderLanes`, `IncrementalDelta.rowsTheLawsNeed` |
+| `DataFrame` | `ColExprModule.paramNames`, `TransformModule.stepParamNames`, `SchemaWalk.noSources`, `Incremental.verbName`, `Incremental.classifyStep`, `Incremental.evalDelta` |
+| `Function` | `Space.isBounded`, `Function.memoKey`, `CapabilityCodec.signatureJson`, `CapabilityCodec.encodeInvocationJson`, `CapabilityPipelineModule.nodeOutputType` |
+| `Idl` | `Idl.Encode.encodeNodeEnv` |
+| `Idl.Codegen` | `Idl.Diff.stabilityImpact`, `Idl.Diff.profileBump`, `Idl.Diff.rosterFrom`, `Idl.Gen.msgCarrying`, `Idl.Gen.typescriptValueWith`, `Idl.Trust.gateCustom` |
+| `OpStream` | `OpStream.verifyAcrossWithOpt`, `OpStream.verifyAcrossChainOnlyWith` |
+| `Query` | `QueryModule.cellType`, and the codec quartet `QueryCodec.queryJson` / `queryOf` / `resultJson` / `resultOf` |
+| `Wire` | `Versioning.profileKey`, `Versioning.requiredProfileKey`, `Corpus.runCase` |
+
+**The `QueryCodec` quartet moved as ONE decision, not four.** Narrowing half a symmetric
+encode/decode surface is worse than narrowing neither — it leaves a consumer able to write a query
+document it cannot read back. `Fuaran.Core.QueryCodec` has no consumer at all, so the whole codec
+narrows together and would come back together.
+
+**Deleted (4):** `Idl.Trust.uiPolicy`, `Incremental.evalDeltaOn`, `CellModule.shapeName`,
+`ContentPack.baseVersions`. Each had **zero references of any kind** — not a call, not a test, not a
+doc comment naming it. An `internal` binding nothing calls is still code to read, compile and
+believe; deletion is the honest disposal, and the history is where it lives now.
+
+**Members the sweep proposed and this release did NOT narrow, for three different reasons:**
+
+- **`Conformance.snapshotLawsWith`** and **`FoldConfluence.laneFoldLawsWith`** — **enrolled by NAME
+  in `SampleAdequacy.census`**, which is a shipped public declaration of every law family the kit
+  ships. A string enrolment is not a call, so a caller-count reading cannot see it; the suite can,
+  and did — `SampleAdequacy.census`'s completeness test resolves each row by reflection over the
+  kit's PUBLIC law entry points, so narrowing these two turned two census rows into rows naming
+  nothing. That is the guard working. The general rule it establishes: **a `*Laws` / `*LawsWith`
+  entry point enrolled in the census is public surface**, and the census row is the promise.
+- **`Incremental.windowFnName`** — promised, and recently: see "The row-set-preserving window
+  family" below, which retains it alongside the `FallBackReason` case it renders.
+- **`Idl.Gen.usesHosted`** — a **declared boundary**, not a helper. It answers "does this authored
+  value populate a hosted slot", which is the question a generative cross-host comparison must
+  answer about its own vectors before it can claim to have compared them: a hosted slot's content
+  belongs to the host codec's own specification, so a value-generic sampler cannot draw content that
+  codec is obliged to accept. It has no caller in this repository today — the leg it was written for
+  is not wired here — and it stays public precisely because the alternative is a consumer swallowing
+  those vectors silently instead of stating the boundary.
+
+**Not narrowed, and not an API question at all:** `Fuaran.Core.Conformance` ships fifty law families
+that no adopting domain runs. They are correctly public — the gap is adoption, and a visibility
+change would answer the wrong question by deleting the kit's reason to exist.
+
+The other members the sweep found uncalled but load-bearing are now documented as such, in the same
+release, under "Public because a sibling Core package calls it", "Members the other language hosts
+mirror name for name", and "The portability set" — so the next reading classifies them as promised
+rather than proposing them again.
+
 ## Open-core posture
 
 Apache-2.0, abstractions-tier. The contract (protocol + witness records + signature/

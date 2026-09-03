@@ -366,7 +366,7 @@ module IncrementalDelta =
     /// way the merged-order laws can see a stability defect at all. Phase 115 measured the cost of
     /// getting this wrong: at one-to-five rows most tables held ONE row, and a merge with no
     /// stability tiebreak passed every seed.
-    let rowsTheLawsNeed = 7
+    let internal rowsTheLawsNeed = 7
 
     /// The shipped bound: one to nine rows (Phase 115).
     let samples (seed: int) (iterations: int) : IncrementalSample list = samplesWith 9 seed iterations

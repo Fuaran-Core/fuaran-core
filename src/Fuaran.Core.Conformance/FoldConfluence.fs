@@ -221,7 +221,7 @@ module FoldConfluence =
 
     /// Render a lane set for a counterexample, one line per lane, through the witness's own
     /// encoder — so the reproducer is in the domain's vocabulary, not `%A` of its internals.
-    let renderLanes (encodeOp: 'Op -> string) (lanes: 'Op list list) : string =
+    let internal renderLanes (encodeOp: 'Op -> string) (lanes: 'Op list list) : string =
         lanes
         |> List.mapi (fun i ops ->
             "  lane "

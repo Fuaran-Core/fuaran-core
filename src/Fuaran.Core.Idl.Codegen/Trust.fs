@@ -44,15 +44,6 @@ module Trust =
           UrlFields: Set<string * string>
           MarkdownFields: Set<string * string> }
 
-    /// A convenience policy for the vocabulary the tokens in [[HardenPolicy.Default]]
-    /// came from: `Link.href` / `Image.src` are URLs; `Markdown.text` is markdown.
-    /// Callers pass their own allowlist — and a domain that spells its fields
-    /// otherwise builds its own [[Policy]] rather than reaching for this.
-    let uiPolicy (allowlist: AllowEntry list) : Policy =
-        { Allowlist = allowlist
-          UrlFields = Set.ofList [ "Link", "href"; "Image", "src" ]
-          MarkdownFields = Set.ofList [ "Markdown", "text" ] }
-
     /// The gate decision for a node of the gated kind.
     type CustomGate =
         | Allowed
@@ -65,7 +56,7 @@ module Trust =
     /// → inert; allowlisted + hash matches → live; allowlisted + hash MISMATCH →
     /// inert under `StrictReplay` / `Enforced`, live (advisory) under
     /// `AdvisoryWarning`.
-    let gateCustom (allowlist: AllowEntry list) (fields: (string * IdlValue) list) : CustomGate =
+    let internal gateCustom (allowlist: AllowEntry list) (fields: (string * IdlValue) list) : CustomGate =
         let str name =
             match fieldOf name fields with
             | Some(VStr s) -> s

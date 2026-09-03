@@ -149,7 +149,7 @@ module PatternBank =
     /// The first pattern (bank order) with a matching anchor — bank order is
     /// part of the resolution contract, so a domain lists its most specific
     /// patterns first.
-    let tryMatch (w: AiSurfaceWitness<'State, 'Op, 'Rej>) (intent: Intent) : PatternCard<'Op> option =
+    let internal tryMatch (w: AiSurfaceWitness<'State, 'Op, 'Rej>) (intent: Intent) : PatternCard<'Op> option =
         w.Patterns
         |> List.tryFind (fun p -> p.PromptAnchors |> List.exists (fun a -> matchesAnchor a intent.Text))
 

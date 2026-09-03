@@ -129,12 +129,6 @@ module Cell =
         | Timestamp _ -> Some TimestampType
         | Null -> None
 
-    /// A short human name for a present cell's shape (for `TypeMismatch` messages).
-    let shapeName (c: Cell) : string =
-        match typeOf c with
-        | Some t -> ColumnType.tag t
-        | None -> "null"
-
     /// The type default a `Null` cell encodes as on the wire (the validity mask, not this
     /// placeholder, carries nullity — the placeholder keeps the values array null-free, which the
     /// Fuaran wire model requires).

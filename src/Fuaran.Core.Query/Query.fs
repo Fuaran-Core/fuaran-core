@@ -75,7 +75,7 @@ module Query =
 
     /// The `ColumnType` a present (non-`Null`) cell realizes — the type-compatibility surface the
     /// param validator (and the fuaran#323 binding thread) checks against.
-    let cellType (c: Cell) : ColumnType option =
+    let internal cellType (c: Cell) : ColumnType option =
         match c with
         | Int _ -> Some IntType
         | Float _ -> Some FloatType
@@ -322,7 +322,7 @@ module QueryCodec =
 
     // ---- query declaration ----
 
-    let queryJson (q: Query) : JVal =
+    let internal queryJson (q: Query) : JVal =
         JObj(
             [ "$type", JStr "query"
               "id", JStr q.Id
@@ -336,7 +336,7 @@ module QueryCodec =
 
     let encode (q: Query) : string = Canon.render (queryJson q)
 
-    let queryOf (el: JVal) : Result<Query, QueryError> =
+    let internal queryOf (el: JVal) : Result<Query, QueryError> =
         let dataErr (s: string) = ExecutionFailed("decode: " + s, [])
 
         let r =
@@ -380,7 +380,7 @@ module QueryCodec =
 
     // ---- query result ----
 
-    let resultJson (qr: QueryResult) : JVal =
+    let internal resultJson (qr: QueryResult) : JVal =
         let nextTok =
             match qr.NextPageToken with
             | Some tok -> [ "nextPageToken", JStr tok ]
@@ -396,7 +396,7 @@ module QueryCodec =
 
     let encodeResult (qr: QueryResult) : string = Canon.render (resultJson qr)
 
-    let resultOf (el: JVal) : Result<QueryResult, QueryError> =
+    let internal resultOf (el: JVal) : Result<QueryResult, QueryError> =
         let dataErr (s: string) = ExecutionFailed("decode: " + s, [])
 
         match Decode.getProp "rows" el with

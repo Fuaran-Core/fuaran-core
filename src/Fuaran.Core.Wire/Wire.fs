@@ -976,13 +976,13 @@ module Versioning =
             Current
 
     [<Literal>]
-    let profileKey = "$profile"
+    let internal profileKey = "$profile"
 
     [<Literal>]
     let payloadKey = "$payload"
 
     [<Literal>]
-    let requiredProfileKey = "requiredProfile"
+    let internal requiredProfileKey = "requiredProfile"
 
     /// A versioned wire envelope: the producer's authored `Profile` + the artifact `Payload`
     /// (a `Node` / `TreeOp` JVal). `$profile` / `$payload` keys are `$`-prefixed so they sort
@@ -1139,7 +1139,7 @@ module Corpus =
         | Ok _ -> Error "round-trip produced a different value"
         | Error m -> Error("re-decode failed: " + m)
 
-    let runCase (codec: Codec<'T>) (c: Case) : Outcome =
+    let internal runCase (codec: Codec<'T>) (c: Case) : Outcome =
         match c.Kind with
         | RoundTrip ->
             match codec.Decode c.Json with

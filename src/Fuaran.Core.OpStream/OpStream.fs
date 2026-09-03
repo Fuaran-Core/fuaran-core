@@ -980,7 +980,7 @@ module OpStream =
     /// chain format (and so `verifyChainWith`/`appendWith` under its own `cfg`) can now verify a
     /// snapshot/compaction boundary too. The snapshot's own hash payload (`snapPayload`) is fixed —
     /// it is the checkpoint format, not the per-op chain format — so it is unaffected by `cfg`.
-    let verifyAcrossWithOpt
+    let internal verifyAcrossWithOpt
         (cfg: StreamConfig)
         (hashFn: HashFn)
         (stateEncode: ('State -> string) option)
@@ -1022,7 +1022,7 @@ module OpStream =
     /// the tail chain. **Does NOT detect a swapped `'State`** — that is the chain-only trade-off; use
     /// `verifyAcrossWith` (strict) for independent state-tamper detection. A domain on a legacy chain
     /// format (its own `cfg`) that snapshots a large/awkward `'State` verifies its boundary here.
-    let verifyAcrossChainOnlyWith
+    let internal verifyAcrossChainOnlyWith
         (cfg: StreamConfig)
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)

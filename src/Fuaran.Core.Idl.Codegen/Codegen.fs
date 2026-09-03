@@ -162,7 +162,7 @@ module Gen =
 
     /// The type names emitted generic in `'Msg` — union names, record names,
     /// `<Tag>Spec` names, plus `NodeKind` / `Node` when any kind qualifies.
-    let msgCarrying (idl: Idl) : Set<string> =
+    let internal msgCarrying (idl: Idl) : Set<string> =
         let rec mentions (seen: Set<string>) (t: IdlType) =
             match t with
             | TFn s -> s.FSharp.Contains "'Msg"
@@ -2332,7 +2332,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// discriminator-tagged objects (matching the generated encoder's dispatch),
     /// fields keyed by name; a flat vocabulary's node is ONE object. Builds the
     /// conformance fixtures the node harness runs.
-    let rec typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
+    let rec internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
         let go = typescriptValueWith shape
         let disc = tsDiscKey shape.Discriminator
 

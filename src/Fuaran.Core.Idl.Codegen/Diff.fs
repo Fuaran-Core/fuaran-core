@@ -1075,7 +1075,7 @@ module Diff =
 
     /// The draft `stability_impact:` value — the roadmap front-matter vocabulary
     /// is `additive` / `breaking` / `null`, so this emits one of the first two.
-    let stabilityImpact (cs: Classification list) : string =
+    let internal stabilityImpact (cs: Classification list) : string =
         if
             cs
             |> List.exists (fun c -> c.Severity = BreakingWire || c.Severity = BreakingForEmitters)
@@ -1088,7 +1088,7 @@ module Diff =
 
     /// The wire-profile recommendation. `core@1.x` is the profile-id grammar
     /// (`STABILITY.md` §15 sentinel strings); `/v1/` is the schema `$id` major.
-    let profileBump (cs: Classification list) : string =
+    let internal profileBump (cs: Classification list) : string =
         if cs |> List.exists (fun c -> c.Severity = BreakingWire) then
             "`/v2/` MAJOR — the schema `$id` major segment moves. VOCABULARY.md §4.2 says avoid this after publication; do it pre-launch or not at all."
         elif cs |> List.exists (fun c -> c.Severity = Unclassifiable) then
@@ -1160,7 +1160,7 @@ module Diff =
     /// Read the roster from a parsed `manifest.json` when it carries one; `None`
     /// when it does not, which is the current state and the reason
     /// `declaredRoster` exists.
-    let rosterFrom (manifest: JVal) : Host list option =
+    let internal rosterFrom (manifest: JVal) : Host list option =
         match field "hosts" manifest with
         | Some(JArr entries) when not entries.IsEmpty ->
             entries

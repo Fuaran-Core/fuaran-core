@@ -127,7 +127,7 @@ module Space =
         | AnyString -> true
 
     /// A space is bounded unless it is `AnyString` — the totality criterion for repeats.
-    let isBounded (space: ValueSpace) : bool =
+    let internal isBounded (space: ValueSpace) : bool =
         match space with
         | AnyString -> false
         | _ -> true
@@ -763,7 +763,7 @@ module Function =
     /// Hygiene: args are keyed by absolute address. Deterministic — identical `(function, param-set)`
     /// always yields the identical key (a hit), and any function- or param-change yields a different
     /// one (a miss).
-    let memoKey
+    let internal memoKey
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)
         (args: Map<string, Arg<'Node>>)
@@ -1197,7 +1197,7 @@ module CapabilityCodec =
                                   Action = ac
                                   Required = required }))))))
 
-    let signatureJson (sg: Signature) : JVal =
+    let internal signatureJson (sg: Signature) : JVal =
         JObj
             [ "name", JStr sg.Name
               "effect", effectJson sg.Effect
@@ -1302,7 +1302,7 @@ module CapabilityCodec =
     // ---- typed invocation record ----
 
     /// Encode a typed invocation `(capabilityId, args)` to a `JVal` (`"$type":"invocation"`).
-    let encodeInvocationJson (capabilityId: string) (args: (string * string) list) : JVal =
+    let internal encodeInvocationJson (capabilityId: string) (args: (string * string) list) : JVal =
         Canon.typed
             "invocation"
             [ "capabilityId", JStr capabilityId
@@ -1628,13 +1628,6 @@ module ContentPack =
     let signatureFingerprint (sg: Signature) : string =
         Function.toSchema sg |> Json.render |> Hash.fnv1a
 
-    /// The authoritative base-signature versions of a registry: every entry id → its current signature
-    /// fingerprint. A host inspects this to author a manifest that pins the live shapes, or to diff a
-    /// pack's declared versions against the registry it will load into. (`load` recomputes the live
-    /// fingerprint itself, so it does not depend on this projection.)
-    let baseVersions (reg: FunctionRegistry) : Map<string, string> =
-        reg.Entries |> Map.map (fun _ e -> signatureFingerprint e.Capability.Signature)
-
     /// Build a `PackedFunction` against a base ENTRY, fingerprinting its current signature — the
     /// authoring helper, so a pack pins the live shape it was actually curried from (the honest path; a
     /// hand-written `BaseSignatureVersion` is still accepted by the `PackedFunction` literal, and a wrong
@@ -1746,7 +1739,7 @@ module CapabilityPipeline =
         | Source(id, _, _) -> id
         | Invoke(id, _, _, _) -> id
 
-    let nodeOutputType (n: PipelineNode) : ValueSpace =
+    let internal nodeOutputType (n: PipelineNode) : ValueSpace =
         match n with
         | Source(_, _, ty) -> ty
         | Invoke(_, _, ty, _) -> ty

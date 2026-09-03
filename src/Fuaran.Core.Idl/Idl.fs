@@ -960,7 +960,7 @@ module Encode =
     /// behave identically on a node field and on a kind field; that shared path is
     /// the whole reason the generated hosts and the interpreter can be expected to
     /// agree. Key order is irrelevant — `Canon.render` sorts Ordinal.
-    and encodeNodeEnv
+    and internal encodeNodeEnv
         (idl: Idl)
         (id: string)
         (envelope: (string * IdlValue) list)
