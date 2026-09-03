@@ -201,6 +201,41 @@ Certified by `Conformance.leaseLaws` (apply totality, `canApply` ≡ `apply`, co
 `verifyChain`, replay determinism, expiry-as-data) — a host in another language re-implements the codec
 + these laws against this section, exactly as it does the witness surface.
 
+### Public because a sibling Core package calls it (`0.19.0`)
+
+`Fuaran.Core.*` is nineteen assemblies and declares **no `InternalsVisibleTo` anywhere**, so a
+function one Core package needs from another has to be public — `internal` cannot express it. Four
+members are exactly that and nothing else: no caller outside these packages, no test, and until
+`0.19.0` no document saying why they were public. A reading that classifies surface by caller count
+therefore takes each for dead and reaches for a narrowing that would not compile. They are contracts:
+
+- **`Fuaran.Core.ColumnOps.changeOf`** — `Fuaran.Core.Conformance` drives the edit-stream incremental
+  re-evaluation law through it.
+- **`Fuaran.Core.FunctionRegistryModule.partiallyApply`** — the content-pack currying
+  `Fuaran.Core.Conformance` builds its samples with.
+- **`Fuaran.Core.Memo.isMemoisable`** — the memo-soundness law asks it the same question the memo
+  gate asks, which is the whole point of that law.
+- **`Fuaran.Core.Idl.ProposalModule.touchedKinds`** — `Fuaran.Core.Idl.Codegen` reads it when
+  reporting which kinds a proposal delta reaches.
+
+Public here is a consequence of the package split, not an invitation. They carry the ordinary
+breaking-change terms above; nothing in this entry promotes them to a documented extension point.
+
+### Members the other language hosts mirror name for name (`0.19.0`)
+
+Six members are re-implemented under the same name by the TypeScript and Go reference
+implementations. Those hosts do not call the F#; the F# is the reference they must agree with. So a
+rename, or a change to what one of these returns, is a cross-host divergence to be landed in every
+host in the same change-set — whatever the caller count in this repository says.
+
+- **`Fuaran.Core.CellModule.defaultFor`** — the type default a `Null` cell encodes as on the wire.
+- **`Fuaran.Core.DataFrame.cellString`** — the cell → string projection group keys and sorts read.
+- **`Fuaran.Core.DataFrameCodec.decodeExpr`** — the column-expression decoder.
+- **`Fuaran.Core.CapabilityPipelineModule.nodeInvocationKey`** — a pipeline node's invocation key.
+- **`Fuaran.Core.Idl.Sanitize.sanitizeUrlOrBlank`** — the URL sanitiser. Its RESULT is the contract:
+  a divergence here is a security divergence, not a cosmetic one.
+- **`Fuaran.Core.Conformance.capabilityLaws`** — the capability law family a host certifies against.
+
 ## Witness-record field freeze (the 1.0 contract)
 
 The six public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
@@ -967,6 +1002,27 @@ green **and** the committed .NET vector table green — the mask is a no-op on .
 it — while the parity leg reddens on exactly the two-block SHA-256 vectors (the 56-byte FIPS message
 and the byte-form vector over it) and leaves every single-block vector untouched. That is the class
 this leg exists for, and it is now measured on the gate's own vectors rather than in a scratch probe.
+
+### The portability set — what `tests/fable-smoke/` reaches is PROMISED (`0.19.0`)
+
+The gate above compiles that project against every public package, and what it touches it touches
+deliberately. A member reached from there therefore carries a **portability guarantee to Fable
+consumers**, not merely a proof that it compiles — and seven such members have no other caller in
+this repository, which is exactly the shape a caller-count reading takes for dead code. Narrowing
+one to `internal` would withdraw a guarantee **without turning the gate red**: the smoke project
+would simply stop seeing it, and stop asserting anything about it. They are promised, and named here
+so the next such reading knows it:
+
+- **`Fuaran.Core.Delta.ofRows`** and **`Fuaran.Core.RowIdentity.byColumn`** — building a row-set
+  delta and keying its rows, the first two calls a client-side incremental host makes.
+- **`Fuaran.Core.Incremental.isIncremental`**, **`Incremental.primeOn`**, **`Incremental.refreshOn`**
+  — the incremental column-layer entry points, so a Fable host primes and refreshes in the browser
+  rather than round-tripping for every edit.
+- **`Fuaran.Core.Idl.Sanitize.sanitizeAttributes`** and **`Idl.Sanitize.scrubMarkdown`** — the
+  sanitisers, which a client host needs precisely because it is the side rendering untrusted content.
+
+**The rule generalises: `tests/fable-smoke/` is a promise surface, not a scratch project.** Adding a
+member to it makes a portability promise; removing one withdraws it. Neither is a tidying edit.
 
 ## Canonical float layout (Phase 55)
 
