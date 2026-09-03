@@ -1904,7 +1904,16 @@ let inputKinds: IdlKind list =
             // The handler arg is the hosted browser-file metadata record (prelude
             // type; closure args never serialise, so no codec is needed).
             opt "onSelect" (handlerOf "Fuaran.UI.HostPrelude.FileSelection list" "unknown[]")
-            opt "disabled" (bindingOf TBool) ] }
+            opt "disabled" (bindingOf TBool)
+            // Phase 1115 — the two ingress gestures, both omit-at-`false`. The
+            // wire names a CAPABILITY on the node that hosts the gesture and
+            // consumes its effect (the affordance→op charter's governing
+            // sentence); the drag, the drop, the paste and the drop-state
+            // styling are the renderer's own. Appended, so the generated
+            // constructor's existing positions do not move, and omit-at-`false`
+            // so an upload that says nothing encodes to the bytes it always did.
+            omit "acceptPaste" TBool (VBool false)
+            omit "dropTarget" TBool (VBool false) ] }
       { Tag = "Form"
         Category = "Input"
         Annotations = Annotations.Empty
