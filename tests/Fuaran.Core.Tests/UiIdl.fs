@@ -816,6 +816,37 @@ let private formFieldKind =
                 opt "min" TStr
                 opt "max" TStr
                 opt "step" TFloat ]
+            Annotations = Annotations.Empty }
+          // Fuaran-UI Phase 1113 — the typeahead / autocomplete control. A
+          // `Choice` is a bounded menu the reader scans; a `Combobox` is a
+          // searchable one it FILTERS, which is what makes a two-hundred-option
+          // source usable rather than merely valid.
+          //
+          // The option source is an ordinary `Binding<SelectOption list>`, so a
+          // `Query`-bound source gives asynchronous suggestions through binding
+          // machinery that already exists — no coordination vocabulary is minted
+          // for it.
+          //
+          // `allowFreeText` omits at `false`, which makes the SHORTEST document
+          // the constrained one: an emitter that says nothing gets the shape a
+          // `Select` would have had, and admitting values outside the option set
+          // is the thing it has to ask for.
+          //
+          // The value slot and the handler are `Choice`'s, deliberately: the
+          // constrained combobox IS a searchable select, so the two must not
+          // differ at a call site that migrates between them. With free text an
+          // empty entry is genuinely no value, so collapsing it to `None` gives
+          // one fact one spelling rather than two.
+          //
+          // Nothing here names a keystroke. Arrow / Enter / Escape, the listbox
+          // popup and `aria-activedescendant` are the renderer's affordance
+          // under the affordance→op charter.
+          { Tag = "Combobox"
+            Fields =
+              [ omit "allowFreeText" TBool (VBool false)
+                opt "onChange" (handlerOf "string option" "string | null")
+                req "options" (TUnion("Binding", [ TList(TRecord "SelectOption") ]))
+                opt "value" (TUnion("Binding", [ TStr ])) ]
             Annotations = Annotations.Empty } ] }
 
 // _(The separate `FilterKind` union this file carried until the Phase 692
