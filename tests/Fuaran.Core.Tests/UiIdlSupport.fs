@@ -58,10 +58,20 @@ let private switchProjection: Gen.KindProjection =
      | Ok None -> dReq "stateKey" __fs dStr |> Result.map (fun key -> Binding.State(key, None))
      | Error e -> Error e) |> Result.bind (fun on ->
     Ok { Cases = cases; Default = ``default``; On = on }))))"""
+      // A projected kind supplies its OWN `mk`, so the node envelope is spelled
+      // here by hand rather than derived from `Idl.NodeFields` the way the
+      // forty-one generated constructors' envelope is. A new envelope field
+      // therefore has to be added here too — Fuaran-UI Phase 1112's `tooltip` is
+      // the first one to land since this projection seam did, and it arrived as
+      // `FS0764` on this literal alone. The coupling is left as it is
+      // deliberately: the compiler names the one site, in the same build that
+      // adds the field, which is a stronger guarantee than a convention nobody
+      // re-reads. What is added is this note, so the next envelope field is
+      // expected here rather than discovered here.
       Mk =
         Some
             """let mkSwitch (id: string) (cases: SwitchCase<'Msg> list) (``default``: Node<'Msg>) (stateKey: string) : Node<'Msg> =
-    { Id = id; Kind = NodeKind.Switch { Cases = cases; Default = ``default``; On = Binding.State(stateKey, None) }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None }""" }
+    { Id = id; Kind = NodeKind.Switch { Cases = cases; Default = ``default``; On = Binding.State(stateKey, None) }; Accessibility = None; ExtraAttributes = None; Motion = None; State = None; Style = None; Tooltip = None }""" }
 
 /// The declared support for `Gen.fsharpModuleWith` — see the module doc above.
 let support: Gen.GenSupport =

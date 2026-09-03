@@ -2404,7 +2404,27 @@ let uiIdl: Idl =
           hostOnly "extraAttributes" "Map<string, string> option" "None"
           hostOnly "motion" "Motion option" "None"
           opt "state" (TRecord "StateBehaviour")
-          opt "style" (TRecord "SemanticStyle") ]
+          opt "style" (TRecord "SemanticStyle")
+          // Fuaran-UI Phase 1112 — the node-level tooltip trait: a supplementary
+          // HINT about the node this envelope wraps, omitted when `None`.
+          //
+          // It sits here, beside `accessibility`, rather than as a field on the
+          // 41 spec records, for the reason the trait tier exists: a hint is
+          // uniform across kinds — nothing about "a short supplementary
+          // description of this thing" varies with whether the thing is a button
+          // or a metric — and 41 per-spec fields would be 41 independently
+          // driftable decisions about one concept. It is a `TextSource` and not a
+          // `Binding<string>` because a hint is CONTENT: it is authored, it is
+          // translated, and `TextSource` is this vocabulary's word for exactly
+          // that (`Literal` / `I18n` / `Bound`, so the runtime case is covered
+          // too).
+          //
+          // The GESTURE that reveals it is deliberately absent from the wire.
+          // Hover, focus, long-press and touch reveal are the renderer's
+          // affordance under the affordance→op charter, so no event name and no
+          // placement token is minted here: a document says WHAT the hint is and
+          // never HOW it appears.
+          opt "tooltip" TS ]
       Ops = treeOps
       Wire = WireShape.Default
       Harden = HardenPolicy.Default }

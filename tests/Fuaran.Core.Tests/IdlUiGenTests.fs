@@ -65,6 +65,7 @@ let private markdown1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind = G.NodeKind.Markdown { Text = lit "Updated hourly." } }
 
 /// `metric-1` — optional spec fields (all present) + a generic `Binding<float>` +
@@ -76,6 +77,7 @@ let private metric1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.Metric
             { Label = lit "Revenue"
@@ -101,6 +103,7 @@ let private stack1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.Box
             { Children = [ metric1; markdown1 ]
@@ -116,6 +119,7 @@ let private btnInvoke: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.Button
             { Label = lit "Run model"
@@ -147,6 +151,7 @@ let private form1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.Form
             { Fields =
@@ -198,6 +203,7 @@ let private grid1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.DataGrid
             { Columns =
@@ -242,6 +248,7 @@ let private table1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.DataGrid
             { Columns = []
@@ -275,6 +282,7 @@ let private customBounded1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.Custom
             { ModuleId = "deal-flow"
@@ -297,6 +305,7 @@ let private fragRefArgs: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.FragmentRef
             { Name = "stat-card"
@@ -311,6 +320,7 @@ let private fragRefArgs: G.Node<unit> =
                                 Motion = None
                                 State = None
                                 Style = None
+                                Tooltip = None
                                 Kind = G.NodeKind.Markdown { Text = lit "Bound slot" } }
                           "count", G.FragmentArg.Int 7 ]
                 ) } }
@@ -323,6 +333,7 @@ let private boundary1: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.ErrorBoundary
             { Child =
@@ -332,6 +343,7 @@ let private boundary1: G.Node<unit> =
                   Motion = None
                   State = None
                   Style = None
+                  Tooltip = None
                   Kind = G.NodeKind.Markdown { Text = lit "Child body" } }
               Fallback =
                 { Id = "boundary-fallback"
@@ -340,6 +352,7 @@ let private boundary1: G.Node<unit> =
                   Motion = None
                   State = None
                   Style = None
+                  Tooltip = None
                   Kind =
                     G.NodeKind.Callout
                         { Body = lit "Fallback rendered"
@@ -357,6 +370,7 @@ let private fragDeclParam: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.FragmentDecl
             { Body =
@@ -366,6 +380,7 @@ let private fragDeclParam: G.Node<unit> =
                   Motion = None
                   State = None
                   Style = None
+                  Tooltip = None
                   Kind = G.NodeKind.Markdown { Text = lit "Parameterised body" } }
               Name = "stat-card"
               Holes =
@@ -391,6 +406,7 @@ let private formatBindings: G.Node<unit> =
           Motion = None
           State = None
           Style = None
+          Tooltip = None
           Kind = G.NodeKind.Markdown { Text = G.TextSource.Bound(G.Binding.Format(source, format, locale)) } }
 
     { Id = "format-bindings"
@@ -399,6 +415,7 @@ let private formatBindings: G.Node<unit> =
       Motion = None
       State = None
       Style = None
+      Tooltip = None
       Kind =
         G.NodeKind.Box
             { Heading = None
