@@ -182,6 +182,18 @@ let private scrollOrientation =
 let private buttonVariant =
     Declare.enumOf "ButtonVariant" [ "Primary"; "Secondary"; "Tertiary"; "Destructive" ]
 
+/// Fuaran-UI Phase 1119 — WHICH overlay a `Modal` node is. `Modal` is the
+/// blocking task surface (scrim, focus trap, `aria-modal`); `Popover` is the
+/// transient anchored one (no scrim, no trap, light-dismiss). Omitted at
+/// `Modal` on the wire, so every document written before this release keeps
+/// its bytes and its behaviour.
+///
+/// Deliberately TWO cases. A third ("sheet", "drawer", "menu") names a
+/// PRESENTATION of one of these two, not a third modality: the axis this enum
+/// declares is whether the surface blocks the page, and that question has two
+/// answers.
+let private modalityKind = Declare.enumOf "ModalityKind" [ "Modal"; "Popover" ]
+
 let private fileReadEncoding =
     Declare.enumOf "FileReadEncoding" [ "Text"; "Base64"; "DataUrl" ]
 
@@ -1806,12 +1818,21 @@ let layoutKinds: IdlKind list =
         // exactly as before; `None` omits the key and arms the renderer's `Open`
         // write-back default. The IDL carried it Required until the Phase 692
         // gap-closure (`controls-declarative` omits it).
+        // Fuaran-UI Phase 1119 — `modality` + `anchor` appended at the END of
+        // the field list, which is the additive position: `mkModal`'s existing
+        // parameters are the REQUIRED fields and neither of these is one, so no
+        // constructor position moves. `modality` omits at `Modal`, so every
+        // pre-1119 modal document is byte-unchanged; `anchor` is a NodeId and is
+        // meaningful for `Popover` only (a `Modal` carrying one is a dead
+        // declaration the tier's validator reports, not a decode refusal).
         Fields =
           [ req "children" (TList TNode)
             req "dismissable" TBool
             opt "onDismiss" (TUnion("Action", []))
             req "open" (bindingOf TBool)
-            opt "heading" TS ] }
+            opt "heading" TS
+            omit "modality" (TEnum "ModalityKind") (VEnum "Modal")
+            opt "anchor" TStr ] }
       { Tag = "ScrollArea"
         Category = "Layout"
         Annotations = Annotations.Empty
@@ -2373,6 +2394,7 @@ let uiIdl: Idl =
           trendPolarity
           scrollOrientation
           buttonVariant
+          modalityKind
           fileReadEncoding
           dateVariant
           textFormat
