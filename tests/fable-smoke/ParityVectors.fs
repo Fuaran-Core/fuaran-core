@@ -42,6 +42,22 @@ let private hexOf (bs: byte[]) : string =
 
     sb.ToString()
 
+/// The first eight draws of `ConfRng.next` from a seed, hyphen-joined. EIGHT rather than one
+/// because the first draw is the one a broken generator gets very nearly right: at seed 1488 the
+/// LCG that stood here until 0.20.0 drew `1547650046` on .NET and `1547650048` under Fable — a
+/// two-apart pair a single-draw vector would read as a rounding difference — and then `0` forever
+/// after on the transpiled side.
+let private drawsOf (seed: int) : string =
+    let mutable r = ConfRng.ofSeed seed
+    let out = ResizeArray<string>()
+
+    for _ in 1..8 do
+        let v, r' = ConfRng.next r
+        r <- r'
+        out.Add(string v)
+
+    String.concat "-" out
+
 /// The reference witness: one committed document exercising every `JVal` case, both key orders
 /// (`Json.render` keeps author order, `Canon.render` sorts Ordinal), the escape path — including
 /// the `Hash.foldSep` control byte — and a float in each renderer. ASCII in its content, so its
@@ -153,7 +169,23 @@ let vectors: (string * string) list =
       "defaultHash/genesis", OpStream.defaultHash "" "{\"seq\":0}"
       "chain/hash-0", recordAt 0 _.Hash
       "chain/prev-1", recordAt 1 _.PrevHash
-      "chain/hash-1", recordAt 1 _.Hash ]
+      "chain/hash-1", recordAt 1 _.Hash
+
+      // ---- ConfRng — the conformance kit's seeded draw stream ----
+      // The kit's entire reproducibility claim is that a recorded seed redraws the same sample, and
+      // a domain certifying in a browser runs the transpiled generator. `next` was a 32-bit LCG
+      // until 0.20.0, and a 32-bit multiply is precisely the shape Fable cannot carry (`Hash.mul32`
+      // documents why): the product is formed on a double and its low bits are gone before any mask
+      // can recover them. Under node every draw after the first collapsed to zero, so a
+      // self-contained `(seed, iterations)` family run drew a degenerate sample — a guarded family
+      // reddened on its adequacy demand, an unguarded one passed vacuously green. Nothing in the
+      // .NET suite could see it, and the compile gate beside this file never could.
+      // Seed 0 is here because it is the state xorshift must never reach, and -1 because it is the
+      // seed whose `uint32` conversion differs most between the two runtimes.
+      "confRng/seed-0", drawsOf 0
+      "confRng/seed-1", drawsOf 1
+      "confRng/seed-neg-1", drawsOf -1
+      "confRng/seed-1488", drawsOf 1488 ]
 
 /// Emit the table, one `VEC <label> <value>` line per vector — the byte-comparable form
 /// `parity.ps1` diffs between the two pipelines. The `VEC ` prefix is what lets the runner filter

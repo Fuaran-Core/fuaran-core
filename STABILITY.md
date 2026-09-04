@@ -1753,3 +1753,34 @@ memory. `samples` / `laws` pin the shipped bound and are unchanged in behaviour.
 it. Same namespace, same shape, same name: nothing a consumer can observe. It moved because the
 guard produces `LawResult`s and every family declares its demands through the guard, so the guard
 has to precede them, and it deliberately depends on no family it guards.
+
+## The conformance kit's draw stream: xorshift32, Fable-identical (`0.20.0`) — BREAKING
+
+`ConfRng` — the seeded generator every `Fuaran.Core.Conformance` law family draws from — was a
+32-bit LCG (`state * 1664525u + 1013904223u`, off a multiplied seed mix). It is xorshift32 from
+`0.20.0`: three shift/XOR rounds, no multiply anywhere in the path.
+
+**Why it had to change.** A `uint32` multiply is the one arithmetic shape that does not survive
+Fable — the product is formed on a double and its low bits are lost inside the operation, before any
+mask could recover them (`Hash.mul32` documents the same defect on the FNV multiply, and
+`Hash.(.+.)` on the SHA-256 add). The consequence here was worse than a divergence: at seed 1488 the
+.NET stream `1547650046, 642982293, 2003517255, …` came out under Fable as `1547650048, 0, 0, …` —
+the first draw very nearly right, and every draw after it the generator's fixed point. So a domain
+certifying **in a browser** ran every self-contained `(seed, iterations)` family against a
+degenerate sample: a guarded family reddened on its adequacy demand, and an unguarded one passed
+**vacuously green**. `intBelow` had documented that no-32-bit-multiply constraint since it was
+written and honoured it; `next`, one function above it, did not.
+
+**What a consumer must do.** Every seeded sample changes — a family run at seed `s` draws a
+different sample than it did at `0.19.0`, on both pipelines. Nothing about a law's meaning moved and
+no report shape moved. The thing to re-read is any recorded seed: **a recorded seed means "a
+sample", not "that sample"** — it reproduces a run against the generator of its release, which is
+exactly what makes a counterexample replayable and exactly what makes it not a stored vector. A
+consumer that pinned a drawn VALUE (rather than a seed) was pinning the generator, and must repin.
+
+**It is guarded by measurement, not by review.** The `confRng/*` vectors in
+`tests/fable-smoke/ParityVectors.fs` print the first eight draws for four seeds on both pipelines
+and byte-compare them, so the multiply cannot come back quietly. Eight draws rather than one
+deliberately: a single-draw vector would have read `1547650048` against `1547650046` as a rounding
+difference rather than as the collapse it precedes. Measured by reverting the step: the whole .NET
+suite stays green — it always could — while the parity leg reddens on all four vectors.

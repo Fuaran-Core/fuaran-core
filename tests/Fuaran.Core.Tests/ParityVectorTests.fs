@@ -59,7 +59,14 @@ let private expected: (string * string) list =
       "defaultHash/genesis", "31654cc6"
       "chain/hash-0", "8f05218a"
       "chain/prev-1", "8f05218a"
-      "chain/hash-1", "90e9e1a4" ]
+      "chain/hash-1", "90e9e1a4"
+      // `ConfRng` is xorshift32 from 0.20.0 — these are NOT the values the LCG before it drew, and
+      // the difference is the release. What the vectors pin is that the two pipelines agree; that
+      // they agree on THIS stream is what makes a recorded seed reproducible at all.
+      "confRng/seed-0", "12702810-1931064975-2093279515-1561498856-2122184415-1415771932-1521297884-222582007"
+      "confRng/seed-1", "166402301-879050087-1794327795-1338740069-1921087622-1872842638-205863014-1114920338"
+      "confRng/seed-neg-1", "2015858743-1309524423-815153517-1875012400-1982543394-218150117-1746742363-2136549504"
+      "confRng/seed-1488", "1779094209-974108648-1386259377-469941146-625613426-646666080-1082870579-340445045" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -71,7 +78,8 @@ let private families =
       "canonicalFloat/"
       "jsonRender/"
       "witness/"
-      "chain/" ]
+      "chain/"
+      "confRng/" ]
 
 [<Tests>]
 let tests =
