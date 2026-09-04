@@ -51,6 +51,19 @@ namespace Fuaran.Core
 //  satisfied by the `lag` alone and would have gone on passing had the
 //  relaxation been reverted.
 //
+//  Then a consumer swept the family over independent seeds and found that
+//  demand MARGINAL: the two classes admitted last were each carried by two
+//  pipelines out of twenty and reached by about one sample in twenty, so a
+//  hundred-iteration run missed one of them often enough for the guard's
+//  verdict to be a coin flip rather than a finding. The corpus grew a seventh
+//  time, and this time for a reason internal to the guard rather than to the
+//  seam: `20`–`26` are compositions of the classes the corpus already held —
+//  a relation verdict feeding a running total, a merged order, a bounded frame;
+//  a window feeding a maintained group; a filter feeding a relation verdict —
+//  chosen so one draw answers two demands at once. The measured rates and the
+//  before/after guard firings are recorded on `pipelineOf` below, because a
+//  claim about a generator's reach is only worth what its measurement is.
+//
 //  Every sample also records its FOOTPRINT — what the prime evaluated and what
 //  the refresh evaluated — so the family certifies not only that the answer is
 //  right but that the seam did less work to reach it. An incremental evaluator
@@ -130,8 +143,8 @@ module IncrementalDelta =
         { Schema = [ "k", IntType ]
           Columns = [ Column.create "k" IntType [ Int 0; Int 2 ] ] }
 
-    /// The pipelines. `0`–`5`, `9`–`17` and `19` are incrementalisable; `6`–`8` and `18` are the
-    /// declined ones, present because a fall-back that returns the wrong answer is the worse
+    /// The pipelines. `0`–`5`, `9`–`17` and `19`–`26` are incrementalisable; `6`–`8` and `18` are
+    /// the declined ones, present because a fall-back that returns the wrong answer is the worse
     /// failure. `11`–`13` are the sort-bearing shapes (Phase 115): a sort last, a sort before the
     /// steps that read the order it produced, and a sort feeding an order-sensitive maintained
     /// group. `14`–`18` are Phase 120: a bounded-frame window, a partition-global one, a filtering
@@ -144,6 +157,33 @@ module IncrementalDelta =
     /// the filter stops re-evaluating every row while the ranked column is recomputed as the
     /// reference computes it. `15` was this family's window DECLINE until the row-set-preserving
     /// relaxation; keeping it and adding `19` is what makes the widening measurable here.
+    ///
+    /// `20`–`26` widen the two NARROWEST demands. Measured over 400 seeds × 100 iterations at both
+    /// the shipped row bound and a wider one, the partition-global-window class was reached by 5.4%
+    /// of samples and the relation-filtered class by 5.2% — each carried by exactly two pipelines
+    /// out of twenty, against four or more for every other class — and the adequacy guard reported
+    /// one of them missing on 8 of those 800 runs. That is a guard on a coin flip, and a coin flip
+    /// is what gets a guard re-seeded rather than believed, which is the one remedy
+    /// `SampleAdequacy` exists to forbid. So the generator is what moved: the same sweep now
+    /// reaches those classes on 13.5% and 13.7% of samples and the guard fires on 0 of 800.
+    ///
+    /// The seven are not filler for a count. `classify` names EVERY class a sample reached, so a
+    /// pipeline that both filters by a relation and frames a partition-global window is one draw
+    /// answering two demands — which is how the thin classes rise without the thick ones being
+    /// crowded out of the draw as hard as seven unrelated pipelines would crowd them. Each is also
+    /// a composition the corpus did not hold: a relation verdict feeding a running total (`20` its
+    /// `semi` side, `25` its `anti` side, where an emptied partition is the common case), a merged
+    /// order feeding a ranked column, whose OUTPUT order is the sort's even though its values are
+    /// not (`21`), a relation verdict feeding a bounded frame, so the join decides who a row's
+    /// neighbour IS (`22`), a partition-global window feeding an order-sensitive maintained group
+    /// that reads the window's own appended column (`23`), a relation verdict feeding a merged
+    /// order (`24`), and a row-local filter BEFORE a relation verdict rather than after one (`26`).
+    ///
+    /// Spreading the draw over 27 pipelines instead of 20 necessarily costs the classes that did
+    /// not grow: `declined` falls from 20.3% of samples to 14.9% and `group-restricted` from 10.6%
+    /// to 9.9%. Both stay well clear of the margin — neither was missed once in the same 800 runs —
+    /// and that trade is the point rather than a side-effect: an adequacy demand is answered by
+    /// whether a class can be MISSED, not by how comfortably the comfortable classes lead.
     let private pipelineOf (k: int) : Transform list =
         match k with
         | 0 -> [ Filter(Binary(Gt, Col "a", Lit(Int 0))) ]
@@ -227,12 +267,94 @@ module IncrementalDelta =
                     Fn = Rank
                     Of = "a"
                     As = "rk" } ]
+        | 20 ->
+            // A relation verdict feeding a PARTITION-GLOBAL window: the join decides which rows are
+            // in the partition at all, and the running total then reads every one of them. An edit
+            // the join's verdict flips therefore moves an output the edited row does not appear in.
+            [ Join(Embedded lookup, [ "b", "k" ], Semi)
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" } ]
+        | 21 ->
+            // A merged order feeding a partition-global window. The window carries its own
+            // `OrderBy`, so the ranked VALUES do not read the sort — but a window emits its rows in
+            // the order it was handed them, so the output ORDER does. A merge that got the sort
+            // right and then rebuilt the frame from a cached arrival order would answer with the
+            // right numbers against the wrong rows.
+            [ Sort [ "b", Asc; "a", Desc ]
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Rank
+                    Of = "a"
+                    As = "rk" } ]
+        | 22 ->
+            // A relation verdict feeding a BOUNDED frame — the pairing `14` and `16` each hold one
+            // half of. What the anti join decides here is not merely whether a row survives but who
+            // the surviving row's NEIGHBOUR is, so one flipped verdict moves the lagged output of a
+            // row whose own columns did not change.
+            [ Join(Embedded lookup, [ "b", "k" ], Anti)
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" } ]
+        | 23 ->
+            // A partition-global window feeding an order-sensitive maintained group, aggregating
+            // the window's OWN appended column: the group reads a value no source row carries, and
+            // `First` / `Last` read the position the window emitted its rows in. A maintained group
+            // that cached its members' contributions would answer from a `rk` computed over the
+            // partition as it stood before the delta.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Rank
+                    Of = "a"
+                    As = "rk" }
+              GroupBy([ "b" ], [ agg "mx" Max "rk"; agg "f" First "id"; agg "n" Count "a" ]) ]
+        | 24 ->
+            // A relation verdict feeding a MERGED ORDER — the third of the three restricted classes
+            // a filtering join can hand its output to, and the one that pairs the two demands this
+            // widening had to move furthest apart. The merge has to place the surviving rows among
+            // the cached order's ties without ever seeing the rows the join removed.
+            [ Join(Embedded lookup, [ "b", "k" ], Semi); Sort [ "b", Asc ] ]
+        | 25 ->
+            // The ANTI verdict feeding a partition-global window. `20` is its `semi` mirror, and the
+            // pair is not redundant: a semi join keeps roughly two thirds of a generated table and an
+            // anti join the remaining third, so the partition a running total walks is a different
+            // size and a different shape under each, and an empty partition — which only the anti
+            // side reaches often — is where a frame recompute is most easily wrong.
+            [ Join(Embedded lookup, [ "b", "k" ], Anti)
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" } ]
+        | 26 ->
+            // A row-local filter BEFORE a relation verdict, then a ranked column: the only shape in
+            // the corpus where a restricted row-filter feeds a filtering join rather than following
+            // one. The two verdicts compose in that order and not the other — the join sees only the
+            // rows the filter left, so a refresh that re-evaluated the join over the cached
+            // pre-filter frame would keep rows the filter had already dropped.
+            [ Filter(Binary(Gt, Col "a", Lit(Int -5)))
+              Join(Embedded lookup, [ "b", "k" ], Semi)
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Rank
+                    Of = "a"
+                    As = "rk" } ]
         | _ ->
             // Phase 120 — declined by KIND: a combining join fans a left row out across its matches
             // and appends the right schema, so one source row is no longer one output row.
             [ Join(Embedded lookup, [ "b", "k" ], Inner) ]
 
-    let private pipelineCount = 20
+    let private pipelineCount = 27
 
     /// Apply one edit to the base rows, returning the new table and a tag naming the edit.
     let private editOf (k: int) (rows: (string * Cell * Cell) list) (n: int) : Table * string =
