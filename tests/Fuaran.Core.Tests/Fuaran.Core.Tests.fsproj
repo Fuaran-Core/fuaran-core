@@ -118,6 +118,12 @@
          comparison certifies a coincidence. Reads nothing here, so it simply follows. -->
     <Compile Include="..\fable-smoke\ParityVectors.fs" Link="ParityVectors.fs" />
     <Compile Include="ParityVectorTests.fs" />
+    <!-- The host-neutral export of the transform-parity family's reference answers, and the
+         checks that keep it an oracle: the law over the declared sample, a decode-and-recompute
+         pass over every rendered vector, and the comparison against the shared corpus when it is
+         checked out alongside. Reads nothing here, so it simply follows. -->
+    <Compile Include="LawVectorExport.fs" />
+    <Compile Include="LawVectorTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

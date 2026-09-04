@@ -18,6 +18,16 @@ let main argv =
     // third argument is the corpus manifest, read solely for the §11.0 host
     // roster once it carries one — until then the declared roster is used and the
     // report says so.
+    // Write the transform-parity family's reference vectors into the shared
+    // conformance corpus, for the hosts that ship their own dataframe evaluator:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <corpus dir>
+    // Deliberately a flag rather than a test side-effect. The corpus is a separate
+    // repository, and a suite that wrote into it on every run would dirty a shared
+    // clone; the suite COMPARES against it and names this command.
+    | "--emit-laws" :: dir :: _ ->
+        LawVectorExport.write dir
+        printfn "Wrote %s" (LawVectorExport.transformPath dir)
+        0
     | "--idl-diff" :: oldPath :: newPath :: rest ->
         let read (p: string) = System.IO.File.ReadAllText p
 
