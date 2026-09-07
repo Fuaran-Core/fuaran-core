@@ -777,6 +777,67 @@ required field, so every record-literal construction adds `Harden = HardenPolicy
 `TransparentUnion.tag` takes a policy. `Trust.scaffoldFSharp`'s signature is unchanged — it
 already had the `Idl`, and now reads the tokens from it.
 
+### Declared defaults: what the generator renders, and what it refuses (Phase 124, `0.21.0`)
+
+An `OmitDefault d` says the encoder emits a field only when it differs from `d` and the decoder
+restores `d` on absence. Rendering `d` as source in each target language is what makes that true
+of the GENERATED layer, and until this release the generator could render only a scalar, an enum
+case, the empty list and a **nullary** union case. The newly expressible class is the
+**value-carrying union case** — `Slot.Fixed(0.0)`, `Binding.Static(Some 0)` — with its payload
+nested to any depth through further unions, records and scalars.
+
+**What decides the admissible set is a constraint that is easy to miss.** The emitted string is
+used in an EXPRESSION position (the decoder's `dDef` restore, a smart constructor's filled field)
+*and* in a PATTERN position: the encoder's omit test for a union field is
+`match s.X with | <lit> -> None | _ -> …`, never `=`, because Phase 691 established that a union
+whose fields reach a closure supports no equality at all. Constants, a union-case application over
+constants, `Some`/`None`, a record literal and `[]` are legal in both. A **non-empty** list is
+therefore still refused even though it renders: the encoder's omit test for a list field is
+`List.isEmpty`, which has no non-empty analogue, and equality may not compile at the element type.
+A non-finite float is refused for the same class of reason — `nan` and `infinity` are F#
+identifiers, not literals, so they have no pattern spelling. (The §5 wire sentinel Phase 1063 added
+is a WIRE spelling and is unaffected; this is a host-source position.)
+
+**`defaultExpr` and the omit-test literal are now ONE renderer.** They were two match expressions
+over overlapping-but-different sets, so a smart constructor could fill a `TStr` default the encoder
+could not test for. One contract, one renderer: the constructor, the encoder's omit test and the
+decoder's restore cannot come apart.
+
+**The half that is not additive: a declaration the generator cannot render REFUSES.** Before this
+release the literal emitters answered `None`, and four of the six paths that consult them fell back
+to **always-emit** (encoder) or **`dReq`** (decoder) — consistent with each other and with nothing
+else, least of all the IDL that declared the slot omitted at its default. The artefact contradicted
+its own declaration, and did so with a green build. Every such path is now a typed
+`CodegenError.UnsupportedDefault` reported at generation time:
+
+- a **kind-spec** field (already refused, via the smart-constructor leg);
+- a **projected** kind's field — the projection suppresses the generated constructor, and that
+  skip took the only default check with it while the encoder still emitted the field;
+- a **union-case** field and a **record** field, neither of which passes through that leg;
+- the **node envelope**, whose refusal was an untyped `failwithf` inside a function that already
+  returned `Result`;
+- and the **whole TypeScript backend**, which had no error case anywhere.
+
+`Gen.fsharpValue`'s scaffold leg publishes a plain-string channel and so cannot carry the case, but
+it renders that same case through `CodegenError.describe` rather than wording a refusal of its own.
+
+**BREAKING, at compile time only: `Gen.typescriptModule` returns `Result<string, CodegenError>`.**
+That is the refusal channel; a backend that emits source for a declaration it cannot honour is worse
+than one that refuses. The fix at a call site is one `match`. Nothing else on either package's
+surface moved.
+
+**Every pre-existing emission is byte-identical**, which is what makes the widening safe to adopt:
+no vocabulary in the certification set declared a value-carrying default before this phase, the
+nullary-union, enum, boolean and empty-list renderings are character-for-character what they were,
+and the TypeScript literal is now produced by the value emitter that already spelled a tagged object
+exactly the same way. The reference vocabulary, both vendored foreign vocabularies and the committed
+generated module pin it.
+
+**One narrowing worth naming.** `VUnion(tag, [])` used to match ANY union, so a default authored
+without its payload emitted the bare tag — which, for a case that takes arguments, is a FUNCTION
+where a value belongs. The declared field list decides the arity now, and a payload-carrying case
+spelled nullary is refused. A vocabulary relying on the old spelling was relying on a defect.
+
 ### Declared annotations on cases and fields (Phase 113, `0.18.0`)
 
 `IdlUnionCase` and `IdlField` each carry an `Annotations` record — a **bounded** set of three

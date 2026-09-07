@@ -208,7 +208,25 @@
          within the same working day — 0.16.0 was packed to the local feed only, never tagged or
          published, and widening the same record twice across two unreleased versions is cheaper
          for every consumer than adopting it twice. -->
-    <Version>0.20.0</Version>
+    <!-- 0.21.0 (2026-09-07): Phase 124 — `Fuaran.Core.Idl.Codegen` renders a VALUE-CARRYING
+         union default (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`), nested payloads included,
+         in both target languages; `defaultExpr` becomes the same renderer, so the smart
+         constructor, the encoder's omit test and the decoder's restore cannot come apart. And
+         the half that is not additive: an unrenderable default now REFUSES generation with
+         `CodegenError.UnsupportedDefault` on every path — projected kinds, union-case fields,
+         record fields, the node envelope and the whole TypeScript backend — where four of those
+         previously answered `None` and fell back to always-emit (encoder) or `dReq` (decoder),
+         so the artefact contradicted its own IDL with a green build.
+         BREAKING at compile time for a caller of `Gen.typescriptModule`: it returns
+         `Result<string, CodegenError>` where it returned `string`, which is the refusal channel
+         that backend had never had. One added `match`, no behaviour change for a vocabulary that
+         declares nothing unrenderable. MINOR rather than major under the pre-1.0 policy at the
+         head of STABILITY.md, and a fresh version rather than a repack because v0.20.0 is tagged.
+         Every pre-existing emission is byte-identical (the reference, both vendored spike
+         vocabularies and the committed generated module pin it), so no consumer's generated copy
+         moves. See DECISIONS.md D26 and STABILITY.md "Declared defaults: what the generator
+         renders, and what it refuses". -->
+    <Version>0.21.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

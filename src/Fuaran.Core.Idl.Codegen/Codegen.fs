@@ -30,14 +30,36 @@ open Fuaran.Core
 /// `Gen.fsharpModule`, so an unsupported construct is a typed `Error` rather than a `failwith`
 /// in the generator or a `failwith` emitted into the generated code.
 type CodegenError =
-    /// A field default whose (IDL type, value) pair has no emission — only scalars (`TStr`/`TInt`/
-    /// `TBool`) and enums (`TEnum`) carry a default expression today; unions / nodes are a later
-    /// leg. Names the offending type + value.
+    /// A field default whose (IDL type, value) pair has no emission. Scalars, enums, the empty
+    /// list, a nullary union case and — since Phase 124 — a VALUE-CARRYING union case, a record
+    /// and their nestings all carry one; a node, a map, arbitrary JSON, a sentinel slot and a
+    /// non-empty list do not. Names the offending type + value.
+    ///
+    /// **The whole point of this case is that it arrives at GENERATION time.** Before Phase 124 an
+    /// unrenderable default was answered `None` by the literal emitters on four of the six paths
+    /// that consult them, and each of those fell back to always-emit (encoder) or `dReq`
+    /// (decoder) — so the artefact silently contradicted its own IDL, and it did so with a green
+    /// build. There is now no such path: every emitter that needs a default literal propagates
+    /// this case up to `Gen.fsharpModuleWith` / `Gen.typescriptModule`, which refuse the module.
     | UnsupportedDefault of ty: IdlType * value: IdlValue
     /// A kind mixing a `Node list` field with other node-bearing fields — `witnessReplaceChildren`
     /// has no unambiguous positional split for it (several single-`Node` fields ARE generated,
     /// re-assigned positionally; no mixed kind exists in the current vocabulary). Names the kind tag.
     | MultiChildFieldKind of kindTag: string
+
+/// Rendering for [[CodegenError]] — the one place a codegen refusal becomes prose.
+[<RequireQualifiedAccess>]
+module CodegenError =
+
+    /// A one-line human rendering of a codegen refusal. It exists so that a leg whose published
+    /// channel is a plain `string` (`Gen.fsharpValue`, the scaffold mode) reports the SAME typed
+    /// case as the module emitters rather than an ad-hoc sentence of its own — before Phase 124 an
+    /// unrenderable default was two unrelated refusals depending on which leg met it.
+    let describe (e: CodegenError) : string =
+        match e with
+        | UnsupportedDefault(ty, value) -> sprintf "no default literal for an IDL value of type %A: %A" ty value
+        | MultiChildFieldKind kindTag ->
+            sprintf "kind '%s' mixes a 'Node list' field with other node-bearing fields" kindTag
 
 /// The type-generation leg: emit illustrative F# type source from the IDL — the
 /// "generate Types.fs" half of the inversion. Spike-grade (a source string, not a
@@ -55,6 +77,27 @@ module Gen =
             | Ok _, Error e -> Error e
             | Ok xs, Ok x -> Ok(x :: xs))
         |> Result.map List.rev
+
+    /// [[sequenceR]] followed by `String.concat` — the shape almost every emitter below needs,
+    /// since a generated declaration is a list of per-field / per-case fragments joined by a
+    /// separator and any one of them may now refuse.
+    let private concatR (sep: string) (results: Result<string, CodegenError> list) : Result<string, CodegenError> =
+        sequenceR results |> Result.map (String.concat sep)
+
+    /// Substitute a generic union's type parameters into a case field's type (`'T` → the type
+    /// argument), so a slot's declared type is known at the INSTANTIATION the IDL names it at.
+    /// Kept private to the generator: it is a codegen detail, and putting it on the `Idl` surface
+    /// would publish one.
+    let rec private substType (subst: Map<string, IdlType>) (t: IdlType) : IdlType =
+        match t with
+        | TVar v ->
+            match Map.tryFind v subst with
+            | Some r -> r
+            | None -> t
+        | TList inner -> TList(substType subst inner)
+        | TMap inner -> TMap(substType subst inner)
+        | TUnion(n, args) -> TUnion(n, List.map (substType subst) args)
+        | other -> other
 
     let private pascal (s: string) =
         if s.Length = 0 then
@@ -702,28 +745,6 @@ let private encFloat (f: float) : JVal =
         |> Option.bind _.CaseOf(wire)
         |> Option.defaultValue wire
 
-    /// The F# literal for an omit-when-default field's identity default — enums
-    /// (`ToneVariant.Default`), nullary unions (`CellFormat.None`), booleans, and
-    /// the EMPTY LIST (Phase 1080). `None` ⇒ the emitter can't render it, and the
-    /// encoder falls back to always-emit.
-    ///
-    /// The empty-list case is the one default whose *absence* is expressible on the
-    /// wire without ambiguity in the other direction: an absent list slot and an
-    /// empty one denote the same document, so a repeated slot that is empty by
-    /// default costs a key on every node that does not use it. `[]` is a legal F#
-    /// literal at any list type and list equality is structural, so both halves —
-    /// the encoder's `= []` omit test and the decoder's restore — fall out of the
-    /// same one-line literal the enum case does.
-    let private fsDefaultLit (enums: IdlEnum list) (t: IdlType) (v: IdlValue) : string option =
-        match t, v with
-        | TEnum n, VEnum c -> Some(n + "." + fsEnumCase enums n c)
-        | TUnion(n, _), VUnion(tag, []) -> Some(n + "." + tag)
-        | TBool, VBool b -> Some(if b then "true" else "false")
-        | TList _, VList [] -> Some "[]"
-        | _ -> None
-
-    /// One field of a record-spec encoder, as a `(string * JVal) option` for `List.choose id`
-    /// (Required → always `Some`; Optional → omit-on-`None`; OmitDefault → omit-at-default).
     /// The F# expression a HostOnly field takes on decode — its `TFn` placeholder.
     /// A host-only field must be a `TFn`, because that is what carries both the
     /// declared host type and the value to restore; anything else is an IDL defect
@@ -733,45 +754,166 @@ let private encFloat (f: float) : JVal =
         | TFn sg -> sg.Placeholder
         | _ -> failwithf "field '%s' is HostOnly but not a TFn — it declares no host type or placeholder" f.Name
 
-    /// `recv` is the bound record variable — `s` for a spec/record encoder, `n` for
-    /// the node envelope (Phase 690), which reuses this presence machinery unchanged.
-    let private specPieceOf (enums: IdlEnum list) (recv: string) (f: IdlField) : string =
-        let src = recv + "." + pascal f.Name
+    /// An escaped F# string literal for a DECLARED default. Deliberately narrower than the
+    /// scaffold mode's `fsStringLit`: this spelling is the one the generator has always emitted
+    /// for a `TStr` default, and widening it would move the bytes of every module that has one.
+    let private fsDefaultStr (s: string) : string =
+        "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""
 
-        match f.Opt with
-        | Required -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
-        | Optional -> sprintf "(%s |> Option.map (fun v -> \"%s\", %s))" src f.Name (encApplied "v" f.Type)
-        // Phase 691 — never on the wire, in any state.
-        | HostOnly -> "None"
-        | OmitDefault d ->
-            match fsDefaultLit enums f.Type d with
+    /// An F# FLOAT literal for a declared default. `ToString("R")` alone will not do: a
+    /// whole-valued double renders as `0`, which F# reads as an INT literal and which then fails
+    /// to type-check at a float slot — in a pattern position silently for the reader, loudly for
+    /// the compiler. The `.0` suffix is added when the rendering carries no decimal point or
+    /// exponent. Non-finite values are refused by the caller rather than spelled here: `nan` and
+    /// `infinity` are F# identifiers, not literals, so they are illegal in the pattern position
+    /// the encoder's omit test needs.
+    let private fsFloatLit (f: float) : string =
+        let s = f.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+
+        if s.Contains "." || s.Contains "E" || s.Contains "e" then
+            s
+        else
+            s + ".0"
+
+    /// The F# source form of a declared default VALUE — enums (`ToneVariant.Default`), scalars,
+    /// the EMPTY LIST (Phase 1080), a nullary union case (`CellFormat.None`) and, since Phase 124,
+    /// a VALUE-CARRYING union case (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`) and a record,
+    /// nested to any depth.
+    ///
+    /// **The admissible set is decided by a constraint that is easy to miss: the string is used in
+    /// both an EXPRESSION and a PATTERN position.** The generated encoder tests a union default by
+    /// `match s.X with | <lit> -> None | _ -> …` (Phase 691 — an element type that reaches a
+    /// closure carries no equality, so the union arm cannot use `=`), while the decoder's `dDef`
+    /// restore and the smart constructors use the very same string as an expression. Constants,
+    /// a union-case application over constants, `Some`/`None`, a record literal and `[]` are all
+    /// legal in both. That is why a non-empty list stays refused even though `[ a; b ]` renders
+    /// perfectly well: it is legal in both positions, but the encoder's omit test for a LIST field
+    /// is `List.isEmpty` (which has no non-empty analogue) precisely because equality may not
+    /// compile at the element type.
+    ///
+    /// `Error` ⇒ the generator cannot render it, and the module REFUSES rather than emitting an
+    /// artefact that contradicts its own declaration — see [[CodegenError.UnsupportedDefault]].
+    let rec private fsDefaultLit (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+        let refuse () =
+            Error(CodegenError.UnsupportedDefault(t, v))
+
+        match t, v with
+        | TStr, VStr s -> Ok(fsDefaultStr s)
+        | TInt, VInt i -> Ok(string i)
+        | TBool, VBool b -> Ok(if b then "true" else "false")
+        // A non-finite double has no F# LITERAL (`nan` / `infinity` are identifiers), so it has
+        // no pattern spelling either and is refused rather than mis-emitted — the §5 sentinel
+        // Phase 1063 added is a WIRE spelling, and this is a host-source position.
+        | TFloat, VFloat f when System.Double.IsFinite f -> Ok(fsFloatLit f)
+        // A whole-valued float authored as an integer — the canonical artifact writes one that
+        // way, so the emitter must read it back at a float slot (the same asymmetry `dFloat`
+        // carries on the decode side).
+        | TFloat, VInt i -> Ok(fsFloatLit (float i))
+        | TEnum n, VEnum c -> Ok(n + "." + fsEnumCase idl.Enums n c)
+        | TList _, VList [] -> Ok "[]"
+        | TRecord n, VRecord authored ->
+            match idl.Records |> List.tryFind (fun r -> r.Name = n) with
+            | None -> refuse ()
+            | Some r ->
+                r.Fields
+                |> List.map (fun rf ->
+                    fsDefaultField idl Map.empty rf authored
+                    |> Result.map (fun e -> pascal rf.Name + " = " + e))
+                |> concatR "; "
+                |> Result.map (fun body -> "{ " + body + " }")
+        | TUnion(n, args), VUnion(tag, authored) ->
+            match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+            | None -> refuse ()
+            | Some u when List.length u.Params <> List.length args -> refuse ()
+            | Some u ->
+                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                | None -> refuse ()
+                | Some c ->
+                    let subst = Map.ofList (List.zip u.Params args)
+
+                    // The DECLARED fields decide the arity, never the authored ones: `Slot.Fixed`
+                    // is a one-argument constructor whatever an `IdlValue` happens to carry, and
+                    // emitting the bare tag for a case that takes arguments would emit a FUNCTION
+                    // where a value belongs. That was reachable before Phase 124 — `VUnion(tag,
+                    // [])` matched on any union — and is exactly the artefact-vs-declaration
+                    // divergence this phase closes, so it refuses now.
+                    c.Fields
+                    |> List.map (fun cf -> fsDefaultField idl subst cf authored)
+                    |> sequenceR
+                    |> Result.map (fun parts ->
+                        match parts with
+                        | [] -> n + "." + tag
+                        | ps -> sprintf "%s.%s(%s)" n tag (String.concat ", " ps))
+        | _ -> refuse ()
+
+    /// One declared field of a union case or a record, rendered from the authored value set —
+    /// honouring the same presence rules the encoder writes it under. A HostOnly slot is refused
+    /// rather than filled with its placeholder: the placeholder is an arbitrary host EXPRESSION
+    /// (`ignore`), which is not legal in the pattern position the encoder's omit test needs.
+    and private fsDefaultField
+        (idl: Idl)
+        (subst: Map<string, IdlType>)
+        (f: IdlField)
+        (authored: (string * IdlValue) list)
+        : Result<string, CodegenError> =
+        let ft = substType subst f.Type
+
+        match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
+        | Some(_, av) when av <> VAbsent ->
+            match f.Opt with
+            | Optional -> fsDefaultLit idl ft av |> Result.map (fun e -> "Some(" + e + ")")
+            | HostOnly -> Error(CodegenError.UnsupportedDefault(ft, av))
+            | Required
+            | OmitDefault _ -> fsDefaultLit idl ft av
+        | _ ->
+            match f.Opt with
+            | Optional -> Ok "None"
+            | OmitDefault d -> fsDefaultLit idl ft d
+            | HostOnly
+            | Required -> Error(CodegenError.UnsupportedDefault(ft, VAbsent))
+
+    /// The omit-at-default `(string * JVal) option` piece, shared by the spec/record encoder and
+    /// the union-case encoder — they differ only in how the value is BOUND (`s.Field` vs a
+    /// positional binding), never in how the default is tested, and keeping one copy is what
+    /// stops the two halves from drifting apart under a widening like Phase 124's.
+    let private omitPiece (idl: Idl) (src: string) (f: IdlField) (d: IdlValue) : Result<string, CodegenError> =
+        fsDefaultLit idl f.Type d
+        |> Result.map (fun dexpr ->
+            match f.Type with
             // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
             // closure slot gives its owning union a function-typed field, and F#
             // functions support no equality, so the union stops supporting the
             // `equality` constraint entirely — `CellFormat.Custom of (obj -> string)`
             // broke `s.Format = CellFormat.None` for every column. A match is also
             // simply the better test: it needs no constraint, and reads as what it is.
-            | Some dexpr when
-                (match f.Type with
-                 | TUnion _ -> true
-                 | _ -> false)
-                ->
+            // Phase 124 — this is also why a value-carrying default works at all: the
+            // rendered literal is a legal PATTERN as well as a legal expression.
+            | TUnion _ ->
                 sprintf "(match %s with | %s -> None | _ -> Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
             // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
             // `= []`, and for the same reason the union arm above exists: an element
             // type that reaches a closure carries no equality, so `SrcSetEntry`
             // (whose `src` is a `Binding`) fails the constraint the moment the
             // generated encoder is compiled. `List.isEmpty` imposes none, and it is
-            // the better test anyway — it says what it means.
-            | Some _ when
-                (match f.Type with
-                 | TList _ -> true
-                 | _ -> false)
-                ->
+            // the better test anyway — it says what it means. (`fsDefaultLit` admits
+            // only the EMPTY list, so there is no non-empty case to answer for.)
+            | TList _ ->
                 sprintf "(if List.isEmpty %s then None else Some(\"%s\", %s))" src f.Name (encApplied src f.Type)
-            | Some dexpr ->
-                sprintf "(if %s = %s then None else Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
-            | None -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
+            | _ -> sprintf "(if %s = %s then None else Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type))
+
+    /// One field of a record-spec encoder, as a `(string * JVal) option` for `List.choose id`
+    /// (Required → always `Some`; Optional → omit-on-`None`; OmitDefault → omit-at-default).
+    /// `recv` is the bound record variable — `s` for a spec/record encoder, `n` for
+    /// the node envelope (Phase 690), which reuses this presence machinery unchanged.
+    let private specPieceOf (idl: Idl) (recv: string) (f: IdlField) : Result<string, CodegenError> =
+        let src = recv + "." + pascal f.Name
+
+        match f.Opt with
+        | Required -> Ok(sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type))
+        | Optional -> Ok(sprintf "(%s |> Option.map (fun v -> \"%s\", %s))" src f.Name (encApplied "v" f.Type))
+        // Phase 691 — never on the wire, in any state.
+        | HostOnly -> Ok "None"
+        | OmitDefault d -> omitPiece idl src f d
 
     /// One `"key", <enc>` pair of a *required* union-case field (positional binding; the wire
     /// key is the raw field name, the value reference is keyword-escaped).
@@ -782,43 +924,15 @@ let private encFloat (f: float) : JVal =
     /// omit-on-`None` for an optional one (`CellFormat.Number`'s `decimals`, `Format.Percent`,
     /// `FormFieldKind.RangedNumber`'s `min`/`max`/`step`, `HoleDecl.Value`'s `default`). Mirrors
     /// [[specPieceOf]] for the `List.choose id` shape, but binds the *positional* case field.
-    let private casePiece (enums: IdlEnum list) (f: IdlField) : string =
+    let private casePiece (idl: Idl) (f: IdlField) : Result<string, CodegenError> =
         let src = ident f.Name
 
         match f.Opt with
-        | Required -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
-        | Optional -> sprintf "(%s |> Option.map (fun v -> \"%s\", %s))" src f.Name (encApplied "v" f.Type)
+        | Required -> Ok(sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type))
+        | Optional -> Ok(sprintf "(%s |> Option.map (fun v -> \"%s\", %s))" src f.Name (encApplied "v" f.Type))
         // Phase 691 — never on the wire, in any state.
-        | HostOnly -> "None"
-        | OmitDefault d ->
-            match fsDefaultLit enums f.Type d with
-            // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
-            // closure slot gives its owning union a function-typed field, and F#
-            // functions support no equality, so the union stops supporting the
-            // `equality` constraint entirely — `CellFormat.Custom of (obj -> string)`
-            // broke `s.Format = CellFormat.None` for every column. A match is also
-            // simply the better test: it needs no constraint, and reads as what it is.
-            | Some dexpr when
-                (match f.Type with
-                 | TUnion _ -> true
-                 | _ -> false)
-                ->
-                sprintf "(match %s with | %s -> None | _ -> Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
-            // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
-            // `= []`, and for the same reason the union arm above exists: an element
-            // type that reaches a closure carries no equality, so `SrcSetEntry`
-            // (whose `src` is a `Binding`) fails the constraint the moment the
-            // generated encoder is compiled. `List.isEmpty` imposes none, and it is
-            // the better test anyway — it says what it means.
-            | Some _ when
-                (match f.Type with
-                 | TList _ -> true
-                 | _ -> false)
-                ->
-                sprintf "(if List.isEmpty %s then None else Some(\"%s\", %s))" src f.Name (encApplied src f.Type)
-            | Some dexpr ->
-                sprintf "(if %s = %s then None else Some(\"%s\", %s))" src dexpr f.Name (encApplied src f.Type)
-            | None -> sprintf "Some(\"%s\", %s)" f.Name (encApplied src f.Type)
+        | HostOnly -> Ok "None"
+        | OmitDefault d -> omitPiece idl src f d
 
     let private enumEncoder (e: IdlEnum) =
         // The case name is the F# identifier, the wire string is what goes on the
@@ -840,9 +954,9 @@ let private encFloat (f: float) : JVal =
         (docFn: string -> string -> string)
         (tokens: HardenPolicy)
         (msg: Set<string>)
-        (enums: IdlEnum list)
+        (idl: Idl)
         (u: IdlUnion)
-        : string =
+        : Result<string, CodegenError> =
         let encArgs =
             u.Params
             |> List.map (fun p -> sprintf " (enc%s: '%s -> JVal)" p p)
@@ -862,67 +976,90 @@ let private encFloat (f: float) : JVal =
             match TransparentUnion.tag tokens u with
             | Some ttag when ttag = c.Tag ->
                 match c.Fields with
-                | [ f ] -> sprintf "    | %s.%s%s -> %s" u.Name c.Tag pat (encApplied (ident f.Name) f.Type)
+                | [ f ] -> Ok(sprintf "    | %s.%s%s -> %s" u.Name c.Tag pat (encApplied (ident f.Name) f.Type))
                 | _ -> failwithf "transparent union case '%s' must have exactly one field" c.Tag
             | _ ->
                 // All-required cases keep the simple literal list (byte-identical to the pre-optional
                 // emission); any optional field switches to the `List.choose id` omit-on-absence form.
                 if c.Fields |> List.forall (fun f -> f.Opt = Required) then
                     let pairs = c.Fields |> List.map casePair |> String.concat "; "
-                    sprintf "    | %s.%s%s -> %s \"%s\" [ %s ]" u.Name c.Tag pat typedName c.Tag pairs
+                    Ok(sprintf "    | %s.%s%s -> %s \"%s\" [ %s ]" u.Name c.Tag pat typedName c.Tag pairs)
                 else
-                    let pieces = c.Fields |> List.map (casePiece enums) |> String.concat "; "
+                    c.Fields
+                    |> List.map (casePiece idl)
+                    |> concatR "; "
+                    |> Result.map (fun pieces ->
+                        sprintf
+                            "    | %s.%s%s -> %s \"%s\" ([ %s ] |> List.choose id)"
+                            u.Name
+                            c.Tag
+                            pat
+                            typedName
+                            c.Tag
+                            pieces)
 
-                    sprintf
-                        "    | %s.%s%s -> %s \"%s\" ([ %s ] |> List.choose id)"
-                        u.Name
-                        c.Tag
-                        pat
-                        typedName
-                        c.Tag
-                        pieces
-
-        let arms =
+        let armsR =
             u.Cases
-            |> List.map (fun c -> docFn ("encarm:" + u.Name + "." + c.Tag) "    " + arm c)
-            |> String.concat "\n"
+            |> List.map (fun c ->
+                arm c
+                |> Result.map (fun a -> docFn ("encarm:" + u.Name + "." + c.Tag) "    " + a))
+            |> concatR "\n"
         // The explicit `<'T>` type-parameter list (not just `'T` free in the signature) is
         // load-bearing for a generic union: `Binding.Format.source` is a fixed `Binding<float>`
         // *inside* `Binding<'T>`, so the generated `encBinding` recurses at a concrete type ≠ the
         // ambient `'T` — **polymorphic recursion**, which F# permits only under an explicit
         // generic-parameter declaration. Without it, `encBinding` monomorphises to the first use
         // (string) and the `float` recursion fails to type-check.
-        sprintf
-            "and private enc%s%s%s (v: %s%s) : JVal =\n    match v with\n%s"
-            u.Name
-            tyArgs
-            encArgs
-            u.Name
-            tyArgs
-            arms
+        armsR
+        |> Result.map (fun arms ->
+            sprintf
+                "and private enc%s%s%s (v: %s%s) : JVal =\n    match v with\n%s"
+                u.Name
+                tyArgs
+                encArgs
+                u.Name
+                tyArgs
+                arms)
 
-    let private specEncoder (typedName: string) (msg: Set<string>) (enums: IdlEnum list) (k: IdlKind) : string =
+    let private specEncoder
+        (typedName: string)
+        (msg: Set<string>)
+        (idl: Idl)
+        (k: IdlKind)
+        : Result<string, CodegenError> =
         // Single-line list literal — avoids F# offside-rule pitfalls in generated code.
-        let pieces = k.Fields |> List.map (specPieceOf enums "s") |> String.concat "; "
-
-        sprintf
-            "and private enc%sSpec%s (s: %sSpec%s) : JVal =\n    %s \"%s\" ([ %s ] |> List.choose id)"
-            k.Tag
-            (declParams msg (k.Tag + "Spec") [])
-            k.Tag
-            (declParams msg (k.Tag + "Spec") [])
-            typedName
-            k.Tag
-            pieces
+        k.Fields
+        |> List.map (specPieceOf idl "s")
+        |> concatR "; "
+        |> Result.map (fun pieces ->
+            sprintf
+                "and private enc%sSpec%s (s: %sSpec%s) : JVal =\n    %s \"%s\" ([ %s ] |> List.choose id)"
+                k.Tag
+                (declParams msg (k.Tag + "Spec") [])
+                k.Tag
+                (declParams msg (k.Tag + "Spec") [])
+                typedName
+                k.Tag
+                pieces)
 
     /// A non-discriminated *record* encoder — a plain `JObj` (no `$type`), fields via `List.choose
     /// id` (omit-on-absence for optionals). `Canon.render` Ordinal-sorts keys, so emission order is
     /// irrelevant. Reuses [[specPieceOf]] (`s.<Pascal>` field access). New for the real tier
     /// (`InvokeArg`, `FormField`, `FilterSpec`, `TabHeader`, `ColumnErased`, `ContentHash`, …).
-    let private recordEncoder (msg: Set<string>) (enums: IdlEnum list) (r: IdlRecord) : string =
-        let pieces = r.Fields |> List.map (specPieceOf enums "s") |> String.concat "; "
+    let private recordEncoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
         let ps = declParams msg r.Name []
-        sprintf "and private enc%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)" r.Name ps r.Name ps pieces
+
+        r.Fields
+        |> List.map (specPieceOf idl "s")
+        |> concatR "; "
+        |> Result.map (fun pieces ->
+            sprintf
+                "and private enc%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)"
+                r.Name
+                ps
+                r.Name
+                ps
+                pieces)
 
     // -----------------------------------------------------------------------
     // Phase 672 — the structural DECODER leg.
@@ -987,7 +1124,7 @@ let private encFloat (f: float) : JVal =
 
     /// Reading one field back out, honouring the presence rules [[specPieceOf]] /
     /// [[casePiece]] wrote it under.
-    let private decField (enums: IdlEnum list) (f: IdlField) : string =
+    let private decField (idl: Idl) (f: IdlField) : Result<string, CodegenError> =
         match f.Type with
         | TClosure
         | TOpaque ->
@@ -998,26 +1135,28 @@ let private encFloat (f: float) : JVal =
             // silently drops the field (caught by the corpus round-trip gate on
             // `grid-1`'s optional `rowKey`).
             match f.Opt with
-            | Optional -> sprintf "dPresent \"%s\" __fs" f.Name
-            | _ -> "Ok()"
+            | Optional -> Ok(sprintf "dPresent \"%s\" __fs" f.Name)
+            | _ -> Ok "Ok()"
         // Phase 689 — same presence rule, but the slot is typed, so the value put
         // back is the declared placeholder rather than `()`.
         | TFn s ->
             match f.Opt with
             | Optional ->
-                sprintf "(dPresent \"%s\" __fs |> Result.map (Option.map (fun () -> %s)))" f.Name s.Placeholder
-            | _ -> sprintf "Ok (%s)" s.Placeholder
+                Ok(sprintf "(dPresent \"%s\" __fs |> Result.map (Option.map (fun () -> %s)))" f.Name s.Placeholder)
+            | _ -> Ok(sprintf "Ok (%s)" s.Placeholder)
         | _ ->
             match f.Opt with
-            | Required -> sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type)
-            | Optional -> sprintf "dOpt \"%s\" __fs %s" f.Name (decFn f.Type)
+            | Required -> Ok(sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type))
+            | Optional -> Ok(sprintf "dOpt \"%s\" __fs %s" f.Name (decFn f.Type))
             // Never on the wire — nothing to read, so take the declared placeholder.
-            | HostOnly -> sprintf "Ok (%s)" (hostOnlyLit f)
+            | HostOnly -> Ok(sprintf "Ok (%s)" (hostOnlyLit f))
+            // Phase 124 — the decoder's optional arm and the encoder's omit test are now
+            // rendered from ONE literal, so they cannot disagree. Before this, an
+            // unrenderable default fell through to `dReq` here and to always-emit there —
+            // consistent with each other and with nothing else, least of all the IDL.
             | OmitDefault d ->
-                match fsDefaultLit enums f.Type d with
-                | Some dexpr -> sprintf "dDef \"%s\" __fs %s (%s)" f.Name (decFn f.Type) dexpr
-                // The encoder fell back to always-emit, so decode is required too.
-                | None -> sprintf "dReq \"%s\" __fs %s" f.Name (decFn f.Type)
+                fsDefaultLit idl f.Type d
+                |> Result.map (fun dexpr -> sprintf "dDef \"%s\" __fs %s (%s)" f.Name (decFn f.Type) dexpr)
 
     /// Nest one `Result.bind` per field over `final`, then close the lot. F# has
     /// no applicative sugar for this, and the generated file is Fantomas-exempt,
@@ -1035,8 +1174,10 @@ let private encFloat (f: float) : JVal =
         let closes = String.replicate (List.length binders + extraCloses) ")"
         (opens @ [ indent + final + closes ]) |> String.concat "\n"
 
-    let private fieldBinders (enums: IdlEnum list) (fs: IdlField list) =
-        fs |> List.map (fun f -> ident f.Name, decField enums f)
+    let private fieldBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
+        fs
+        |> List.map (fun f -> decField idl f |> Result.map (fun e -> ident f.Name, e))
+        |> sequenceR
 
     let private enumDecoder (e: IdlEnum) =
         let arms =
@@ -1060,9 +1201,9 @@ let private encFloat (f: float) : JVal =
         (disc: string)
         (tokens: HardenPolicy)
         (msg: Set<string>)
-        (enums: IdlEnum list)
+        (idl: Idl)
         (u: IdlUnion)
-        : string =
+        : Result<string, CodegenError> =
         let decArgs =
             u.Params
             |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, string>)" p p)
@@ -1094,14 +1235,14 @@ let private encFloat (f: float) : JVal =
 
             let body =
                 if List.isEmpty c.Fields then
-                    sprintf "        | \"%s\" -> Ok %s" c.Tag (ctor c)
+                    Ok(sprintf "        | \"%s\" -> Ok %s" c.Tag (ctor c))
                 else
-                    sprintf
-                        "        | \"%s\" ->\n%s"
-                        c.Tag
-                        (bindChain "            " (fieldBinders enums c.Fields) final 0)
+                    fieldBinders idl c.Fields
+                    |> Result.map (fun binders ->
+                        sprintf "        | \"%s\" ->\n%s" c.Tag (bindChain "            " binders final 0))
 
-            docFn ("decarm:" + u.Name + "." + c.Tag) "        " + body
+            body
+            |> Result.map (fun b -> docFn ("decarm:" + u.Name + "." + c.Tag) "        " + b)
 
         // The declared transparent case is on the wire BARE, so it is recognised by
         // the ABSENCE of a discriminator, not by a tag.
@@ -1122,55 +1263,63 @@ let private encFloat (f: float) : JVal =
                 | _ -> None
             | None -> None
 
-        let tagged =
-            let arms = u.Cases |> List.map arm |> String.concat "\n"
-
-            sprintf
-                "    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = \"%s\")) ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> Error (\"unknown %s case: \" + __other))"
-                disc
-                arms
-                u.Name
+        let taggedR =
+            u.Cases
+            |> List.map arm
+            |> concatR "\n"
+            |> Result.map (fun arms ->
+                sprintf
+                    "    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = \"%s\")) ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> Error (\"unknown %s case: \" + __other))"
+                    disc
+                    arms
+                    u.Name)
 
         let fallthrough =
             match transparent with
             | Some t -> t
             | None -> sprintf "    | _ -> Error \"expected a %s object\"" u.Name
 
-        sprintf
-            "and private dec%s%s%s (j: JVal) : Result<%s%s, string> =\n    match j with\n%s\n%s"
-            u.Name
-            declArgs
-            decArgs
-            u.Name
-            tyArgs
-            tagged
-            fallthrough
+        taggedR
+        |> Result.map (fun tagged ->
+            sprintf
+                "and private dec%s%s%s (j: JVal) : Result<%s%s, string> =\n    match j with\n%s\n%s"
+                u.Name
+                declArgs
+                decArgs
+                u.Name
+                tyArgs
+                tagged
+                fallthrough)
 
-    let private specDecoder (msg: Set<string>) (enums: IdlEnum list) (k: IdlKind) : string =
+    let private specDecoder (msg: Set<string>) (idl: Idl) (k: IdlKind) : Result<string, CodegenError> =
         let assigns =
             k.Fields
             |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
             |> String.concat "; "
 
-        sprintf
-            "and private dec%sSpec (j: JVal) : Result<%sSpec%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
-            k.Tag
-            k.Tag
-            (objParams msg (k.Tag + "Spec") [])
-            (bindChain "    " (fieldBinders enums k.Fields) (sprintf "Ok { %s }" assigns) 1)
+        fieldBinders idl k.Fields
+        |> Result.map (fun binders ->
+            sprintf
+                "and private dec%sSpec (j: JVal) : Result<%sSpec%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+                k.Tag
+                k.Tag
+                (objParams msg (k.Tag + "Spec") [])
+                (bindChain "    " binders (sprintf "Ok { %s }" assigns) 1))
 
-    let private recordDecoder (msg: Set<string>) (enums: IdlEnum list) (r: IdlRecord) : string =
+    let private recordDecoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
         let assigns =
             r.Fields
             |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
             |> String.concat "; "
 
-        sprintf
-            "and private dec%s (j: JVal) : Result<%s%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
-            r.Name
-            r.Name
-            (objParams msg r.Name [])
-            (bindChain "    " (fieldBinders enums r.Fields) (sprintf "Ok { %s }" assigns) 1)
+        fieldBinders idl r.Fields
+        |> Result.map (fun binders ->
+            sprintf
+                "and private dec%s (j: JVal) : Result<%s%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+                r.Name
+                r.Name
+                (objParams msg r.Name [])
+                (bindChain "    " binders (sprintf "Ok { %s }" assigns) 1))
 
     /// The decode-side helper prelude, emitted once per module. `dTag` reads the
     /// DECLARED discriminator (Phase 108) — `"$type"` interpolates to exactly the
@@ -1417,19 +1566,14 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
     /// The F# source expression for a declared default value, in the context of the
     /// field's IDL type (so a `VEnum "Standard"` on a `HeadingVariant` field emits
-    /// `HeadingVariant.Standard`). Scalars + enums are supported — the spike's default
-    /// classes; richer default values (unions / nodes) are a later leg.
-    let private defaultExpr (enums: IdlEnum list) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        match t, v with
-        | TStr, VStr s -> Ok("\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"")
-        | TInt, VInt i -> Ok(string i)
-        | TBool, VBool b -> Ok(if b then "true" else "false")
-        | TEnum n, VEnum c -> Ok(n + "." + fsEnumCase enums n c)
-        | TUnion(n, _), VUnion(tag, []) -> Ok(n + "." + tag)
-        // Phase 1080 — the empty list, so a smart constructor can fill an
-        // omitted-when-empty repeated slot without taking it as a parameter.
-        | TList _, VList [] -> Ok "[]"
-        | _ -> Error(CodegenError.UnsupportedDefault(t, v))
+    /// `HeadingVariant.Standard`).
+    ///
+    /// **Phase 124 — this IS [[fsDefaultLit]], and the alias is the point.** The two rendered
+    /// overlapping-but-different sets from two separate match expressions: a smart constructor
+    /// could fill a `TStr` default the encoder's omit test could not spell, and (the direction
+    /// that mattered) neither could spell a value-carrying union. One contract, one renderer, so
+    /// the smart constructor, the encoder's omit test and the decoder's restore cannot come apart.
+    let private defaultExpr (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> = fsDefaultLit idl t v
 
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
     /// IDL-declared default has no code emission (`defaultExpr` — GP4/GP5).
@@ -1450,6 +1594,27 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 else
                     None)
 
+        // Phase 690 — a smart constructor fills the envelope with its identity value, so the
+        // common case stays `mkHeading "h" 2 text`. An envelope field that is neither optional
+        // nor defaulted would have to become a parameter; none is, and the generator says so
+        // rather than guessing.
+        //
+        // Phase 124 — an unrenderable envelope default was a `failwithf` here, the one refusal in
+        // this leg that was not a typed `CodegenError` even though the function it sat inside
+        // already returned one. It is the same `UnsupportedDefault` as every other path now. The
+        // envelope is also computed ONCE rather than per kind: it does not depend on the kind.
+        let envelopeAssigns: Result<string, CodegenError> =
+            idl.NodeFields
+            |> List.map (fun f ->
+                match f.Opt with
+                | Optional -> Ok(sprintf "; %s = None" (pascal f.Name))
+                | OmitDefault d ->
+                    fsDefaultLit idl f.Type d
+                    |> Result.map (fun e -> sprintf "; %s = %s" (pascal f.Name) e)
+                | HostOnly -> Ok(sprintf "; %s = %s" (pascal f.Name) (hostOnlyLit f))
+                | Required -> failwithf "node envelope field '%s' is Required — not yet supported" f.Name)
+            |> concatR ""
+
         let ctor (k: IdlKind) : Result<string, CodegenError> =
             let parms =
                 "(id: string)"
@@ -1460,46 +1625,45 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
             let fieldExpr (f: IdlField) : Result<string, CodegenError> =
                 match defaultFor k.Tag f.Name, f.Opt with
-                | Some v, Required -> defaultExpr idl.Enums f.Type v
-                | Some v, Optional -> defaultExpr idl.Enums f.Type v |> Result.map (fun e -> "Some(" + e + ")")
+                | Some v, Required -> defaultExpr idl f.Type v
+                | Some v, Optional -> defaultExpr idl f.Type v |> Result.map (fun e -> "Some(" + e + ")")
                 | None, Required -> Ok(ident f.Name)
                 | None, Optional -> Ok "None"
                 // HostOnly: not a ctor param either — the field takes its placeholder.
                 | _, HostOnly -> Ok(hostOnlyLit f)
                 // OmitDefault: not a ctor param — the field takes its identity default.
-                | _, OmitDefault d -> defaultExpr idl.Enums f.Type d
+                | _, OmitDefault d -> defaultExpr idl f.Type d
 
             k.Fields
             |> List.map (fun f -> fieldExpr f |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
+            |> concatR "; "
+            |> Result.bind (fun record ->
+                envelopeAssigns
+                |> Result.map (fun envelope ->
+                    sprintf
+                        "let mk%s %s : Node%s =\n    { Id = id; Kind = NodeKind.%s { %s }%s }"
+                        k.Tag
+                        parms
+                        nodeArgs
+                        k.Tag
+                        record
+                        envelope))
+
+        // Phase 124 — a PROJECTED kind emits no generated constructor (the projection supplies
+        // its own), which before this phase meant its declared defaults were never rendered and
+        // so never checked: an unrenderable default on a projected kind escaped `defaultExpr`
+        // entirely and reached the encoder, where it fell back to always-emit. Validating them
+        // here keeps "a declaration the generator cannot render refuses" true of a projected kind
+        // too, without emitting a constructor for it.
+        let projectedDefaultsChecked (k: IdlKind) : Result<unit, CodegenError> =
+            k.Fields
+            |> List.map (fun f ->
+                match defaultFor k.Tag f.Name, f.Opt with
+                | Some v, _ -> defaultExpr idl f.Type v |> Result.map ignore
+                | None, OmitDefault d -> defaultExpr idl f.Type d |> Result.map ignore
+                | None, _ -> Ok())
             |> sequenceR
-            |> Result.map (fun fieldStrs ->
-                let record = String.concat "; " fieldStrs
-
-                // Phase 690 — a smart constructor fills the envelope with its identity
-                // value, so the common case stays `mkHeading "h" 2 text`. An envelope
-                // field that is neither optional nor defaulted would have to become a
-                // parameter; none is, and the generator says so rather than guessing.
-                let envelope =
-                    idl.NodeFields
-                    |> List.map (fun f ->
-                        match f.Opt with
-                        | Optional -> sprintf "; %s = None" (pascal f.Name)
-                        | OmitDefault d ->
-                            match fsDefaultLit idl.Enums f.Type d with
-                            | Some e -> sprintf "; %s = %s" (pascal f.Name) e
-                            | None -> failwithf "node envelope field '%s' has an unrenderable default" f.Name
-                        | HostOnly -> sprintf "; %s = %s" (pascal f.Name) (hostOnlyLit f)
-                        | Required -> failwithf "node envelope field '%s' is Required — not yet supported" f.Name)
-                    |> String.concat ""
-
-                sprintf
-                    "let mk%s %s : Node%s =\n    { Id = id; Kind = NodeKind.%s { %s }%s }"
-                    k.Tag
-                    parms
-                    nodeArgs
-                    k.Tag
-                    record
-                    envelope)
+            |> Result.map ignore
 
         kinds
         |> List.map (fun k ->
@@ -1507,7 +1671,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // the generated one would construct the IDL-derived record, which under a
             // projection is not the record that exists.
             match projections.TryFind k.Tag with
-            | Some p -> Ok(p.Mk |> Option.toList)
+            | Some p -> projectedDefaultsChecked k |> Result.map (fun () -> p.Mk |> Option.toList)
             | None -> ctor k |> Result.map List.singleton)
         |> sequenceR
         |> Result.map List.concat
@@ -1716,49 +1880,56 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // Phase 109 — the FLAT shape merges the id (and any envelope) into the
             // kind's own object; `Canon.render` sorts keys, so splice order is
             // irrelevant. Nested emission is byte-identical to the pre-declarable form.
+            let envelopePieces () =
+                idl.NodeFields |> List.map (specPieceOf idl "n") |> concatR "; "
+
             let body =
                 match idl.Wire.NodeEnvelope, idl.NodeFields with
-                | NodeEnvelopeShape.NestedKind, [] -> "\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
+                | NodeEnvelopeShape.NestedKind, [] -> Ok "\n    JObj [ \"id\", JStr n.Id; \"kind\", kind ]"
                 | NodeEnvelopeShape.NestedKind, _ ->
-                    let pieces =
-                        idl.NodeFields |> List.map (specPieceOf idl.Enums "n") |> String.concat "; "
-
-                    sprintf "\n    JObj([ Some(\"id\", JStr n.Id); Some(\"kind\", kind); %s ] |> List.choose id)" pieces
+                    envelopePieces ()
+                    |> Result.map (
+                        sprintf "\n    JObj([ Some(\"id\", JStr n.Id); Some(\"kind\", kind); %s ] |> List.choose id)"
+                    )
                 // Discriminator first, then id, kind fields, envelope — the
                 // Phase 111 declared order (irrelevant under Sorted rendering,
                 // where `Canon.render` re-sorts; normative under Declared).
                 | NodeEnvelopeShape.FlatKind, [] ->
-                    "\n    match kind with\n    | JObj(__d :: __kf) -> JObj(__d :: (\"id\", JStr n.Id) :: __kf)\n    | __other -> __other"
+                    Ok
+                        "\n    match kind with\n    | JObj(__d :: __kf) -> JObj(__d :: (\"id\", JStr n.Id) :: __kf)\n    | __other -> __other"
                 | NodeEnvelopeShape.FlatKind, _ ->
-                    let pieces =
-                        idl.NodeFields |> List.map (specPieceOf idl.Enums "n") |> String.concat "; "
-
-                    sprintf
-                        "\n    match kind with\n    | JObj(__d :: __kf) -> JObj(__d :: (\"id\", JStr n.Id) :: (__kf @ ([ %s ] |> List.choose id)))\n    | __other -> __other"
-                        pieces
+                    envelopePieces ()
+                    |> Result.map (
+                        sprintf
+                            "\n    match kind with\n    | JObj(__d :: __kf) -> JObj(__d :: (\"id\", JStr n.Id) :: (__kf @ ([ %s ] |> List.choose id)))\n    | __other -> __other"
+                    )
 
             // Phase 694 — the kind dispatch is its own function (was inline in
             // encNode) so the JVal accessors below can expose it: a host codec
             // splicing a bare NodeKind (a TreeOp `EditNode.newKind`) reaches the
             // same single encoder the node envelope uses.
-            sprintf "let rec private encNodeKind (k: NodeKind%s) : JVal =\n    match k with\n" nodeArgs
-            + arms
-            + sprintf "\n\nand private encNode (n: Node%s) : JVal =\n    let kind = encNodeKind n.Kind\n" nodeArgs
-            + body
+            body
+            |> Result.map (fun b ->
+                sprintf "let rec private encNodeKind (k: NodeKind%s) : JVal =\n    match k with\n" nodeArgs
+                + arms
+                + sprintf "\n\nand private encNode (n: Node%s) : JVal =\n    let kind = encNodeKind n.Kind\n" nodeArgs
+                + b)
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
             (encNodeDecl
-             :: (unions |> List.map (unionEncoder typedName doc idl.Harden msg idl.Enums))
-             @ (records |> List.map (recordEncoder msg idl.Enums))
+             :: (unions |> List.map (unionEncoder typedName doc idl.Harden msg idl))
+             @ (records |> List.map (recordEncoder msg idl))
              @ (kinds
                 |> List.map (fun k ->
                     // Phase 945 — a projected kind's encoder is the projection's, verbatim.
                     match sup.KindProjections.TryFind k.Tag with
-                    | Some proj -> doc ("enc:" + k.Tag) "" + proj.Encoder
-                    | None -> doc ("enc:" + k.Tag) "" + specEncoder typedName msg idl.Enums k))
-             @ (sup.EncodeSplice |> Option.toList))
-            |> String.concat "\n\n"
+                    | Some proj -> Ok(doc ("enc:" + k.Tag) "" + proj.Encoder)
+                    | None ->
+                        specEncoder typedName msg idl k
+                        |> Result.map (fun e -> doc ("enc:" + k.Tag) "" + e)))
+             @ (sup.EncodeSplice |> Option.toList |> List.map Ok))
+            |> concatR "\n\n"
 
         let header =
             // Phase 113 — the generated layer constructs and matches EVERY declared
@@ -1820,30 +1991,35 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                     | NodeEnvelopeShape.NestedKind -> "dReq \"kind\" __fs decNodeKind"
                     | NodeEnvelopeShape.FlatKind -> "decNodeKind j"
 
-                let binders =
-                    [ "id", "dReq \"id\" __fs dStr"; "kind", kindBinder ]
-                    @ fieldBinders idl.Enums idl.NodeFields
+                fieldBinders idl idl.NodeFields
+                |> Result.map (fun envelopeBinders ->
+                    let binders =
+                        [ "id", "dReq \"id\" __fs dStr"; "kind", kindBinder ] @ envelopeBinders
 
-                sprintf "and private decNode (j: JVal) : Result<Node%s, string> =\n" (objParams msg "Node" [])
-                + "    dObj j |> Result.bind (fun __fs ->\n"
-                + bindChain "    " binders final 1
+                    sprintf "and private decNode (j: JVal) : Result<Node%s, string> =\n" (objParams msg "Node" [])
+                    + "    dObj j |> Result.bind (fun __fs ->\n"
+                    + bindChain "    " binders final 1)
 
-            (decNodeKindDecl
+            (Ok decNodeKindDecl
              :: decNodeDecl
              :: (unions
-                 |> List.map (unionDecoder doc sup.CaseRefines idl.Wire.Discriminator idl.Harden msg idl.Enums))
-             @ (records |> List.map (recordDecoder msg idl.Enums))
+                 |> List.map (unionDecoder doc sup.CaseRefines idl.Wire.Discriminator idl.Harden msg idl))
+             @ (records |> List.map (recordDecoder msg idl))
              @ (kinds
                 |> List.map (fun k ->
                     // Phase 945 — a projected kind's decoder is the projection's, verbatim.
                     match sup.KindProjections.TryFind k.Tag with
-                    | Some proj -> doc ("dec:" + k.Tag) "" + proj.Decoder
-                    | None -> doc ("dec:" + k.Tag) "" + specDecoder msg idl.Enums k))
-             @ (sup.DecodeSplice |> Option.toList))
-            |> String.concat "\n\n"
+                    | Some proj -> Ok(doc ("dec:" + k.Tag) "" + proj.Decoder)
+                    | None -> specDecoder msg idl k |> Result.map (fun d -> doc ("dec:" + k.Tag) "" + d)))
+             @ (sup.DecodeSplice |> Option.toList |> List.map Ok))
+            |> concatR "\n\n"
 
-        match witnessDecl msg kinds, defaultsDecl sup.KindProjections msg idl kinds with
-        | Ok witness, Ok defaults ->
+        // Phase 124 — the encoder and decoder groups joined the two declarations that could
+        // already refuse. Every leg that renders a declared default now reports the same typed
+        // `UnsupportedDefault` here, so there is no remaining path on which an unrenderable
+        // default produces a module instead of a refusal.
+        match witnessDecl msg kinds, defaultsDecl sup.KindProjections msg idl kinds, recGroup, decGroup with
+        | Ok witness, Ok defaults, Ok recGroup, Ok decGroup ->
             [ [ header ]
               enums |> List.map rqaEnum
               [ typeGroup ]
@@ -1887,8 +2063,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             |> List.concat
             |> String.concat "\n\n"
             |> Ok
-        | Error e, _
-        | _, Error e -> Error e
+        | Error e, _, _, _
+        | _, Error e, _, _
+        | _, _, Error e, _
+        | _, _, _, Error e -> Error e
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
     /// emitting byte-identically to the generator before the support channel existed.
@@ -1910,21 +2088,6 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     // accepted a boolean and a `Binding<int>` slot accepted a §7 non-finite
     // sentinel, both of which the decoder refuses.
     // -----------------------------------------------------------------------
-
-    /// Substitute a generic union's type parameters into a case field's type
-    /// (`'T` → the type argument). Mirrors the identically-shaped substitution the
-    /// encode / decode legs perform; kept local because those are private to their
-    /// own modules and a shared one would put a codegen detail on the Idl surface.
-    let rec private substType (subst: Map<string, IdlType>) (t: IdlType) : IdlType =
-        match t with
-        | TVar v ->
-            match Map.tryFind v subst with
-            | Some r -> r
-            | None -> t
-        | TList inner -> TList(substType subst inner)
-        | TMap inner -> TMap(substType subst inner)
-        | TUnion(n, args) -> TUnion(n, List.map (substType subst) args)
-        | other -> other
 
     /// The `$defs` NAME of a type — for a non-generic declaration its own name,
     /// and for an instantiated generic union the name plus its mangled arguments
@@ -2490,53 +2653,129 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TNode -> "encodeNode(" + var + ")"
         | _ -> tsEncFn t + "(" + var + ")"
 
-    /// One field of a spec encoder — a `[key, enc]` pair, or `null` (filtered) for
-    /// an absent optional.
     /// TS boolean predicate: is `src` at the omit-when-default field's identity default?
     /// Enums render as wire strings (`s.tone === "Default"`); nullary unions as
-    /// discriminator-tagged objects (`s.format.$type === "None"`).
-    let private tsIsDefault (disc: string) (src: string) (t: IdlType) (d: IdlValue) : string option =
+    /// discriminator-tagged objects (`s.format.$type === "None"`); since Phase 124 a
+    /// VALUE-CARRYING union case conjoins a test per declared field
+    /// (`s.value.$type === "Fixed" && s.value.value === 0`), nested to any depth.
+    ///
+    /// **This predicate decides what the TS backend admits as a default at all**, because it is
+    /// the harder half: JS has no structural equality, so every admissible shape has to reduce to
+    /// a chain of `===` (plus the one `.length === 0` an empty array needs, arrays comparing by
+    /// reference). [[tsDefaultLit]] takes its admissibility from here rather than deciding
+    /// separately — an encoder that cannot TEST for a default must not have a decoder that
+    /// RESTORES it, or the two halves of the round trip disagree silently, which is the class
+    /// Phase 124 exists to close.
+    let rec private tsIsDefault
+        (idl: Idl)
+        (disc: string)
+        (src: string)
+        (t: IdlType)
+        (d: IdlValue)
+        : Result<string, CodegenError> =
+        let refuse () =
+            Error(CodegenError.UnsupportedDefault(t, d))
+
         match t, d with
-        | TEnum _, VEnum c -> Some(src + " === " + tsSourceStr c)
-        | TUnion _, VUnion(tag, []) -> Some(tsDiscProp disc src + " === " + tsSourceStr tag)
+        | TEnum _, VEnum c -> Ok(src + " === " + tsSourceStr c)
+        | TStr, VStr s -> Ok(src + " === " + tsSourceStr s)
+        | TInt, VInt i -> Ok(src + " === " + string i)
+        | TFloat, VFloat f when System.Double.IsFinite f -> Ok(src + " === " + invariantFloat f)
+        | TFloat, VInt i -> Ok(src + " === " + invariantFloat (float i))
+        | TBool, VBool b -> Ok(src + " === " + (if b then "true" else "false"))
         // Phase 1080 — an omitted-when-empty repeated slot. `.length === 0` rather
         // than an equality test, because JS arrays compare by reference.
-        | TList _, VList [] -> Some(src + ".length === 0")
-        | TBool, VBool b -> Some(src + " === " + (if b then "true" else "false"))
-        | _ -> None
+        | TList _, VList [] -> Ok(src + ".length === 0")
+        | TRecord n, VRecord authored ->
+            match idl.Records |> List.tryFind (fun r -> r.Name = n) with
+            | None -> refuse ()
+            | Some r ->
+                r.Fields
+                |> List.map (fun rf -> tsIsDefaultField idl disc src Map.empty rf authored)
+                |> concatR " && "
+        | TUnion(n, args), VUnion(tag, authored) ->
+            match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+            | None -> refuse ()
+            | Some u when List.length u.Params <> List.length args -> refuse ()
+            // A DECLARED transparent case is on the wire BARE, so neither the tagged predicate
+            // below nor the tagged literal [[tsDefaultLit]] renders would be about the value the
+            // encoder actually sees. Refused rather than guessed at. (Unreachable before Phase
+            // 124: a transparent case holds exactly one field, so it was never nullary.)
+            | Some u when TransparentUnion.tag idl.Harden u = Some tag -> refuse ()
+            | Some u ->
+                match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                | None -> refuse ()
+                | Some c ->
+                    let subst = Map.ofList (List.zip u.Params args)
 
+                    c.Fields
+                    |> List.map (fun cf -> tsIsDefaultField idl disc src subst cf authored)
+                    |> sequenceR
+                    |> Result.map (fun conjuncts ->
+                        (tsDiscProp disc src + " === " + tsSourceStr tag) :: conjuncts
+                        |> String.concat " && ")
+        | _ -> refuse ()
+
+    /// One declared member of a union case or a record, as a conjunct of the predicate above.
+    /// An absent optional is a real conjunct (`s.value.name === undefined`), not a skip: the
+    /// encoder omits that key, so a value carrying it is NOT at the default and must not be.
+    and private tsIsDefaultField
+        (idl: Idl)
+        (disc: string)
+        (src: string)
+        (subst: Map<string, IdlType>)
+        (f: IdlField)
+        (authored: (string * IdlValue) list)
+        : Result<string, CodegenError> =
+        let ft = substType subst f.Type
+        let member' = src + "." + f.Name
+
+        match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
+        | Some(_, av) when av <> VAbsent ->
+            match f.Opt with
+            // A host-only slot never reaches the wire, so the JS object the encoder sees has no
+            // member to test — a default that depends on one is not testable at all.
+            | HostOnly -> Error(CodegenError.UnsupportedDefault(ft, av))
+            | _ -> tsIsDefault idl disc member' ft av
+        | _ ->
+            match f.Opt with
+            | Optional -> Ok(member' + " === undefined")
+            | OmitDefault dd -> tsIsDefault idl disc member' ft dd
+            | HostOnly
+            | Required -> Error(CodegenError.UnsupportedDefault(ft, VAbsent))
+
+    /// One field of a spec encoder — a `[key, enc]` pair, or `null` (filtered) for
+    /// an absent optional.
     /// `recv` is the bound JS variable — `s` for a spec/record encoder, `n` for the
     /// node envelope (Phase 690), mirroring [[specPieceOf]] on the F# side.
-    let private tsSpecPieceOf (disc: string) (recv: string) (f: IdlField) : string =
+    let private tsSpecPieceOf (idl: Idl) (disc: string) (recv: string) (f: IdlField) : Result<string, CodegenError> =
         let src = recv + "." + f.Name
         let pair = "[" + tsSourceStr f.Name + ", " + tsEncApplied src f.Type + "]"
 
         match f.Opt with
-        | Required -> pair
-        | Optional -> "(" + src + " === undefined ? null : " + pair + ")"
-        | HostOnly -> "null"
+        | Required -> Ok pair
+        | Optional -> Ok("(" + src + " === undefined ? null : " + pair + ")")
+        | HostOnly -> Ok "null"
         | OmitDefault d ->
-            match tsIsDefault disc src f.Type d with
-            | Some pred -> "(" + pred + " ? null : " + pair + ")"
-            | None -> pair
+            tsIsDefault idl disc src f.Type d
+            |> Result.map (fun pred -> "(" + pred + " ? null : " + pair + ")")
 
     /// A union CASE field, honouring the same presence rules as a spec field.
     /// Phase 317 generative conformance caught this ignoring `f.Opt` entirely:
     /// TS emitted every optional union-case field unconditionally while F# omitted
     /// it, so `LayoutMode.Grid` without `templateColumns` diverged (and threw in
     /// the escaper). No fixed fixture carried that shape.
-    let private tsCasePair (disc: string) (f: IdlField) : string =
+    let private tsCasePair (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
         let src = "v." + f.Name
         let pair = "[" + tsSourceStr f.Name + ", " + tsEncApplied src f.Type + "]"
 
         match f.Opt with
-        | Required -> pair
-        | Optional -> "(" + src + " === undefined ? null : " + pair + ")"
-        | HostOnly -> "null"
+        | Required -> Ok pair
+        | Optional -> Ok("(" + src + " === undefined ? null : " + pair + ")")
+        | HostOnly -> Ok "null"
         | OmitDefault d ->
-            match tsIsDefault disc src f.Type d with
-            | Some pred -> "(" + pred + " ? null : " + pair + ")"
-            | None -> pair
+            tsIsDefault idl disc src f.Type d
+            |> Result.map (fun pred -> "(" + pred + " ? null : " + pair + ")")
 
     // -----------------------------------------------------------------------
     // Phase 113 — declared annotations in the TypeScript backend.
@@ -2606,7 +2845,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
          | ls -> (ls |> String.concat "\n") + "\n")
         + tsFieldAnnotationHeader k.Tag k.Fields
 
-    let private tsUnionEncoder (disc: string) (tokens: HardenPolicy) (u: IdlUnion) : string =
+    let private tsUnionEncoder (idl: Idl) (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
         let argList =
             match u.Params with
             | [] -> "v"
@@ -2618,41 +2857,49 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 | [] -> ""
                 | ls -> (ls |> String.concat "\n") + "\n"
 
-            ann
-            + match TransparentUnion.tag tokens u with
-              | Some ttag when ttag = c.Tag ->
-                  // Transparent case: return the single field's value bare (no `typed(...)`).
-                  match c.Fields with
-                  | [ f ] ->
-                      "    case "
-                      + tsSourceStr c.Tag
-                      + ": return "
-                      + tsEncApplied ("v." + f.Name) f.Type
-                      + ";"
-                  | _ -> failwithf "transparent union case '%s' must have exactly one field" c.Tag
-              | _ ->
-                  let pairs = c.Fields |> List.map (tsCasePair disc) |> String.concat ", "
+            (match TransparentUnion.tag tokens u with
+             | Some ttag when ttag = c.Tag ->
+                 // Transparent case: return the single field's value bare (no `typed(...)`).
+                 match c.Fields with
+                 | [ f ] ->
+                     Ok(
+                         "    case "
+                         + tsSourceStr c.Tag
+                         + ": return "
+                         + tsEncApplied ("v." + f.Name) f.Type
+                         + ";"
+                     )
+                 | _ -> failwithf "transparent union case '%s' must have exactly one field" c.Tag
+             | _ ->
+                 c.Fields
+                 |> List.map (tsCasePair idl disc)
+                 |> concatR ", "
+                 |> Result.map (fun pairs ->
+                     "    case "
+                     + tsSourceStr c.Tag
+                     + ": return typed("
+                     + tsSourceStr c.Tag
+                     + ", ["
+                     + pairs
+                     + "]);"))
+            |> Result.map (fun body -> ann + body)
 
-                  "    case "
-                  + tsSourceStr c.Tag
-                  + ": return typed("
-                  + tsSourceStr c.Tag
-                  + ", ["
-                  + pairs
-                  + "]);"
-
-        (u.Cases
-         |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
-         |> String.concat "")
-        + "function enc"
-        + u.Name
-        + "("
-        + argList
-        + ") {\n  switch ("
-        + tsDiscProp disc "v"
-        + ") {\n"
-        + (u.Cases |> List.map arm |> String.concat "\n")
-        + "\n  }\n}"
+        u.Cases
+        |> List.map arm
+        |> concatR "\n"
+        |> Result.map (fun arms ->
+            (u.Cases
+             |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
+             |> String.concat "")
+            + "function enc"
+            + u.Name
+            + "("
+            + argList
+            + ") {\n  switch ("
+            + tsDiscProp disc "v"
+            + ") {\n"
+            + arms
+            + "\n  }\n}")
 
     /// A non-discriminated *record* encoder — a plain object, no discriminator,
     /// mirroring `recordEncoder` on the F# side. Added by Phase 690: the TS backend
@@ -2660,35 +2907,40 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     /// named a function that was never emitted. Harmless while the only IDL the TS
     /// backend ran on had no records, and a `ReferenceError` waiting for the first
     /// one — the node envelope is three of them.
-    let private tsRecordEncoder (disc: string) (r: IdlRecord) : string =
-        let pieces = r.Fields |> List.map (tsSpecPieceOf disc "s") |> String.concat ", "
-
-        tsFieldAnnotationHeader r.Name r.Fields
-        + "function enc"
-        + r.Name
-        + "(s) {\n  return plain(["
-        + pieces
-        + "]);\n}"
+    let private tsRecordEncoder (idl: Idl) (disc: string) (r: IdlRecord) =
+        r.Fields
+        |> List.map (tsSpecPieceOf idl disc "s")
+        |> concatR ", "
+        |> Result.map (fun pieces ->
+            tsFieldAnnotationHeader r.Name r.Fields
+            + "function enc"
+            + r.Name
+            + "(s) {\n  return plain(["
+            + pieces
+            + "]);\n}")
 
     /// A kind's spec encoder. Nested (the default): the discriminator-tagged
     /// object, byte-identical to the pre-declarable emission. Flat (Phase 109):
     /// the PAIRS alone — `encodeNode` merges them with the id and the envelope
     /// into the one flat object.
-    let private tsSpecEncoder (disc: string) (flat: bool) (k: IdlKind) : string =
-        let pieces = k.Fields |> List.map (tsSpecPieceOf disc "s") |> String.concat ", "
+    let private tsSpecEncoder (idl: Idl) (disc: string) (flat: bool) (k: IdlKind) =
         let ann = tsKindAnnotationHeader k
 
-        if flat then
-            ann + "function enc" + k.Tag + "SpecPairs(s) {\n  return [" + pieces + "];\n}"
-        else
-            ann
-            + "function enc"
-            + k.Tag
-            + "Spec(s) {\n  return typed("
-            + tsSourceStr k.Tag
-            + ", ["
-            + pieces
-            + "]);\n}"
+        k.Fields
+        |> List.map (tsSpecPieceOf idl disc "s")
+        |> concatR ", "
+        |> Result.map (fun pieces ->
+            if flat then
+                ann + "function enc" + k.Tag + "SpecPairs(s) {\n  return [" + pieces + "];\n}"
+            else
+                ann
+                + "function enc"
+                + k.Tag
+                + "Spec(s) {\n  return typed("
+                + tsSourceStr k.Tag
+                + ", ["
+                + pieces
+                + "]);\n}")
 
     // ---- Phase 672 task 4: the TS decoder backend ----
     // The JS host's in-memory shape IS the wire shape (plain objects), so decoding
@@ -2740,18 +2992,21 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
 
     /// The TS literal for an omit-when-default value, in its WIRE representation —
     /// refilled on decode so the encoder's omit test fires again and the bytes match.
-    let private tsDefaultLit (disc: string) (t: IdlType) (d: IdlValue) : string option =
-        match t, d with
-        | TEnum _, VEnum c -> Some(tsSourceStr c)
-        | TUnion _, VUnion(tag, []) -> Some("{ " + tsDiscKey disc + ": " + tsSourceStr tag + " }")
-        | TBool, VBool b -> Some(if b then "true" else "false")
+    ///
+    /// **Admissibility is [[tsIsDefault]]'s, and the rendering is
+    /// [[typescriptValueWith]]'s** — neither is re-decided here. The first is the correctness
+    /// argument (a default the encoder cannot test for must not be one the decoder restores);
+    /// the second keeps every pre-Phase-124 emission byte-identical, since the value emitter
+    /// already rendered a discriminator-tagged object exactly the way this function used to
+    /// build one by hand, and it already handles the payload-carrying case.
+    let private tsDefaultLit (idl: Idl) (disc: string) (t: IdlType) (d: IdlValue) : Result<string, CodegenError> =
+        tsIsDefault idl disc "__probe" t d
         // Phase 1080 — an absent repeated slot decodes to the EMPTY ARRAY, never to
         // `undefined` or `null`: the missing-list-field decode class, pinned here
         // rather than left to each host's own reading of an absent key.
-        | TList _, VList [] -> Some "[]"
-        | _ -> None
+        |> Result.map (fun _ -> typescriptValueWith idl.Wire d)
 
-    let private tsDecField (disc: string) (f: IdlField) : string =
+    let private tsDecField (idl: Idl) (disc: string) (f: IdlField) : Result<string, CodegenError> =
         let key = tsSourceStr f.Name
 
         match f.Type with
@@ -2759,25 +3014,33 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TFn _
         | TOpaque ->
             match f.Opt with
-            | Optional -> "dPresent(" + key + ", fs)"
-            | _ -> "null"
+            | Optional -> Ok("dPresent(" + key + ", fs)")
+            | _ -> Ok "null"
         | _ ->
             match f.Opt with
-            | Required -> "dReq(" + key + ", fs, " + tsDecFn f.Type + ")"
-            | Optional -> "dOpt(" + key + ", fs, " + tsDecFn f.Type + ")"
-            | HostOnly -> "undefined"
+            | Required -> Ok("dReq(" + key + ", fs, " + tsDecFn f.Type + ")")
+            | Optional -> Ok("dOpt(" + key + ", fs, " + tsDecFn f.Type + ")")
+            | HostOnly -> Ok "undefined"
+            // Phase 124 — `dReq` here was the TS mirror of the F# decoder's own fallback: the
+            // encoder emitted the key unconditionally, so the decoder demanded it, and the pair
+            // agreed with each other while contradicting the IDL that declared the slot omitted
+            // at its default. There is no fallback now; an unrenderable default refuses the module.
             | OmitDefault d ->
-                match tsDefaultLit disc f.Type d with
-                | Some lit -> "dDef(" + key + ", fs, " + tsDecFn f.Type + ", " + lit + ")"
-                // `tsSpecPieceOf` fell back to always-emit, so decode is required too.
-                | None -> "dReq(" + key + ", fs, " + tsDecFn f.Type + ")"
+                tsDefaultLit idl disc f.Type d
+                |> Result.map (fun lit -> "dDef(" + key + ", fs, " + tsDecFn f.Type + ", " + lit + ")")
 
-    let private tsFieldObject (disc: string) (extra: (string * string) list) (fields: IdlField list) : string =
-        let pairs =
-            (extra |> List.map (fun (k, v) -> k + ": " + v))
-            @ (fields |> List.map (fun f -> tsSourceStr f.Name + ": " + tsDecField disc f))
-
-        "{ " + String.concat ", " pairs + " }"
+    let private tsFieldObject
+        (idl: Idl)
+        (disc: string)
+        (extra: (string * string) list)
+        (fields: IdlField list)
+        : Result<string, CodegenError> =
+        fields
+        |> List.map (fun f -> tsDecField idl disc f |> Result.map (fun e -> tsSourceStr f.Name + ": " + e))
+        |> sequenceR
+        |> Result.map (fun decoded ->
+            let pairs = (extra |> List.map (fun (k, v) -> k + ": " + v)) @ decoded
+            "{ " + String.concat ", " pairs + " }")
 
     let private tsEnumDecoder (e: IdlEnum) =
         // TS holds an enum AS its wire string — there is no second representation
@@ -2803,7 +3066,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         + cases
         + "]);"
 
-    let private tsUnionDecoder (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
+    let private tsUnionDecoder (idl: Idl) (disc: string) (tokens: HardenPolicy) (u: IdlUnion) =
         let argList =
             match u.Params with
             | [] -> "j"
@@ -2815,23 +3078,23 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 | [] -> ""
                 | ls -> (ls |> String.concat "\n") + "\n"
 
-            ann
-            + "    case "
-            + tsSourceStr c.Tag
-            + ": return "
-            + tsFieldObject disc [ tsDiscKey disc, tsSourceStr c.Tag ] c.Fields
-            + ";"
+            tsFieldObject idl disc [ tsDiscKey disc, tsSourceStr c.Tag ] c.Fields
+            |> Result.map (fun obj -> ann + "    case " + tsSourceStr c.Tag + ": return " + obj + ";")
 
-        let tagged =
-            "  if (isTagged(j)) {\n    const fs = j;\n    switch ("
-            + tsDiscProp disc "j"
-            + ") {\n"
-            + (u.Cases |> List.map arm |> String.concat "\n")
-            + "\n      default: return dFail("
-            + tsSourceStr ("unknown " + u.Name + " case: ")
-            + " + "
-            + tsDiscProp disc "j"
-            + ");\n    }\n  }"
+        let taggedR =
+            u.Cases
+            |> List.map arm
+            |> concatR "\n"
+            |> Result.map (fun arms ->
+                "  if (isTagged(j)) {\n    const fs = j;\n    switch ("
+                + tsDiscProp disc "j"
+                + ") {\n"
+                + arms
+                + "\n      default: return dFail("
+                + tsSourceStr ("unknown " + u.Name + " case: ")
+                + " + "
+                + tsDiscProp disc "j"
+                + ");\n    }\n  }")
 
         // A transparent union also accepts its single-field case bare, and re-wraps
         // it so the encoder can flatten it back to the same bytes.
@@ -2852,34 +3115,40 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                 | _ -> failwithf "transparent union case '%s' must have exactly one field" ttag
             | None -> "  return dFail(" + tsSourceStr ("expected a " + u.Name + " object") + ");"
 
-        (u.Cases
-         |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
-         |> String.concat "")
-        + "function dec"
-        + u.Name
-        + "("
-        + argList
-        + ") {\n"
-        + tagged
-        + "\n"
-        + untagged
-        + "\n}"
+        taggedR
+        |> Result.map (fun tagged ->
+            (u.Cases
+             |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
+             |> String.concat "")
+            + "function dec"
+            + u.Name
+            + "("
+            + argList
+            + ") {\n"
+            + tagged
+            + "\n"
+            + untagged
+            + "\n}")
 
-    let private tsRecordDecoder (disc: string) (r: IdlRecord) =
-        tsFieldAnnotationHeader r.Name r.Fields
-        + "function dec"
-        + r.Name
-        + "(j) {\n  const fs = dObj(j);\n  return "
-        + tsFieldObject disc [] r.Fields
-        + ";\n}"
+    let private tsRecordDecoder (idl: Idl) (disc: string) (r: IdlRecord) =
+        tsFieldObject idl disc [] r.Fields
+        |> Result.map (fun obj ->
+            tsFieldAnnotationHeader r.Name r.Fields
+            + "function dec"
+            + r.Name
+            + "(j) {\n  const fs = dObj(j);\n  return "
+            + obj
+            + ";\n}")
 
-    let private tsSpecDecoder (disc: string) (k: IdlKind) =
-        tsKindAnnotationHeader k
-        + "function dec"
-        + k.Tag
-        + "Spec(j) {\n  const fs = dObj(j);\n  return "
-        + tsFieldObject disc [ tsDiscKey disc, tsSourceStr k.Tag ] k.Fields
-        + ";\n}"
+    let private tsSpecDecoder (idl: Idl) (disc: string) (k: IdlKind) =
+        tsFieldObject idl disc [ tsDiscKey disc, tsSourceStr k.Tag ] k.Fields
+        |> Result.map (fun obj ->
+            tsKindAnnotationHeader k
+            + "function dec"
+            + k.Tag
+            + "Spec(j) {\n  const fs = dObj(j);\n  return "
+            + obj
+            + ";\n}")
 
     /// The decode runtime prelude — the JS mirror of the F# `dObj`/`dReq`/… helpers.
     /// `isTagged` tests the DECLARED discriminator (Phase 108); the default key
@@ -2924,7 +3193,14 @@ const dPresent = (name, fs) => (name in fs) ? null : undefined;"""
     /// kinds — `encodeNode(n)` returns canonical wire byte-identical to the F#
     /// generated `encodeNode`. Plain JS string-building: no FSharp.Core, no .NET,
     /// no imports — a genuinely independent host.
-    let typescriptModule (idl: Idl) (kindTags: string list) : string =
+    ///
+    /// **Phase 124 — this returns a `Result` now, and the channel is the point.** The F# backend
+    /// has refused an unemittable construct since the IDL's first codegen leg; this one had no
+    /// error case anywhere, so an unrenderable default here could only be silently absorbed —
+    /// the encoder emitted the key unconditionally and the decoder demanded it, in an artefact
+    /// whose own IDL said the slot was omitted at its default. A backend that emits source for a
+    /// declaration it cannot honour is worse than one that refuses.
+    let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         let kinds =
             kindTags
             |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
@@ -3093,27 +3369,31 @@ const plain = (pairs) =>
                 // this is `id` then `kind`, i.e. exactly the previous hand-built literal.
                 // Phase 111 — declared order keeps the construction order instead:
                 // id, kind, then the envelope as declared.
-                let nodePairsUnsorted =
-                    ("id", "[\"id\", encStr(n.id)]")
-                    :: ("kind", "[\"kind\", encKind(n.kind)]")
-                    :: (idl.NodeFields |> List.map (fun f -> f.Name, tsSpecPieceOf disc "n" f))
+                idl.NodeFields
+                |> List.map (fun f -> tsSpecPieceOf idl disc "n" f |> Result.map (fun p -> f.Name, p))
+                |> sequenceR
+                |> Result.map (fun envelopePairs ->
+                    let nodePairsUnsorted =
+                        ("id", "[\"id\", encStr(n.id)]")
+                        :: ("kind", "[\"kind\", encKind(n.kind)]")
+                        :: envelopePairs
 
-                let nodePairs =
-                    (match idl.Wire.KeyOrder with
-                     | KeyOrder.Sorted ->
-                         nodePairsUnsorted
-                         |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
-                     | KeyOrder.Declared -> nodePairsUnsorted)
-                    |> List.map snd
-                    |> String.concat ", "
+                    let nodePairs =
+                        (match idl.Wire.KeyOrder with
+                         | KeyOrder.Sorted ->
+                             nodePairsUnsorted
+                             |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
+                         | KeyOrder.Declared -> nodePairsUnsorted)
+                        |> List.map snd
+                        |> String.concat ", "
 
-                "function encKind(k) {\n  switch ("
-                + tsDiscProp disc "k"
-                + ") {\n"
-                + arms
-                + "\n  }\n}\n\nfunction encodeNode(n) {\n  return plain(["
-                + nodePairs
-                + "]);\n}"
+                    "function encKind(k) {\n  switch ("
+                    + tsDiscProp disc "k"
+                    + ") {\n"
+                    + arms
+                    + "\n  }\n}\n\nfunction encodeNode(n) {\n  return plain(["
+                    + nodePairs
+                    + "]);\n}")
             else
                 // Phase 109 — the FLAT shape: the in-memory node IS the flat wire
                 // object, so the kind pairs are read from the node itself and
@@ -3128,21 +3408,24 @@ const plain = (pairs) =>
 
                 let envelopeConcat =
                     match idl.NodeFields with
-                    | [] -> ""
+                    | [] -> Ok ""
                     | fields ->
-                        ".concat(["
-                        + (fields |> List.map (tsSpecPieceOf disc "n") |> String.concat ", ")
-                        + "])"
+                        fields
+                        |> List.map (tsSpecPieceOf idl disc "n")
+                        |> concatR ", "
+                        |> Result.map (fun pieces -> ".concat([" + pieces + "])")
 
-                "function encKindPairs(n) {\n  switch ("
-                + tsDiscProp disc "n"
-                + ") {\n"
-                + arms
-                + "\n  }\n}\n\nfunction encodeNode(n) {\n  return typed("
-                + tsDiscProp disc "n"
-                + ", [[\"id\", encStr(n.id)]].concat(encKindPairs(n))"
-                + envelopeConcat
-                + ");\n}"
+                envelopeConcat
+                |> Result.map (fun envelope ->
+                    "function encKindPairs(n) {\n  switch ("
+                    + tsDiscProp disc "n"
+                    + ") {\n"
+                    + arms
+                    + "\n  }\n}\n\nfunction encodeNode(n) {\n  return typed("
+                    + tsDiscProp disc "n"
+                    + ", [[\"id\", encStr(n.id)]].concat(encKindPairs(n))"
+                    + envelope
+                    + ");\n}")
 
         let enums, _, records = referenced idl kinds
 
@@ -3161,42 +3444,47 @@ const plain = (pairs) =>
                 + tsDiscProp disc "j"
                 + ");\n  }\n}\n\n"
 
+            let envelopeDecoded =
+                idl.NodeFields
+                |> List.map (fun f -> tsDecField idl disc f |> Result.map (fun e -> ", " + f.Name + ": " + e))
+                |> concatR ""
+
             let decNode =
-                if not flat then
-                    "function decNode(j) {\n  const fs = dObj(j);\n  return { id: dReq('id', fs, dStr), kind: dReq('kind', fs, decKind)"
-                    + (idl.NodeFields
-                       |> List.map (fun f -> ", " + f.Name + ": " + tsDecField disc f)
-                       |> String.concat "")
-                    + " };\n}\n\n"
-                else
-                    // Phase 109 — flat: the node object is the kind body; the id
-                    // (and envelope) merge beside the decoded spec's own keys.
-                    "function decNode(j) {\n  const fs = dObj(j);\n  return Object.assign({}, decKind(j), { id: dReq('id', fs, dStr)"
-                    + (idl.NodeFields
-                       |> List.map (fun f -> ", " + f.Name + ": " + tsDecField disc f)
-                       |> String.concat "")
-                    + " });\n}\n\n"
+                envelopeDecoded
+                |> Result.map (fun envelope ->
+                    if not flat then
+                        "function decNode(j) {\n  const fs = dObj(j);\n  return { id: dReq('id', fs, dStr), kind: dReq('kind', fs, decKind)"
+                        + envelope
+                        + " };\n}\n\n"
+                    else
+                        // Phase 109 — flat: the node object is the kind body; the id
+                        // (and envelope) merge beside the decoded spec's own keys.
+                        "function decNode(j) {\n  const fs = dObj(j);\n  return Object.assign({}, decKind(j), { id: dReq('id', fs, dStr)"
+                        + envelope
+                        + " });\n}\n\n")
 
-            decKind
-            + decNode
-            + "// Structural decode. The policy layer (diagnostics, §16 lenient-accept, the\n"
-            + "// reject set) composes ABOVE this — see the Phase 672 note in the generator.\n"
-            + "function decodeNode(s) {\n  try {\n    return { ok: true, value: decNode(JSON.parse(s)) };\n  } catch (e) {\n    return { ok: false, error: String(e && e.message ? e.message : e) };\n  }\n}"
+            decNode
+            |> Result.map (fun decNode ->
+                decKind
+                + decNode
+                + "// Structural decode. The policy layer (diagnostics, §16 lenient-accept, the\n"
+                + "// reject set) composes ABOVE this — see the Phase 672 note in the generator.\n"
+                + "function decodeNode(s) {\n  try {\n    return { ok: true, value: decNode(JSON.parse(s)) };\n  } catch (e) {\n    return { ok: false, error: String(e && e.message ? e.message : e) };\n  }\n}")
 
-        [ [ prelude ]
-          records |> List.map (tsRecordEncoder disc)
-          unions |> List.map (tsUnionEncoder disc idl.Harden)
-          kinds |> List.map (tsSpecEncoder disc flat)
+        [ [ Ok prelude ]
+          records |> List.map (tsRecordEncoder idl disc)
+          unions |> List.map (tsUnionEncoder idl disc idl.Harden)
+          kinds |> List.map (tsSpecEncoder idl disc flat)
           [ kindDispatch ]
-          [ tsDecodePrelude disc ]
-          enums |> List.map tsEnumDecoder
-          records |> List.map (tsRecordDecoder disc)
-          unions |> List.map (tsUnionDecoder disc idl.Harden)
-          kinds |> List.map (tsSpecDecoder disc)
+          [ Ok(tsDecodePrelude disc) ]
+          enums |> List.map (tsEnumDecoder >> Ok)
+          records |> List.map (tsRecordDecoder idl disc)
+          unions |> List.map (tsUnionDecoder idl disc idl.Harden)
+          kinds |> List.map (tsSpecDecoder idl disc)
           [ kindDecodeDispatch ]
-          [ "export { encodeNode, decodeNode };" ] ]
+          [ Ok "export { encodeNode, decodeNode };" ] ]
         |> List.concat
-        |> String.concat "\n\n"
+        |> concatR "\n\n"
 
     // -----------------------------------------------------------------------
     // Phase 317 syntax-tree-emission leg + Phase 321 trust boundary. The
@@ -3408,10 +3696,16 @@ const plain = (pairs) =>
                 | Optional -> Ok(pascal f.Name + " = None")
                 | HostOnly -> Ok(pascal f.Name + " = " + hostOnlyLit f)
                 // OmitDefault absent → restore the identity default value.
+                //
+                // Phase 124 — the refusal is the module emitters' own `UnsupportedDefault`,
+                // rendered into the plain-string channel this leg publishes rather than reworded.
+                // Two legs answering the same defect with two different sentences is how a reader
+                // ends up believing they are two different defects.
                 | OmitDefault d ->
-                    match fsDefaultLit idl.Enums f.Type d with
-                    | Some e -> Ok(pascal f.Name + " = " + e)
-                    | None -> Error(sprintf "fsharpValue: unrenderable omit-default for '%s' on %s" f.Name where)
+                    fsDefaultLit idl f.Type d
+                    |> Result.map (fun e -> pascal f.Name + " = " + e)
+                    |> Result.mapError (fun e ->
+                        sprintf "fsharpValue: %s (omit-default for '%s' on %s)" (CodegenError.describe e) f.Name where)
                 | Required -> Error(sprintf "fsharpValue: %s missing required field '%s'" where f.Name)
             | Some(_, fv) ->
                 match f.Opt, fsharpValue idl f.Type fv with

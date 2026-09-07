@@ -1,5 +1,57 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-07 — D26: a default the generator cannot render is a REFUSAL, not a fallback — and the fallback was the whole defect
+
+**Decided (Phase 124, `0.21.0`).** `Fuaran.Core.Idl.Codegen` renders a value-carrying union
+default in both target languages, and — the half that mattered more — an unrenderable default
+refuses generation with `CodegenError.UnsupportedDefault` on every path rather than being absorbed.
+`Gen.typescriptModule` returns a `Result` for the first time, which is what makes "every path"
+literally true.
+
+**The two halves are one change because the fallback is what made the gap invisible.** The missing
+literal was cheap to describe — `fsDefaultLit`, `tsDefaultLit` and `tsIsDefault` admitted a
+NULLARY union case and nothing more, so `Binding.Static(Some 0)` was unrenderable — but the
+consequence of that `None` was not "no default". It was a documented fallback to always-emit on the
+encode side and `dReq` on the decode side: two halves that agreed with each other perfectly and with
+the vocabulary not at all. The IDL said the slot is omitted at its identity default; the emitted
+code said the key is always present. Nothing was red, and nothing could be, because the artefact was
+internally consistent. A generator that can silently disagree with its own input is a worse defect
+than one that cannot express something.
+
+**Where it was, and was not, already caught.** A KIND-SPEC field was refused, because
+`defaultsDecl` runs `defaultExpr` unconditionally from `fsharpModule` — which is why a
+downstream consumer's attempt to declare exactly this default in a UI vocabulary failed loudly
+rather than shipping. That loud failure is the reason the gap was ever named. Four paths had no such
+leg: a **projected** kind (Phase 945 suppresses the generated constructor, and the skip took the
+only default check with it), a **union-case** field, a **record** field, and the **entire TypeScript
+backend**, which had no error case at all. The node envelope refused, but through a `failwithf`
+inside a function that already returned `Result`.
+
+**Refusal by propagation, not by a pre-flight gate.** A single walk over the declaration, run at
+each entry point before any emission, would have been a much smaller change and would have covered
+these paths too. It was rejected for one reason: it leaves the fallback arms standing. F# offers no
+total way to consume a `Result` at an emission site, so a gated design keeps code that still READS
+as "fall back to always-emit", correct only by an invariant asserted in a comment — and the next
+emission site added is not obliged to notice. Propagating the `Result` deletes the arms. The cost
+was a wide, mechanical refactor through the encoder and decoder emitters of both backends, paid
+once, and measured against byte-identity guards the whole way.
+
+**The admissible set is decided by the PATTERN position, not by what renders.** The encoder's omit
+test for a union field is a `match` rather than an equality (Phase 691: a union whose fields reach a
+closure supports no equality), while the decoder's restore and the smart constructor use the same
+string as an expression. So the literal has to be legal in both, which is why a non-empty list and a
+non-finite float stay refused although both render perfectly well as expressions. `defaultExpr` was
+folded into the same renderer for the same reason: two renderers over overlapping sets meant the
+constructor could fill a default the encoder could not test for.
+
+**The go-red proof is the phase, not an addendum to it.** No test asserted `UnsupportedDefault`
+before this — the type had existed since the first codegen leg and nothing measured that it ever
+arrived. Each formerly-silent path is now planted with an unrenderable default and asserted to
+refuse BY NAME, with a positive control proving the same vocabulary generates once the default is
+removed (a refusal arriving for an unrelated reason is a probe measuring the wrong question), and
+the TypeScript round trip is EXECUTED under node over both sides of the default — the key emitted
+when the value differs, absent and restored when it does not.
+
 ## 2026-09-03 — D25: the discriminator is ROW-SET PRESERVATION, not frame boundedness — and `rowsEvaluated` does not measure ordering work
 
 **Decided (operator, 2026-09-02).** D24's finding is resolved in the direction it pointed. From

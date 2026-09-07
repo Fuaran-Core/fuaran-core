@@ -154,20 +154,25 @@ module ProposalSpike =
         | Error e -> leg "generate" false (sprintf "the F# structural layer does not generate: %A" e), None
         | Ok fsharp ->
             let schema = Gen.jsonSchema post
-            let ts = Gen.typescriptModule post tags
 
-            match Json.parse schema with
-            | Error e -> leg "generate" false ("the generated JSON schema is not parseable JSON: " + e), None
-            | Ok _ ->
-                leg
-                    "generate"
-                    true
-                    (sprintf
-                        "F# %d chars, TypeScript %d chars, JSON schema %d chars — all three legs emit"
-                        (String.length fsharp)
-                        (String.length ts)
-                        (String.length schema)),
-                Some ts
+            // Phase 124 — the TypeScript backend refuses an unrenderable declared default the way
+            // the F# one already did, so this leg reports it as a failed generation rather than
+            // shipping a module whose omit tests contradict the delta's own IDL.
+            match Gen.typescriptModule post tags with
+            | Error e -> leg "generate" false (sprintf "the TypeScript structural layer does not generate: %A" e), None
+            | Ok ts ->
+                match Json.parse schema with
+                | Error e -> leg "generate" false ("the generated JSON schema is not parseable JSON: " + e), None
+                | Ok _ ->
+                    leg
+                        "generate"
+                        true
+                        (sprintf
+                            "F# %d chars, TypeScript %d chars, JSON schema %d chars — all three legs emit"
+                            (String.length fsharp)
+                            (String.length ts)
+                            (String.length schema)),
+                    Some ts
 
     let private fuzzLeg
         (post: Idl)
