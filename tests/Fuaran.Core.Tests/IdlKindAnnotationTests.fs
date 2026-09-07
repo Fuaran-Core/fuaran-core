@@ -111,8 +111,15 @@ let private emitFs (idl: Idl) =
     | Ok s -> s
     | Error e -> failtestf "codegen rejected the vocabulary: %A" e
 
-let private emitTs (idl: Idl) =
-    Gen.typescriptModule idl [ "Legacy"; "Note" ]
+/// Phase 124 — `Gen.typescriptModule` refuses a declaration it cannot render (the TypeScript
+/// backend gained a refusal channel), so every call site unwraps. A refusal HERE is a codegen
+/// defect rather than an expectation: the vocabularies below declare nothing unrenderable.
+let private emitTsModule (idl: Idl) (tags: string list) : string =
+    match Gen.typescriptModule idl tags with
+    | Ok src -> src
+    | Error e -> failwithf "TypeScript codegen rejected the vocabulary: %A" e
+
+let private emitTs (idl: Idl) = emitTsModule idl [ "Legacy"; "Note" ]
 
 let private snapshotOf (idl: Idl) =
     match Diff.parse (Artifact.render idl) with

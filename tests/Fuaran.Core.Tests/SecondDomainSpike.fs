@@ -354,6 +354,14 @@ let private paragraphMissingRuns =
             docIdl.Kinds
             |> List.map (fun k -> if k.Tag = "Paragraph" then { k with Fields = [] } else k) }
 
+/// Phase 124 — `Gen.typescriptModule` refuses a declaration it cannot render (the TypeScript
+/// backend gained a refusal channel), so every call site unwraps. A refusal HERE is a codegen
+/// defect rather than an expectation: the vocabularies below declare nothing unrenderable.
+let private emitTsModule (idl: Idl) (tags: string list) : string =
+    match Gen.typescriptModule idl tags with
+    | Ok src -> src
+    | Error e -> failwithf "TypeScript codegen rejected the vocabulary: %A" e
+
 [<Tests>]
 let tests =
     testList
@@ -623,7 +631,7 @@ let tests =
               | Ok corpus ->
                   let fixtures = inSliceFixtures corpus
                   let tags = docIdl.Kinds |> List.map (fun k -> k.Tag)
-                  let tsModule = Gen.typescriptModule docIdl tags
+                  let tsModule = emitTsModule docIdl tags
 
                   let jsStr (s: string) = Text.Json.JsonSerializer.Serialize s
 

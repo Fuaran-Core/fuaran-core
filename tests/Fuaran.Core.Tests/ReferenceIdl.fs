@@ -119,7 +119,13 @@ let refIdl: Idl =
                 opt "origin" (TRecord "Point")
                 req "raw" TOpaque
                 req "series" series
-                req "value" (TUnion("Slot", [ TFloat ])) ]
+                // Phase 124 — the VALUE-CARRYING union default. `Slot.Fixed` takes a payload, so
+                // this is the class the generator answered `None` for until 124: the F# emitter
+                // could not write the literal, and the documented consequence of that `None` was
+                // a silent fallback to always-emit, in an artefact whose own IDL said the slot is
+                // omitted at its identity default. `level` beside it carries the ENUM default, so
+                // the two omit-at-default classes are certified side by side on one kind.
+                omit "value" (TUnion("Slot", [ TFloat ])) (VUnion("Fixed", [ "value", VFloat 0.0 ])) ]
           kind "Note" "content" [ req "body" (TUnion("Text", [])) ] ]
       Unions =
         [ { Name = "Slot"
@@ -327,6 +333,25 @@ let measure1 =
 let private measure1Wire =
     """{"id":"measure-1","kind":{"$type":"Measure","label":{"$type":"Inline","text":"Revenue"},"level":"high","origin":{"x":1.5,"y":-2},"raw":"<opaque>","series":[1,2,3],"value":{"$type":"Fixed","value":1234.5}}}"""
 
+/// The same kind with BOTH of its omit-at-default fields sitting exactly ON their defaults —
+/// the enum one (`level`) and the Phase 124 VALUE-CARRYING union one (`value`) — so neither
+/// appears on the wire and both are restored on decode. `measure-1` above is the other half of
+/// the pair: it authors `value` AWAY from the default, so the key is emitted. Between them they
+/// pin both directions of an omit test the generator could not even write before Phase 124.
+let measureAtDefault =
+    VNode(
+        "measure-2",
+        "Measure",
+        [ "label", literal "Idle"
+          "level", VEnum "low"
+          "raw", VOpaque
+          "series", VJson(JArr [])
+          "value", VUnion("Fixed", [ "value", VFloat 0.0 ]) ]
+    )
+
+let private measureAtDefaultWire =
+    """{"id":"measure-2","kind":{"$type":"Measure","label":{"$type":"Inline","text":"Idle"},"raw":"<opaque>","series":[]}}"""
+
 /// The ENVELOPED form, plus an on-the-wire closure sentinel and an omit-at-default
 /// field sitting exactly on its default (so it emits nothing).
 let group1 =
@@ -394,6 +419,7 @@ let embedAdvisory1 =
 let nodeCases: (string * IdlValue * string) list =
     [ "note-1", note1, note1Wire
       "measure-1", measure1, measure1Wire
+      "measure-2", measureAtDefault, measureAtDefaultWire
       "group-1", group1, group1Wire
       "link-1", link1, link1Wire
       "embed-1", embed1, embed1Wire

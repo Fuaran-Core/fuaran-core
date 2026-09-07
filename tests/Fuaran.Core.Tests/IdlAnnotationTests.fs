@@ -118,6 +118,14 @@ let private theOne (pick: Diff.Change -> bool) (cs: Diff.Classification list) =
     | other ->
         failtestf "expected exactly one matching change; got %d of %A" (List.length other) (cs |> List.map _.Change)
 
+/// Phase 124 — `Gen.typescriptModule` refuses a declaration it cannot render (the TypeScript
+/// backend gained a refusal channel), so every call site unwraps. A refusal HERE is a codegen
+/// defect rather than an expectation: the vocabularies below declare nothing unrenderable.
+let private emitTsModule (idl: Idl) (tags: string list) : string =
+    match Gen.typescriptModule idl tags with
+    | Ok src -> src
+    | Error e -> failwithf "TypeScript codegen rejected the vocabulary: %A" e
+
 [<Tests>]
 let tests =
     testList
@@ -268,7 +276,7 @@ let tests =
 
           testCase "TS: a deprecated case is named at its own case arm, in both directions" (fun _ ->
               let src =
-                  Gen.typescriptModule (withAnnotations (deprecated (Some "Ref") None) Annotations.Empty) [ "Note" ]
+                  emitTsModule (withAnnotations (deprecated (Some "Ref") None) Annotations.Empty) [ "Note" ]
 
               let hits =
                   src.Split('\n')
@@ -281,8 +289,7 @@ let tests =
           testCase "TS: a field's annotation is rendered on the function that owns it, NAMING the field" (fun _ ->
               // The emitted module is plain JS: a field is an inline entry in a
               // one-line object literal, so it has no declaration line of its own.
-              let src =
-                  Gen.typescriptModule (withAnnotations Annotations.Empty inProcessOnly) [ "Note" ]
+              let src = emitTsModule (withAnnotations Annotations.Empty inProcessOnly) [ "Note" ]
 
               Expect.stringContains src "// `Note.label` is in-process only" "the field is named, not merely implied"
 
@@ -292,7 +299,7 @@ let tests =
                    ENCODER is deprecated, which is false")
 
           testCase "TS: an unannotated vocabulary's emitted JS is unchanged" (fun _ ->
-              let bare = Gen.typescriptModule plainIdl [ "Note" ]
+              let bare = emitTsModule plainIdl [ "Note" ]
               Expect.isFalse (bare.Contains "@deprecated") "nothing to say"
               Expect.isFalse (bare.Contains "in-process only") "nothing to say")
 

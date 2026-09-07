@@ -106,6 +106,14 @@ let private trustedWire =
          | Ok w -> w
          | Error e -> failwithf "interpreter failed to encode the hostile node: %s" e)
 
+/// Phase 124 — `Gen.typescriptModule` refuses a declaration it cannot render (the TypeScript
+/// backend gained a refusal channel), so every call site unwraps. A refusal HERE is a codegen
+/// defect rather than an expectation: the vocabularies below declare nothing unrenderable.
+let private emitTsModule (idl: Idl) (tags: string list) : string =
+    match Gen.typescriptModule idl tags with
+    | Ok src -> src
+    | Error e -> failwithf "TypeScript codegen rejected the vocabulary: %A" e
+
 [<Tests>]
 let tests =
     testList
@@ -447,7 +455,7 @@ let tests =
               // node over the 8 fixtures, and assert each wire string equals the vendored
               // corpus (== the F# generated encoder's output). This is the cross-host
               // byte-identity that underwrites cross-host attestation (Phase 320).
-              let tsModule = Gen.typescriptModule miniIdl generatedKinds
+              let tsModule = emitTsModule miniIdl generatedKinds
 
               let fixturesJs =
                   cases
@@ -512,7 +520,7 @@ let tests =
               // backends is what makes the saving multiply across hosts rather than
               // accruing only to F#, and it re-proves cross-host byte-identity from
               // the decode side (Phase 320's attestation rests on both directions).
-              let tsModule = Gen.typescriptModule miniIdl generatedKinds
+              let tsModule = emitTsModule miniIdl generatedKinds
 
               let jsStr (s: string) = Text.Json.JsonSerializer.Serialize s
 
@@ -601,7 +609,7 @@ let tests =
                       | Ok w -> w
                       | Error m -> failtestf "F# encode failed on vector %d: %s" i m)
 
-              let tsModule = Gen.typescriptModule miniIdl generatedKinds
+              let tsModule = emitTsModule miniIdl generatedKinds
 
               let vectorsJs =
                   vectors
@@ -754,7 +762,7 @@ let tests =
               "scaffold injection-safety (TS): a hostile wire string cannot break out of the generated literal"
               (fun _ ->
                   let valueSrc = Gen.typescriptValue hostileNode
-                  let tsModule = Gen.typescriptModule miniIdl generatedKinds
+                  let tsModule = emitTsModule miniIdl generatedKinds
 
                   let harness = tsModule + "\n\nconsole.log(encodeNode(" + valueSrc + "));\n"
 

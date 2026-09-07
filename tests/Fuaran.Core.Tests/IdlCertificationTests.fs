@@ -1,5 +1,6 @@
 module Fuaran.Core.Tests.IdlCertificationTests
 
+open System
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
@@ -192,6 +193,330 @@ let byteIdentity =
               match Encode.encode refIdl mutated with
               | Ok actual -> Expect.notEqual actual expected "negative control unexpectedly matched"
               | Error m -> failtestf "negative control failed to encode: %s" m) ]
+
+// ---------------------------------------------------------------------------
+// Phase 124 — the value-carrying union default, and the refusal beside it.
+//
+// Two claims, and the second is the load-bearing one.
+//
+//   (1) A payload-carrying `OmitDefault` generates encoder and decoder arms that
+//       AGREE with the declaration, in F# and in TypeScript. `refIdl`'s
+//       `Measure.value` carries `Slot.Fixed(0.0)`, and the two `measure-*` fixtures
+//       stand on either side of it: `measure-1` authors the slot away from its
+//       default (so the key is emitted), `measure-2` authors it exactly at the
+//       default (so it is not, and decode restores it). The TypeScript half is
+//       EXECUTED under node, which is the only round trip here that runs rather
+//       than reads.
+//
+//   (2) A declaration the generator cannot render REFUSES, on every path. Before
+//       this phase the literal emitters answered `None` and four of the six paths
+//       that consult them fell back to always-emit or `dReq` — so an artefact
+//       could contradict its own IDL with a green build. Each go-red case below
+//       names one of those paths, and each of them PASSED (silently emitted a
+//       module) against the pre-124 generator.
+//
+// The honesty boundary on the F# half: this suite cannot invoke the F# compiler,
+// so what it pins is the emitted TEXT — that the omit test is a `match` against the
+// payload-carrying literal and that the decoder restores the same literal. That the
+// literal is legal in both a pattern and an expression position is a compile-time
+// property, and the vocabulary whose generated module this repository actually
+// COMPILES is the vendored `docIdl` one, which declares no such default.
+// ---------------------------------------------------------------------------
+
+/// A vocabulary carrying one deliberately UNRENDERABLE default, placed at the named slot.
+/// `TMap` has no default literal in any backend — its JS form compares by reference and its
+/// F# form is not a pattern — so it is the shape each case below plants.
+let private unrenderable = VMap [ "k", VStr "v" ]
+
+let private oneKind (fields: IdlField list) : IdlKind =
+    { Tag = "Probe"
+      Category = "content"
+      Annotations = Annotations.Empty
+      Fields = fields }
+
+let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+    { Name = name
+      Type = t
+      Opt = opt
+      Annotations = Annotations.Empty }
+
+/// The smallest vocabulary that generates at all: one kind, one required string field.
+let private probeIdl: Idl =
+    { Kinds = [ oneKind [ field "text" TStr Required ] ]
+      Unions = []
+      Enums = []
+      Records = []
+      Defaults = []
+      NodeFields = []
+      Ops = []
+      Wire = WireShape.Default
+      Harden = HardenPolicy.Default }
+
+let private badMapField = field "bag" (TMap TStr) (OmitDefault unrenderable)
+
+/// Each formerly-silent path, as a vocabulary that plants the unrenderable default there.
+let private silentPaths: (string * Idl) list =
+    [ "record field",
+      { probeIdl with
+          Records =
+              [ { Name = "Bag"
+                  Fields = [ badMapField ] } ]
+          Kinds = [ oneKind [ field "bag" (TRecord "Bag") Required ] ] }
+      "union-case field",
+      { probeIdl with
+          Unions =
+              [ { Name = "Holder"
+                  Params = []
+                  Cases =
+                    [ { Tag = "Some"
+                        Fields = [ badMapField ]
+                        Annotations = Annotations.Empty } ] } ]
+          Kinds = [ oneKind [ field "held" (TUnion("Holder", [])) Required ] ] }
+      "kind-spec field",
+      { probeIdl with
+          Kinds = [ oneKind [ badMapField ] ] }
+      "node envelope field",
+      { probeIdl with
+          NodeFields = [ badMapField ] } ]
+
+let private probeTags (idl: Idl) = idl.Kinds |> List.map _.Tag
+
+let private isUnsupportedDefault (where: string) (r: Result<string, CodegenError>) =
+    match r with
+    | Error(CodegenError.UnsupportedDefault _) -> ()
+    | Error other -> failtestf "%s: refused, but not as UnsupportedDefault: %A" where other
+    | Ok _ -> failtestf "%s: an unrenderable default GENERATED a module — the silent divergence is back" where
+
+[<Tests>]
+let valueCarryingDefaults =
+    testList
+        "Phase 124 — value-carrying union defaults"
+        [ testCase "the generated F# encoder tests the payload, not just the tag" (fun _ ->
+              match Gen.fsharpModule "Phase124.Generated" refIdl (refIdl.Kinds |> List.map _.Tag) with
+              | Error e -> failtestf "codegen rejected the reference vocabulary: %A" e
+              | Ok src ->
+                  // The omit test is a MATCH (Phase 691) against the full literal — a tag-only
+                  // test would omit the key for `Fixed(7.0)` too, which is a wire-visible lie.
+                  Expect.stringContains
+                      src
+                      "(match s.Value with | Slot.Fixed(0.0) -> None"
+                      "the encoder's omit test carries the payload"
+
+                  // The decoder restores the SAME literal, so an absent key rebuilds a value the
+                  // encoder will omit again — which is what makes the round trip closed.
+                  Expect.stringContains
+                      src
+                      "dDef \"value\" __fs (decSlot dFloat) (Slot.Fixed(0.0))"
+                      "the decoder restores the payload-carrying default"
+
+                  // And the smart constructor fills it, rather than taking it as a parameter.
+                  Expect.stringContains src "Value = Slot.Fixed(0.0)" "the smart constructor fills the default")
+
+          testCase "the generated TypeScript predicate and literal carry the payload" (fun _ ->
+              match Gen.typescriptModule refIdl (refIdl.Kinds |> List.map _.Tag) with
+              | Error e -> failtestf "TypeScript codegen rejected the reference vocabulary: %A" e
+              | Ok src ->
+                  Expect.stringContains
+                      src
+                      "s.value.$type === \"Fixed\" && s.value.value === 0"
+                      "the TS omit predicate conjoins the tag test with a test per declared field"
+
+                  Expect.stringContains
+                      src
+                      "{ $type: \"Fixed\", value: 0 }"
+                      "the TS decoder restores the payload-carrying default")
+
+          // The executed half. `measure-2` omits the slot on the wire and must come back with it;
+          // `measure-1` carries a non-default payload and must keep it. Read against the F#
+          // interpreter's own bytes, so a TS-only regression cannot hide behind a shared oracle.
+          testCase "node round-trips both sides of the payload-carrying default" (fun _ ->
+              match Gen.typescriptModule refIdl (refIdl.Kinds |> List.map _.Tag) with
+              | Error e -> failtestf "TypeScript codegen rejected the reference vocabulary: %A" e
+              | Ok tsModule ->
+                  let cases = nodeCases |> List.filter (fun (n, _, _) -> n.StartsWith "measure-")
+
+                  Expect.isGreaterThanOrEqual
+                      (List.length cases)
+                      2
+                      "both sides of the default must be present or the round trip is one-sided"
+
+                  let jsStr (s: string) = Text.Json.JsonSerializer.Serialize s
+
+                  let wireJs =
+                      cases
+                      |> List.map (fun (name, _, wire) -> sprintf "  [%s, %s]," (jsStr name) (jsStr wire))
+                      |> String.concat "\n"
+
+                  let harness =
+                      tsModule
+                      + "\n\nconst __wire = [\n"
+                      + wireJs
+                      + "\n];\n"
+                      + "for (const [name, s] of __wire) {\n"
+                      + "  const r = decodeNode(s);\n"
+                      + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + r.error));\n"
+                      + "}\n"
+
+                  let tmp =
+                      IO.Path.Combine(
+                          IO.Path.GetTempPath(),
+                          sprintf "fuaran-phase124-ts-%s.mjs" (Guid.NewGuid().ToString("N"))
+                      )
+
+                  IO.File.WriteAllText(tmp, harness)
+
+                  try
+                      let psi = ChildProcess.redirected "node" ("\"" + tmp + "\"")
+
+                      let proc =
+                          try
+                              Some(Diagnostics.Process.Start psi)
+                          with _ ->
+                              None
+
+                      match proc with
+                      | None -> skiptest "node not on PATH — the executed TS round trip is skipped"
+                      | Some p ->
+                          let stdout = p.StandardOutput.ReadToEnd()
+                          let stderr = p.StandardError.ReadToEnd()
+                          p.WaitForExit()
+
+                          if p.ExitCode <> 0 then
+                              failtestf "node failed running the generated TS module: %s" stderr
+
+                          let got =
+                              stdout.Replace("\r\n", "\n").Split('\n')
+                              |> Array.filter (fun l -> l <> "")
+                              |> Array.map (fun l ->
+                                  let parts = l.Split('\u0001')
+                                  parts.[0], parts.[1])
+                              |> Map.ofArray
+
+                          for name, _, wire in cases do
+                              match Map.tryFind name got with
+                              | Some actual ->
+                                  Expect.equal actual wire (sprintf "TS round-trip bytes differ for '%s'" name)
+                              | None -> failtestf "the TS module produced no output for '%s'" name
+                  finally
+                      try
+                          IO.File.Delete tmp
+                      with _ ->
+                          ())
+
+          // ---- the go-red half: each formerly-silent path refuses BY NAME ----
+
+          // The positive control for the four go-red cases below. Without it, each of them
+          // would pass just as happily if the probe vocabularies were unGENERATABLE for some
+          // unrelated reason — a refusal that arrives for the wrong cause is a probe measuring
+          // something other than the question it was asked.
+          testCase "the probe vocabularies generate once the unrenderable default is removed" (fun _ ->
+              let renderable (f: IdlField) =
+                  if f.Name = "bag" then { f with Opt = Optional } else f
+
+              let fix (idl: Idl) =
+                  { idl with
+                      Kinds =
+                          idl.Kinds
+                          |> List.map (fun k ->
+                              { k with
+                                  Fields = k.Fields |> List.map renderable })
+                      Records =
+                          idl.Records
+                          |> List.map (fun r ->
+                              { r with
+                                  Fields = r.Fields |> List.map renderable })
+                      Unions =
+                          idl.Unions
+                          |> List.map (fun u ->
+                              { u with
+                                  Cases =
+                                      u.Cases
+                                      |> List.map (fun c ->
+                                          { c with
+                                              Fields = c.Fields |> List.map renderable }) })
+                      NodeFields = idl.NodeFields |> List.map renderable }
+
+              for where, idl in silentPaths do
+                  let ok = fix idl
+
+                  match Gen.fsharpModule "Phase124.Control" ok (probeTags ok) with
+                  | Ok _ -> ()
+                  | Error e -> failtestf "control (F#, %s): the probe vocabulary does not generate at all: %A" where e
+
+                  match Gen.typescriptModule ok (probeTags ok) with
+                  | Ok _ -> ()
+                  | Error e ->
+                      failtestf "control (TypeScript, %s): the probe vocabulary does not generate at all: %A" where e)
+
+          testCase "an unrenderable default refuses the F# module on every path" (fun _ ->
+              for where, idl in silentPaths do
+                  Gen.fsharpModule "Phase124.Bad" idl (probeTags idl)
+                  |> isUnsupportedDefault ("F#, " + where))
+
+          testCase "an unrenderable default refuses the TypeScript module on every path" (fun _ ->
+              // The TS backend had NO error case at all before this phase — no `Result`, no
+              // refusal, nothing — so every one of these emitted a module whose omit tests
+              // contradicted the vocabulary it was generated from. The node-envelope path is
+              // absent here only because the TS envelope is emitted from the same
+              // `tsSpecPieceOf` the kind-spec path already covers.
+              for where, idl in silentPaths do
+                  Gen.typescriptModule idl (probeTags idl)
+                  |> isUnsupportedDefault ("TypeScript, " + where))
+
+          testCase "a PROJECTED kind's default is checked even though its constructor is not emitted" (fun _ ->
+              // Phase 945 skips the generated smart constructor for a projected kind, and that
+              // skip took the default check with it: the only leg that ran `defaultExpr` over a
+              // kind's fields was the constructor. The encoder still emitted the field.
+              let idl =
+                  { probeIdl with
+                      Kinds = [ oneKind [ badMapField ] ] }
+
+              let projection: Gen.KindProjection =
+                  { SpecDecl = "ProbeSpec = { Bag: Map<string, string> }"
+                    Encoder = "and private encProbeSpec (s: ProbeSpec) : JVal = JObj []"
+                    Decoder = "and private decProbeSpec (j: JVal) : Result<ProbeSpec, string> = Ok { Bag = Map.empty }"
+                    Mk = None }
+
+              let support =
+                  { Gen.GenSupport.Empty with
+                      KindProjections = Map.ofList [ "Probe", projection ] }
+
+              Gen.fsharpModuleWith support "Phase124.Projected" idl (probeTags idl)
+              |> isUnsupportedDefault "F#, projected kind")
+
+          testCase "the scaffold leg answers with the SAME typed case, rendered" (fun _ ->
+              // `Gen.fsharpValue` publishes a plain-string channel, so it cannot carry the case
+              // itself — but it can carry the case's own words rather than a second sentence of
+              // its own invention, which is what "folded into the same case" has to mean here.
+              let idl =
+                  { probeIdl with
+                      Kinds = [ oneKind [ badMapField ] ] }
+
+              match Gen.fsharpValue idl TNode (VNode("p", "Probe", [])) with
+              | Ok _ -> failtest "the scaffold emitted source for a default it cannot render"
+              | Error m ->
+                  Expect.stringContains
+                      m
+                      (CodegenError.describe (CodegenError.UnsupportedDefault(TMap TStr, unrenderable)))
+                      "the scaffold's refusal is the module emitters' own case, rendered")
+
+          testCase "a nullary spelling of a case that TAKES a payload is refused, not mis-emitted" (fun _ ->
+              // `VUnion(tag, [])` matched ANY union before Phase 124, so a default authored
+              // without its payload emitted the bare tag — which for a case with fields is a
+              // FUNCTION, not a value. Refusing is the honest answer; the declaration is wrong.
+              let idl =
+                  { probeIdl with
+                      Unions =
+                          [ { Name = "Holder"
+                              Params = []
+                              Cases =
+                                [ { Tag = "Of"
+                                    Fields = [ field "n" TInt Required ]
+                                    Annotations = Annotations.Empty } ] } ]
+                      Kinds = [ oneKind [ field "held" (TUnion("Holder", [])) (OmitDefault(VUnion("Of", []))) ] ] }
+
+              Gen.fsharpModule "Phase124.Nullary" idl (probeTags idl)
+              |> isUnsupportedDefault "F#, a payload-carrying case spelled nullary") ]
 
 // ---------------------------------------------------------------------------
 // The artifact round-trip law (task 1).

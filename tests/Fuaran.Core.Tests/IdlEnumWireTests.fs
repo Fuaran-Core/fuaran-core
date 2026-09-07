@@ -63,7 +63,15 @@ let private emitted =
     | Ok src -> src
     | Error e -> failwithf "codegen failed: %A" e
 
-let private ts = Gen.typescriptModule idl [ "Note" ]
+/// Phase 124 — `Gen.typescriptModule` refuses a declaration it cannot render (the TypeScript
+/// backend gained a refusal channel), so every call site unwraps. A refusal HERE is a codegen
+/// defect rather than an expectation: the vocabularies below declare nothing unrenderable.
+let private emitTsModule (idl: Idl) (tags: string list) : string =
+    match Gen.typescriptModule idl tags with
+    | Ok src -> src
+    | Error e -> failwithf "TypeScript codegen rejected the vocabulary: %A" e
+
+let private ts = emitTsModule idl [ "Note" ]
 
 [<Tests>]
 let tests =

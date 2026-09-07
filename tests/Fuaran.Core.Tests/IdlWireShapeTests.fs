@@ -59,6 +59,14 @@ let private roundTrip (idl: Idl) =
                 Expect.equal again bytes "round-trip is byte-stable"
                 bytes
 
+/// Phase 124 — `Gen.typescriptModule` refuses a declaration it cannot render (the TypeScript
+/// backend gained a refusal channel), so every call site unwraps. A refusal HERE is a codegen
+/// defect rather than an expectation: the vocabularies below declare nothing unrenderable.
+let private emitTsModule (idl: Idl) (tags: string list) : string =
+    match Gen.typescriptModule idl tags with
+    | Ok src -> src
+    | Error e -> failwithf "TypeScript codegen rejected the vocabulary: %A" e
+
 [<Tests>]
 let tests =
     testList
@@ -273,7 +281,7 @@ let tests =
                   Expect.isTrue (src.Contains "typedTag") "the F# module carries the declared-key helper"
                   Expect.isFalse (src.Contains "Canon.typed \"") "no default-keyed emission remains"
 
-              let ts = Gen.typescriptModule idl [ "Note" ]
+              let ts = emitTsModule idl [ "Note" ]
               Expect.isTrue (ts.Contains "'tag' in j") "the TS module's isTagged tests the declared key"
               Expect.isFalse (ts.Contains "$type") "no $type appears in a shaped TS module"
           } ]
