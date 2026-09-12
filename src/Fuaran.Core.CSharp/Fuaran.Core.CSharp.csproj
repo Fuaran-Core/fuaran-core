@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Fuaran.Core.CSharp</PackageId>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Description>Fuaran.Core.CSharp (Phase 128) — a C#-shaped facade over the closed F# unions a non-F# authoring veneer has to construct and read: the dataframe algebra (ColExpr / Transform and the vocabularies they range over), the artifact-function hole-declaration family (ValueSpace / HoleKind / HoleDecl / EffectClass / Signature), and the wire JSON model (JVal). Construction is factory methods, reading is Match / Switch, and nothing but the declared ToCore / FromCore bridge mentions an F# option, list, function or union type — so a C# or VB veneer can keep a strict "every authored value passes through the declared surface" rule instead of reflecting into F# union cases or hand-rolling a mirror. .NET-only: this package is NOT part of the Fable-clean set (a C# assembly is not Fable-compiled), and it adds no surface to the F# packages it wraps.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.DataFrame\Fuaran.Core.DataFrame.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

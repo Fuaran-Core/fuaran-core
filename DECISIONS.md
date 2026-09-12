@@ -1,5 +1,70 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-12 — D27: the D9 exception is taken for a C# facade, and its deletion criterion is written down beside it
+
+**Decided (Phase 128, `0.22.0`).** `Fuaran.Core.CSharp` ships a C#-shaped facade over the closed
+unions a non-F# authoring surface has to construct and read — the dataframe algebra (`ColExpr`,
+`Transform` and the vocabularies they range over), the artifact-function declaration family
+(`ValueSpace`, `HoleKind`, `HoleDecl`, `EffectClass`, `SigEntry`, `Signature`) and the wire JSON
+model (`JVal`) — with construction through factory methods, reading through `Match` / `Switch`, and
+no F# option, list, function, tuple or union type on any public member outside a declared
+`ToCore` / `FromCore` bridge.
+
+**The rule of three is NOT met, and this rides D9 rather than pretending otherwise.** There is one
+consumer today: the UI host's C# fluent factory (`fuaran-dotnet`), plus the VB dialect that
+translates through that same factory — which is one consumer with two front ends, not two
+consumers. D9 says a single concrete, unblocking consumer is sufficient evidence when the Core
+feature clearly unblocks a desirable feature downstream, and the unblock here is specific: that
+veneer keeps a rule that **every authored value passes through the declared structural layer**, and
+it cannot keep that rule strictly for its transform and expression bindings, because those reach
+these F# unions and C# can construct one only by reflection or by a hand-rolled mirror. Both
+alternatives are worse than a facade for the same reason — they put a second, unversioned copy of a
+closed vocabulary in a repo that does not own it, where a case added here is a silent divergence
+there rather than a compile error.
+
+**The deletion criterion, which is the half D9 asks for and does not always get.** Two different
+events, with two different consequences, and conflating them is how an exception becomes permanent:
+
+- **A SECOND independent C# consumer retires the EXCEPTION, not the package.** At that point the
+  surface is ordinary rule-of-three-justified surface and this entry is superseded rather than
+  acted on.
+- **A source generator emitting this surface from the IDL deletes the PACKAGE.** `Fuaran.Core.Idl`
+  already generates a structural layer per target language from a declared vocabulary; the day it
+  can emit a C# authoring veneer over a closed union, a hand-written facade over the same union is
+  a second answer to one question, and the hand-written one goes. Nothing in this package is
+  designed to resist that: it holds no logic, only construction and reading.
+
+**One premise the phase was authored on is false, and the scope reflects the tree rather than the
+sentence.** `Fuaran.Core.Function` publishes no union named `Function` — it publishes a *module* of
+that name over the declaration family listed above. What the facade covers is that family: the part
+a veneer actually constructs (declare a typed hole) and reads (a derived signature). `Arg<'Node>` is
+deliberately absent, because it is generic over the DOMAIN's node type, which no Core package names
+— a facade over it belongs to whichever host supplies that type, not here.
+
+**What certifies it, and why the checks are shaped the way they are.** A C# console proof
+(`tests/Fuaran.Core.CSharp.Proof`, run by `./verify.ps1` and `./run.ps1`) carries four legs, and each
+answers something the others cannot. A hand-written consumer builds and reads the four families and
+sends what it built out through Core's own codec and back, which is the acceptance criterion
+literally. A **round-trip law** asserts `ToCore(Rebuild(FromCore(x)))` equals `x` over a sample drawn
+off `ConfRng` — the useful form, since the trivial `FromCore ∘ ToCore` is identity by construction
+and proves nothing; what this form says is that the readers and the factories are mutually inverse
+over the whole algebra. A **coverage guard** beside it reports any case the sample never reached,
+with the expected case list read off the F# type through `FSharpType.GetUnionCases` rather than from
+a number written down — so a case added to `ColExpr`, `Transform`, `Cell`, `JVal`, `ValueSpace` or
+`HoleKind` in a later release reddens the gate, by name, which is the one thing a hand-written facade
+over a closed union cannot otherwise be told. And a **surface check** applies the no-F#-types rule by
+reflection over the built assembly, with the `ToCore` / `FromCore` exemption and a printed census of
+every member using it, because a facade with no bridge is a re-implementation and the honest thing is
+to make the bridge's width visible rather than merely permitted. The surface check is written here
+rather than imported: the available analyzers answer nullability and public-API-diff questions, and
+this one is about which assembly a type on the surface came from.
+
+**The go-red proof is part of the phase.** Swapping the two operands in the rebuild of `Binary`
+reddens the round-trip law across the sample; narrowing the window-function rotation reddens the
+coverage guard and names the nine cases it stopped reaching; and four decoy types — a non-bridge F#
+leak, the same leak on the bridge, a positional tuple, and a clean type — pin the surface rule's
+behaviour in both directions.
+
 ## 2026-09-07 — D26: a default the generator cannot render is a REFUSAL, not a fallback — and the fallback was the whole defect
 
 **Decided (Phase 124, `0.21.0`).** `Fuaran.Core.Idl.Codegen` renders a value-carrying union

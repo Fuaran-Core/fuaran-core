@@ -242,7 +242,7 @@
        the `lib/` DLL for .NET. The standard dual-pack convention (Feliz / Thoth). The internal
        ProjectReferences become nuspec dependencies on pack; the dependency packages ship their
        own `fable/` source, so Fable resolves the whole Core graph transitively. -->
-  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+  <ItemGroup Condition="'$(IsPackable)' == 'true' And '$(MSBuildProjectExtension)' == '.fsproj'">
     <Content Include="$(MSBuildProjectFile)" PackagePath="fable\" />
     <Content Include="*.fs" PackagePath="fable\" />
   </ItemGroup>
