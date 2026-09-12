@@ -117,6 +117,17 @@ let regen (surface: string) (idl: Idl) (cases: (string * IdlValue) list) : int =
         obj[name] <- JsonValue.Create wire
 
     let opts = JsonSerializerOptions(WriteIndented = true)
-    File.WriteAllText(mapPath surface, obj.ToJsonString opts + "\n")
+
+    // This writer is an EMITTER, so the artefact's line endings are its own and never
+    // the writing machine's — `Codegen.normalizeEol`'s rule (D29) applied at this
+    // boundary too. `JsonSerializerOptions` resolves the newline it indents with from
+    // `Environment.NewLine`, so an unnormalised write puts CRLF into a committed
+    // artefact the repository pins LF: the tree then reads dirty to `git status` while
+    // `git diff` reads clean, and the working-copy line-ending check fails naming this
+    // file. Found by running the regeneration the two byte-for-byte drift guards name
+    // as their remedy — before this, following that remedy turned the suite red.
+    let json = (obj.ToJsonString opts + "\n").Replace("\r\n", "\n").Replace("\r", "\n")
+
+    File.WriteAllText(mapPath surface, json)
     printfn "regenerated %s.json — %d fixtures" surface (List.length entries)
     List.length entries

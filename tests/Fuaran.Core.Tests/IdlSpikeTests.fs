@@ -274,17 +274,19 @@ let tests =
                   if System.Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
                       File.WriteAllText(path, generated)
 
-                  // Whitespace-insensitive: a real generator change is caught.
-                  let strip (s: string) =
-                      s
-                      |> Seq.filter (System.Char.IsWhiteSpace >> not)
-                      |> Seq.toArray
-                      |> System.String
-
+                  // BYTE-FOR-BYTE (D30). The committed artefact must be exactly what the
+                  // generator emits — not merely the same modulo whitespace. The normaliser
+                  // this replaced stripped every whitespace character before comparing, so an
+                  // emission differing only in line endings or spacing was equal to it, and
+                  // that insensitivity is why a carriage-return bake in a generated artefact
+                  // reached a downstream consumer before anything here noticed. A
+                  // formatting-only generator change is now red until the artefact is
+                  // regenerated and committed — the same discipline the law-vector corpus
+                  // already applies to its committed vectors.
                   Expect.equal
-                      (strip generated)
-                      (strip (File.ReadAllText path))
-                      "the generator no longer reproduces Generated.fs — regenerate it")
+                      generated
+                      (File.ReadAllText path)
+                      "the generator no longer reproduces Generated.fs byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
 
           // ---- Phase 317 increment 5: the Core witness-record leg ----
 

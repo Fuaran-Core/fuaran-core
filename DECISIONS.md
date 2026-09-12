@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-09-12 — D30: an absent conformance corpus FAILS, and CI supplies the corpus rather than the suite lowering its claim
+## 2026-09-12 — D31: an absent conformance corpus FAILS, and CI supplies the corpus rather than the suite lowering its claim
 
 **Decided (Phase 130, `0.22.0`).** The two suites that certify against the shared wire-format
 conformance corpus resolve it through one locator anchored at the repository's MAIN working tree,
@@ -40,6 +40,59 @@ ran. `docs/conformance-corpus.md` states the same thing where a contributor will
 and a skip renders them identically. Where a check depends on something outside the repository, the
 durable arrangement is to make the dependency obtainable and the absence loud — not to make the
 check optional and hope the machine that skips it is not the only machine that runs.
+
+_(Numbered D30 in the commit that landed it, and renumbered here on integration: the D30 below
+reached `main` the same day. Commit messages are not rewritten, so that one still says D30.)_
+
+## 2026-09-12 — D30: a committed generated artefact is pinned BYTE-FOR-BYTE, not modulo whitespace
+
+**Decided (operator ruling, drained from the Phase 129 finding).** The two committed-generated-artefact
+drift guards in this suite — `IdlSpikeTests`'s "real code emission: the generator still reproduces the
+committed `Generated.fs`" and `SecondDomainSpike`'s "drift guard: the generator still reproduces the
+committed `DocGenerated.fs`" — compare the generator's emission to the committed file **exactly**. The
+question they answer is "is the committed file exactly what the generator emits?", not "did the
+generator's meaning change?".
+
+**The two options, because the choice was real.** **(A)** keep the guards whitespace-insensitive: they
+ask about meaning, and line endings and formatting are covered directly by the dedicated
+`IdlCodegenEolTests` and `WorkingCopyEolTests` that Phase 129 landed, so nothing is uncovered and no
+regeneration is ever forced by a formatting-only generator change. **(B)** pin the bytes, which makes a
+formatting-only generator change red until the artefact is regenerated and committed. **(B) is
+adopted.**
+
+**Why.** Two reasons, and the first is an incident rather than an argument. Both guards compared through
+a normaliser that stripped *every* whitespace character before comparing, so an emission differing only
+in line endings was **equal** to them — and that insensitivity is exactly why the generator's
+carriage-return bake reached a downstream consumer before anything in this repository noticed. The
+dedicated tests close that particular hole, but they close it by naming the property; the guards are the
+check that quantifies over the artefact, and a check standing beside the artefact it governs while
+unable to see a whole class of change to it is a check that will be trusted for more than it does. The
+second reason is consistency: `LawVectorTests` already holds the committed law-vector corpus to exactly
+this standard — it compares the committed file to what the kit renders now, and names the re-emit
+command when they differ — and a repository that pins one kind of generated artefact byte-for-byte and
+another modulo whitespace has two rules where one will do.
+
+**What (B) costs, stated plainly, because it is what (A) was protecting.** A formatting-only change to
+the generator is now a red suite until the artefacts are regenerated. That is the intended price: the
+cost is one command, it lands in the same commit as the change that caused it, and the failure message
+names the command. What it buys is that "the committed artefact is current" stops being a claim about
+meaning and becomes a claim about bytes — the only form of the claim a consumer regenerating from the
+packaged generator can actually check.
+
+**One finding came out of adopting it, and it is the reason the remedy is now trustworthy.** Running the
+regeneration the new failure messages name turned the suite **red**: `Snapshots.regen` wrote
+`snapshots/spike.json` through `JsonSerializerOptions`, which resolves the newline it indents with from
+`Environment.NewLine`, so on Windows the regeneration put CRLF into a committed artefact this repository
+pins LF — `git status` dirty, `git diff` clean, and the working-copy line-ending check failing by name.
+A remedy that breaks the gate is not a remedy, so that writer now normalises at its own boundary, which
+is D29's rule applied one artefact further out: **a writer of a committed generated artefact is an
+emitter, and the artefact's line endings are its own rather than the writing machine's.** Adopting (B)
+is what surfaced it — under the old normaliser the guards would have stayed green either way, which is
+the whole of what D30 is about.
+
+**No committed artefact moved.** All three regenerate byte-identically to what is committed, which is
+D29's measured claim holding: the LF emission this repository ships is the LF emission `0.21.0`
+published.
 
 ## 2026-09-12 — D29: the generator's OUTPUT is reproducible; the packed ASSEMBLY is not, and will not be claimed to be
 

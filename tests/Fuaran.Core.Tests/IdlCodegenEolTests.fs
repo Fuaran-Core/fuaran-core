@@ -21,10 +21,16 @@ open Fuaran.Core.Idl
 //     splices that travel as a `support.json` written on whatever machine wrote
 //     it, and annotation prose carried in the IDL itself.
 //
-// The two committed-artefact drift guards in this suite cannot see either, by
-// construction: both compare through a whitespace-STRIPPING normaliser, so an
-// emission that differs only in line endings is equal to them. That is why the
-// bake reached a downstream consumer before anything here noticed.
+// Neither was visible to the two committed-artefact drift guards in this suite
+// when the bake happened: both compared through a whitespace-STRIPPING
+// normaliser, so an emission differing only in line endings was equal to them.
+// That is why the bake reached a downstream consumer before anything here
+// noticed. Those guards are byte-for-byte since D30, so a CR in a committed
+// artefact is now caught there too — but they catch it only where an artefact is
+// COMMITTED, and only after a regeneration has been run. The tests below assert
+// the property at the generator's own boundary, over emissions no committed
+// artefact covers (authored support, annotation prose, the TypeScript backend),
+// which is where a consumer regenerating from the packaged generator meets it.
 //
 // Each test below asserts BOTH halves, and the second is what keeps the first
 // from being vacuous: the artefact carries no CR, AND the probe text is present
