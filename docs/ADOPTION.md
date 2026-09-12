@@ -59,6 +59,39 @@ green while breaking every program that BUILDS a value. This family rebuilds eac
 through your constructors and re-encodes it. A domain supplying no witness is reported by name as
 not adopted, never as passed. See [`construct-then-encode.md`](construct-then-encode.md).
 
+## 2c. If your authoring tier is C# or VB, author through the facade
+
+`Fuaran.Core.CSharp` (Phase 128) is a C#-shaped surface over the closed unions a non-F# authoring
+tier has to build and read: the dataframe algebra (`ColExpr`, `Transform`, and `Cell` / `ColumnType` /
+`BinOp` / `ScalarFn` / `AggFn` / `JoinKind` / `SortDir` / `WindowFn` / `DataSource` and the three step
+specs under them), the artifact-function declaration family (`ValueSpace`, `HoleKind`, `HoleDecl`,
+`EffectClass`, `SigEntry`, `Signature`), and the wire JSON model (`JVal`).
+
+```csharp
+var pipeline = Pipeline.Of(
+    Step.Filter(Expr.Binary(BinaryOperator.Gt, Expr.Col("amount"), Expr.Param("threshold"))),
+    Step.GroupBy(new[] { "region" }, new[] { AggregateSpec.Of("total", AggregateFunction.Sum, "amount") }));
+
+var core = pipeline.ToCore();           // the declared bridge OUT — an F# `Transform list`
+var back = Pipeline.FromCore(core);     // and back IN
+```
+
+Construction is factory methods, reading is a total `Match` / `Switch` per union, and a pipeline is a
+`Pipeline` value rather than an F# list. **No public member mentions an F# option, list, function or
+positional tuple at any generic depth, except on a member named exactly `ToCore` or `FromCore`** —
+that pair is the whole bridge, and the package's own gate prints the census of every member using it.
+So a tier that keeps a rule like *every authored value passes through the declared surface* can keep
+it strictly, instead of reflecting into union cases or hand-rolling a mirror of a vocabulary it does
+not own.
+
+Two things to know before you take the dependency. It is **.NET-only** and deliberately outside the
+Fable-compile gate — a C# assembly is not Fable-compiled — so a browser tier authors through the F#
+surface or a host implementation instead. And it holds **no logic**: every member constructs a wrapped
+value, reads one, or forwards to a function the F# side already publishes, so there is no second
+semantics to keep in step. `tests/Fuaran.Core.CSharp.Proof` is the worked consumer — read it as the
+template the way you read `samples/adoption` for the F# path; it also carries the round-trip law and
+the coverage guard that reddens when a wrapped union grows a case the facade has no spelling for.
+
 ## 3. Re-express the op-stream
 
 ```fsharp
@@ -109,3 +142,6 @@ adoption prints `conformance: GREEN`.
   evaluation (a refresh that costs the rows that changed).
 - [`construct-then-encode.md`](construct-then-encode.md) — certifying the authoring surface (step 2b
   above): why a codec round trip cannot see a widened builder, and how to answer for the family.
+- [`../tests/Fuaran.Core.CSharp.Proof/Authoring.cs`](../tests/Fuaran.Core.CSharp.Proof/Authoring.cs) —
+  the worked C# consumer for step 2c, and [`../DECISIONS.md`](../DECISIONS.md) D28 for why that
+  package exists on one consumer and what deletes it.
