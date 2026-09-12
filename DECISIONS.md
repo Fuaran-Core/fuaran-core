@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-09-12 — D27: the D9 exception is taken for a C# facade, and its deletion criterion is written down beside it
+## 2026-09-12 — D28: the D9 exception is taken for a C# facade, and its deletion criterion is written down beside it
 
 **Decided (Phase 128, `0.22.0`).** `Fuaran.Core.CSharp` ships a C#-shaped facade over the closed
 unions a non-F# authoring surface has to construct and read — the dataframe algebra (`ColExpr`,
@@ -64,6 +64,57 @@ reddens the round-trip law across the sample; narrowing the window-function rota
 coverage guard and names the nine cases it stopped reaching; and four decoy types — a non-bridge F#
 leak, the same leak on the bridge, a positional tuple, and a clean type — pin the surface rule's
 behaviour in both directions.
+
+## 2026-09-12 — D27: a conformance kit that certifies only the codec certifies the wrong half — and "not adopted" is NOT PASSED
+
+**Decided (Phase 126, `0.22.0`).** `Fuaran.Core.Conformance` gains `ConstructWitness<'T>` and
+`Conformance.constructThenEncodeLaws`: a domain's corpus is rebuilt through its own smart
+constructors and re-encoded, so the AUTHORING surface is certified beside the codec.
+
+**Why a round-trip law structurally cannot see this.** Every codec family in the kit certifies
+`decode` and `encode` against each other. The constructors an author actually writes against are a
+different function into the same type, and they are not on that path — the law starts at bytes and
+ends at bytes. So a field that widens in memory to a richer carrier keeps the suite green over
+thousands of vectors while breaking every program that BUILDS a value. That is a measured event
+rather than a hazard: the `@fuaran-ui/ui` 0.26.0 release of 2026-09-11 (fuaran#1661), where the only
+author-direction consumer in the estate broke on the pin bump against a fully green corpus. Rule of
+three is met three times over — the TypeScript builders, the F# smart constructors and the Documents
+builders are three authoring surfaces over three witnesses, and none of them was certified this way.
+
+**The family lands in `Conformance`, not in a module of its own.** The other standalone families
+(`FoldConfluence`, `IncrementalDelta`, `WireNullTolerance`) each drive a different subsystem, so a
+fourth module would have read as the natural home. It is the wrong home for one reason that outweighs
+tidiness: a consumer's conformance census enumerates law entry points by reflection over a
+hard-coded module list that mirrors this kit's own. A new module contributes nothing to any
+consumer's census until every consumer edits that list first — which is exactly the silent skip this
+phase exists to abolish, arriving through the back door. In `Conformance` the family appears in every
+consumer's census on the pin raise, with no consumer edit at all.
+
+**"Not adopted" is reported as NOT PASSED, and the alternative was considered and rejected.**
+`witness` is an option, and `None` yields one result naming the domain and the family, with
+`Passed = false`. `LawResult` carries two states and no third; widening it to carry "skipped" is a
+compile-breaking change for every consumer that constructs one, for a distinction that has an honest
+encoding already — a family asked to certify a surface it was never given has certified nothing.
+The consequence is deliberate: running the family with `None` is not a route to green. A domain
+whose subject this is not records a reasoned non-use in its census row, which is the mechanism every
+other unused family already goes through, and which leaves a human's reason on the record instead of
+a machine's shrug.
+
+**The right-hand side is `encode (decode b)`, not the bytes `b`.** The law is naturally written
+`encode (construct (decode b)) = b` and that is what it computes on a canonical corpus. But a
+`Corpus.Case`'s JSON is not required to be canonical — `Corpus.roundTrip` compares values, so a
+legal corpus may spell a document with a different key order — and a literal byte comparison would
+redden on the corpus's formatting rather than on the authoring surface, which is the one subject
+this family has. Checked against the tree before implementing, not assumed.
+
+**Refusal and divergence are separate laws.** A constructor that rejects a value the domain's own
+codec just decoded is a finding about the surface; a constructor that builds a differently-encoding
+value is a different finding with a different remedy. Folding them into one law would make the red
+ambiguous at exactly the moment a reader needs it not to be.
+
+**The go-red is the phase, not an addendum.** The widened constructor is planted over the reference
+witness and the plain `Corpus.runCorpus` is asserted GREEN over the same corpus in the same test —
+the positive control without which the red proves only that something is wrong somewhere.
 
 ## 2026-09-07 — D26: a default the generator cannot render is a REFUSAL, not a fallback — and the fallback was the whole defect
 

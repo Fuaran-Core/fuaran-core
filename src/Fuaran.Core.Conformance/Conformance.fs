@@ -156,6 +156,22 @@ type StreamGen<'Op, 'State> =
 // guard has to precede them — and it deliberately depends on no family, which makes it the right
 // place for the type they all share.
 
+/// The domain-supplied AUTHORING surface (Phase 126): how to rebuild a decoded value through the
+/// smart constructors / builders a program actually writes against, rather than through the decoded
+/// record itself. `Surface` names that surface in the report — it is read by a human reading a
+/// counterexample, so name the thing an author calls ("the smart constructors", "the `ui` builders"),
+/// not the module it lives in.
+///
+/// `Construct` returns a `Result` because an authoring surface is allowed to REFUSE: a constructor
+/// that validates is the common case, and a refusal of a value the domain's own codec just decoded is
+/// itself a finding (`constructThenEncodeLaws`' second law), not an exception.
+///
+/// It is deliberately NOT part of any existing witness. A domain opts in by supplying one, and a
+/// domain that supplies none is reported by name rather than skipped — see `constructThenEncodeLaws`.
+type ConstructWitness<'T> =
+    { Surface: string
+      Construct: 'T -> Result<'T, string> }
+
 /// The aggregate certification report.
 type ConformanceReport =
     { Results: LawResult list
@@ -6540,3 +6556,164 @@ module Conformance =
           { Law = "idempotency precedes the CAS (a seen key converges under any head; a fresh key CASes as appendIf)"
             Passed = casLaw.IsNone
             Counterexample = casLaw } ]
+
+    // ---- construct-then-encode (Phase 126) ----
+    // Every family above that touches a codec certifies `decode` and `encode` against each other.
+    // That certifies the CODEC and says nothing about the AUTHORING surface a program actually
+    // writes against: the smart constructors, the builders, the fluent factory. The two are
+    // different functions into the same type, and only one of them is exercised by a round-trip
+    // suite.
+    //
+    // The gap is not hypothetical. In the `@fuaran-ui/ui` 0.26.0 release (2026-09-11, recorded as
+    // fuaran#1661) one field widened in memory to a richer shape; the decoder-encoder suite stayed
+    // green over thousands of vectors, because nothing in it ever built a value the way an author
+    // builds one - and the only author-direction consumer in the estate broke on the pin bump.
+    // A round-trip law cannot see that by construction: it starts from bytes and ends at bytes, and
+    // the authoring surface is not on that path.
+    //
+    // So this family runs the corpus through the authoring surface: decode a corpus document,
+    // REBUILD it through the domain's own constructors, and re-encode. A domain opts in by
+    // supplying a `ConstructWitness`; one that supplies none is reported BY NAME as not adopted,
+    // never silently skipped and never counted as passed.
+
+    /// The construct-then-encode laws (Phase 126) - the authoring surface certified, not only the
+    /// codec. Over a domain's own conformance corpus (its `Corpus.Case` list; a `Reject` case is not
+    /// a document, so only `RoundTrip` ones are read):
+    ///
+    ///  - **non-vacuity** - the corpus offers at least one round-trip document. A family with no
+    ///    document certifies nothing, and would otherwise report the same green as one that
+    ///    certified a thousand;
+    ///  - **acceptance** - every document decodes, and the authoring surface accepts the decoded
+    ///    value. A constructor that REFUSES a value the domain's own codec just produced is a
+    ///    finding about the surface, distinct from one that builds a different value;
+    ///  - **the law** - `encode (construct (decode b)) = encode (decode b)` for every document: what
+    ///    an author builds encodes exactly as what the codec decoded. The counterexample also states
+    ///    whether the plain codec round-trip passes over that same document, because it usually does
+    ///    - that is the whole finding this family exists for, and a reader meeting the red for the
+    ///    first time should not have to establish it.
+    ///
+    /// **Why the right-hand side is `encode (decode b)` and not the literal bytes `b`.** The law is
+    /// naturally stated as `encode (construct (decode b)) = b`, and on a corpus whose documents are
+    /// written in their codec's own canonical form that is exactly what this computes. But a
+    /// `Corpus.Case`'s JSON is not required to be canonical - `Corpus.roundTrip` compares VALUES, so
+    /// a legal corpus may spell a document with a different key order or spacing - and comparing
+    /// against its literal bytes would then redden on the corpus's formatting rather than on the
+    /// authoring surface. Comparing against the codec's own encoding of the same decoded value
+    /// isolates the one subject this family has, on any corpus.
+    ///
+    /// `'T` needs no equality: the comparison is between two encodings, which the codec already
+    /// promises are strings.
+    let constructThenEncodeLaws
+        (domain: string)
+        (codec: Corpus.Codec<'T>)
+        (witness: ConstructWitness<'T> option)
+        (corpus: Corpus.Case list)
+        : LawResult list =
+        let documents = corpus |> List.filter (fun c -> c.Kind = Corpus.RoundTrip)
+
+        match witness with
+        | None ->
+            // A `LawResult` has two states and no third, and widening it is a compile-breaking
+            // change for every consumer that constructs one - so "not adopted" is reported as NOT
+            // PASSED, which is the honest reading: a family asked to certify an authoring surface it
+            // was never given has certified nothing. A domain that has decided the family does not
+            // apply records that in its own conformance census as a reasoned non-use; it does not
+            // run the family with no witness and read the green.
+            [ { Law =
+                  "construct-then-encode ("
+                  + domain
+                  + "): NOT ADOPTED - no ConstructWitness supplied"
+                Passed = false
+                Counterexample =
+                  Some(
+                      domain
+                      + " supplies no ConstructWitness, so its authoring surface is uncertified: the codec round-trip laws beside this one prove only that bytes survive decode and encode, never that the smart constructors an author calls rebuild a corpus document to the same bytes. Supply a witness, or record the family as a reasoned non-use in the domain's conformance census rather than running it with none."
+                  ) } ]
+        | Some w ->
+            let mutable accepted = None
+            let mutable reencoded = None
+
+            for c in documents do
+                match codec.Decode c.Json with
+                | Error m ->
+                    if accepted.IsNone then
+                        accepted <-
+                            Some(
+                                "case "
+                                + c.Name
+                                + ": the corpus document did not decode ("
+                                + m
+                                + ") - this family reads the codec's output, so certify the codec first (`Corpus.runCorpus`)"
+                            )
+                | Ok decoded ->
+                    match w.Construct decoded with
+                    | Error m ->
+                        if accepted.IsNone then
+                            accepted <-
+                                Some(
+                                    "case "
+                                    + c.Name
+                                    + ": "
+                                    + w.Surface
+                                    + " refused a value the domain's own codec decoded ("
+                                    + m
+                                    + ") - the corpus and the authoring surface disagree about what is constructible"
+                                )
+                    | Ok built ->
+                        let canonical = codec.Encode decoded
+                        let authored = codec.Encode built
+
+                        if authored <> canonical && reencoded.IsNone then
+                            let codecVerdict =
+                                match Corpus.roundTrip codec decoded with
+                                | Ok() ->
+                                    "the plain codec round-trip PASSES over this same document, so the defect is in the authoring surface and not in the codec"
+                                | Error m ->
+                                    "the plain codec round-trip also fails over this document ("
+                                    + m
+                                    + "), so certify the codec first"
+
+                            reencoded <-
+                                Some(
+                                    "case "
+                                    + c.Name
+                                    + ": "
+                                    + w.Surface
+                                    + " re-encodes to "
+                                    + authored
+                                    + " where the decoded document encodes to "
+                                    + canonical
+                                    + " - "
+                                    + codecVerdict
+                                )
+
+            [ { Law =
+                  "construct-then-encode ("
+                  + domain
+                  + "): the corpus offers at least one round-trip document to rebuild"
+                Passed = not (List.isEmpty documents)
+                Counterexample =
+                  if List.isEmpty documents then
+                      Some(
+                          "the corpus carries "
+                          + string (List.length corpus)
+                          + " case(s) and none of them is a round-trip document, so every law below holds vacuously"
+                      )
+                  else
+                      None }
+              { Law =
+                  "construct-then-encode ("
+                  + domain
+                  + "): every corpus document decodes, and "
+                  + w.Surface
+                  + " accepts the decoded value"
+                Passed = accepted.IsNone
+                Counterexample = accepted }
+              { Law =
+                  "construct-then-encode ("
+                  + domain
+                  + "): encode (construct (decode b)) = encode (decode b) - what "
+                  + w.Surface
+                  + " builds encodes as what the codec decoded"
+                Passed = reencoded.IsNone
+                Counterexample = reencoded } ]

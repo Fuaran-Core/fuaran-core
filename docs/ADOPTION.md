@@ -45,6 +45,20 @@ Conformance.reducer     myApply myStreamGen None seed iters // your OWN reducer 
 `witnessLaws` runs first — if your `ReplaceChildren` isn't total it tells you exactly that, instead
 of surfacing later as a confusing `apply ∘ invert` failure.
 
+## 2b. Certify the authoring surface too, not only the codec
+
+```fsharp
+let constructW : ConstructWitness<Item> = { Surface = "the Item smart constructors"; Construct = construct }
+
+Conformance.constructThenEncodeLaws "my domain" myCodec (Some constructW) myCorpus   // Phase 126
+```
+
+Your codec laws certify that bytes survive `decode` and `encode`. They never call the smart
+constructors an author writes against, so a field that widens in memory keeps a round-trip suite
+green while breaking every program that BUILDS a value. This family rebuilds each corpus document
+through your constructors and re-encodes it. A domain supplying no witness is reported by name as
+not adopted, never as passed. See [`construct-then-encode.md`](construct-then-encode.md).
+
 ## 3. Re-express the op-stream
 
 ```fsharp
@@ -93,3 +107,5 @@ adoption prints `conformance: GREEN`.
 - [`STABILITY.md`](../STABILITY.md) — which witness surfaces are stability-critical.
 - [`incremental-evaluation.md`](incremental-evaluation.md) — adopting incremental `Transform`
   evaluation (a refresh that costs the rows that changed).
+- [`construct-then-encode.md`](construct-then-encode.md) — certifying the authoring surface (step 2b
+  above): why a codec round trip cannot see a widened builder, and how to answer for the family.

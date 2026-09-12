@@ -124,6 +124,10 @@
          checked out alongside. Reads nothing here, so it simply follows. -->
     <Compile Include="LawVectorExport.fs" />
     <Compile Include="LawVectorTests.fs" />
+    <!-- Phase 126 — the construct-then-encode family over the reference witness: the authoring
+         surface certified, and the go-red on a constructor that widens a field the encoder does
+         not expect. Reads only Reference.fs and the kit, so it simply follows. -->
+    <Compile Include="ConstructThenEncodeTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
