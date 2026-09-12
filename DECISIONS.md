@@ -90,6 +90,15 @@ emitter, and the artefact's line endings are its own rather than the writing mac
 is what surfaced it — under the old normaliser the guards would have stayed green either way, which is
 the whole of what D30 is about.
 
+**The ruling covers all THREE artefacts `--regen-snapshots` writes, `snapshots/spike.json` included.**
+That third one was the artefact the finding above was about, and it was the one nothing byte-compared:
+the legs that read it go through `loadPaired`, which parses it and checks only the wire STRINGS it
+holds, so its key order, indentation and line endings were unpinned — the CRLF regeneration left every
+one of those legs green. It now carries a guard of the same shape, against a `Snapshots.render` split
+out of `regen` so the check can ask "is the committed file current?" without writing. Leaving it out
+would have made D30 a rule about two artefacts and a habit about the third, which is the shape this
+decision exists to remove.
+
 **No committed artefact moved.** All three regenerate byte-identically to what is committed, which is
 D29's measured claim holding: the LF emission this repository ships is the LF emission `0.21.0`
 published.

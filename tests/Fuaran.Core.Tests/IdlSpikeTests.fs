@@ -288,6 +288,32 @@ let tests =
                       (File.ReadAllText path)
                       "the generator no longer reproduces Generated.fs byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
 
+          testCase "snapshot store: the committed spike.json IS what the store renders (byte-for-byte)" (fun _ ->
+              // D30's third artefact. The two guards above cover the generated F# modules;
+              // this one covers the golden map the SAME `--regen-snapshots` command writes,
+              // which nothing byte-compared until now: the legs above it read this file
+              // through `loadPaired`, which parses it and compares only the wire STRINGS it
+              // holds — so its own key order, indentation and line endings were unpinned, and
+              // a regeneration that reformatted it left every one of those legs green.
+              //
+              // Distinct from the freshness the authoring leg already proves. That leg asks
+              // whether each recorded wire string is still what the encoder produces; this one
+              // asks whether the FILE is still what the store writes. A rendering change — a
+              // sort order, an indentation width, `Environment.NewLine` — leaves every string
+              // true and the file stale, which is the same pair `LawVectorTests` keeps.
+              let path = Snapshots.mapFile "spike"
+
+              if not (File.Exists path) then
+                  skiptest "snapshots/spike.json not on disk — byte guard skipped"
+              else
+                  if System.Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
+                      File.WriteAllText(path, Snapshots.render "spike" miniIdl cases)
+
+                  Expect.equal
+                      (Snapshots.render "spike" miniIdl cases)
+                      (File.ReadAllText path)
+                      "the committed snapshots/spike.json is not what the store renders byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+
           // ---- Phase 317 increment 5: the Core witness-record leg ----
 
           testCase "witness leg: the generated NodeWitness drives Fuaran.Core.Tree over generated nodes" (fun _ ->
