@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <!-- Phase 127 — the classifier as a command any specification home's gate can call.
+         The classification itself is a library (Fuaran.Core.Idl.Diff); what was missing was a
+         way to REACH it from a repository that holds an `idl.json` pair and no F# build. The
+         only prior entry point was a flag on this repo's own test runner, which is not a thing
+         another repository can invoke at all.
+
+         Packed as a dotnet TOOL rather than a library: the artefact a gate wants is a command
+         on PATH, and a tool package carries its own dependency closure, so installing it pulls
+         no version into the caller's restore graph. Adding a package id is itself a contract
+         change even though no existing package's surface moves — the 0.4.0 precedent — so it is
+         recorded in STABILITY.md under the version that ships it. -->
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>fuaran-core-idl</ToolCommandName>
+    <PackageId>Fuaran.Core.Idl.Cli</PackageId>
+    <Description>Fuaran.Core.Idl.Cli — the IDL stability classifier as a command (`fuaran-core-idl`). Classifies the delta between two `idl.json` revisions: the wire severity per changed member with the reason it applies, the wire-profile evolution, and the F# consequence classes a consumer compiled against the generated structural layer meets. Exits 0 / 3 / 4 for absorbable / breaking / undecided, or asserts a declared class with `--expect`. .NET-only and build-time; the classification it prints lives in Fuaran.Core.Idl.Codegen.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- No Fable source distribution, for the reason Fuaran.Core.Idl.Codegen states: the
+         packable-project convention in Directory.Build.props ships every `.fs` under `fable/`,
+         and this is a .NET console entry point over the .NET-only generation half. Shipping the
+         source would offer a portability nothing certifies. -->
+    <Content Remove="$(MSBuildProjectFile)" />
+    <Content Remove="*.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fuaran.Core.Idl.Codegen\Fuaran.Core.Idl.Codegen.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

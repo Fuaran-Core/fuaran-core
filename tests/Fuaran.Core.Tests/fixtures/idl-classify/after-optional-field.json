@@ -1,0 +1,88 @@
+{
+  "defaults": [],
+  "description": "Canonical data rendering of the Fuaran UI wire vocabulary — kinds, unions, enums, records, field defaults and the node envelope. This is the STRUCTURAL source: it states what the vocabulary is, including optionality classes and omit-at-default values that a JSON Schema cannot express. schema.json beside it is the VALIDATION surface, derived from the same contract. Keys marked hostSurface are host-language declarations, not wire spec, and carry nothing observable on the wire. See WIRE_FORMAT.md section 13.",
+  "enums": [
+    {
+      "cases": [
+        "Plain",
+        "Loud"
+      ],
+      "name": "Loudness"
+    }
+  ],
+  "kinds": [
+    {
+      "category": "display",
+      "fields": [
+        {
+          "name": "body",
+          "optionality": {
+            "$type": "required"
+          },
+          "type": {
+            "$type": "str"
+          }
+        },
+        {
+          "name": "loudness",
+          "optionality": {
+            "$type": "optional"
+          },
+          "type": {
+            "$type": "enum",
+            "name": "Loudness"
+          }
+        },
+        {
+          "name": "caption",
+          "optionality": {
+            "$type": "optional"
+          },
+          "type": {
+            "$type": "str"
+          }
+        }
+      ],
+      "tag": "Note"
+    }
+  ],
+  "nodeFields": [],
+  "records": [],
+  "unions": [
+    {
+      "cases": [
+        {
+          "fields": [
+            {
+              "name": "text",
+              "optionality": {
+                "$type": "required"
+              },
+              "type": {
+                "$type": "str"
+              }
+            }
+          ],
+          "tag": "Inline"
+        },
+        {
+          "fields": [
+            {
+              "name": "id",
+              "optionality": {
+                "$type": "required"
+              },
+              "type": {
+                "$type": "str"
+              }
+            }
+          ],
+          "tag": "Ref"
+        }
+      ],
+      "name": "Source",
+      "params": []
+    }
+  ],
+  "version": 1
+}

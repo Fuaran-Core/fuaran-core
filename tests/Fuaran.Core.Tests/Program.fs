@@ -175,4 +175,14 @@ let main argv =
             (SecondDomainSpike.docIdl.Kinds |> List.map (fun k -> k.Tag))
 
         0
+    // Phase 127 — rewrite the committed `idl.json` fixtures the repository gate runs
+    // the `fuaran-core-idl` command over:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --regen-idl-classify-fixtures
+    // They are rendered from the `Idl` declarations in IdlStabilityClassTests, and a
+    // guard there fails naming this command when a committed file and its declaration
+    // disagree — so the gate can never certify the command against bytes nothing
+    // produces.
+    | "--regen-idl-classify-fixtures" :: _ ->
+        IdlStabilityClassTests.regen ()
+        0
     | _ -> runTestsInAssemblyWithCLIArgs [] argv

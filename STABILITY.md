@@ -1899,3 +1899,88 @@ document. The not-adopted report, the vacuous corpus, the reject-cases-are-not-d
 the refusing surface each have their own case.
 
 Adoption guide: [`docs/construct-then-encode.md`](docs/construct-then-encode.md).
+
+## One classifier for the wire-profile bump, and the F# consequence table (Phase 127, `0.22.0`)
+
+Two things ship, and they are the same thing at two altitudes.
+
+**`Fuaran.Core.Idl.Codegen` gains, in `Diff`,** the entry point the classification never had over
+values plus the axis it never reported:
+
+- **`Diff.classifyDiff : Idl -> Idl -> Result<Verdict, string>`** and
+  **`Diff.classifyArtifacts : string -> string -> Result<Verdict, string>`** — one classifier, two
+  doors. The value door renders through `Artifact.render` deliberately, because the artifact is the
+  published contract and the render is lossy by design, so classifying the values directly would
+  classify more than the contract does.
+- **`Diff.Verdict`** — the rows, the wire `Versioning.Evolution`, the undecided rows, whether
+  emitters break, the F# consequence set, and the two prose drafts `report` already emitted.
+- **`Diff.FSharpConsequence`** + `consequences` / `consequenceLabel` / `consequenceWhy` /
+  `allConsequences` / `consequenceTable` — what a change does to a consumer's F# source compiled
+  against the generated structural layer, which is a **different question** from what it does to a
+  document.
+- **`Diff.VerdictClass`** + `verdictClass` / `classLabel` / `classOfLabel` / `allClasses` /
+  `exitCode` — the one word a gate branches on, and the codes it branches with.
+- **`Diff.bumpProfile : Versioning.Profile -> Verdict -> Bump`**, `Diff.verdictBlock`,
+  `Diff.runVerdict`.
+
+**A twelfth package: `Fuaran.Core.Idl.Cli`,** packed as a dotnet tool whose command is
+`fuaran-core-idl` (`classify <before.json> <after.json>` / `table`). Adding a package id is a
+contract change even though no existing package's surface moves — the `0.4.0` precedent — so it is
+recorded here rather than passed over as additive. `dotnet pack Fuaran.Core.slnx` now emits twelve
+nupkgs where `0.21.0` emitted eleven. .NET-only and build-time, with no Fable source distribution,
+for the reason `Fuaran.Core.Idl.Codegen` states.
+
+**Purely additive for the eleven existing packages.** `Versioning.classify` and `Versioning.bump`
+keep their signatures and their values; `Diff.changes`, `Diff.classify`, `Diff.report` and
+`Diff.run` are untouched, and the report's existing bytes are unchanged — the verdict block is
+appended by a separate renderer. Consumers repin without source changes. MINOR rather than patch on
+the standing grounds, twice over: new public types and functions in a shipped package, and a new
+package id.
+
+**Why the second axis exists, and why it is not derived from the first.** The wire severity answers
+"what happens to a document". It does not answer "what happens to a consumer's source", and the two
+diverge routinely in both directions. An **optional** field added is `Additive` on the wire — every
+existing document is byte-unchanged and stays valid — and it stops every full record literal
+compiling, because an F# record literal must name every field whether or not its type is an
+`option` (`FS0764`). A **`hostSurface`** edit is the same divergence reversed: invisible on the
+wire, and it moves a generated field's type. So a caller reading only the wire verdict is told a
+consumer repins without source changes in exactly the cases where it does not. The three classes —
+construction sites (`FS0764` / `FS1129` / `FS0001`), match sites (`FS0025`, a warning by default and
+a `MatchFailureException` at run time; `FS0039` on a removal) and the stale package slot (no compile
+event at all, an `InvalidCastException` from code that type-checked) — are stated **once**, in the
+code that decides them, so external surface guards and corpus gates cite one table instead of each
+re-deriving the mapping from the compiler's behaviour.
+
+**The bump routes through `Versioning.bump` rather than restating its rule.** `Diff.evolution`
+builds the two subject sets `Versioning.classify` compares — the members a revision retires, the
+members it introduces — and hands them over, so the additive-vs-breaking rule has one definition and
+this answer moves when it moves. `profileBump`'s prose is kept and is unchanged; what it could never
+do is be branched on, which is why nothing in the estate called `Versioning.bump` at all before this.
+
+**An undecided verdict yields no profile.** `Bump` has a second case, and `bumpProfile` returns it
+whenever any row crosses an erased slot the artifact does not describe. Returning the base profile
+unchanged, or a minor, would hand a caller a number to publish for a revision whose class nobody has
+established — which is how a `/v2/` event gets published as a minor. For the same reason
+`VerdictClass.Undecided` takes precedence over every other class, and the command's exit codes keep
+"I cannot tell" (`4`) separate from "this breaks" (`3`) and from "I reached no verdict at all" (`2`).
+
+**Still advisory.** Nothing here writes a file, bumps a version or gates a build on its own account;
+a gate that wants to stop is the one that reads the exit code. The reason is the one `Diff` has
+carried since Phase 700 — a classifier that applied itself would make the hand-declared
+classification unfalsifiable, and the retroactive validation depends on the two being independently
+produced.
+
+**How the compile claims are held.** Compiled, not asserted:
+`tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs` spawns the real F# compiler over the real
+generator output for `FS0764` and `FS0025`, each in **both** directions — the perturbed consumer
+must fail and the adapted consumer must pass — so a leg that has stopped measuring anything is
+visible rather than green. Beside them a property over every declared perturbation asserts that the
+consequence reported tracks what the generator's **output** structurally exhibits, read off the
+emitted text rather than re-derived from the IDL, with its own non-vacuity guard; restating the
+mapping in the assertion would have certified the suite against itself. The command is exercised as
+a command over three committed fixture artifacts — both calling shapes, both directions of the
+`--expect` assertion, and every refusal — and the fixtures are generated from the same declarations,
+with a guard that fails naming the regeneration command when a committed file and its declaration
+disagree.
+
+Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).

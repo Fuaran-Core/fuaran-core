@@ -128,6 +128,12 @@
          surface certified, and the go-red on a constructor that widens a field the encoder does
          not expect. Reads only Reference.fs and the kit, so it simply follows. -->
     <Compile Include="ConstructThenEncodeTests.fs" />
+    <!-- Phase 127 — the one classifier entry point over an IDL pair, the F# consequence
+         table beside the wire severity, and the wire-profile bump. Two legs spawn the real
+         compiler over the generator's output, so it needs ChildProcess.fs above; it reads the
+         committed CLI fixtures through Snapshots.repoFile. Appended here (append-only
+         registration) — it depends on nothing else in this list. -->
+    <Compile Include="IdlStabilityClassTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

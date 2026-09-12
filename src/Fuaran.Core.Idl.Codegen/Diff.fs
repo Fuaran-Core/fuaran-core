@@ -1490,3 +1490,483 @@ module Diff =
             parse newText
             |> Result.mapError (fun e -> "new: " + e)
             |> Result.map (fun after -> report (fst roster) (snd roster) before after))
+
+    // -----------------------------------------------------------------------
+    // Phase 127 — ONE classifier entry point, the F# consequence table, and the
+    // wire-profile bump.
+    //
+    // Everything above answers "what does this change do to a DOCUMENT", and says
+    // so in prose for a phase author to read. Three things were missing, and each
+    // is a different kind of gap:
+    //
+    //  - There was no entry point over two `Idl` VALUES. The pipeline —
+    //    `Artifact.render` -> `parse` -> `changes` -> `classify` -> read the
+    //    severities — existed only as a private helper inside this repo's own test
+    //    file, whose comment already described it as "as the CLI does" of a CLI
+    //    that did not exist. So every gate that wanted the classification
+    //    re-derived those five steps, and one that got a step wrong got a
+    //    plausible answer rather than an error.
+    //
+    //  - `profileBump` returns PROSE. That is the right output for a human and it
+    //    is unbranchable: nothing could ask "does this move the major", so nothing
+    //    called `Versioning.bump` at all — the very function whose `Evolution` /
+    //    `Profile` vocabulary this classification exists to feed.
+    //
+    //  - The F# CONSEQUENCE of a change was stated nowhere, although it is the
+    //    half a consuming host feels first and it does NOT follow from the wire
+    //    verdict. An OPTIONAL field added to a kind is `Additive` on the wire and
+    //    still stops every full record literal compiling; a `hostSurface` edit is
+    //    invisible on the wire and moves a generated field's type. External
+    //    surface guards and corpus gates re-derive that mapping independently,
+    //    each from its own reading; this is the one table they can cite instead.
+    //
+    // Nothing here becomes authoritative: the module stays advisory (it writes no
+    // file, bumps no version and gates no build), for the reason at the head of
+    // this file — a classifier that applied itself would make the hand-declared
+    // classification unfalsifiable.
+    // -----------------------------------------------------------------------
+
+    /// What a classified change does to a CONSUMER'S F# SOURCE compiled against the
+    /// generated structural layer. A different question from what it does to a
+    /// document, and the two answers diverge routinely — which is the whole reason
+    /// this axis is reported beside `Severity` rather than derived from it.
+    ///
+    /// Each case is named for the SITE that stops working, because that is what a
+    /// consumer reads in the compiler output.
+    type FSharpConsequence =
+        /// **Construction sites.** `Gen.fsharpTypes` emits a kind, a record and a
+        /// union case as F# RECORDS, and a record literal must name every field —
+        /// so a field arriving, leaving or changing type breaks every full literal
+        /// that builds one: `FS0764` ("No assignment given for field") on an
+        /// arrival, `FS1129` (no such field) on a departure, `FS0001` on a type
+        /// move.
+        ///
+        /// **Independent of optionality.** `string option` is still a field the
+        /// literal must name, so an OPTIONAL field added lands here too while its
+        /// wire severity is `Additive`. That divergence is the row this table
+        /// exists for: reading the wire verdict alone says a consumer repins
+        /// without source changes, and it does not.
+        | FullLiteralConstruction
+        /// **Match sites.** An enum, a value-union and the per-vocabulary node-kind
+        /// discriminator each emit as a closed F# DU, so a case arriving makes every
+        /// exhaustive `match` incomplete — `FS0025`, a WARNING under this repo's
+        /// `TreatWarningsAsErrors=false` and an error wherever a consumer sets it,
+        /// and a `MatchFailureException` at run time on the first value carrying the
+        /// new case — and a case leaving makes the arm naming it undefined
+        /// (`FS0039`).
+        | ExhaustiveMatch
+        /// **Reference sites.** A whole generated TYPE left, or its type parameters
+        /// moved, so a consumer naming it no longer resolves (`FS0039`) or applies
+        /// the wrong arity. A type ARRIVING is not this: nothing could have
+        /// referenced it.
+        | TypeNameReference
+        /// **Neither — until the package slot is reused.** The generated shape
+        /// moved, so a consumer whose extracted package cache still holds the
+        /// previous assembly for the SAME version compiles against one shape and
+        /// runs against the other. It surfaces as an `InvalidCastException` thrown
+        /// from code that type-checked, at the first value crossing the boundary,
+        /// with nothing in the source to read.
+        ///
+        /// It ACCOMPANIES the three classes above rather than replacing them: those
+        /// are what a clean rebuild reports, this is what a stale restore reports
+        /// instead of them. Which is why a shape change wants a fresh version
+        /// rather than a repack of a slot consumers already hold.
+        | StalePackageSlot
+        /// The generated shape did not move: the change is on the wire only, in the
+        /// host-surface declarations, in an annotation, or in an authoring default.
+        | NoGeneratedShapeChange
+        /// The change crosses an ERASED slot (`hosted` / `json` / `opaque`), so
+        /// nothing in the artifact says whether the generated shape moved.
+        /// Reported, never guessed — `Unclassifiable`'s counterpart on this axis,
+        /// and for the same reason: a confident wrong answer on the commonest kind
+        /// of IDL tidy-up gets the whole report skimmed.
+        | GeneratedShapeUnreadable
+
+    /// The stable label of a consequence class. A contract: these strings are what
+    /// an external gate greps and what the `docs/` table names.
+    let consequenceLabel =
+        function
+        | FullLiteralConstruction -> "full-literal-construction"
+        | ExhaustiveMatch -> "exhaustive-match"
+        | TypeNameReference -> "type-name-reference"
+        | StalePackageSlot -> "stale-package-slot"
+        | NoGeneratedShapeChange -> "no-generated-shape-change"
+        | GeneratedShapeUnreadable -> "generated-shape-unreadable"
+
+    /// One sentence per consequence class — the reason it applies, for a report that
+    /// has to stand on its own beside a compiler message.
+    let consequenceWhy =
+        function
+        | FullLiteralConstruction ->
+            "every full record literal that builds this owner stops compiling — FS0764 on an added field, FS1129 on a removed one, FS0001 on a moved type. True for an OPTIONAL field too: a literal must name it."
+        | ExhaustiveMatch ->
+            "every exhaustive match over the generated DU stops being exhaustive — FS0025 (a warning by default, an error under TreatWarningsAsErrors, a MatchFailureException at run time) on an added case, FS0039 on a removed one."
+        | TypeNameReference ->
+            "a generated type name no longer resolves, or no longer takes the arity a consumer applies — FS0039."
+        | StalePackageSlot ->
+            "no compile event at all if the package slot was REPACKED rather than advanced: a consumer restoring the same version from a warm cache compiles against the new shape and runs against the old one, and the mismatch arrives as an InvalidCastException from code that type-checked."
+        | NoGeneratedShapeChange ->
+            "the generated declarations are unchanged, so no construction, match or reference site moves."
+        | GeneratedShapeUnreadable ->
+            "the change crosses an erased slot whose admitted values the artifact does not state, so whether the generated shape moved cannot be read off it."
+
+    /// Every consequence class, in report order — so a renderer and a document
+    /// enumerate the table rather than each restating it.
+    let allConsequences: FSharpConsequence list =
+        [ FullLiteralConstruction
+          ExhaustiveMatch
+          TypeNameReference
+          StalePackageSlot
+          NoGeneratedShapeChange
+          GeneratedShapeUnreadable ]
+
+    /// The F# consequence set of one classified change.
+    ///
+    /// Keyed on the CHANGE rather than on its severity, because the two axes are
+    /// independent by construction: `FieldHostSurfaceChanged` is `HostSurfaceOnly`
+    /// on the wire and a construction break here, and a `FieldAdded` that is
+    /// `Additive` on the wire is a construction break all the same.
+    ///
+    /// `StalePackageSlot` rides every shape change rather than standing alone — see
+    /// its own note.
+    let consequences (c: Classification) : FSharpConsequence list =
+        let construction = [ FullLiteralConstruction; StalePackageSlot ]
+        let matching = [ ExhaustiveMatch; StalePackageSlot ]
+        let reference = [ TypeNameReference; StalePackageSlot ]
+
+        match c.Severity with
+        | Unclassifiable -> [ GeneratedShapeUnreadable ]
+        | _ ->
+            match c.Change with
+            // A field on any owner is a record member.
+            | FieldAdded _
+            | FieldRemoved _
+            | FieldTypeChanged _ -> construction
+            // The generated DECLARATION moved — a `TFn` field's F# signature, a
+            // hosted slot's codec expression. Invisible on the wire; a construction
+            // break all the same.
+            | FieldHostSurfaceChanged _ -> construction
+            // Only the `optional` class emits an F# `option`, so the generated type
+            // moves exactly when one side is optional and the other is not. Every
+            // other optionality move (required <-> omitDefault) changes the ENCODER
+            // body and leaves the record member's type where it was — decidable, so
+            // decided, rather than reported conservatively.
+            | FieldOptionalityChanged(_, _, before, after) ->
+                if (before.OptClass = "optional") <> (after.OptClass = "optional") then
+                    construction
+                else
+                    [ NoGeneratedShapeChange ]
+            // A kind is a case of the generated node-kind DU, and gains or loses its
+            // own spec record alongside (which breaks no existing site on arrival).
+            | KindAdded _
+            | KindRemoved _ -> matching
+            | UnionCaseAdded _
+            | UnionCaseRemoved _
+            | EnumCaseAdded _
+            | EnumCaseRemoved _ -> matching
+            // The host-side case NAMES moved: every arm that spelled one is now
+            // undefined, and the set is no longer covered.
+            | EnumHostMappingChanged _ -> matching
+            | UnionRemoved _
+            | EnumRemoved _
+            | RecordRemoved _ -> reference
+            | UnionParamsChanged _ -> reference
+            // A type arriving breaks nothing: no source could have named it.
+            | UnionAdded _
+            | EnumAdded _
+            | RecordAdded _ -> [ NoGeneratedShapeChange ]
+            // The op vocabulary has no generated F# shape at all — the F# type
+            // emitter leaves that leg unshipped (Phase 703) — so an op change moves
+            // no declaration. This row changes the day that leg lands.
+            | OpAdded _
+            | OpRemoved _ -> [ NoGeneratedShapeChange ]
+            // Reported ALONGSIDE the add + remove that explain it, and those two
+            // rows carry the consequence; claiming it again here would double-count.
+            | KindRenamed _ -> [ NoGeneratedShapeChange ]
+            // Wire-only or metadata-only: the discriminator key and envelope
+            // nesting, the trust-boundary vocabulary, a transparent case's encoding,
+            // a kind's category, the artifact's own encoding version, the authoring
+            // defaults, and every annotation set (which moves an `Obsolete`
+            // attribute, and therefore which warnings a consumer sees — not a
+            // shape).
+            | WireShapeChanged _
+            | HardenPolicyChanged _
+            | UnionTransparencyChanged _
+            | KindCategoryChanged _
+            | ArtifactVersionChanged _
+            | DefaultAdded _
+            | DefaultRemoved _
+            | DefaultChanged _
+            | FieldAnnotationsChanged _
+            | UnionCaseAnnotationsChanged _
+            | KindAnnotationsChanged _
+            | EnumCaseAnnotationsChanged _ -> [ NoGeneratedShapeChange ]
+
+    /// The `Versioning.Evolution` a classification list amounts to.
+    ///
+    /// It DELEGATES the additive-vs-breaking decision to `Versioning.classify`
+    /// rather than restating that rule, by handing it the two subject sets that
+    /// function compares: the members a revision RETIRES and the members it
+    /// INTRODUCES. A change to the rule therefore changes this answer too, which is
+    /// the point of routing through it — one rule, in one place, with `bump` reading
+    /// it.
+    ///
+    /// The split is the severity's:
+    ///
+    ///  - `BreakingWire` RETIRES — a document that was valid is not, or its bytes
+    ///    moved, so an older consumer cannot interpret the result and the major must
+    ///    move.
+    ///  - `Additive` and `BreakingForEmitters` INTRODUCE. The second reads oddly
+    ///    until you ask whose profile it is: every existing document still decodes,
+    ///    so a consumer negotiating the profile is `Behind` rather than `Foreign`,
+    ///    and the minor is the honest answer to THAT question. What the minor does
+    ///    not say is that emitters need a coordinated bump — which is why the
+    ///    verdict carries `BreaksEmitters` separately instead of folding it in here
+    ///    and calling the format broken.
+    ///  - `HostSurfaceOnly` moves no profile at all.
+    ///  - `Unclassifiable` moves nothing here either, and stops the bump outright —
+    ///    see `bumpProfile`.
+    let evolution (cs: Classification list) : Versioning.Evolution =
+        let subjects pick =
+            cs |> List.filter pick |> List.map (fun c -> summarise c.Change) |> Set.ofList
+
+        let retired = subjects (fun c -> c.Severity = BreakingWire)
+
+        let introduced =
+            subjects (fun c ->
+                match c.Severity with
+                | Additive
+                | BreakingForEmitters -> true
+                | _ -> false)
+
+        Versioning.classify retired introduced
+
+    /// The whole classification of one revision pair: the rows, the wire evolution,
+    /// the F# consequence set, and the two prose drafts the report already emitted.
+    type Verdict =
+        {
+            Changes: Classification list
+            /// The wire evolution as `Versioning.classify` decides it — the input
+            /// `Versioning.bump` takes.
+            Evolution: Versioning.Evolution
+            /// The rows the artifact cannot decide. Non-empty means no profile
+            /// answer is available — NOT that the answer is "additive".
+            Undecided: Classification list
+            /// At least one row keeps every existing document valid AND stops a
+            /// conformant emitter conforming. Carried separately because the profile
+            /// minor cannot express it — see `evolution`.
+            BreaksEmitters: bool
+            /// Every F# consequence class any row exhibits, de-duplicated, in table
+            /// order.
+            FSharpConsequences: FSharpConsequence list
+            /// The roadmap front-matter draft — `stabilityImpact`.
+            StabilityImpact: string
+            /// The prose wire-profile recommendation — `profileBump`.
+            ProfileAdvice: string
+        }
+
+    /// The verdict over two read snapshots.
+    let verdictOf (before: Snapshot) (after: Snapshot) : Verdict =
+        let cs = changes before after |> List.map classify
+
+        let exhibited = cs |> List.collect consequences |> Set.ofList
+
+        { Changes = cs
+          Evolution = evolution cs
+          Undecided = cs |> List.filter (fun c -> c.Severity = Unclassifiable)
+          BreaksEmitters = cs |> List.exists (fun c -> c.Severity = BreakingForEmitters)
+          FSharpConsequences = allConsequences |> List.filter exhibited.Contains
+          StabilityImpact = stabilityImpact cs
+          ProfileAdvice = profileBump cs }
+
+    /// The verdict over two `idl.json` TEXTS — the committed-artifact door, which
+    /// works across revisions whose F# vocabulary no longer compiles.
+    let classifyArtifacts (beforeText: string) (afterText: string) : Result<Verdict, string> =
+        parse beforeText
+        |> Result.mapError (fun e -> "old: " + e)
+        |> Result.bind (fun before ->
+            parse afterText
+            |> Result.mapError (fun e -> "new: " + e)
+            |> Result.map (verdictOf before))
+
+    /// The verdict over two `Idl` VALUES — the in-process door, for a caller holding
+    /// both revisions as values (a proposal applied to a vocabulary, a generated
+    /// pair under test).
+    ///
+    /// It goes THROUGH `Artifact.render`, deliberately: the artifact is the
+    /// published contract and the render is lossy by design (it elides authored
+    /// ordering of sorted collections, flags host-surface), so classifying the
+    /// values directly would classify more than the contract does. The `Error`
+    /// branch is reachable only if the artifact encoder and its reader disagree —
+    /// a defect in this package rather than in the caller's input, since the round
+    /// trip is certified — and it is returned rather than raised so both doors have
+    /// one shape.
+    let classifyDiff (before: Idl) (after: Idl) : Result<Verdict, string> =
+        classifyArtifacts (Artifact.render before) (Artifact.render after)
+
+    /// The one-word class a gate branches on.
+    [<RequireQualifiedAccess>]
+    type VerdictClass =
+        /// No rows: the two revisions describe the same contract.
+        | Unchanged
+        /// Rows, none of them observable on the wire.
+        | HostSurface
+        /// Every wire-observable row is additive.
+        | Additive
+        /// At least one row breaks the wire, or breaks emitters.
+        | Breaking
+        /// At least one row the artifact cannot decide. Takes precedence over every
+        /// other class: an undecided row makes the whole verdict undecided, because
+        /// reporting the decidable remainder as the answer is how a `/v2/` event
+        /// gets published as a minor.
+        | Undecided
+
+    let verdictClass (v: Verdict) : VerdictClass =
+        if not v.Undecided.IsEmpty then
+            VerdictClass.Undecided
+        elif v.Changes.IsEmpty then
+            VerdictClass.Unchanged
+        elif
+            v.BreaksEmitters
+            || v.Changes |> List.exists (fun c -> c.Severity = BreakingWire)
+        then
+            VerdictClass.Breaking
+        elif v.Changes |> List.exists (fun c -> c.Severity = Severity.Additive) then
+            VerdictClass.Additive
+        else
+            VerdictClass.HostSurface
+
+    /// The stable label of a verdict class — the CLI's `--expect` vocabulary. A
+    /// contract: a spec home's gate passes or greps these strings.
+    let classLabel =
+        function
+        | VerdictClass.Unchanged -> "unchanged"
+        | VerdictClass.HostSurface -> "host-surface"
+        | VerdictClass.Additive -> "additive"
+        | VerdictClass.Breaking -> "breaking"
+        | VerdictClass.Undecided -> "undecided"
+
+    /// Every verdict class, in the order a report and the CLI usage list them.
+    let allClasses: VerdictClass list =
+        [ VerdictClass.Unchanged
+          VerdictClass.HostSurface
+          VerdictClass.Additive
+          VerdictClass.Breaking
+          VerdictClass.Undecided ]
+
+    /// Read a label back. `None` on anything else — an unrecognised `--expect` is
+    /// refused rather than read as a default, because defaulting would make a
+    /// misspelled assertion pass.
+    let classOfLabel (s: string) : VerdictClass option =
+        allClasses |> List.tryFind (fun c -> classLabel c = s)
+
+    /// The process exit code a branching gate reads when it has NOT declared what it
+    /// expects: `0` for anything a consumer absorbs by repinning, `3` for a break,
+    /// `4` for undecided. Three codes rather than a boolean, because "I cannot tell"
+    /// and "this breaks" want different handling — collapsing them is how the
+    /// erased-slot case gets treated as a break and the report stops being read.
+    let exitCode =
+        function
+        | VerdictClass.Unchanged
+        | VerdictClass.HostSurface
+        | VerdictClass.Additive -> 0
+        | VerdictClass.Breaking -> 3
+        | VerdictClass.Undecided -> 4
+
+    /// The F# consequence table, rendered from the code that decides it. `docs/`
+    /// carries the same table for a reader with no build; a test asserts the
+    /// document names every class, so the two cannot drift silently.
+    let consequenceTable: string =
+        let sb = System.Text.StringBuilder()
+        sb.Append("F# consequence classes\n\n") |> ignore
+
+        sb.Append(
+            "What a classified IDL change does to a consumer's F# source compiled against the\n"
+            + "generated structural layer. Independent of the wire severity reported beside it.\n\n"
+        )
+        |> ignore
+
+        for c in allConsequences do
+            sb.Append("  ").Append(consequenceLabel c).Append("\n        ") |> ignore
+            sb.Append(consequenceWhy c).Append("\n") |> ignore
+
+        sb.ToString()
+
+    /// The branchable block the CLI prints under the advisory report: the class, the
+    /// wire evolution, the emitter warning the minor cannot carry, and the F#
+    /// consequence set with the reason each applies.
+    ///
+    /// A function of the `Verdict` alone rather than of the snapshots, so it composes
+    /// onto `report`'s output without a second roster resolution — see `runVerdict`.
+    let verdictBlock (v: Verdict) : string =
+        let sb = System.Text.StringBuilder()
+        let line (s: string) = sb.Append(s).Append('\n') |> ignore
+
+        line "## Verdict class"
+        line ""
+        line (sprintf "class:            %s" (classLabel (verdictClass v)))
+
+        line (
+            sprintf
+                "wire evolution:   %s"
+                (match v.Evolution with
+                 | Versioning.Additive [] -> "no movement"
+                 | Versioning.Additive added -> sprintf "additive — %d introduced" (List.length added)
+                 | Versioning.Breaking(removed, added) ->
+                     sprintf "BREAKING — %d retired, %d introduced" (List.length removed) (List.length added))
+        )
+
+        line (sprintf "breaks emitters:  %s" (if v.BreaksEmitters then "yes" else "no"))
+
+        line (
+            sprintf
+                "F# consequences:  %s"
+                (if v.FSharpConsequences.IsEmpty then
+                     "none"
+                 else
+                     v.FSharpConsequences |> List.map consequenceLabel |> String.concat ", ")
+        )
+
+        line ""
+
+        for c in v.FSharpConsequences do
+            line (sprintf "  %s" (consequenceLabel c))
+            line (sprintf "        %s" (consequenceWhy c))
+
+        line ""
+        sb.ToString()
+
+    /// Whole-pipeline entry for a caller that wants BOTH the text and something to
+    /// branch on: `run`'s advisory report, the verdict block under it, and the
+    /// `Verdict` value itself.
+    ///
+    /// It calls `run` rather than reproducing its roster resolution, so there stays
+    /// exactly one place that decides whether the manifest carries a host roster.
+    /// The cost is reading the two artifacts twice, which for two files on a gate's
+    /// command line is not a cost.
+    let runVerdict
+        (manifestText: string option)
+        (oldText: string)
+        (newText: string)
+        : Result<string * Verdict, string> =
+        run manifestText oldText newText
+        |> Result.bind (fun reportText ->
+            classifyArtifacts oldText newText
+            |> Result.map (fun v -> reportText + verdictBlock v, v))
+
+    /// The profile a `baseProfile` bumps to under a verdict — `Versioning.bump`
+    /// applied to `evolution`'s answer, which is the whole reason this module
+    /// produces an `Evolution` at all.
+    ///
+    /// An UNDECIDED verdict yields no profile, and that is the load-bearing half: a
+    /// function that returned `baseProfile` unchanged, or a minor bump, would hand a
+    /// caller a number to publish for a revision whose class nobody has established.
+    [<RequireQualifiedAccess>]
+    type Bump =
+        | Bumped of Versioning.Profile
+        | Undecided of rows: Classification list
+
+    let bumpProfile (baseProfile: Versioning.Profile) (v: Verdict) : Bump =
+        match v.Undecided with
+        | [] -> Bump.Bumped(Versioning.bump baseProfile v.Evolution)
+        | rows -> Bump.Undecided rows
