@@ -100,15 +100,21 @@ let loadPaired (surface: string) (cases: (string * 'a) list) : (string * string)
         | Some wire -> name, wire
         | None -> failwithf "Snapshots: no '%s' entry in %s.json — run --regen-snapshots" name surface)
 
-/// Regenerate a surface's golden map from `encode(idl, case)`. Deterministic;
-/// the authoring leg freezes it, round-trip + drift-guard legs then check it.
-let regen (surface: string) (idl: Idl) (cases: (string * IdlValue) list) : int =
+/// The committed map file for a surface. Public so a byte-for-byte guard can read the
+/// bytes without re-implementing the climb that located them.
+let mapFile (surface: string) : string = mapPath surface
+
+/// The EXACT bytes `regen` writes for a surface, rendered without writing anything —
+/// the same render/emit separation `LawVectorExport` keeps, and for the same reason: a
+/// byte-for-byte guard has to be able to ask "is the committed file current?" on a clean
+/// tree, and one that had to write in order to compare could not.
+let render (surface: string) (idl: Idl) (cases: (string * IdlValue) list) : string =
     let entries =
         cases
         |> List.map (fun (name, v) ->
             match Encode.encode idl v with
             | Ok wire -> name, wire
-            | Error e -> failwithf "Snapshots.regen %s/%s: encode failed: %s" surface name e)
+            | Error e -> failwithf "Snapshots.render %s/%s: encode failed: %s" surface name e)
 
     // A stable, human-diffable map file (keys sorted, indented).
     let obj = JsonObject()
@@ -118,16 +124,20 @@ let regen (surface: string) (idl: Idl) (cases: (string * IdlValue) list) : int =
 
     let opts = JsonSerializerOptions(WriteIndented = true)
 
-    // This writer is an EMITTER, so the artefact's line endings are its own and never
-    // the writing machine's — `Codegen.normalizeEol`'s rule (D29) applied at this
-    // boundary too. `JsonSerializerOptions` resolves the newline it indents with from
-    // `Environment.NewLine`, so an unnormalised write puts CRLF into a committed
-    // artefact the repository pins LF: the tree then reads dirty to `git status` while
-    // `git diff` reads clean, and the working-copy line-ending check fails naming this
-    // file. Found by running the regeneration the two byte-for-byte drift guards name
-    // as their remedy — before this, following that remedy turned the suite red.
-    let json = (obj.ToJsonString opts + "\n").Replace("\r\n", "\n").Replace("\r", "\n")
+    // This is an EMITTER, so the artefact's line endings are its own and never the
+    // rendering machine's — `Codegen.normalizeEol`'s rule (D29) applied at this boundary
+    // too. `JsonSerializerOptions` resolves the newline it indents with from
+    // `Environment.NewLine`, so an unnormalised render puts CRLF into a committed artefact
+    // the repository pins LF: the tree then reads dirty to `git status` while `git diff`
+    // reads clean, and the working-copy line-ending check fails naming this file. Found by
+    // running the regeneration the byte-for-byte drift guards name as their remedy —
+    // before this, following that remedy turned the suite red.
+    (obj.ToJsonString opts + "\n").Replace("\r\n", "\n").Replace("\r", "\n")
 
-    File.WriteAllText(mapPath surface, json)
-    printfn "regenerated %s.json — %d fixtures" surface (List.length entries)
-    List.length entries
+/// Regenerate a surface's golden map from `encode(idl, case)`. Deterministic;
+/// the authoring leg freezes it, round-trip + drift-guard legs then check it —
+/// including the D30 guard that the committed file IS these bytes.
+let regen (surface: string) (idl: Idl) (cases: (string * IdlValue) list) : int =
+    File.WriteAllText(mapPath surface, render surface idl cases)
+    printfn "regenerated %s.json — %d fixtures" surface (List.length cases)
+    List.length cases
