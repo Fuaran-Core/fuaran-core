@@ -729,13 +729,14 @@ let tests =
               if Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
                   File.WriteAllText(path, generated)
 
-              let strip (s: string) =
-                  s |> Seq.filter (Char.IsWhiteSpace >> not) |> Seq.toArray |> String
-
+              // BYTE-FOR-BYTE (D30) — the same rule its sibling guard in `IdlSpikeTests`
+              // applies to `Generated.fs`, and for the same reason: the whitespace-stripping
+              // normaliser this replaced could not see a line-ending change in a generated
+              // artefact at all.
               Expect.equal
-                  (strip generated)
-                  (strip (File.ReadAllText path))
-                  "the generator no longer reproduces DocGenerated.fs — regenerate it (--regen-snapshots)"
+                  generated
+                  (File.ReadAllText path)
+                  "the generator no longer reproduces DocGenerated.fs byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots"
           }
 
           test "the generated F# module round-trips the corpus in the native shape" {
