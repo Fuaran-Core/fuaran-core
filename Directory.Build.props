@@ -226,7 +226,20 @@
          vocabularies and the committed generated module pin it), so no consumer's generated copy
          moves. See DECISIONS.md D26 and STABILITY.md "Declared defaults: what the generator
          renders, and what it refuses". -->
-    <Version>0.21.0</Version>
+    <!-- 0.22.0 (2026-09-12): Phase 126 — `Fuaran.Core.Conformance` gains `ConstructWitness<'T>`
+         and `Conformance.constructThenEncodeLaws`: a domain's corpus rebuilt through its own smart
+         constructors and re-encoded, so the AUTHORING surface is certified beside the codec. Every
+         codec family in the kit certifies `decode` and `encode` against each other, and the
+         constructors a program writes against are a different function into the same type that no
+         round-trip law ever calls — so a field that widens in memory keeps a suite green over
+         thousands of vectors while breaking every consumer that BUILDS a value (`@fuaran-ui/ui`
+         0.26.0, fuaran#1661). Purely additive: no existing type, signature, verdict or emitted byte
+         moved, so consumers repin without source changes. MINOR rather than patch on the standing
+         grounds — a new public type and a new public function in a shipped package are a contract a
+         consumer can pin against — and a fresh version rather than a repack because v0.21.0 is
+         tagged. See DECISIONS.md D27 and STABILITY.md "Construct-then-encode: the authoring surface
+         certified". -->
+    <Version>0.22.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
