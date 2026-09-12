@@ -1845,3 +1845,57 @@ and byte-compare them, so the multiply cannot come back quietly. Eight draws rat
 deliberately: a single-draw vector would have read `1547650048` against `1547650046` as a rounding
 difference rather than as the collapse it precedes. Measured by reverting the step: the whole .NET
 suite stays green — it always could — while the parity leg reddens on all four vectors.
+
+## Construct-then-encode: the authoring surface certified (Phase 126, `0.22.0`)
+
+`Fuaran.Core.Conformance` gains one public type and one law family:
+
+- **`ConstructWitness<'T>`** (`{ Surface: string; Construct: 'T -> Result<'T, string> }`) — how a
+  domain rebuilds a decoded value through the smart constructors / builders an author writes
+  against, rather than through the decoded record itself. `Surface` names that surface in the
+  report, because a counterexample is read by a human.
+- **`Conformance.constructThenEncodeLaws domain codec witness corpus`** — over a domain's existing
+  `Corpus.Case` list: the corpus is non-vacuous, the authoring surface accepts every decoded
+  document, and `encode (construct (decode b)) = encode (decode b)` for every one of them.
+
+**Purely additive.** No existing type, function, signature or emitted byte moved, and no existing
+family's verdict changes, so consumers repin without source changes. MINOR rather than patch on the
+standing grounds: a new public type and a new public function in a shipped package are a contract a
+consumer can pin against.
+
+**What it certifies that nothing else did.** Every codec law in this kit certifies `decode` and
+`encode` against each other. The authoring surface is a *different function into the same type*, and
+a round-trip law never calls it — it starts at bytes and ends at bytes. So a field that widens in
+memory to a richer carrier keeps a decoder-encoder suite green over thousands of vectors while
+breaking every program that BUILDS a value. That is not a constructed example: it is the
+`@fuaran-ui/ui` 0.26.0 release of 2026-09-11 (fuaran#1661), where the only author-direction consumer
+in the estate broke on the pin bump against a fully green corpus.
+
+**A domain opts in, and one that does not is named.** `witness` is an option. `None` reports a
+single result — `construct-then-encode (<domain>): NOT ADOPTED — no ConstructWitness supplied` —
+whose `Passed` is **false**. `LawResult` has two states and no third, and widening it would be a
+compile-breaking change for every consumer that constructs one, so not-adopted is reported as not
+passed: a family asked to certify a surface it was never given has certified nothing. Running the
+family with `None` is therefore not a way to stay green; a domain whose subject this is not records
+a reasoned non-use in its census row, as it does for every other family it does not use.
+
+**The right-hand side is `encode (decode b)`, not the literal bytes `b`.** The law reads naturally
+as `encode (construct (decode b)) = b`, and on a corpus written in its codec's canonical form that
+is what it computes. A `Corpus.Case`'s JSON is not *required* to be canonical — `Corpus.roundTrip`
+compares values, so a legal corpus may spell a document with a different key order — and comparing
+against literal bytes would redden on the corpus's formatting rather than on the authoring surface.
+
+**A refusal and a divergence are separate laws**, so a red is never misattributed: a constructor
+that rejects a value the domain's own codec just decoded fails the acceptance law, and the
+construct-then-encode law stays green because nothing was built to compare. When the law itself
+reddens, the counterexample states whether the plain codec round-trip passes over that same document
+— it usually does, and a reader meeting the red for the first time should not have to establish it.
+
+**Go-red proof.** `tests/Fuaran.Core.Tests/ConstructThenEncodeTests.fs` plants the fuaran#1661 shape
+over the reference string-id witness: an authoring constructor that widens a leaf's text into a
+child source node. Every resulting tree encodes and decodes perfectly, `Corpus.runCorpus` is green
+over the same corpus in the same test, and the construct-then-encode law reddens naming the
+document. The not-adopted report, the vacuous corpus, the reject-cases-are-not-documents rule and
+the refusing surface each have their own case.
+
+Adoption guide: [`docs/construct-then-encode.md`](docs/construct-then-encode.md).

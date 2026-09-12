@@ -360,6 +360,30 @@ let private sampleAdequacyTouch =
 
     sprintf "%d/%b/%d" (List.length results) (results |> List.forall (fun r -> r.Passed)) censusKinds
 
+// Phase 126 — the construct-then-encode family. It has to be Fable-clean for the same reason the
+// rest of the kit does, and one more: the authoring surfaces it certifies are the builders a client
+// calls, so a law that only ran on .NET would certify the wrong host. Both arms are touched — the
+// adopted one and the by-name not-adopted report — because the second is a whole branch.
+let private constructThenEncodeTouch =
+    let codec: Corpus.Codec<string> =
+        { Encode = fun s -> Json.render (JStr s)
+          Decode = fun s -> Decode.parse s |> Result.bind Decode.asString }
+
+    let witness: ConstructWitness<string> =
+        { Surface = "the smoke's own constructor"
+          Construct = fun s -> Ok(String.concat "" [ s ]) }
+
+    let cases =
+        [ { Corpus.Name = "one"
+            Corpus.Kind = Corpus.RoundTrip
+            Corpus.Json = codec.Encode "x"
+            Corpus.Tag = "str" } ]
+
+    let adopted = Conformance.constructThenEncodeLaws "smoke" codec (Some witness) cases
+    let notAdopted = Conformance.constructThenEncodeLaws "smoke" codec None cases
+
+    sprintf "%b/%b" (adopted |> List.forall (fun r -> r.Passed)) (notAdopted |> List.exists (fun r -> not r.Passed))
+
 // Phase 118 — the VALUE leg's entry point. `--vectors` prints the cross-pipeline table and nothing
 // else, which is what `parity.ps1` runs on both pipelines and byte-compares. It is a MODE of this
 // program rather than a project of its own on purpose: the table has to be transpiled by the same
@@ -393,7 +417,8 @@ let main argv =
           aiSurfaceTouch
           idlTouch
           foldConfluenceTouch
-          sampleAdequacyTouch ]
+          sampleAdequacyTouch
+          constructThenEncodeTouch ]
         |> List.iter (printfn "%s")
 
     0

@@ -269,4 +269,7 @@ module SampleAdequacy =
           "Conformance.leaseLaws", Unconditional "the conflict and expiry witnesses are BUILT each iteration, not drawn"
           "Conformance.casLaws", Unconditional "each iteration appends at the true head, at a stale head, and races two"
           "Conformance.idempotencyLaws",
-          Unconditional "each iteration appends a fresh key then re-sends it under both heads" ]
+          Unconditional "each iteration appends a fresh key then re-sends it under both heads"
+          "Conformance.constructThenEncodeLaws",
+          Unconditional
+              "every corpus document is decoded, rebuilt through the authoring surface and re-encoded on every run — the sample is the caller's own corpus rather than a draw, and an empty one fails the family's own non-vacuity law instead of passing quietly" ]
