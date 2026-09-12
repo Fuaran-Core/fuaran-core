@@ -25,4 +25,8 @@ if (-not $SkipBuild) {
 if (-not $SkipTests) {
     dotnet run --project tests/Fuaran.Core.Tests --no-build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Phase 128 — the C# facade's conformance report (see ./verify.ps1 for what it certifies).
+    dotnet run --project tests/Fuaran.Core.CSharp.Proof --no-build
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

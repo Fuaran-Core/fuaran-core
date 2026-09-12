@@ -20,10 +20,12 @@
     <Project Path="src/Fuaran.Core.AiSurface/Fuaran.Core.AiSurface.fsproj" />
     <Project Path="src/Fuaran.Core.Propagation/Fuaran.Core.Propagation.fsproj" />
     <Project Path="src/Fuaran.Core.Lease/Fuaran.Core.Lease.fsproj" />
+    <Project Path="src/Fuaran.Core.CSharp/Fuaran.Core.CSharp.csproj" />
     <Project Path="src/Fuaran.Core.Idl.Cli/Fuaran.Core.Idl.Cli.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj" />
+    <Project Path="tests/Fuaran.Core.CSharp.Proof/Fuaran.Core.CSharp.Proof.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/adoption/Adoption.fsproj" />

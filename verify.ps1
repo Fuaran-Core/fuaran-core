@@ -51,5 +51,18 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# The C# facade's conformance report (Phase 128) — a C# consumer constructs and reads `ColExpr`,
+# `Transform`, the artifact-function hole family and `JVal` through `Fuaran.Core.CSharp` alone, the
+# read-then-rebuild round trip is the identity over a generated sample, that sample is shown to reach
+# every case of every union it covers (read off the F# type, so a NEW case reddens this), and no public
+# facade member mentions an F# type outside the two declared bridge names. Run from here rather than
+# from the Expecto suite because the claim is about what a C# CONSUMER can express, and only C# consumer
+# code can make it.
+dotnet run --project tests/Fuaran.Core.CSharp.Proof --no-build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '==== verify: C# facade proof FAILED its conformance report' -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
 Write-Host '==== verify: fuaran-core green' -ForegroundColor Green
 exit 0

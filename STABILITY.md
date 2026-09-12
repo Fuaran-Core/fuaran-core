@@ -1846,6 +1846,63 @@ deliberately: a single-draw vector would have read `1547650048` against `1547650
 difference rather than as the collapse it precedes. Measured by reverting the step: the whole .NET
 suite stays green — it always could — while the parity leg reddens on all four vectors.
 
+## The C# facade: an F#-free authoring surface over the closed unions (Phase 128, `0.22.0`)
+
+`Fuaran.Core.CSharp` is a new package (the count is not restated here — `dotnet pack Fuaran.Core.slnx`
+is the enumeration, and a written-down number drifts) carrying a C#-shaped facade over the closed
+unions a non-F# authoring surface has to construct and read: the dataframe algebra (`ColExpr`,
+`Transform`, and `Cell` / `ColumnType` / `BinOp` / `ScalarFn` / `AggFn` / `JoinKind` / `SortDir` /
+`WindowFn` / `DataSource` / `Agg` / `WindowSpec` / `PivotSpec` under them), the artifact-function
+declaration family (`ValueSpace`, `HoleKind`, `HoleDecl`, `EffectClass`, `SigEntry`, `Signature`), and
+the wire JSON model (`JVal`). Construction is factory methods, reading is a total `Match` / `Switch`
+per union, and a pipeline is a `Pipeline` value rather than an `FSharpList`.
+
+**Purely additive: no F# surface moved.** Every existing package is byte-unchanged and carries the new
+stamp only, so an F# consumer repins without reading anything. MINOR rather than patch on the `0.4.0`
+precedent — adding a package to the published set is a contract change even when no existing
+package's surface moves, because `dotnet pack` now emits one more nupkg and a consumer pinning
+`0.22.0` gets an id that did not exist at `0.21.0`.
+
+**What the promise IS, stated precisely, because the loose version is not checkable.** No public member
+of the facade mentions a type from `FSharp.Core`, a type from a `Fuaran.Core.*` F# assembly, or a
+positional `Tuple` / `ValueTuple`, at any depth of a generic argument — **except** on a member named
+exactly `ToCore` or `FromCore`. That pair is the declared bridge, and it has to exist: the facade's
+whole job is to hand Core its own values. The gate asserts the rule and PRINTS the bridge census, so
+how wide the exemption actually is stays visible rather than merely permitted; today it is 36 members,
+two per facade type.
+
+**Three things this package deliberately is not.**
+
+- **It is not Fable-clean, and it is not in the Fable-compile gate.** A C# assembly is not
+  Fable-compiled, so the smoke project does not and must not reference it. The "public surfaces are
+  FSharp.Core-only and Fable-clean" claim above is about the F# packages and is unaffected; this one is
+  .NET-only by construction, and a consumer needing the same vocabulary in a browser uses the F# tier
+  or a host implementation.
+- **It holds no logic.** Every member either constructs a wrapped value, reads one, or forwards to a
+  function the F# side already publishes (`Effect.join` / `covers` / `determinismTag`,
+  `Space.validate`, `Json.tryRender` / `parse`, `DataFrameCodec.encodePipeline` / `decodePipeline`).
+  Nothing is re-implemented, so there is no second semantics to keep in step.
+- **It is not a general C# surface over Core.** It covers the unions a veneer AUTHORS. `Arg<'Node>`,
+  the witness records, the op-stream and the evaluators are absent on purpose — the witness records
+  are generic over a domain's own types, and a facade over them belongs to the host that supplies
+  those types.
+
+**The forward-coupling rule this creates, and it is the reason the coverage guard exists.** Adding a
+case to `ColExpr`, `Transform`, `Cell`, `JVal`, `ValueSpace` or `HoleKind` now also adds a factory and
+a `Match` arm to this package, **in the same change-set**. That is not a discipline to remember: the
+proof's coverage leg reads the expected case list off the F# type through
+`FSharpType.GetUnionCases`, so a case with no facade spelling cannot be produced by the generator, and
+the gate reddens naming it. The widened `Match` signature is a compile break for a caller that passed
+its arms positionally, which is the honest cost of a closed union growing and is the same cost the F#
+side's exhaustive matches pay.
+
+**Its own certification is a C# console proof, not an Expecto suite.** `./verify.ps1` and `./run.ps1`
+run `tests/Fuaran.Core.CSharp.Proof`, on the reference-adoption-sample pattern. The claim is about what
+a C# CONSUMER can express, and only C# consumer code can make it — a law about the facade written in F#
+would be certifying the wrapped values, which is what the F# suite already does. Its four legs and
+their go-red proofs are in DECISIONS.md D28, with the D9 exception this package rides and the
+criterion for deleting it.
+
 ## Construct-then-encode: the authoring surface certified (Phase 126, `0.22.0`)
 
 `Fuaran.Core.Conformance` gains one public type and one law family:

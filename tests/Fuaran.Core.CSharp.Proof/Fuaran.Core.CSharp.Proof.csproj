@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Fuaran.Core.CSharp.Proof</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fuaran.Core.CSharp\Fuaran.Core.CSharp.csproj" />
+    <!-- The conformance kit is here for ONE thing: `ConfRng`, the seeded, Fable-identical draw
+         stream every Core law family already generates from. The round-trip law draws its sample
+         off that stream rather than off a generator invented for this project. -->
+    <ProjectReference Include="..\..\src\Fuaran.Core.Conformance\Fuaran.Core.Conformance.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

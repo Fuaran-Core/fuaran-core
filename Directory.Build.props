@@ -239,6 +239,18 @@
          consumer can pin against — and a fresh version rather than a repack because v0.21.0 is
          tagged. See DECISIONS.md D27 and STABILITY.md "Construct-then-encode: the authoring surface
          certified". -->
+    <!-- 0.22.0 (2026-09-12): Phase 128 also RIDES this draft slot — `Fuaran.Core.CSharp` joins the
+         packed set, a C#-shaped facade over the unions a non-F# authoring surface constructs and
+         reads (`ColExpr` / `Transform` and their vocabularies, the artifact-function hole family,
+         `JVal`), with no F# option, list, function or positional tuple on any public member outside a
+         declared `ToCore` / `FromCore` bridge. Purely additive for every existing package — all are
+         byte-unchanged and carry the new stamp only. Riding rather than advancing because this slot
+         is untagged and no public-path consumer pins it, and because an addition is not a higher
+         change class than the one the slot already carries; what it does change is the same fact
+         0.4.0 recorded — `dotnet pack Fuaran.Core.slnx` emits one more nupkg, and a consumer pinning
+         0.22.0 gets an id that did not exist at 0.21.0. Note it is .NET-only and deliberately NOT in
+         the Fable-compile gate: a C# assembly is not Fable-compiled. See DECISIONS.md D28 and
+         STABILITY.md "The C# facade: an F#-free authoring surface over the closed unions". -->
     <Version>0.22.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
@@ -255,7 +267,7 @@
        the `lib/` DLL for .NET. The standard dual-pack convention (Feliz / Thoth). The internal
        ProjectReferences become nuspec dependencies on pack; the dependency packages ship their
        own `fable/` source, so Fable resolves the whole Core graph transitively. -->
-  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+  <ItemGroup Condition="'$(IsPackable)' == 'true' And '$(MSBuildProjectExtension)' == '.fsproj'">
     <Content Include="$(MSBuildProjectFile)" PackagePath="fable\" />
     <Content Include="*.fs" PackagePath="fable\" />
   </ItemGroup>
