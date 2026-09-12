@@ -30,12 +30,24 @@ any other corpus, and the bytes below are the ones it is measured against.
 
 `manifest.json` identifies the directory as a corpus and enumerates the
 round-trip documents; `model-roundtrips/*.json` are the documents themselves.
+The identity is the manifest's **`kind`** member, which reads
+`"second-domain-spike-corpus"` — that member, and nothing else in the document,
+is what makes this directory this corpus.
 The spike reads the `root` member of each file and ignores everything else, so a
 richer corpus in the same layout — carrying its own document envelope and
 sidecars alongside `root` — is read by the same code path.
 
 ## Pointing the spike at a different corpus
 
-Set `FUARAN_SPIKE_CORPUS` to a directory of this shape. It must carry a
-`manifest.json` naming `modelRoundTrips` and a `model-roundtrips/` directory, or
-the spike refuses it by name rather than falling back silently.
+Set `FUARAN_SPIKE_CORPUS` to a directory of this shape. Its `manifest.json` must
+declare `"kind": "second-domain-spike-corpus"`, carry a `modelRoundTrips` array,
+and sit beside a `model-roundtrips/` directory — or the spike refuses it at
+resolution, naming the identity it expected and the path it read, rather than
+falling back to the vendored set silently.
+
+Acceptance used to be a containment test over the manifest's text: any document
+that CONTAINED the string naming the round-trip family was taken to be a corpus.
+That cannot tell a document which *is* this corpus from one which merely
+*mentions* it — another vocabulary's manifest listing the family among
+specifications it does not carry would have been accepted, and the certification
+would then have reported a result about whichever documents were on disk.

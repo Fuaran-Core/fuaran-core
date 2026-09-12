@@ -1,5 +1,40 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-12 — D29: the generator's OUTPUT is reproducible; the packed ASSEMBLY is not, and will not be claimed to be
+
+**Decided (Phase 129, `0.22.0`).** Every emitter in `Fuaran.Core.Idl.Codegen` normalises its output
+to LF at its own boundary, so a regeneration is reproducible across machines. The stronger property
+the phase was asked to establish — that a locally packed assembly is byte-identical to the published
+package for the same version — is **refuted**, and is not adopted as a goal.
+
+**The refutation is measured, not argued.** The published `Fuaran.Core.Idl.Codegen 0.21.0` carries
+`lib/net10.0/Fuaran.Core.Idl.Codegen.dll` at 468,992 bytes; `dotnet pack -c Release` of the SAME
+tagged commit, from an all-LF export, produces 469,504 bytes — a different size, so not a difference
+in build identifiers that a deterministic-build switch would erase. Three causes act independently
+and none of them is a line ending: `global.json` pins the SDK with `rollForward: latestFeature`, so
+the compiler is whichever feature band the machine has; the released packages are built on a
+different operating system; and this repository sets none of the properties (`Deterministic`,
+`PathMap`, `ContinuousIntegrationBuild`) that would pin embedded source paths. Reaching assembly
+byte-identity would mean pinning all three, which is a decision about how this repository is BUILT
+and released, not a fix for the defect that prompted the phase.
+
+**So the claim is narrowed to the one that was actually load-bearing.** The symptom that reached a
+consumer was never "two assemblies differ" — nobody diffs assemblies. It was that a consumer's IDL
+regeneration test failed on every machine that had packed locally, because the generated TEXT
+differed: the generator's multi-line templates baked the line endings of whichever checkout compiled
+them. That is what the emitters now foreclose, and it is verifiable by anyone in a way assembly
+byte-identity is not: build the generator from an LF tree and from a CRLF tree and compare what it
+emits. Measured both ways — before the change the two builds emit different bytes, after it they
+emit the same bytes, and those bytes equal `0.21.0`'s LF emission, so no committed generated
+artefact moves.
+
+**The general point, which outlives this instance.** "Byte-identical packages" and "reproducible
+generated output" look like the same promise and are not. One is a property of a build system and
+costs pinned toolchains, pinned runners and source-path mapping; the other is a property of a
+LIBRARY and costs one normalisation at each output boundary. The second is what a consumer of a code
+generator depends on, and it is available without the first. A finding phrased as the first should
+be checked against which of the two the reported symptom actually needed.
+
 ## 2026-09-12 — D28: the D9 exception is taken for a C# facade, and its deletion criterion is written down beside it
 
 **Decided (Phase 128, `0.22.0`).** `Fuaran.Core.CSharp` ships a C#-shaped facade over the closed
