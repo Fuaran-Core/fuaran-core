@@ -10,12 +10,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The wire-format conformance corpus is a BUILD INPUT, not an optional extra
+      # (Phase 130). Two suites certify against it — the laws/ transform vectors and the
+      # nodes/ drift guard — and an absent corpus now FAILS rather than skipping, because a
+      # skip is how four consecutive gates reported green over a corpus none of them had
+      # read. So the corpus is checked out here and named explicitly below.
+      #
+      # Checked out INSIDE the workspace because actions/checkout refuses a path outside it;
+      # .gitignore carries the directory so the tree stays clean either way.
+      - name: Check out the wire-format conformance corpus
+        uses: actions/checkout@v4
+        with:
+          repository: fuaran-ui/fuaran-ui-specification
+          path: wire-format-fixtures
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
       # The repo green gate — the same command contributors run locally, so CI and
       # local never diverge: tool restore + fantomas --check + build + the Fable-compile
       # gate (the "Fable-clean on encode AND decode" claim) + tests + the adoption sample.
+      #
+      # FUARAN_CORE_CORPUS_DIR names the checkout above rather than leaving the suite to
+      # anchor and climb. The climb would find it here too, so this is not load-bearing for
+      # the run — it is load-bearing for the failure: if the checkout step is ever removed or
+      # renamed, the suite says which directory it was told to read instead of reporting a
+      # search that came up empty. It is also the form docs/conformance-corpus.md hands a
+      # contributor whose clone lives somewhere else.
       - name: Verify (./verify.ps1)
         shell: pwsh
+        env:
+          FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
         run: ./verify.ps1

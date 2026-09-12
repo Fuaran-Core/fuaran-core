@@ -1,5 +1,46 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-12 — D30: an absent conformance corpus FAILS, and CI supplies the corpus rather than the suite lowering its claim
+
+**Decided (Phase 130, `0.22.0`).** The two suites that certify against the shared wire-format
+conformance corpus resolve it through one locator anchored at the repository's MAIN working tree,
+and an absent corpus **fails** the gate, naming every path tried and the remedy. The only way to
+skip is `FUARAN_CORE_SKIP_CORPUS`, and the skip then prints that variable by name and says nothing
+was compared. `.github/workflows/ci.yml` checks the corpus out and names it in
+`FUARAN_CORE_CORPUS_DIR`, so the default is fail-loud in CI as well as locally.
+
+**What it replaces, and why the two halves had to move together.** Each suite found the corpus by
+climbing upwards from `Directory.GetCurrentDirectory()` and `AppContext.BaseDirectory`, and
+`skiptest`ed by name when the climb found nothing. A climb rooted in the running binary reaches a
+sibling corpus from the main working tree and can never reach it from a LINKED WORKTREE of the same
+repository, because a worktree sits somewhere else entirely. So the same commit either certified
+against the corpus or did not, decided by which checkout ran it — and the skip made that invisible:
+four consecutive gate runs in worktrees reported green over a corpus none of them had read, and the
+first run that actually compared was one in the main tree, where it failed on drift attached to a
+change that had not caused it. Fixing only the anchor would have left the skip available to hide the
+next such gap; removing only the skip would have reddened every worktree.
+
+**The decision that needed deciding was the DEFAULT, and it turned on what CI does.** A fail-loud
+default is worth nothing if the repository's own CI cannot satisfy it — the gate would be red on
+arrival, and a gate that is red on arrival is one people learn to step over. CI cloned no corpus,
+so there were two honest options: keep skipping when the corpus is absent (cheap, and preserves
+exactly the hole just found), or make CI supply it. The second was taken, because the corpus is a
+BUILD INPUT to those two suites in the same sense the vendored fixture corpora are: a conformance
+check that goes green without its oracle is worse than no check, and this repository already treats
+that as settled for every fixture store it vendors. The cost is one checkout step; the return is
+that drift between this kit and the published corpus surfaces on the push that caused it.
+
+**Why the skip survives at all.** The corpus is a separate repository, and a contributor on a bare
+clone who is changing something unrelated should not be blocked on a second clone. What is not
+acceptable is a skip nobody asked for: an opt-out that must be set by name, and that says on every
+skipped leg that nothing was compared, cannot be mistaken in a green report for a comparison that
+ran. `docs/conformance-corpus.md` states the same thing where a contributor will meet it first.
+
+**The general point.** "The check could not run" and "the check ran and passed" are different facts,
+and a skip renders them identically. Where a check depends on something outside the repository, the
+durable arrangement is to make the dependency obtainable and the absence loud — not to make the
+check optional and hope the machine that skips it is not the only machine that runs.
+
 ## 2026-09-12 — D29: the generator's OUTPUT is reproducible; the packed ASSEMBLY is not, and will not be claimed to be
 
 **Decided (Phase 129, `0.22.0`).** Every emitter in `Fuaran.Core.Idl.Codegen` normalises its output

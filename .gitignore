@@ -11,6 +11,12 @@ tests/fable-smoke/output/
 fable_modules/
 .fable/
 
+# The shared wire-format conformance corpus (Phase 130) is a separate repository, and one of
+# the two places the suite looks for it is inside this repository root — which is where CI
+# checks it out, and the simplest place for a contributor to clone it. Ignored so that
+# cloning it there never makes the tree look dirty.
+/wire-format-fixtures/
+
 # The parity probe (tests/hash-parity-probe/) emits throwaway JS, same as the Fable smoke gate.
 tests/hash-parity-probe/out/
 tests/hash-parity-probe/probe-*.txt

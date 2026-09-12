@@ -52,6 +52,12 @@
          suites below do not depend on the console code page the runner inherited.
          Before its first consumer; it references nothing here. -->
     <Compile Include="ChildProcess.fs" />
+    <!-- Phase 130 — the one lookup for the shared conformance corpus, anchored at the
+         repository's MAIN working tree (git's own common-dir question) so a linked worktree
+         resolves what the main tree resolves, and loud rather than silent when the corpus
+         is absent. Before its two consumers (the nodes/ drift guard below and the laws/
+         vectors further down); it reads ChildProcess.fs above and nothing else here. -->
+    <Compile Include="SiblingCorpus.fs" />
     <Compile Include="IdlSpikeTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
     <!-- Phases 108/109 - the declared wire shape (discriminator key + node envelope),
@@ -142,6 +148,12 @@
          committed CLI fixtures through Snapshots.repoFile. Appended here (append-only
          registration) — it depends on nothing else in this list. -->
     <Compile Include="IdlStabilityClassTests.fs" />
+    <!-- Phase 130 — the corpus lookup proved from a second worktree of this repository
+         (created and removed by the test), beside the go-red that shows the climb it
+         replaced finding nothing from the same place. Spawns git through ChildProcess.fs
+         and reads Snapshots.fs for the repository root. Appended here (append-only
+         registration) — it depends on nothing else in this list. -->
+    <Compile Include="SiblingCorpusTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

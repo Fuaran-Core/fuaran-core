@@ -16,6 +16,12 @@ Requirements: the .NET SDK pinned in [`global.json`](global.json).
 
 A change is ready to propose when `./verify.ps1` is green.
 
+Two of the suites certify against a conformance corpus that lives in a separate repository, and an
+absent corpus **fails** the gate rather than skipping it — a skipped comparison is indistinguishable
+from a passing one in a green report. [`docs/conformance-corpus.md`](docs/conformance-corpus.md) has
+the one-line clone command, the variable that names a clone kept elsewhere, and the documented
+opt-out.
+
 ## Coding standards
 
 - **F# formatting is Fantomas.** Run `./run.ps1` (or `dotnet fantomas src tests`) before every

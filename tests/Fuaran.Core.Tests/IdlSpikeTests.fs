@@ -48,24 +48,12 @@ let private wire (name: string) =
 let private generatedKinds =
     [ "Heading"; "Badge"; "Button"; "Metric"; "Box"; "Markdown"; "Tabs" ]
 
-let private tryFindCorpus () : string option =
-    let candidates (root: string) =
-        [ Path.Combine(root, "Fuaran-UI", "wire-format-fixtures", "nodes")
-          Path.Combine(root, "wire-format-fixtures", "nodes") ]
-
-    let rec climb (dir: string) (budget: int) =
-        if budget < 0 || isNull dir then
-            None
-        else
-            match candidates dir |> List.tryFind Directory.Exists with
-            | Some d -> Some d
-            | None ->
-                match Directory.GetParent dir with
-                | null -> None
-                | parent -> climb parent.FullName (budget - 1)
-
-    [ Directory.GetCurrentDirectory(); System.AppContext.BaseDirectory ]
-    |> List.tryPick (fun start -> climb start 12)
+/// The corpus's `nodes/` family. Resolved through the shared locator (Phase 130), which
+/// anchors at the repository's main working tree rather than climbing from wherever the
+/// binary happens to be running — a linked worktree never reached it, so this guard silently
+/// did nothing in every worktree gate.
+[<Literal>]
+let private corpusFamily = "nodes"
 
 let private tryFindGenerated () : string option =
     let rel = Path.Combine("src", "Fuaran.Core.Idl.Spike", "Generated.fs")
@@ -146,9 +134,14 @@ let tests =
               // Phase 86 realignment: the spike IDL now tracks the live 0.2.x corpus (Box
               // unification, bare-string TextSource, Metric source→value, Divider retired),
               // so every fixture is byte-exact-guarded again with NO exemptions.
-              match tryFindCorpus () with
-              | None -> skiptest "Fuaran-UI/wire-format-fixtures not checked out alongside — drift guard skipped"
-              | Some dir ->
+              // Phase 130: an absent corpus FAILS with the paths tried and the remedy. It used to
+              // skip by name, which is what every linked worktree of this repository got.
+              match SiblingCorpus.resolve corpusFamily with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let dir = Path.Combine(root, corpusFamily)
+
                   for name, snapshot in expected do
                       let path = Path.Combine(dir, name + ".json")
 
