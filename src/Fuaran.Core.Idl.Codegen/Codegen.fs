@@ -66,6 +66,26 @@ module CodegenError =
 /// compiled artefact); proves the IDL carries enough to project a host's types.
 module Gen =
 
+    /// Phase 129 — the emitted text's line endings are the GENERATOR's, never its inputs'.
+    ///
+    /// Two inputs can carry a CR into an emission and neither is under the caller's control. The
+    /// multi-line `"""…"""` templates below bake whatever line ending the compiled `Codegen.fs`
+    /// happened to have on disk, so a build from a CRLF working copy emits CRLF where a build from
+    /// an LF one emits LF — same version, same declaration, different bytes. And `GenSupport`'s
+    /// doc blocks and verbatim splices are authored data that may arrive from a `support.json`
+    /// written on any machine. Either way a consumer regenerating from the packaged generator gets
+    /// bytes that depend on where the generator was built, which its own regeneration guard then
+    /// reports as drift it cannot explain.
+    ///
+    /// Applied at each module emitter's boundary rather than at the template literals, so the
+    /// property holds for every path into the output — including ones added later — and is
+    /// falsifiable in one place: a declaration whose authored text carries a CR must still emit an
+    /// artefact that carries none. A raw CR is never wanted in emitted F# or TypeScript source; a
+    /// carriage return inside generated *data* travels as a six-character escape sequence, which
+    /// this leaves untouched because it is text rather than a control byte.
+    let private normalizeEol (s: string) : string =
+        s.Replace("\r\n", "\n").Replace("\r", "\n")
+
     /// Sequence a list of codegen results, short-circuiting on the first `CodegenError` (order
     /// preserved). The generator assembles source from many per-kind / per-field fragments; this
     /// threads a single typed failure up through the fragment lists without exceptions.
@@ -640,6 +660,7 @@ module Gen =
           idl.Kinds |> List.map (kindDecl msg) ]
         |> List.concat
         |> String.concat "\n\n"
+        |> normalizeEol
 
     // -----------------------------------------------------------------------
     // Phase 317 increment 3 — *feature-complete* code emission: emit a
@@ -1680,15 +1701,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             + "\n\n"
             + String.concat "\n\n" ctors)
 
-    /// Emit a compiling, self-contained F# encoder module (`moduleName`) for the named kinds,
-    /// drawing in the enums/unions they transitively reference. `encodeNode : Node -> string`
-    /// returns canonical wire via the shared `Canon.render`. Also emits a `nodeWitness`
-    /// (`NodeWitness<Node, string>`) so the generated layer plugs into `Fuaran.Core.Tree`, a
-    /// `runValidator` scaffold wiring `Fuaran.Core.Validator` over the generated `Node`, and
-    /// `mk<Kind>` smart constructors applying the IDL-declared field defaults. `Error` on a
-    /// construct the generator cannot yet emit (`CodegenError` — GP4/GP5), reported at generation
-    /// time rather than as a `failwith`.
-    let fsharpModuleWith
+    /// The F# module emission before [[normalizeEol]] — see `fsharpModuleWith`, the public
+    /// entry point, which is this composed with it.
+    let private fsharpModuleUnnormalised
         (sup: GenSupport)
         (moduleName: string)
         (idl: Idl)
@@ -2067,6 +2082,25 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | _, Error e, _, _
         | _, _, Error e, _
         | _, _, _, Error e -> Error e
+
+    /// Emit a compiling, self-contained F# encoder module (`moduleName`) for the named kinds,
+    /// drawing in the enums/unions they transitively reference. `encodeNode : Node -> string`
+    /// returns canonical wire via the shared `Canon.render`. Also emits a `nodeWitness`
+    /// (`NodeWitness<Node, string>`) so the generated layer plugs into `Fuaran.Core.Tree`, a
+    /// `runValidator` scaffold wiring `Fuaran.Core.Validator` over the generated `Node`, and
+    /// `mk<Kind>` smart constructors applying the IDL-declared field defaults. `Error` on a
+    /// construct the generator cannot yet emit (`CodegenError` — GP4/GP5), reported at generation
+    /// time rather than as a `failwith`.
+    ///
+    /// The emitted text is LF-terminated whatever the generator was built from and whatever the
+    /// declared support carries — see [[normalizeEol]].
+    let fsharpModuleWith
+        (sup: GenSupport)
+        (moduleName: string)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<string, CodegenError> =
+        fsharpModuleUnnormalised sup moduleName idl kindTags |> Result.map normalizeEol
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
     /// emitting byte-identically to the generator before the support channel existed.
@@ -3485,6 +3519,10 @@ const plain = (pairs) =>
           [ Ok "export { encodeNode, decodeNode };" ] ]
         |> List.concat
         |> concatR "\n\n"
+        // Phase 129 — the emitted TypeScript is LF-terminated whatever this generator was built
+        // from; the three preludes above are multi-line templates and would otherwise carry the
+        // line endings of whichever checkout compiled them. See [[normalizeEol]].
+        |> Result.map normalizeEol
 
     // -----------------------------------------------------------------------
     // Phase 317 syntax-tree-emission leg + Phase 321 trust boundary. The

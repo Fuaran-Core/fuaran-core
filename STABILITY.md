@@ -980,6 +980,48 @@ afterwards (Phase 123, and see the D14 amendment). The proofs that remain here a
 the neutral vocabularies; the full-scale instance of each is now the domain's own gate, which is
 what "a vocabulary lives in its domain's repo" has to mean to be worth anything.
 
+### The emitted artefact's line endings are the generator's (Phase 129, `0.22.0`)
+
+**Promise: every emitter in `Fuaran.Core.Idl.Codegen` emits LF, whatever the generator was built
+from and whatever its declared support carries.** `Gen.fsharpTypes`, `Gen.fsharpModuleWith` /
+`Gen.fsharpModule` and `Gen.typescriptModule` normalise at their own boundary, so a regeneration is
+reproducible across machines rather than across machines-that-share-a-checkout-style.
+
+Two inputs could previously put a carriage return into an emission, and a consumer had no way to
+see either. The generator's own multi-line `"""…"""` templates bake whatever line ending
+`Codegen.fs` had on disk in the checkout that compiled it — the repository pins LF in the index, but
+a formatter run used to rewrite the working copy to the platform's ending, so the same version of
+the same package emitted CRLF when built on one machine and LF when built on another. And declared
+support (`GenSupport` doc blocks and verbatim splices, annotation prose in the IDL) is authored data
+that travels as a document written on any machine.
+
+**Measured, in both directions.** Building `0.21.0`'s generator from an all-LF source tree and from
+the same tree with `Codegen.fs` forced to CRLF produced two different emissions of the same
+vocabulary (differing by exactly the carriage returns). With the normalisation in place both builds
+emit the same bytes — and those bytes are byte-identical to `0.21.0`'s LF emission, so **no
+committed generated artefact moves**: a consumer's regeneration guard sees nothing change.
+
+**What the repository's own guards could not see, recorded because it is the reason this reached a
+consumer first.** Both committed-artefact drift guards in the suite compare through a
+whitespace-stripping normaliser, so an emission that differs only in line endings is EQUAL to them.
+They are right to be insensitive — they exist to catch a real generator change, not reformatting —
+but it means nothing in this repository was measuring the property. The new family asserts it
+directly, and asserts the authored prose is PRESENT in its LF form, so a generator that dropped or
+escaped the prose instead of normalising it fails rather than passing by emitting nothing.
+
+**Two producer-side changes travel with it, and neither is on the API surface.** `.editorconfig`
+pins `end_of_line = lf`, which is what Fantomas reads — `.gitattributes` governs the index and the
+checkout, and demonstrably did not keep the working copy LF. And a test in the suite fails a working copy
+that has drifted to CRLF, naming the files and the remedy, so the drift is caught where it happens
+rather than in a package.
+
+**What this does NOT claim.** A locally packed assembly is *not* byte-identical to the published one
+for the same version, and no line-ending fix could make it so: the compiling SDK rolls forward to
+the newest feature band available on the machine, the released packages are built on a different
+operating system, and this repository sets none of the deterministic-build properties that would
+pin source paths. The promise here is about the generator's OUTPUT, which is what a consumer
+regenerates and compares; assembly-level reproducibility is a separate question and is not promised.
+
 ## Surface narrowing: the uncalled internals (`0.19.0`) — BREAKING
 
 A sweep of all nineteen packable `Fuaran.Core.*` packages measured 613 public functions against
@@ -1000,7 +1042,7 @@ measurement, not a guarantee: if you are the caller it could not see, say so and
 |---|---|
 | `AiSurface` | `PatternBank.tryMatch` |
 | `Conformance` | `FoldConfluence.renderLanes`, `IncrementalDelta.rowsTheLawsNeed` |
-| `DataFrame` | `ColExprModule.paramNames`, `TransformModule.stepParamNames`, `SchemaWalk.noSources`, `Incremental.verbName`, `Incremental.classifyStep`, `Incremental.evalDelta` |
+| `DataFrame` | `ColExprModule.paramNames`, `TransformModule.stepParamNames`, `SchemaWalk.noSources` (**public again at `0.22.0`** — see below), `Incremental.verbName`, `Incremental.classifyStep`, `Incremental.evalDelta` |
 | `Function` | `Space.isBounded`, `Function.memoKey`, `CapabilityCodec.signatureJson`, `CapabilityCodec.encodeInvocationJson`, `CapabilityPipelineModule.nodeOutputType` |
 | `Idl` | `Idl.Encode.encodeNodeEnv` |
 | `Idl.Codegen` | `Idl.Diff.stabilityImpact`, `Idl.Diff.profileBump`, `Idl.Diff.rosterFrom`, `Idl.Gen.msgCarrying`, `Idl.Gen.typescriptValueWith`, `Idl.Trust.gateCustom` |
@@ -1045,6 +1087,32 @@ The other members the sweep found uncalled but load-bearing are now documented a
 release, under "Public because a sibling Core package calls it", "Members the other language hosts
 mirror name for name", and "The portability set" — so the next reading classifies them as promised
 rather than proposing them again.
+
+### The narrowing had a caller: `SchemaWalk.noSources` is public again (Phase 129, `0.22.0`)
+
+`SchemaWalk.noSources` is **public** from `0.22.0`. The sentence above — "if you are the caller it
+could not see, say so and the member returns" — was taken up, and this is the member returning.
+
+The caller was a downstream consumer's schema-walk helper: the UI host `fuaran-dotnet`, whose
+grounding helper for two validator codes called it to walk a pipeline under no declared source. The
+sweep searched every `.fs` / `.fsi` / `.fsx` file available to it and could not see the call, because
+that consumer was sitting on a deliberate version hold at `0.18.0` when the sweep ran — so the file
+that held the call was in the workspace and the call itself was against a Core the consumer had not
+yet adopted. It surfaced when the consumer was raised to `0.21.0` and stopped compiling, and it was
+repaired there with a file-private `SchemaWalk.ofMap Map.empty`, which is the public spelling of the
+same thing and remains a correct way to write it.
+
+**Restoring it is additive** — a token returns to the surface, nothing changes shape, and no
+consumer that adopted the narrowing has anything to do. The `ofMap Map.empty` spelling is not
+deprecated by this; `noSources` is back because it NAMES the case ("no named source declared"),
+which a caller reading the call site should not have to reconstruct from an empty map.
+
+**What it says about the method, which is the part worth keeping.** A caller-count sweep measures the
+sources it can read at the revision they are at, and a consumer on a version hold is invisible to it
+in precisely the way that matters: its code is present, its call is real, and the call is against a
+surface it has not adopted yet. A future narrowing sweep should read each consumer at the version it
+will adopt, not at the version it currently pins — or treat a consumer on a hold as unmeasured and
+say so, rather than as measured and silent.
 
 ## Open-core posture
 

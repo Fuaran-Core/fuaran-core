@@ -1,0 +1,21 @@
+root = true
+
+# Line endings are LF everywhere — on disk as well as in the index (Phase 129).
+#
+# `.gitattributes` pins `* text=auto eol=lf`, which makes a CHECKOUT LF. It does not keep
+# the working copy that way: Fantomas resolves its output line ending from EditorConfig and
+# falls back to the platform's, so a format run on Windows rewrote every `.fs` file to CRLF.
+# The result was a tree that `git status` called dirty while `git diff` called clean, and —
+# the part that reached a consumer — a package whose compiled multi-line string templates
+# carried whichever ending the machine that built it happened to use.
+#
+# The generator no longer lets its own inputs' line endings reach what it emits (see
+# `Gen.normalizeEol`), and the test suite fails a working copy that has drifted to CRLF (see
+# `WorkingCopyEolTests`). This is the third of those three: it stops the drift happening in
+# the first place.
+#
+# Deliberately just the one setting. Fantomas reads this file, so every key added here is a
+# formatting decision for the whole repository; the formatting profile is its defaults and
+# this changes none of it.
+[*]
+end_of_line = lf

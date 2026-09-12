@@ -229,22 +229,82 @@ let private declaredTags = Set.union nodeTags runTags
 // So the vendored corpus beside this file is the DEFAULT and is always present:
 // the legs run, or they fail — they never pass by resolving nothing, and they no
 // longer skip. `FUARAN_SPIKE_CORPUS` remains, for pointing the same declaration
-// at a richer corpus in the same layout; it is validated by shape and refused by
-// name rather than falling back silently, because a typo that degrades to the
-// vendored set would report a certification the operator did not ask for.
+// at a richer corpus in the same layout; it is validated by the manifest's declared
+// IDENTITY (Phase 129) and refused by name rather than falling back silently, because
+// a typo that degrades to the vendored set would report a certification the operator
+// did not ask for.
+//
+// Phase 129 — "validated" used to mean a CONTAINMENT probe: the manifest text had to
+// contain the string naming the round-trip family. That accepts any document which
+// merely CITES the family — a manifest for a different vocabulary listing it among
+// specifications it does not carry, an index, a README — and there is no third answer
+// available to a substring, so what the legs certified was whichever documents were on
+// disk. Acceptance is anchored on the manifest's own `kind` member now, and a directory
+// that is not this corpus fails AT RESOLUTION, naming the identity expected and the path
+// read.
 // ---------------------------------------------------------------------------
 
-/// A directory is a corpus when it identifies itself as one: a manifest naming
-/// the round-trip family, beside the directory holding it.
-let private isCorpus (dir: string) =
-    try
-        let manifest = Path.Combine(dir, "manifest.json")
+/// The identity this spike's corpus declares in its own manifest — the `kind` member, the
+/// one thing in the document that says WHAT it is rather than what it happens to mention.
+[<Literal>]
+let private corpusKind = "second-domain-spike-corpus"
 
-        File.Exists manifest
-        && File.ReadAllText(manifest).Contains "\"modelRoundTrips\""
-        && Directory.Exists(Path.Combine(dir, "model-roundtrips"))
-    with _ ->
-        false
+/// Why `dir` is not this spike's corpus, or `None` when it is (Phase 129).
+///
+/// Answered from the manifest's IDENTITY member, never from a substring over the manifest
+/// text. The predicate this replaces asked whether the whole file CONTAINED the string
+/// `"modelRoundTrips"`, which a document that merely CITES the family in prose satisfies
+/// while describing something else entirely — a corpus for another vocabulary, a README-ish
+/// index, a manifest that lists the family among specifications it does not carry. A
+/// containment probe cannot tell "this IS that" from "this MENTIONS that", so what it
+/// certifies is whichever documents happen to be on disk.
+///
+/// Every fault names the path it read and the identity it expected, because the only useful
+/// thing a resolution failure can do is tell you which directory to fix.
+let private corpusFault (dir: string) : string option =
+    let manifest = Path.Combine(dir, "manifest.json")
+
+    let expected = sprintf "this spike's corpus declares \"kind\": \"%s\"" corpusKind
+
+    let read =
+        try
+            if File.Exists manifest then
+                Ok(File.ReadAllText manifest)
+            else
+                Error "no manifest.json"
+        with e ->
+            Error("manifest.json could not be read: " + e.Message)
+
+    match read with
+    | Error why -> Some(sprintf "%s at '%s' (%s)" why manifest expected)
+    | Ok text ->
+        match Json.parse text with
+        | Error e -> Some(sprintf "manifest.json at '%s' is not JSON (%s); %s" manifest e expected)
+        | Ok(JObj fields) ->
+            let member' name =
+                fields |> List.tryPick (fun (k, v) -> if k = name then Some v else None)
+
+            match member' "kind" with
+            | Some(JStr k) when k = corpusKind ->
+                match member' "modelRoundTrips" with
+                | Some(JArr _) when Directory.Exists(Path.Combine(dir, "model-roundtrips")) -> None
+                | Some(JArr _) ->
+                    Some(
+                        sprintf
+                            "manifest.json at '%s' declares the right identity but there is no model-roundtrips/ directory beside it"
+                            manifest
+                    )
+                | _ ->
+                    Some(
+                        sprintf
+                            "manifest.json at '%s' declares the right identity but carries no \"modelRoundTrips\" array"
+                            manifest
+                    )
+            | Some(JStr other) ->
+                Some(sprintf "manifest.json at '%s' declares \"kind\": \"%s\"; %s" manifest other expected)
+            | Some _ -> Some(sprintf "manifest.json at '%s' has a non-string \"kind\" member; %s" manifest expected)
+            | None -> Some(sprintf "manifest.json at '%s' declares no \"kind\" member; %s" manifest expected)
+        | Ok _ -> Some(sprintf "manifest.json at '%s' is not a JSON object; %s" manifest expected)
 
 /// The vendored corpus, located the way this project's other fixture stores are:
 /// climb from the CWD / test binary to `tests/Fuaran.Core.Tests` by probing for a
@@ -272,18 +332,21 @@ let private vendoredCorpus () : string option =
 let private resolveCorpus () : Result<string, string> =
     match Environment.GetEnvironmentVariable "FUARAN_SPIKE_CORPUS" with
     | ovr when not (String.IsNullOrWhiteSpace ovr) ->
-        if isCorpus ovr then
-            Ok ovr
-        else
+        match corpusFault ovr with
+        | None -> Ok ovr
+        | Some why ->
             Error(
                 sprintf
-                    "FUARAN_SPIKE_CORPUS is set to '%s', which is not a corpus: it must hold a manifest.json naming \"modelRoundTrips\" and a model-roundtrips/ directory. Unset it to use the vendored corpus."
+                    "FUARAN_SPIKE_CORPUS is set to '%s', which is not this spike's corpus: %s. Unset it to use the vendored corpus."
                     ovr
+                    why
             )
     | _ ->
         match vendoredCorpus () with
-        | Some dir when isCorpus dir -> Ok dir
-        | Some dir -> Error(sprintf "the vendored corpus at '%s' is missing or malformed" dir)
+        | Some dir ->
+            match corpusFault dir with
+            | None -> Ok dir
+            | Some why -> Error(sprintf "the vendored corpus at '%s' is not usable: %s" dir why)
         | None ->
             Error
                 "could not locate tests/Fuaran.Core.Tests (Fuaran.Core.Tests.fsproj marker) from the CWD or the test binary"
@@ -367,6 +430,81 @@ let tests =
     testList
         "Second-vocabulary readiness spike"
         [
+
+          // ---- Phase 129: the corpus is accepted by IDENTITY, not by containment ----
+
+          test "corpus resolution: the vendored corpus declares this spike's identity" {
+              match vendoredCorpus () with
+              | None -> failtest "could not locate tests/Fuaran.Core.Tests from the CWD or the test binary"
+              | Some dir ->
+                  Expect.isNone
+                      (corpusFault dir)
+                      "the vendored corpus's manifest declares this spike's kind and the round-trip family"
+
+                  match resolveCorpus () with
+                  | Ok resolved -> Expect.equal resolved dir "resolution lands on the vendored corpus"
+                  | Error e -> failtestf "the vendored corpus did not resolve: %s" e
+          }
+
+          test "corpus resolution: a manifest that merely CITES the round-trip family is refused" {
+              let root =
+                  Path.Combine(Path.GetTempPath(), "fuaran-core-spike-" + Guid.NewGuid().ToString("N"))
+
+              try
+                  Directory.CreateDirectory(Path.Combine(root, "model-roundtrips")) |> ignore
+
+                  // A well-formed manifest for a DIFFERENT corpus that happens to name the
+                  // family in prose and even to carry a list under that key — exactly the
+                  // shape a containment probe cannot distinguish from the real thing.
+                  let decoy =
+                      """{
+  "kind": "some-other-corpus",
+  "description": "Vectors for another vocabulary. Its round-trip family is spelled modelRoundTrips, as in the \"modelRoundTrips\" family elsewhere in the estate.",
+  "modelRoundTrips": []
+}"""
+
+                  let manifest = Path.Combine(root, "manifest.json")
+                  File.WriteAllText(manifest, decoy)
+
+                  // The go-red control: the predicate this replaced ACCEPTS this directory.
+                  // Without it the test proves only that some arbitrary directory is refused.
+                  Expect.isTrue
+                      (File.ReadAllText(manifest).Contains "\"modelRoundTrips\"")
+                      "the retired containment probe would have accepted this manifest"
+
+                  match corpusFault root with
+                  | None -> failtest "a manifest declaring another corpus's identity was accepted"
+                  | Some why ->
+                      Expect.stringContains why corpusKind "the refusal names the identity it expected"
+                      Expect.stringContains why manifest "the refusal names the path it read"
+                      Expect.stringContains why "some-other-corpus" "the refusal names the identity it found"
+              finally
+                  try
+                      Directory.Delete(root, true)
+                  with _ ->
+                      ()
+          }
+
+          test "corpus resolution: a manifest with no identity member is refused" {
+              let root =
+                  Path.Combine(Path.GetTempPath(), "fuaran-core-spike-" + Guid.NewGuid().ToString("N"))
+
+              try
+                  Directory.CreateDirectory(Path.Combine(root, "model-roundtrips")) |> ignore
+                  let manifest = Path.Combine(root, "manifest.json")
+                  File.WriteAllText(manifest, """{ "modelRoundTrips": [] }""")
+
+                  match corpusFault root with
+                  | None -> failtest "a manifest declaring no identity at all was accepted"
+                  | Some why ->
+                      Expect.stringContains why corpusKind "the refusal names the identity it expected"
+                      Expect.stringContains why manifest "the refusal names the path it read"
+              finally
+                  try
+                      Directory.Delete(root, true)
+                  with _ ->
+                      ()
+          }
 
           test "the declared slice is well-formed" {
               Expect.isEmpty (Declare.enumWireErrors docIdl) "every enum's case/wire mapping is well-formed"

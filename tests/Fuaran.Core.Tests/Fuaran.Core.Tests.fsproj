@@ -128,6 +128,14 @@
          surface certified, and the go-red on a constructor that widens a field the encoder does
          not expect. Reads only Reference.fs and the kit, so it simply follows. -->
     <Compile Include="ConstructThenEncodeTests.fs" />
+    <!-- Phase 129 — the generated artefact's line endings are the generator's, not those of
+         whichever checkout compiled it. Reads only the spike vocabulary from the src project,
+         so it simply follows. -->
+    <Compile Include="IdlCodegenEolTests.fs" />
+    <!-- Phase 129 — the other half of the same property: the WORKING COPY's line endings,
+         measured by shelling git's own tracked-file listing through ChildProcess.fs. After
+         that helper, and it reads nothing else here. -->
+    <Compile Include="WorkingCopyEolTests.fs" />
     <!-- Phase 127 — the one classifier entry point over an IDL pair, the F# consequence
          table beside the wire severity, and the wire-profile bump. Two legs spawn the real
          compiler over the generator's output, so it needs ChildProcess.fs above; it reads the
