@@ -1,5 +1,40 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-12 — D32: F\* is the prover; the extracted model is the oracle; the pin, not hints, is what makes the leg reproducible
+
+**Decided (Phase 131, the prover spike).** The mechanised half of the correctness story is written
+in F\*, on the operator's familiarity argument — the kernel is pure, FSharp.Core-only, DU-shaped F#,
+and an ML-family model of an ML-family kernel keeps the gap between what is proved and what ships
+small enough to read. `proofs/DagFold.fst` models `Ops.independent`, `Dag.conflicts`,
+`Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce` over an abstract `op`/`state`/`rej`
+and proves the Phase 100 fold-confluence law as a theorem under one hypothesis, the domain's
+commutation promise. All three of the phase's exit criteria were met — reproducible, agrees,
+readable — so the verdict is GO, and the decoder-totality theorem follows in F\*.
+
+**The oracle IS the extraction, and the leg holds it there.** `proofs/oracle/DagFold.fs` is the
+model as F\*'s F# backend emits it, compiled into a never-packed assembly the suite runs beside
+production over the Phase 100 lane generators and the wire corpus's `ops/` pool. The proof leg
+re-extracts on every run and fails on any byte of difference from the committed file, so "the
+suite tests the model the theorem is about" is a checked claim rather than a discipline. Nothing
+extracted enters `src/`: GP3's FSharp.Core-only, Fable-clean surface is untouched, and no package
+moves — `0.22.0` stands.
+
+**Hints are gone, so the pin carries reproducibility.** The phase asked for the proof to check
+from committed hints; F\* 2026.09.06 has removed proof hints entirely (`--record_hints`,
+`--use_hints`, `.hints` files, unsat cores). The leg instead pins the release — which bundles its
+Z3 — by version and hash, refuses any other version, proves every query three times over varying
+seeds (`--quake 3`), runs three cold checks in CI, and reports every escape hatch as an error.
+F\* releases weekly; an unpinned prover is a gate that changes under you, and the pin is the
+single most load-bearing line in the leg.
+
+**The backend's cost landed on its edges and was small.** The F# backend ships no runtime (a
+sixteen-line `Prims` shim), emits pre-F#-8 layout (strict indentation off for the oracle project
+only), and extracts ghost inductives unless told not to (`noextract_to`). None of it touched the
+modelling. The findings are itemised in `proofs/README.md` beside the claims ladder that says what
+"formally verified" is spent on — the theorem, on the model, under its hypothesis — and what is
+only differentially tested (the DAG's delta recovery) or assumed (the domain promise, the
+extractor).
+
 ## 2026-09-12 — D31: an absent conformance corpus FAILS, and CI supplies the corpus rather than the suite lowering its claim
 
 **Decided (Phase 130, `0.22.0`).** The two suites that certify against the shared wire-format

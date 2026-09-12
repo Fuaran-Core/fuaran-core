@@ -72,6 +72,7 @@ A saved typed tree behaves as a function of its declared holes. The contract bak
 ```powershell
 ./run.ps1            # format + build + test
 ./verify.ps1         # format-check + build + Fable-compile gate + test (the green gate)
+./verify.ps1 -Proofs # … plus the proof leg: the F* model of the DAG fold, checked and re-extracted
 dotnet build Fuaran.Core.slnx
 dotnet run --project tests/Fuaran.Core.Tests
 ```
@@ -79,6 +80,13 @@ dotnet run --project tests/Fuaran.Core.Tests
 `./verify.ps1` includes a **Fable-compile gate** (Phase 54): `tests/fable-smoke/` references every
 public package and is compiled with `dotnet fable`, so the "Fable-clean on encode **and** decode" claim
 is enforced in-repo, not discovered downstream — a package that stops compiling under Fable fails the gate.
+
+`proofs/` carries a **machine-checked model of the N-lane DAG fold** (Phase 131): `DagFold.fst` is
+an F\* model of `Dag.reconcileMany` and the replay with fold confluence proved as a theorem, and
+`proofs/oracle/DagFold.fs` is that model extracted to F# and run by the suite beside the production
+fold as a differential oracle. What the theorem covers, what it assumes and how to run the leg are
+in [`proofs/README.md`](proofs/README.md); `./verify.ps1 -Proofs` (and CI's `proofs` job) installs
+the pinned prover and checks it.
 
 398 conformance tests exercise every layer against an in-repo reference witness (a tiny
 string-id domain) — proving the generics work **without depending on any domain

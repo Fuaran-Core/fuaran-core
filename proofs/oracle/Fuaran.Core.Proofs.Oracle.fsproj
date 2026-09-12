@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Phase 131 — the ORACLE: the F* model of the DAG fold (../DagFold.fst), extracted to F# by
+       F*'s F# code generator, compiled as an ordinary assembly so the Expecto suite can run it
+       beside the production `Dag.reconcileMany` over the same lane sets. Never packed: nothing
+       extracted enters the shipped kernel. DagFold.fs is GENERATED — regenerate it with
+       `pwsh ../check.ps1 -Extract`; the proof leg fails when the committed file and a fresh
+       extraction differ, which is what makes "the oracle IS the model" a checked claim. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- The extracted code is not this repository's style: generated, and formatted by the
+         extractor. Fantomas does not run over proofs/, and the warnings the extraction style
+         raises (unused pattern variables, less-generic constructs) are the extractor's to keep. -->
+    <NoWarn>$(NoWarn);FS0058;FS0064;FS1182</NoWarn>
+    <!-- The F# backend emits pre-F#-8 layout (match arms at column 1 inside a parenthesised
+         lambda), which F# 10's strict indentation rejects outright. Relaxed for THIS project only;
+         the finding is recorded in ../README.md. -->
+    <OtherFlags>$(OtherFlags) --strict-indentation-</OtherFlags>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Prims.fs" />
+    <Compile Include="DagFold.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

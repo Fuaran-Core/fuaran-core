@@ -2,7 +2,12 @@
 # Non-zero exit on the first failing stage. The "is the repo green" command.
 [CmdletBinding()]
 param(
-    [switch] $SkipFormatCheck
+    [switch] $SkipFormatCheck,
+    # Phase 131 — also run the proof leg (proofs/check.ps1): verify proofs/DagFold.fst with the
+    # pinned F*/Z3 and hold the committed oracle to a fresh extraction. Opt-in here because it
+    # installs a prover; CI's proofs job runs it on every push. The oracle HOST (the Proofs.Oracle
+    # differential family) needs no prover and runs in the ordinary suite below, always.
+    [switch] $Proofs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +67,14 @@ dotnet run --project tests/Fuaran.Core.CSharp.Proof --no-build
 if ($LASTEXITCODE -ne 0) {
     Write-Host '==== verify: C# facade proof FAILED its conformance report' -ForegroundColor Red
     exit $LASTEXITCODE
+}
+
+if ($Proofs) {
+    pwsh ./proofs/check.ps1 -Runs 3 -SkipOracleHost
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '==== verify: the proof leg FAILED (see proofs/README.md)' -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
 }
 
 Write-Host '==== verify: fuaran-core green' -ForegroundColor Green

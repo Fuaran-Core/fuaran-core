@@ -25,3 +25,8 @@ tests/hash-parity-probe/probe-*.txt
 # -KeepOutput writes the two captured runs beside it for inspection.
 tests/fable-smoke/out-parity/
 tests/fable-smoke/parity-*.txt
+
+# Phase 131 — the proof leg (proofs/check.ps1) installs the pinned F* release beside the model and
+# keeps its checked-module cache and fresh extraction under obj/; neither is source.
+proofs/.fstar/
+proofs/obj/

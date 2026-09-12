@@ -663,6 +663,20 @@ these two", never "one of these is wrong". The footprint function is injectable
 (`concurrencyLawsWith`) purely as the teeth seam — the in-repo suite proves the law bites under a
 falsely-independent footprint; domains run `concurrencyLaws` (pinned to the real `Ops.footprint`).
 
+### Mechanised: the N-lane fold law is a theorem (Phase 131)
+
+The Phase 100 fold-confluence law — the same lanes fold to the same state however they arrive,
+a lane set that cannot fold halts with the same canonical report however it arrives, and no set
+folds under one order and halts under another — is **proved** in `proofs/DagFold.fst` over an F\*
+model of `Ops.independent` / `Dag.conflicts` / `Dag.reconcileMany` / the replay, for every lane
+count and every permutation, under the domain's commutation promise for independent ops. The
+model is extracted to F# and run by the suite beside production over the Phase 100 generators and
+the wire corpus (`Proofs.Oracle`), and the proof leg holds the committed oracle to a fresh
+extraction byte for byte. **No shipped surface changes**: the claim is about what the existing
+`reconcileMany` does, stated as a theorem on a model and tied to production by a differential
+test. The claims ladder — what is proved, what is only tested, what is assumed — is in
+`proofs/README.md`, and "formally verified" is spent on the theorem alone.
+
 ## The IDL engine — two packages, two promises (Phase 97, `0.8.0`)
 
 The IDL engine ships as **two** packages from `0.8.0`, and the split is by what each one

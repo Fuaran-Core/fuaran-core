@@ -41,3 +41,32 @@ jobs:
         env:
           FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
         run: ./verify.ps1
+
+  # Phase 131 — the proof leg. proofs/DagFold.fst is checked by the PINNED F*/Z3 three times
+  # from a cold cache (exit criterion 1: reproducible), the committed F# oracle is held to a fresh
+  # extraction, and the Proofs.Oracle differential family runs the extracted model beside the
+  # production fold (exit criterion 2: agrees). Windows because that is the release the pin
+  # names; the prover is cached by the pin file's hash so a push that does not move the pin
+  # downloads nothing. The corpus is checked out for the family's ops/ leg, as in `verify`.
+  proofs:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the wire-format conformance corpus
+        uses: actions/checkout@v4
+        with:
+          repository: fuaran-ui/fuaran-ui-specification
+          path: wire-format-fixtures
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Cache the pinned F* release
+        uses: actions/cache@v4
+        with:
+          path: proofs/.fstar
+          key: fstar-${{ runner.os }}-${{ hashFiles('proofs/fstar-pin.json') }}
+      - name: Proof leg (./proofs/check.ps1 -Runs 3)
+        shell: pwsh
+        env:
+          FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
+        run: ./proofs/check.ps1 -Runs 3

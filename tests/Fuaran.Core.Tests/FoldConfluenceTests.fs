@@ -11,6 +11,10 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
+// The two domain witnesses and their lane generators are public (not `private`) since Phase 131:
+// the F*-oracle differential host (ProofOracleTests.fs) runs the extracted model over the SAME
+// lane sets this pack certifies production against, so the two must draw from one generator.
+
 // ---------------------------------------------------------------------------
 //  Domain 1 — the reference witness (tree + skeleton ops), lifted to a StreamWitness.
 // ---------------------------------------------------------------------------
@@ -68,12 +72,12 @@ let rec private encTreeOp (op: SkeletonOp<RNode, string>) : string =
     | ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
     | Batch inner -> "B|" + (inner |> List.map encTreeOp |> String.concat ";")
 
-let private treeW: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string>> =
+let treeW: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string>> =
     { Apply = fun op st -> Ops.apply nodew idw op st
       Encode = encTreeOp
       Decode = fun _ -> Error "FoldConfluenceTests: the tree witness's decode is unused by the pack" }
 
-let private treeBase = sample ()
+let treeBase = sample ()
 
 /// An applyable script: `n` random ops threaded from the base tree, keeping the accepted ones.
 let private treeScript (n: int) (r0: ConfRng.T) =
@@ -93,7 +97,7 @@ let private treeScript (n: int) (r0: ConfRng.T) =
 
     accepted, r
 
-let private treeLaneGen: LaneGen<SkeletonOp<RNode, string>, RNode> =
+let treeLaneGen: LaneGen<SkeletonOp<RNode, string>, RNode> =
     { State0 = treeBase
       // Never applied — it sits in the base closure, which `betweenOps` excludes from every lane
       // delta. It only seeds the base node's content id.
@@ -119,9 +123,9 @@ let private treeLaneGen: LaneGen<SkeletonOp<RNode, string>, RNode> =
 
             lanes, r }
 
-let private treeHash = Tree.encodeHash nodew encNode
+let treeHash = Tree.encodeHash nodew encNode
 
-let private treeFootprint (op: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ op ]
+let treeFootprint (op: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ op ]
 
 // ---------------------------------------------------------------------------
 //  Domain 2 — a NON-tree domain with the shape of a real op-stream consumer: a work plan of
@@ -181,7 +185,7 @@ let private noAddr: Set<string> = Set.empty
 /// is the clause it is easiest to get wrong: `AddDep` writing only its own structure would leave a
 /// lane creating an item footprint-independent of a lane depending on it, and those two do not
 /// commute. The pack's classification law catches exactly that omission.
-let private planFootprint (op: PlanOp) : Footprint =
+let planFootprint (op: PlanOp) : Footprint =
     match op with
     | AddItem(id, _) ->
         { Reads = noAddr
@@ -200,7 +204,7 @@ let private planFootprint (op: PlanOp) : Footprint =
           ContentWrites = noAddr
           UnknownParentWrites = noAddr }
 
-let private encPlanOp (op: PlanOp) : string =
+let encPlanOp (op: PlanOp) : string =
     match op with
     | AddItem(i, t) -> "A|" + i + "|" + t
     | Retitle(i, t) -> "T|" + i + "|" + t
@@ -215,14 +219,14 @@ let private decPlanOp (s: string) : Result<PlanOp, string> =
     | [ "D"; i; d ] -> Ok(AddDep(i, d))
     | _ -> Error("PlanOp: cannot decode " + s)
 
-let private planW: StreamWitness<PlanOp, Plan, string> =
+let planW: StreamWitness<PlanOp, Plan, string> =
     { Apply = planApply
       Encode = encPlanOp
       Decode = decPlanOp }
 
 /// A canonical rendering of the whole plan, hashed — `Map` enumerates key-sorted, so the
 /// rendering is a pure function of the state's content.
-let private planHash (p: Plan) : string =
+let planHash (p: Plan) : string =
     let body =
         p
         |> Map.toList
@@ -241,7 +245,7 @@ let private planHash (p: Plan) : string =
 
 /// Wide enough that lanes CAN be disjoint and narrow enough that they often are not: both
 /// coverage guards have to fire, and an address space of three items makes every trial collide.
-let private basePlan: Plan =
+let basePlan: Plan =
     [ for i in 1..8 ->
           "p" + string i,
           { Title = "item-" + string i
@@ -293,7 +297,7 @@ let private planScript (n: int) (r0: ConfRng.T) =
 
     accepted, r
 
-let private planLaneGen: LaneGen<PlanOp, Plan> =
+let planLaneGen: LaneGen<PlanOp, Plan> =
     { State0 = basePlan
       BaseOp = SetShipped "p3"
       Lanes =
@@ -319,7 +323,7 @@ let private appendW: StreamWitness<string, string, string> =
       Encode = id
       Decode = Ok }
 
-let private blindFootprint (_: string) : Footprint =
+let blindFootprint (_: string) : Footprint =
     { Reads = noAddr
       StructureWrites = noAddr
       ContentWrites = noAddr

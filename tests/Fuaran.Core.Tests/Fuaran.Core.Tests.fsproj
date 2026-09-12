@@ -87,6 +87,10 @@
          reference witness, a second non-tree domain, and the order-sensitive go-red case.
          Depends on nothing here either, so it simply follows. -->
     <Compile Include="FoldConfluenceTests.fs" />
+    <!-- Phase 131 — the F* oracle as a corpus host: the extracted model of the DAG fold run
+         beside the production Dag.reconcileMany over the Phase 100 lane generators (which it
+         reads from FoldConfluenceTests.fs above) and over the wire corpus's ops/ fixtures. -->
+    <Compile Include="ProofOracleTests.fs" />
     <!-- The second-vocabulary readiness spike - throwaway measurement code, kept for its
          findings. Declares a slice of a foreign vocabulary against the IDL and certifies it
          against a corpus of sample documents written in that vocabulary's wire shape,
@@ -181,6 +185,8 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
+    <!-- Phase 131 — the F*-extracted oracle (never packed; see proofs/README.md). -->
+    <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
