@@ -18,7 +18,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
 | `check.ps1` | The proof leg: check with the pin, re-extract and diff against the committed oracle, run the host. |
-| `../tests/Fuaran.Core.Tests/ProofOracleTests.fs` | The differential host (`Proofs.Oracle`, eight cases). |
+| `../tests/Fuaran.Core.Tests/ProofOracleTests.fs` | The differential host (`Proofs.Oracle`), and the family that measures the theorem's hypothesis on the reference witness. |
 
 ## The theorem
 
@@ -28,7 +28,6 @@ Coq's `Permutation` — and every base state, `fold_once ls1` and `fold_once ls2
 outcomes**:
 
 - both fold, to the **same state** (propositional equality, not a hash); or
-- both reject, with the **same rejection**; or
 - both halt, with the **same canonical report** — the same set of (shape, address, unordered op
   pair), which is exactly what `FoldConfluence.canonicalConflictReport` renders.
 
@@ -39,11 +38,28 @@ sweep (`all_conflicts_perm`), and a conflict-free set replays identically under 
 `Ops.independent` (`conflicts_nil_independent`, both directions — the Phase 64/83 cross-validation
 promise, mechanised) joining the two.
 
-**The one hypothesis** is `independence_sound`: for this domain, two ops whose footprints
-`independent` declares disjoint commute under `apply` — `bind (apply a s) (apply b) == bind (apply
-b s) (apply a)` for every state, rejections included. That is the domain's promise. Phase 78/80
-certify it for the tree algebra by sampling; Phase 100 certifies it for a domain's own witness by
-sampling; nothing proves it, and everything here rests on it.
+**The one domain hypothesis** is `independence_diamond`: for this domain, two ops whose footprints
+`independent` declares disjoint and which **both apply** at a state each apply after the other and
+reach the same state. That is the domain's promise, and it is exactly the promise a shipped witness
+certifies — Phase 78/80 for the tree algebra by sampling, Phase 100 for a domain's own witness by
+sampling. Nothing proves it; everything in the fold half rests on it; and the `Proofs.Oracle`
+family now **measures it on the reference tree witness**, so the hypothesis is not merely stated
+about the domain it names.
+
+The fold half asks one thing more, and it is a statement about the lane set in hand rather than a
+promise about the domain: `lanes_apply` — every lane applies cleanly from the base state. That is
+the lane set `foldOnce`'s generators produce, and it is the set the fold half was always about. A
+lane set with a **rejecting** lane is outside the fold claim, exactly as it is outside Phase 80's;
+`outcome_equiv` still has a both-rejected arm, and the theorem simply says nothing about when it is
+taken. **The halt half asks for neither** — `fold_confluence_halt` is stated and proved with no
+hypothesis about `apply` at all, because whether a lane set halts and what it halts with are
+properties of the footprints alone.
+
+_(Phase 131 stated the hypothesis as `independence_sound`: independent ops commute at every state,
+**rejections included**. That premise is false of the reference witness — `Rejection.UnknownNode`
+carries `addressable`, the whole id set of the tree it was raised against — so the theorem was
+sound about a domain nobody has. Phase 132 replaced it with what the algebra keeps. See the claims
+ladder's "not claimed" entry, and the `Proofs.Oracle` case that holds the refuting witness.)_
 
 `--report_assumes error` is on: the module carries no `assume`, no `admit`, no `assume val`.
 
@@ -65,27 +81,42 @@ oracle's own outcomes across all sampled orders are one outcome. The go-red case
 a blind footprint and requires the comparison to fail and shrink to two lanes of one op, so a green
 report is known to be a comparison that can lose.
 
+**And the theorem's HYPOTHESIS is measured, not only stated.** Over the same generator, for every
+op pair the model's own `independent` declares disjoint and every state where both ops apply, the
+host checks the diamond directly on the tree `apply`: each applies after the other, and the two
+orders reach the same tree. A sample-adequacy guard reports how many (pair, state) triples actually
+met the premise, because a run that never met it measures nothing; a blind footprint must break the
+same sample, so this measurement too is known to be one that can lose. A third case holds the
+witness that the **stronger** clause is unavailable here: two footprint-independent inserts, one
+under an absent parent, reject in both orders with *different* `UnknownNode` envelopes — which is
+the claims-ladder entry below, as an assertion that goes red if the algebra ever changes back.
+
 ## The gap between model and production — the claims ladder
 
 What may be said, and at what strength, per the attested-stack programme's §6:
 
 1. **Proved (machine-checked, no admits).** On the model, for every N and every permutation:
-   the fold-confluence law above, under `independence_sound`. F\* 2026.09.06, Z3 4.13.3, every
-   query 3/3 under `--quake 3`, cold-cache checks on three seeds and at a quarter of the rlimit
-   the leg runs with.
+   the fold-confluence law above — the fold half under `independence_diamond` for a lane set whose
+   lanes all apply from the base state, the halt half under nothing at all. F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, cold-cache checks on three seeds and at a quarter
+   of the rlimit the leg runs with.
 2. **Differentially tested.** Production's `betweenOps` recovery of each lane's delta from a
    content-addressed DAG, its pairwise `conflicts` sweep, `reconcileMany`'s composition and
    `foldOnce`'s replay and rendering together agree with the extracted model, over the pools
    above. Agreement is over sampled lane sets and the `arrivalOrders` sample (exhaustive to 4
    lanes, 24 orders above), never over all inputs.
 3. **Assumed, and stated as such.**
-   - `independence_sound` — the domain's promise. For the skeleton-op tree algebra it is
-     Phase 80's sampled certification; the model's hypothesis is in fact *stronger* than Phase
-     80's law, because it demands rejection-identity too, where Phase 80 certifies interleaving
-     totality (accepted scripts stay accepted). A folding set of accepted scripts never rejects,
-     so the extra strength is not load-bearing in any run the host makes; a domain whose
-     rejection envelopes carry tree facts (the reference `UnknownNode` carries `Tree.ids`) would
-     not satisfy it as stated, and the theorem would say nothing about that domain's rejections.
+   - `independence_diamond` — the domain's promise, and the only domain hypothesis the theorem
+     carries. Independent ops that **both apply** at a state each apply after the other and reach
+     the same state. This is Phase 80's law and no more than it: interleaving totality (accepted
+     scripts stay accepted) plus confluence, at op granularity. It is **sampled**, never proved —
+     Phase 80 for the tree algebra, Phase 100 for a domain's own witness, and the `Proofs.Oracle`
+     diamond family for the reference witness directly against the extracted model's own
+     `independent`. Sampling is what this level means.
+   - **The lane set is assumed to apply.** The fold half is stated for a lane set whose every lane
+     applies cleanly from the base state (`lanes_apply`), which is what `foldOnce`'s generators
+     produce and what the differential host draws. Nothing is proved about a lane set one of whose
+     lanes rejects; the halt half still covers it whenever it halts.
    - **The DAG is outside the model.** Node ids, hashing, `mergeBase`, the topological order that
      recovers a delta — the model starts where the lane deltas are known. Level 2 is the only
      evidence about them.
@@ -96,7 +127,18 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    - **Sets are lists.** The model reads F#'s `Set<string>` as lists under membership; the
      host compares canonical (deduplicated, sorted) reports, never raw conflict lists, so
      multiplicity and order in the model's reports are unobserved by construction.
-4. **Not claimed.** Anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
+4. **Not claimed.**
+   - **Rejection identity.** That two independent ops, one of which rejects, reject *identically*
+     whichever ran first. The reference algebra cannot keep it and the theorem no longer asks for
+     it: `Rejection.UnknownNode` carries `addressable` — the whole id set of the tree it was raised
+     against — and `ReorderMismatch` carries the parent's current children, so an op that rejects
+     at `s` rejects with a **different envelope** after an independent op has inserted a node. Both
+     orders reject; they do not reject identically. Phase 131's `independence_sound` demanded this
+     clause, which made the theorem sound about a domain no shipped witness is; Phase 132 dropped
+     it, and a `Proofs.Oracle` case holds the refuting witness so the sentence goes red if the
+     algebra ever changes back.
+
+   Also not claimed: anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over
    the real `RoadmapOp` union is roadmap-engine#343; this theorem is what makes its choice of
    total order canonical-form-only), or about any domain's reconciliation policy — the model,
@@ -112,10 +154,12 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    leg uses 40) and under seeds 1, 2 and 3. There are no proof hints to commit, because the
    pinned release removed them (finding 1) — reproducibility rests on the pin, the seed sweep and
    the margin, not on a replay file.
-2. **Agrees — met.** The eight `Proofs.Oracle` cases are green: no divergence over any pool, all
+2. **Agrees — met.** The `Proofs.Oracle` cases are green: no divergence over any pool, all
    three outcome classes exercised (folded and halted asserted non-vacuous; rejected covered by
-   `LaneFoldOutcome` equality), and the merge script equal, not merely its hash.
-3. **Readable — met.** `DagFold.fst` is ~660 lines with its commentary; the model half (sections
+   `LaneFoldOutcome` equality), and the merge script equal, not merely its hash. Since Phase 132
+   the same family also measures the theorem's hypothesis on the reference witness, with its own
+   adequacy guard and its own go-red.
+3. **Readable — met.** `DagFold.fst` is ~790 lines with its commentary; the model half (sections
    0–4, everything the oracle is extracted from) is under 300 of them, and every definition is
    captioned with its F# counterpart. The one structural difference a reviewer meets is
    lists-for-sets, stated once at the top.

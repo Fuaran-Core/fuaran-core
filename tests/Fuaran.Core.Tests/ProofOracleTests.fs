@@ -23,6 +23,7 @@ module Fuaran.Core.Tests.ProofOracleTests
 open System.IO
 open Expecto
 open Fuaran.Core
+open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
 
 // ---------------------------------------------------------------------------
@@ -416,6 +417,93 @@ let private loadCorpusOps (root: string) : Result<CorpusOp list, string> =
         (Ok [])
 
 // ---------------------------------------------------------------------------
+//  The theorem's HYPOTHESIS, measured on the domain it names (Phase 132).
+//
+//  `fold_confluence`'s one domain hypothesis is `independence_diamond`: ops the model's
+//  `independent` declares disjoint and which BOTH APPLY at a state each apply after the other
+//  and reach the same state. Phase 131 assumed the stronger `independence_sound` — commuting at
+//  every state, REJECTIONS INCLUDED — which the reference algebra cannot keep (the last case
+//  below is the witness). A hypothesis stated and never measured is a theorem about a domain
+//  nobody has, so this pool measures it on the reference tree witness itself.
+// ---------------------------------------------------------------------------
+
+/// Every way a witness breaks the diamond over one pool of ops and one pool of states, and the
+/// number of (pair, state) triples at which the PREMISE was actually met — both orders asked
+/// for. `oracleFp` is the footprint the check runs under; handing it a blind one is what proves
+/// this measurement can fail, exactly as the differential's go-red case does.
+let private diamondBreaks
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (oracleFp: 'Op -> Footprint)
+    (ops: 'Op list)
+    (states: 'State list)
+    : string list * int =
+    let apply = modelApply w
+    let mutable met = 0
+    let mutable breaks = []
+
+    for a in ops do
+        for b in ops do
+            if DagFold.independent (toModelFootprint (oracleFp a)) (toModelFootprint (oracleFp b)) then
+                for s in states do
+                    match apply a s, apply b s with
+                    | DagFold.Ok sa, DagFold.Ok sb ->
+                        // The premise is met here, and only here: both ops apply at `s`.
+                        met <- met + 1
+
+                        let broke (why: string) =
+                            breaks <-
+                                breaks
+                                @ [ sprintf
+                                        "independent %s / %s both apply at a state, but %s"
+                                        (w.Encode a)
+                                        (w.Encode b)
+                                        why ]
+
+                        match apply b sa, apply a sb with
+                        | DagFold.Ok t1, DagFold.Ok t2 when t1 = t2 -> ()
+                        | DagFold.Ok _, DagFold.Ok _ -> broke "the two orders reach different states"
+                        | DagFold.Error _, _ -> broke "the second does not apply after the first"
+                        | _, DagFold.Error _ -> broke "the first does not apply after the second"
+                    | _ -> ()
+
+    breaks, met
+
+/// The op and state pools Phase 80's construction yields for the reference witness: applyable
+/// skeleton-op scripts threaded from the base tree (`treeLaneGen` — the public form of that
+/// construction, shared with the differential above), pooled into ops, and every state a prefix
+/// of that pool reaches. The states matter: the hypothesis quantifies over ALL of them, and a
+/// check at the base tree alone would measure one instance of a `forall s`.
+let private treeDiamondSample
+    (oracleFp: SkeletonOp<RNode, string> -> Footprint)
+    (seed: int)
+    (trials: int)
+    : string list * int =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable breaks = []
+    let mutable met = 0
+
+    for _ in 1..trials do
+        let lanes, r' = treeLaneGen.Lanes 3 r
+        r <- r'
+        let ops = List.concat lanes
+
+        let states =
+            ops
+            |> List.fold
+                (fun (acc, cur) op ->
+                    match treeW.Apply op cur with
+                    | Ok t -> (acc @ [ t ]), t
+                    | Error _ -> acc, cur)
+                ([ treeBase ], treeBase)
+            |> fst
+
+        let b, m = diamondBreaks treeW oracleFp ops states
+        breaks <- breaks @ b
+        met <- met + m
+
+    breaks, met
+
+// ---------------------------------------------------------------------------
 
 [<Tests>]
 let proofOracleTests =
@@ -561,4 +649,79 @@ let proofOracleTests =
                        |> List.map ofModelConflict)
 
               Expect.isFalse (production = "") "the two deltas genuinely conflict"
-              Expect.equal model production "the model enumerates the same interferences" ]
+              Expect.equal model production "the model enumerates the same interferences"
+
+          // ---- the theorem's hypothesis, measured on the reference witness (Phase 132) ----
+
+          testCase "the reference witness keeps the theorem's hypothesis: independent ops form a diamond"
+          <| fun _ ->
+              let breaks, met = treeDiamondSample treeFootprint 1320 250
+
+              match breaks with
+              | why :: _ -> failtestf "the reference witness BREAKS independence_diamond: %s" why
+              | [] ->
+                  // Sample adequacy, the pack's posture: a run that never met the premise
+                  // measures nothing at all, and a run that met it a handful of times measures
+                  // almost nothing. The threshold is far below what the sample delivers and is
+                  // there to catch a generator that stops producing independent pairs.
+                  Expect.isGreaterThan met 300 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+
+          testCase "a blind footprint BREAKS the diamond over the same sample — the measurement can fail"
+          <| fun _ ->
+              // The teeth. A footprint that erases every address makes `independent` declare
+              // EVERY pair independent, so genuinely-dependent pairs (an insert racing a reorder
+              // of the same parent, an insert under a node another op removes) are measured and
+              // must break. If this comes back clean, the green run above certifies nothing.
+              let blind (_: SkeletonOp<RNode, string>) : Footprint =
+                  { Reads = noAddr
+                    StructureWrites = noAddr
+                    ContentWrites = noAddr
+                    UnknownParentWrites = noAddr }
+
+              let breaks, met = treeDiamondSample blind 1320 250
+              Expect.isGreaterThan met 0 "the blind run met the premise, so it had something to measure"
+
+              match breaks with
+              | [] ->
+                  failtest
+                      "a footprint declaring EVERY pair independent must break the diamond — otherwise this comparison cannot lose"
+              | why :: _ -> Expect.stringContains why "independent" "the break names the pair it found"
+
+          testCase "the reference algebra cannot keep rejection identity — the clause the diamond drops"
+          <| fun _ ->
+              // Phase 131's hypothesis demanded that independent ops commute at EVERY state,
+              // REJECTIONS INCLUDED. `Rejection.UnknownNode` carries `addressable` — the whole id
+              // set of the tree it was raised against — so that clause is unavailable here, and
+              // this is the witness that keeps the claims ladder's "not claimed" honest. `a`
+              // inserts under a real parent; `b` inserts under an absent one and always rejects.
+              let a = InsertChild("a", RNode.leaf "fresh-132" "para" "v")
+              let b = InsertChild("ghost-132", RNode.leaf "fresh-132b" "para" "v")
+
+              Expect.isTrue
+                  (Ops.independent (treeFootprint a) (treeFootprint b))
+                  "the two inserts are footprint-independent — different parents, different fresh ids"
+
+              let ab = treeW.Apply a treeBase |> Result.bind (treeW.Apply b)
+              let ba = treeW.Apply b treeBase |> Result.bind (treeW.Apply a)
+
+              match ab, ba with
+              | Error(UnknownNode(t1, ids1)), Error(UnknownNode(t2, ids2)) ->
+                  Expect.equal t1 t2 "both orders reject on the same absent parent"
+
+                  Expect.notEqual
+                      ids1
+                      ids2
+                      "but NOT with the same envelope — `addressable` is the tree at the moment of rejection"
+
+                  Expect.isTrue
+                      (List.contains "fresh-132" ids1)
+                      "`a; b` rejects against a tree that already carries a's insert"
+
+                  Expect.isFalse (List.contains "fresh-132" ids2) "`b; a` rejects against the tree before it"
+              | _ -> failtestf "expected both orders to reject with UnknownNode; got %A / %A" ab ba
+
+              // The DIAMOND is silent about this pair, and that is the whole of the change: `b`
+              // never applies, so the premise is not met and nothing is claimed.
+              match treeW.Apply b treeBase with
+              | Error _ -> ()
+              | Ok _ -> failtest "the witness requires `b` to reject at the base tree" ]

@@ -10,13 +10,18 @@
 
    WHAT IS PROVED. `fold_confluence`: for any two arrival orders of the same lane set — any two
    lists related by the inductive permutation relation `perm` — the outcomes are equivalent:
-   the same folded state, or the same rejection, or the same canonical halt report (as an
-   unordered set of shape × address × unordered op pair, which is the canonical form
-   `FoldConfluence.canonicalConflictReport` renders). The one hypothesis is the domain's
-   promise (`independence_sound`): ops whose footprints `independent` declares disjoint commute
-   under `apply`. That is the promise Phase 78/80 certify for the tree algebra and that the
-   Phase 100 pack certifies for a domain's own witness; nothing here proves it, everything
-   here rests on it, and the README states that boundary in the claims-ladder form.
+   the same folded state, or the same canonical halt report (as an unordered set of shape ×
+   address × unordered op pair, which is the canonical form
+   `FoldConfluence.canonicalConflictReport` renders). The one DOMAIN hypothesis is the
+   diamond (`independence_diamond`): ops whose footprints `independent` declares disjoint and
+   which BOTH APPLY at a state each apply after the other and reach the same state. That is
+   exactly what Phase 78/80 certify for the tree algebra and what the Phase 100 pack certifies
+   for a domain's own witness — nothing here proves it, everything in the fold half rests on
+   it, and `ProofOracleTests.fs` measures it on the reference witness. The fold half also asks
+   that the lane set in hand be one whose lanes all apply from the base state (`lanes_apply`),
+   which is the lane set `foldOnce`'s generators produce. The HALT half (`fold_confluence_halt`)
+   asks for neither: it is a property of the footprints alone. The README states the whole
+   boundary in the claims-ladder form.
 
    WHAT IS NOT MODELLED. The DAG itself — content-addressed node ids, `betweenOps`, the
    topological order that recovers each lane's delta from a real `Dag.T`. The model starts
@@ -337,17 +342,46 @@ let rec perm_mem (#a:eqtype) (l1 l2:list a) (p:perm a l1 l2) (x:a)
 (* ======================================================================================
    6. The domain's promise (F#: what Phase 80's `concurrencyLaws` certifies for the tree
       algebra and Phase 100's `laneFoldLaws` certifies for a domain's own witness).
+
+      Phase 131 stated this as `independence_sound`: independent ops commute under `apply`
+      at EVERY state, REJECTIONS INCLUDED. That premise is false of the reference witness,
+      so the theorem was sound about a domain nobody has. `Ops.Rejection.UnknownNode`
+      carries `addressable` — the whole id set of the tree it was raised against
+      (`Tree.ids`) — and `ReorderMismatch` carries the parent's current children, so two
+      independent ops one of which rejects reject with DIFFERENT envelopes depending on
+      whether the other ran first. Both orders reject; they do not reject identically.
+
+      What Phase 80 certifies, and what this hypothesis states, is the DIAMOND: independent
+      ops that BOTH APPLY at a state each apply after the other and the two orders reach the
+      same state. Nothing is claimed where either op rejects — the README's claims ladder
+      says so under "not claimed", and `ProofOracleTests.fs` holds a witness that the
+      stronger clause really is unavailable here.
    ====================================================================================== *)
 
-let commutes (#op:eqtype) (#state #rej:Type)
+(* The diamond for one pair of ops, at one state. `bind (apply a s) (apply b)` IS "b after
+   a" when a applied, so `Ok?` of it is "b still applies", and the equality is the two
+   orders agreeing. F#: Phase 80's `a @ b` / `b @ a` interleavings, at script length one. *)
+let diamond (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (a b:op) : prop =
-  forall (s:state). bind (apply a s) (apply b) == bind (apply b s) (apply a)
+  forall (s:state).
+    Ok? (apply a s) ==> Ok? (apply b s) ==>
+    (Ok? (bind (apply a s) (apply b)) /\
+     bind (apply a s) (apply b) == bind (apply b s) (apply a))
 
-(* Footprint independence is SOUND for this domain: what `independent` declares disjoint
-   commutes under `apply`, rejections included. *)
-let independence_sound (#op:eqtype) (#state #rej:Type)
+(* Footprint independence keeps the DIAMOND for this domain: what `independent` declares
+   disjoint commutes under `apply` wherever both ops apply. This is the theorem's one
+   domain hypothesis. *)
+let independence_diamond (#op:eqtype) (#state #rej:Type)
   (fp:op -> footprint) (apply:op -> state -> outcome state rej) : prop =
-  forall (a b:op). independent (fp a) (fp b) ==> commutes apply a b
+  forall (a b:op). independent (fp a) (fp b) ==> diamond apply a b
+
+(* The lane set the fold half is about: every lane applies cleanly from the base state —
+   which is exactly what `foldOnce`'s generators produce, and what Phase 80 builds its
+   pairs from (`collectScript` keeps only accepted ops). A lane set with a REJECTING lane
+   is outside the fold claim, as it is outside Phase 80's. *)
+let lanes_apply (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (ls:list (list op)) (s:state) : prop =
+  forall (l:list op). mem l ls ==> Ok? (replay apply l s)
 
 (* ======================================================================================
    7. Conflicts and independence agree (F#: the Phase 83 cross-validation
@@ -541,7 +575,8 @@ let all_conflicts_perm_empty (#op:eqtype) (fp:op -> footprint)
      | h :: _ -> assert (mem_u h (all_conflicts fp ls2)))
 
 (* ======================================================================================
-   9. The replay of a conflict-free lane set is arrival-order-invariant.
+   9. The replay of a conflict-free lane set whose lanes all apply from the base state is
+      arrival-order-invariant.
    ====================================================================================== *)
 
 let rec replay_app (#op:eqtype) (#state #rej:Type)
@@ -555,90 +590,160 @@ let rec replay_app (#op:eqtype) (#state #rej:Type)
       | Ok s' -> replay_app apply t q s'
       | Error _ -> ()
 
-(* One op independent of a whole script slides through it: `y; a` is `a; y`. *)
+(* One op independent of a whole script slides through it WHERE BOTH APPLY: `y; a` is
+   `a; y`, and both are `Ok`. The diamond, extended along `y` by induction. *)
 let rec replay_push_through (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (fp:op -> footprint)
   (a:op) (y:list op) (s:state)
-  : Lemma (requires independence_sound fp apply /\
-                    (forall (b:op). mem b y ==> independent (fp a) (fp b)))
-          (ensures bind (replay apply y s) (apply a) == bind (apply a s) (replay apply y))
+  : Lemma (requires independence_diamond fp apply /\
+                    (forall (b:op). mem b y ==> independent (fp a) (fp b)) /\
+                    Ok? (apply a s) /\ Ok? (replay apply y s))
+          (ensures Ok? (bind (apply a s) (replay apply y)) /\
+                   bind (replay apply y s) (apply a) == bind (apply a s) (replay apply y))
           (decreases y)
   = match y with
-    | [] ->
-      (match apply a s with
-       | Ok _ -> ()
-       | Error _ -> ())
+    | [] -> ()
     | b :: y' ->
       assert (mem b y);
       assert (independent (fp a) (fp b));
-      assert (commutes apply a b);
-      assert (bind (apply a s) (apply b) == bind (apply b s) (apply a));
-      (match apply b s with
-       | Error _ ->
-         (match apply a s with
-          | Ok _ -> ()
+      assert (diamond apply a b);
+      (* `replay (b :: y') s` is `Ok`, so `b` applies at `s` and the tail applies after it. *)
+      assert (Ok? (apply b s));
+      assert (Ok? (bind (apply a s) (apply b)) /\
+              bind (apply a s) (apply b) == bind (apply b s) (apply a));
+      (match apply a s, apply b s with
+       | Ok sa, Ok s1 ->
+         assert (apply b sa == apply a s1);
+         (match apply b sa with
+          | Ok t1 ->
+            assert (apply a s1 == Ok t1);
+            assert (Ok? (replay apply y' s1));
+            replay_push_through apply fp a y' s1;
+            assert (bind (replay apply y' s1) (apply a) == bind (apply a s1) (replay apply y'));
+            assert (bind (apply a s1) (replay apply y') == replay apply y' t1);
+            assert (bind (apply a s) (replay apply y) == replay apply y' t1);
+            assert (bind (replay apply y s) (apply a) == bind (replay apply y' s1) (apply a))
           | Error _ -> ())
-       | Ok s1 ->
-         replay_push_through apply fp a y' s1;
-         (match apply a s with
-          | Ok s2 ->
-            (match apply a s1 with
-             | Ok _ -> ()
-             | Error _ -> ())
-          | Error _ -> ()))
+       | _, _ -> ())
 
-(* Two pairwise-independent lanes replay the same in either order. *)
-let rec replay_swap_lanes (#op:eqtype) (#state #rej:Type)
+(* Two pairwise-independent scripts that both apply from `s` compose to the same state in
+   either order, and that state exists — the diamond lifted from ops to scripts. F#: Phase
+   80's `a @ b` / `b @ a` confluence at full script length, which is the law this whole
+   proof rests on and the only one a shipped witness certifies. *)
+let rec replay_diamond (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (fp:op -> footprint)
   (x y:list op) (s:state)
-  : Lemma (requires independence_sound fp apply /\
-                    (forall (a b:op). mem a x ==> mem b y ==> independent (fp a) (fp b)))
-          (ensures replay apply (app x y) s == replay apply (app y x) s)
+  : Lemma (requires independence_diamond fp apply /\
+                    (forall (a b:op). mem a x ==> mem b y ==> independent (fp a) (fp b)) /\
+                    Ok? (replay apply x s) /\ Ok? (replay apply y s))
+          (ensures Ok? (replay apply (app x y) s) /\
+                   replay apply (app x y) s == replay apply (app y x) s)
           (decreases x)
   = match x with
-    | [] -> ()
+    | [] -> app_nil_r y
     | a :: x' ->
       assert (mem a x);
       assert (forall (b:op). mem b y ==> independent (fp a) (fp b));
+      assert (Ok? (apply a s));
       replay_push_through apply fp a y s;
-      replay_app apply y (a :: x') s;
-      (match apply a s with
-       | Ok s0 ->
-         replay_swap_lanes apply fp x' y s0;
-         replay_app apply y x' s0;
-         (match replay apply y s with
-          | Ok _ -> ()
+      (match apply a s, replay apply y s with
+       | Ok sa, Ok sy ->
+         assert (Ok? (replay apply y sa));
+         assert (apply a sy == replay apply y sa);
+         assert (Ok? (replay apply x' sa));
+         replay_diamond apply fp x' y sa;
+         replay_app apply y (a :: x') s;
+         replay_app apply y x' sa;
+         (match replay apply y sa with
+          | Ok t1 ->
+            assert (apply a sy == Ok t1);
+            assert (replay apply (app y (a :: x')) s == replay apply x' t1);
+            assert (replay apply (app y x') sa == replay apply x' t1);
+            assert (replay apply (app x y) s == replay apply (app x' y) sa)
           | Error _ -> ())
-       | Error _ ->
-         (match replay apply y s with
-          | Ok _ -> ()
-          | Error _ -> ()))
+       | _, _ -> ())
 
-(* THEOREM (fold half): a conflict-free lane set replays to the same outcome — state or
-   rejection — under every arrival order. *)
+(* A lane that applies from `s` still applies once an independent sibling lane has run. *)
+let lane_applies_after (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint)
+  (d e:list op) (s s1:state)
+  : Lemma (requires independence_diamond fp apply /\
+                    (forall (a b:op). mem a d ==> mem b e ==> independent (fp a) (fp b)) /\
+                    replay apply d s == Ok s1 /\ Ok? (replay apply e s))
+          (ensures Ok? (replay apply e s1))
+  = replay_diamond apply fp d e s;
+    replay_app apply d e s
+
+(* A lane pair inside a conflict-free sweep is itself conflict-free. *)
+let lane_conflicts_nil_each (#op:eqtype) (fp:op -> footprint)
+  (d:list op) (rest:list (list op)) (e:list op)
+  : Lemma (requires is_empty (lane_conflicts fp d rest) /\ mem e rest)
+          (ensures is_empty (conflicts fp d e))
+  = match conflicts fp d e with
+    | [] -> ()
+    | c :: _ ->
+      mem_u_lane_conflicts fp d rest c;
+      assert (mem_u c (conflicts fp d e));
+      assert (mem_u c (lane_conflicts fp d rest));
+      assert (lane_conflicts fp d rest == [])
+
+(* … so EVERY remaining lane still applies once the first of a conflict-free set has run.
+   This is what carries `lanes_apply` down the induction: the hypothesis is about the BASE
+   state, and each step moves the state on. *)
+let lanes_apply_after (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint)
+  (d:list op) (rest:list (list op)) (s s1:state)
+  : Lemma (requires independence_diamond fp apply /\
+                    is_empty (lane_conflicts fp d rest) /\
+                    replay apply d s == Ok s1 /\
+                    (forall (e:list op). mem e rest ==> Ok? (replay apply e s)))
+          (ensures forall (e:list op). mem e rest ==> Ok? (replay apply e s1))
+  = let aux (e:list op) : Lemma (mem e rest ==> Ok? (replay apply e s1)) =
+      if mem e rest then begin
+        lane_conflicts_nil_each fp d rest e;
+        conflicts_nil_pairwise fp d e;
+        lane_applies_after apply fp d e s s1
+      end
+      else ()
+    in
+    FStar.Classical.forall_intro aux
+
+(* THEOREM (fold half): a conflict-free lane set whose lanes all apply from the base state
+   replays to the same state under every arrival order. *)
 let rec replay_perm (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (fp:op -> footprint)
   (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2) (s:state)
-  : Lemma (requires independence_sound fp apply /\ is_empty (all_conflicts fp ls1))
+  : Lemma (requires independence_diamond fp apply /\
+                    is_empty (all_conflicts fp ls1) /\
+                    lanes_apply apply ls1 s)
           (ensures replay apply (concat ls1) s == replay apply (concat ls2) s)
           (decreases p)
   = match p with
     | PNil -> ()
     | PSkip x m1 m2 p' ->
-      replay_app apply x (concat m1) s;
-      replay_app apply x (concat m2) s;
+      assert (mem x (x :: m1));
+      assert (Ok? (replay apply x s));
       (match replay apply x s with
-       | Ok s1 -> replay_perm apply fp m1 m2 p' s1
+       | Ok s1 ->
+         lanes_apply_after apply fp x m1 s s1;
+         replay_perm apply fp m1 m2 p' s1;
+         replay_app apply x (concat m1) s;
+         replay_app apply x (concat m2) s
        | Error _ -> ())
     | PSwap x y l ->
       (* all_conflicts (x :: y :: l) starts with conflicts x y, so x and y are independent. *)
+      assert (mem x (x :: y :: l));
+      assert (mem y (x :: y :: l));
       assert (is_empty (conflicts fp x y));
       conflicts_nil_pairwise fp x y;
+      replay_diamond apply fp x y s;
+      app_assoc x y (concat l);
+      app_assoc y x (concat l);
       replay_app apply (app x y) (concat l) s;
-      replay_app apply (app y x) (concat l) s;
-      replay_swap_lanes apply fp x y s
+      replay_app apply (app y x) (concat l) s
     | PTrans m1 m2 m3 p12 p23 ->
       all_conflicts_perm_empty fp m1 m2 p12;
+      FStar.Classical.forall_intro (perm_mem m1 m2 p12);
       replay_perm apply fp m1 m2 p12 s;
       replay_perm apply fp m2 m3 p23 s
 
@@ -649,16 +754,37 @@ let rec replay_perm (#op:eqtype) (#state #rej:Type)
        under one order and halts under another.
    ====================================================================================== *)
 
+(* The HALT half, with NO domain hypothesis at all — not the diamond, and nothing about
+   `apply`. Whether a lane set halts, and the canonical report it halts with, are
+   properties of the footprints alone. This half therefore holds for every domain,
+   including one whose lanes reject; it is stated separately so that "the halt half is
+   unconditional" is machine-checked rather than asserted in prose. *)
+val fold_confluence_halt (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (s0:state)
+  (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2)
+  : Lemma (requires not (is_empty (all_conflicts fp ls1)))
+          (ensures outcome_equiv (fold_once apply fp s0 ls1) (fold_once apply fp s0 ls2))
+
+let fold_confluence_halt #op #state #rej apply fp s0 ls1 ls2 p =
+  all_conflicts_perm_empty fp ls1 ls2 p;
+  FStar.Classical.forall_intro (all_conflicts_perm fp ls1 ls2 p)
+
+(* The theorem. Its one DOMAIN hypothesis is `independence_diamond` — the promise Phase 80
+   certifies and `ProofOracleTests.fs` measures on the reference witness. `lanes_apply` is
+   not a domain promise but a statement about the lane set in hand: the lanes all apply
+   from the base state, which is the lane set `foldOnce`'s generators produce and the only
+   one the fold half was ever about. A lane set with a rejecting lane is outside the claim
+   (the halt half above still covers it whenever it halts). *)
 val fold_confluence (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (fp:op -> footprint) (s0:state)
   (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2)
-  : Lemma (requires independence_sound fp apply)
+  : Lemma (requires independence_diamond fp apply /\ lanes_apply apply ls1 s0)
           (ensures outcome_equiv (fold_once apply fp s0 ls1) (fold_once apply fp s0 ls2))
 
 let fold_confluence #op #state #rej apply fp s0 ls1 ls2 p =
-  all_conflicts_perm_empty fp ls1 ls2 p;
   match all_conflicts fp ls1 with
   | [] ->
+    all_conflicts_perm_empty fp ls1 ls2 p;
     replay_perm apply fp ls1 ls2 p s0
   | _ ->
-    FStar.Classical.forall_intro (all_conflicts_perm fp ls1 ls2 p)
+    fold_confluence_halt apply fp s0 ls1 ls2 p
