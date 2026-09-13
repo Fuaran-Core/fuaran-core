@@ -2132,9 +2132,10 @@ not one anybody can pin today. They are grouped as one section because they are 
 deliberately: each is a separate ask, and raising a pin four times to adopt four asks costs every
 consumer three raises it gains nothing from.
 
-Three of the four are BREAKING in shape and one is additive; a fifth entry is a removal. Each names
-the consumer that deletes a workaround on adoption, because that is the only reliable way to tell
-afterwards whether the ask was answered or merely implemented.
+Three of the four are BREAKING in shape and one is additive; a fifth entry is a removal, and a sixth
+is a codegen NARROWING the fourth ask's own property found and the operator ruled on the same day.
+Each names the consumer that deletes a workaround on adoption, because that is the only reliable way
+to tell afterwards whether the ask was answered or merely implemented.
 
 ### `ChainBreak.Reason` is a closed DU (`0.23.0`) — BREAKING
 
@@ -2292,15 +2293,45 @@ delivered exactly that** — `fsDefaultLit` renders every declared field of a va
 any depth, and the `dReq` / always-emit fallbacks are gone. What 124 certified was CASE-BASED. A case
 proves a case; this is the property that holds over the shapes nobody wrote a case for.
 
-**ONE backend divergence exists, and the property PINS it rather than tolerating it.** A default
-whose case is a DECLARED TRANSPARENT union case is refused by the TypeScript backend — such a case is
-on the wire BARE, so a `$type`-tagged predicate would be about a value the JS encoder never sees —
-and RENDERED by the F# backend, whose omit test is a pattern match on the HOST value, where the case
-is not transparent at all. Both are locally correct; the consequence is that a vocabulary declaring
-such a default generates in F# and refuses in TypeScript. The property admits exactly this class by
-name and fails on any other disagreement, and it also fails if the class becomes EMPTY — so closing
-the divergence is possible, but not silently. Whether it should be closed, and which backend moves,
-is a design call this release does not take.
+**ONE backend divergence was found on the property's first run. It is CLOSED in this same draft, and
+the close is a narrowing — see the entry below.**
+
+### A declared TRANSPARENT case as a default is REFUSED by the F# backend too (`0.23.0`) — BREAKING
+
+`Gen.fsharpModule` / `Gen.fsharpModuleWith` / `Gen.fsharpValue` now return
+`CodegenError.UnsupportedDefault` for a field whose `OmitDefault` value is a union case that the
+vocabulary declares TRANSPARENT (`Idl.Harden.TransparentUnions`). They rendered it before. The
+TypeScript backend has refused it since `0.21.0` (Phase 124) and is unchanged.
+
+**A vocabulary that declares such a default stops generating an F# module and starts reporting a
+typed refusal naming the offending type and value.** Nothing else moves: a default whose case is
+NOT the declared transparent one renders exactly as it did, payload and all, and a vocabulary
+declaring no transparent unions at all is bit-for-bit unaffected. `HardenPolicy.Default` declares
+`TextSource.Literal`, so a vocabulary carrying the default policy and declaring a `TextSource.Literal`
+default is the shape that meets this.
+
+**Why the narrower side wins.** A transparent case is on the wire BARE — no `$type` — so the omit
+predicate the TypeScript encoder would need is about a value it never writes, and is not expressible.
+The F# omit test is a pattern match on the HOST value, where the case is not transparent at all, so
+the F# backend could render it and did. Both were locally correct and the PAIR was wrong: one
+generator emitted two hosts that disagreed about what the vocabulary meant, and a default only one
+host honours is not a default. The ruling (operator, 2026-09-13; `DECISIONS.md` D33) is that the
+backends must agree.
+
+**The rule is now ONE predicate both backends call** (`isDeclaredTransparentCase`), not two matching
+checks. The rest of each backend's admissibility differs for real reasons and stays separate; this
+clause is about the wire, and a wire rule written once per backend is a rule that drifts — which is
+exactly how this one arose.
+
+**This rides the untagged `0.23.0` draft**, so no further version move: the slot is already BREAKING
+and already unreleased. A consumer adopting `0.23.0` meets the narrowing with everything else in this
+section.
+
+**The property is tightened with it.** The named-class admission and the class-must-stay-non-empty
+guard are both gone; it demands FULL agreement now. A case-based test beside it plants a
+transparent-case default and asserts both backends refuse it with `UnsupportedDefault`, then plants
+the same value at the same field with the case no longer declared transparent and asserts both
+render — so the refusal is certified to be about transparency, not about the payload-carrying shape.
 
 ### `Idl.Gen.usesHosted` is REMOVED (`0.23.0`) — BREAKING
 

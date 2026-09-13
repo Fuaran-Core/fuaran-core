@@ -796,6 +796,28 @@ let private encFloat (f: float) : JVal =
         else
             s + ".0"
 
+    /// **The one admissibility rule BOTH default backends apply, written once.** A default whose
+    /// case is the union's DECLARED TRANSPARENT case (`Harden.TransparentUnions` — the case that
+    /// encodes BARE, without the `$type` discriminator) is refused by every backend.
+    ///
+    /// It is here, above both deciders, because it was written once and needed twice. Phase 124
+    /// added the TypeScript refusal — a `$type`-tagged omit predicate would be about a value the
+    /// JS encoder never writes — and added no F# counterpart, because the F# omit test is a
+    /// pattern match on the HOST value, where the case is not transparent at all and renders
+    /// perfectly. Each backend was locally right and the pair was wrong: a vocabulary declaring
+    /// such a default generated in F# and refused in TypeScript, which is a generator that ships
+    /// two hosts that do not agree about what the vocabulary means. Phase 125's generative
+    /// agreement property found it; the 2026-09-13 ruling is that the backends must AGREE, and
+    /// the narrower side wins because the wire is the thing both hosts have to share.
+    ///
+    /// One predicate rather than two matching checks is the point: `fsDefaultLit` and
+    /// `tsIsDefault` already decide the REST of their admissibility separately (they must — F#
+    /// has literals and patterns where JS has only `===`), and this is the one rule that is about
+    /// the WIRE rather than about either host language. A rule about the wire that is spelled
+    /// twice is a rule that drifts, and this one already had.
+    let private isDeclaredTransparentCase (idl: Idl) (u: IdlUnion) (tag: string) : bool =
+        TransparentUnion.tag idl.Harden u = Some tag
+
     /// The F# source form of a declared default VALUE — enums (`ToneVariant.Default`), scalars,
     /// the EMPTY LIST (Phase 1080), a nullary union case (`CellFormat.None`) and, since Phase 124,
     /// a VALUE-CARRYING union case (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`) and a record,
@@ -846,6 +868,11 @@ let private encFloat (f: float) : JVal =
             match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
             | None -> refuse ()
             | Some u when List.length u.Params <> List.length args -> refuse ()
+            // The shared wire rule — see [[isDeclaredTransparentCase]]. This arm is what the
+            // 2026-09-13 ruling added: the case renders as an F# pattern and expression without
+            // difficulty, and is refused anyway, because the TypeScript backend cannot test for
+            // it on the wire and a default only one of the two hosts honours is not a default.
+            | Some u when isDeclaredTransparentCase idl u tag -> refuse ()
             | Some u ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
                 | None -> refuse ()
@@ -2734,8 +2761,10 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // A DECLARED transparent case is on the wire BARE, so neither the tagged predicate
             // below nor the tagged literal [[tsDefaultLit]] renders would be about the value the
             // encoder actually sees. Refused rather than guessed at. (Unreachable before Phase
-            // 124: a transparent case holds exactly one field, so it was never nullary.)
-            | Some u when TransparentUnion.tag idl.Harden u = Some tag -> refuse ()
+            // 124: a transparent case holds exactly one field, so it was never nullary.) Since
+            // the 2026-09-13 ruling the test is [[isDeclaredTransparentCase]], which `fsDefaultLit`
+            // calls too — the rule is about the WIRE, so it cannot belong to one backend.
+            | Some u when isDeclaredTransparentCase idl u tag -> refuse ()
             | Some u ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
                 | None -> refuse ()

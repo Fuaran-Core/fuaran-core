@@ -23,16 +23,42 @@ asserts the two emitters AGREE — both render, or both refuse — which is the 
 shape nobody wrote a case for, and the one that goes red if 124 is ever undone. A refuted premise
 whose finding lands as an assertion is worth more than a mechanism built on top of it.
 
-**And the property found a divergence on its first run, which is reported rather than resolved.** A
-declared TRANSPARENT union case as a default is refused by the TypeScript backend — bare on the wire,
-so a tagged predicate would be about a value the JS encoder never sees — and rendered by the F#
-backend, whose omit test is a pattern match on the HOST value, where the case is not transparent.
-Both are locally correct, and the consequence is a vocabulary that generates in F# and refuses in
-TypeScript. Phase 124 added the TS refusal knowing it was newly reachable and did not add an F#
-counterpart; nothing records whether the asymmetry was intended. Under the bound doctrine's
-escalate-don't-guess axis this release does NOT pick a side: the property admits exactly that class
-by name, fails on any other disagreement, and fails if the class becomes empty — so the divergence
-cannot widen, cannot spread, and cannot be closed silently either.
+**And the property found a divergence on its first run, which was escalated rather than guessed at —
+and RULED the same day.** A declared TRANSPARENT union case as a default was refused by the
+TypeScript backend — bare on the wire, so a tagged predicate would be about a value the JS encoder
+never sees — and rendered by the F# backend, whose omit test is a pattern match on the HOST value,
+where the case is not transparent. Both were locally correct, and the consequence was a vocabulary
+that generates in F# and refuses in TypeScript. Phase 124 added the TS refusal knowing it was newly
+reachable and did not add an F# counterpart, and nothing recorded whether the asymmetry was
+intended. Under the bound doctrine's escalate-don't-guess axis the release itself did not pick a
+side: the property admitted exactly that class by name, failed on any other disagreement, and failed
+if the class became empty — so the divergence could not widen, could not spread, and could not be
+closed silently either.
+
+**The ruling (operator, 2026-09-13): the asymmetry was NOT intended, and the backends must agree.**
+The F# backend now REFUSES a default whose case is a declared transparent case, with the same
+`UnsupportedDefault` the TypeScript backend gives. The narrower side wins because the question is
+about the WIRE and not about either host language: a transparent case encodes bare, so the omit
+predicate the TypeScript encoder would need is not expressible, and a default that only one of the
+two generated hosts honours is not a default — it is two hosts disagreeing about what the vocabulary
+means, emitted by one generator, on a green build.
+
+**The rule is one predicate, not two matching checks** (`Gen.isDeclaredTransparentCase`, called by
+both `fsDefaultLit` and `tsIsDefault`). The rest of each backend's admissibility genuinely differs
+and must — F# has literals and patterns where JS has only `===` — but this clause is about the wire,
+and a rule about the wire spelled once per backend is a rule that drifts. This one already had: that
+is the whole content of the finding above, and writing the F# arm as a second copy of the TypeScript
+arm would have fixed the instance while leaving the mechanism in place.
+
+**The property is tightened in the same act**, which is what keeps the ruling from being a comment.
+Its named-class admission is gone and so is the guard requiring the class to stay non-empty; it now
+demands FULL agreement, so a transparent-case default lands in the both-refused arm with every other
+refusal and any `Ok`/`Error` split at all fails. A case-based test beside it plants one such default
+and asserts BOTH backends refuse it with `UnsupportedDefault`, then plants the SAME value at the SAME
+field of the SAME vocabulary with the case no longer declared transparent and asserts both RENDER —
+one bit changed, so the refusal is certified to be about transparency and not about the
+payload-carrying shape Phase 124 exists to render. Both halves go red when the new F# arm is removed,
+which was checked rather than assumed.
 
 **Where the property lives is itself a decision.** Not `Fuaran.Core.Conformance`: a law family
 certifies a HOST against a contract, and nothing outside this repository implements this generator,

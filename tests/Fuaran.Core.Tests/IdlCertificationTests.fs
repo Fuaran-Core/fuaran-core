@@ -1158,26 +1158,18 @@ let declaredDefaultProperty =
               let mutable rendered = 0
               let mutable refused = 0
               let mutable unionPayloadsRendered = 0
-              let mutable transparentDivergences = 0
 
-              // The ONE admitted divergence, named rather than tolerated. `tsIsDefault` refuses a
-              // default whose case is a DECLARED TRANSPARENT union case, because such a case is on
-              // the wire BARE and a `$type`-tagged predicate would be about a value the JS encoder
-              // never sees. `fsDefaultLit` has no such check and renders it — correctly, because
-              // the F# omit test is a pattern match on the HOST value, where the case is not
-              // transparent at all. So the two backends are asymmetric for a real reason, and the
-              // consequence is that a vocabulary declaring this default generates in F# and refuses
-              // in TypeScript. Whether that consequence is intended is a design call this property
-              // does not make: it PINS the class so a NEW disagreement fails, and it requires the
-              // class to stay non-empty so the divergence cannot disappear unnoticed either.
-              let isTransparentCaseDefault (idl: Idl) (t: IdlType) (v: IdlValue) =
-                  match t, v with
-                  | TUnion(n, _), VUnion(tag, _) ->
-                      idl.Unions
-                      |> List.tryFind (fun u -> u.Name = n)
-                      |> Option.bind (TransparentUnion.tag idl.Harden)
-                      |> (=) (Some tag)
-                  | _ -> false
+              // **This property admitted ONE named divergence when Phase 125 first ran it, and
+              // admits none now.** A default whose case is a DECLARED TRANSPARENT union case was
+              // refused by `tsIsDefault` (such a case is on the wire BARE, so a `$type`-tagged
+              // predicate would be about a value the JS encoder never sees) and rendered by
+              // `fsDefaultLit` (whose omit test is a pattern match on the HOST value, where the
+              // case is not transparent at all). Both locally correct, and the pair wrong: the
+              // vocabulary generated in one host and refused in the other. The 2026-09-13 ruling
+              // (DECISIONS D33) is that the backends must AGREE, and `Gen.isDeclaredTransparentCase`
+              // is now the one predicate both consult. So the admission is GONE — a transparent-case
+              // default lands in the `Error, Error` arm below with every other refusal, and any
+              // `Ok`/`Error` split at all is a disagreement this property fails on.
 
               for iteration in 0..399 do
                   let vi, r = ConfRng.intBelow (List.length neutralVocabularies) rng
@@ -1219,16 +1211,6 @@ let declaredDefaultProperty =
                       match fe, te with
                       | CodegenError.UnsupportedDefault _, CodegenError.UnsupportedDefault _ -> ()
                       | _ -> unnamed <- (where, sprintf "F#=%A TS=%A" fe te) :: unnamed
-                  | Ok _, Error te when isTransparentCaseDefault planted field.Type value ->
-                      // The named divergence above. Still required to be the TYPED refusal.
-                      transparentDivergences <- transparentDivergences + 1
-
-                      match te with
-                      | CodegenError.UnsupportedDefault _ -> ()
-                      | _ ->
-                          unnamed <-
-                              (where, sprintf "TS refused a transparent-case default untyped: %A" te)
-                              :: unnamed
                   | Ok _, Error te ->
                       disagreements <-
                           (where, sprintf "F# rendered it; TypeScript refused with %A" te)
@@ -1262,11 +1244,6 @@ let declaredDefaultProperty =
                   refused
                   20
                   "the sample barely refused any default, so the refusal half is near-vacuous"
-
-              Expect.isGreaterThan
-                  transparentDivergences
-                  0
-                  "the sample never reached the ONE admitted backend divergence (a declared transparent union case as a default), so this property is no longer pinning it — either the generator stopped drawing it, or the divergence was closed and this guard should be removed with a DECISIONS entry saying which backend moved"
 
               Expect.isGreaterThan
                   unionPayloadsRendered
@@ -1343,4 +1320,81 @@ let declaredDefaultProperty =
                       Expect.stringContains
                           src
                           ("=== \"" + c.Tag + "\"")
-                          "the TS omit predicate tests the discriminator, and (Phase 124) conjoins a test per declared field" ]
+                          "the TS omit predicate tests the discriminator, and (Phase 124) conjoins a test per declared field"
+
+          // The 2026-09-13 ruling (DECISIONS D33), certified by case beside the property above.
+          // The property says the backends AGREE; this says WHICH way they agree on the one class
+          // where they used not to, and it isolates the cause: the two halves plant the SAME
+          // default of the SAME shape at the SAME field of the SAME vocabulary, and differ in
+          // exactly one bit — whether `Harden.TransparentUnions` declares the case transparent.
+          // A refusal that survived the second half would be a refusal of the SHAPE, which is not
+          // what was ruled and would silently narrow every payload-carrying default with it.
+          testCase
+              "a DECLARED TRANSPARENT case as a default is refused by BOTH backends, and only because it is transparent"
+          <| fun _ ->
+              // `HardenPolicy.Default` declares `TextSource.Literal` transparent, and `miniIdl`
+              // carries that policy — so this is the live class, not a synthetic one.
+              let idl = Fuaran.Core.Idl.Spike.Fixtures.miniIdl
+
+              Expect.equal
+                  (idl.Unions
+                   |> List.tryFind (fun u -> u.Name = "TextSource")
+                   |> Option.bind (TransparentUnion.tag idl.Harden))
+                  (Some "Literal")
+                  "the fixture must actually declare the transparent case, or this test measures nothing"
+
+              let fields = allFields idl
+
+              let index =
+                  fields
+                  |> List.tryFindIndex (fun f ->
+                      match f.Type with
+                      | TUnion("TextSource", []) -> true
+                      | _ -> false)
+
+              match index with
+              | None ->
+                  failtest "the fixture declares no field of the transparent union, so this assertion measures nothing"
+              | Some i ->
+                  let deflt = VUnion("Literal", [ "text", VStr "d" ])
+
+                  let generate (v: Idl) =
+                      let planted = plantDefault v i deflt
+                      let tags = probeTags planted
+                      Gen.fsharpModule "Phase125.Transparent" planted tags, Gen.typescriptModule planted tags
+
+                  // Transparent — both must refuse, and with the TYPED refusal.
+                  match generate idl with
+                  | Error(CodegenError.UnsupportedDefault _), Error(CodegenError.UnsupportedDefault _) -> ()
+                  | Ok _, _ ->
+                      failtest
+                          "the F# backend RENDERED a default whose case is a declared transparent case. That is the pre-ruling asymmetry: the case is bare on the wire, the TypeScript backend cannot test for it, and a default only one host honours is not a default (DECISIONS D33, ruled 2026-09-13)"
+                  | _, Ok _ ->
+                      failtest
+                          "the TypeScript backend rendered a transparent-case default that the F# backend refused — the asymmetry, back in the other direction"
+                  | fe, te -> failtestf "both backends refused, but not with UnsupportedDefault: F#=%A TS=%A" fe te
+
+                  // The go-red half. Same vocabulary, same field, same value — the case merely
+                  // stops being declared transparent, and both backends must now render it.
+                  let opaque =
+                      { idl with
+                          Harden =
+                              { idl.Harden with
+                                  TransparentUnions = [] } }
+
+                  match generate opaque with
+                  | Ok fs, Ok ts ->
+                      Expect.stringContains
+                          fs
+                          "TextSource.Literal("
+                          "the F# literal applies the case to its payload once the case is no longer transparent"
+
+                      Expect.stringContains
+                          ts
+                          "=== \"Literal\""
+                          "the TS predicate tests the discriminator once the case is no longer bare on the wire"
+                  | fe, te ->
+                      failtestf
+                          "a payload-carrying union default was refused even with NO transparent case declared, so the refusal above is about the SHAPE and not about transparency — the ruling narrowed more than it was supposed to: F#=%A TS=%A"
+                          fe
+                          te ]
