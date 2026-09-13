@@ -2818,7 +2818,7 @@ module Conformance =
             | 1 -> [ Project [ "a", "a"; "b", "b" ] ] // drops c → an irrelevant c-change can reuse
             | 2 -> [ Derive("d", Binary(Add, Col "a", Lit(Int 1))) ]
             | 3 -> [ GroupBy([ "a" ], [ { Name = "s"; Fn = Sum; Of = "b" } ]) ] // drops c
-            | _ -> [ Sort [ "b", Asc ]; Project [ "a", "a" ] ] // drops b, c
+            | _ -> [ Transform.sortBy [ "b", Asc ]; Project [ "a", "a" ] ] // drops b, c
 
         for i in 0 .. iterations - 1 do
             let nRows, r1 = ConfRng.intBelow 4 rng
@@ -3117,9 +3117,9 @@ module Conformance =
 
         let menu: Transform list =
             [ Filter(Binary(Gt, Col "a", Lit(Int 0)))
-              Sort [ "b", Asc ]
+              Transform.sortBy [ "b", Asc ]
               Distinct
-              Limit(3, 0)
+              Transform.limit 3 0
               Derive("d", Binary(Add, Col "a", Lit(Int 1)))
               // A derive onto an EXISTING name — the evaluator retypes in place, keeping position.
               Derive("b", Cast(FloatType, Col "b"))
@@ -6717,3 +6717,616 @@ module Conformance =
                   + " builds encodes as what the codec decoded"
                 Passed = reencoded.IsNone
                 Counterexample = reencoded } ]
+
+    /// **Every reason this library MINTS is a named case** (Phase 125) — the law that makes
+    /// `ChainBreakReason.Unrecognised` an honest arm rather than a hedge.
+    ///
+    /// `ChainBreak.Reason` became a closed DU so a consumer stops re-deriving the type by
+    /// string-matching this library's spellings. That only helps if the walkers actually stay
+    /// inside the named cases: a walker that minted an `Unrecognised` would hand every consumer
+    /// back exactly the untyped string the type exists to remove, and nothing would say so. So this
+    /// family drives BOTH walkers — the op walk (`firstChainBreakWith`) and the capture walk
+    /// (`firstCaptureBreak`) — into EVERY break each can produce, and asserts the reason is named.
+    ///
+    /// The three breaks are BUILT each iteration rather than drawn, so the sample cannot miss one:
+    /// a sequence is renumbered, a prev-link is repointed, and a payload is tampered with its
+    /// sequence and prev-link left intact so the cheap checks pass and the digest check is the one
+    /// that fires. The final law is the non-vacuity guard — each break kind was actually observed —
+    /// because "no unnamed reason was minted" is trivially true of a walk that never broke.
+    ///
+    /// The `toString` / `ofString` pair is certified here too, in both directions: the round trip is
+    /// the identity on the named cases, and an unknown string lands in `Unrecognised` VERBATIM
+    /// rather than being swept into the nearest-looking case — which is the defect the consumer's
+    /// pre-typed form had, and the reason this type is worth its breaking change.
+    let chainBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
+        // A self-contained int-op witness: the claim is about THIS library's walkers, not about a
+        // host's, so there is no caller witness to take.
+        let sw: StreamWitness<int, int, string> =
+            { Apply = fun op state -> Ok(state + op)
+              Encode = string
+              Decode =
+                fun s ->
+                    match System.Int32.TryParse s with
+                    | true, v -> Ok v
+                    | false, _ -> Error("not an int: " + s) }
+
+        let hashFn = OpStream.defaultHash
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable unnamed = None
+        let mutable roundTrip = None
+        let mutable verbatim = None
+        let mutable seenOp = Set.empty
+        let mutable seenCapture = Set.empty
+
+        // The reason a break carries, or None when the walk found the chain intact — which is
+        // itself a defect here, since every input below is deliberately broken.
+        let reasonOf (label: string) (i: int) (b: ChainBreak option) : ChainBreakReason option =
+            match b with
+            | Some br ->
+                (match br.Reason with
+                 | Unrecognised s when unnamed.IsNone ->
+                     unnamed <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: the %s walk minted an unnamed reason %s — a walker inside this library must stay inside the named cases, or ChainBreakReason gives a consumer back the untyped string it exists to remove"
+                                 seed
+                                 i
+                                 label
+                                 s
+                         )
+                 | _ -> ())
+
+                Some br.Reason
+            | None ->
+                if unnamed.IsNone then
+                    unnamed <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: the %s walk reported NO break over a deliberately broken chain, so this family is measuring nothing"
+                                seed
+                                i
+                                label
+                        )
+
+                None
+
+        for i in 0 .. iterations - 1 do
+            // ---- a sound op chain of four records ----
+            let mutable state = 0
+            let mutable recs = OpStream.empty
+
+            for _ in 0..3 do
+                let op, r' = ConfRng.intBelow 50 rng
+                rng <- r'
+
+                match OpStream.append hashFn sw (Human "conf") (op + 1) state recs with
+                | Ok(s', recs') ->
+                    state <- s'
+                    recs <- recs'
+                | Error _ -> ()
+
+            let len = List.length recs
+
+            if len >= 2 then
+                // sequence: renumber the last record so the contiguity counter disagrees first.
+                let renumbered =
+                    recs
+                    |> List.mapi (fun j r -> if j = len - 1 then { r with Seq = r.Seq + 7 } else r)
+
+                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw renumbered) with
+                | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
+                | None -> ()
+
+                // prev-link: repoint the last record's PrevHash, leaving its Seq correct.
+                let repointed =
+                    recs
+                    |> List.mapi (fun j r ->
+                        if j = len - 1 then
+                            { r with PrevHash = r.PrevHash + "x" }
+                        else
+                            r)
+
+                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw repointed) with
+                | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
+                | None -> ()
+
+                // digest: tamper the OP only. Seq and PrevHash still agree, so the two cheap checks
+                // pass and the hash recomputation is what fails — the only way to reach that arm.
+                let tampered =
+                    recs
+                    |> List.mapi (fun j r -> if j = len - 1 then { r with Op = r.Op + 1000 } else r)
+
+                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw tampered) with
+                | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
+                | None -> ()
+
+            // ---- a sound capture log of three captures, then the same three breaks ----
+            let mutable caps = []
+
+            for k in 0..2 do
+                let v, caps' =
+                    OpStream.captureEffect hashFn string "nondeterministic" ("eff" + string k) (fun () -> k * 3) caps
+
+                ignore v
+                caps <- caps'
+
+            let clen = List.length caps
+
+            if clen >= 2 then
+                let capRenumbered =
+                    caps
+                    |> List.mapi (fun j c -> if j = clen - 1 then { c with Seq = c.Seq + 7 } else c)
+
+                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capRenumbered) with
+                | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
+                | None -> ()
+
+                let capRepointed =
+                    caps
+                    |> List.mapi (fun j c ->
+                        if j = clen - 1 then
+                            { c with PrevHash = c.PrevHash + "x" }
+                        else
+                            c)
+
+                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capRepointed) with
+                | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
+                | None -> ()
+
+                let capTampered =
+                    caps
+                    |> List.mapi (fun j c -> if j = clen - 1 then { c with Value = c.Value + "9" } else c)
+
+                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capTampered) with
+                | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
+                | None -> ()
+
+            // ---- the string pair, both directions ----
+            for named in [ SequenceMismatch; PrevHashLinkBroken; HashMismatch ] do
+                if
+                    ChainBreakReason.ofString (ChainBreakReason.toString named) <> named
+                    && roundTrip.IsNone
+                then
+                    roundTrip <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: ofString (toString %A) = %A — the rendering and the parse disagree, so a consumer reading a logged reason back does not recover the case that wrote it"
+                                seed
+                                i
+                                named
+                                (ChainBreakReason.ofString (ChainBreakReason.toString named))
+                        )
+
+            let alien, rA = ConfRng.intBelow 1000 rng
+            rng <- rA
+            let alienText = "a reason this library does not mint #" + string alien
+
+            match ChainBreakReason.ofString alienText with
+            | Unrecognised s when s = alienText -> ()
+            | other ->
+                if verbatim.IsNone then
+                    verbatim <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: ofString %s = %A — an unknown reason must land in Unrecognised carrying its own text, never be swept into a named case, which is a claim about which check failed that nothing established"
+                                seed
+                                i
+                                alienText
+                                other
+                        )
+
+        // The capture walk spells the digest failure differently; `toString` renders one spelling
+        // for the single `HashMismatch` case, so both walks are expected to have observed the same
+        // three strings.
+        let expected =
+            [ ChainBreakReason.toString SequenceMismatch
+              ChainBreakReason.toString PrevHashLinkBroken
+              ChainBreakReason.toString HashMismatch ]
+            |> Set.ofList
+
+        let missing (seen: Set<string>) =
+            Set.difference expected seen |> Set.toList |> String.concat ", "
+
+        [ { Law = "every reason the chain walkers mint is a NAMED ChainBreakReason case"
+            Passed = unnamed.IsNone
+            Counterexample = unnamed }
+          { Law = "ChainBreakReason.ofString (toString r) = r on every named case"
+            Passed = roundTrip.IsNone
+            Counterexample = roundTrip }
+          { Law = "ChainBreakReason.ofString carries an unknown reason into Unrecognised verbatim"
+            Passed = verbatim.IsNone
+            Counterexample = verbatim }
+          { Law = "non-vacuity: the op walk produced every break kind it can produce"
+            Passed = Set.isEmpty (Set.difference expected seenOp)
+            Counterexample =
+              if Set.isEmpty (Set.difference expected seenOp) then
+                  None
+              else
+                  Some(
+                      "the op walk never reported: "
+                      + missing seenOp
+                      + " — the laws above hold vacuously for the break kinds that were never produced"
+                  ) }
+          { Law = "non-vacuity: the capture walk produced every break kind it can produce"
+            Passed = Set.isEmpty (Set.difference expected seenCapture)
+            Counterexample =
+              if Set.isEmpty (Set.difference expected seenCapture) then
+                  None
+              else
+                  Some(
+                      "the capture walk never reported: "
+                      + missing seenCapture
+                      + " — the laws above hold vacuously for the break kinds that were never produced"
+                  ) } ]
+
+    /// **`Now` at a pinned clock is deterministic** (Phase 125) — the law that makes a
+    /// clock-dependent pipeline a legitimate thing for a conformance kit to certify at all.
+    ///
+    /// A `ColExpr.Now` names the current moment. Left to read a host clock at evaluation it would
+    /// make every downstream parity claim unfalsifiable: two hosts computing the same pipeline would
+    /// legitimately disagree, and no vector could say which was wrong. `Now` therefore resolves by
+    /// SUBSTITUTION against a `ClockWitness` the caller pins, and these five laws are what that buys:
+    ///
+    ///   1. **Determinism.** The same pipeline under the same witness evaluates to the same table,
+    ///      twice, whatever the witness returns.
+    ///   2. **The reading is the witness's.** A `Derive` of a bare `Now g` produces exactly the cell
+    ///      `clock g` returned — not a re-derivation, not a coercion.
+    ///   3. **One reading per grain per pinning.** A COUNTING witness — one that returns a different
+    ///      cell on every call — still yields ONE value per grain across the whole pipeline, so two
+    ///      `Now`s in one evaluation cannot straddle a tick and disagree with each other. This is
+    ///      the law a naive `fun g -> DateTime.Now` implementation fails, which is why it is stated
+    ///      over a witness that is deliberately not constant.
+    ///   4. **Unpinned is REFUSED, by name.** A `Now` reaching the evaluator with no clock is
+    ///      `EvalError.UnpinnedClock`, never a silent reading, and the grain it names is the one
+    ///      that was asked for.
+    ///   5. **Substitution is the only resolution**, so a pipeline that carried no `Now` evaluates
+    ///      byte-identically whether or not a clock was pinned — pinning a clock is not an
+    ///      evaluation mode with its own semantics.
+    ///
+    /// The sample is drawn, but every law's evidence is BUILT each iteration: both grains, a
+    /// clock-bearing pipeline and a clock-free one, on the same input.
+    let nowLaws (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable deterministic = None
+        let mutable isWitnessReading = None
+        let mutable oneReading = None
+        let mutable unpinned = None
+        let mutable clockFreeUnchanged = None
+
+        let col name cells : Column = Column.create name IntType cells
+
+        for i in 0 .. iterations - 1 do
+            let nRows, r1 = ConfRng.intBelow 4 rng
+            let rows = nRows + 1
+            let mutable r = r1
+
+            let draw () =
+                let v, r' = ConfRng.intBelow 40 r
+                r <- r'
+                Int(v - 20)
+
+            let table =
+                { Schema = [ "a", IntType ]
+                  Columns = [ col "a" [ for _ in 1..rows -> draw () ] ] }
+
+            // Which grain this iteration leads with — both are exercised below regardless.
+            let gPick, r2 = ConfRng.intBelow 2 r
+            r <- r2
+
+            let grain = if gPick = 0 then NowGrain.Date else NowGrain.Timestamp
+
+            let stampN, r3 = ConfRng.intBelow 28 r
+            r <- r3
+            rng <- r
+
+            // A drawn but CONSTANT witness: the reading varies across iterations (so no law can be
+            // passing on one fixed string) and is fixed within one, which is what a clock pinned for
+            // an evaluation means.
+            let dateOf (n: int) =
+                "2026-09-" + (if n < 9 then "0" else "") + string (n + 1)
+
+            let stampFor (g: NowGrain) (n: int) : Cell =
+                match g with
+                | NowGrain.Date -> Date(dateOf n)
+                | NowGrain.Timestamp -> Timestamp(dateOf n + "T00:00:00Z")
+
+            let clock: ClockWitness = fun g -> stampFor g stampN
+
+            let pipeline =
+                [ Derive("now1", Now grain)
+                  Filter(Binary(Gt, Col "a", Lit(Int -100)))
+                  Derive("now2", Now grain) ]
+
+            // ---- 1. determinism ----
+            let once = DataFrame.evalPipelineAt clock pipeline table
+            let twice = DataFrame.evalPipelineAt clock pipeline table
+
+            if once <> twice && deterministic.IsNone then
+                deterministic <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: the same pipeline under the same ClockWitness evaluated to two different tables — a pinned clock is the whole determinism claim"
+                            seed
+                            i
+                    )
+
+            // ---- 2. the reading IS the witness's ----
+            let expected = stampFor grain stampN
+
+            (match DataFrame.evalPipelineAt clock [ Derive("n", Now grain) ] table with
+             | Ok t ->
+                 let got =
+                     t.Columns
+                     |> List.tryFind (fun c -> c.Name = "n")
+                     |> Option.bind (fun c -> List.tryHead c.Cells)
+
+                 if got <> Some expected && isWitnessReading.IsNone then
+                     isWitnessReading <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: Derive(Now %A) produced %A where the witness returned %A"
+                                 seed
+                                 i
+                                 grain
+                                 got
+                                 expected
+                         )
+             | Error e ->
+                 if isWitnessReading.IsNone then
+                     isWitnessReading <- Some(sprintf "seed=%d iter=%d: a pinned Now failed to evaluate: %A" seed i e))
+
+            // ---- 3. ONE reading per grain per pinning, under a witness that is NOT constant ----
+            // A counting witness answers differently on every call. If the pinning did not read it
+            // once per grain, the two `Now`s above would land on different cells and this fails —
+            // which is exactly the defect `fun _ -> <read the real clock>` would exhibit.
+            let mutable calls = 0
+
+            let counting: ClockWitness =
+                fun g ->
+                    calls <- calls + 1
+                    stampFor g (calls % 28)
+
+            (match DataFrame.evalPipelineAt counting pipeline table with
+             | Ok t ->
+                 let cellsOf n =
+                     t.Columns |> List.tryFind (fun c -> c.Name = n) |> Option.map (fun c -> c.Cells)
+
+                 if cellsOf "now1" <> cellsOf "now2" && oneReading.IsNone then
+                     oneReading <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: two Now nodes of one grain in one evaluation produced different readings (%A vs %A) — the witness was read more than once per grain, so a pipeline can straddle a tick"
+                                 seed
+                                 i
+                                 (cellsOf "now1")
+                                 (cellsOf "now2")
+                         )
+             | Error e ->
+                 if oneReading.IsNone then
+                     oneReading <- Some(sprintf "seed=%d iter=%d: the counting-witness run failed: %A" seed i e))
+
+            // ---- 4. unpinned is refused BY NAME, on both grains ----
+            for g in [ NowGrain.Date; NowGrain.Timestamp ] do
+                match DataFrame.evalPipeline [ Derive("n", Now g) ] table with
+                | Error(UnpinnedClock got) when got = g -> ()
+                | other ->
+                    if unpinned.IsNone then
+                        unpinned <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: an unpinned Now %A gave %A — it must be a strict UnpinnedClock naming that grain, never a silent reading and never a different error"
+                                    seed
+                                    i
+                                    g
+                                    other
+                            )
+
+            // ---- 5. a clock-free pipeline is unaffected by pinning one ----
+            let clockFree =
+                [ Filter(Binary(Gt, Col "a", Lit(Int -100)))
+                  Derive("b", Binary(Add, Col "a", Lit(Int 1))) ]
+
+            if
+                DataFrame.evalPipelineAt clock clockFree table
+                <> DataFrame.evalPipeline clockFree table
+                && clockFreeUnchanged.IsNone
+            then
+                clockFreeUnchanged <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: pinning a clock changed the answer of a pipeline that names no Now — resolution must be substitution and nothing else"
+                            seed
+                            i
+                    )
+
+        [ { Law = "Now at a pinned ClockWitness is deterministic: the same pipeline twice gives the same table"
+            Passed = deterministic.IsNone
+            Counterexample = deterministic }
+          { Law = "a pinned Now evaluates to exactly the cell the witness returned for its grain"
+            Passed = isWitnessReading.IsNone
+            Counterexample = isWitnessReading }
+          { Law = "the witness is read at most ONCE PER GRAIN per pinning, so two Now nodes agree"
+            Passed = oneReading.IsNone
+            Counterexample = oneReading }
+          { Law = "an unpinned Now is EvalError.UnpinnedClock naming its grain, never a silent reading"
+            Passed = unpinned.IsNone
+            Counterexample = unpinned }
+          { Law = "pinning a clock does not change a pipeline that names no Now"
+            Passed = clockFreeUnchanged.IsNone
+            Counterexample = clockFreeUnchanged } ]
+
+    /// **A scalar slot's parameter resolves exactly as an expression parameter does** (Phase 125) —
+    /// the law that makes `Slot<'T>` a widening of the param seam rather than a second one beside it.
+    ///
+    /// `Transform.Limit` and `Transform.Sort` took literals until `0.23.0`. The whole argument for
+    /// putting the param INSIDE Core's type — rather than leaving each host to pre-substitute it
+    /// through a parallel structure — is that the answers then come from the machinery that already
+    /// exists: one param namespace, one census (`Transform.paramsOf`), one unbound refusal
+    /// (`EvalError.UnboundParam`). These six laws are that argument, checked:
+    ///
+    ///   1. **A bound slot param evaluates as its literal.** Binding `n` to `Int k` and evaluating
+    ///      gives byte-identically what `Slot.Lit k` gives.
+    ///   2. **Substitution and env-resolution agree** — `evalPipelineInEnv env p` ≡
+    ///      `evalPipeline (Transform.substitute env p)`, the same law `paramLaws` states for
+    ///      expression params, over the slots.
+    ///   3. **The census is complete.** `Transform.paramsOf` names every slot param, so a host that
+    ///      prunes or subscribes off it does not silently miss one.
+    ///   4. **An unbound slot param is `UnboundParam` naming it**, never a default, never a skip.
+    ///   5. **A wrongly-typed binding is a `TypeError` naming the slot**, not a coercion: a `Str`
+    ///      at a count slot must not become a count, and the message must say WHICH slot, since a
+    ///      `Limit` has two.
+    ///   6. **A literal-only pipeline is untouched** — the wire and the answer are what they were
+    ///      before slots existed, so adopting `0.23.0` costs a pipeline that binds nothing exactly
+    ///      nothing.
+    ///
+    /// Every law's evidence is BUILT each iteration: a bound run, a substituted run, an unbound run,
+    /// a mistyped run and a literal-only run over the same drawn table.
+    let slotParamLaws (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable asLiteral = None
+        let mutable substEquiv = None
+        let mutable census = None
+        let mutable unbound = None
+        let mutable mistyped = None
+        let mutable literalOnly = None
+
+        let col name cells : Column = Column.create name IntType cells
+
+        for i in 0 .. iterations - 1 do
+            let nRows, r1 = ConfRng.intBelow 6 rng
+            let rows = nRows + 3
+            let mutable r = r1
+
+            let draw () =
+                let v, r' = ConfRng.intBelow 40 r
+                r <- r'
+                Int(v - 20)
+
+            let aCells = [ for _ in 1..rows -> draw () ]
+            let bCells = [ for _ in 1..rows -> draw () ]
+
+            let table =
+                { Schema = [ "a", IntType; "b", IntType ]
+                  Columns = [ col "a" aCells; col "b" bCells ] }
+
+            let nTake, r2 = ConfRng.intBelow rows r
+            let take = nTake + 1
+            let offPick, r3 = ConfRng.intBelow 2 r2
+            let sortPick, r4 = ConfRng.intBelow 2 r3
+            rng <- r4
+
+            let sortCol = if sortPick = 0 then "a" else "b"
+
+            let env =
+                Map.ofList [ "take", Int take; "skip", Int offPick; "orderBy", Str sortCol ]
+
+            let bound =
+                [ Sort [ Slot.Param "orderBy", Asc ]
+                  Limit(Slot.Param "take", Slot.Param "skip") ]
+
+            let literal = [ Transform.sortBy [ sortCol, Asc ]; Transform.limit take offPick ]
+
+            // ---- 1. a bound slot param evaluates as its literal ----
+            let viaEnv = DataFrame.evalPipelineInEnv env bound table
+            let viaLit = DataFrame.evalPipeline literal table
+
+            if viaEnv <> viaLit && asLiteral.IsNone then
+                asLiteral <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: the bound slot pipeline gave %A where the literal one gave %A — a slot param must stand for its value and nothing else"
+                            seed
+                            i
+                            viaEnv
+                            viaLit
+                    )
+
+            // ---- 2. substitution ≡ env resolution ----
+            let viaSubst = DataFrame.evalPipeline (Transform.substitute env bound) table
+
+            if viaEnv <> viaSubst && substEquiv.IsNone then
+                substEquiv <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: evalPipelineInEnv ≠ evalPipeline∘substitute over slot params — the two resolution routes have come apart"
+                            seed
+                            i
+                    )
+
+            // ---- 3. the census names every slot param ----
+            let declared = Transform.paramsOf bound |> Set.ofList
+
+            if declared <> Set.ofList [ "orderBy"; "take"; "skip" ] && census.IsNone then
+                census <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: Transform.paramsOf reported %A over a pipeline binding orderBy/take/skip — a host prunes and subscribes off this list, so a missing name is a param nobody binds"
+                            seed
+                            i
+                            declared
+                    )
+
+            // ---- 4. unbound is UnboundParam, naming it ----
+            (match DataFrame.evalPipelineInEnv (Map.remove "take" env) bound table with
+             | Error(UnboundParam("take", _)) -> ()
+             | other ->
+                 if unbound.IsNone then
+                     unbound <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: an unbound slot param gave %A — it must be the strict UnboundParam naming it, the same case an expression param gives"
+                                 seed
+                                 i
+                                 other
+                         ))
+
+            // ---- 5. a wrongly-typed binding is a TypeError naming the slot ----
+            (match DataFrame.evalPipelineInEnv (Map.add "take" (Str "three") env) bound table with
+             | Error(TypeError detail) when detail.Contains "limit n" -> ()
+             | other ->
+                 if mistyped.IsNone then
+                     mistyped <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: a Str bound at a count slot gave %A — it must be a TypeError NAMING the slot, since a Limit has two and 'type error' alone would not say which"
+                                 seed
+                                 i
+                                 other
+                         ))
+
+            // ---- 6. a literal-only pipeline is untouched by any of this ----
+            let litWire = DataFrameCodec.encodePipeline literal
+
+            if
+                (litWire <> DataFrameCodec.encodePipeline literal
+                 || not (litWire.Contains("\"n\":" + string take))
+                 || litWire.Contains "$param")
+                && literalOnly.IsNone
+            then
+                literalOnly <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: a literal-only pipeline encoded as %s — a literal slot must be the bare value it always was, so a pre-0.23.0 document is byte-identical"
+                            seed
+                            i
+                            litWire
+                    )
+
+        [ { Law = "a bound slot param evaluates byte-identically to the literal it stands for"
+            Passed = asLiteral.IsNone
+            Counterexample = asLiteral }
+          { Law = "slot params: evalPipelineInEnv ≡ evalPipeline ∘ Transform.substitute"
+            Passed = substEquiv.IsNone
+            Counterexample = substEquiv }
+          { Law = "Transform.paramsOf names every slot param alongside the expression params"
+            Passed = census.IsNone
+            Counterexample = census }
+          { Law = "an unbound slot param is EvalError.UnboundParam naming it, never a default"
+            Passed = unbound.IsNone
+            Counterexample = unbound }
+          { Law = "a slot param bound to the wrong cell shape is a TypeError NAMING the slot"
+            Passed = mistyped.IsNone
+            Counterexample = mistyped }
+          { Law = "a literal slot encodes as the bare value it did before slots existed"
+            Passed = literalOnly.IsNone
+            Counterexample = literalOnly } ]

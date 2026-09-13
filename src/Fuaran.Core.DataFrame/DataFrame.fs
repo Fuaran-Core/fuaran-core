@@ -159,6 +159,99 @@ type BinOp =
     | StartsWith
     | EndsWith
 
+/// The grain of a `ColExpr.Now` reading (Phase 125) — the two `Cell` cases that can hold a clock
+/// reading, and no more.
+///
+/// **Why there is no `hour` / `quarter` / `week` ladder.** A grain has to land in a cell, and the
+/// columnar model has exactly two that carry a moment: `Cell.Date` (`YYYY-MM-DD`) and
+/// `Cell.Timestamp` (`YYYY-MM-DDThh:mm:ssZ`), both canonical ISO-8601 strings. A finer or coarser
+/// grain would be vocabulary with no semantics — admitted by the type, meaningless to every
+/// evaluator. Truncating an existing moment to a period is `ScalarFn.DatePart`'s job and always was.
+[<RequireQualifiedAccess>]
+type NowGrain =
+    /// A calendar day: `Cell.Date`, `YYYY-MM-DD`.
+    | Date
+    /// An instant: `Cell.Timestamp`, `YYYY-MM-DDThh:mm:ssZ`.
+    | Timestamp
+
+/// Wire tags for `NowGrain`.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module NowGrain =
+
+    let tag (g: NowGrain) : string =
+        match g with
+        | NowGrain.Date -> "date"
+        | NowGrain.Timestamp -> "timestamp"
+
+    let ofTag (s: string) : NowGrain option =
+        match s with
+        | "date" -> Some NowGrain.Date
+        | "timestamp" -> Some NowGrain.Timestamp
+        | _ -> None
+
+    /// Both tags, for a decoder's `UnknownType` enumeration (GP5 — a closed set names its
+    /// alternatives when it refuses).
+    let allTags: string list = [ "date"; "timestamp" ]
+
+/// The clock seam (Phase 125): a pinned reading per grain.
+///
+/// Core is FSharp.Core-only and Fable-clean (GP3), so it holds no platform clock and never will —
+/// the host supplies one. That is not merely a portability constraint: a pipeline that silently
+/// picked up wall-clock time at evaluation would not be reproducible, and its cross-host parity
+/// claim would not be falsifiable. PINNING the clock is what makes `Now` deterministic, and what
+/// `Conformance.nowLaws` certifies.
+type ClockWitness = NowGrain -> Cell
+
+/// A SCALAR SLOT in a `Transform` verb (Phase 125): a pinned literal, or a named parameter resolved
+/// per evaluation from the same binding environment `ColExpr.Param` reads.
+///
+/// **Why this exists rather than `ColExpr` at those slots.** A `Limit`'s count and a `SortKey`'s
+/// column are positions with no row in scope, so `Col "x"` there is an expression the type would
+/// admit and no evaluator could mean; the same goes for every other `ColExpr` case. Default-deny by
+/// shape (GP5) says the type admits what the position means and nothing else, and at a scalar slot
+/// that is exactly two things.
+///
+/// **Why it is Core's type rather than each host's.** The alternative is a host-side
+/// pre-substitution: a parallel structure carrying "this slot is really a param", maintained
+/// outside Core's type at every conformant host, and agreeing with the others only by discipline.
+/// One closed type in the shared substrate is what makes the wire form, the param census and the
+/// unbound-param refusal one answer instead of five.
+///
+/// `RequireQualifiedAccess` because `Lit` and `Param` are already `ColExpr` cases in this
+/// namespace: `Slot.Lit 10` never shadows `Lit (Int 10)`.
+[<RequireQualifiedAccess>]
+type Slot<'T> =
+    /// The value itself — what every slot held before this type existed.
+    | Lit of 'T
+    /// A named parameter, resolved from the evaluation env. Unbound at evaluation is a strict
+    /// `EvalError.UnboundParam`; bound to a cell of the wrong shape is an `EvalError.TypeError`
+    /// naming the slot. It shares the scalar params' namespace, so `Transform.paramsOf` reports it
+    /// and a host's dependency edges, reactivity and unbound-param pruning pick it up with no new
+    /// call.
+    | Param of name: string
+
+/// Pure, total derivations over a scalar slot.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Slot =
+
+    /// The param name this slot references, if any.
+    let paramName (s: Slot<'T>) : string list =
+        match s with
+        | Slot.Lit _ -> []
+        | Slot.Param n -> [ n ]
+
+    /// Is this slot still a param? (`true` ⇒ the value is not known without an env.)
+    let isParam (s: Slot<'T>) : bool =
+        match s with
+        | Slot.Lit _ -> false
+        | Slot.Param _ -> true
+
+    /// The literal, when the slot holds one.
+    let tryLit (s: Slot<'T>) : 'T option =
+        match s with
+        | Slot.Lit v -> Some v
+        | Slot.Param _ -> None
+
 /// A scalar expression over a row's columns + literals — the `ColExpr` algebra (spec §2).
 type ColExpr =
     | Col of string
@@ -187,6 +280,18 @@ type ColExpr =
     /// is a strict `UnboundParam`. Wire: `{"$type":"in","expr":...,"param":"<name>"}` — the same
     /// `in` tag as the literal form, with `param` in place of `items` (exactly one of the two).
     | InParam of ColExpr * name: string
+    /// A `now` literal at the declared grain (Phase 125) — a pipeline names the current moment
+    /// itself, instead of a host threading a param by hand for it at every site.
+    ///
+    /// Resolves by SUBSTITUTION against a pinned `ClockWitness` (`ColExpr.substituteNow` /
+    /// `Transform.substituteNow`, and the `…At` evaluator entry points that call them) — the same
+    /// seam `InParam` resolves through, reused rather than joined by a second mechanism. One that
+    /// reaches evaluation unresolved is a strict `EvalError.UnpinnedClock`, never a silent reading
+    /// of the host's real clock: Core owns no clock, and a pipeline whose answer depends on when it
+    /// ran is not reproducible and its parity claim is not falsifiable.
+    ///
+    /// Wire: `{"$type":"now","grain":"date"|"timestamp"}`.
+    | Now of grain: NowGrain
 
 /// One aggregate in a `GroupBy` / `Pivot`: an output `Name`, the aggregate `Fn`, over column `Of`.
 type Agg = { Name: string; Fn: AggFn; Of: string }
@@ -223,9 +328,15 @@ type Transform =
     | Pivot of PivotSpec
     /// Long→wide's inverse: melt `valueVars` into `(variable, value)` rows, keeping `idVars`.
     | Unpivot of idVars: string list * valueVars: string list
-    | Sort of (string * SortDir) list
+    /// Order rows by the named keys. The COLUMN of each key is a `Slot` as of `0.23.0`, so a host
+    /// can bind "sort by whichever column the user picked" without a parallel structure outside this
+    /// type. The DIRECTION stays a literal: nothing asked for a bound direction, and a `Cell`-valued
+    /// param would have to spell one as a string.
+    | Sort of (Slot<string> * SortDir) list
     | Distinct
-    | Limit of n: int * offset: int
+    /// Take `n` rows after skipping `offset`. Both are `Slot`s as of `0.23.0` — a page size and a
+    /// page offset are the two slots a UI binds most often, and they were literals in this DU.
+    | Limit of n: Slot<int> * offset: Slot<int>
     | Union of DataSource
     /// Phase 101 — keep the left rows whose FULL ROW also appears in `source`, preserving the left's
     /// order and its duplicate multiplicity (SQL `INTERSECT ALL`). Row identity is the same canonical
@@ -250,7 +361,9 @@ module ColExpr =
     let rec internal paramNames (e: ColExpr) : string list =
         match e with
         | Col _
-        | Lit _ -> []
+        | Lit _
+        // A `Now` carries no param name: the clock is a witness, not a binding.
+        | Now _ -> []
         | Param n -> [ n ]
         | Binary(_, a, b) -> paramNames a @ paramNames b
         | Not x -> paramNames x
@@ -274,7 +387,8 @@ module ColExpr =
     let rec substitute (env: Map<string, Cell>) (e: ColExpr) : ColExpr =
         match e with
         | Col _
-        | Lit _ -> e
+        | Lit _
+        | Now _ -> e
         | Param n ->
             match Map.tryFind n env with
             | Some c -> Lit c
@@ -300,7 +414,8 @@ module ColExpr =
         match e with
         | Col _
         | Lit _
-        | Param _ -> e
+        | Param _
+        | Now _ -> e
         | InParam(x, n) ->
             let x = substituteListParams listEnv x
 
@@ -321,6 +436,74 @@ module ColExpr =
         | InList(x, items) -> InList(substituteListParams listEnv x, items |> List.map (substituteListParams listEnv))
         | IsNull x -> IsNull(substituteListParams listEnv x)
 
+    /// Replace every `Now g` with `Lit (clock g)` — the clock-pinning twin of `substitute`
+    /// (Phase 125). A `Now` resolves this way and no other: Core holds no clock, so the reading is
+    /// the caller's, taken once and frozen into the expression before anything evaluates.
+    ///
+    /// **Substitution rather than an evaluator argument, deliberately.** Threading a clock down
+    /// `evalExpr` would give every call site a chance to supply a different one, and "the same
+    /// pipeline twice under one clock agrees" would then be a claim about call-site discipline.
+    /// Substituted, it is a claim about the expression: after this call the pipeline contains no
+    /// `Now` at all, so what evaluates is a pure function of literals, and the determinism law
+    /// (`Conformance.nowLaws`) is about the value rather than about who called what.
+    ///
+    /// The witness is read AT MOST ONCE PER GRAIN per call (`pinOnce`): two `Now NowGrain.Timestamp`
+    /// nodes in one expression must be the same instant, or a pipeline could straddle a second and
+    /// compare a row against two different "now"s.
+    let rec substituteNow (clock: ClockWitness) (e: ColExpr) : ColExpr = substituteWithPinned (pinOnce clock) e
+
+    /// One reading per grain, taken on first use. `Lazy` rather than a mutable dictionary:
+    /// FSharp.Core only, Fable-clean, and a grain the expression never names is never asked for —
+    /// a witness that reads a real clock, or charges for one, is not invoked for a grain nobody
+    /// wanted.
+    and internal pinOnce (clock: ClockWitness) : ClockWitness =
+        let d = lazy (clock NowGrain.Date)
+        let ts = lazy (clock NowGrain.Timestamp)
+
+        fun g ->
+            match g with
+            | NowGrain.Date -> d.Value
+            | NowGrain.Timestamp -> ts.Value
+
+    /// The walk itself, over an ALREADY-pinned witness — so the pinning happens once at the entry
+    /// point rather than once per recursive step.
+    and internal substituteWithPinned (pinned: ClockWitness) (e: ColExpr) : ColExpr =
+        let go = substituteWithPinned pinned
+
+        match e with
+        | Col _
+        | Lit _
+        | Param _ -> e
+        | Now g -> Lit(pinned g)
+        | Binary(op, a, b) -> Binary(op, go a, go b)
+        | Not x -> Not(go x)
+        | Coalesce xs -> Coalesce(xs |> List.map go)
+        | Case(cases, els) -> Case(cases |> List.map (fun (w, t) -> go w, go t), go els)
+        | Cast(ty, x) -> Cast(ty, go x)
+        | ApplyFn(fn, xs) -> ApplyFn(fn, xs |> List.map go)
+        | InList(x, items) -> InList(go x, items |> List.map go)
+        | IsNull x -> IsNull(go x)
+        | InParam(x, n) -> InParam(go x, n)
+
+    /// Does the expression name `now` anywhere? The `paramsOf` analogue for the clock: a host that
+    /// needs to know whether a pipeline is clock-dependent (to decide caching, or to refuse to
+    /// evaluate one without pinning) reads it off the expression rather than declaring it beside.
+    let rec usesNow (e: ColExpr) : bool =
+        match e with
+        | Now _ -> true
+        | Col _
+        | Lit _
+        | Param _ -> false
+        | Binary(_, a, b) -> usesNow a || usesNow b
+        | Not x
+        | Cast(_, x)
+        | IsNull x
+        | InParam(x, _) -> usesNow x
+        | Coalesce xs
+        | ApplyFn(_, xs) -> xs |> List.exists usesNow
+        | Case(cases, els) -> (cases |> List.exists (fun (w, t) -> usesNow w || usesNow t)) || usesNow els
+        | InList(x, items) -> usesNow x || (items |> List.exists usesNow)
+
 /// Pure, total derivations over a `Transform` pipeline (Phase 77) — the load-bearing helper for a
 /// host that wires a filter/state value into a declarative pipeline: `paramsOf` names every param the
 /// pipeline depends on, so dependency edges + reactivity + unbound-param pruning are all *derived*.
@@ -333,15 +516,19 @@ module Transform =
         match t with
         | Filter p -> ColExpr.paramNames p
         | Derive(_, e) -> ColExpr.paramNames e
+        // `0.23.0` — a SLOT param shares the scalar params' namespace, so it is reported here and
+        // nowhere else: a host's dependency edges, reactivity subscriptions and unbound-param
+        // pruning all read `paramsOf`, and adding a second census for slots would mean each of them
+        // had to learn about it.
+        | Sort by -> by |> List.collect (fun (c, _) -> Slot.paramName c)
+        | Limit(n, offset) -> Slot.paramName n @ Slot.paramName offset
         | Project _
         | GroupBy _
         | Join _
         | Window _
         | Pivot _
         | Unpivot _
-        | Sort _
         | Distinct
-        | Limit _
         | Union _
         | Intersect _
         | Except _ -> []
@@ -352,13 +539,37 @@ module Transform =
     let paramsOf (pipeline: Transform list) : string list =
         pipeline |> List.collect stepParamNames |> List.distinct
 
-    /// Substitute every param bound in `env` through the whole pipeline (each step's `ColExpr`).
+    /// Substitute every param bound in `env` through the whole pipeline — each step's `ColExpr`,
+    /// and (`0.23.0`) each step's scalar `Slot`s.
+    ///
+    /// A slot param binds only when the bound cell has the slot's shape: an `Int` at a count slot,
+    /// a `Str` at a column slot. A cell of the wrong shape is LEFT UNSUBSTITUTED rather than
+    /// coerced, so the defect surfaces at evaluation as a `TypeError` naming the slot, where a
+    /// coercion here would have silently sorted by the string "3".
     let substitute (env: Map<string, Cell>) (pipeline: Transform list) : Transform list =
+        let bindInt (s: Slot<int>) =
+            match s with
+            | Slot.Param n ->
+                match Map.tryFind n env with
+                | Some(Int v) -> Slot.Lit v
+                | _ -> s
+            | _ -> s
+
+        let bindStr (s: Slot<string>) =
+            match s with
+            | Slot.Param n ->
+                match Map.tryFind n env with
+                | Some(Str v) -> Slot.Lit v
+                | _ -> s
+            | _ -> s
+
         pipeline
         |> List.map (fun t ->
             match t with
             | Filter p -> Filter(ColExpr.substitute env p)
             | Derive(n, e) -> Derive(n, ColExpr.substitute env e)
+            | Sort by -> Sort(by |> List.map (fun (c, d) -> bindStr c, d))
+            | Limit(n, offset) -> Limit(bindInt n, bindInt offset)
             | other -> other)
 
     /// Substitute every LIST param bound in `listEnv` through the whole pipeline (Phase 91) —
@@ -370,6 +581,52 @@ module Transform =
             | Filter p -> Filter(ColExpr.substituteListParams listEnv p)
             | Derive(n, e) -> Derive(n, ColExpr.substituteListParams listEnv e)
             | other -> other)
+
+    /// Pin the clock through the whole pipeline (Phase 125): every `ColExpr.Now` becomes the
+    /// literal `clock` returns for its grain. ONE reading per grain per call is what makes a
+    /// pipeline's two `Now`s agree with each other — a witness that returned a fresh reading per
+    /// call would let `Derive("a", Now g)` and `Derive("b", Now g)` disagree within one evaluation,
+    /// which is the defect a host threading a param by hand was already avoiding by accident.
+    let substituteNow (clock: ClockWitness) (pipeline: Transform list) : Transform list =
+        let pinned = ColExpr.pinOnce clock
+
+        pipeline
+        |> List.map (fun t ->
+            match t with
+            | Filter p -> Filter(ColExpr.substituteWithPinned pinned p)
+            | Derive(n, e) -> Derive(n, ColExpr.substituteWithPinned pinned e)
+            | other -> other)
+
+    /// The literal `Limit` — `Transform.limit 10 0` for the common case, so a call site that never
+    /// binds a param reads as it did before `0.23.0`.
+    let limit (n: int) (offset: int) : Transform = Limit(Slot.Lit n, Slot.Lit offset)
+
+    /// The literal `Sort` — `Transform.sortBy [ "total", Desc ]`, the pre-`0.23.0` spelling.
+    let sortBy (by: (string * SortDir) list) : Transform =
+        Sort(by |> List.map (fun (c, d) -> Slot.Lit c, d))
+
+    /// Every SLOT param the pipeline still carries unresolved, first-occurrence order, deduplicated
+    /// (`0.23.0`). A subset of `paramsOf`, and the half a STATIC reader has to know about: a slot
+    /// param means the step's shape — which column it orders by, how many rows it keeps — is not
+    /// known without an env, so a static walk over the pipeline cannot answer for it.
+    let slotParamsOf (pipeline: Transform list) : string list =
+        pipeline
+        |> List.collect (fun t ->
+            match t with
+            | Sort by -> by |> List.collect (fun (c, _) -> Slot.paramName c)
+            | Limit(n, offset) -> Slot.paramName n @ Slot.paramName offset
+            | _ -> [])
+        |> List.distinct
+
+    /// Does the pipeline name `now` anywhere? The clock's `paramsOf` — a host reads clock
+    /// dependence off the pipeline rather than declaring it beside.
+    let usesNow (pipeline: Transform list) : bool =
+        pipeline
+        |> List.exists (fun t ->
+            match t with
+            | Filter p -> ColExpr.usesNow p
+            | Derive(_, e) -> ColExpr.usesNow e
+            | _ -> false)
 
 /// The reference evaluator's recoverable error envelope — names the failure, enumerates the
 /// alternatives where a closed set is expected (GP5).
@@ -389,6 +646,12 @@ type EvalError =
     /// the reference evaluator never guesses a default — lenient "unset ⇒ no constraint" is host policy
     /// (prune the step via `Transform.paramsOf` before evaluating).
     | UnboundParam of name: string * bound: string list
+    /// A `ColExpr.Now` reached evaluation with no clock pinned (Phase 125). Names the grain that
+    /// was asked for. Strict-Core, and the exact analogue of `UnboundParam`: the reference
+    /// evaluator never reads a host clock of its own, because an answer that depends on when the
+    /// pipeline ran is not reproducible and not comparable across hosts. Pin one with
+    /// `DataFrame.evalPipelineAt` (or `Transform.substituteNow` before evaluating).
+    | UnpinnedClock of grain: NowGrain
 
 /// A description of what changed in a source table between a prior evaluation and now (Phase 34) — the
 /// input to the incremental `DataFrame.evalFrom`. `ColumnValuesChanged` = the cells of one existing
@@ -1002,6 +1265,12 @@ module DataFrame =
             // List params resolve by substitution (`substituteListParams`) BEFORE evaluation —
             // one that reaches the evaluator is unbound, same strictness as a scalar `Param`.
             Error(UnboundParam(name, env |> Map.toList |> List.map fst))
+        | Now grain ->
+            // A `now` resolves by substitution against a pinned clock (`substituteNow`) BEFORE
+            // evaluation, exactly as a list param does. One that reaches here has no clock, and
+            // Core has none to fall back on — reading the host's real clock here would make the
+            // answer depend on when the pipeline ran, which is the property `Now` exists to keep.
+            Error(UnpinnedClock grain)
         | ApplyFn(fn, args) ->
             let rec evalArgs acc =
                 function
@@ -1602,6 +1871,66 @@ module DataFrame =
         | Embedded t -> Ok t
         | Ref r -> resolve r
 
+    /// Resolve a scalar slot against the evaluation env (`0.23.0`). A `Slot.Lit` is itself; a
+    /// `Slot.Param` reads the env, and the two ways it can fail are the two the env already knows:
+    /// an unbound name is `UnboundParam` enumerating the bound set (the same case a `ColExpr.Param`
+    /// gives, because a host pruning unbound params does not want to learn a second one), and a cell
+    /// of the wrong shape is a `TypeError` NAMING THE SLOT — which is the whole reason the slot
+    /// label is threaded in, since "type error" alone would not say which of a `Limit`'s two slots
+    /// it was about.
+    let private cellShape (c: Cell) : string =
+        match Cell.typeOf c with
+        | Some t -> ColumnType.tag t
+        | None -> "null"
+
+    /// Resolve an integer slot: a count or an offset.
+    let private resolveIntSlot (env: Map<string, Cell>) (slot: string) (s: Slot<int>) : Result<int, EvalError> =
+        match s with
+        | Slot.Lit v -> Ok v
+        | Slot.Param n ->
+            match Map.tryFind n env with
+            | None -> Error(UnboundParam(n, env |> Map.toList |> List.map fst))
+            | Some(Int v) -> Ok v
+            | Some other ->
+                Error(
+                    TypeError(
+                        slot
+                        + ": param '"
+                        + n
+                        + "' is bound to a "
+                        + cellShape other
+                        + " cell, not an integer"
+                    )
+                )
+
+    let private resolveStrSlot (env: Map<string, Cell>) (slot: string) (s: Slot<string>) : Result<string, EvalError> =
+        match s with
+        | Slot.Lit v -> Ok v
+        | Slot.Param n ->
+            match Map.tryFind n env with
+            | None -> Error(UnboundParam(n, env |> Map.toList |> List.map fst))
+            | Some(Str v) -> Ok v
+            | Some other ->
+                Error(
+                    TypeError(
+                        slot
+                        + ": param '"
+                        + n
+                        + "' is bound to a "
+                        + cellShape other
+                        + " cell, not a string"
+                    )
+                )
+
+    let private sequenceR (xs: Result<'a, EvalError> list) : Result<'a list, EvalError> =
+        (Ok [], xs)
+        ||> List.fold (fun acc r ->
+            match acc, r with
+            | Error e, _ -> Error e
+            | Ok _, Error e -> Error e
+            | Ok vs, Ok v -> Ok(v :: vs))
+        |> Result.map List.rev
+
     let private evalStep
         (resolve: string -> Result<Table, EvalError>)
         (env: Map<string, Cell>)
@@ -1615,9 +1944,21 @@ module DataFrame =
         | Project pairs -> evalProject f pairs
         | Derive(name, expr) -> evalDerive env f name expr
         | GroupBy(keys, aggs) -> evalGroupBy f keys aggs
-        | Sort by -> Ok(evalSort f by)
+        // `0.23.0` — resolve the scalar slots against the SAME env `ColExpr.Param` reads, then call
+        // the unchanged reference primitives. `evalSort` / `evalLimit` still take resolved values,
+        // so the pinned ordering and the pinned window semantics have exactly one definition and
+        // the slot is a resolution step in front of them, not a second evaluator.
+        | Sort by ->
+            by
+            |> List.map (fun (c, d) -> resolveStrSlot env "sort key column" c |> Result.map (fun c -> c, d))
+            |> sequenceR
+            |> Result.map (evalSort f)
         | Distinct -> Ok(evalDistinct f)
-        | Limit(n, offset) -> Ok(evalLimit f n offset)
+        | Limit(n, offset) ->
+            resolveIntSlot env "limit n" n
+            |> Result.bind (fun n ->
+                resolveIntSlot env "limit offset" offset
+                |> Result.map (fun offset -> evalLimit f n offset))
         | Window spec -> evalWindow f spec
         | Pivot spec -> evalPivot f spec
         | Unpivot(idVars, valueVars) -> evalUnpivot f idVars valueVars
@@ -1710,6 +2051,37 @@ module DataFrame =
     /// The reference evaluator over embedded sources only (`Ref` ⇒ `UnresolvedSource`).
     let evalPipeline (pipeline: Transform list) (input: Table) : Result<Table, EvalError> =
         evalPipelineWithInEnv noResolve Map.empty pipeline input
+
+    // ---- clock-pinning entry points (Phase 125) ----
+    // Each is `substituteNow` followed by the corresponding param-resolving entry point, in that
+    // order and one line long — there is no second evaluator. Pinning the clock FIRST is what makes
+    // `Now` deterministic: after the substitution the pipeline holds literals, so everything below
+    // is the same pure fold it was before `Now` existed, and `Conformance.nowLaws` can state its
+    // claim about a value rather than about an ordering of calls.
+
+    /// The reference evaluator with a pinned clock, a param env, and a `Ref` resolver — the full
+    /// form every other `…At` entry point delegates to.
+    let evalPipelineWithInEnvAt
+        (clock: ClockWitness)
+        (resolve: string -> Result<Table, EvalError>)
+        (env: Map<string, Cell>)
+        (pipeline: Transform list)
+        (input: Table)
+        : Result<Table, EvalError> =
+        evalPipelineWithInEnv resolve env (Transform.substituteNow clock pipeline) input
+
+    /// The reference evaluator over embedded sources, with a pinned clock and a param env.
+    let evalPipelineInEnvAt
+        (clock: ClockWitness)
+        (env: Map<string, Cell>)
+        (pipeline: Transform list)
+        (input: Table)
+        : Result<Table, EvalError> =
+        evalPipelineWithInEnvAt clock noResolve env pipeline input
+
+    /// The reference evaluator over embedded sources, with a pinned clock and no params.
+    let evalPipelineAt (clock: ClockWitness) (pipeline: Transform list) (input: Table) : Result<Table, EvalError> =
+        evalPipelineWithInEnvAt clock noResolve Map.empty pipeline input
 
     // ---- the reference primitives, exposed (Phase 99) ----
     // An incremental evaluator recomputes a SUBSET of what a full evaluation recomputes, so it must
@@ -1848,6 +2220,7 @@ module DataFrame =
         | InList(x, items) -> unionAll ((x :: items) |> List.map exprCols)
         | IsNull x -> exprCols x
         | InParam(x, _) -> exprCols x
+        | Now _ -> Set.empty
 
     /// The source columns a single step references — an over-approximation is safe (it only makes the
     /// incremental check more conservative, never less). A right-hand `Join`/`Union` source is a
@@ -1866,7 +2239,11 @@ module DataFrame =
                   Set.singleton spec.Of ]
         | Pivot spec -> unionAll [ Set.ofList spec.Index; Set.singleton spec.On; Set.singleton spec.Values ]
         | Unpivot(idVars, valueVars) -> Set.union (Set.ofList idVars) (Set.ofList valueVars)
-        | Sort by -> by |> List.map fst |> Set.ofList
+        // `0.23.0` — only the LITERAL key columns are named here. A slot param's column is not
+        // known without an env, which would make this an UNDER-approximation (unsafe: `evalFrom`
+        // reuses a prior result when a changed column is absent from this set). `evalFrom` therefore
+        // declines the reuse outright while any slot param stands — see its guard.
+        | Sort by -> by |> List.choose (fun (c, _) -> Slot.tryLit c) |> Set.ofList
         | Distinct
         | Limit _
         | Union _
@@ -1906,6 +2283,11 @@ module DataFrame =
             match change with
             | ColumnValuesChanged c ->
                 not (hasFullRowDedup pipeline)
+                // `0.23.0` — an unresolved SLOT param means `readColumns` cannot see which column a
+                // `Sort` orders by, so "the pipeline does not read `c`" is not a claim this walk can
+                // make. Declining the reuse costs a full evaluation; taking it would return a stale
+                // table for a change that did matter.
+                && List.isEmpty (Transform.slotParamsOf pipeline)
                 && not (Set.contains c (readColumns pipeline))
                 && not (prior.Schema |> List.exists (fun (n, _) -> n = c))
             | RowsAppended
@@ -1928,6 +2310,10 @@ module DataFrame =
         | UnresolvedSource r -> "unresolved source ref: " + r
         | OverflowError d -> "overflow: " + d
         | UnboundParam(n, bound) -> "unbound param '" + n + "'; bound: " + String.concat ", " bound
+        | UnpinnedClock g ->
+            "unpinned clock: a now("
+            + NowGrain.tag g
+            + ") reached evaluation with no ClockWitness; pin one with evalPipelineAt (or Transform.substituteNow)"
 
 
 // ============================================================================
@@ -2518,6 +2904,7 @@ module DataFrameCodec =
             Canon.typed "in" [ "expr", encodeExpr subject; "items", JArr(items |> List.map encodeExpr) ]
         | InParam(subject, name) -> Canon.typed "in" [ "expr", encodeExpr subject; "param", JStr name ]
         | IsNull inner -> Canon.typed "isNull" [ "expr", encodeExpr inner ]
+        | Now grain -> Canon.typed "now" [ "grain", JStr(NowGrain.tag grain) ]
 
     let private field k el =
         match el with
@@ -2691,6 +3078,13 @@ module DataFrameCodec =
                         )
                     | None, None -> Error(MissingField "items"))
             | "isNull" -> field "expr" el |> Result.bind decodeExpr |> Result.map IsNull
+            | "now" ->
+                field "grain" el
+                |> Result.bind strOf
+                |> Result.bind (fun gs ->
+                    match NowGrain.ofTag gs with
+                    | Some g -> Ok(Now g)
+                    | None -> Error(UnknownType(gs, NowGrain.allTags)))
             // Phase 93 — expression-level string-predicate spellings (stretch-wave-2 census):
             // {"$type":"contains","expr":X,"other":Y} (also left/right) denotes exactly
             // Binary(Contains, X, Y); same for startsWith/endsWith. Canonical stays the
@@ -2783,7 +3177,8 @@ module DataFrameCodec =
                           "cast"
                           "apply"
                           "in"
-                          "isNull" ]
+                          "isNull"
+                          "now" ]
                     )
                 ))
 
@@ -2800,13 +3195,47 @@ module DataFrameCodec =
 
     let private strListOf el = arrOf el |> Result.bind (mapM strOf)
 
-    let private orderJson (name, dir) =
-        JObj [ "col", JStr name; "dir", JStr(dirTag dir) ]
+    // ---- scalar slots (`0.23.0`) ----
+    // A LITERAL slot encodes exactly as the bare value did before this type existed, so every
+    // pre-`0.23.0` pipeline is byte-identical on the wire and every pre-`0.23.0` document still
+    // decodes. A param is the one new shape: `{"$param":"<name>"}`, an object where a scalar was,
+    // which no literal spelling of an int or a column name can collide with.
+    let private slotJson (litJson: 'T -> JVal) (s: Slot<'T>) : JVal =
+        match s with
+        | Slot.Lit v -> litJson v
+        | Slot.Param n -> JObj [ "$param", JStr n ]
 
-    let private orderOf el =
+    let private slotOf
+        (litOf: JVal -> Result<'T, ColumnError>)
+        (what: string)
+        (el: JVal)
+        : Result<Slot<'T>, ColumnError> =
+        match el with
+        | JObj fields ->
+            match fields |> List.tryFind (fun (n, _) -> n = "$param") with
+            | Some(_, JStr n) -> Ok(Slot.Param n)
+            | Some _ -> Error(MalformedShape("\"$param\" must be a JSON string (" + what + ")"))
+            | None -> Error(MalformedShape(what + ": an object here is a parameter slot and must carry \"$param\""))
+        | _ -> litOf el |> Result.map Slot.Lit
+
+    /// A plain `(column, direction)` key — a `WindowSpec.OrderBy` entry. NOT a `Sort` key: a
+    /// window's frame ordering was not asked for as a slot, and widening it too would be a breaking
+    /// change taken on a symmetry argument rather than on a demand.
+    let private orderJson (col: string, dir) =
+        JObj [ "col", JStr col; "dir", JStr(dirTag dir) ]
+
+    /// A `Sort` key, whose COLUMN is a slot (`0.23.0`). A literal encodes as the bare string it
+    /// always did, so every pre-`0.23.0` sort is byte-identical.
+    let private sortKeyJson (col: Slot<string>, dir) =
+        JObj [ "col", slotJson JStr col; "dir", JStr(dirTag dir) ]
+
+    /// The shared key decoder, parameterised over how the COLUMN half reads — so the alias set
+    /// (`column`, `descending`, `direction`) has one definition across a `Sort` key and a window's
+    /// frame ordering rather than two that can drift.
+    let private keyOfWith (colOf: JVal -> Result<'C, ColumnError>) el =
         // Phase 92 — the sort-key aliases: `column` for `col`, boolean `descending` for `dir`.
         fieldAliased "col" "column" el
-        |> Result.bind strOf
+        |> Result.bind colOf
         |> Result.bind (fun n ->
             // Phase 93 — `direction` is a third observed spelling; a directionless entry is
             // the SQL default (asc) — both unambiguous.
@@ -2821,6 +3250,13 @@ module DataFrameCodec =
                     MalformedShape
                         "give ONE of \"dir\" (canonical: asc|desc), \"descending\" (alias boolean), or \"direction\" (alias: asc|desc)"
                 ))
+
+    /// A plain key — a window's frame ordering.
+    let private orderOf el : Result<string * SortDir, ColumnError> = keyOfWith strOf el
+
+    /// A `Sort` key, whose column may be a slot (`0.23.0`).
+    let private sortKeyOf el : Result<Slot<string> * SortDir, ColumnError> =
+        keyOfWith (slotOf strOf "sort key column") el
 
     let private aggJson (a: Agg) =
         JObj [ "name", JStr a.Name; "fn", JStr(aggFnTag a.Fn); "of", JStr a.Of ]
@@ -2894,9 +3330,9 @@ module DataFrameCodec =
                   "agg", JStr(aggFnTag spec.Agg) ]
         | Unpivot(idVars, valueVars) ->
             Canon.typed "unpivot" [ "idVars", strList idVars; "valueVars", strList valueVars ]
-        | Sort by -> Canon.typed "sort" [ "by", JArr(by |> List.map orderJson) ]
+        | Sort by -> Canon.typed "sort" [ "by", JArr(by |> List.map sortKeyJson) ]
         | Distinct -> Canon.typed "distinct" []
-        | Limit(n, offset) -> Canon.typed "limit" [ "n", JInt n; "offset", JInt offset ]
+        | Limit(n, offset) -> Canon.typed "limit" [ "n", slotJson JInt n; "offset", slotJson JInt offset ]
         | Union src -> Canon.typed "union" [ "source", ColumnCodec.encodeJson src ]
         | Intersect src -> Canon.typed "intersect" [ "source", ColumnCodec.encodeJson src ]
         | Except src -> Canon.typed "except" [ "source", ColumnCodec.encodeJson src ]
@@ -3141,17 +3577,17 @@ module DataFrameCodec =
                     // Phase 92 — `keys` (SQL ORDER-BY-list prior) aliases `by`.
                     fieldAliased "by" "keys" el
                     |> Result.bind arrOf
-                    |> Result.bind (mapM orderOf)
+                    |> Result.bind (mapM sortKeyOf)
                     |> Result.map Sort
                 | "distinct" -> Ok Distinct
                 | "limit" ->
                     // Phase 92 — `count` aliases `n`; an absent `offset` is unambiguously 0.
                     fieldAliased "n" "count" el
-                    |> Result.bind intOf
+                    |> Result.bind (slotOf intOf "limit n")
                     |> Result.bind (fun n ->
                         match tryField "offset" el with
-                        | Some o -> intOf o |> Result.map (fun ofs -> Limit(n, ofs))
-                        | None -> Ok(Limit(n, 0)))
+                        | Some o -> slotOf intOf "limit offset" o |> Result.map (fun ofs -> Limit(n, ofs))
+                        | None -> Ok(Limit(n, Slot.Lit 0)))
                 | "union" -> field "source" el |> Result.bind ColumnCodec.decodeJson |> Result.map Union
                 | "intersect" -> field "source" el |> Result.bind ColumnCodec.decodeJson |> Result.map Intersect
                 | "except" -> field "source" el |> Result.bind ColumnCodec.decodeJson |> Result.map Except

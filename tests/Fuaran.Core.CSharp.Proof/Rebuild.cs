@@ -40,7 +40,8 @@ internal static class Rebuild
             onApply: (fn, xs) => Expr.Apply(fn, xs.Select(x => Expression(x))),
             onInList: (s, xs) => Expr.InList(Expression(s), xs.Select(x => Expression(x))),
             onIsNull: x => Expr.IsNull(Expression(x)),
-            onInParam: (s, n) => Expr.InParam(Expression(s), n)
+            onInParam: (s, n) => Expr.InParam(Expression(s), n),
+            onNow: g => Expr.Now(g)
         );
 
     internal static ColumnValue ColumnOf(ColumnValue c) =>
@@ -96,7 +97,7 @@ internal static class Rebuild
             onWindow: w => Step.Window(WindowStep(w)),
             onPivot: p => Step.Pivot(PivotStep(p)),
             onUnpivot: (ids, vals) => Step.Unpivot(ids, vals),
-            onSort: keys => Step.Sort(keys.Select(k => new SortKey(k.Column, k.Order))),
+            onSort: keys => Step.Sort(keys.Select(k => new SortSlot(k.Column, k.Order))),
             onDistinct: () => Step.Distinct,
             onLimit: (n, o) => Step.Limit(n, o),
             onUnion: src => Step.Union(Source(src)),

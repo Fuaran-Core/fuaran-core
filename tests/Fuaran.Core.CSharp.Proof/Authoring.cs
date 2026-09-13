@@ -69,7 +69,8 @@ internal static class Authoring
                                 onApply: (_, _) => "?",
                                 onInList: (_, _) => "?",
                                 onIsNull: _ => "?",
-                                onInParam: (_, _) => "?"
+                                onInParam: (_, _) => "?",
+                                onNow: _ => "?"
                             ) : "?",
                         onNot: _ => "?",
                         onCoalesce: _ => "?",
@@ -78,7 +79,8 @@ internal static class Authoring
                         onApply: (_, _) => "?",
                         onInList: (_, _) => "?",
                         onIsNull: _ => "?",
-                        onInParam: (_, _) => "?"
+                        onInParam: (_, _) => "?",
+                        onNow: _ => "?"
                     ),
                 onProject: _ => "?",
                 onDerive: (_, _) => "?",
@@ -109,7 +111,7 @@ internal static class Authoring
                 onUnpivot: (_, _) => -1,
                 onSort: _ => -1,
                 onDistinct: () => -1,
-                onLimit: (n, _) => n,
+                onLimit: (n, _) => n.Value,
                 onUnion: _ => -1,
                 onIntersect: _ => -1,
                 onExcept: _ => -1

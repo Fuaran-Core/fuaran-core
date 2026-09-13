@@ -251,7 +251,31 @@
          0.22.0 gets an id that did not exist at 0.21.0. Note it is .NET-only and deliberately NOT in
          the Fable-compile gate: a C# assembly is not Fable-compiled. See DECISIONS.md D28 and
          STABILITY.md "The C# facade: an F#-free authoring surface over the closed unions". -->
-    <Version>0.22.0</Version>
+    <!-- 0.23.0 (2026-09-13): Phase 125 — the Core API asks the UI tier routed here, cut as ONE
+         minor so a consumer raises once. ADVANCING rather than riding 0.22.0
+         because v0.22.0 is TAGGED: that slot is released, and the draft-slot rule requires a
+         fresh version for a contract move. The slot is BREAKING in three places and additive in
+         the fourth:
+         (1) `ChainBreak.Reason` is a closed `ChainBreakReason` DU with an honest `Unrecognised`
+             arm, minted where the reason is minted, so a consumer stops re-deriving the type by
+             string-matching Core's spellings. Compile-breaking for anyone reading `.Reason` as a
+             string (`FS0001`).
+         (2) `ColExpr.Now of NowGrain` — a `now` literal a pipeline can name, resolved by a pinned
+             clock witness through the existing substitution seam. Compile-breaking at exhaustive
+             `ColExpr` matches (`FS0025`), and `EvalError` gains `UnpinnedClock` (`FS0025` again).
+         (3) `Transform.Limit` and `Transform.Sort` take `Slot<'T>` in their scalar slots, so a
+             param reaches those positions inside Core's own type rather than by a parallel
+             pre-substitution structure at every host. Compile-breaking at every construction and
+             match site of those two cases (`FS0001` / `FS0025`).
+         (4) The codegen ask was found ALREADY SHIPPED (Phase 124, `0.21.0`); what it still owed
+             was the GENERATIVE property, which lives in this repository's own suite rather than in
+             the conformance kit — no public surface moved for it. It also found one previously
+             unrecorded backend divergence, now pinned by name. See STABILITY.md.
+         And one REMOVAL: `Idl.Gen.usesHosted` is gone (fuaran ruling 13, operator 2026-09-10) —
+         `FS0039` for a caller, of which this repository has none. MINOR rather than major under
+         the pre-1.0 policy at the head of STABILITY.md. See DECISIONS.md D29 and STABILITY.md
+         "0.23.0 — DRAFT". -->
+    <Version>0.23.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
