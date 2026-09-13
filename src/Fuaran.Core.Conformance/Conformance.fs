@@ -2818,7 +2818,7 @@ module Conformance =
             | 1 -> [ Project [ "a", "a"; "b", "b" ] ] // drops c → an irrelevant c-change can reuse
             | 2 -> [ Derive("d", Binary(Add, Col "a", Lit(Int 1))) ]
             | 3 -> [ GroupBy([ "a" ], [ { Name = "s"; Fn = Sum; Of = "b" } ]) ] // drops c
-            | _ -> [ Sort [ "b", Asc ]; Project [ "a", "a" ] ] // drops b, c
+            | _ -> [ Transform.sortBy [ "b", Asc ]; Project [ "a", "a" ] ] // drops b, c
 
         for i in 0 .. iterations - 1 do
             let nRows, r1 = ConfRng.intBelow 4 rng
@@ -3117,9 +3117,9 @@ module Conformance =
 
         let menu: Transform list =
             [ Filter(Binary(Gt, Col "a", Lit(Int 0)))
-              Sort [ "b", Asc ]
+              Transform.sortBy [ "b", Asc ]
               Distinct
-              Limit(3, 0)
+              Transform.limit 3 0
               Derive("d", Binary(Add, Col "a", Lit(Int 1)))
               // A derive onto an EXISTING name — the evaluator retypes in place, keeping position.
               Derive("b", Cast(FloatType, Col "b"))
@@ -7154,3 +7154,179 @@ module Conformance =
           { Law = "pinning a clock does not change a pipeline that names no Now"
             Passed = clockFreeUnchanged.IsNone
             Counterexample = clockFreeUnchanged } ]
+
+    /// **A scalar slot's parameter resolves exactly as an expression parameter does** (Phase 125) —
+    /// the law that makes `Slot<'T>` a widening of the param seam rather than a second one beside it.
+    ///
+    /// `Transform.Limit` and `Transform.Sort` took literals until `0.23.0`. The whole argument for
+    /// putting the param INSIDE Core's type — rather than leaving each host to pre-substitute it
+    /// through a parallel structure — is that the answers then come from the machinery that already
+    /// exists: one param namespace, one census (`Transform.paramsOf`), one unbound refusal
+    /// (`EvalError.UnboundParam`). These six laws are that argument, checked:
+    ///
+    ///   1. **A bound slot param evaluates as its literal.** Binding `n` to `Int k` and evaluating
+    ///      gives byte-identically what `Slot.Lit k` gives.
+    ///   2. **Substitution and env-resolution agree** — `evalPipelineInEnv env p` ≡
+    ///      `evalPipeline (Transform.substitute env p)`, the same law `paramLaws` states for
+    ///      expression params, over the slots.
+    ///   3. **The census is complete.** `Transform.paramsOf` names every slot param, so a host that
+    ///      prunes or subscribes off it does not silently miss one.
+    ///   4. **An unbound slot param is `UnboundParam` naming it**, never a default, never a skip.
+    ///   5. **A wrongly-typed binding is a `TypeError` naming the slot**, not a coercion: a `Str`
+    ///      at a count slot must not become a count, and the message must say WHICH slot, since a
+    ///      `Limit` has two.
+    ///   6. **A literal-only pipeline is untouched** — the wire and the answer are what they were
+    ///      before slots existed, so adopting `0.23.0` costs a pipeline that binds nothing exactly
+    ///      nothing.
+    ///
+    /// Every law's evidence is BUILT each iteration: a bound run, a substituted run, an unbound run,
+    /// a mistyped run and a literal-only run over the same drawn table.
+    let slotParamLaws (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable asLiteral = None
+        let mutable substEquiv = None
+        let mutable census = None
+        let mutable unbound = None
+        let mutable mistyped = None
+        let mutable literalOnly = None
+
+        let col name cells : Column = Column.create name IntType cells
+
+        for i in 0 .. iterations - 1 do
+            let nRows, r1 = ConfRng.intBelow 6 rng
+            let rows = nRows + 3
+            let mutable r = r1
+
+            let draw () =
+                let v, r' = ConfRng.intBelow 40 r
+                r <- r'
+                Int(v - 20)
+
+            let aCells = [ for _ in 1..rows -> draw () ]
+            let bCells = [ for _ in 1..rows -> draw () ]
+
+            let table =
+                { Schema = [ "a", IntType; "b", IntType ]
+                  Columns = [ col "a" aCells; col "b" bCells ] }
+
+            let nTake, r2 = ConfRng.intBelow rows r
+            let take = nTake + 1
+            let offPick, r3 = ConfRng.intBelow 2 r2
+            let sortPick, r4 = ConfRng.intBelow 2 r3
+            rng <- r4
+
+            let sortCol = if sortPick = 0 then "a" else "b"
+
+            let env =
+                Map.ofList [ "take", Int take; "skip", Int offPick; "orderBy", Str sortCol ]
+
+            let bound =
+                [ Sort [ Slot.Param "orderBy", Asc ]
+                  Limit(Slot.Param "take", Slot.Param "skip") ]
+
+            let literal = [ Transform.sortBy [ sortCol, Asc ]; Transform.limit take offPick ]
+
+            // ---- 1. a bound slot param evaluates as its literal ----
+            let viaEnv = DataFrame.evalPipelineInEnv env bound table
+            let viaLit = DataFrame.evalPipeline literal table
+
+            if viaEnv <> viaLit && asLiteral.IsNone then
+                asLiteral <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: the bound slot pipeline gave %A where the literal one gave %A — a slot param must stand for its value and nothing else"
+                            seed
+                            i
+                            viaEnv
+                            viaLit
+                    )
+
+            // ---- 2. substitution ≡ env resolution ----
+            let viaSubst = DataFrame.evalPipeline (Transform.substitute env bound) table
+
+            if viaEnv <> viaSubst && substEquiv.IsNone then
+                substEquiv <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: evalPipelineInEnv ≠ evalPipeline∘substitute over slot params — the two resolution routes have come apart"
+                            seed
+                            i
+                    )
+
+            // ---- 3. the census names every slot param ----
+            let declared = Transform.paramsOf bound |> Set.ofList
+
+            if declared <> Set.ofList [ "orderBy"; "take"; "skip" ] && census.IsNone then
+                census <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: Transform.paramsOf reported %A over a pipeline binding orderBy/take/skip — a host prunes and subscribes off this list, so a missing name is a param nobody binds"
+                            seed
+                            i
+                            declared
+                    )
+
+            // ---- 4. unbound is UnboundParam, naming it ----
+            (match DataFrame.evalPipelineInEnv (Map.remove "take" env) bound table with
+             | Error(UnboundParam("take", _)) -> ()
+             | other ->
+                 if unbound.IsNone then
+                     unbound <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: an unbound slot param gave %A — it must be the strict UnboundParam naming it, the same case an expression param gives"
+                                 seed
+                                 i
+                                 other
+                         ))
+
+            // ---- 5. a wrongly-typed binding is a TypeError naming the slot ----
+            (match DataFrame.evalPipelineInEnv (Map.add "take" (Str "three") env) bound table with
+             | Error(TypeError detail) when detail.Contains "limit n" -> ()
+             | other ->
+                 if mistyped.IsNone then
+                     mistyped <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: a Str bound at a count slot gave %A — it must be a TypeError NAMING the slot, since a Limit has two and 'type error' alone would not say which"
+                                 seed
+                                 i
+                                 other
+                         ))
+
+            // ---- 6. a literal-only pipeline is untouched by any of this ----
+            let litWire = DataFrameCodec.encodePipeline literal
+
+            if
+                (litWire <> DataFrameCodec.encodePipeline literal
+                 || not (litWire.Contains("\"n\":" + string take))
+                 || litWire.Contains "$param")
+                && literalOnly.IsNone
+            then
+                literalOnly <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: a literal-only pipeline encoded as %s — a literal slot must be the bare value it always was, so a pre-0.23.0 document is byte-identical"
+                            seed
+                            i
+                            litWire
+                    )
+
+        [ { Law = "a bound slot param evaluates byte-identically to the literal it stands for"
+            Passed = asLiteral.IsNone
+            Counterexample = asLiteral }
+          { Law = "slot params: evalPipelineInEnv ≡ evalPipeline ∘ Transform.substitute"
+            Passed = substEquiv.IsNone
+            Counterexample = substEquiv }
+          { Law = "Transform.paramsOf names every slot param alongside the expression params"
+            Passed = census.IsNone
+            Counterexample = census }
+          { Law = "an unbound slot param is EvalError.UnboundParam naming it, never a default"
+            Passed = unbound.IsNone
+            Counterexample = unbound }
+          { Law = "a slot param bound to the wrong cell shape is a TypeError NAMING the slot"
+            Passed = mistyped.IsNone
+            Counterexample = mistyped }
+          { Law = "a literal slot encodes as the bare value it did before slots existed"
+            Passed = literalOnly.IsNone
+            Counterexample = literalOnly } ]

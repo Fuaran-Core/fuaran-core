@@ -97,7 +97,7 @@ internal static class Rebuild
             onWindow: w => Step.Window(WindowStep(w)),
             onPivot: p => Step.Pivot(PivotStep(p)),
             onUnpivot: (ids, vals) => Step.Unpivot(ids, vals),
-            onSort: keys => Step.Sort(keys.Select(k => new SortKey(k.Column, k.Order))),
+            onSort: keys => Step.Sort(keys.Select(k => new SortSlot(k.Column, k.Order))),
             onDistinct: () => Step.Distinct,
             onLimit: (n, o) => Step.Limit(n, o),
             onUnion: src => Step.Union(Source(src)),

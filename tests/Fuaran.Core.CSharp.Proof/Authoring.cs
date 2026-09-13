@@ -111,7 +111,7 @@ internal static class Authoring
                 onUnpivot: (_, _) => -1,
                 onSort: _ => -1,
                 onDistinct: () => -1,
-                onLimit: (n, _) => n,
+                onLimit: (n, _) => n.Value,
                 onUnion: _ => -1,
                 onIntersect: _ => -1,
                 onExcept: _ => -1

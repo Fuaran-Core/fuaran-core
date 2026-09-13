@@ -195,13 +195,13 @@ module IncrementalDelta =
         | 4 ->
             [ Filter(Binary(Gt, Col "a", Lit(Int -5)))
               GroupBy([ "b" ], [ agg "mx" Max "a"; agg "f" First "id"; agg "l" Last "id" ]) ]
-        | 5 -> [ Sort [ "b", Asc ] ] // merged order over the TIE-HEAVY key (Phase 115)
+        | 5 -> [ Transform.sortBy [ "b", Asc ] ] // merged order over the TIE-HEAVY key (Phase 115)
         | 6 -> [ Project [ "b", "b" ]; Distinct ] // declined: whole-relation
         | 7 ->
             // declined: a maintainable step that is not last
             [ GroupBy([ "b" ], [ agg "n" Count "a" ])
               Filter(Binary(Gt, Col "n", Lit(Int 0))) ]
-        | 8 -> [ Limit(2, 0) ] // declined: order-dependent
+        | 8 -> [ Transform.limit 2 0 ] // declined: order-dependent
         | 9 ->
             // a derived column whose TYPE depends on which rows survive, followed by a filter that
             // can drop the only typed row — the inferred-type trap.
@@ -210,18 +210,18 @@ module IncrementalDelta =
         | 10 -> [ Derive("a", Binary(Add, Col "a", Lit(Int 1))) ] // Derive OVERWRITING a column
         | 11 ->
             // the shape the estate's recompute fixture family carries: a filter, then a sort.
-            [ Filter(Binary(Gt, Col "a", Lit(Int 0))); Sort [ "a", Asc ] ]
+            [ Filter(Binary(Gt, Col "a", Lit(Int 0))); Transform.sortBy [ "a", Asc ] ]
         | 12 ->
             // a sort that is NOT last, followed by the two steps that read the order it produced —
             // a derive whose column TYPE is inferred over the frame, and a filter.
-            [ Sort [ "b", Asc ]
+            [ Transform.sortBy [ "b", Asc ]
               Derive("d", Case([ Binary(Gt, Col "a", Lit(Int 0)), Lit(Str "pos") ], Lit Null))
               Filter(Binary(Lt, Col "a", Lit(Int 3))) ]
         | 13 ->
             // a sort feeding an order-sensitive maintained group: `First` and `Last` read the
             // position the sort put each row in, and `b` ties heavily, so the sort's STABILITY is
             // what decides the answer rather than its comparator alone.
-            [ Sort [ "b", Asc; "a", Desc ]
+            [ Transform.sortBy [ "b", Asc; "a", Desc ]
               GroupBy([ "b" ], [ agg "f" First "id"; agg "l" Last "id"; agg "n" Count "a" ]) ]
         | 14 ->
             // Phase 120 — a BOUNDED-frame window: a filter, then a lag over the tie-heavy partition
@@ -284,7 +284,7 @@ module IncrementalDelta =
             // the order it was handed them, so the output ORDER does. A merge that got the sort
             // right and then rebuilt the frame from a cached arrival order would answer with the
             // right numbers against the wrong rows.
-            [ Sort [ "b", Asc; "a", Desc ]
+            [ Transform.sortBy [ "b", Asc; "a", Desc ]
               Window
                   { PartitionBy = [ "b" ]
                     OrderBy = [ "a", Asc ]
@@ -321,7 +321,7 @@ module IncrementalDelta =
             // a filtering join can hand its output to, and the one that pairs the two demands this
             // widening had to move furthest apart. The merge has to place the surviving rows among
             // the cached order's ties without ever seeing the rows the join removed.
-            [ Join(Embedded lookup, [ "b", "k" ], Semi); Sort [ "b", Asc ] ]
+            [ Join(Embedded lookup, [ "b", "k" ], Semi); Transform.sortBy [ "b", Asc ] ]
         | 25 ->
             // The ANTI verdict feeding a partition-global window. `20` is its `semi` mirror, and the
             // pair is not redundant: a semi join keeps roughly two thirds of a generated table and an

@@ -443,24 +443,46 @@ public sealed class Step : IEquatable<Step>
             )
         );
 
-    /// <summary>Sort by the given keys.</summary>
-    public static Step Sort(IEnumerable<SortKey> keys) =>
+    /// <summary>Sort by the given keys, whose columns may be bound parameters.</summary>
+    public static Step Sort(IEnumerable<SortSlot> keys) =>
         new(
             Transform.NewSort(
                 Interop.List(
-                    Interop.Items(keys, nameof(keys)).Select(k => Tuple.Create(k.Column, Vocab.ToCore(k.Order)))
+                    Interop
+                        .Items(keys, nameof(keys))
+                        .Select(k => Tuple.Create(k.Column.ToCoreSlot(), Vocab.ToCore(k.Order)))
                 )
             )
         );
 
-    /// <summary>Sort by the given keys.</summary>
+    /// <summary>Sort by the given keys, whose columns may be bound parameters.</summary>
+    public static Step Sort(params SortSlot[] keys) => Sort((IEnumerable<SortSlot>)keys);
+
+    /// <summary>Sort by the given literal-column keys — the everyday form.</summary>
+    public static Step Sort(IEnumerable<SortKey> keys) =>
+        Sort(Interop.Items(keys, nameof(keys)).Select(k => new SortSlot(k.Column, k.Order)));
+
+    /// <summary>Sort by the given literal-column keys — the everyday form.</summary>
     public static Step Sort(params SortKey[] keys) => Sort((IEnumerable<SortKey>)keys);
 
     /// <summary>Drop duplicate rows.</summary>
     public static Step Distinct { get; } = new(Transform.Distinct);
 
     /// <summary>Take <paramref name="count" /> rows after skipping <paramref name="offset" />.</summary>
-    public static Step Limit(int count, int offset) => new(Transform.NewLimit(count, offset));
+    public static Step Limit(int count, int offset) =>
+        Limit(CountSlot.Literal(count), CountSlot.Literal(offset));
+
+    /// <summary>
+    /// Take <paramref name="count" /> rows after skipping <paramref name="offset" />, either of
+    /// which may be a bound parameter — the page-size and page-offset a host binds most often.
+    /// </summary>
+    public static Step Limit(CountSlot count, CountSlot offset) =>
+        new(
+            Transform.NewLimit(
+                Interop.NotNull(count, nameof(count)).ToCoreSlot(),
+                Interop.NotNull(offset, nameof(offset)).ToCoreSlot()
+            )
+        );
 
     /// <summary>Concatenate another source.</summary>
     public static Step Union(SourceValue source) =>
@@ -486,9 +508,9 @@ public sealed class Step : IEquatable<Step>
         Func<WindowStepSpec, T> onWindow,
         Func<PivotStepSpec, T> onPivot,
         Func<IReadOnlyList<string>, IReadOnlyList<string>, T> onUnpivot,
-        Func<IReadOnlyList<SortKey>, T> onSort,
+        Func<IReadOnlyList<SortSlot>, T> onSort,
         Func<T> onDistinct,
-        Func<int, int, T> onLimit,
+        Func<CountSlot, CountSlot, T> onLimit,
         Func<SourceValue, T> onUnion,
         Func<SourceValue, T> onIntersect,
         Func<SourceValue, T> onExcept
@@ -540,7 +562,7 @@ public sealed class Step : IEquatable<Step>
                 return onSort(
                     Interop
                         .Read(((Transform.Sort)_core).Item)
-                        .Select(t => new SortKey(t.Item1, Vocab.SortOrderOf(t.Item2)))
+                        .Select(t => new SortSlot(ColumnSlot.FromCoreSlot(t.Item1), Vocab.SortOrderOf(t.Item2)))
                         .ToArray()
                 );
             case Transform.Tags.Distinct:
@@ -548,7 +570,7 @@ public sealed class Step : IEquatable<Step>
             case Transform.Tags.Limit:
             {
                 var c = (Transform.Limit)_core;
-                return onLimit(c.n, c.offset);
+                return onLimit(CountSlot.FromCoreSlot(c.n), CountSlot.FromCoreSlot(c.offset));
             }
             case Transform.Tags.Union:
                 return onUnion(SourceValue.FromCore(((Transform.Union)_core).Item));
@@ -571,9 +593,9 @@ public sealed class Step : IEquatable<Step>
         Action<WindowStepSpec> onWindow,
         Action<PivotStepSpec> onPivot,
         Action<IReadOnlyList<string>, IReadOnlyList<string>> onUnpivot,
-        Action<IReadOnlyList<SortKey>> onSort,
+        Action<IReadOnlyList<SortSlot>> onSort,
         Action onDistinct,
-        Action<int, int> onLimit,
+        Action<CountSlot, CountSlot> onLimit,
         Action<SourceValue> onUnion,
         Action<SourceValue> onIntersect,
         Action<SourceValue> onExcept
