@@ -417,6 +417,482 @@ let private loadCorpusOps (root: string) : Result<CorpusOp list, string> =
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+//  Phase 135 — the DECODE model as a second oracle.
+//
+//  `proofs/WireDecode.fst` models the `Fuaran.Core.Decode` combinators clause for clause, with
+//  decoder totality proved (every combinator reaches exactly one outcome on every input, and
+//  which one is characterised structurally), the reference vocabulary's round trip proved, and
+//  the Phase 102 read policy proved to agree with the strict reader everywhere the policy does
+//  not fire. `proofs/oracle/WireDecode.fs` is that model extracted by F*'s own code generator.
+//
+//  What runs here is the model BESIDE `Wire.Decode`, over the wire corpus's `nodes/` and `ops/`
+//  fixtures, over a generated `JVal` sample, and — for the policy — over generated documents
+//  that carry the `null` token in every position. Three things are compared at once, because
+//  they are rendered into one string: the outcome CLASS, the decoded VALUE, and the error
+//  MESSAGE. A model that agreed on accept-vs-refuse alone would not notice a decoder that named
+//  the wrong expectation, which is most of what these combinators are for.
+//
+//  The model is parametric in the two numeric carriers (no combinator in `Decode` looks inside a
+//  number, it only moves one), so the bridge instantiates it at `<int, float>` and hands
+//  `as_float` the widening `Decode.asFloat` performs as `float i`.
+// ---------------------------------------------------------------------------
+
+type private MJVal = WireDecode.jval<int, float>
+type private MJValN = WireDecode.jvaln<int, float>
+
+let private inv = System.Globalization.CultureInfo.InvariantCulture
+
+let rec private toModel (v: JVal) : MJVal =
+    match v with
+    | JStr s -> WireDecode.JStr s
+    | JInt i -> WireDecode.JInt i
+    | JBool b -> WireDecode.JBool b
+    | JFloat f -> WireDecode.JFloat f
+    | JArr xs -> WireDecode.JArr(xs |> List.map toModel)
+    | JObj fields -> WireDecode.JObj(fields |> List.map (fun (k, v) -> k, toModel v))
+
+let rec private ofModel (v: MJVal) : JVal =
+    match v with
+    | WireDecode.JStr s -> JStr s
+    | WireDecode.JInt i -> JInt i
+    | WireDecode.JBool b -> JBool b
+    | WireDecode.JFloat f -> JFloat f
+    | WireDecode.JArr xs -> JArr(xs |> List.map ofModel)
+    | WireDecode.JObj fields -> JObj(fields |> List.map (fun (k, v) -> k, ofModel v))
+
+/// The BLIND bridge — the go-red instrument, and the decode family's counterpart to the blind
+/// footprint the fold family hands its oracle. It reads every wire integer as a float, which is
+/// exactly the numeric normalisation `JVal`'s doc warns a reader not to assume away, so the
+/// oracle is asked about a different value from the one production was asked about and the
+/// comparison must lose. A green report elsewhere is therefore known to be a comparison that CAN
+/// fail rather than one that cannot.
+let rec private toModelBlind (v: JVal) : MJVal =
+    match v with
+    | JInt i -> WireDecode.JFloat(float i)
+    | JStr s -> WireDecode.JStr s
+    | JBool b -> WireDecode.JBool b
+    | JFloat f -> WireDecode.JFloat f
+    | JArr xs -> WireDecode.JArr(xs |> List.map toModelBlind)
+    | JObj fields -> WireDecode.JObj(fields |> List.map (fun (k, v) -> k, toModelBlind v))
+
+/// `Decode.kindName`, which is private to that module — mirrored here because the reference
+/// decoder below has to name a wrong shape the same way the shipped combinators do, and a
+/// differential whose two sides spell a message differently measures the spelling.
+let private kindWord (v: JVal) : string =
+    match v with
+    | JStr _ -> "string"
+    | JInt _ -> "int"
+    | JBool _ -> "bool"
+    | JFloat _ -> "float"
+    | JArr _ -> "array"
+    | JObj _ -> "object"
+
+// ---- one probe of the decode surface, both sides rendered the same way ----
+
+type private Probe =
+    { Name: string
+      Production: string
+      Oracle: string }
+
+let private resR (render: 'a -> string) (r: Result<'a, string>) : string =
+    match r with
+    | Ok v -> "Ok " + render v
+    | Error m -> "Error " + m
+
+let private resO (render: 'a -> string) (o: WireDecode.outcome<'a>) : string =
+    match o with
+    | WireDecode.Ok v -> "Ok " + render v
+    | WireDecode.Error m -> "Error " + m
+
+let private asStr (s: string) = s
+let private asFlt (f: float) = f.ToString("R", inv)
+let private asStrs (xs: string list) = String.concat "" xs
+let private asJson (v: JVal) = Json.render v
+let private asModelJson (v: MJVal) = Json.render (ofModel v)
+
+/// Every combinator in `Decode`, asked the same question of production and of the model.
+/// `bridge` is the projection the oracle is handed — the identity in every real run and the
+/// blind one only in the go-red case.
+let private decodeProbes (bridge: JVal -> MJVal) (el: JVal) : Probe list =
+    let m = bridge el
+
+    let p name prod orac =
+        { Name = name
+          Production = prod
+          Oracle = orac }
+
+    [ p "asString" (resR asStr (Decode.asString el)) (resO asStr (WireDecode.as_string m))
+      p "asInt" (resR string (Decode.asInt el)) (resO string (WireDecode.as_int m))
+      p "asBool" (resR string (Decode.asBool el)) (resO string (WireDecode.as_bool m))
+      p "asFloat" (resR asFlt (Decode.asFloat el)) (resO asFlt (WireDecode.as_float (fun (i: int) -> float i) m))
+      p "kindOf" (resR asStr (Decode.kindOf el)) (resO asStr (WireDecode.kind_of m))
+      p "getProp kind" (resR asJson (Decode.getProp "kind" el)) (resO asModelJson (WireDecode.get_prop "kind" m))
+      p "getProp $type" (resR asJson (Decode.getProp "$type" el)) (resO asModelJson (WireDecode.get_prop "$type" m))
+      p "getProp id" (resR asJson (Decode.getProp "id" el)) (resO asModelJson (WireDecode.get_prop "id" m))
+      p
+          "getProp absent"
+          (resR asJson (Decode.getProp "no-such-member" el))
+          (resO asModelJson (WireDecode.get_prop "no-such-member" m))
+      p "strField id" (resR asStr (Decode.strField "id" el)) (resO asStr (WireDecode.str_field "id" m))
+      p "intField n" (resR string (Decode.intField "n" el)) (resO string (WireDecode.int_field "n" m))
+      p
+          "mapList asString"
+          (resR asStrs (Decode.mapList Decode.asString el))
+          (resO asStrs (WireDecode.map_list (fun (x: MJVal) -> WireDecode.as_string x) m)) ]
+
+/// Every value in a document, root first — the combinators are asked about the scalars and the
+/// nested objects too, not only the root, since that is where their refusal arms live.
+let rec private everyValue (v: JVal) : JVal list =
+    match v with
+    | JArr xs -> v :: (xs |> List.collect everyValue)
+    | JObj fields -> v :: (fields |> List.collect (fun (_, x) -> everyValue x))
+    | _ -> [ v ]
+
+type private Tally =
+    { Disagreements: string list
+      Accepted: int
+      Refused: int }
+
+let private emptyTally =
+    { Disagreements = []
+      Accepted = 0
+      Refused = 0 }
+
+/// Run every probe over every value of `el`, folding the disagreements and the two outcome
+/// classes into `tally`.
+let private runProbes (bridge: JVal -> MJVal) (label: string) (el: JVal) (tally: Tally) : Tally =
+    everyValue el
+    |> List.fold
+        (fun acc v ->
+            decodeProbes bridge v
+            |> List.fold
+                (fun (a: Tally) probe ->
+                    let a =
+                        if probe.Production.StartsWith "Ok" then
+                            { a with Accepted = a.Accepted + 1 }
+                        else
+                            { a with Refused = a.Refused + 1 }
+
+                    if probe.Production <> probe.Oracle then
+                        { a with
+                            Disagreements =
+                                a.Disagreements
+                                @ [ sprintf
+                                        "%s: %s on %s\n  production: %s\n  oracle:     %s"
+                                        label
+                                        probe.Name
+                                        (Json.render v)
+                                        probe.Production
+                                        probe.Oracle ] }
+                    else
+                        a)
+                acc)
+        tally
+
+let private expectProbeAgreement (label: string) (t: Tally) =
+    match t.Disagreements with
+    | d :: _ -> failtestf "%s: the decode oracle and Wire.Decode DISAGREE\n%s" label d
+    | [] ->
+        // Both classes must have been reached, or the agreement certifies one arm only — the
+        // same vacuity posture the fold family's `expectAgreement` takes.
+        Expect.isGreaterThan
+            t.Accepted
+            0
+            (sprintf "%s: no probe was ACCEPTED (accepted=%d refused=%d)" label t.Accepted t.Refused)
+
+        Expect.isGreaterThan
+            t.Refused
+            0
+            (sprintf "%s: no probe was REFUSED (accepted=%d refused=%d)" label t.Accepted t.Refused)
+
+// ---- the reference vocabulary, on the production side ----
+
+/// The vocabulary `WireDecode.rnode` models: one case per combinator the model exercises.
+type RefNode =
+    | RefText of string
+    | RefFlag of bool
+    | RefTags of string list
+    | RefGroup of string * RefNode list
+
+/// F#: `Json.kindObj` — the model's `encode`, on the production side.
+let rec private encodeRef (n: RefNode) : JVal =
+    match n with
+    | RefText s -> Json.kindObj "text" [ "value", JStr s ]
+    | RefFlag b -> Json.kindObj "flag" [ "on", JBool b ]
+    | RefTags ts -> Json.kindObj "tags" [ "tags", JArr(ts |> List.map JStr) ]
+    | RefGroup(id, items) -> Json.kindObj "group" [ "id", JStr id; "items", JArr(items |> List.map encodeRef) ]
+
+/// The kind-dispatch node decoder a domain writes from the shipped combinators — the production
+/// side of the model's `decode_node`, written against `Wire.Decode` and nothing else.
+let rec private decodeRef (el: JVal) : Result<RefNode, string> =
+    match Decode.kindOf el with
+    | Error m -> Error m
+    | Ok tag ->
+        if tag = "text" then
+            Decode.strField "value" el |> Result.map RefText
+        elif tag = "flag" then
+            Decode.getProp "on" el |> Result.bind Decode.asBool |> Result.map RefFlag
+        elif tag = "tags" then
+            Decode.getProp "tags" el
+            |> Result.bind (Decode.mapList Decode.asString)
+            |> Result.map RefTags
+        elif tag = "group" then
+            match Decode.strField "id" el with
+            | Error m -> Error m
+            | Ok id ->
+                match Decode.getProp "items" el with
+                | Error m -> Error m
+                | Ok(JArr ys) ->
+                    let rec go acc rest =
+                        match rest with
+                        | [] -> Ok(List.rev acc)
+                        | x :: t ->
+                            match decodeRef x with
+                            | Ok n -> go (n :: acc) t
+                            | Error m -> Error m
+
+                    go [] ys |> Result.map (fun ns -> RefGroup(id, ns))
+                | Ok other -> Error("expected array, got " + kindWord other)
+        else
+            Error("unknown kind: " + tag)
+
+let rec private renderRef (n: RefNode) : string =
+    match n with
+    | RefText s -> "text(" + s + ")"
+    | RefFlag b -> "flag(" + string b + ")"
+    | RefTags ts -> "tags[" + String.concat ";" ts + "]"
+    | RefGroup(id, items) -> "group(" + id + ")[" + (items |> List.map renderRef |> String.concat ";") + "]"
+
+let rec private renderRnode (n: WireDecode.rnode) : string =
+    match n with
+    | WireDecode.RText s -> "text(" + s + ")"
+    | WireDecode.RFlag b -> "flag(" + string b + ")"
+    | WireDecode.RTags ts -> "tags[" + String.concat ";" ts + "]"
+    | WireDecode.RGroup(id, items) ->
+        "group("
+        + id
+        + ")["
+        + (items |> List.map renderRnode |> String.concat ";")
+        + "]"
+
+/// Production's node decoder and the model's, on the same document.
+let private refDiff (el: JVal) : string option =
+    let production = resR renderRef (decodeRef el)
+    let oracle = resO renderRnode (WireDecode.decode_node (toModel el))
+
+    if production <> oracle then
+        Some(
+            sprintf
+                "the node decoders disagree on %s\n  production: %s\n  oracle:     %s"
+                (Json.render el)
+                production
+                oracle
+        )
+    else
+        None
+
+// ---- generators ----
+
+let rec private genJ (depth: int) (r: ConfRng.T) : JVal * ConfRng.T =
+    let pick, r1 = ConfRng.intBelow (if depth >= 2 then 4 else 6) r
+
+    match pick with
+    | 0 ->
+        let n, r2 = ConfRng.intBelow 8 r1
+        JStr("s" + string n), r2
+    | 1 ->
+        let n, r2 = ConfRng.intBelow 1000 r1
+        JInt(n - 500), r2
+    | 2 ->
+        let n, r2 = ConfRng.intBelow 2 r1
+        JBool(n = 0), r2
+    | 3 ->
+        let n, r2 = ConfRng.intBelow 1000 r1
+        JFloat(float n + 0.25), r2
+    | 4 ->
+        let count, r2 = ConfRng.intBelow 4 r1
+
+        let items, r3 =
+            List.fold
+                (fun (acc, rr) _ ->
+                    let v, rr' = genJ (depth + 1) rr
+                    acc @ [ v ], rr')
+                ([], r2)
+                [ 1..count ]
+
+        JArr items, r3
+    | _ ->
+        let count, r2 = ConfRng.intBelow 4 r1
+
+        let fields, r3 =
+            List.fold
+                (fun (acc, rr) _ ->
+                    let k, rr1 = ConfRng.intBelow 6 rr
+                    let v, rr2 = genJ (depth + 1) rr1
+                    // The key alphabet deliberately includes the names the probes and the
+                    // reference decoder ask for, so the hit arms are reached as often as the
+                    // miss arms.
+                    let name = [| "kind"; "value"; "on"; "tags"; "id"; "items" |].[k]
+                    acc @ [ name, v ], rr2)
+                ([], r2)
+                [ 1..count ]
+
+        JObj fields, r3
+
+let rec private genRef (depth: int) (r: ConfRng.T) : RefNode * ConfRng.T =
+    let pick, r1 = ConfRng.intBelow (if depth >= 2 then 3 else 4) r
+
+    match pick with
+    | 0 ->
+        let n, r2 = ConfRng.intBelow 20 r1
+        RefText("t" + string n), r2
+    | 1 ->
+        let n, r2 = ConfRng.intBelow 2 r1
+        RefFlag(n = 0), r2
+    | 2 ->
+        let count, r2 = ConfRng.intBelow 4 r1
+
+        let ts, r3 =
+            List.fold
+                (fun (acc, rr) _ ->
+                    let n, rr' = ConfRng.intBelow 20 rr
+                    acc @ [ "g" + string n ], rr')
+                ([], r2)
+                [ 1..count ]
+
+        RefTags ts, r3
+    | _ ->
+        let count, r2 = ConfRng.intBelow 3 r1
+        let idn, r3 = ConfRng.intBelow 20 r2
+
+        let items, r4 =
+            List.fold
+                (fun (acc, rr) _ ->
+                    let n, rr' = genRef (depth + 1) rr
+                    acc @ [ n ], rr')
+                ([], r3)
+                [ 1..count ]
+
+        RefGroup("i" + string idn, items), r4
+
+// ---- the Phase 102 read policy ----
+
+/// A document carrying the `null` token, rendered as the wire text production's two policies
+/// actually read. Floats keep a fractional part: an integral `JFloat` renders without a point
+/// and re-parses as `JInt` (the documented numeric normalisation), which would make the
+/// comparison measure that normalisation rather than the policy.
+let rec private renderN (d: MJValN) : string =
+    match d with
+    | WireDecode.NNull -> "null"
+    | WireDecode.NStr s -> "\"" + Json.escape s + "\""
+    | WireDecode.NInt i -> string i
+    | WireDecode.NBool b -> (if b then "true" else "false")
+    | WireDecode.NFloat f -> f.ToString("R", inv)
+    | WireDecode.NArr xs -> "[" + (xs |> List.map renderN |> String.concat ",") + "]"
+    | WireDecode.NObj fields ->
+        "{"
+        + (fields
+           |> List.map (fun (k, v) -> "\"" + Json.escape k + "\":" + renderN v)
+           |> String.concat ",")
+        + "}"
+
+let rec private genN (depth: int) (r: ConfRng.T) : MJValN * ConfRng.T =
+    let pick, r1 = ConfRng.intBelow (if depth >= 2 then 5 else 7) r
+
+    match pick with
+    | 0 ->
+        let n, r2 = ConfRng.intBelow 8 r1
+        WireDecode.NStr("s" + string n), r2
+    | 1 ->
+        let n, r2 = ConfRng.intBelow 1000 r1
+        WireDecode.NInt(n - 500), r2
+    | 2 ->
+        let n, r2 = ConfRng.intBelow 2 r1
+        WireDecode.NBool(n = 0), r2
+    | 3 ->
+        let n, r2 = ConfRng.intBelow 1000 r1
+        WireDecode.NFloat(float n + 0.25), r2
+    | 4 -> (WireDecode.NNull: MJValN), r1
+    | 5 ->
+        let count, r2 = ConfRng.intBelow 4 r1
+
+        let items, r3 =
+            List.fold
+                (fun (acc, rr) _ ->
+                    let v, rr' = genN (depth + 1) rr
+                    acc @ [ v ], rr')
+                ([], r2)
+                [ 1..count ]
+
+        WireDecode.NArr items, r3
+    | _ ->
+        let count, r2 = ConfRng.intBelow 4 r1
+
+        let fields, r3 =
+            List.fold
+                (fun (acc, rr) _ ->
+                    let k, rr1 = ConfRng.intBelow 4 rr
+                    let v, rr2 = genN (depth + 1) rr1
+                    acc @ [ "k" + string k, v ], rr2)
+                ([], r2)
+                [ 1..count ]
+
+        WireDecode.NObj fields, r3
+
+type private PolicyTally =
+    {
+        Diffs: string list
+        /// Documents the strict reader accepted.
+        StrictOk: int
+        /// Documents the strict reader refused.
+        StrictErr: int
+        /// Documents the POLICY fired on: strict refuses, tolerant accepts. Without these the
+        /// tolerant leg would be a second run of the strict one.
+        Fired: int
+    }
+
+/// The model's reader beside `Json.parseDetailedWithPolicy`, under both policies, on the same
+/// document — compared on the outcome class, the decoded value AND the message, the last of
+/// which is the half that distinguishes the tolerant policy's "no absence to erase it to"
+/// refusal from the strict policy's blanket one.
+let private policyProbe (d: MJValN) (t: PolicyTally) : PolicyTally =
+    let text = renderN d
+
+    let side (policy: NullPolicy) (mp: WireDecode.null_policy) =
+        let production =
+            match Json.parseDetailedWithPolicy policy Json.defaultMaxDepth text with
+            | Ok v -> "Ok " + Json.render v
+            | Error e -> "Error " + e.Message
+
+        let oracle =
+            match WireDecode.read mp d with
+            | WireDecode.Ok v -> "Ok " + Json.render (ofModel v)
+            | WireDecode.Error m -> "Error " + m
+
+        production, oracle
+
+    let strictP, strictO = side RejectNull WireDecode.RejectNull
+    let lenientP, lenientO = side EraseMemberNull WireDecode.EraseMemberNull
+
+    let diffs =
+        [ if strictP <> strictO then
+              sprintf "strict read of %s\n  production: %s\n  oracle:     %s" text strictP strictO
+          if lenientP <> lenientO then
+              sprintf "tolerant read of %s\n  production: %s\n  oracle:     %s" text lenientP lenientO ]
+
+    { Diffs = t.Diffs @ diffs
+      StrictOk = t.StrictOk + (if strictP.StartsWith "Ok" then 1 else 0)
+      StrictErr = t.StrictErr + (if strictP.StartsWith "Ok" then 0 else 1)
+      Fired =
+        t.Fired
+        + (if not (strictP.StartsWith "Ok") && lenientP.StartsWith "Ok" then
+               1
+           else
+               0) }
+
+// ---------------------------------------------------------------------------
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -561,4 +1037,183 @@ let proofOracleTests =
                        |> List.map ofModelConflict)
 
               Expect.isFalse (production = "") "the two deltas genuinely conflict"
-              Expect.equal model production "the model enumerates the same interferences" ]
+              Expect.equal model production "the model enumerates the same interferences"
+          // ---- Phase 135: the DECODE model beside Wire.Decode ----
+
+          testCase "the decode oracle agrees with Wire.Decode over every nodes/ fixture"
+          <| fun _ ->
+              match SiblingCorpus.resolve "nodes" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let files = Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort
+                  Expect.isGreaterThan files.Length 50 "the nodes/ family carries a real corpus"
+
+                  files
+                  |> Array.fold
+                      (fun acc path ->
+                          let name = Path.GetFileNameWithoutExtension path
+
+                          match Json.parse (File.ReadAllText path) with
+                          | Error e -> failtestf "%s: not JSON (%s)" name e
+                          | Ok v -> runProbes toModel name v acc)
+                      emptyTally
+                  |> expectProbeAgreement "nodes/ fixtures"
+
+          testCase "the decode oracle agrees with Wire.Decode over every ops/ fixture"
+          <| fun _ ->
+              match SiblingCorpus.resolve "ops" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let files = Directory.GetFiles(Path.Combine(root, "ops"), "*.json") |> Array.sort
+                  Expect.isGreaterThan files.Length 8 "the ops/ family carries a real corpus"
+
+                  files
+                  |> Array.fold
+                      (fun acc path ->
+                          let name = Path.GetFileNameWithoutExtension path
+
+                          match Json.parse (File.ReadAllText path) with
+                          | Error e -> failtestf "%s: not JSON (%s)" name e
+                          | Ok v -> runProbes toModel name v acc)
+                      emptyTally
+                  |> expectProbeAgreement "ops/ fixtures"
+
+          testCase "the decode oracle agrees with Wire.Decode over a generated JVal sample"
+          <| fun _ ->
+              let mutable rng = ConfRng.ofSeed 8100
+              let mutable tally = emptyTally
+
+              for i in 1..400 do
+                  let v, r' = genJ 0 rng
+                  rng <- r'
+                  tally <- runProbes toModel (sprintf "generated %d" i) v tally
+
+              expectProbeAgreement "generated JVal sample" tally
+
+          testCase "the model's node decoder inverts its encoder, on both sides"
+          <| fun _ ->
+              // `decode_encode_roundtrip` is proved on the model; this is that theorem's
+              // instance on the EXTRACTED code, run beside the same decoder written from the
+              // shipped combinators. The two together are what tie the proof to production.
+              let mutable rng = ConfRng.ofSeed 6100
+              let mutable decoded = 0
+
+              for _ in 1..150 do
+                  let n, r' = genRef 0 rng
+                  rng <- r'
+                  let el = encodeRef n
+
+                  match refDiff el with
+                  | Some d -> failtest d
+                  | None -> ()
+
+                  Expect.equal (decodeRef el) (Ok n) "production decodes its own encoding"
+                  decoded <- decoded + 1
+
+              Expect.isGreaterThan decoded 0 "the round-trip sample is non-empty"
+
+          testCase "the model's node decoder agrees with production on documents it REFUSES"
+          <| fun _ ->
+              // The accept path is the round trip above; this is the refusal path, where the
+              // MESSAGE is the whole content of the comparison. Corpus fixtures first (real
+              // documents in a vocabulary this decoder does not know), then a generated sample
+              // whose key alphabet is the reference vocabulary's own, so the near-misses — right
+              // tag, wrong member type — are reached as well as the obvious rejects.
+              let mutable refused = 0
+
+              let check (el: JVal) =
+                  match refDiff el with
+                  | Some d -> failtest d
+                  | None ->
+                      match decodeRef el with
+                      | Error _ -> refused <- refused + 1
+                      | Ok _ -> ()
+
+              match SiblingCorpus.resolve "nodes" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  for path in Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort do
+                      match Json.parse (File.ReadAllText path) with
+                      | Error e -> failtestf "%s: not JSON (%s)" (Path.GetFileNameWithoutExtension path) e
+                      | Ok v ->
+                          for el in everyValue v do
+                              check el
+
+              let mutable rng = ConfRng.ofSeed 6200
+
+              for _ in 1..400 do
+                  let v, r' = genJ 0 rng
+                  rng <- r'
+
+                  for el in everyValue v do
+                      check el
+
+              Expect.isGreaterThan refused 0 "documents were refused, so the message comparison ran"
+
+          testCase "the model's null-policy reader agrees with the parser under BOTH policies"
+          <| fun _ ->
+              // The Phase 102 promise, tied to production. The model reads a document TREE where
+              // the parser reads text, so each generated document is rendered to the wire bytes
+              // the parser actually takes — see `renderN` and the boundary note in
+              // proofs/README.md for what that comparison does and does not establish.
+              let fixtures: MJValN list =
+                  [ WireDecode.NNull
+                    WireDecode.NArr [ WireDecode.NNull ]
+                    WireDecode.NArr [ WireDecode.NInt 1; WireDecode.NNull ]
+                    WireDecode.NObj [ "a", WireDecode.NNull ]
+                    WireDecode.NObj [ "a", WireDecode.NNull; "b", WireDecode.NInt 1 ]
+                    WireDecode.NObj [ "a", WireDecode.NObj [ "b", WireDecode.NNull ] ]
+                    WireDecode.NObj [ "a", WireDecode.NArr [ WireDecode.NNull ] ] ]
+
+              let mutable t =
+                  { Diffs = []
+                    StrictOk = 0
+                    StrictErr = 0
+                    Fired = 0 }
+
+              for d in fixtures do
+                  t <- policyProbe d t
+
+              let mutable rng = ConfRng.ofSeed 7100
+
+              for _ in 1..400 do
+                  let d, r' = genN 0 rng
+                  rng <- r'
+                  t <- policyProbe d t
+
+              match t.Diffs with
+              | d :: _ -> failtestf "the read-policy oracle and the parser DISAGREE\n%s" d
+              | [] ->
+                  Expect.isGreaterThan t.StrictOk 0 "some documents were accepted"
+                  Expect.isGreaterThan t.StrictErr 0 "some documents were refused"
+                  Expect.isGreaterThan t.Fired 0 "the policy FIRED — strict refused where tolerant accepted"
+
+          testCase "a decode oracle handed a blind bridge DISAGREES with Wire.Decode"
+          <| fun _ ->
+              // The teeth. The blind bridge reads every wire integer as a float, so the oracle is
+              // asked about a different value from the one production was asked about: `asInt`
+              // must lose. A green report above is therefore a comparison that CAN fail.
+              let tally = runProbes toModelBlind "blind" (JObj [ "n", JInt 7 ]) emptyTally
+
+              match tally.Disagreements with
+              | [] ->
+                  failtest
+                      "a blind bridge reads every integer as a float, so asInt must disagree — this comparison cannot lose"
+              | ds ->
+                  Expect.isTrue
+                      (ds |> List.exists (fun d -> d.Contains "asInt"))
+                      (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head ds))
+
+                  // … and it loses over the generated sample too, not only on a hand-made value.
+                  let mutable rng = ConfRng.ofSeed 9100
+                  let mutable swept = emptyTally
+
+                  for _ in 1..60 do
+                      let v, r' = genJ 0 rng
+                      rng <- r'
+                      swept <- runProbes toModelBlind "blind" v swept
+
+                  Expect.isNonEmpty swept.Disagreements "the blind bridge loses over the generated sample as well" ]

@@ -13,3 +13,8 @@ type bool = System.Boolean
 
 /// F*'s `=` on an `eqtype` — decidable structural equality.
 let inline op_Equals (x: 'a) (y: 'a) : bool = (x = y)
+
+/// F*'s `^` on strings — `Prims.strcat`. Named by the Phase 135 extraction, which reproduces
+/// `Decode`'s error MESSAGES rather than merely their class, so the differential compares what
+/// a failure says as well as that it failed.
+let inline strcat (x: string) (y: string) : string = x + y
