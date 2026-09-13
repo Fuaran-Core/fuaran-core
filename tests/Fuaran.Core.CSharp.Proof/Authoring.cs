@@ -69,7 +69,8 @@ internal static class Authoring
                                 onApply: (_, _) => "?",
                                 onInList: (_, _) => "?",
                                 onIsNull: _ => "?",
-                                onInParam: (_, _) => "?"
+                                onInParam: (_, _) => "?",
+                                onNow: _ => "?"
                             ) : "?",
                         onNot: _ => "?",
                         onCoalesce: _ => "?",
@@ -78,7 +79,8 @@ internal static class Authoring
                         onApply: (_, _) => "?",
                         onInList: (_, _) => "?",
                         onIsNull: _ => "?",
-                        onInParam: (_, _) => "?"
+                        onInParam: (_, _) => "?",
+                        onNow: _ => "?"
                     ),
                 onProject: _ => "?",
                 onDerive: (_, _) => "?",

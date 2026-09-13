@@ -28,9 +28,11 @@ internal sealed class Gen
     private static readonly JoinMode[] JoinModes = Enum.GetValues<JoinMode>();
     private static readonly SortOrder[] SortOrders = Enum.GetValues<SortOrder>();
     private static readonly ColumnKind[] ColumnKinds = Enum.GetValues<ColumnKind>();
+
+    private static readonly ClockGrain[] ClockGrains = Enum.GetValues<ClockGrain>();
     private static readonly WindowFunctionKind[] WindowKinds = Enum.GetValues<WindowFunctionKind>();
 
-    internal const int ExprCases = 12;
+    internal const int ExprCases = 13;
     internal const int StepCases = 14;
     internal const int JsonCases = 6;
     internal const int SpaceCases = 5;
@@ -43,6 +45,8 @@ internal sealed class Gen
     private int _joinMode;
     private int _sortOrder;
     private int _columnKind;
+
+    private int _clockGrain;
     private int _windowKind;
     private int _cellCase;
     private int _names;
@@ -165,6 +169,8 @@ internal sealed class Gen
                 );
             case 10:
                 return Expr.IsNull(Expression(Below(ExprCases), depth - 1));
+            case 11:
+                return Expr.Now(ClockGrains[_clockGrain++ % ClockGrains.Length]);
             default:
                 return Expr.InParam(Expression(Below(ExprCases), depth - 1), "lp" + Below(3));
         }

@@ -40,7 +40,8 @@ internal static class Rebuild
             onApply: (fn, xs) => Expr.Apply(fn, xs.Select(x => Expression(x))),
             onInList: (s, xs) => Expr.InList(Expression(s), xs.Select(x => Expression(x))),
             onIsNull: x => Expr.IsNull(Expression(x)),
-            onInParam: (s, n) => Expr.InParam(Expression(s), n)
+            onInParam: (s, n) => Expr.InParam(Expression(s), n),
+            onNow: g => Expr.Now(g)
         );
 
     internal static ColumnValue ColumnOf(ColumnValue c) =>

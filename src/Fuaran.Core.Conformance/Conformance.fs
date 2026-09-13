@@ -6958,3 +6958,199 @@ module Conformance =
                       + missing seenCapture
                       + " — the laws above hold vacuously for the break kinds that were never produced"
                   ) } ]
+
+    /// **`Now` at a pinned clock is deterministic** (Phase 125) — the law that makes a
+    /// clock-dependent pipeline a legitimate thing for a conformance kit to certify at all.
+    ///
+    /// A `ColExpr.Now` names the current moment. Left to read a host clock at evaluation it would
+    /// make every downstream parity claim unfalsifiable: two hosts computing the same pipeline would
+    /// legitimately disagree, and no vector could say which was wrong. `Now` therefore resolves by
+    /// SUBSTITUTION against a `ClockWitness` the caller pins, and these five laws are what that buys:
+    ///
+    ///   1. **Determinism.** The same pipeline under the same witness evaluates to the same table,
+    ///      twice, whatever the witness returns.
+    ///   2. **The reading is the witness's.** A `Derive` of a bare `Now g` produces exactly the cell
+    ///      `clock g` returned — not a re-derivation, not a coercion.
+    ///   3. **One reading per grain per pinning.** A COUNTING witness — one that returns a different
+    ///      cell on every call — still yields ONE value per grain across the whole pipeline, so two
+    ///      `Now`s in one evaluation cannot straddle a tick and disagree with each other. This is
+    ///      the law a naive `fun g -> DateTime.Now` implementation fails, which is why it is stated
+    ///      over a witness that is deliberately not constant.
+    ///   4. **Unpinned is REFUSED, by name.** A `Now` reaching the evaluator with no clock is
+    ///      `EvalError.UnpinnedClock`, never a silent reading, and the grain it names is the one
+    ///      that was asked for.
+    ///   5. **Substitution is the only resolution**, so a pipeline that carried no `Now` evaluates
+    ///      byte-identically whether or not a clock was pinned — pinning a clock is not an
+    ///      evaluation mode with its own semantics.
+    ///
+    /// The sample is drawn, but every law's evidence is BUILT each iteration: both grains, a
+    /// clock-bearing pipeline and a clock-free one, on the same input.
+    let nowLaws (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable deterministic = None
+        let mutable isWitnessReading = None
+        let mutable oneReading = None
+        let mutable unpinned = None
+        let mutable clockFreeUnchanged = None
+
+        let col name cells : Column = Column.create name IntType cells
+
+        for i in 0 .. iterations - 1 do
+            let nRows, r1 = ConfRng.intBelow 4 rng
+            let rows = nRows + 1
+            let mutable r = r1
+
+            let draw () =
+                let v, r' = ConfRng.intBelow 40 r
+                r <- r'
+                Int(v - 20)
+
+            let table =
+                { Schema = [ "a", IntType ]
+                  Columns = [ col "a" [ for _ in 1..rows -> draw () ] ] }
+
+            // Which grain this iteration leads with — both are exercised below regardless.
+            let gPick, r2 = ConfRng.intBelow 2 r
+            r <- r2
+
+            let grain = if gPick = 0 then NowGrain.Date else NowGrain.Timestamp
+
+            let stampN, r3 = ConfRng.intBelow 28 r
+            r <- r3
+            rng <- r
+
+            // A drawn but CONSTANT witness: the reading varies across iterations (so no law can be
+            // passing on one fixed string) and is fixed within one, which is what a clock pinned for
+            // an evaluation means.
+            let dateOf (n: int) =
+                "2026-09-" + (if n < 9 then "0" else "") + string (n + 1)
+
+            let stampFor (g: NowGrain) (n: int) : Cell =
+                match g with
+                | NowGrain.Date -> Date(dateOf n)
+                | NowGrain.Timestamp -> Timestamp(dateOf n + "T00:00:00Z")
+
+            let clock: ClockWitness = fun g -> stampFor g stampN
+
+            let pipeline =
+                [ Derive("now1", Now grain)
+                  Filter(Binary(Gt, Col "a", Lit(Int -100)))
+                  Derive("now2", Now grain) ]
+
+            // ---- 1. determinism ----
+            let once = DataFrame.evalPipelineAt clock pipeline table
+            let twice = DataFrame.evalPipelineAt clock pipeline table
+
+            if once <> twice && deterministic.IsNone then
+                deterministic <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: the same pipeline under the same ClockWitness evaluated to two different tables — a pinned clock is the whole determinism claim"
+                            seed
+                            i
+                    )
+
+            // ---- 2. the reading IS the witness's ----
+            let expected = stampFor grain stampN
+
+            (match DataFrame.evalPipelineAt clock [ Derive("n", Now grain) ] table with
+             | Ok t ->
+                 let got =
+                     t.Columns
+                     |> List.tryFind (fun c -> c.Name = "n")
+                     |> Option.bind (fun c -> List.tryHead c.Cells)
+
+                 if got <> Some expected && isWitnessReading.IsNone then
+                     isWitnessReading <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: Derive(Now %A) produced %A where the witness returned %A"
+                                 seed
+                                 i
+                                 grain
+                                 got
+                                 expected
+                         )
+             | Error e ->
+                 if isWitnessReading.IsNone then
+                     isWitnessReading <- Some(sprintf "seed=%d iter=%d: a pinned Now failed to evaluate: %A" seed i e))
+
+            // ---- 3. ONE reading per grain per pinning, under a witness that is NOT constant ----
+            // A counting witness answers differently on every call. If the pinning did not read it
+            // once per grain, the two `Now`s above would land on different cells and this fails —
+            // which is exactly the defect `fun _ -> <read the real clock>` would exhibit.
+            let mutable calls = 0
+
+            let counting: ClockWitness =
+                fun g ->
+                    calls <- calls + 1
+                    stampFor g (calls % 28)
+
+            (match DataFrame.evalPipelineAt counting pipeline table with
+             | Ok t ->
+                 let cellsOf n =
+                     t.Columns |> List.tryFind (fun c -> c.Name = n) |> Option.map (fun c -> c.Cells)
+
+                 if cellsOf "now1" <> cellsOf "now2" && oneReading.IsNone then
+                     oneReading <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: two Now nodes of one grain in one evaluation produced different readings (%A vs %A) — the witness was read more than once per grain, so a pipeline can straddle a tick"
+                                 seed
+                                 i
+                                 (cellsOf "now1")
+                                 (cellsOf "now2")
+                         )
+             | Error e ->
+                 if oneReading.IsNone then
+                     oneReading <- Some(sprintf "seed=%d iter=%d: the counting-witness run failed: %A" seed i e))
+
+            // ---- 4. unpinned is refused BY NAME, on both grains ----
+            for g in [ NowGrain.Date; NowGrain.Timestamp ] do
+                match DataFrame.evalPipeline [ Derive("n", Now g) ] table with
+                | Error(UnpinnedClock got) when got = g -> ()
+                | other ->
+                    if unpinned.IsNone then
+                        unpinned <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: an unpinned Now %A gave %A — it must be a strict UnpinnedClock naming that grain, never a silent reading and never a different error"
+                                    seed
+                                    i
+                                    g
+                                    other
+                            )
+
+            // ---- 5. a clock-free pipeline is unaffected by pinning one ----
+            let clockFree =
+                [ Filter(Binary(Gt, Col "a", Lit(Int -100)))
+                  Derive("b", Binary(Add, Col "a", Lit(Int 1))) ]
+
+            if
+                DataFrame.evalPipelineAt clock clockFree table
+                <> DataFrame.evalPipeline clockFree table
+                && clockFreeUnchanged.IsNone
+            then
+                clockFreeUnchanged <-
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: pinning a clock changed the answer of a pipeline that names no Now — resolution must be substitution and nothing else"
+                            seed
+                            i
+                    )
+
+        [ { Law = "Now at a pinned ClockWitness is deterministic: the same pipeline twice gives the same table"
+            Passed = deterministic.IsNone
+            Counterexample = deterministic }
+          { Law = "a pinned Now evaluates to exactly the cell the witness returned for its grain"
+            Passed = isWitnessReading.IsNone
+            Counterexample = isWitnessReading }
+          { Law = "the witness is read at most ONCE PER GRAIN per pinning, so two Now nodes agree"
+            Passed = oneReading.IsNone
+            Counterexample = oneReading }
+          { Law = "an unpinned Now is EvalError.UnpinnedClock naming its grain, never a silent reading"
+            Passed = unpinned.IsNone
+            Counterexample = unpinned }
+          { Law = "pinning a clock does not change a pipeline that names no Now"
+            Passed = clockFreeUnchanged.IsNone
+            Counterexample = clockFreeUnchanged } ]
