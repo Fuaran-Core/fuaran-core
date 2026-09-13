@@ -1,5 +1,86 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-13 — D33: four API asks cut as one minor — and the fourth was already shipped, so what it gets is the property
+
+**Decided (Phase 125).** The UI tier routed four Core API asks here. They are cut as
+ONE minor because a consumer's cost is per RAISE and not per ask: four minors would have cost the
+same consumer three raises it gains nothing from, and the cohort rule moves the substrate as a
+system anyway.
+
+**The fourth ask was already answered, and saying so is the deliverable.** The ask was that
+`Fuaran.Core.Idl.Codegen` render a payload-carrying `OmitDefault (VUnion (tag, payload))` in all
+three emitters, and that the `None`-literal fallbacks — always-emit on the encoder, `dReq` on the
+decoder — stop shipping an artefact that contradicts its own IDL. **D26 / Phase 124 (`0.21.0`) is
+that work**, landed three days after the ask was written and citing the same example. Reading
+`fsDefaultLit`, `defaultExpr`, `tsIsDefault`, `tsDefaultLit` and `tsDecField` in the tree confirms
+every clause of it, so implementing the ask as stated would have been a second renderer over the
+same set — the exact defect D26 records the first one causing.
+
+What the ask asked for that 124 did NOT ship is the GENERATIVE property. 124's certification is
+case-based: a payload-carrying fixture plus go-red probes on each formerly-silent path. A case
+proves a case. `Conformance.declaredDefaultLaws` draws a declared default over a drawn IDL and
+asserts the two emitters AGREE — both render, or both refuse — which is the claim that survives a
+shape nobody wrote a case for, and the one that goes red if 124 is ever undone. A refuted premise
+whose finding lands as an assertion is worth more than a mechanism built on top of it.
+
+**And the property found a divergence on its first run, which is reported rather than resolved.** A
+declared TRANSPARENT union case as a default is refused by the TypeScript backend — bare on the wire,
+so a tagged predicate would be about a value the JS encoder never sees — and rendered by the F#
+backend, whose omit test is a pattern match on the HOST value, where the case is not transparent.
+Both are locally correct, and the consequence is a vocabulary that generates in F# and refuses in
+TypeScript. Phase 124 added the TS refusal knowing it was newly reachable and did not add an F#
+counterpart; nothing records whether the asymmetry was intended. Under the bound doctrine's
+escalate-don't-guess axis this release does NOT pick a side: the property admits exactly that class
+by name, fails on any other disagreement, and fails if the class becomes empty — so the divergence
+cannot widen, cannot spread, and cannot be closed silently either.
+
+**Where the property lives is itself a decision.** Not `Fuaran.Core.Conformance`: a law family
+certifies a HOST against a contract, and nothing outside this repository implements this generator,
+so it would be a family no adopter could run — and the kit is Fable-clean while the generator is
+.NET-only and build-time by declaration, so the reference would break the portability gate the kit's
+own claim rests on. It sits beside Phase 124's case-based certification, which is where the question
+it answers was already being asked.
+
+**`ChainBreakReason` collapses the two hash spellings, and that is a decision.** Core's walkers mint
+four distinct reason strings; the type has three named cases. `Reason` answers *which check failed*,
+and `"tampered op/actor/seq"` and `"tampered capture"` are the same check run by two walkers — which
+walker ran is the caller's own choice and carried by which function it called. The one measured
+consumer collapses them already. A case every consumer immediately discards is a worse contract than
+no case; `toString` / `ofString` keep the old bytes available for anyone who was logging them.
+
+**`Unrecognised` is kept on a type this library alone mints**, for the reason the consumer's own
+comment gives: the alternative is a reader that claims to know which check failed when it does not.
+A break that arrives from a host's own walker, from a wire, or from a consumer-constructed record
+lands there honestly. `Dag.DagBreak.Reason` is deliberately NOT widened in the same act — different
+type, different spellings, no measured consumer, and a breaking change taken on a symmetry argument
+is a breaking change nobody asked for.
+
+**`Now` resolves by substitution against a pinned clock, not by a platform call and not by a new
+env.** GP3 keeps Core FSharp.Core-only and Fable-clean, so there is no clock to call; GP5 makes
+"read the host's real clock at evaluation" the wrong default, because a pipeline that silently picks
+up wall-clock time is not reproducible and its cross-host parity claim is not falsifiable.
+`ClockWitness = NowGrain -> Cell` plus `substituteNow` reuses D12's seam — the one list-valued params
+already resolve through — rather than adding a second resolution mechanism, and an unpinned `Now`
+reaching evaluation is `EvalError.UnpinnedClock`, the strict analogue of `UnboundParam`. The grain
+set is the two cells that can hold a clock reading and no more: an `hour` or `quarter` grain has no
+cell to land in, so admitting one would be vocabulary with no semantics.
+
+**A scalar slot takes `Slot<'T>`, not a `ColExpr`.** Reusing `ColExpr` would have cost nothing to
+write and would have admitted `Col "x"` at a `Limit` count, where there is no row to read — an
+expression the type permits and no evaluator can mean. D13's default-deny-by-shape reading applies:
+the closed two-case `Slot<'T>` says literal-or-param and says nothing else. Resolution is the
+EXISTING param seam — the same `Map<string, Cell>` env, the same `UnboundParam`, reported by the same
+`Transform.paramsOf` — so a host wires nothing new. The sort DIRECTION stays a literal: no demand
+named it, and a `Cell`-valued param would have to spell a direction as a string, which is the shape
+this vocabulary exists to avoid.
+
+**`Idl.Gen.usesHosted` is removed rather than kept as a declared boundary.** The `0.19.0` narrowing
+kept it on the argument that it states a boundary a cross-host generative comparison must state, and
+recorded that it had no caller here because that leg was not wired. The operator's 2026-09-10 ruling
+is that the leg is not Core's: the vocabulary-scale sweep belongs to the UI tier. Its sibling
+`encodeNodeEnv` was already narrowed on the same evidence, and a surface that retires one of a pair
+and keeps the other is a surface nobody can ever finish retiring.
+
 ## 2026-09-12 — D32: F\* is the prover; the extracted model is the oracle; the pin, not hints, is what makes the leg reproducible
 
 **Decided (Phase 131, the prover spike).** The mechanised half of the correctness story is written

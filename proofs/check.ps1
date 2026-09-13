@@ -1,17 +1,20 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phase 131).
+# fuaran-core — the proof leg (Phases 131 and 135).
 #
-# Three steps, each of which can fail on its own:
-#   1. CHECK  — proofs/DagFold.fst is verified by the PINNED F*/Z3 (proofs/fstar-pin.json) with
+# EVERY MODULE in $modules below goes through the same three steps, and each step can fail on its
+# own. Adding a model is adding its name to that list: nothing else here is per-module.
+#   1. CHECK  — proofs/<Module>.fst is verified by the PINNED F*/Z3 (proofs/fstar-pin.json) with
 #               every SMT query proved three times over varying seeds (--quake 3) and every escape
 #               hatch (assume / admit) reported as an error. -Runs N repeats the whole check N
 #               times from a cold cache — CI asks for 3, which is exit criterion 1 made literal.
-#   2. EXTRACT — the checked model is extracted to F# and DIFFED against the committed oracle
-#               (proofs/oracle/DagFold.fs). A difference fails: the oracle the suite runs must be
+#               A run checks EVERY module before the next run starts, so -Runs still means "N
+#               cold-cache verifications of everything", as it did when there was one model.
+#   2. EXTRACT — each checked model is extracted to F# and DIFFED against its committed oracle
+#               (proofs/oracle/<Module>.fs). A difference fails: the oracle the suite runs must be
 #               the model the theorem is about, byte for byte. -Extract overwrites the committed
-#               file with the fresh extraction instead (then commit it).
-#   3. HOST   — the Expecto Proofs.Oracle family runs the extracted model beside the production
-#               fold (the differential test). -SkipOracleHost leaves that to ./verify.ps1, which
+#               files with the fresh extractions instead (then commit them).
+#   3. HOST   — the Expecto Proofs.Oracle family runs the extracted models beside the production
+#               code (the differential tests). -SkipOracleHost leaves that to ./verify.ps1, which
 #               already runs the whole suite.
 #
 # The prover is resolved from $env:FSTAR_HOME (a release directory holding bin/fstar.exe), else
@@ -38,6 +41,12 @@ function Fail([string] $message, [int] $code = 1) {
 
 $pin = Get-Content ./fstar-pin.json -Raw | ConvertFrom-Json
 $pinnedVersion = $pin.fstar.TrimStart('v')
+
+# The models, in the order they were cut. Each is proofs/<name>.fst with its committed extraction
+# at proofs/oracle/<name>.fs; they share nothing but oracle/Prims.fs.
+#   DagFold    — Phase 131, the N-lane DAG fold, with fold confluence proved.
+#   WireDecode — Phase 135, the wire decode combinators, with decoder totality proved.
+$modules = @('DagFold', 'WireDecode')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
@@ -98,10 +107,12 @@ for ($run = 1; $run -le $Runs; $run++) {
     if (Test-Path $cache) { Remove-Item $cache -Recurse -Force }
     New-Item -ItemType Directory -Force $cache | Out-Null
 
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    & $fstar --z3rlimit 40 --quake 3 --report_assumes error --cache_checked_modules --cache_dir $cache DagFold.fst
-    if ($LASTEXITCODE -ne 0) { Fail "DagFold.fst did NOT verify (run $run of $Runs)" $LASTEXITCODE }
-    Write-Host "==== proofs: DagFold.fst verified — run $run of $Runs, $([int]$sw.Elapsed.TotalSeconds)s, every query 3/3 under --quake" -ForegroundColor Green
+    foreach ($module in $modules) {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        & $fstar --z3rlimit 40 --quake 3 --report_assumes error --cache_checked_modules --cache_dir $cache "$module.fst"
+        if ($LASTEXITCODE -ne 0) { Fail "$module.fst did NOT verify (run $run of $Runs)" $LASTEXITCODE }
+        Write-Host "==== proofs: $module.fst verified — run $run of $Runs, $([int]$sw.Elapsed.TotalSeconds)s, every query 3/3 under --quake" -ForegroundColor Green
+    }
 }
 
 # ---- 3. extract, and hold the committed oracle to the model ---------------------------------------
@@ -109,30 +120,32 @@ for ($run = 1; $run -le $Runs; $run++) {
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 
-& $fstar --cache_checked_modules --cache_dir $cache --codegen FSharp --extract DagFold --odir $out DagFold.fst
-if ($LASTEXITCODE -ne 0) { Fail "extraction to F# failed" $LASTEXITCODE }
+foreach ($module in $modules) {
+    & $fstar --cache_checked_modules --cache_dir $cache --codegen FSharp --extract $module --odir $out "$module.fst"
+    if ($LASTEXITCODE -ne 0) { Fail "extraction of $module to F# failed" $LASTEXITCODE }
 
-$fresh = Join-Path $out 'DagFold.fs'
-$committed = Join-Path $PSScriptRoot 'oracle/DagFold.fs'
-if (-not (Test-Path $fresh)) { Fail "extraction produced no DagFold.fs under $out" }
+    $fresh = Join-Path $out "$module.fs"
+    $committed = Join-Path $PSScriptRoot "oracle/$module.fs"
+    if (-not (Test-Path $fresh)) { Fail "extraction produced no $module.fs under $out" }
 
-# Compare LF-normalised: the extractor writes LF and the repository pins LF, but a checkout with
-# autocrlf on would otherwise fail this for a reason that is not the model.
-$freshText = (Get-Content $fresh -Raw).Replace("`r`n", "`n")
-$committedText = if (Test-Path $committed) { (Get-Content $committed -Raw).Replace("`r`n", "`n") } else { '' }
+    # Compare LF-normalised: the extractor writes LF and the repository pins LF, but a checkout
+    # with autocrlf on would otherwise fail this for a reason that is not the model.
+    $freshText = (Get-Content $fresh -Raw).Replace("`r`n", "`n")
+    $committedText = if (Test-Path $committed) { (Get-Content $committed -Raw).Replace("`r`n", "`n") } else { '' }
 
-if ($Extract) {
-    [System.IO.File]::WriteAllText($committed, $freshText, [System.Text.UTF8Encoding]::new($false))
-    Write-Host "==== proofs: wrote the fresh extraction to oracle/DagFold.fs — commit it" -ForegroundColor Yellow
-}
-elseif ($freshText -ne $committedText) {
-    Write-Host "==== proofs: the committed oracle (oracle/DagFold.fs) is NOT the extraction of DagFold.fst." -ForegroundColor Red
-    Write-Host "     Fresh extraction: $fresh" -ForegroundColor Red
-    Write-Host "     Re-extract with: pwsh ./proofs/check.ps1 -Extract   (then commit the result)" -ForegroundColor Red
-    Fail "oracle drift"
-}
-else {
-    Write-Host "==== proofs: oracle/DagFold.fs is byte-identical to a fresh extraction" -ForegroundColor Green
+    if ($Extract) {
+        [System.IO.File]::WriteAllText($committed, $freshText, [System.Text.UTF8Encoding]::new($false))
+        Write-Host "==== proofs: wrote the fresh extraction to oracle/$module.fs — commit it" -ForegroundColor Yellow
+    }
+    elseif ($freshText -ne $committedText) {
+        Write-Host "==== proofs: the committed oracle (oracle/$module.fs) is NOT the extraction of $module.fst." -ForegroundColor Red
+        Write-Host "     Fresh extraction: $fresh" -ForegroundColor Red
+        Write-Host "     Re-extract with: pwsh ./proofs/check.ps1 -Extract   (then commit the result)" -ForegroundColor Red
+        Fail "oracle drift"
+    }
+    else {
+        Write-Host "==== proofs: oracle/$module.fs is byte-identical to a fresh extraction" -ForegroundColor Green
+    }
 }
 
 # ---- 4. the oracle host --------------------------------------------------------------------------
@@ -144,7 +157,7 @@ if (-not $SkipOracleHost) {
         if ($LASTEXITCODE -ne 0) { Fail "the test project did not build" $LASTEXITCODE }
 
         dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter Proofs.Oracle
-        if ($LASTEXITCODE -ne 0) { Fail "the oracle host (Proofs.Oracle) is RED — the extracted model and production disagree" $LASTEXITCODE }
+        if ($LASTEXITCODE -ne 0) { Fail "the oracle host (Proofs.Oracle) is RED — an extracted model and production disagree" $LASTEXITCODE }
     }
     finally { Pop-Location }
 }

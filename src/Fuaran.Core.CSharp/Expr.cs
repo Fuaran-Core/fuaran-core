@@ -131,6 +131,13 @@ public sealed class Expr : IEquatable<Expr>
             )
         );
 
+    /// <summary>
+    /// The current moment at the given grain — a <c>now</c> the pipeline names itself. Resolved
+    /// against a clock the caller pins before evaluation; one that reaches evaluation unpinned is
+    /// refused rather than read from the host's real clock.
+    /// </summary>
+    public static Expr Now(ClockGrain grain) => new(ColExpr.NewNow(Vocab.ToCore(grain)));
+
     // ---- reading ----
 
     /// <summary>Read this expression by case. Total: exactly one branch runs.</summary>
@@ -146,7 +153,8 @@ public sealed class Expr : IEquatable<Expr>
         Func<ScalarFunction, IReadOnlyList<Expr>, T> onApply,
         Func<Expr, IReadOnlyList<Expr>, T> onInList,
         Func<Expr, T> onIsNull,
-        Func<Expr, string, T> onInParam
+        Func<Expr, string, T> onInParam,
+        Func<ClockGrain, T> onNow
     )
     {
         switch (_core.Tag)
@@ -197,6 +205,8 @@ public sealed class Expr : IEquatable<Expr>
                 var c = (ColExpr.InParam)_core;
                 return onInParam(new Expr(c.Item1), c.name);
             }
+            case ColExpr.Tags.Now:
+                return onNow(Vocab.ClockGrainOf(((ColExpr.Now)_core).grain));
             default:
                 throw Interop.UnknownCase(nameof(ColExpr), _core.Tag);
         }
@@ -215,7 +225,8 @@ public sealed class Expr : IEquatable<Expr>
         Action<ScalarFunction, IReadOnlyList<Expr>> onApply,
         Action<Expr, IReadOnlyList<Expr>> onInList,
         Action<Expr> onIsNull,
-        Action<Expr, string> onInParam
+        Action<Expr, string> onInParam,
+        Action<ClockGrain> onNow
     ) =>
         Match(
             n =>
@@ -276,6 +287,11 @@ public sealed class Expr : IEquatable<Expr>
             (s, n) =>
             {
                 onInParam(s, n);
+                return true;
+            },
+            g =>
+            {
+                onNow(g);
                 return true;
             }
         );

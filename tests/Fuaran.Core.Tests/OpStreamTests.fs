@@ -224,7 +224,7 @@ let tests =
                   match OpStream.firstChainBreak OpStream.defaultHash sw tampered with
                   | Some b ->
                       Expect.equal b.Index 1 "break at record 1"
-                      Expect.stringContains b.Reason "hash" "names a hash mismatch"
+                      Expect.equal b.Reason HashMismatch "names the digest check, typed (0.23.0)"
                   | None -> failtest "expected a break"
               | Error e -> failtestf "unexpected %A" e
 
@@ -371,7 +371,9 @@ let tests =
               match OpStream.firstCaptureBreak h tampered with
               | Some b ->
                   Expect.equal b.Index 0 "break localised to capture 0"
-                  Expect.stringContains b.Reason "hash" "names a hash mismatch"
+                  // 0.23.0 — the capture walk's own digest spelling collapses into the one typed
+                  // `HashMismatch` case; which walker ran is carried by which function was called.
+                  Expect.equal b.Reason HashMismatch "names the digest check, typed (0.23.0)"
               | None -> failtest "expected a capture break"
 
           testCase "capture journal round-trips through JSONL and still verifies"
@@ -594,3 +596,61 @@ let attributedTests =
               with
               | Error(AppendRejection.Domain "would go negative") -> ()
               | other -> failtestf "expected a forwarded domain rejection, got %A" other ]
+
+[<Tests>]
+let chainBreakReasonTests =
+    testList
+        "OpStream.ChainBreakReason"
+        [ testCase "chainBreakReasonLaws certify the named-case discipline on both walkers (Phase 125)"
+          <| fun _ ->
+              let results = Conformance.chainBreakReasonLaws 5125 120
+              Expect.equal (List.length results) 5 "five reason laws reported"
+
+              if results |> List.exists (fun r -> not r.Passed) then
+                  let fails =
+                      results
+                      |> List.filter (fun r -> not r.Passed)
+                      |> List.map (fun r -> sprintf "%s — %A" r.Law r.Counterexample)
+
+                  failtestf "chainBreakReasonLaws failed:\n%s" (String.concat "\n" fails)
+
+              Expect.equal (Conformance.chainBreakReasonLaws 5125 120) results "same seed ⇒ identical report"
+
+          // The go-red half. The family's first law is only worth its breaking change if it can
+          // FAIL, and the only reason it never does is that the walkers stay inside the named
+          // cases — so plant a break that came from outside them and check the classifier does not
+          // launder it into whichever named case looks nearest. That laundering is exactly the
+          // defect the pre-0.23.0 consumer-side form had.
+          testCase "an unknown reason is Unrecognised verbatim, never the nearest named case"
+          <| fun _ ->
+              Expect.equal
+                  (ChainBreakReason.ofString "hash mismatch, probably")
+                  (Unrecognised "hash mismatch, probably")
+                  "a reason that merely LOOKS like a digest failure is not one"
+
+              Expect.equal
+                  (ChainBreakReason.ofString "hash mismatch (tampered capture)")
+                  HashMismatch
+                  "the capture walk's own legacy spelling still classifies"
+
+              Expect.equal
+                  (ChainBreakReason.toString (Unrecognised "verbatim"))
+                  "verbatim"
+                  "an unrecognised reason renders as itself, losing nothing"
+
+          testCase "toString renders the pre-0.23.0 bytes, so a consumer that logged them still does"
+          <| fun _ ->
+              Expect.equal
+                  (ChainBreakReason.toString SequenceMismatch)
+                  "sequence-number mismatch"
+                  "the sequence spelling is unchanged"
+
+              Expect.equal
+                  (ChainBreakReason.toString PrevHashLinkBroken)
+                  "prev-hash link broken"
+                  "the prev-link spelling is unchanged"
+
+              Expect.equal
+                  (ChainBreakReason.toString HashMismatch)
+                  "hash mismatch (tampered op/actor/seq)"
+                  "the op-walk digest spelling is the one rendering for the single case" ]

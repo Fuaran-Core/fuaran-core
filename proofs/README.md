@@ -14,7 +14,9 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 |---|---|
 | `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved. Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
-| `oracle/Prims.fs` | Sixteen lines: the `Prims` names the F# backend emits and the release does not ship. |
+| `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
+| `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
 | `check.ps1` | The proof leg: check with the pin, re-extract and diff against the committed oracle, run the host. |
@@ -146,6 +148,9 @@ What may be said, and at what strength, per the attested-stack programme's §6:
 
 "Formally verified" is spent on level 1 alone.
 
+Theorem 1 — decoder totality — carries its own ladder of the same shape, in its own section below;
+what is said at each level there is said about the decode combinators and about nothing else.
+
 ## Exit criteria, with evidence
 
 1. **Reproducible — met.** `check.ps1 -Runs 3` verifies the module three times from a cold
@@ -205,17 +210,154 @@ backend's edges (findings 2–4), each closed in a few lines, not on the modelli
 ```powershell
 pwsh ./proofs/check.ps1            # check (once), re-extract + diff, run the oracle host
 pwsh ./proofs/check.ps1 -Runs 3    # what CI runs
-pwsh ./proofs/check.ps1 -Extract   # after editing DagFold.fst: rewrite oracle/DagFold.fs, then commit it
+pwsh ./proofs/check.ps1 -Extract   # after editing a model: rewrite its oracle/*.fs, then commit it
 pwsh ./verify.ps1 -Proofs          # the whole repo gate plus the proof leg
 ```
 
-The first run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`;
-`FSTAR_HOME` pointing at a matching release skips that. Editing `DagFold.fst` without
-re-extracting fails the leg with "oracle drift" — that is the point, not an inconvenience.
+Every model in the script's `$modules` list goes through all three steps, and `-Runs N` means N
+cold-cache verifications of all of them; adding a model is adding its name to that list. The first
+run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`; `FSTAR_HOME`
+pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
+with "oracle drift" — that is the point, not an inconvenience.
+
+## Theorem 1 — decoder totality (Phase 135)
+
+`WireDecode.fst` is this directory's second model, and the programme's WS6.1 **theorem 1**. The
+Fuaran wire is JSON with a kind-tag discipline, so this is a hand-written model of the decode
+combinators over an abstract JSON value rather than an EverParse artefact — EverParse targets
+binary formats and would say nothing about the layer where the estate's decoders actually live.
+
+It models `Fuaran.Core.Decode` clause for clause — `getProp`, `asString` / `asInt` / `asBool` /
+`asFloat`, `kindOf`, `strField` / `intField`, and `mapList`, the array walker and the only walker
+`Decode` has — with the error **messages** reproduced verbatim rather than classified, because
+naming what was expected is most of what these combinators are for. On top of them sit a reference
+vocabulary, its `Json.kindObj` encoder, and the kind-dispatch node decoder a domain writes from
+those combinators.
+
+Four things are proved:
+
+- **`decode_total`.** Every combinator reaches exactly one outcome on every input — `Ok` or a named
+  `Error` — and WHICH one is characterised structurally: `as_string` succeeds exactly on a string,
+  `as_float` exactly on a float **or an int** (the numeric normalisation `JVal`'s own doc warns a
+  reader not to assume away), `get_prop` exactly on an object carrying the member, `map_list`
+  exactly on an array whose every element decodes. That the combinators are `Tot` is carried by
+  their types, since F\* admits a definition only after showing it is defined on every input and
+  terminates; the lemma is what makes the failure classification **exhaustive** rather than merely
+  non-empty.
+- **`decode_node_total` / `decode_node_wf`.** The recursive node decoder is `Tot` on an arbitrary
+  `jval`, and succeeds on exactly the well-formed documents (`wf`). Termination is the content here
+  rather than a formality: the decoder descends into a child array it obtained **by name**, so
+  nothing structural is visible at the call site, and `get_prop` carries
+  `Ok? r ==> jsize (Ok?.v r) < jsize el` in its RETURN TYPE to supply it.
+- **`decode_encode_roundtrip`.** `decode_node (encode n) == Ok n`, for every node of the reference
+  vocabulary, at every depth.
+- **`lenient_agrees_off_policy` / `strict_unchanged_on_null_free`.** The Phase 102 promise — see
+  the policy note below, which is also where this model diverges from what the phase's brief
+  assumed.
+
+### The boundary — `Json.parse` is excluded, and why
+
+**`Json.parse`, the string-to-`JVal` parser, is outside theorem 1.** Its totality is a property of
+a recursive-descent parser over bytes — the depth bound, escape handling, the int53 token guard,
+the `MaxDepthExceeded` and `TrailingCharacters` classes — and it is the one place in this stack an
+EverParse-shaped approach might apply. It is a separate phase. Everything the theorem says begins
+at a `JVal` that already exists; `Decode.parse` and `Decode.parseTolerantOfNull` are one-line
+delegates to the parser and are not modelled either.
+
+So **the programme's §6 wording "the decoder is total" is spent on the combinator layer alone.** It
+says: given a parsed value, no combinator and no decoder built from them can diverge, throw, or
+reach a state that is neither an accept nor a named refusal. It says nothing about what happens to
+the bytes before that value exists.
+
+One further exclusion, named rather than silent: `Versioning.decodeTolerant` is the shipped
+**generic** instance of the kind-dispatch pattern, and it is not modelled — its `requiredProfile`
+read goes through `Versioning.Profile.tryParse`, string-splitting at a different layer. The pattern
+itself is modelled where a domain meets it, as the reference vocabulary's `decode_node`.
+
+### Where the Phase 102 policy actually lives
+
+`NullPolicy` is a parameter of `Json.parseDetailedWithPolicy` **and of nothing else**, and `JVal`
+has no null constructor — so no `Decode` combinator can see a null, and none takes a policy
+parameter. What the policy is, at the layer this theorem is about, is a **document-level read
+normalisation** upstream of every combinator: erase object-member nulls, refuse a null that has no
+absence to erase it to.
+
+The model puts it there. `read : null_policy -> jvaln -> outcome jval` goes from a document model
+that HAS a null into the wire model that cannot carry one, which is the type-level form of
+"tolerance is a read normalisation, never a new emission". Two consequences worth stating exactly:
+
+- **The promise is about the VERDICT, not the message.** On every document the policy does not name
+  — no null in member position anywhere — the two readers accept the same values and refuse the
+  same documents (`lenient_agrees_off_policy`). They do **not** return equal `Error`s: at the two
+  positions the tolerant policy declines to erase (a bare root null, an array element) it names a
+  different refusal on purpose, "since the remedy is different". On a document with no null at all
+  the two readers are literally the same function, message included
+  (`strict_unchanged_on_null_free`) — which is the sharpest form of "the policy governs exactly one
+  thing".
+- **What this ASSUMES.** That the parser's member-null absorption is equivalent to erasing member
+  nulls from the document tree the strict grammar would otherwise produce. The near-miss tokens
+  that make that an assumption rather than a theorem (`nul`, which falls through to the strict
+  arm; `nullish`, which the following `,`/`}` expectation catches) are grammar, and stay with
+  `Json.parse`. The differential below is the evidence for the assumption, not a proof of it.
+
+### What the corpus covers
+
+The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs
+the extracted model beside `Wire.Decode`. Each probe renders both answers into one string, so the
+outcome **class**, the decoded **value** and the error **message** are compared at once — a model
+agreeing on accept-vs-refuse alone would not notice a decoder that named the wrong expectation.
+
+| Pool | What is asked | Both classes exercised |
+|---|---|---|
+| the wire corpus's `nodes/` fixtures | every combinator (12 probes) on every value of every fixture — 228 fixtures, 9,374 values | yes (asserted) |
+| the wire corpus's `ops/` fixtures | the same 12 probes — 24 fixtures, 245 values | yes (asserted) |
+| a generated `JVal` sample | the same 12 probes over 400 seed-replayable documents, key alphabet drawn from the reference vocabulary's own member names | yes (asserted) |
+| the reference vocabulary | 150 generated nodes encoded and decoded, model against the same decoder written from the shipped combinators — the round-trip theorem's instance on the extracted code | accept path |
+| the same, refused | every corpus `nodes/` value and 400 generated documents through both node decoders | refuse path (asserted) |
+| the read policy | 7 hand-written null positions + 400 generated documents carrying the token at every position, rendered to wire text and read by `Json.parseDetailedWithPolicy` under BOTH policies | yes, and the policy is asserted to have FIRED |
+
+The **go-red case** hands the oracle a *blind bridge* that reads every wire integer as a float — the
+decode family's counterpart to the fold family's blind footprint — and requires `asInt` to
+disagree, on a hand-made value and over the generated sample. A green report is therefore known to
+be a comparison that can lose.
+
+The **proof** was falsified the same way before it was trusted, on scratch copies: dropping
+`as_float`'s `JInt` clause reddens `decode_total`; renaming the `"text"` kind tag in the encoder
+reddens `decode_encode_roundtrip`; making the tolerant reader erase one off-policy member shape
+reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have caught it.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** On the model: the four results above, for every input,
+   under no hypothesis at all — unlike the fold theorem, which rests on `independence_sound`, this
+   one assumes nothing about a domain. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
+2. **Differentially tested.** The extracted model agrees with `Wire.Decode` over the pools above,
+   on class, value and message. Agreement is over those pools, never over all inputs.
+3. **Assumed, and stated as such.**
+   - **The numeric payloads are opaque.** `jval` is parametric in the int and float carriers, and
+     `as_float` takes the widening `to_flt` where F# writes `float i`. No combinator in `Decode`
+     looks inside a number — it only moves one — so this is the precise statement of the layer
+     rather than a weakening; but it does mean nothing here is said about Int32 range or float
+     precision. The `JInt`/`JFloat` **distinction** is modelled, because the combinators branch on
+     it.
+   - **The parser's null handling, at the tree.** As above: the model's `read` is an assumption
+     about what the parser's two forks do to the document, evidenced by the differential.
+   - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as
+     for the fold model. The leg holds the committed oracle to a fresh extraction byte for byte,
+     which makes "the oracle is the model" a checked claim and nothing more.
+4. **Not claimed.** Anything about `Json.parse`; anything about a domain's own decoder beyond the
+   reference vocabulary modelled here (what carries to one is the combinator layer it is built
+   from, not its clauses); and anything about encode — `Canon.render`'s key ordering and float
+   layout are certified by the wire-format corpus, not by this theorem.
 
 ## Next
 
-Theorem 1 of the programme's WS6.1 — decoder totality — as a hand-written F\* model of the decode
-combinators over an abstract JSON value (the Fuaran wire is JSON with a kind-tag discipline, so this
-is not an EverParse artefact). Theorem 3, interpreter budget monotonicity, is `fuaran-program`'s and
-follows the same shape now that the prover is settled.
+**`Json.parse` itself** — the boundary theorem 1 names. Totality of the recursive-descent parser
+over bytes: the depth bound that makes deep input a named `Error` rather than an uncatchable stack
+overflow, the escape and `\uXXXX` paths, the int53 token guard, and the exhaustiveness of the
+`JsonErrorKind` classification. It is the one piece of this stack where an EverParse-shaped
+approach is worth pricing rather than assuming away.
+
+Theorem 3, interpreter budget monotonicity, is `fuaran-program`'s and follows the same shape now
+that the prover is settled.

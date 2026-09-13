@@ -972,3 +972,375 @@ let trustBoundary =
                   Expect.stringContains src "NodeKind.Note" "emits the inert placeholder, not a live component"
                   Expect.isFalse (src.Contains "NodeKind.Embed") "no live gated construction in the generated source"
               | Error m -> failtestf "scaffold failed: %s" m) ]
+
+// ---------------------------------------------------------------------------
+// Phase 125 — the GENERATIVE property over declared defaults.
+//
+// Phase 124 gave the two backends a payload-carrying union default and a typed
+// refusal on every formerly-silent path, and certified it BY CASE: a
+// payload-carrying fixture, plus a go-red probe per path. A case proves a case.
+// What a case cannot prove is that the two backends AGREE on a shape nobody
+// thought to write a case for — and they must, because `tsDefaultLit` takes its
+// admissibility from `tsIsDefault` while `fsDefaultLit` decides its own, so the
+// two admissibility rules are written twice and can drift apart in either
+// direction. One drift emits an F# encoder whose omit test has no TypeScript
+// counterpart; the other refuses a module in one language and ships it in the
+// other. Both are green builds.
+//
+// So this walks the neutral vocabularies, plants a DRAWN default at a drawn
+// field, and asserts the two answers agree — over hundreds of (type, value)
+// pairs including the mismatched ones, which is where a refusal has to arrive.
+//
+// **The ask this answers phrased the property as "every representable default
+// has a literal", and that is FALSE and must not be asserted.** Several
+// representable defaults are refused on purpose and correctly: a `HostOnly`
+// slot's placeholder is a host expression with no pattern spelling, a non-empty
+// list has no `List.isEmpty` analogue, a non-finite float has no F# literal, a
+// declared transparent union case is bare on the wire. The honest property is
+// AGREEMENT plus a NAMED refusal — which is what Phase 124's own design argues
+// for, and what would actually go red if it were undone.
+// ---------------------------------------------------------------------------
+
+/// A deterministic draw over the IDL VALUE model for a declared type. `wellFormed`
+/// asks for a value the type can carry; otherwise the draw deliberately mismatches,
+/// because a property that only ever plants well-formed defaults never reaches a
+/// refusal and certifies half the claim.
+let rec private drawValue
+    (idl: Idl)
+    (wellFormed: bool)
+    (depth: int)
+    (t: IdlType)
+    (r: ConfRng.T)
+    : IdlValue * ConfRng.T =
+    let pick (n: int) (r: ConfRng.T) = ConfRng.intBelow n r
+
+    if not wellFormed then
+        // A value of a SHAPE the declared type does not carry. Every backend must
+        // refuse these, and refuse them identically.
+        let k, r = pick 4 r
+
+        match k with
+        | 0 -> VStr "mismatched", r
+        | 1 -> VInt 7, r
+        | 2 -> VList [ VInt 1; VInt 2 ], r
+        | _ -> VOpaque, r
+    else
+        match t with
+        | TStr -> VStr "d", r
+        | TInt ->
+            let v, r = pick 5 r
+            VInt v, r
+        | TBool ->
+            let v, r = pick 2 r
+            VBool(v = 0), r
+        | TFloat ->
+            // The non-finite draw is deliberate: it has no F# literal, so it is one of
+            // the shapes both backends must REFUSE, and refusing it is a real answer.
+            let v, r = pick 4 r
+
+            (if v = 3 then VFloat nan else VFloat(float v)), r
+        | TEnum n ->
+            match idl.Enums |> List.tryFind (fun e -> e.Name = n) with
+            | Some e when not (List.isEmpty e.Cases) ->
+                let i, r = pick (List.length e.Cases) r
+                VEnum(List.item i e.Cases), r
+            | _ -> VEnum "Unknown", r
+        | TList inner ->
+            // Empty (renderable) and non-empty (refused — the encoder's omit test for a
+            // list is `List.isEmpty`, which has no non-empty analogue) are BOTH drawn.
+            let n, r = pick 2 r
+
+            if n = 0 || depth <= 0 then
+                VList [], r
+            else
+                let v, r = drawValue idl true (depth - 1) inner r
+                VList [ v ], r
+        | TUnion(n, _) ->
+            match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+            | Some u when not (List.isEmpty u.Cases) ->
+                let i, r = pick (List.length u.Cases) r
+                let c = List.item i u.Cases
+
+                if depth <= 0 then
+                    VUnion(c.Tag, []), r
+                else
+                    // The PAYLOAD-CARRYING shape the ask named. Each declared field of the
+                    // drawn case is filled, so this reaches `VUnion(tag, [(name, value)])`
+                    // and its nested forms rather than only the nullary spelling.
+                    let fields, r =
+                        ((([]: (string * IdlValue) list), r), c.Fields)
+                        ||> List.fold (fun (acc, r) f ->
+                            let v, r = drawValue idl true (depth - 1) f.Type r
+                            acc @ [ f.Name, v ], r)
+
+                    VUnion(c.Tag, fields), r
+            | _ -> VUnion("Missing", []), r
+        | TRecord n ->
+            match idl.Records |> List.tryFind (fun rc -> rc.Name = n) with
+            | Some rc when depth > 0 ->
+                let fields, r =
+                    ((([]: (string * IdlValue) list), r), rc.Fields)
+                    ||> List.fold (fun (acc, r) f ->
+                        let v, r = drawValue idl true (depth - 1) f.Type r
+                        acc @ [ f.Name, v ], r)
+
+                VRecord fields, r
+            | _ -> VRecord [], r
+        | TMap _ -> VMap [], r
+        | TJson -> VJson(JStr "j"), r
+        | TClosure
+        | TFn _ -> VClosure, r
+        | TOpaque -> VOpaque, r
+        | THosted _ -> VJson(JStr "hosted"), r
+        | TNode -> VNode("n", "Missing", []), r
+        | TVar _ -> VStr "var", r
+        | TKind -> VUnion("Missing", []), r
+        | TOp -> VUnion("Missing", []), r
+
+/// Plant `d` as the declared default of the field at `index`, counted in EXACTLY the order
+/// `allFields` above lists them (kinds, ops, union cases, records, node fields), leaving every
+/// other field alone. The `let` bindings are sequenced deliberately: a record-construction
+/// expression would leave the counter's order to the order the fields happen to be written in.
+let private plantDefault (idl: Idl) (index: int) (d: IdlValue) : Idl =
+    let mutable seen = -1
+
+    let at (f: IdlField) =
+        seen <- seen + 1
+
+        if seen = index then { f with Opt = OmitDefault d } else f
+
+    let kinds =
+        idl.Kinds
+        |> List.map (fun k ->
+            { k with
+                Fields = k.Fields |> List.map at })
+
+    let ops =
+        idl.Ops
+        |> List.map (fun o ->
+            { o with
+                Fields = o.Fields |> List.map at })
+
+    let unions =
+        idl.Unions
+        |> List.map (fun u ->
+            { u with
+                Cases =
+                    u.Cases
+                    |> List.map (fun c ->
+                        { c with
+                            Fields = c.Fields |> List.map at }) })
+
+    let records =
+        idl.Records
+        |> List.map (fun rc ->
+            { rc with
+                Fields = rc.Fields |> List.map at })
+
+    let nodeFields = idl.NodeFields |> List.map at
+
+    { idl with
+        Kinds = kinds
+        Ops = ops
+        Unions = unions
+        Records = records
+        NodeFields = nodeFields }
+
+[<Tests>]
+let declaredDefaultProperty =
+    testList
+        "Idl.DeclaredDefault"
+        [ testCase "the two backends AGREE on every drawn declared default (Phase 125)"
+          <| fun _ ->
+              let mutable rng = ConfRng.ofSeed 1250913
+              let mutable disagreements = []
+              let mutable unnamed = []
+              let mutable rendered = 0
+              let mutable refused = 0
+              let mutable unionPayloadsRendered = 0
+              let mutable transparentDivergences = 0
+
+              // The ONE admitted divergence, named rather than tolerated. `tsIsDefault` refuses a
+              // default whose case is a DECLARED TRANSPARENT union case, because such a case is on
+              // the wire BARE and a `$type`-tagged predicate would be about a value the JS encoder
+              // never sees. `fsDefaultLit` has no such check and renders it — correctly, because
+              // the F# omit test is a pattern match on the HOST value, where the case is not
+              // transparent at all. So the two backends are asymmetric for a real reason, and the
+              // consequence is that a vocabulary declaring this default generates in F# and refuses
+              // in TypeScript. Whether that consequence is intended is a design call this property
+              // does not make: it PINS the class so a NEW disagreement fails, and it requires the
+              // class to stay non-empty so the divergence cannot disappear unnoticed either.
+              let isTransparentCaseDefault (idl: Idl) (t: IdlType) (v: IdlValue) =
+                  match t, v with
+                  | TUnion(n, _), VUnion(tag, _) ->
+                      idl.Unions
+                      |> List.tryFind (fun u -> u.Name = n)
+                      |> Option.bind (TransparentUnion.tag idl.Harden)
+                      |> (=) (Some tag)
+                  | _ -> false
+
+              for iteration in 0..399 do
+                  let vi, r = ConfRng.intBelow (List.length neutralVocabularies) rng
+                  let name, idl = List.item vi neutralVocabularies
+                  let fields = allFields idl
+                  let fi, r = ConfRng.intBelow (List.length fields) r
+                  let field = List.item fi fields
+                  let wf, r = ConfRng.intBelow 4 r
+                  let value, r = drawValue idl (wf > 0) 2 field.Type r
+                  rng <- r
+
+                  let planted = plantDefault idl fi value
+                  let tags = probeTags planted
+                  let fs = Gen.fsharpModule "Phase125.Property" planted tags
+                  let ts = Gen.typescriptModule planted tags
+
+                  let where =
+                      sprintf
+                          "iteration %d, vocabulary %s, field '%s' : %A, default %A"
+                          iteration
+                          name
+                          field.Name
+                          field.Type
+                          value
+
+                  match fs, ts with
+                  | Ok _, Ok _ ->
+                      rendered <- rendered + 1
+
+                      match value with
+                      | VUnion(_, _ :: _) -> unionPayloadsRendered <- unionPayloadsRendered + 1
+                      | _ -> ()
+                  | Error fe, Error te ->
+                      refused <- refused + 1
+
+                      // A refusal must be the NAMED one. An untyped failure is the class
+                      // Phase 124 folded away, and it would satisfy an agreement law while
+                      // telling a caller nothing about what it has to fix.
+                      match fe, te with
+                      | CodegenError.UnsupportedDefault _, CodegenError.UnsupportedDefault _ -> ()
+                      | _ -> unnamed <- (where, sprintf "F#=%A TS=%A" fe te) :: unnamed
+                  | Ok _, Error te when isTransparentCaseDefault planted field.Type value ->
+                      // The named divergence above. Still required to be the TYPED refusal.
+                      transparentDivergences <- transparentDivergences + 1
+
+                      match te with
+                      | CodegenError.UnsupportedDefault _ -> ()
+                      | _ ->
+                          unnamed <-
+                              (where, sprintf "TS refused a transparent-case default untyped: %A" te)
+                              :: unnamed
+                  | Ok _, Error te ->
+                      disagreements <-
+                          (where, sprintf "F# rendered it; TypeScript refused with %A" te)
+                          :: disagreements
+                  | Error fe, Ok _ ->
+                      disagreements <-
+                          (where, sprintf "TypeScript rendered it; F# refused with %A" fe)
+                          :: disagreements
+
+              Expect.isEmpty
+                  disagreements
+                  (sprintf
+                      "the F# and TypeScript backends disagreed about whether a declared default is renderable. `tsDefaultLit` takes its admissibility from `tsIsDefault` and `fsDefaultLit` decides its own, so the rule is written twice — a disagreement means one of them has moved. Cases: %A"
+                      disagreements)
+
+              Expect.isEmpty
+                  unnamed
+                  (sprintf
+                      "a default was refused by something other than CodegenError.UnsupportedDefault, which is the untyped-refusal class Phase 124 folded away: %A"
+                      unnamed)
+
+              // The non-vacuity guard. Agreement holds trivially over a sample in which
+              // every default rendered, or in which every one was refused — and either
+              // shape is easy to fall into (drawing only well-formed values gives the
+              // first). The counts are asserted, and the payload-carrying union count
+              // separately, because THAT is the shape this phase's ask was about and the
+              // one that would silently stop being drawn if the generator narrowed.
+              Expect.isGreaterThan rendered 20 "the sample barely rendered any default, so agreement is near-vacuous"
+
+              Expect.isGreaterThan
+                  refused
+                  20
+                  "the sample barely refused any default, so the refusal half is near-vacuous"
+
+              Expect.isGreaterThan
+                  transparentDivergences
+                  0
+                  "the sample never reached the ONE admitted backend divergence (a declared transparent union case as a default), so this property is no longer pinning it — either the generator stopped drawing it, or the divergence was closed and this guard should be removed with a DECISIONS entry saying which backend moved"
+
+              Expect.isGreaterThan
+                  unionPayloadsRendered
+                  5
+                  "the sample rendered almost no PAYLOAD-CARRYING union default — the shape this property exists to hold, and the one a narrowed generator would stop producing without failing anything else"
+
+          // The property above is an agreement law, and an agreement law is satisfied by
+          // two backends that both refuse everything. This is the assertion that goes red
+          // if Phase 124's payload-carrying rendering is ever undone: a concrete
+          // value-carrying default, in the shape the 2026-09-06 ask named, rendered by
+          // BOTH backends. Stated as an equality on the emitted text rather than on a
+          // verdict, so a backend that starts emitting the bare tag for a case that takes
+          // arguments — a FUNCTION where a value belongs — fails here too.
+          testCase "a payload-carrying union default renders in both backends, with its payload"
+          <| fun _ ->
+              let idl = refIdl
+              let fields = allFields idl
+
+              let index =
+                  fields
+                  |> List.tryFindIndex (fun f ->
+                      match f.Type with
+                      | TUnion(n, _) ->
+                          idl.Unions
+                          |> List.exists (fun u ->
+                              u.Name = n && u.Cases |> List.exists (fun c -> not (List.isEmpty c.Fields)))
+                      | _ -> false)
+
+              match index with
+              | None ->
+                  failtest
+                      "the reference vocabulary declares no field of a union with a value-carrying case, so this assertion measures nothing"
+              | Some i ->
+                  let field = List.item i fields
+
+                  let unionName =
+                      match field.Type with
+                      | TUnion(n, _) -> n
+                      | _ -> ""
+
+                  let u = idl.Unions |> List.find (fun u -> u.Name = unionName)
+                  let c = u.Cases |> List.find (fun c -> not (List.isEmpty c.Fields))
+
+                  let payload, _ =
+                      ((([]: (string * IdlValue) list), ConfRng.ofSeed 1), c.Fields)
+                      ||> List.fold (fun (acc, r) f ->
+                          let v, r = drawValue idl true 2 f.Type r
+                          acc @ [ f.Name, v ], r)
+
+                  let planted = plantDefault idl i (VUnion(c.Tag, payload))
+                  let tags = probeTags planted
+
+                  match Gen.fsharpModule "Phase125.Payload" planted tags with
+                  | Error e ->
+                      failtestf
+                          "the F# backend refused a payload-carrying union default (%s.%s) — Phase 124 renders these, so this is that rendering undone: %A"
+                          unionName
+                          c.Tag
+                          e
+                  | Ok src ->
+                      Expect.stringContains
+                          src
+                          (unionName + "." + c.Tag + "(")
+                          "the case is APPLIED to its payload, not emitted as a bare tag (a bare tag for a case that takes arguments is a function where a value belongs)"
+
+                  match Gen.typescriptModule planted tags with
+                  | Error e ->
+                      failtestf
+                          "the TypeScript backend refused a payload-carrying union default (%s.%s) that F# rendered: %A"
+                          unionName
+                          c.Tag
+                          e
+                  | Ok src ->
+                      Expect.stringContains
+                          src
+                          ("=== \"" + c.Tag + "\"")
+                          "the TS omit predicate tests the discriminator, and (Phase 124) conjoins a test per declared field" ]

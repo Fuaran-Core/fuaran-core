@@ -93,6 +93,13 @@ internal static class RoundTrip
         {
             typeof(ColExpr),
             typeof(Transform),
+            // Phase 125 — the two `Slot` instantiations the algebra uses, and the grain a `Now`
+            // carries. Listed for the same reason every other union here is: a sample that never
+            // built a `Slot.Param` would let the round-trip law report green about a case it never
+            // saw, and the whole point of the slot is the param.
+            typeof(Slot<string>),
+            typeof(Slot<int>),
+            typeof(NowGrain),
             typeof(Cell),
             typeof(ColumnType),
             typeof(DataSource),

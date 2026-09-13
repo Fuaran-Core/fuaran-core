@@ -28,10 +28,12 @@ internal sealed class Gen
     private static readonly JoinMode[] JoinModes = Enum.GetValues<JoinMode>();
     private static readonly SortOrder[] SortOrders = Enum.GetValues<SortOrder>();
     private static readonly ColumnKind[] ColumnKinds = Enum.GetValues<ColumnKind>();
+
+    private static readonly ClockGrain[] ClockGrains = Enum.GetValues<ClockGrain>();
     private static readonly WindowFunctionKind[] WindowKinds = Enum.GetValues<WindowFunctionKind>();
 
-    internal const int ExprCases = 12;
-    internal const int StepCases = 14;
+    internal const int ExprCases = 13;
+    internal const int StepCases = 16;
     internal const int JsonCases = 6;
     internal const int SpaceCases = 5;
     internal const int ShapeCases = 4;
@@ -43,6 +45,8 @@ internal sealed class Gen
     private int _joinMode;
     private int _sortOrder;
     private int _columnKind;
+
+    private int _clockGrain;
     private int _windowKind;
     private int _cellCase;
     private int _names;
@@ -165,6 +169,8 @@ internal sealed class Gen
                 );
             case 10:
                 return Expr.IsNull(Expression(Below(ExprCases), depth - 1));
+            case 11:
+                return Expr.Now(ClockGrains[_clockGrain++ % ClockGrains.Length]);
             default:
                 return Expr.InParam(Expression(Below(ExprCases), depth - 1), "lp" + Below(3));
         }
@@ -236,9 +242,20 @@ internal sealed class Gen
                 return Step.Distinct;
             case 10:
                 return Step.Limit(Below(50), Below(10));
+            // Phase 125 — the PARAMETER halves of the two slots. Drawn as their own step cases
+            // rather than mixed into the literal ones above, because the coverage guard reads the
+            // `Slot` union's cases off the F# type: without a case that builds `Slot.Param`, the
+            // round-trip law would report green about the very half the slot exists for.
             case 11:
-                return Step.Union(Source());
+                return Step.Sort(
+                    new SortSlot(ColumnSlot.Parameter("sortCol" + Below(3)), SortOrders[_sortOrder++ % SortOrders.Length]),
+                    new SortSlot(Name(), SortOrders[_sortOrder++ % SortOrders.Length])
+                );
             case 12:
+                return Step.Limit(CountSlot.Parameter("take" + Below(3)), CountSlot.Parameter("skip" + Below(3)));
+            case 13:
+                return Step.Union(Source());
+            case 14:
                 return Step.Intersect(Source());
             default:
                 return Step.Except(Source());

@@ -105,6 +105,13 @@ public enum SortOrder
     Desc,
 }
 
+/// <summary>The grain of a <c>now</c> reading — the two cell shapes that can hold one.</summary>
+public enum ClockGrain
+{
+    Date,
+    Timestamp,
+}
+
 /// <summary>Effect axis 1 — does the artifact touch the world.</summary>
 public enum HostEffectKind
 {
@@ -308,6 +315,22 @@ internal static class Vocab
             SortDir.Tags.Asc => SortOrder.Asc,
             SortDir.Tags.Desc => SortOrder.Desc,
             _ => throw Interop.UnknownCase(nameof(SortDir), d.Tag),
+        };
+
+    internal static NowGrain ToCore(ClockGrain g) =>
+        g switch
+        {
+            ClockGrain.Date => NowGrain.Date,
+            ClockGrain.Timestamp => NowGrain.Timestamp,
+            _ => throw new ArgumentOutOfRangeException(nameof(g), g, "not a ClockGrain"),
+        };
+
+    internal static ClockGrain ClockGrainOf(NowGrain g) =>
+        g.Tag switch
+        {
+            NowGrain.Tags.Date => ClockGrain.Date,
+            NowGrain.Tags.Timestamp => ClockGrain.Timestamp,
+            _ => throw Interop.UnknownCase(nameof(NowGrain), g.Tag),
         };
 
     internal static HostEffect ToCore(HostEffectKind h) =>
