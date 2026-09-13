@@ -3567,68 +3567,6 @@ const plain = (pairs) =>
         | TUnion(n, args) -> TUnion(n, List.map (substG subst) args)
         | other -> other
 
-    /// Does this authored value POPULATE a hosted slot ([[THosted]]) anywhere?
-    ///
-    /// A hosted slot's CONTENT belongs to the host codec's own specification — the
-    /// IDL says only that the position carries verbatim JSON (see [[HostedCodec]]) —
-    /// so a value-generic sampler cannot draw content a host codec is obliged to
-    /// accept, and the real vocabulary's codecs are genuinely strict: an aria role
-    /// is a string, a row feed is an array of row objects or the legacy sentinel, a
-    /// `DataSource` is an object carrying `columns`. Any consumer that runs a
-    /// sampled value THROUGH a host codec therefore has to know which of its own
-    /// vectors it put beyond that codec's reach; this answers exactly that, so the
-    /// answer is a stated boundary rather than a swallowed failure.
-    ///
-    /// Precise, not conservative: it walks the value ALONGSIDE its declared type and
-    /// only reports a slot that is actually populated, so an optional hosted field
-    /// sampled absent does not count.
-    let usesHosted (idl: Idl) (v: IdlValue) : bool =
-        let rec go (t: IdlType) (value: IdlValue) : bool =
-            match t, value with
-            | THosted _, _ -> true
-            | TList inner, VList xs -> xs |> List.exists (go inner)
-            | TMap vt, VMap entries -> entries |> List.exists (fun (_, ev) -> go vt ev)
-            | TRecord n, VRecord fs ->
-                match idl.Records |> List.tryFind (fun r -> r.Name = n) with
-                | Some r -> fields r.Fields fs
-                | None -> false
-            | TUnion(n, args), VUnion(tag, fs) ->
-                match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
-                | Some u when List.length u.Params = List.length args ->
-                    match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                    | Some c ->
-                        let subst = Map.ofList (List.zip u.Params args)
-
-                        fields (c.Fields |> List.map (fun f -> { f with Type = substG subst f.Type })) fs
-                    | None -> false
-                | _ -> false
-            | TKind, VUnion(tag, fs) ->
-                match idl.Kinds |> List.tryFind (fun k -> k.Tag = tag) with
-                | Some k -> fields k.Fields fs
-                | None -> false
-            | TOp, VUnion(tag, fs) ->
-                match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
-                | Some o -> fields o.Fields fs
-                | None -> false
-            | TNode, VNode(_, kindTag, fs) -> node kindTag fs []
-            | TNode, VNodeEnv(_, envelope, kindTag, fs) -> node kindTag fs envelope
-            | _ -> false
-
-        and fields (declared: IdlField list) (authored: (string * IdlValue) list) : bool =
-            declared
-            |> List.exists (fun f ->
-                match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
-                | Some(_, av) when av <> VAbsent -> go f.Type av
-                | _ -> false)
-
-        and node (kindTag: string) (kindFields: (string * IdlValue) list) (envelope: (string * IdlValue) list) : bool =
-            fields idl.NodeFields envelope
-            || (match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
-                | Some k -> fields k.Fields kindFields
-                | None -> false)
-
-        go TNode v
-
     let private combineR (results: Result<string, string> list) : Result<string list, string> =
         (Ok [], results)
         ||> List.fold (fun acc r ->

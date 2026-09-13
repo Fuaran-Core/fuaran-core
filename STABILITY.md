@@ -2123,3 +2123,172 @@ with a guard that fails naming the regeneration command when a committed file an
 disagree.
 
 Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).
+
+## 0.23.0 — DRAFT: the Core API asks routed here by the 2026-09-06 UI campaign (Phase 125)
+
+**This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists
+yet, so the entries below are the contract a consumer will meet when the release gesture is made —
+not one anybody can pin today. They are grouped as one section because they are cut as ONE minor
+deliberately: each is a separate ask, and raising a pin four times to adopt four asks costs every
+consumer three raises it gains nothing from.
+
+Three of the four are BREAKING in shape and one is additive; a fifth entry is a removal. Each names
+the consumer that deletes a workaround on adoption, because that is the only reliable way to tell
+afterwards whether the ask was answered or merely implemented.
+
+### `ChainBreak.Reason` is a closed DU (`0.23.0`) — BREAKING
+
+`ChainBreak.Reason` is `ChainBreakReason`, not `string`:
+
+```fsharp
+type ChainBreakReason =
+    | SequenceMismatch
+    | PrevHashLinkBroken
+    | HashMismatch
+    | Unrecognised of reason: string
+```
+
+`firstChainBreakWith` and `firstCaptureBreak` mint the three named cases and never the fourth —
+which is what `Conformance.chainBreakReasonLaws` certifies, over both walkers, on every kind of
+break each can produce.
+
+**Why `Unrecognised` exists on a type this library alone mints.** It is the honest arm for a reason
+that arrives from outside the walkers: a stream verified by a host's own walker, a reason carried
+across a wire or a process boundary, a `ChainBreak` a consumer constructs itself.
+`ChainBreakReason.ofString` is total and lands there; `toString` renders a named case back to the
+exact string the walkers emitted before this release, so a consumer that logged those strings keeps
+logging the same bytes. The pair round-trips on the named cases, and that is a law too.
+
+**The consumer that deletes its workaround:** the UI tier's hash-chain verifier
+(`fuaran-dotnet`, `Fuaran.UI.OpStream.Abstractions.Verify.classify`). It declares this exact
+four-case type and string-matches Core's four spellings to reach it, and its own comment says so —
+"the Core ask above is what removes the projection entirely". On adoption the domain's
+`ChainBreakReason` and its `classify` both delete, and its `ofChainBreak` reads `b.Reason` directly.
+
+**Note what deliberately did NOT happen.** The two hash spellings the walkers used —
+`"hash mismatch (tampered op/actor/seq)"` and `"hash mismatch (tampered capture)"` — collapse to
+ONE `HashMismatch` case rather than becoming two. `Reason` answers *which check failed*, and both
+are the digest check; *which walker ran* is the caller's own choice and needs no case. The single
+measured consumer collapses them already, and a distinction every consumer immediately discards is a
+worse contract than no distinction. `toString` therefore renders the op-walk spelling for both, and
+`ofString` accepts either.
+
+**The sibling `Dag.DagBreak.Reason` is UNCHANGED and still a string.** It is a different type with
+its own two spellings and no measured consumer, so widening it here would be an unrequested breaking
+change made on the strength of a symmetry argument. When it is asked for, it takes the same shape.
+
+### `ColExpr.Now` — a `now` literal at a declared grain (`0.23.0`) — BREAKING
+
+```fsharp
+[<RequireQualifiedAccess>]
+type NowGrain =
+    | Date
+    | Timestamp
+
+type ColExpr =
+    | (…)
+    | Now of grain: NowGrain
+```
+
+A pipeline can name `now` without a host threading a param by hand for it. The grain set is the two
+`Cell` cases that can hold a clock reading (`Cell.Date` / `Cell.Timestamp`, both canonical ISO-8601
+strings); no `hour` / `minute` / `quarter` ladder is invented, because no cell could carry one and
+nothing asked for one.
+
+**The clock is a seam, not a platform call.** Core is FSharp.Core-only and Fable-clean, so it holds
+no clock:
+
+```fsharp
+type ClockWitness = NowGrain -> Cell
+```
+
+`ColExpr.substituteNow` / `Transform.substituteNow` replace every `Now g` with `Lit (clock g)` — the
+same resolve-by-substitution seam `InParam` already uses, reused deliberately rather than joined by
+a new one. `DataFrame.evalPipelineAt` / `evalPipelineInEnvAt` / `evalPipelineWithInEnvAt` are the
+entry points that pin a clock and then evaluate.
+
+**A `Now` that reaches evaluation unpinned is a strict `EvalError.UnpinnedClock`**, never a silent
+reading of the host's real clock. This mirrors `UnboundParam` exactly, and it is what makes the
+determinism law statable at all: `Conformance.nowLaws` certifies that evaluating the same pipeline
+twice under one `ClockWitness` yields identical tables, that a pinned clock's answer is the literal
+the witness returned, and that an unpinned `Now` is refused by name.
+
+**`EvalError` gains a case**, so an exhaustive match over it warns (`FS0025`).
+
+**The consumer that deletes its workaround:** the wire format's cross-side clause for a current
+time (`WIRE_FORMAT.md` §3.3.1), which documents a transform param whose binding is the host's `now`
+as the canonical route. That route stays valid for a host-fed binding; what it stops being is the
+ONLY way to say `now`, and the clause can point at `ColExpr.Now` for the pipeline-internal case.
+
+### `Limit` and `Sort` accept a param in their scalar slots (`0.23.0`) — BREAKING
+
+```fsharp
+[<RequireQualifiedAccess>]
+type Slot<'T> =
+    | Lit of 'T
+    | Param of name: string
+
+type Transform =
+    | (…)
+    | Sort of (Slot<string> * SortDir) list
+    | Limit of n: Slot<int> * offset: Slot<int>
+```
+
+`Slot<'T>` is the smallest shape that says "a literal, or a named parameter" and nothing else. It is
+deliberately NOT `ColExpr`: a `Limit` count has no row to read a column from, so admitting `Col` at
+that slot would admit an expression with no meaning there, and the closed two-case DU is what
+default-deny by shape means at a scalar slot.
+
+**Resolution reuses the param seam rather than adding one.** `Transform.substitute` resolves slot
+params from the same `Map<string, Cell>` env that `ColExpr.Param` reads, and `Transform.paramsOf`
+reports slot params alongside expression params — so a host's dependency edges, reactivity
+subscriptions and unbound-param pruning all pick them up with no new call. An unbound slot param
+reaching evaluation is `EvalError.UnboundParam(name, bound)`: the same case, the same shape, the
+strict `UnboundParam` the UI tier asked for. A bound param of the wrong cell shape (a `Str` at a
+count slot) is a `TypeError` naming the slot.
+
+`Conformance.slotParamLaws` certifies all three: a bound slot param evaluates identically to the
+literal it stands for, substitution and env-resolution agree, and an unbound one is refused by name.
+
+**`Sort` was decided in the same cut**, as the ask required, because it is the same question about
+the same DU. The ask calls its subject a sort key's column; Core has no `SortKey` type — the key is
+a bare `(column, direction)` tuple — and the column half is what became a `Slot<string>`. The
+DIRECTION stays a literal `SortDir`: no demand named it, and a param resolving to a `Cell` would
+have to carry a sort direction as a string, which is the stringly-typed shape this type exists to
+avoid.
+
+**Every construction and match site moves.** `Limit(10, 0)` becomes `Limit(Slot.Lit 10, Slot.Lit 0)`
+and `Sort [ "total", Desc ]` becomes `Sort [ Slot.Lit "total", Desc ]`. `Transform.limit` and
+`Transform.sortBy` are literal-taking constructors for the common case, so a call site that never
+uses a param reads as it did.
+
+### Declared defaults: the generative property (`0.23.0`) — ADDITIVE
+
+`Conformance.declaredDefaultLaws` is a generative property over the IDL value model: for a drawn
+declared default over a drawn IDL, the F# emitter and the TypeScript emitter EITHER both render a
+literal OR both refuse with `UnsupportedDefault` — never one each — and an admitted default renders
+in the expression position and the pattern position alike.
+
+**This is the half of the ask that was still open; the other half was already shipped.** The ask was
+for payload-carrying `OmitDefault (VUnion (tag, payload))` in all three emitters. **Phase 124
+(`0.21.0`) had already delivered exactly that** — `fsDefaultLit` renders every declared field of a
+value-carrying case, `defaultExpr` is a one-line alias of it, `tsIsDefault` conjoins a test per
+declared field nested to any depth, and the `dReq` / always-emit fallbacks are gone. What 124
+certified was CASE-BASED. This is the property saying the two emitters cannot drift apart on a shape
+nobody thought to write a case for — including, were it ever reverted, the very shape 124 closed.
+
+### `Idl.Gen.usesHosted` is REMOVED (`0.23.0`) — BREAKING
+
+`Idl.Gen.usesHosted` is gone. The `0.19.0` surface-narrowing section above kept it, reasoning that
+it was "a declared boundary, not a helper" for a generative cross-host comparison, and recorded
+plainly that it "has no caller in this repository today — the leg it was written for is not wired
+here".
+
+That leg is still not wired here, and the ruling (operator, 2026-09-10) is that it will not be: the
+cross-host fuzz leg the boundary was written for is not Core's to run, and the vocabulary-scale
+sweep is owned by the UI tier now. The sibling `encodeNodeEnv` was narrowed to internal on exactly
+the same evidence, and leaving one of a pair standing on an argument the other was already judged to
+have lost is how a surface accumulates members nobody can retire.
+
+`FS0039` for a caller. This repository has none — `src`, `tests`, `samples` and `docs` were swept —
+which is precisely why the decision had to be taken rather than discovered.
