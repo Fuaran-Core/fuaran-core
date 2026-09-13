@@ -270,6 +270,9 @@ module SampleAdequacy =
           "Conformance.casLaws", Unconditional "each iteration appends at the true head, at a stale head, and races two"
           "Conformance.idempotencyLaws",
           Unconditional "each iteration appends a fresh key then re-sends it under both heads"
+          "Conformance.chainBreakReasonLaws",
+          Unconditional
+              "each iteration BUILDS all three break kinds on both walkers — a renumbered sequence, a repointed prev-link, and a payload tampered with its sequence and link left intact — rather than drawing them, and the family's own last two laws fail if any kind was not actually observed"
           "Conformance.constructThenEncodeLaws",
           Unconditional
               "every corpus document is decoded, rebuilt through the authoring surface and re-encoded on every run — the sample is the caller's own corpus rather than a draw, and an empty one fails the family's own non-vacuity law instead of passing quietly" ]

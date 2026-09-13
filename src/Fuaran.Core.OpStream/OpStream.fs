@@ -73,12 +73,67 @@ type OpRecord<'Op> =
       PrevHash: string
       Hash: string }
 
+/// WHICH integrity check a `ChainBreak` failed (Phase 125) — the closed set of reasons the chain
+/// walkers can report, typed where the reason is MINTED rather than re-derived downstream by
+/// string-matching this library's spellings.
+///
+/// **Three named cases for four spellings, deliberately.** `firstChainBreakWith` and
+/// `firstCaptureBreak` spell the digest failure differently (`"tampered op/actor/seq"` vs
+/// `"tampered capture"`) because they walk different records; both are the SAME check, and which
+/// walker ran is the caller's own choice — it called one of them. A case that every consumer
+/// immediately collapses is a worse contract than no case, so both map to `HashMismatch`.
+///
+/// **`Unrecognised` is the honest arm, not a hedge**, even though only this library mints the named
+/// cases. A `ChainBreak` also reaches a reader from outside these walkers — a host's own verifier, a
+/// reason carried across a wire or a process boundary, a record a consumer constructs itself — and
+/// the alternative to naming that case is a reader that claims to know which check failed when it
+/// does not. `ChainBreakReason.ofString` is total and lands there; nothing in this module ever does
+/// (`Conformance.chainBreakReasonLaws`).
+type ChainBreakReason =
+    /// The record's sequence is not the one the walk expected — a gap, a reordering, a truncation.
+    | SequenceMismatch
+    /// The record's `PrevHash` does not name its predecessor's `Hash`.
+    | PrevHashLinkBroken
+    /// The record's `Hash` does not recompute from its own fields — a tampered op, actor, sequence
+    /// or captured value.
+    | HashMismatch
+    /// A reason that did not come from this module's walkers. Reported AS unknown: the chain is
+    /// genuinely broken, and nothing here will claim to know which check failed.
+    | Unrecognised of reason: string
+
+/// Render / parse a `ChainBreakReason` as the wire-and-log string the walkers emitted before the
+/// type existed, so a consumer that logged those bytes keeps logging them.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module ChainBreakReason =
+
+    /// The canonical string for a reason. `HashMismatch` renders the OP-walk spelling for both
+    /// walkers — one case, one rendering; the capture spelling is still accepted by `ofString`.
+    let toString (r: ChainBreakReason) : string =
+        match r with
+        | SequenceMismatch -> "sequence-number mismatch"
+        | PrevHashLinkBroken -> "prev-hash link broken"
+        | HashMismatch -> "hash mismatch (tampered op/actor/seq)"
+        | Unrecognised s -> s
+
+    /// Total: every string the walkers ever emitted classifies, and anything else is `Unrecognised`
+    /// verbatim rather than swept into the nearest-looking case. `toString >> ofString` is the
+    /// identity on the named cases.
+    let ofString (s: string) : ChainBreakReason =
+        match s with
+        | "sequence-number mismatch" -> SequenceMismatch
+        | "prev-hash link broken" -> PrevHashLinkBroken
+        | "hash mismatch (tampered op/actor/seq)"
+        | "hash mismatch (tampered capture)" -> HashMismatch
+        | other -> Unrecognised other
+
 /// The first integrity fault found in a hash-chained stream (Phase 21) — the record `Index`, why
 /// (sequence / prev-link / hash), and the expected vs got value. `verifyChain` is `firstChainBreak
 /// … |> Option.isNone`; this names *where* a corrupt stream broke (for `fromJsonlVerified` / debug).
+/// `Reason` is the closed `ChainBreakReason` as of `0.23.0` — it was a bare `string`, which every
+/// consumer that wanted to branch on it had to re-type by matching this module's own spellings.
 type ChainBreak =
     { Index: int
-      Reason: string
+      Reason: ChainBreakReason
       Expected: string
       Got: string }
 
@@ -421,13 +476,13 @@ module OpStream =
                 if r.Seq <> i then
                     Some
                         { Index = i
-                          Reason = "sequence-number mismatch"
+                          Reason = SequenceMismatch
                           Expected = string i
                           Got = string r.Seq }
                 elif r.PrevHash <> prev then
                     Some
                         { Index = i
-                          Reason = "prev-hash link broken"
+                          Reason = PrevHashLinkBroken
                           Expected = prev
                           Got = r.PrevHash }
                 else
@@ -437,7 +492,7 @@ module OpStream =
                     if r.Hash <> expectedHash then
                         Some
                             { Index = i
-                              Reason = "hash mismatch (tampered op/actor/seq)"
+                              Reason = HashMismatch
                               Expected = expectedHash
                               Got = r.Hash }
                     else
@@ -843,7 +898,13 @@ module OpStream =
         |> Result.bind (fun recs ->
             match firstChainBreak hashFn w recs with
             | None -> Ok recs
-            | Some b -> Error(sprintf "OpStream.fromJsonlVerified: chain breaks at record %d — %s" b.Index b.Reason))
+            | Some b ->
+                Error(
+                    sprintf
+                        "OpStream.fromJsonlVerified: chain breaks at record %d — %s"
+                        b.Index
+                        (ChainBreakReason.toString b.Reason)
+                ))
 
     // ---- snapshot / compaction (Phase 244) ----
 
@@ -1259,13 +1320,13 @@ module OpStream =
                 if c.Seq <> i then
                     Some
                         { Index = i
-                          Reason = "sequence-number mismatch"
+                          Reason = SequenceMismatch
                           Expected = string i
                           Got = string c.Seq }
                 elif c.PrevHash <> prev then
                     Some
                         { Index = i
-                          Reason = "prev-hash link broken"
+                          Reason = PrevHashLinkBroken
                           Expected = prev
                           Got = c.PrevHash }
                 else
@@ -1274,7 +1335,7 @@ module OpStream =
                     if c.Hash <> expectedHash then
                         Some
                             { Index = i
-                              Reason = "hash mismatch (tampered capture)"
+                              Reason = HashMismatch
                               Expected = expectedHash
                               Got = c.Hash }
                     else

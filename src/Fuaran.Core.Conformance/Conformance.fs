@@ -6717,3 +6717,244 @@ module Conformance =
                   + " builds encodes as what the codec decoded"
                 Passed = reencoded.IsNone
                 Counterexample = reencoded } ]
+
+    /// **Every reason this library MINTS is a named case** (Phase 125) — the law that makes
+    /// `ChainBreakReason.Unrecognised` an honest arm rather than a hedge.
+    ///
+    /// `ChainBreak.Reason` became a closed DU so a consumer stops re-deriving the type by
+    /// string-matching this library's spellings. That only helps if the walkers actually stay
+    /// inside the named cases: a walker that minted an `Unrecognised` would hand every consumer
+    /// back exactly the untyped string the type exists to remove, and nothing would say so. So this
+    /// family drives BOTH walkers — the op walk (`firstChainBreakWith`) and the capture walk
+    /// (`firstCaptureBreak`) — into EVERY break each can produce, and asserts the reason is named.
+    ///
+    /// The three breaks are BUILT each iteration rather than drawn, so the sample cannot miss one:
+    /// a sequence is renumbered, a prev-link is repointed, and a payload is tampered with its
+    /// sequence and prev-link left intact so the cheap checks pass and the digest check is the one
+    /// that fires. The final law is the non-vacuity guard — each break kind was actually observed —
+    /// because "no unnamed reason was minted" is trivially true of a walk that never broke.
+    ///
+    /// The `toString` / `ofString` pair is certified here too, in both directions: the round trip is
+    /// the identity on the named cases, and an unknown string lands in `Unrecognised` VERBATIM
+    /// rather than being swept into the nearest-looking case — which is the defect the consumer's
+    /// pre-typed form had, and the reason this type is worth its breaking change.
+    let chainBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
+        // A self-contained int-op witness: the claim is about THIS library's walkers, not about a
+        // host's, so there is no caller witness to take.
+        let sw: StreamWitness<int, int, string> =
+            { Apply = fun op state -> Ok(state + op)
+              Encode = string
+              Decode =
+                fun s ->
+                    match System.Int32.TryParse s with
+                    | true, v -> Ok v
+                    | false, _ -> Error("not an int: " + s) }
+
+        let hashFn = OpStream.defaultHash
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable unnamed = None
+        let mutable roundTrip = None
+        let mutable verbatim = None
+        let mutable seenOp = Set.empty
+        let mutable seenCapture = Set.empty
+
+        // The reason a break carries, or None when the walk found the chain intact — which is
+        // itself a defect here, since every input below is deliberately broken.
+        let reasonOf (label: string) (i: int) (b: ChainBreak option) : ChainBreakReason option =
+            match b with
+            | Some br ->
+                (match br.Reason with
+                 | Unrecognised s when unnamed.IsNone ->
+                     unnamed <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: the %s walk minted an unnamed reason %s — a walker inside this library must stay inside the named cases, or ChainBreakReason gives a consumer back the untyped string it exists to remove"
+                                 seed
+                                 i
+                                 label
+                                 s
+                         )
+                 | _ -> ())
+
+                Some br.Reason
+            | None ->
+                if unnamed.IsNone then
+                    unnamed <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: the %s walk reported NO break over a deliberately broken chain, so this family is measuring nothing"
+                                seed
+                                i
+                                label
+                        )
+
+                None
+
+        for i in 0 .. iterations - 1 do
+            // ---- a sound op chain of four records ----
+            let mutable state = 0
+            let mutable recs = OpStream.empty
+
+            for _ in 0..3 do
+                let op, r' = ConfRng.intBelow 50 rng
+                rng <- r'
+
+                match OpStream.append hashFn sw (Human "conf") (op + 1) state recs with
+                | Ok(s', recs') ->
+                    state <- s'
+                    recs <- recs'
+                | Error _ -> ()
+
+            let len = List.length recs
+
+            if len >= 2 then
+                // sequence: renumber the last record so the contiguity counter disagrees first.
+                let renumbered =
+                    recs
+                    |> List.mapi (fun j r -> if j = len - 1 then { r with Seq = r.Seq + 7 } else r)
+
+                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw renumbered) with
+                | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
+                | None -> ()
+
+                // prev-link: repoint the last record's PrevHash, leaving its Seq correct.
+                let repointed =
+                    recs
+                    |> List.mapi (fun j r ->
+                        if j = len - 1 then
+                            { r with PrevHash = r.PrevHash + "x" }
+                        else
+                            r)
+
+                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw repointed) with
+                | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
+                | None -> ()
+
+                // digest: tamper the OP only. Seq and PrevHash still agree, so the two cheap checks
+                // pass and the hash recomputation is what fails — the only way to reach that arm.
+                let tampered =
+                    recs
+                    |> List.mapi (fun j r -> if j = len - 1 then { r with Op = r.Op + 1000 } else r)
+
+                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw tampered) with
+                | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
+                | None -> ()
+
+            // ---- a sound capture log of three captures, then the same three breaks ----
+            let mutable caps = []
+
+            for k in 0..2 do
+                let v, caps' =
+                    OpStream.captureEffect hashFn string "nondeterministic" ("eff" + string k) (fun () -> k * 3) caps
+
+                ignore v
+                caps <- caps'
+
+            let clen = List.length caps
+
+            if clen >= 2 then
+                let capRenumbered =
+                    caps
+                    |> List.mapi (fun j c -> if j = clen - 1 then { c with Seq = c.Seq + 7 } else c)
+
+                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capRenumbered) with
+                | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
+                | None -> ()
+
+                let capRepointed =
+                    caps
+                    |> List.mapi (fun j c ->
+                        if j = clen - 1 then
+                            { c with PrevHash = c.PrevHash + "x" }
+                        else
+                            c)
+
+                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capRepointed) with
+                | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
+                | None -> ()
+
+                let capTampered =
+                    caps
+                    |> List.mapi (fun j c -> if j = clen - 1 then { c with Value = c.Value + "9" } else c)
+
+                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capTampered) with
+                | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
+                | None -> ()
+
+            // ---- the string pair, both directions ----
+            for named in [ SequenceMismatch; PrevHashLinkBroken; HashMismatch ] do
+                if
+                    ChainBreakReason.ofString (ChainBreakReason.toString named) <> named
+                    && roundTrip.IsNone
+                then
+                    roundTrip <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: ofString (toString %A) = %A — the rendering and the parse disagree, so a consumer reading a logged reason back does not recover the case that wrote it"
+                                seed
+                                i
+                                named
+                                (ChainBreakReason.ofString (ChainBreakReason.toString named))
+                        )
+
+            let alien, rA = ConfRng.intBelow 1000 rng
+            rng <- rA
+            let alienText = "a reason this library does not mint #" + string alien
+
+            match ChainBreakReason.ofString alienText with
+            | Unrecognised s when s = alienText -> ()
+            | other ->
+                if verbatim.IsNone then
+                    verbatim <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: ofString %s = %A — an unknown reason must land in Unrecognised carrying its own text, never be swept into a named case, which is a claim about which check failed that nothing established"
+                                seed
+                                i
+                                alienText
+                                other
+                        )
+
+        // The capture walk spells the digest failure differently; `toString` renders one spelling
+        // for the single `HashMismatch` case, so both walks are expected to have observed the same
+        // three strings.
+        let expected =
+            [ ChainBreakReason.toString SequenceMismatch
+              ChainBreakReason.toString PrevHashLinkBroken
+              ChainBreakReason.toString HashMismatch ]
+            |> Set.ofList
+
+        let missing (seen: Set<string>) =
+            Set.difference expected seen |> Set.toList |> String.concat ", "
+
+        [ { Law = "every reason the chain walkers mint is a NAMED ChainBreakReason case"
+            Passed = unnamed.IsNone
+            Counterexample = unnamed }
+          { Law = "ChainBreakReason.ofString (toString r) = r on every named case"
+            Passed = roundTrip.IsNone
+            Counterexample = roundTrip }
+          { Law = "ChainBreakReason.ofString carries an unknown reason into Unrecognised verbatim"
+            Passed = verbatim.IsNone
+            Counterexample = verbatim }
+          { Law = "non-vacuity: the op walk produced every break kind it can produce"
+            Passed = Set.isEmpty (Set.difference expected seenOp)
+            Counterexample =
+              if Set.isEmpty (Set.difference expected seenOp) then
+                  None
+              else
+                  Some(
+                      "the op walk never reported: "
+                      + missing seenOp
+                      + " — the laws above hold vacuously for the break kinds that were never produced"
+                  ) }
+          { Law = "non-vacuity: the capture walk produced every break kind it can produce"
+            Passed = Set.isEmpty (Set.difference expected seenCapture)
+            Counterexample =
+              if Set.isEmpty (Set.difference expected seenCapture) then
+                  None
+              else
+                  Some(
+                      "the capture walk never reported: "
+                      + missing seenCapture
+                      + " — the laws above hold vacuously for the break kinds that were never produced"
+                  ) } ]

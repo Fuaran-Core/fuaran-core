@@ -117,7 +117,10 @@ let tests =
                   match OpStream.firstChainBreak h sw reattributed with
                   | Some b ->
                       Expect.equal b.Index 1 "break localised to the re-attributed record"
-                      Expect.stringContains b.Reason "actor" "the break reason names actor tampering"
+                      // 0.23.0 — the reason is typed. `HashMismatch` is the digest check, which is
+                      // the one a re-attribution fails: the record keeps its sequence and its
+                      // prev-link, and only the pre-image the hash was taken over has moved.
+                      Expect.equal b.Reason HashMismatch "the break names the digest check"
                   | None -> failtest "expected a chain break"
               | Error e -> failtestf "build failed: %A" e
 
