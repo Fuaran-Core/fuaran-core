@@ -2,7 +2,7 @@
 
 ## 2026-09-13 — D33: four API asks cut as one minor — and the fourth was already shipped, so what it gets is the property
 
-**Decided (Phase 125).** The 2026-09-06 UI campaign routed four Core API asks here. They are cut as
+**Decided (Phase 125).** The UI tier routed four Core API asks here. They are cut as
 ONE minor because a consumer's cost is per RAISE and not per ask: four minors would have cost the
 same consumer three raises it gains nothing from, and the cohort rule moves the substrate as a
 system anyway.

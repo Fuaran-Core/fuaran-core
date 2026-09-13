@@ -2124,7 +2124,7 @@ disagree.
 
 Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).
 
-## 0.23.0 — DRAFT: the Core API asks routed here by the 2026-09-06 UI campaign (Phase 125)
+## 0.23.0 — DRAFT: the Core API asks routed here from the UI tier (Phase 125)
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists
 yet, so the entries below are the contract a consumer will meet when the release gesture is made —

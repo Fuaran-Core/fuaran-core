@@ -251,8 +251,8 @@
          0.22.0 gets an id that did not exist at 0.21.0. Note it is .NET-only and deliberately NOT in
          the Fable-compile gate: a C# assembly is not Fable-compiled. See DECISIONS.md D28 and
          STABILITY.md "The C# facade: an F#-free authoring surface over the closed unions". -->
-    <!-- 0.23.0 (2026-09-13): Phase 125 — the Core API asks the 2026-09-06 UI campaign routed
-         here, cut as ONE minor so a consumer raises once. ADVANCING rather than riding 0.22.0
+    <!-- 0.23.0 (2026-09-13): Phase 125 — the Core API asks the UI tier routed here, cut as ONE
+         minor so a consumer raises once. ADVANCING rather than riding 0.22.0
          because v0.22.0 is TAGGED: that slot is released, and the draft-slot rule requires a
          fresh version for a contract move. The slot is BREAKING in three places and additive in
          the fourth:
