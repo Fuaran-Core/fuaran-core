@@ -82,7 +82,9 @@ let private incrementalTouch =
     // The sort is deliberately part of the touched pipeline (Phase 115): the merge path is the
     // only place in the seam that reaches `List.sortWith`, `List.indexed` and a stored order, and a
     // pipeline without it would compile this file while leaving that path untouched.
-    let pipeline = [ Filter(Binary(Gt, Col "a", Lit(Int 0))); Sort [ "a", Asc ] ]
+    let pipeline =
+        [ Filter(Binary(Gt, Col "a", Lit(Int 0))); Transform.sortBy [ "a", Asc ] ]
+
     let declared = Incremental.isIncremental (Incremental.plan pipeline)
 
     let ordering =
@@ -94,6 +96,57 @@ let private incrementalTouch =
         | Ok next -> declared, ordering, Incremental.footprintString (Incremental.footprint next)
         | Error e -> declared, ordering, DataFrame.errorString e
     | Error e -> declared, ordering, DataFrame.errorString e
+
+// Phase 125 — the three new public shapes, touched because each carries a construct the Fable
+// pipeline could plausibly refuse and a .NET suite would never notice. `Slot<'T>` is a GENERIC
+// union in a wire codec; `ChainBreakReason` is a DU minted inside the op-stream walkers; and
+// `ColExpr.Now`'s clock pinning is built on `lazy`, which is the one construct this phase
+// introduced whose Fable behaviour is not obvious from its .NET behaviour. A browser-side consumer
+// that binds a page size or names `now` reaches all three.
+let private slotAndClockTouch =
+    let t: Table =
+        { Schema = [ "a", IntType ]
+          Columns = [ Column.create "a" IntType [ Int 3; Int 1; Int 2 ] ] }
+
+    // A param at both slot kinds, resolved through the SAME env an expression param reads.
+    let paged =
+        [ Sort [ Slot.Param "orderBy", Asc ]; Limit(Slot.Param "take", Slot.Lit 0) ]
+
+    let env = Map.ofList [ "orderBy", Str "a"; "take", Int 2 ]
+    let wire = DataFrameCodec.encodePipeline paged
+
+    let bound =
+        match DataFrame.evalPipelineInEnv env paged t with
+        | Ok r -> string (List.length r.Columns)
+        | Error e -> DataFrame.errorString e
+
+    // The unbound refusal, which must be the strict named one rather than a default.
+    let unbound =
+        match DataFrame.evalPipelineInEnv Map.empty paged t with
+        | Ok _ -> "UNBOUND SLOT PARAM WAS NOT REFUSED"
+        | Error e -> DataFrame.errorString e
+
+    // `Now` pinned through the lazy once-per-grain witness, and the unpinned refusal beside it.
+    let clock: ClockWitness =
+        fun g ->
+            match g with
+            | NowGrain.Date -> Date "2026-09-13"
+            | NowGrain.Timestamp -> Timestamp "2026-09-13T00:00:00Z"
+
+    let pinned =
+        match DataFrame.evalPipelineAt clock [ Derive("d", Now NowGrain.Date) ] t with
+        | Ok r -> string (List.length r.Schema)
+        | Error e -> DataFrame.errorString e
+
+    let unpinned =
+        match DataFrame.evalPipeline [ Derive("d", Now NowGrain.Timestamp) ] t with
+        | Ok _ -> "UNPINNED NOW WAS NOT REFUSED"
+        | Error e -> DataFrame.errorString e
+
+    let reason =
+        ChainBreakReason.toString (ChainBreakReason.ofString "prev-hash link broken")
+
+    sprintf "%s|%s|%s|%s|%s|%s" wire bound unbound pinned unpinned reason
 
 // Query — declaration codec round-trip.
 let private queryTouch =
@@ -410,6 +463,7 @@ let main argv =
           // file — a compile error attached to the line that names the surface — did not apply to it.
           (sprintf "%A" deltaTouch)
           (sprintf "%A" incrementalTouch)
+          slotAndClockTouch
           queryTouch
           (sprintf "%A" (List.length conformanceTouch))
           projectionTouch
