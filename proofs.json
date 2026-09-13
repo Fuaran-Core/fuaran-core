@@ -1,0 +1,143 @@
+{
+  "kind": "proofs",
+  "subject": "Fuaran-Core",
+  "$comment": "This repository's claims ladder, declared as data. It is `proofs/README.md`'s own ladder — what is PROVED, what is only TESTED, what is ASSUMED — in a schema a tool can read, so the question does not have to be answered by reading prose and hoping two documents use the same words. A `not claimed` item is the ABSENCE of a row, never a row: the README enumerates those, and enumerating them here would turn a disclaimer into a claim. Levels are the closed set proved | tested | assumed | policy. Authored by hand, never generated — editing the ladder means editing this file and the README together.",
+  "claims": [
+    {
+      "id": "fold-confluence",
+      "level": "proved",
+      "claim": "On the model, for every N and every permutation of a lane set, the fold halts with the same canonical conflict report or folds to the same state. Proved with no assume and no admit under --report_assumes error; the fold half under `independence_diamond` for a lane set whose lanes all apply from the base, the halt half under no hypothesis at all.",
+      "phase": "fuaran-core#131",
+      "evidence": {
+        "theorem": "fold_confluence",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decode-total",
+      "level": "proved",
+      "claim": "Every decode combinator reaches exactly one outcome on every input, and which one is characterised structurally — so the failure classification is exhaustive rather than merely non-empty.",
+      "phase": "fuaran-core#135",
+      "evidence": {
+        "theorem": "decode_total",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decode-node-wf",
+      "level": "proved",
+      "claim": "The recursive node decoder is total on an arbitrary JSON value and succeeds on exactly the well-formed documents. Termination is content here rather than a formality: the decoder descends into a child array obtained by name, so nothing structural is visible at the call site.",
+      "phase": "fuaran-core#135",
+      "evidence": {
+        "theorem": "decode_node_wf",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decode-encode-roundtrip",
+      "level": "proved",
+      "claim": "Decoding an encoded node returns that node, for every node of the reference vocabulary, at every depth.",
+      "phase": "fuaran-core#135",
+      "evidence": {
+        "theorem": "decode_encode_roundtrip",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "lenient-agrees-off-policy",
+      "level": "proved",
+      "claim": "On every document the read policy does not name, the tolerant and strict readers accept the same values and refuse the same documents — a promise about the VERDICT, not about the message; on a document with no null at all the two are literally the same function.",
+      "phase": "fuaran-core#135",
+      "evidence": {
+        "theorem": "lenient_agrees_off_policy",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "fold-differential",
+      "level": "tested",
+      "claim": "Production's delta recovery from a content-addressed DAG, its pairwise conflict sweep, the composition and the replay together agree with the extracted model over three lane pools, per lane set and per sampled arrival order — outcome and composed merge script, not merely a hash. Agreement is over the sets drawn and the orders enumerated, never over all inputs.",
+      "phase": "fuaran-core#131",
+      "evidence": {
+        "family": "Proofs.Oracle"
+      }
+    },
+    {
+      "id": "decode-differential",
+      "level": "tested",
+      "claim": "The extracted decode model agrees with the shipped combinators over the wire corpus and a generated sample, compared on outcome CLASS, decoded VALUE and error MESSAGE at once — a model agreeing on accept-versus-refuse alone would not notice a decoder naming the wrong expectation. A blind bridge reading every integer as a float is required to make the comparison fail, so a green report is known to be one that can lose.",
+      "phase": "fuaran-core#135",
+      "evidence": {
+        "family": "Proofs.Oracle"
+      }
+    },
+    {
+      "id": "independence-diamond",
+      "level": "assumed",
+      "claim": "The fold theorem's one domain hypothesis: two operations whose footprints are declared disjoint, and which both apply at a state, each apply after the other and reach the same state. Sampled — never proved — including directly against the extracted model's own independence predicate on the reference witness, with a sample-adequacy guard and its own go-red.",
+      "phase": "fuaran-core#132",
+      "evidence": {
+        "assumption": "independence_diamond holds of the domain the fold is run over"
+      }
+    },
+    {
+      "id": "lanes-apply",
+      "level": "assumed",
+      "claim": "The fold half is stated for a lane set whose every lane applies cleanly from the base state. Nothing is proved about a lane set one of whose lanes rejects; the halt half still covers it whenever it halts.",
+      "phase": "fuaran-core#132",
+      "evidence": {
+        "assumption": "lanes_apply — every lane of the set applies from the base state"
+      }
+    },
+    {
+      "id": "dag-outside-the-model",
+      "level": "assumed",
+      "claim": "Node identity, hashing, the merge base and the topological order that recovers a lane's delta are outside the model entirely, which starts where the deltas are known. The differential level is the only evidence about them.",
+      "phase": "fuaran-core#131",
+      "evidence": {
+        "assumption": "the content-addressed DAG layer beneath the fold is correct"
+      }
+    },
+    {
+      "id": "extractor-and-compiler-trusted",
+      "level": "assumed",
+      "claim": "The proof leg holds the committed oracle to a fresh extraction byte for byte, which makes 'the oracle is the model' a checked claim; it does not make the F# backend correct. The least-examined link in the chain, and named as such.",
+      "phase": "fuaran-core#131",
+      "evidence": {
+        "assumption": "the F* extractor and the F# compiler are correct"
+      }
+    },
+    {
+      "id": "sets-are-lists",
+      "level": "assumed",
+      "claim": "The model reads sets as lists under membership and the host compares canonical (deduplicated, sorted) reports, so multiplicity and order inside a report are unobserved by construction.",
+      "phase": "fuaran-core#131",
+      "evidence": {
+        "assumption": "the list-for-set reading loses nothing the comparison observes"
+      }
+    },
+    {
+      "id": "parser-null-absorption",
+      "level": "assumed",
+      "claim": "That the parser's absorption of object-member nulls is equivalent to erasing member nulls from the document tree the strict grammar would otherwise produce. The near-miss tokens that make this an assumption rather than a theorem are grammar, and stay with the parser; the differential is the evidence for it, not a proof of it.",
+      "phase": "fuaran-core#135",
+      "evidence": {
+        "assumption": "the parser's member-null fork equals erasing member nulls from the strict tree"
+      }
+    },
+    {
+      "id": "proof-leg",
+      "level": "policy",
+      "claim": "Which prover is pinned, how many cold-cache runs a check is, and that a model edited without re-extracting fails the leg — the reproducibility posture the proved rows above are only as good as. Policy, not algebra: no theorem addresses it.",
+      "phase": "fuaran-core#131",
+      "evidence": {
+        "document": "proofs/README.md"
+      }
+    }
+  ]
+}
