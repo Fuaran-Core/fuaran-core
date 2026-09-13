@@ -23,6 +23,24 @@ asserts the two emitters AGREE — both render, or both refuse — which is the 
 shape nobody wrote a case for, and the one that goes red if 124 is ever undone. A refuted premise
 whose finding lands as an assertion is worth more than a mechanism built on top of it.
 
+**And the property found a divergence on its first run, which is reported rather than resolved.** A
+declared TRANSPARENT union case as a default is refused by the TypeScript backend — bare on the wire,
+so a tagged predicate would be about a value the JS encoder never sees — and rendered by the F#
+backend, whose omit test is a pattern match on the HOST value, where the case is not transparent.
+Both are locally correct, and the consequence is a vocabulary that generates in F# and refuses in
+TypeScript. Phase 124 added the TS refusal knowing it was newly reachable and did not add an F#
+counterpart; nothing records whether the asymmetry was intended. Under the bound doctrine's
+escalate-don't-guess axis this release does NOT pick a side: the property admits exactly that class
+by name, fails on any other disagreement, and fails if the class becomes empty — so the divergence
+cannot widen, cannot spread, and cannot be closed silently either.
+
+**Where the property lives is itself a decision.** Not `Fuaran.Core.Conformance`: a law family
+certifies a HOST against a contract, and nothing outside this repository implements this generator,
+so it would be a family no adopter could run — and the kit is Fable-clean while the generator is
+.NET-only and build-time by declaration, so the reference would break the portability gate the kit's
+own claim rests on. It sits beside Phase 124's case-based certification, which is where the question
+it answers was already being asked.
+
 **`ChainBreakReason` collapses the two hash spellings, and that is a decision.** Core's walkers mint
 four distinct reason strings; the type has three named cases. `Reason` answers *which check failed*,
 and `"tampered op/actor/seq"` and `"tampered capture"` are the same check run by two walkers — which

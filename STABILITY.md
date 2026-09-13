@@ -2262,20 +2262,45 @@ and `Sort [ "total", Desc ]` becomes `Sort [ Slot.Lit "total", Desc ]`. `Transfo
 `Transform.sortBy` are literal-taking constructors for the common case, so a call site that never
 uses a param reads as it did.
 
-### Declared defaults: the generative property (`0.23.0`) — ADDITIVE
+### Declared defaults: the generative property, and one named backend divergence (`0.23.0`)
 
-`Conformance.declaredDefaultLaws` is a generative property over the IDL value model: for a drawn
-declared default over a drawn IDL, the F# emitter and the TypeScript emitter EITHER both render a
-literal OR both refuse with `UnsupportedDefault` — never one each — and an admitted default renders
-in the expression position and the pattern position alike.
+**No public surface moved for this entry.** The generative property lives in this repository's own
+suite (`tests/Fuaran.Core.Tests/IdlCertificationTests.fs`, beside Phase 124's case-based
+certification), NOT as a `Fuaran.Core.Conformance` law family. Two reasons, both structural: a
+conformance family certifies a HOST against a contract, and nothing outside this repository
+implements this generator, so the family would be one no adopter could ever run; and
+`Fuaran.Core.Conformance` is Fable-clean while `Fuaran.Core.Idl.Codegen` is .NET-only and build-time
+by declaration, so the reference would break the Fable gate the kit's own portability claim rests on.
 
-**This is the half of the ask that was still open; the other half was already shipped.** The ask was
-for payload-carrying `OmitDefault (VUnion (tag, payload))` in all three emitters. **Phase 124
-(`0.21.0`) had already delivered exactly that** — `fsDefaultLit` renders every declared field of a
-value-carrying case, `defaultExpr` is a one-line alias of it, `tsIsDefault` conjoins a test per
-declared field nested to any depth, and the `dReq` / always-emit fallbacks are gone. What 124
-certified was CASE-BASED. This is the property saying the two emitters cannot drift apart on a shape
-nobody thought to write a case for — including, were it ever reverted, the very shape 124 closed.
+**What the property says.** For a drawn declared default over a drawn field of the neutral
+vocabularies, the F# backend and the TypeScript backend EITHER both render a literal OR both refuse
+with `UnsupportedDefault` — never one each. `tsDefaultLit` takes its admissibility from
+`tsIsDefault`, and `fsDefaultLit` decides its own, so the rule is written twice and can drift in
+either direction: one drift emits an F# encoder whose omit test has no TypeScript counterpart, the
+other refuses a module in one language and ships it in the other. Both are green builds.
+
+**The ask's own phrasing — "every representable default has a literal" — is FALSE, and is
+deliberately not what is asserted.** Several representable defaults are refused on purpose and
+correctly: a `HostOnly` slot's placeholder is a host expression with no pattern spelling, a non-empty
+list has no `List.isEmpty` analogue, a non-finite float has no F# literal. The honest property is
+AGREEMENT plus a NAMED refusal.
+
+**The half of the ask that was already shipped.** The ask was for payload-carrying
+`OmitDefault (VUnion (tag, payload))` in all three emitters. **Phase 124 (`0.21.0`) had already
+delivered exactly that** — `fsDefaultLit` renders every declared field of a value-carrying case,
+`defaultExpr` is a one-line alias of it, `tsIsDefault` conjoins a test per declared field nested to
+any depth, and the `dReq` / always-emit fallbacks are gone. What 124 certified was CASE-BASED. A case
+proves a case; this is the property that holds over the shapes nobody wrote a case for.
+
+**ONE backend divergence exists, and the property PINS it rather than tolerating it.** A default
+whose case is a DECLARED TRANSPARENT union case is refused by the TypeScript backend — such a case is
+on the wire BARE, so a `$type`-tagged predicate would be about a value the JS encoder never sees —
+and RENDERED by the F# backend, whose omit test is a pattern match on the HOST value, where the case
+is not transparent at all. Both are locally correct; the consequence is that a vocabulary declaring
+such a default generates in F# and refuses in TypeScript. The property admits exactly this class by
+name and fails on any other disagreement, and it also fails if the class becomes EMPTY — so closing
+the divergence is possible, but not silently. Whether it should be closed, and which backend moves,
+is a design call this release does not take.
 
 ### `Idl.Gen.usesHosted` is REMOVED (`0.23.0`) — BREAKING
 

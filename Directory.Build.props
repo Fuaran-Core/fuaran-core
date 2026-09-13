@@ -267,9 +267,10 @@
              param reaches those positions inside Core's own type rather than by a parallel
              pre-substitution structure at every host. Compile-breaking at every construction and
              match site of those two cases (`FS0001` / `FS0025`).
-         (4) `Fuaran.Core.Conformance.declaredDefaultLaws` — a generative property over the IDL
-             value model that every representable default has a literal in both emitters. Purely
-             additive.
+         (4) The codegen ask was found ALREADY SHIPPED (Phase 124, `0.21.0`); what it still owed
+             was the GENERATIVE property, which lives in this repository's own suite rather than in
+             the conformance kit — no public surface moved for it. It also found one previously
+             unrecorded backend divergence, now pinned by name. See STABILITY.md.
          And one REMOVAL: `Idl.Gen.usesHosted` is gone (fuaran ruling 13, operator 2026-09-10) —
          `FS0039` for a caller, of which this repository has none. MINOR rather than major under
          the pre-1.0 policy at the head of STABILITY.md. See DECISIONS.md D29 and STABILITY.md
