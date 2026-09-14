@@ -1,18 +1,27 @@
 {
   "kind": "proofModules",
   "subject": "Fuaran-Core",
-  "$comment": "What the proof leg COSTS, declared per module, so that a growth in prover time is named rather than discovered when CI times out. `proofs/check.ps1` reads this file: every green CHECK line prints the module's measured seconds beside its budget, and a run over budget prints a named COST warning — never a failure on its own, because prover time varies by machine and by load and a budget is a smoke detector rather than a gate. `check.ps1 -Strict` promotes the warnings to a red leg for a session that wants one. This is NOT `proofs.json`: that file is the claims ladder — what is proved, tested and assumed, at a closed set of levels, checked row-by-row against the tree by the Proofs.Ladder family — and a wall-clock budget is a claim at none of those levels and is not per-claim but per-module. The ladder's `proof-leg` policy row points here for the cost half. Coverage is checked BOTH ways: a module the leg checks with no entry here, and an entry here for a module the leg does not check, are each a COST warning naming what to do. Hand-authored; the seeding rule below says how a number is arrived at, and bumping one is the recorded act the README's `Running it` section describes.",
+  "$comment": "What the proof leg COSTS, declared per module, so that a growth in prover time is named rather than discovered when CI times out. `proofs/check.ps1` reads this file: every green CHECK line prints the module's measured seconds beside its budget, and a run over budget prints a named COST warning — never a failure on its own, because prover time varies by machine and by load and a budget is a smoke detector rather than a gate. `check.ps1 -Strict` promotes the warnings to a red leg for a session that wants one. This is NOT `proofs.json`: that file is the claims ladder — what is proved, tested and assumed, at a closed set of levels, checked row-by-row against the tree by the Proofs.Ladder family — and a wall-clock budget is a claim at none of those levels and is not per-claim but per-module. The ladder's `proof-leg` policy row points here for the cost half. Coverage is checked BOTH ways: a module the leg checks with no entry here, and an entry here for a module the leg does not check, are each a COST warning naming what to do. Hand-authored; the seeding rule below says how a number is arrived at, and bumping one is the recorded act the README's `Running it` section describes. SINCE PHASE 164 each entry also carries a `floorSeconds`, and that number is a GATE rather than a smoke detector: a module that verifies in less than its floor fails the leg on the spot, because a run faster than the module can possibly be is not evidence of speed but of a cache that was not cold. The two rules sit in `seeding` and `floorSeeding` below, and the asymmetry between warning above and failing below is argued in the second of them.",
   "seeding": {
     "rule": "budgetSeconds = max(2 x the slowest observed cold-cache run, 20s), rounded up to the next 10s.",
     "toleranceFactor": 2,
     "floorSeconds": 20,
     "$comment": "The tolerance is applied ONCE, here, when a number is seeded — `check.ps1` multiplies nothing, so the pair it prints is the measurement against the ceiling and there is no second arithmetic to hold in your head. Seeded from the SLOWEST observed cold run rather than the median, deliberately: on the machine these were measured on, six concurrent sessions inflate a cold check by ~1.8x with nothing about the tree changed (TreeOps 45s to 77s, JsonParse 52s to 99s within one three-run leg), so a budget seeded from the median would fire on a busy afternoon and teach a reader to ignore it. The 20s floor is for the sub-5s modules, where 2x is inside ordinary process-start noise. These are figures from a Windows dev machine; CI's windows-latest runner is a different machine and its first runs are what will say whether the tolerance is generous enough there. If it is not, that is a bump, and a bump is recorded."
   },
+  "floorSeeding": {
+    "rule": "floorSeconds = the FASTEST genuine cold run ever observed, halved, rounded DOWN to the whole second; 0 for a module whose fastest genuine cold run is under 5s.",
+    "divisor": 2,
+    "zeroBelowSeconds": 5,
+    "$comment": "The floor is the budget's mirror and the two are deliberately NOT symmetric in what they do. A budget is a ceiling and a smoke detector: an overshoot is a true measurement of a true cost, so it warns and the leg stays green. A floor is a gate: `check.ps1` FAILS the leg on the spot, naming the module and the time, because a module that verified faster than it can possibly verify has not told you it is fast — it has told you the measurement is worthless, and everything measured after it shares the apparatus. Implausibly fast is the one direction in which a lie looks like good news. WHAT BOUGHT THIS (2026-09-14, recorded in Phase 143's outcome): an orphaned background `check.ps1` kept writing the then-shared `proofs/obj/cache` while a replacement run started in the same worktree; the replacement found the orphan's `.checked` files, reported `TreeOps 0s`, `Skeleton 0s`, `Chain 0s` and printed `==== proofs: green`. It was caught by a human reading the timings. Phase 164 closed the cause (a per-invocation cache directory, `obj/cache-<pid>`) and this file closes the class (a floor, so a shared cache anywhere else still cannot pass as evidence). Seeded from the FASTEST observed rather than the median, and halved on top, for the mirror of the budget's reason: a floor that fires on a fast quiet machine teaches a reader to ignore it, and the failure this catches lands at or near ZERO seconds, so an enormous margin costs nothing in detection. The 5s rule is for the modules where halving lands inside process-start noise — `Skeleton` checks in about one second, and any positive floor there would be a coin toss. An ABSENT `floorSeconds` is a cost finding rather than a failure (a sibling adding a model should no more go red for a floor nobody has measured than for a budget nobody has measured); an explicit 0 is a different statement and reads as one. `check.ps1 -NoFloor` is the deliberate opt-out for a machine genuinely that fast, and it says so in the log. Re-seeding a floor DOWNWARDS is the same recorded act as bumping a budget upwards: the new number, the `fastestSeconds` it came from, and your phase. One asymmetry makes that act rarer than the budget's: a run FASTER than the recorded `fastestSeconds` but still above the floor leaves the floor correct and merely conservative, so it obliges nothing — where a run over budget is a live finding every time. Only a breach forces the number, and a breach is first a reason to look for a second writer. The figures here were seeded on 2026-09-14 from the fastest of three cold passes on one quiet Windows dev machine; CI's runner is a different machine, and if it is genuinely faster than half of these, that is a re-seed and a re-seed is recorded."
+  },
   "modules": [
     {
       "module": "DagFold",
       "budgetSeconds": 100,
       "measuredSeconds": 48,
+      "floorSeconds": 12,
+      "fastestSeconds": 24,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#148",
       "note": "The first model, and the one section 11's delta recovery lives in. It carries no `--ext context_pruning`; what it carries instead is the SMT-pattern lesson (see the README's per-module costs) — `rev` / `app` / `ids_of` / `ops_of` rewrite into one another and their lemmas deliberately have NO `SMTPat`. Adding one back is the cost cliff here, and it is a cliff rather than a slope: the query stops returning."
     },
@@ -20,6 +29,9 @@
       "module": "WireDecode",
       "budgetSeconds": 70,
       "measuredSeconds": 33,
+      "floorSeconds": 6,
+      "fastestSeconds": 12,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#148",
       "note": "The decode combinators. Default context, no scoped options; the cost is ordinary and the spread between an idle and a contended machine (15s to 33s) is most of it."
     },
@@ -27,6 +39,9 @@
       "module": "TreeOps",
       "budgetSeconds": 160,
       "measuredSeconds": 77,
+      "floorSeconds": 19,
+      "fastestSeconds": 38,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#148",
       "note": "Carries `#set-options \"--ext context_pruning\"` at line 62 — 300s with the default context against 56s pruned, measured on the pinned prover. The single most expensive module in the leg even so, because it is an order of magnitude larger than DagFold. If this budget is ever bumped, check first that the pruning option is still in force: losing it is a 5x regression that looks like ordinary growth in the log."
     },
@@ -34,13 +49,19 @@
       "module": "Skeleton",
       "budgetSeconds": 20,
       "measuredSeconds": 2,
+      "floorSeconds": 0,
+      "fastestSeconds": 1,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#148",
-      "note": "The composite, thin on purpose — the argument is in the two halves it joins. At the 20s floor: 2x of a 2s measurement is inside process-start noise, so the floor is what keeps this entry from being a false-alarm generator."
+      "note": "The composite, thin on purpose — the argument is in the two halves it joins. At the 20s floor: 2x of a 2s measurement is inside process-start noise, so the floor is what keeps this entry from being a false-alarm generator. (That 20s is the BUDGET rule's minimum ceiling — read `seeding.floorSeconds` — and is a different thing from this entry's `floorSeconds`, which is the Phase 164 per-module time floor and is 0 here.) The 0 is the whole reason `floorSeeding` has a `zeroBelowSeconds`: this module genuinely checks in about one second, so half of its fastest run is under a second and any positive floor would be decided by process-start noise rather than by whether the cache was cold. It is therefore the ONE module in the leg that a shared cache could still make implausibly fast without this file noticing — the per-invocation cache directory in `check.ps1` is what covers it, and the floor here is honest about covering nothing."
     },
     {
       "module": "Chain",
       "budgetSeconds": 30,
       "measuredSeconds": 12,
+      "floorSeconds": 5,
+      "fastestSeconds": 10,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#148",
       "note": "The two integrity walkers. Default context; 2x of 12s rounds to the floor's neighbourhood anyway."
     },
@@ -48,6 +69,9 @@
       "module": "JsonParse",
       "budgetSeconds": 200,
       "measuredSeconds": 99,
+      "floorSeconds": 20,
+      "fastestSeconds": 41,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#148",
       "note": "Carries `#set-options \"--ext context_pruning\"` at line 98 — 128s default against 72s pruned. The widest spread in the leg (52s to 99s across one three-run pass), because a 45-constructor alphabet in a large mutual group is exactly the shape a loaded machine punishes; the budget is sized for the top of that spread and not its middle."
     },
@@ -55,6 +79,9 @@
       "module": "Preservation",
       "budgetSeconds": 190,
       "measuredSeconds": 93,
+      "floorSeconds": 16,
+      "fastestSeconds": 33,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#140",
       "note": "The apply engine, seeded by the phase that added the model over SIX cold runs, two `-Runs 3` passes: 39s, 36s, 27s and then 25s, 42s, 32s. The slowest is the 42s, and it is the one the rule takes — it was measured with a sibling session's full repo gate running beside it on the same machine, which is precisely the contention the tolerance exists to absorb rather than a run to discard. 2x42 rounds to 90s. Seeding from the first pass alone would have given 80s, which every run still fits; the number moved because the rule says slowest observed, and a rule applied only to the convenient half of the data is not the rule. Carries `#set-options \"--ext context_pruning\"` like the two modules above, and one SCOPED exception beside it that this budget depends on: `invert_applicable` proves 78 goals in a single query and sits under `#push-options \"--z3rlimit 200\"`, because at the leg's default 40 it was close enough to the ceiling that a different `--quake` seed exhausted it — green standalone, red under check.ps1. If this module ever needs a large bump, check that BOTH are still in force before believing the growth is ordinary: losing the scoped rlimit does not read as slowness, it reads as a flake. BUMPED by fuaran-core#140 from 90s/42s: section 8 added the container capability — a second engine clause for clause, the invariant, two premise refutations and the `--quake`-proved lemmas over them. Seeded from a `-Runs 3` pass measuring 85s, 93s and 65s, so the rule's SLOWEST observed is the 93s and 2x93 rounds to 190. Two things about that are worth the sentence. The first draft of this bump used the 71s a single earlier run had measured and set 150s — which is the rule applied to the convenient half of the data, exactly what the seeding note above warns against, and the 93s run happened in the very pass that would have shipped it. The second is that the 93s run EXCEEDED the old 90s budget: this is not a ceiling raised to fit a green run, it is a budget that had genuinely been left behind by the module underneath it."
     },
@@ -62,6 +89,9 @@
       "module": "TreeDiff",
       "budgetSeconds": 30,
       "measuredSeconds": 12,
+      "floorSeconds": 4,
+      "fastestSeconds": 8,
+      "floorPhase": "fuaran-core#164",
       "phase": "fuaran-core#141",
       "note": "The diff — `Diff.toOps`'s two refusals, the four passes, and the container-aware mirror. Seeded over EIGHT cold runs: 9s, 10s, 9s, 9s, 9s before the Phase 161 merge and 12s, 9s, 9s after it, so the rule's slowest observed is 12s, 2x is 24s and the next 10s is 30. It was first written as the 20s floor off the first five runs, and the 12s arrived in the very pass that would have shipped that number — the same shape `Preservation`'s entry below records, and the reason the rule says slowest rather than typical. Nothing regressed: the 12s run is inside the old 20s too, and the module is unchanged between the two passes; what moved is which runs the rule had seen. It is the cheapest model in the leg after `Skeleton`, and the reason is worth knowing before anyone reads a future bump as ordinary growth: what is proved here is what the four passes GUARANTEE ABOUT THE SCRIPT — shape, order and the refusal characterisation — and not what applying that script DOES, which the README's theorem 6 carries at level 2 instead. The lemmas are therefore structural inductions over lists, which Z3 discharges quickly; the reconstruction theorem, if it is ever taken, reasons about `ins` and `rem_at` over intermediate trees and would put this module in `Preservation`'s cost class rather than `Chain`'s. Carries `#set-options \"--ext context_pruning\"`, like the three modules above and for the same reason — it opens `TreeOps` and `DagFold`, whose ninety-odd patterned lemmas would otherwise be live at every query here."
     },
