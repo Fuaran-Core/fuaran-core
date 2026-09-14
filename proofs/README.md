@@ -6,7 +6,8 @@ the pinned prover, the extracted model agrees with production over every lane se
 host draws, and the model reads beside the F# in one sitting — and four further theorems have
 shipped beside it since. **Shipped, five in all: fold confluence (131, with its hypothesis
 corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
-totality (135), independence soundness for the tree algebra (133), chain integrity (136), and
+totality (135), independence soundness for the tree algebra (133), chain integrity (136, its
+content-id premise decomposed by 145), and
 `Json.parse` totality, bounded (146).** Each carries its own claims ladder in its own section
 below; the "Next" section at the foot is the live list.
 
