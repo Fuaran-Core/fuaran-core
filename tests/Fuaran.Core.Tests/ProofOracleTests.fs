@@ -78,14 +78,15 @@ let private productionFold
     : LaneFoldOutcome =
     FoldConfluence.foldOnce w fp OpStream.defaultHash hashState state0 baseOp lanes
 
-/// Production's merge SCRIPT (or canonical halt report) through a real DAG — the same
-/// construction `foldOnce` uses: each lane chained onto one base node under its own actor.
-let private productionScript
+/// The real DAG `FoldConfluence.foldOnce` builds for a lane set — each lane chained onto one base
+/// node under its own actor — with the base id and the lane heads it produced. One definition,
+/// because three places here need the same construction and a second copy of it would be a second
+/// thing to keep in step with `foldOnce`.
+let private productionDag
     (w: StreamWitness<'Op, 'State, 'Rej>)
-    (fp: 'Op -> Footprint)
     (baseOp: 'Op)
     (lanes: 'Op list list)
-    : Result<'Op list, string> =
+    : string * string list * Dag.T<'Op> =
     let hashFn = OpStream.defaultHash
     let baseId, d0 = Dag.append hashFn w (Human "base") baseOp "" Dag.empty
 
@@ -102,6 +103,17 @@ let private productionScript
 
                 hs @ [ head ], d')
             ([], d0)
+
+    baseId, heads, dag
+
+/// Production's merge SCRIPT (or canonical halt report) through that DAG.
+let private productionScript
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (fp: 'Op -> Footprint)
+    (baseOp: 'Op)
+    (lanes: 'Op list list)
+    : Result<'Op list, string> =
+    let baseId, heads, dag = productionDag w baseOp lanes
 
     match Dag.reconcileMany fp dag baseId heads with
     | Ok script -> Ok script
@@ -980,6 +992,174 @@ let private policyProbe (d: MJValN) (t: PolicyTally) : PolicyTally =
                0) }
 
 // ---------------------------------------------------------------------------
+//  Phase 134 — the DAG BENEATH the fold, differentially.
+//
+//  Sections 0–10 of the model start where the lane deltas are known, so until now the oracle was
+//  fed them directly while production rebuilt them from a content-addressed DAG, and the
+//  difference between those two starting points was the widest unproved gap in the claims ladder.
+//  Section 11 closes it on the model side (`between_chain`, `reconcile_many_dag_eq`,
+//  `fold_confluence_dag`); what runs here is the other half — production's OWN
+//  `Dag.ancestorsOf` / `topoOrder` / `Dag.between` / `Dag.betweenOps`, on the DAG `foldOnce`
+//  actually builds, against the model's recovery on the SAME nodes.
+//
+//  Nothing is recomputed across the bridge: the ids the model walks are the content hashes
+//  production minted, so a disagreement can only be about the RECOVERY. The one step the model
+//  does not prove — that Kahn's frontier drain and the reverse of the parent walk are the same
+//  order on a spine — is exactly what these cases measure.
+// ---------------------------------------------------------------------------
+
+/// A production `Dag.T` as the model reads it: the same nodes, the same content ids, the same
+/// parent lists.
+let private toModelDag (dag: Dag.T<'Op>) : DagFold.dag<'Op> =
+    { DagFold.nodes =
+        dag.Nodes
+        |> Map.toList
+        |> List.map (fun (_, n) ->
+            { DagFold.nid = n.Id
+              DagFold.nparents = n.Parents
+              DagFold.nop = n.Op }) }
+
+/// The faithful bridge — what every real run uses.
+let private unperturbed (_: string) (_: string list) (dag: Dag.T<'Op>) : DagFold.dag<'Op> = toModelDag dag
+
+/// The go-red instrument, and the fold family's blind-footprint counterpart for this layer: every
+/// lane's FIRST node is re-parented from the base onto the PREVIOUS lane's head, so the model
+/// walks a spine the DAG does not have. The ids are untouched, so every lookup still succeeds and
+/// the only thing that has moved is the shape the recovery walks — which is the thing under test.
+let private reparented (baseId: string) (heads: string list) (dag: Dag.T<'Op>) : DagFold.dag<'Op> =
+    let previousHead (actor: Actor) =
+        match actor with
+        | Human name when name.StartsWith "lane-" ->
+            match System.Int32.TryParse(name.Substring 5) with
+            | true, i when i > 0 && i - 1 < List.length heads -> Some(List.item (i - 1) heads)
+            | _ -> None
+        | _ -> None
+
+    { DagFold.nodes =
+        dag.Nodes
+        |> Map.toList
+        |> List.map (fun (_, n) ->
+            let parents =
+                if n.Parents = [ baseId ] then
+                    match previousHead n.Actor with
+                    | Some p when p <> baseId -> [ p ]
+                    | _ -> n.Parents
+                else
+                    n.Parents
+
+            { DagFold.nid = n.Id
+              DagFold.nparents = parents
+              DagFold.nop = n.Op }) }
+
+/// Every way production's per-lane delta recovery and the model's disagree on ONE lane set, plus
+/// how many ops were actually recovered — a run that recovered nothing has compared two empty
+/// lists and measured nothing at all.
+let private deltaDisagreements
+    (bridge: string -> string list -> Dag.T<'Op> -> DagFold.dag<'Op>)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (lanes: 'Op list list)
+    : string list * int =
+    let baseId, heads, dag = productionDag w baseOp lanes
+    let model = bridge baseId heads dag
+    // One walk step per node in the DAG, which is the bound production's own work-list runs to.
+    let fuel = model.nodes
+
+    let diffs =
+        heads
+        |> List.mapi (fun i head ->
+            let p = Dag.betweenOps dag baseId head
+            let o = DagFold.between_ops model fuel baseId head
+
+            if p <> o then
+                Some(
+                    sprintf
+                        "lane %d: the recovered delta differs\n  production: [%s]\n  model:      [%s]"
+                        i
+                        (p |> List.map w.Encode |> String.concat "; ")
+                        (o |> List.map w.Encode |> String.concat "; ")
+                )
+            else
+                None)
+        |> List.choose id
+
+    diffs, (heads |> List.sumBy (fun h -> List.length (Dag.betweenOps dag baseId h)))
+
+/// The oracle's fold FROM THE DAG — `fold_once_dag`, the Phase 134 entry point beside
+/// `fold_once` — rendered exactly as `FoldConfluence.foldOnce` renders production's. Where
+/// `oracleFold` above is handed the lane deltas, this one is handed the DAG and recovers them.
+let private oracleFoldFromDag
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (fp: 'Op -> Footprint)
+    (hashState: 'State -> string)
+    (state0: 'State)
+    (baseOp: 'Op)
+    (lanes: 'Op list list)
+    : LaneFoldOutcome =
+    let baseId, heads, dag = productionDag w baseOp lanes
+    let model = toModelDag dag
+
+    match DagFold.fold_once_dag (modelApply w) (fp >> toModelFootprint) model model.nodes baseId state0 heads with
+    | DagFold.LaneFolded s -> LaneFolded(hashState s)
+    | DagFold.LaneHalted cs ->
+        LaneHalted(FoldConfluence.canonicalConflictReport w.Encode (cs |> List.map ofModelConflict))
+    | DagFold.LaneRejected r -> LaneRejected(sprintf "%A" r)
+
+type private DeltaTally =
+    {
+        Failure: string option
+        /// Ops recovered across every lane of every trial — the vacuity guard.
+        Recovered: int
+        /// Lane sets carrying a lane of two or more ops: a one-node chain exercises no walk.
+        Chains: int
+    }
+
+/// Run the delta differential over `iterations` generated lane sets from one pool.
+let private deltaDifferential
+    (label: string)
+    (bridge: string -> string list -> Dag.T<'Op> -> DagFold.dag<'Op>)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (gen: LaneGen<'Op, 'State>)
+    (laneCount: int)
+    (seed: int)
+    (iterations: int)
+    : DeltaTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable failure: string option = None
+    let mutable recovered = 0
+    let mutable chains = 0
+
+    for i in 0 .. iterations - 1 do
+        let lanes, r' = gen.Lanes laneCount rng
+        rng <- r'
+
+        if lanes |> List.exists (fun l -> List.length l > 1) then
+            chains <- chains + 1
+
+        let diffs, got = deltaDisagreements bridge w gen.BaseOp lanes
+        recovered <- recovered + got
+
+        match diffs, failure with
+        | d :: _, None ->
+            failure <- Some(sprintf "%s: seed=%d iter=%d\n%s\n%s" label seed i (renderLanes w.Encode lanes) d)
+        | _ -> ()
+
+    { Failure = failure
+      Recovered = recovered
+      Chains = chains }
+
+let private expectDeltaAgreement (label: string) (t: DeltaTally) =
+    match t.Failure with
+    | Some why -> failtest why
+    | None ->
+        Expect.isGreaterThan t.Recovered 0 (sprintf "%s: no ops were recovered at all (recovered=%d)" label t.Recovered)
+
+        Expect.isGreaterThan
+            t.Chains
+            0
+            (sprintf "%s: no trial carried a lane longer than one op, so no chain was walked" label)
+
+// ---------------------------------------------------------------------------
 
 [<Tests>]
 let proofOracleTests =
@@ -1380,4 +1560,146 @@ let proofOracleTests =
                       rng <- r'
                       swept <- runProbes toModelBlind "blind" v swept
 
-                  Expect.isNonEmpty swept.Disagreements "the blind bridge loses over the generated sample as well" ]
+                  Expect.isNonEmpty swept.Disagreements "the blind bridge loses over the generated sample as well"
+
+          // ---- Phase 134: production's DELTA RECOVERY beside the model's ----
+
+          testCase "production's betweenOps recovers the model's delta over the reference witness"
+          <| fun _ ->
+              deltaDifferential "reference witness" unperturbed treeW treeLaneGen 3 1340 120
+              |> expectDeltaAgreement "reference witness, 3 lanes"
+
+          testCase "production's betweenOps recovers the model's delta over the reference witness at 4 lanes"
+          <| fun _ ->
+              deltaDifferential "reference witness" unperturbed treeW treeLaneGen 4 1341 60
+              |> expectDeltaAgreement "reference witness, 4 lanes"
+
+          testCase "production's betweenOps recovers the model's delta over the work-plan domain"
+          <| fun _ ->
+              deltaDifferential "work-plan domain" unperturbed planW planLaneGen 3 1342 150
+              |> expectDeltaAgreement "work-plan domain, 3 lanes"
+
+          testCase "production's betweenOps recovers the model's delta over the work-plan domain at 5 lanes"
+          <| fun _ ->
+              deltaDifferential "work-plan domain" unperturbed planW planLaneGen 5 1343 40
+              |> expectDeltaAgreement "work-plan domain, 5 lanes"
+
+          testCase "production's betweenOps recovers the model's delta over the corpus ops pool"
+          <| fun _ ->
+              match SiblingCorpus.resolve "ops" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let ops =
+                      match loadCorpusOps root with
+                      | Ok ops -> ops
+                      | Error why -> failtestf "a corpus op could not be projected to a footprint: %s" why
+
+                  Expect.isGreaterThan (List.length ops) 8 "the ops/ family carries a real pool"
+
+                  let baseOp =
+                      { Name = "base"
+                        Fp = (List.head ops).Fp }
+
+                  let n = List.length ops
+                  let mutable recovered = 0
+                  let mutable chains = 0
+
+                  let check (lanes: CorpusOp list list) =
+                      if lanes |> List.exists (fun l -> List.length l > 1) then
+                          chains <- chains + 1
+
+                      match deltaDisagreements unperturbed corpusW baseOp lanes with
+                      | [], got -> recovered <- recovered + got
+                      | d :: _, _ -> failtestf "corpus lanes\n%s\n%s" (renderLanes corpusW.Encode lanes) d
+
+                  for i in 0 .. n - 1 do
+                      for j in i + 1 .. n - 1 do
+                          check [ [ List.item i ops ]; [ List.item j ops ] ]
+
+                          for k in j + 1 .. n - 1 do
+                              check [ [ List.item i ops ]; [ List.item j ops ]; [ List.item k ops ] ]
+
+                  // Multi-op lanes are where the WALK is exercised: a one-node chain is recovered
+                  // by a single step and would certify almost nothing about the closure.
+                  for i in 0 .. n - 2 do
+                      check [ [ List.item i ops; List.item (i + 1) ops ]; [ List.item ((i + 2) % n) ops ] ]
+
+                  Expect.isGreaterThan recovered 0 "ops were recovered"
+                  Expect.isGreaterThan chains 0 "multi-op lanes were walked"
+
+          testCase "the oracle's DAG-shaped fold agrees with production over the work-plan domain"
+          <| fun _ ->
+              // `fold_once_dag` is the Phase 134 entry point: the model doing the WHOLE thing from
+              // the content-addressed DAG — recovering each lane's delta, sweeping the pairs,
+              // composing and replaying — where `fold_once` is handed the deltas. Compared against
+              // production end to end, and against the deltas-first oracle beside it, so a
+              // disagreement says which of the two halves moved.
+              let mutable rng = ConfRng.ofSeed 1344
+              let mutable folded = 0
+              let mutable halted = 0
+
+              for i in 1..120 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+
+                  let p =
+                      productionFold planW planFootprint planHash planLaneGen.State0 planLaneGen.BaseOp lanes
+
+                  let o =
+                      oracleFoldFromDag planW planFootprint planHash planLaneGen.State0 planLaneGen.BaseOp lanes
+
+                  let deltasFirst = oracleFold planW planFootprint planHash planLaneGen.State0 lanes
+
+                  if p <> o then
+                      failtestf
+                          "iter %d: the DAG-shaped oracle and production differ\n%s\n  production: %A\n  oracle:     %A"
+                          i
+                          (renderLanes encPlanOp lanes)
+                          p
+                          o
+
+                  if o <> deltasFirst then
+                      failtestf
+                          "iter %d: fold_once_dag and fold_once differ on the same lanes\n%s\n  from the DAG: %A\n  from deltas:  %A"
+                          i
+                          (renderLanes encPlanOp lanes)
+                          o
+                          deltasFirst
+
+                  match p with
+                  | LaneFolded _ -> folded <- folded + 1
+                  | LaneHalted _ -> halted <- halted + 1
+                  | LaneRejected _ -> ()
+
+              Expect.isGreaterThan folded 0 "some lane sets folded"
+              Expect.isGreaterThan halted 0 "some lane sets halted"
+
+          testCase "a model DAG whose lanes hang off the WRONG parent disagrees with production"
+          <| fun _ ->
+              // The teeth. Re-parenting each lane's first node onto the previous lane's head makes
+              // the model walk a longer spine than the DAG has, so it recovers a longer delta. If
+              // this comes back clean, the green cases above certify nothing: they would be
+              // comparing a recovery that cannot notice the shape it walks.
+              let mutable rng = ConfRng.ofSeed 1342
+              let mutable found = 0
+              let mutable example = ""
+
+              for _ in 1..150 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+
+                  match deltaDisagreements reparented planW planLaneGen.BaseOp lanes with
+                  | [], _ -> ()
+                  | d :: _, _ ->
+                      found <- found + 1
+
+                      if example = "" then
+                          example <- d
+
+              Expect.isGreaterThan
+                  found
+                  0
+                  "a DAG whose lanes hang off the wrong parent must recover different deltas — this comparison cannot lose"
+
+              Expect.stringContains example "the recovered delta differs" "the disagreement names what moved" ]
