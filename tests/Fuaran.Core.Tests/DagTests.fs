@@ -220,7 +220,7 @@ let tests =
                   { Dag.T.Nodes = d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }) }
 
               match Dag.firstBreak h sw tampered with
-              | Some b -> Expect.stringContains b.Reason "content-id" "names a content-id mismatch"
+              | Some b -> Expect.equal b.Reason ContentIdMismatch "names a content-id mismatch"
               | None -> failtest "expected a break"
 
               // a real node whose parent is dropped from the map: its id still matches its content
@@ -231,9 +231,56 @@ let tests =
 
               match Dag.firstBreak h sw orphaned with
               | Some b ->
-                  Expect.stringContains b.Reason "parent" "names a missing parent"
+                  Expect.equal b.Reason MissingParent "names a missing parent"
                   Expect.equal b.Got ra "reports the missing parent id"
               | None -> failtest "expected a break"
+
+          // ---- Phase 147: DagBreak.Reason is a closed DU ----
+
+          testCase "fromJsonlVerified's error renders the PRE-0.24.0 spellings byte for byte"
+          <| fun _ ->
+              // The compatibility half of Phase 147, pinned rather than asserted in prose. `Reason`
+              // is typed now, but this error text is what a consumer outside this library matches,
+              // and `DagBreakReason.toString` is the only thing keeping it what it was. An exact
+              // comparison, not a substring: this case exists to go red if the wording ever moves.
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+
+              let bLine =
+                  (Dag.toJsonl sw.Encode d2).Split('\n') |> Array.find (fun l -> l.Contains b)
+
+              match Dag.fromJsonlVerified h sw bLine with
+              | Error e ->
+                  Expect.equal
+                      e
+                      (sprintf "Dag.fromJsonlVerified: missing parent at node %s" b)
+                      "the missing-parent load error is unchanged"
+              | Ok _ -> failtest "expected the dangling-parent DAG to be refused on load"
+
+              let tampered =
+                  { Dag.T.Nodes = d1.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }) }
+
+              match Dag.firstBreak h sw tampered with
+              | Some br ->
+                  Expect.equal
+                      (DagBreakReason.toString br.Reason)
+                      "content-id mismatch (tampered node)"
+                      "the content-id spelling is unchanged"
+              | None -> failtest "expected a break"
+
+          testCase "dagBreakReasonLaws certify the named-case discipline on the DAG walker (Phase 147)"
+          <| fun _ ->
+              let results = Conformance.dagBreakReasonLaws 5147 120
+
+              let fails =
+                  results
+                  |> List.filter (fun r -> not r.Passed)
+                  |> List.map (fun r -> sprintf "%s — %A" r.Law r.Counterexample)
+
+              if not (List.isEmpty fails) then
+                  failtestf "dagBreakReasonLaws failed:\n%s" (String.concat "\n" fails)
+
+              Expect.equal (Conformance.dagBreakReasonLaws 5147 120) results "same seed ⇒ identical report"
 
           // ---- conformance: dagLaws (Phase 07) ----
 

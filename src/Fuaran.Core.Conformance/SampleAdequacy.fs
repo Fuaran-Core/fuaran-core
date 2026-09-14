@@ -254,6 +254,9 @@ module SampleAdequacy =
           "Conformance.canonicalFloatLaws",
           Unconditional "each iteration renders a drawn float and the three non-finite tokens"
           "Conformance.encoderInjectivityLaws", Unconditional "each iteration hashes a drawn pair of trees"
+          "Conformance.codecInjectivityLaws",
+          Unconditional
+              "the left-inverse law is BUILT by every iteration — one drawn op round-tripped through the domain's own Decode, and a codec with a total left inverse is injective — so the family's weight does not rest on the collision search beside it, whose own third law fails when the draw was too narrow to compare anything"
           "Conformance.projectionLaws", Unconditional "each iteration projects, re-imports and scopes the same tree"
           "Conformance.aiSurfaceLaws",
           Unconditional "each iteration walks the catalogue and exercises approved, denied and unknown"
@@ -281,4 +284,7 @@ module SampleAdequacy =
               "each iteration BUILDS all three break kinds on both walkers — a renumbered sequence, a repointed prev-link, and a payload tampered with its sequence and link left intact — rather than drawing them, and the family's own last two laws fail if any kind was not actually observed"
           "Conformance.constructThenEncodeLaws",
           Unconditional
-              "every corpus document is decoded, rebuilt through the authoring surface and re-encoded on every run — the sample is the caller's own corpus rather than a draw, and an empty one fails the family's own non-vacuity law instead of passing quietly" ]
+              "every corpus document is decoded, rebuilt through the authoring surface and re-encoded on every run — the sample is the caller's own corpus rather than a draw, and an empty one fails the family's own non-vacuity law instead of passing quietly"
+          "Conformance.dagBreakReasonLaws",
+          Unconditional
+              "each iteration BUILDS both break kinds on the DAG walk — a node whose op is tampered with its map key left alone, and a named parent deleted — rather than drawing them, and the family's own last law fails if either kind was not actually observed" ]

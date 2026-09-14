@@ -20,12 +20,12 @@
      - `tamper_detected` / `chain_tamper_detected` — changing ONE node's op, actor or parent
        multiset, or ONE record's seq, actor or op, while leaving its ADDRESS as it was, is found.
 
-   THE ONE ASSUMPTION, and it is the point of the phase. Both detection theorems take the
-   injectivity of the hash **as an explicit parameter** — a lemma the caller supplies, not an
-   `assume` (`--report_assumes error` is on and this module carries no `assume`, no `admit`, no
-   `assume val`). It says: two contents that hash to one id ARE the same content. That is the
-   collision-resistance assumption every content-addressed store makes; what is unusual is only
-   that it is written down beside the code that needs it.
+   THE ASSUMPTIONS, and narrowing them is the point of Phase 145. Both detection theorems take
+   their injectivity **as an explicit parameter** — a lemma the caller supplies, not an `assume`
+   (`--report_assumes error` is on and this module carries no `assume`, no `admit`, no
+   `assume val`). What the DAG's parameter said, before Phase 145, was: two contents that hash to
+   one id ARE the same content. That is the collision-resistance assumption every content-addressed
+   store makes; what is unusual is only that it is written down beside the code that needs it.
 
    Three things about that parameter are worth reading twice.
 
@@ -35,13 +35,17 @@
       ORDER" — and `parent_reorder_undetected` below states the consequence as a theorem rather
       than leaving it to prose: **re-ordering a node's parents is not a detectable tamper.** It is
       not meant to be. `merge_id_parent_order_independent` proves the convergence that buys.
-   2. **It bundles more than the hash.** `nodeHash` is `hashFn (join "," sortedParents)
-      (actor ^ "|" ^ encodedOp)`, so "the id determines the content" needs the hash injective AND
-      the two splices unambiguous (no comma inside a parent id, no `|` splitting the actor
-      encoding from the op encoding at a second place) AND the op codec injective. Those are
-      named in `proofs/README.md` under the assumption; the model does not decompose the premise
-      into them, because string concatenation is opaque here and an argument the model cannot
-      check is better stated than half-mechanised.
+   2. **It bundled more than the hash, and Phase 145 UNBUNDLED it.** `nodeHash` is
+      `hashFn (join "," sortedParents) (actor ^ "|" ^ encodedOp)`, so "the id determines the
+      content" needs the hash injective AND the two splices unambiguous AND the op codec injective.
+      Section 1b names all four, proves the two splices for the alphabets production uses, and
+      composes them back into the premise the theorems take (`node_injective_derived`). What is
+      still ASSUMED about the DAG's content id is exactly `hash_injective` — the cryptographic
+      one — and `op_codec_injective`, which is the domain's own promise and has a conformance law
+      in the kit for a domain's witness to certify by sampling. The LINEAR side's `rec_injective`
+      is deliberately left bundled: its pre-image is a four-way JSON envelope rather than
+      `nodeHash`'s two splices, and decomposing it is a separate piece of work, named in the
+      claims ladder rather than quietly implied by this one.
    3. **The chain's SEQUENCE and PREV-LINK breaks need none of it.** `chain_tamper_seq_detected`
       and `chain_tamper_prev_detected` are proved with no hypothesis at all: those two checks
       compare stored data against the walk's own running values and never consult the hash. Only
@@ -154,25 +158,394 @@ let node_hash
   : Tot string =
   h (join_comma (isort le parents)) (actor ^ "|" ^ enc_op o)
 
-(* THE CRYPTOGRAPHIC PREMISE, as an explicit parameter rather than an `assume`: a lemma the
-   caller hands in, saying that two contents which mint one id are the same content — the parents
-   up to the sort, the actor and the op exactly. Every detection theorem below that needs it takes
-   it; every theorem that does not, does not.
+(* ======================================================================================
+   1b. The pre-image, decomposed (Phase 145).
+
+   Phase 136 took ONE premise — the content id determines the content — and said in its own comment
+   that the premise bundled more than the hash. It does. `nodeHash` hashes two SPLICED strings: the
+   parent ids joined by `,`, and the actor encoding joined to the op encoding by `|`. So "the id
+   determines the content" is four claims at once, and only two of them are assumptions:
+
+     1. `hash_injective` — the hash is injective on the (key, value) PAIRS it is handed. The one
+        genuinely cryptographic claim, and it stays a lemma-valued PARAMETER.
+     2. `parent_splice_unambiguous` — the comma-join is injective on lists of parent ids. PROVED
+        below, for ids that carry no comma and are not empty. Both conditions are load-bearing:
+        without the first `["a,b"]` and `["a"; "b"]` join to one string, and without the second
+        `[]` and `[""]` do (`String.concat ","` maps both to `""`).
+     3. `actor_op_splice_unambiguous` — the `|` splice recovers the actor encoding and the op
+        encoding. PROVED below, for an actor code no member of which is a proper prefix of
+        another.
+     4. `op_codec_injective` — the op codec is injective. The DOMAIN'S, not this library's, so it
+        stays a parameter; `Conformance.codecInjectivityLaws` is the kit law a domain's witness
+        certifies it with, the same shape `FoldConfluence.laneFoldLaws` gives the fold theorem's
+        `independence_diamond`.
+
+   `node_injective_derived` composes the four back into `node_injective_on`, which is what the
+   tamper theorems take. So the composite is a THEOREM now, and what is assumed about the DAG's
+   content id is exactly (1) and (4).
+
+   HOW A STRING IS READ, and why it is a hypothesis rather than a parameter. F*'s `string` is
+   primitive and `^` is opaque, so no splice argument is possible without a reading of a string as
+   its symbols. `symbols_faithful reveal` is that reading, and it says two things that are true of
+   `System.String` by construction: concatenation is symbol-list append, and two strings with the
+   same symbols are the same string. It sits in the `requires` of the lemmas that need it, exactly
+   as `total_order le` does below — not in their argument lists, because it is a fact about the
+   string type rather than about anything this model or production chose. (F*'s own `FStar.String`
+   states both as `val`s under the comment "admitted for now as we don't have a model". Naming
+   them here says the same thing with the assumption visible in the signature, rather than
+   inherited from a module `--report_assumes` does not quantify over.)
+
+   WHAT THE PRODUCTION CHECK FOUND — a correction to Phase 136's README, not a confirmation of it.
+   That document says the `|` splice is unambiguous because "`Actor.encode` emits a JSON object
+   that never contains one". It can contain one. `Actor.encode`'s escaper handles `"`, `\` and the
+   C0 controls; `|` is none of those, so a `Human` whose id is `a|b` encodes to
+   `{"kind":"human","id":"a|b"}`. SEPARATOR FREEDOM IS FALSE OF PRODUCTION. What is true is
+   stronger, and is what lemma 3 asks for: a JSON object whose string literals are self-delimiting
+   is a PREFIX-FREE code — the closing quote is the first unescaped one, the two cases diverge at
+   `{"kind":"h` against `{"kind":"a`, and the skeleton between the literals is fixed — so no
+   encoding is a proper prefix of another and the split point is forced. `ProofOracleTests`
+   measures both halves over an adversarial actor population: the refutation, and the property
+   that saves it.
+   ====================================================================================== *)
+
+(* ---- the alphabet level, at which a splice argument can be made at all ---- *)
+
+(* F#: `List.append`. Spelled locally, per the Prims-only idiom, and `noextract` because the whole
+   of this section is proof: nothing the differential runs reaches any of it. *)
+[@@ noextract_to "FSharp"]
+let rec app (#a: Type) (x: list a) (y: list a) : Tot (list a) =
+  match x with
+  | [] -> y
+  | h :: t -> h :: app t y
+
+[@@ noextract_to "FSharp"]
+let nonempty (#a: Type) (l: list a) : Tot bool =
+  match l with
+  | [] -> false
+  | _ -> true
+
+(* No occurrence of the separator. *)
+[@@ noextract_to "FSharp"]
+let rec sym_free (#sym: eqtype) (c: sym) (l: list sym) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: t -> not (x = c) && sym_free c t
+
+(* `x` is a PROPER prefix of `y` — strictly shorter, and agreeing everywhere it is defined. *)
+[@@ noextract_to "FSharp"]
+let rec proper_prefix (#sym: eqtype) (x: list sym) (y: list sym) : Tot bool =
+  match x, y with
+  | [], [] -> false
+  | [], _ :: _ -> true
+  | _ :: _, [] -> false
+  | p :: xt, q :: yt -> p = q && proper_prefix xt yt
+
+(* `String.concat ","` at the symbol level — the same three clauses as `join_comma`. *)
+[@@ noextract_to "FSharp"]
+let rec joined (#sym: eqtype) (c: sym) (l: list (list sym)) : Tot (list sym) =
+  match l with
+  | [] -> []
+  | [x] -> x
+  | x :: t -> app x (c :: joined c t)
+
+[@@ noextract_to "FSharp"]
+let rec all_ids (#sym: eqtype) (c: sym) (l: list (list sym)) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: t -> nonempty x && sym_free c x && all_ids c t
+
+(* ---- the two splice arguments, at the symbol level ---- *)
+
+let app_cons_nonempty (#a: Type) (y: list a) (h: a) (r: list a)
+  : Lemma (ensures nonempty (app y (h :: r))) =
+  match y with
+  | [] -> ()
+  | _ :: _ -> ()
+
+(* Splicing the separator in puts one there — the fact both arguments turn on. *)
+let rec app_has_sep (#sym: eqtype) (c: sym) (y: list sym) (r: list sym)
+  : Lemma (ensures sym_free c (app y (c :: r)) == false) =
+  match y with
+  | [] -> ()
+  | _ :: t -> app_has_sep c t r
+
+(* Two separator-free prefixes spliced by the separator: the split point is forced, because the
+   first occurrence of the separator is at the end of each prefix. *)
+let rec app_sep_split
+  (#sym: eqtype)
+  (c: sym)
+  (x: list sym)
+  (r1: list sym)
+  (y: list sym)
+  (r2: list sym)
+  : Lemma
+    (requires sym_free c x /\ sym_free c y /\ app x (c :: r1) == app y (c :: r2))
+    (ensures x == y /\ r1 == r2) =
+  match x, y with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: xt, _ :: yt -> app_sep_split c xt r1 yt r2
+
+(* THE PARENT SPLICE, at the symbol level. *)
+let rec joined_injective (#sym: eqtype) (c: sym) (l1: list (list sym)) (l2: list (list sym))
+  : Lemma (requires all_ids c l1 /\ all_ids c l2 /\ joined c l1 == joined c l2) (ensures l1 == l2) =
+  match l1, l2 with
+  | [], [] -> ()
+  | [], [_] -> ()
+  | [], y :: z :: r -> app_cons_nonempty y c (joined c (z :: r))
+  | [_], [] -> ()
+  | x :: w :: q, [] -> app_cons_nonempty x c (joined c (w :: q))
+  | [_], [_] -> ()
+  | [_], y :: z :: r -> app_has_sep c y (joined c (z :: r))
+  | x :: w :: q, [_] -> app_has_sep c x (joined c (w :: q))
+  | x :: w :: q, y :: z :: r ->
+    app_sep_split c x (joined c (w :: q)) y (joined c (z :: r));
+    joined_injective c (w :: q) (z :: r)
+
+(* THE ACTOR/OP SPLICE, at the symbol level. Separator freedom would also force the split and is
+   the condition Phase 136's README named; production does not satisfy it (see the section
+   header), and this weaker one it does. *)
+let rec splice_split
+  (#sym: eqtype)
+  (b: sym)
+  (x: list sym)
+  (v1: list sym)
+  (y: list sym)
+  (v2: list sym)
+  : Lemma
+    (requires
+      app x (b :: v1) == app y (b :: v2) /\ not (proper_prefix x y) /\ not (proper_prefix y x))
+    (ensures x == y /\ v1 == v2) =
+  match x, y with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: xt, _ :: yt -> splice_split b xt v1 yt v2
+
+(* ---- lifting the alphabet level to the strings production actually splices ---- *)
+
+(* The reading of a string as its symbols — a HYPOTHESIS about `string`, in the same style as
+   `total_order le`, not a parameter. Both clauses are true of `System.String`. *)
+[@@ noextract_to "FSharp"]
+let symbols_faithful (#sym: eqtype) (reveal: string -> list sym) : prop =
+  (forall (s: string) (t: string). reveal (s ^ t) == app (reveal s) (reveal t)) /\
+  (forall (s: string) (t: string). reveal s == reveal t ==> s == t)
+
+let faithful_cat (#sym: eqtype) (reveal: string -> list sym) (s: string) (t: string)
+  : Lemma
+    (requires symbols_faithful reveal)
+    (ensures reveal (s ^ t) == app (reveal s) (reveal t)) = ()
+
+let faithful_det (#sym: eqtype) (reveal: string -> list sym) (s: string) (t: string)
+  : Lemma (requires symbols_faithful reveal /\ reveal s == reveal t) (ensures s == t) = ()
+
+[@@ noextract_to "FSharp"]
+let rec symbols (#sym: eqtype) (reveal: string -> list sym) (l: list string)
+  : Tot (list (list sym)) =
+  match l with
+  | [] -> []
+  | x :: t -> reveal x :: symbols reveal t
+
+(* "Every parent id in this list is one" — the predicate abstract, so the theorems below say what
+   they need of an id without this model deciding what an id looks like. *)
+[@@ noextract_to "FSharp"]
+let rec ids_all (id_ok: string -> bool) (l: list string) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: t -> id_ok x && ids_all id_ok t
+
+let rec ids_all_symbols
+  (#sym: eqtype)
+  (reveal: string -> list sym)
+  (comma: sym)
+  (id_ok: string -> bool)
+  (l: list string)
+  : Lemma
+    (requires
+      ids_all id_ok l /\
+      (forall (s: string). id_ok s ==> nonempty (reveal s) /\ sym_free comma (reveal s)))
+    (ensures all_ids comma (symbols reveal l)) =
+  match l with
+  | [] -> ()
+  | _ :: t -> ids_all_symbols reveal comma id_ok t
+
+let rec symbols_injective
+  (#sym: eqtype)
+  (reveal: string -> list sym)
+  (l1: list string)
+  (l2: list string)
+  : Lemma
+    (requires symbols_faithful reveal /\ symbols reveal l1 == symbols reveal l2)
+    (ensures l1 == l2) =
+  match l1, l2 with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | x :: t1, y :: t2 ->
+    faithful_det reveal x y;
+    symbols_injective reveal t1 t2
+
+let rec reveal_join (#sym: eqtype) (reveal: string -> list sym) (comma: sym) (l: list string)
+  : Lemma
+    (requires symbols_faithful reveal /\ reveal "" == [] /\ reveal "," == [comma])
+    (ensures reveal (join_comma l) == joined comma (symbols reveal l)) =
+  match l with
+  | [] -> ()
+  | [_] -> ()
+  | x :: y :: r ->
+    let rest = join_comma (y :: r) in
+    faithful_cat reveal "," rest;
+    faithful_cat reveal x ("," ^ rest);
+    reveal_join reveal comma (y :: r)
+
+(* THEOREM (premise 2). `String.concat ","` is injective on lists of parent ids, given that an id
+   carries no comma and is not empty. Proved, not assumed. *)
+let parent_splice_unambiguous
+  (#sym: eqtype)
+  (reveal: string -> list sym)
+  (comma: sym)
+  (id_ok: string -> bool)
+  (p1: list string)
+  (p2: list string)
+  : Lemma
+    (requires
+      symbols_faithful reveal /\ reveal "" == [] /\ reveal "," == [comma] /\
+      (forall (s: string). id_ok s ==> nonempty (reveal s) /\ sym_free comma (reveal s)) /\
+      ids_all id_ok p1 /\ ids_all id_ok p2 /\ join_comma p1 == join_comma p2)
+    (ensures p1 == p2) =
+  reveal_join reveal comma p1;
+  reveal_join reveal comma p2;
+  ids_all_symbols reveal comma id_ok p1;
+  ids_all_symbols reveal comma id_ok p2;
+  joined_injective comma (symbols reveal p1) (symbols reveal p2);
+  symbols_injective reveal p1 p2
+
+(* THEOREM (premise 3). `actor ^ "|" ^ encodedOp` recovers both halves, given that neither actor
+   encoding is a proper prefix of the other — which is what a self-delimiting JSON object buys,
+   and is NOT the separator-freedom Phase 136 claimed. Proved, not assumed. *)
+let actor_op_splice_unambiguous
+  (#sym: eqtype)
+  (reveal: string -> list sym)
+  (bar: sym)
+  (a1: string)
+  (v1: string)
+  (a2: string)
+  (v2: string)
+  : Lemma
+    (requires
+      symbols_faithful reveal /\ reveal "|" == [bar] /\
+      not (proper_prefix (reveal a1) (reveal a2)) /\
+      not (proper_prefix (reveal a2) (reveal a1)) /\ a1 ^ "|" ^ v1 == a2 ^ "|" ^ v2)
+    (ensures a1 == a2 /\ v1 == v2) =
+  faithful_cat reveal "|" v1;
+  faithful_cat reveal "|" v2;
+  faithful_cat reveal a1 ("|" ^ v1);
+  faithful_cat reveal a2 ("|" ^ v2);
+  splice_split bar (reveal a1) (reveal v1) (reveal a2) (reveal v2);
+  faithful_det reveal a1 a2;
+  faithful_det reveal v1 v2
+
+(* ---- the two premises that stay premises ---- *)
+
+(* PREMISE 1 — THE CRYPTOGRAPHIC ONE, and after Phase 145 the only claim about the hash itself: two
+   (key, value) pairs that mint one digest ARE the same pair. An explicit parameter rather than an
+   `assume`, so every theorem that spends it says so in its signature and every theorem that does
+   not, does not. *)
+[@@ noextract_to "FSharp"]
+let hash_injective (h: string -> string -> string) : Type =
+  k1: string -> v1: string -> k2: string -> v2: string ->
+  Lemma (requires h k1 v1 == h k2 v2) (ensures k1 == k2 /\ v1 == v2)
+
+(* PREMISE 4 — THE DOMAIN'S. `StreamWitness.Encode` belongs to whoever brings the op type, so this
+   library cannot prove it and should not pretend to. It is a parameter here and a sampled
+   conformance law in the kit (`Conformance.codecInjectivityLaws`), which is the same division the
+   fold theorem's `independence_diamond` already runs on. *)
+[@@ noextract_to "FSharp"]
+let op_codec_injective (op: eqtype) (enc_op: op -> string) : Type =
+  o1: op -> o2: op -> Lemma (requires enc_op o1 == enc_op o2) (ensures o1 == o2)
+
+(* The composite the tamper theorems take. It is Phase 136's `node_injective`, RESTRICTED to
+   pre-images whose parents are ids and whose actor string is one the actor code emits — because
+   that is what the two splice lemmas need, and it is what production supplies: a stored parent is
+   a key of the map (a hash output) or the walk's second clause reports it, and a stored actor is
+   an `Actor` the walker re-encodes with `Actor.encode`.
 
    `isort le p1 == isort le p2` rather than `p1 == p2` is not a weakening for convenience: it is
    the strongest statement that is TRUE of production, which sorts before hashing so that a merge
    node's identity does not depend on which head the reconciler happened to call left. *)
 [@@ noextract_to "FSharp"]
-let node_injective
+let node_injective_on
   (op: eqtype)
   (h: string -> string -> string)
   (enc_op: op -> string)
   (le: string -> string -> bool)
+  (id_ok: string -> bool)
+  (actor_ok: string -> bool)
   : Type =
   p1: list string -> a1: string -> o1: op -> p2: list string -> a2: string -> o2: op ->
   Lemma
-    (requires node_hash h enc_op le p1 a1 o1 == node_hash h enc_op le p2 a2 o2)
+    (requires
+      ids_all id_ok p1 /\ ids_all id_ok p2 /\ actor_ok a1 /\ actor_ok a2 /\
+      node_hash h enc_op le p1 a1 o1 == node_hash h enc_op le p2 a2 o2)
     (ensures isort le p1 == isort le p2 /\ a1 == a2 /\ o1 == o2)
+
+(* Sorting permutes, so a list of ids stays a list of ids. *)
+let rec insert_ids_all
+  (le: string -> string -> bool)
+  (id_ok: string -> bool)
+  (x: string)
+  (l: list string)
+  : Lemma (requires id_ok x /\ ids_all id_ok l) (ensures ids_all id_ok (insert le x l)) =
+  match l with
+  | [] -> ()
+  | y :: t -> if le x y then () else insert_ids_all le id_ok x t
+
+let rec isort_ids_all (le: string -> string -> bool) (id_ok: string -> bool) (l: list string)
+  : Lemma (requires ids_all id_ok l) (ensures ids_all id_ok (isort le l)) =
+  match l with
+  | [] -> ()
+  | x :: t ->
+    isort_ids_all le id_ok t;
+    insert_ids_all le id_ok x (isort le t)
+
+(* THE DECOMPOSITION ITSELF, as a theorem rather than a paragraph: the composite premise every
+   tamper theorem below takes is BUILT from the four named ones. Nothing about the id is bundled
+   any more — a reader who wants to know what tamper detection rests on reads the two parameters
+   this takes, and the two lemmas it calls are proved above. *)
+let node_injective_derived
+  (#sym: eqtype)
+  (op: eqtype)
+  (h: string -> string -> string)
+  (enc_op: op -> string)
+  (le: string -> string -> bool)
+  (reveal: string -> list sym)
+  (comma: sym)
+  (bar: sym)
+  (id_ok: string -> bool)
+  (actor_ok: string -> bool)
+  (hinj: hash_injective h)
+  (oinj: op_codec_injective op enc_op)
+  (reading:
+    squash (
+      symbols_faithful reveal /\ reveal "" == [] /\ reveal "," == [comma] /\ reveal "|" == [bar]))
+  (ids: squash (forall (s: string). id_ok s ==> nonempty (reveal s) /\ sym_free comma (reveal s)))
+  (code:
+    squash (
+      forall (x: string) (y: string).
+        actor_ok x /\ actor_ok y ==> not (proper_prefix (reveal x) (reveal y))))
+  : node_injective_on op h enc_op le id_ok actor_ok =
+  fun p1 a1 o1 p2 a2 o2 ->
+    hinj
+      (join_comma (isort le p1))
+      (a1 ^ "|" ^ enc_op o1)
+      (join_comma (isort le p2))
+      (a2 ^ "|" ^ enc_op o2);
+    isort_ids_all le id_ok p1;
+    isort_ids_all le id_ok p2;
+    parent_splice_unambiguous reveal comma id_ok (isort le p1) (isort le p2);
+    actor_op_splice_unambiguous reveal bar a1 (enc_op o1) a2 (enc_op o2);
+    oinj o1 o2
 
 (* ======================================================================================
    2. The DAG (F#: `DagNode<'Op>` and `Dag.T<'Op>`).
@@ -552,11 +925,15 @@ let tamper_changes_the_id
   (h: string -> string -> string)
   (enc_op: op -> string)
   (le: string -> string -> bool)
-  (inj: node_injective op h enc_op le)
+  (id_ok: string -> bool)
+  (actor_ok: string -> bool)
+  (inj: node_injective_on op h enc_op le id_ok actor_ok)
   (n: dnode op)
   (n': dnode op)
   : Lemma
-    (requires not (same_preimage le n n'))
+    (requires
+      ids_all id_ok n.dparents /\ ids_all id_ok n'.dparents /\ actor_ok n.dactor /\
+      actor_ok n'.dactor /\ not (same_preimage le n n'))
     (ensures
       ~(node_hash h enc_op le n'.dparents n'.dactor n'.dop ==
         node_hash h enc_op le n.dparents n.dactor n.dop)) =
@@ -585,13 +962,18 @@ let rec retarget_breaks_all_ok
 
 (* THEOREM. Change one node's op, actor or parent multiset while leaving its id as it was, in a
    DAG whose node under that id was intact, and `Dag.firstBreak` reports a break — under the
-   injectivity premise and nothing else. *)
+   injectivity premise and nothing else. Since Phase 145 that premise is `node_injective_on`,
+   whose two remaining assumptions (`hash_injective`, `op_codec_injective`) a caller composes
+   through `node_injective_derived`; the well-formedness beside it is what the splice lemmas need
+   and what production supplies. *)
 let tamper_detected
   (#op: eqtype)
   (h: string -> string -> string)
   (enc_op: op -> string)
   (le: string -> string -> bool)
-  (inj: node_injective op h enc_op le)
+  (id_ok: string -> bool)
+  (actor_ok: string -> bool)
+  (inj: node_injective_on op h enc_op le id_ok actor_ok)
   (es: list (entry op))
   (k: string)
   (n: dnode op)
@@ -599,9 +981,11 @@ let tamper_detected
   : Lemma
     (requires
       lookup_node es k == Found n /\
-      k == node_hash h enc_op le n.dparents n.dactor n.dop /\ not (same_preimage le n n'))
+      k == node_hash h enc_op le n.dparents n.dactor n.dop /\
+      ids_all id_ok n.dparents /\ ids_all id_ok n'.dparents /\ actor_ok n.dactor /\
+      actor_ok n'.dactor /\ not (same_preimage le n n'))
     (ensures not (verify_dag h enc_op le (retarget es k n'))) =
-  tamper_changes_the_id h enc_op le inj n n';
+  tamper_changes_the_id h enc_op le id_ok actor_ok inj n n';
   retarget_breaks_all_ok h enc_op le es k n n';
   break_none_iff h enc_op le (retarget es k n')
 
@@ -614,7 +998,9 @@ let tamper_op_detected
   (h: string -> string -> string)
   (enc_op: op -> string)
   (le: string -> string -> bool)
-  (inj: node_injective op h enc_op le)
+  (id_ok: string -> bool)
+  (actor_ok: string -> bool)
+  (inj: node_injective_on op h enc_op le id_ok actor_ok)
   (es: list (entry op))
   (k: string)
   (n: dnode op)
@@ -622,12 +1008,13 @@ let tamper_op_detected
   : Lemma
     (requires
       lookup_node es k == Found n /\
-      k == node_hash h enc_op le n.dparents n.dactor n.dop /\ ~(o' == n.dop))
+      k == node_hash h enc_op le n.dparents n.dactor n.dop /\ ids_all id_ok n.dparents /\
+      actor_ok n.dactor /\ ~(o' == n.dop))
     (ensures
       not
         (verify_dag h enc_op le
           (retarget es k ({ dparents = n.dparents; dactor = n.dactor; dop = o' })))) =
-  tamper_detected h enc_op le inj es k n
+  tamper_detected h enc_op le id_ok actor_ok inj es k n
     ({ dparents = n.dparents; dactor = n.dactor; dop = o' })
 
 let tamper_actor_detected
@@ -635,7 +1022,9 @@ let tamper_actor_detected
   (h: string -> string -> string)
   (enc_op: op -> string)
   (le: string -> string -> bool)
-  (inj: node_injective op h enc_op le)
+  (id_ok: string -> bool)
+  (actor_ok: string -> bool)
+  (inj: node_injective_on op h enc_op le id_ok actor_ok)
   (es: list (entry op))
   (k: string)
   (n: dnode op)
@@ -643,12 +1032,13 @@ let tamper_actor_detected
   : Lemma
     (requires
       lookup_node es k == Found n /\
-      k == node_hash h enc_op le n.dparents n.dactor n.dop /\ ~(a' == n.dactor))
+      k == node_hash h enc_op le n.dparents n.dactor n.dop /\ ids_all id_ok n.dparents /\
+      actor_ok n.dactor /\ actor_ok a' /\ ~(a' == n.dactor))
     (ensures
       not
         (verify_dag h enc_op le
           (retarget es k ({ dparents = n.dparents; dactor = a'; dop = n.dop })))) =
-  tamper_detected h enc_op le inj es k n
+  tamper_detected h enc_op le id_ok actor_ok inj es k n
     ({ dparents = n.dparents; dactor = a'; dop = n.dop })
 
 (* Re-parenting is detected exactly when it moves the parent MULTISET — which is the honest
@@ -658,7 +1048,9 @@ let tamper_parents_detected
   (h: string -> string -> string)
   (enc_op: op -> string)
   (le: string -> string -> bool)
-  (inj: node_injective op h enc_op le)
+  (id_ok: string -> bool)
+  (actor_ok: string -> bool)
+  (inj: node_injective_on op h enc_op le id_ok actor_ok)
   (es: list (entry op))
   (k: string)
   (n: dnode op)
@@ -666,13 +1058,13 @@ let tamper_parents_detected
   : Lemma
     (requires
       lookup_node es k == Found n /\
-      k == node_hash h enc_op le n.dparents n.dactor n.dop /\
-      ~(isort le n.dparents == isort le ps'))
+      k == node_hash h enc_op le n.dparents n.dactor n.dop /\ ids_all id_ok n.dparents /\
+      ids_all id_ok ps' /\ actor_ok n.dactor /\ ~(isort le n.dparents == isort le ps'))
     (ensures
       not
         (verify_dag h enc_op le
           (retarget es k ({ dparents = ps'; dactor = n.dactor; dop = n.dop })))) =
-  tamper_detected h enc_op le inj es k n
+  tamper_detected h enc_op le id_ok actor_ok inj es k n
     ({ dparents = ps'; dactor = n.dactor; dop = n.dop })
 
 (* ---- the second break class: a parent the DAG does not hold ---- *)

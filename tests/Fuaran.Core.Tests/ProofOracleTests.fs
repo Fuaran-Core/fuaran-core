@@ -1464,15 +1464,38 @@ let private toChainEntries (dag: Dag.T<'Op>) : Chain.entry<'Op> list =
               Chain.dactor = Actor.encode n.Actor
               Chain.dop = n.Op } })
 
-let private renderDagVerdict (b: DagBreak option) : string =
-    match b with
-    | None -> "intact"
-    | Some b -> sprintf "break at %s | %s | expected=%s | got=%s" b.NodeId b.Reason b.Expected b.Got
+/// A DAG walker's verdict as a COMPARABLE VALUE (Phase 147). Production's break carries a typed
+/// `DagBreakReason`; the model's carries the string its extraction mints, classified through the
+/// same total `ofString`. Comparing these compares the reason as a CLASS rather than as two
+/// spellings that happen to match — which is the projection Phase 147 deletes, and it is this
+/// differential that asked for it. It also sharpens the failure: a model whose reason string drifted
+/// a character used to fail as an unexplained textual mismatch and now fails as an `Unrecognised`
+/// carrying that text against a named case, which says what went wrong.
+type private DagVerdict =
+    | DagIntact
+    | DagBroke of node: string * reason: DagBreakReason * expected: string * got: string
 
-let private renderModelDagVerdict (b: Chain.found<Chain.dbreak>) : string =
+let private renderDagVerdict (v: DagVerdict) : string =
+    match v with
+    | DagIntact -> "intact"
+    | DagBroke(node, reason, expected, got) ->
+        sprintf "break at %s | %s | expected=%s | got=%s" node (DagBreakReason.toString reason) expected got
+
+/// The reason class a verdict names, for the cases that assert WHICH check fired.
+let private dagVerdictReason (v: DagVerdict) : DagBreakReason option =
+    match v with
+    | DagIntact -> None
+    | DagBroke(_, reason, _, _) -> Some reason
+
+let private prodDagVerdict (b: DagBreak option) : DagVerdict =
     match b with
-    | Chain.Missing -> "intact"
-    | Chain.Found b -> sprintf "break at %s | %s | expected=%s | got=%s" b.bnode b.breason b.bexpected b.bgot
+    | None -> DagIntact
+    | Some b -> DagBroke(b.NodeId, b.Reason, b.Expected, b.Got)
+
+let private modelDagVerdict (b: Chain.found<Chain.dbreak>) : DagVerdict =
+    match b with
+    | Chain.Missing -> DagIntact
+    | Chain.Found b -> DagBroke(b.bnode, DagBreakReason.ofString b.breason, b.bexpected, b.bgot)
 
 /// Both walkers on the same DAG. The two hash functions are separate arguments only so the go-red
 /// case can hand the MODEL one production is not using; every real run passes the same one twice.
@@ -1481,9 +1504,9 @@ let private dagVerdicts
     (modelHash: HashFn)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (dag: Dag.T<'Op>)
-    : string * string =
-    renderDagVerdict (Dag.firstBreak prodHash w dag),
-    renderModelDagVerdict (Chain.first_break modelHash w.Encode ordinalLe (toChainEntries dag))
+    : DagVerdict * DagVerdict =
+    prodDagVerdict (Dag.firstBreak prodHash w dag),
+    modelDagVerdict (Chain.first_break modelHash w.Encode ordinalLe (toChainEntries dag))
 
 /// The DAG `FoldConfluence.foldOnce` builds, under a CHOSEN `HashFn` — one shared base node and
 /// one chain per lane. `productionDag` above pins the default hash; the premise case below needs
@@ -1616,7 +1639,7 @@ let private dagDifferential
         | Some why -> note (sprintf "%s: seed=%d %s" label seed why)
         | None -> ()
 
-        let compare (what: string) (d: Dag.T<'Op>) : string =
+        let compare (what: string) (d: Dag.T<'Op>) : DagVerdict =
             let p, m = dagVerdicts prodHash modelHash w d
 
             if p <> m then
@@ -1627,20 +1650,20 @@ let private dagDifferential
                         seed
                         what
                         (renderLanes w.Encode lanes)
-                        p
-                        m
+                        (renderDagVerdict p)
+                        (renderDagVerdict m)
                 )
 
             p
 
-        if compare "none" dag = "intact" then
+        if compare "none" dag = DagIntact then
             t <- { t with Intact = t.Intact + 1 }
 
         for (what, tampered) in dagTampers otherOp dag do
             let p = compare what tampered
             t <- { t with Tampers = t.Tampers + 1 }
 
-            if p <> "intact" then
+            if p <> DagIntact then
                 t <- { t with Detected = t.Detected + 1 }
 
     t
@@ -1674,26 +1697,43 @@ let private toChainRecords (rs: OpRecord<'Op> list) : Chain.record<'Op> list =
           Chain.rprev = r.PrevHash
           Chain.rhash = r.Hash })
 
-let private renderChainVerdict (b: ChainBreak option) : string =
-    match b with
-    | None -> "intact"
-    | Some b ->
-        sprintf "break at %d | %s | expected=%s | got=%s" b.Index (ChainBreakReason.toString b.Reason) b.Expected b.Got
+/// The linear walker's verdict, on the same footing as `DagVerdict` (Phase 147). `ChainBreak.Reason`
+/// has been a closed DU since Phase 125; this differential was still rendering it to text and
+/// comparing the text, so the same reason-as-a-class argument applies unchanged and the section now
+/// holds no string match on a break reason at all.
+type private ChainVerdict =
+    | ChainIntact
+    | ChainBroke of index: int * reason: ChainBreakReason * expected: string * got: string
 
-let private renderModelChainVerdict (b: Chain.found<Chain.cbreak>) : string =
+let private renderChainVerdict (v: ChainVerdict) : string =
+    match v with
+    | ChainIntact -> "intact"
+    | ChainBroke(index, reason, expected, got) ->
+        sprintf "break at %d | %s | expected=%s | got=%s" index (ChainBreakReason.toString reason) expected got
+
+let private chainVerdictReason (v: ChainVerdict) : ChainBreakReason option =
+    match v with
+    | ChainIntact -> None
+    | ChainBroke(_, reason, _, _) -> Some reason
+
+let private prodChainVerdict (b: ChainBreak option) : ChainVerdict =
     match b with
-    | Chain.Missing -> "intact"
-    | Chain.Found b ->
-        sprintf "break at %d | %s | expected=%s | got=%s" (intOfPos b.cindex) b.creason b.cexpected b.cgot
+    | None -> ChainIntact
+    | Some b -> ChainBroke(b.Index, b.Reason, b.Expected, b.Got)
+
+let private modelChainVerdict (b: Chain.found<Chain.cbreak>) : ChainVerdict =
+    match b with
+    | Chain.Missing -> ChainIntact
+    | Chain.Found b -> ChainBroke(intOfPos b.cindex, ChainBreakReason.ofString b.creason, b.cexpected, b.cgot)
 
 let private chainVerdicts
     (prodHash: HashFn)
     (modelHash: HashFn)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (rs: OpRecord<'Op> list)
-    : string * string =
-    renderChainVerdict (OpStream.firstChainBreak prodHash w rs),
-    renderModelChainVerdict (Chain.first_chain_break modelHash showPos w.Encode "" (toChainRecords rs))
+    : ChainVerdict * ChainVerdict =
+    prodChainVerdict (OpStream.firstChainBreak prodHash w rs),
+    modelChainVerdict (Chain.first_chain_break modelHash showPos w.Encode "" (toChainRecords rs))
 
 /// A chain production built by `OpStream.append`, skipping the ops the domain reducer rejects —
 /// `append` chains nothing on a rejection, so the chain is the shape of the accepted run.
@@ -1768,7 +1808,7 @@ let private chainDifferential
         let ops = List.concat lanes
         let rs = chainUnder prodHash w gen.State0 (Human "writer") ops
 
-        let compare (what: string) (records: OpRecord<'Op> list) : string =
+        let compare (what: string) (records: OpRecord<'Op> list) : ChainVerdict =
             let p, m = chainVerdicts prodHash modelHash w records
 
             if p <> m then
@@ -1779,21 +1819,21 @@ let private chainDifferential
                         seed
                         what
                         (ops |> List.map w.Encode |> String.concat "; ")
-                        p
-                        m
+                        (renderChainVerdict p)
+                        (renderChainVerdict m)
                 )
 
             p
 
         if not (List.isEmpty rs) then
-            if compare "none" rs = "intact" then
+            if compare "none" rs = ChainIntact then
                 t <- { t with Intact = t.Intact + 1 }
 
             for (what, tampered) in chainTampers otherOp rs do
                 let p = compare what tampered
                 t <- { t with Tampers = t.Tampers + 1 }
 
-                if p <> "intact" then
+                if p <> ChainIntact then
                     t <- { t with Detected = t.Detected + 1 }
 
     t
@@ -2207,6 +2247,60 @@ module private JsonParseDiff =
                   System.String(Array.init len (fun _ -> alphabet.[next () % alphabet.Length]))
 
               sprintf "soup seed=%d #%d" seed i, s ]
+
+// ---------------------------------------------------------------------------
+//  Phase 145 — the pre-image's two splices, measured against production's encodings
+// ---------------------------------------------------------------------------
+//
+// `Chain.fst` proves the two splices unambiguous under conditions on the ALPHABETS: a parent id
+// carries no comma and is not empty, and no actor encoding is a proper prefix of another. Those
+// are claims about `OpStream.defaultHash`'s output and about `Actor.encode`, and the model cannot
+// check either — F*'s `string` is primitive. This is where they are checked, and the population is
+// chosen adversarially rather than typically, because a typical actor cannot refute anything.
+
+/// `x` is a PROPER prefix of `y` — the model's `Chain.proper_prefix`, spelled over `string`.
+let private properPrefix (x: string) (y: string) : bool =
+    x.Length < y.Length && y.StartsWith(x, System.StringComparison.Ordinal)
+
+/// Actors chosen to break a splice if anything can: the separator itself, the JSON metacharacters
+/// `Actor.encode`'s escaper does and does not handle, an id that spells another actor's encoding,
+/// the empty id, and both cases at every field.
+let private adversarialActors: Actor list =
+    [ Human ""
+      Human "a"
+      Human "a|b"
+      Human "a|b|c"
+      Human "a\"}|{\""
+      Human "a\\|b"
+      Human "a,b"
+      Human "{\"kind\":\"human\",\"id\":\"a\"}"
+      Human "}|{"
+      Human "\n|\t"
+      Agent("", "", "")
+      Agent("m", "v", "a")
+      Agent("m|1", "v|2", "a|3")
+      Agent("m", "v", "a\"}|x")
+      Agent("m", "v", "{\"kind\":\"agent\"}")
+      Agent("m,1", "v,2", "a,3") ]
+
+/// A `StreamGen` over the work-plan domain, drawn through the lane generator this differential
+/// already runs on — so the population the kit's codec law samples is the population the model's
+/// `op_codec_injective` parameter is about, rather than a second one invented beside it.
+let private planStreamGen: StreamGen<PlanOp, Plan> =
+    { State0 = planLaneGen.State0
+      Op =
+        fun rng ->
+            let lanes, r = planLaneGen.Lanes 1 rng
+
+            match lanes |> List.collect id with
+            | op :: _ -> op, r
+            | [] -> planLaneGen.BaseOp, r } // a lane may legitimately be empty
+
+/// Op encodings chosen the same way — including the work-plan codec's own `"A|" + id + "|" + title`
+/// shape, which is why the splice condition is not academic.
+let private adversarialOpEncodings: string list =
+    [ ""; "|"; "A|x|t"; "}|{"; "{\"kind\":\"human\",\"id\":\"a\"}|A|x|t"; "\"}" ]
+
 
 // ---------------------------------------------------------------------------
 //  Phase 138 — the APPLY-ENGINE PRESERVATION model beside `Ops.apply` / `canApply` / `invert`.
@@ -3283,9 +3377,13 @@ let proofOracleTests =
               let lanes, _ = planLaneGen.Lanes 3 (ConfRng.ofSeed 3640)
               let dag = dagUnder OpStream.defaultHash planW planLaneGen.BaseOp lanes
               let p, m = dagVerdicts OpStream.defaultHash swappedHash planW dag
-              Expect.equal p "intact" "production built this DAG and sees it intact"
+              Expect.equal p DagIntact "production built this DAG and sees it intact"
               Expect.notEqual m p "a model recomputing ids with a different hash must disagree"
-              Expect.stringContains m "content-id mismatch" "and it disagrees by naming the check that failed"
+
+              Expect.equal
+                  (dagVerdictReason m)
+                  (Some ContentIdMismatch)
+                  "and it disagrees by naming the check that failed"
 
           testCase "a model handed a DIFFERENT hash reports a break on an intact linear chain"
           <| fun _ ->
@@ -3296,9 +3394,10 @@ let proofOracleTests =
 
               Expect.isNonEmpty rs "the generated lane produced a chain"
               let p, m = chainVerdicts OpStream.defaultHash swappedHash planW rs
-              Expect.equal p "intact" "production built this chain and sees it intact"
+              Expect.equal p ChainIntact "production built this chain and sees it intact"
               Expect.notEqual m p "a model recomputing hashes with a different function must disagree"
-              Expect.stringContains m "hash mismatch" "and it disagrees by naming the check that failed"
+
+              Expect.equal (chainVerdictReason m) (Some HashMismatch) "and it disagrees by naming the check that failed"
 
           // ---- what the theorem's one premise buys, measured in BOTH directions ----
 
@@ -3334,11 +3433,12 @@ let proofOracleTests =
               let rp, rm =
                   dagVerdicts OpStream.defaultHash OpStream.defaultHash planW (tamper real)
 
-              Expect.stringContains rp "content-id mismatch" "under an injective hash the tamper is found"
+              Expect.equal (dagVerdictReason rp) (Some ContentIdMismatch) "under an injective hash the tamper is found"
+
               Expect.equal rm rp "and the model finds it identically"
 
               let wp, wm = dagVerdicts opBlindHash opBlindHash planW (tamper weak)
-              Expect.equal wp "intact" "a hash that drops the op cannot see an op tamper — this is the premise"
+              Expect.equal wp DagIntact "a hash that drops the op cannot see an op tamper — this is the premise"
               Expect.equal wm wp "and neither can the model, under the same hash"
 
           // ---- the corpus dag/ family: its SHAPES, not its addresses ----
@@ -3409,7 +3509,7 @@ let proofOracleTests =
                   | None -> ()
 
                   let p, m = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW dag
-                  Expect.equal p "intact" "the rebuilt DAG is intact"
+                  Expect.equal p DagIntact "the rebuilt DAG is intact"
                   Expect.equal m p "and the model agrees"
 
                   let mutable detected = 0
@@ -3418,7 +3518,7 @@ let proofOracleTests =
                       let tp, tm = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW tampered
                       Expect.equal tm tp (sprintf "tamper %s: the two walkers disagree" what)
 
-                      if tp <> "intact" then
+                      if tp <> DagIntact then
                           detected <- detected + 1
 
                   Expect.isGreaterThan detected 0 "the tampers were found, so the agreement is not vacuous"
@@ -3623,6 +3723,178 @@ let proofOracleTests =
                   (JsonParseDiff.prodAnswer RejectNull 512 "42")
                   (JsonParseDiff.modelAnswer JsonParseDiff.toChsBlind RejectNull 512 (JsonParseDiff.budget 512) "42")
                   "a scalar still agrees under the blind bridge"
+
+          // ---- Phase 145 — the two splices, and the premise each of them actually needs ----
+
+          testCase "an actor encoding CAN carry the splice separator — Phase 136's stated reason is REFUTED"
+          <| fun _ ->
+              // Phase 136's README says the `|` splice is unambiguous because "`Actor.encode` emits
+              // a JSON object that never contains one". It can. `jstr` escapes `"`, `\` and the C0
+              // controls; `|` is 0x7C and is none of those. Recorded as an assertion rather than a
+              // sentence so it goes red the day the escaper changes — at which point the model's
+              // separator-freedom reading would become available and this case is the notice.
+              let enc = Actor.encode (Human "a|b")
+              Expect.equal enc "{\"kind\":\"human\",\"id\":\"a|b\"}" "the id is copied through unescaped"
+
+              Expect.isTrue
+                  (enc.Contains "|")
+                  "an actor encoding containing the separator is REACHABLE — separator freedom is false of production"
+
+              Expect.isTrue
+                  ((Actor.encode (Agent("m|1", "v|2", "a|3"))).Contains "|")
+                  "and on the Agent case at every field"
+
+              // The pre-image really does then carry several separators, which is the whole
+              // question: it is not that the splice is safe because there is only one.
+              let preimage = Actor.encode (Human "a|b") + "|" + "A|x|t"
+
+              Expect.isGreaterThan
+                  (preimage.Split('|').Length - 1)
+                  1
+                  "the composite pre-image carries several separators"
+
+          testCase "Actor.encode is a PREFIX-FREE code — the premise the splice lemma actually takes"
+          <| fun _ ->
+              // `Chain.actor_op_splice_unambiguous` asks for exactly this and nothing stronger: no
+              // encoding is a proper prefix of another. It is what a self-delimiting JSON object
+              // buys, and it is what survives the refutation above.
+              let encs = adversarialActors |> List.map Actor.encode
+              Expect.equal (List.length (List.distinct encs)) (List.length encs) "the population encodes injectively"
+
+              let offenders =
+                  [ for x in encs do
+                        for y in encs do
+                            if properPrefix x y then
+                                yield sprintf "%s is a proper prefix of %s" x y ]
+
+              Expect.isEmpty offenders (sprintf "no actor encoding may be a proper prefix of another: %A" offenders)
+
+              // The probe can lose: drop the JSON envelope and the code stops being prefix-free on
+              // this very population, so the emptiness above is a measurement rather than a shape.
+              let bare = adversarialActors |> List.map Actor.id
+
+              Expect.isNonEmpty
+                  [ for x in bare do
+                        for y in bare do
+                            if properPrefix x y then
+                                yield x, y ]
+                  "a bare-id encoder IS prefix-comparable here — the check above can fail"
+
+          testCase "the actor/op splice recovers both halves over the adversarial population"
+          <| fun _ ->
+              // The model's conclusion, measured on production's own encodings: over every pair of
+              // (actor, op-encoding) the composite `Actor.encode a + \"|\" + enc` determines both.
+              let pairs =
+                  [ for a in adversarialActors do
+                        for o in adversarialOpEncodings -> a, o ]
+
+              let spliced = pairs |> List.map (fun (a, o) -> Actor.encode a + "|" + o, (a, o))
+              let byBytes = spliced |> List.map fst
+
+              let collisions =
+                  spliced
+                  |> List.groupBy fst
+                  |> List.filter (fun (_, g) -> (g |> List.map snd |> List.distinct |> List.length) > 1)
+
+              Expect.isEmpty
+                  (collisions |> List.map fst)
+                  "two distinct (actor, op) pairs splice to one pre-image — the splice is ambiguous"
+
+              Expect.equal (List.length (List.distinct byBytes)) (List.length byBytes) "and no two pairs collide at all"
+
+              // Both directions. A bare-id actor encoder makes the SAME population collide, so the
+              // green above is not a property of the population.
+              let bareSpliced = pairs |> List.map (fun (a, o) -> Actor.id a + "|" + o, (a, o))
+
+              Expect.isLessThan
+                  (List.length (List.distinct (bareSpliced |> List.map fst)))
+                  (List.length bareSpliced)
+                  "under a bare-id encoder the same population DOES collide — the comparison can lose"
+
+          testCase "a content id carries no comma and is not empty, and a parent id that would names no node"
+          <| fun _ ->
+              // `Chain.parent_splice_unambiguous` asks for exactly two things of a parent id. Both
+              // are properties of what mints one. The default hash is FNV-1a rendered `x8`.
+              let lanes, _ = planLaneGen.Lanes 3 (ConfRng.ofSeed 3660)
+              let dag = dagUnder OpStream.defaultHash planW planLaneGen.BaseOp lanes
+              let keys = dag.Nodes |> Map.toList |> List.map fst
+              Expect.isGreaterThan (List.length keys) 3 "the generated DAG has nodes to measure"
+
+              for k in keys do
+                  Expect.equal k.Length 8 (sprintf "a content id is 8 characters: %s" k)
+                  Expect.isFalse (k.Contains ",") (sprintf "a content id carries no comma: %s" k)
+                  Expect.isFalse (k = "") "a content id is not empty"
+
+              // And the ids production stores as PARENTS are exactly those keys, in an intact DAG.
+              for KeyValue(_, n) in dag.Nodes do
+                  for p in n.Parents do
+                      Expect.isTrue (List.contains p keys) (sprintf "a stored parent is a key: %s" p)
+
+              // `Dag.append` does NOT validate the parent string it is handed — it takes it and
+              // stores it — so a comma-bearing parent id is constructible. What stops it sitting in
+              // a VERIFIED DAG is the walk's second clause: it names no node. That is the honest
+              // form of "refused or escaped", and it is the reason the model may ask for
+              // comma-freedom of a parent list whose parents are all present.
+              let ambiguous = List.head keys + "," + List.item 1 keys
+
+              let _, spoiled =
+                  Dag.append OpStream.defaultHash planW (Human "w") planLaneGen.BaseOp ambiguous dag
+
+              match Dag.firstBreak OpStream.defaultHash planW spoiled with
+              | Some b ->
+                  // Typed since Phase 147 — `Reason` was the string this case compared when it was
+                  // written, and comparing the case is what that phase made possible.
+                  Expect.equal b.Reason MissingParent "a comma-bearing parent id is caught as a missing parent"
+                  Expect.equal b.Got ambiguous "and the break names the offending id"
+              | None -> failtest "a DAG naming a parent that is not a node must not verify"
+
+          testCase "the op codec this differential runs on certifies injective through the kit's own law"
+          <| fun _ ->
+              // The model's FOURTH premise (`Chain.op_codec_injective`) is the domain's, so it is a
+              // parameter there and a sampled law here. This runs that law over the very witness the
+              // DAG and chain differentials above use, so the premise is certified for the domain
+              // whose ids those cases compare rather than for a domain invented for the purpose.
+              let results = Conformance.codecInjectivityLaws planW planStreamGen 3670 200
+
+              if results |> List.exists (fun r -> not r.Passed) then
+                  let fails =
+                      results
+                      |> List.filter (fun r -> not r.Passed)
+                      |> List.map (fun r -> sprintf "%s — %A" r.Law r.Counterexample)
+
+                  failtestf "the work-plan op codec is not certified injective:\n%s" (String.concat "\n" fails)
+
+              // The premise shown to be load-bearing and the law shown to be able to lose, in one
+              // move: a codec that drops the op's payload aliases two ops onto one encoding, so two
+              // DAG nodes differing only in that op mint ONE content id and the tamper between them
+              // is invisible to production's own walker. That is what the parameter buys.
+              let lossy = { planW with Encode = fun _ -> "op" }
+
+              Expect.isTrue
+                  (Conformance.codecInjectivityLaws lossy planStreamGen 3670 200
+                   |> List.exists (fun r -> not r.Passed))
+                  "a codec that erases its op must fail the law — otherwise the green above cannot lose"
+
+              let lane = [ AddItem("z1", "one"); AddItem("z2", "two") ]
+              let weak = dagUnder OpStream.defaultHash lossy planLaneGen.BaseOp [ lane ]
+
+              let tampered =
+                  let k, n =
+                      weak.Nodes
+                      |> Map.toList
+                      |> List.find (fun (_, n) -> n.Op = AddItem("z1", "one"))
+
+                  { weak with
+                      Nodes =
+                          Map.add
+                              k
+                              { n with
+                                  Op = AddItem("z1", "TAMPERED") }
+                              weak.Nodes }
+
+              Expect.isTrue
+                  (Dag.verifyDag OpStream.defaultHash lossy tampered)
+                  "under a non-injective CODEC — the hash untouched — production's own walker cannot see the tamper"
 
           // ---- Phase 138 — the APPLY ENGINE: apply, canApply and invert against the model ----
 

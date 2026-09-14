@@ -288,7 +288,7 @@
     {
       "id": "chain-intact-verifies",
       "level": "proved",
-      "claim": "A content-addressed DAG grown from nothing by append and merge alone, each naming parents the DAG already held, has no integrity break; and a linear hash chain grown from genesis by append alone verifies. The id half is free by construction, but the parent half is not: append does not check that the parent it is handed names a node the DAG holds, so every-parent-present is a precondition on how a DAG was grown rather than a property of the constructor, and the theorem carries it as one.",
+      "claim": "A content-addressed DAG grown from nothing by append and merge alone, each naming parents the DAG already held, has no integrity break; and a linear hash chain grown from genesis by append alone verifies. The id half is free by construction, but the parent half is not: append does not check that the parent it is handed names a node the DAG holds, so every-parent-present is a precondition on how a DAG was grown rather than a property of the constructor, and the theorem carries it as one. Its PREMISE is the whole of nothing: `intact_verifies` takes no injectivity hypothesis of any kind — not the hash's, not the codec's, not the splices' — because append mints the id from the content it is storing, so the id cannot be wrong however weak the hash is. Phase 145 left it untouched for that reason; there was nothing there to decompose.",
       "phase": "fuaran-core#136",
       "evidence": {
         "theorem": "intact_verifies",
@@ -299,7 +299,7 @@
     {
       "id": "chain-tamper-detected",
       "level": "proved",
-      "claim": "Changing one DAG node's op, actor or parent multiset while leaving its address as it was, in a DAG whose node under that id was intact, is reported as a break; and the same for one linear record's sequence, actor or op with its two hash fields left alone. Both are corollaries of a characterisation of the walker itself: the walk finds nothing exactly when every key is its content hash and every named parent is present, and exactly when every record's sequence, prev-link and recomputed hash agree.",
+      "claim": "Changing one DAG node's op, actor or parent multiset while leaving its address as it was, in a DAG whose node under that id was intact, is reported as a break; and the same for one linear record's sequence, actor or op with its two hash fields left alone. Both are corollaries of a characterisation of the walker itself: the walk finds nothing exactly when every key is its content hash and every named parent is present, and exactly when every record's sequence, prev-link and recomputed hash agree. Since Phase 145 the DAG arm's premise is `node_injective_on`, which is the Phase 136 composite RESTRICTED to pre-images whose parents are ids and whose actor string is one the actor code emits — what the splice lemmas need, and what production supplies, since a stored parent is a key of the map or the walk's second clause reports it and a stored actor is an Actor the walker re-encodes. A caller builds that premise from the two that remain assumptions, through `node_injective_derived`; the linear arm's `rec_injective` is still the bundled Phase 136 form.",
       "phase": "fuaran-core#136",
       "evidence": {
         "theorem": "tamper_detected",
@@ -351,10 +351,37 @@
     {
       "id": "content-id-determines-content",
       "level": "assumed",
-      "claim": "The one cryptographic premise, and the whole of what tamper detection rests on: two contents that hash to one id are the same content. It is an explicit lemma-valued PARAMETER of the theorems that need it rather than an assume, so which results depend on it is visible in their signatures. It is stated MODULO THE PARENT SORT, which is the strongest true form. And it bundles three things the model does not decompose: the hash injective on the pre-images that occur, the two splices in the pre-image unambiguous (no comma inside a parent id, no second place the pipe could split the actor encoding from the op encoding), and the op codec injective.",
-      "phase": "fuaran-core#136",
+      "claim": "The cryptographic premise, and since Phase 145 the only claim about the DAG's content id that is assumed rather than proved or certified: two (key, value) pairs that mint one digest are the same pair. It is an explicit lemma-valued PARAMETER (`hash_injective`) of the theorems that need it rather than an assume, so which results depend on it is visible in their signatures. Phase 136 stated it in a bundled form that also carried the two splices and the op codec; those are now `preimage-splices-unambiguous` and `op-codec-injective-certified` below, and this row is what is left. It is still stated MODULO THE PARENT SORT, which is the strongest true form. The LINEAR side's `rec_injective` is NOT decomposed and remains bundled — its pre-image is a four-way JSON envelope rather than nodeHash's two splices, and decomposing it is separate work, named here rather than implied.",
+      "phase": "fuaran-core#145",
       "evidence": {
-        "assumption": "Dag.nodeHash and the chain payload hash are injective on the pre-images that occur"
+        "assumption": "the HashFn is injective on the (key, value) pairs it is handed; and, on the linear side only, the chain payload hash is injective on the pre-images that occur"
+      }
+    },
+    {
+      "id": "preimage-splices-unambiguous",
+      "level": "proved",
+      "claim": "The two SPLICES in `Dag.nodeHash`'s pre-image are unambiguous, and the composite premise the tamper theorems take is therefore DERIVED from the hash's own injectivity and the op codec's rather than assumed alongside them. `parent_splice_unambiguous`: `String.concat \",\"` is injective on lists of parent ids, given that an id carries no comma and is not empty — both conditions load-bearing, since `[\"a,b\"]` and `[\"a\";\"b\"]` join alike without the first and `[]` and `[\"\"]` do without the second. `actor_op_splice_unambiguous`: `actor ^ \"|\" ^ encodedOp` recovers both halves, given that neither actor encoding is a proper prefix of the other. That second condition is NOT the separator-freedom Phase 136's README named, which is false of production: `Actor.encode` does not escape the pipe, so a Human whose id is `a|b` encodes with one in it. What is true is stronger — a JSON object whose string literals are self-delimiting is a prefix-free code — and it is what the lemma takes. The reading of a string as its symbols is a stated hypothesis (`symbols_faithful`) in the same style as `total_order`, not a parameter: concatenation is symbol-list append and two strings with the same symbols are the same string.",
+      "phase": "fuaran-core#145",
+      "evidence": {
+        "theorem": "node_injective_derived",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "op-codec-injective-certified",
+      "level": "tested",
+      "claim": "The fourth thing Phase 136's premise bundled: the op codec is injective. It is the DOMAIN'S — `StreamWitness.Encode` belongs to whoever brings the op type — so the model takes it as a parameter (`op_codec_injective`) and the kit carries the law a witness certifies it with (`Conformance.codecInjectivityLaws`), the same division the fold theorem's `independence_diamond` runs on. Three arms: no collision drawn, the codec has a left inverse (`Decode ∘ Encode = Ok`, which makes it injective rather than merely un-collided, and which one drawn op exercises where a collision search needs the pair), and the draw compared more than one encoding. Certified here for the work-plan witness the DAG and chain differentials themselves run on. The two alphabet conditions the splice lemmas ask of production are measured beside it, over an adversarial actor population rather than a typical one, with both directions probed: a bare-id encoder is prefix-comparable and DOES collide on the same population, and a codec that erases its op makes a tamper invisible to production's own walker with the hash untouched.",
+      "phase": "fuaran-core#145",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "an actor encoding CAN carry the splice separator — Phase 136's stated reason is REFUTED",
+          "Actor.encode is a PREFIX-FREE code — the premise the splice lemma actually takes",
+          "the actor/op splice recovers both halves over the adversarial population",
+          "a content id carries no comma and is not empty, and a parent id that would names no node",
+          "the op codec this differential runs on certifies injective through the kit's own law"
+        ]
       }
     },
     {

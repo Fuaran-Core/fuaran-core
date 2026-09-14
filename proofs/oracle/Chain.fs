@@ -74,6 +74,9 @@ let rec join_comma : Prims.list<Prims.string>  ->  Prims.string = (fun ( l  :  P
 
 let node_hash = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( enc_op  :  'op  ->  Prims.string ) ( le  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( parents  :  Prims.list<Prims.string> ) ( actor  :  Prims.string ) ( o  :  'op ) -> (h (join_comma (isort le parents)) (Prims.strcat actor (Prims.strcat "|" (enc_op o)))))
 
+
+
+
 type dnode<'op> = {dparents : Prims.list<Prims.string>; dactor : Prims.string; dop : 'op}
 
 
