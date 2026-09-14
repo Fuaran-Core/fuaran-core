@@ -380,5 +380,282 @@ let rec mem_u = (fun ( c  :  conflict<'op> ) ( cs  :  Prims.list<conflict<'op>> 
      end))
 
 
+let rec rev = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+     (app (rev t) ((x)::[]))
+     end))
+
+
+let rec distinct = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (x)::t -> begin
+     ((not ((mem x t))) && (distinct t))
+     end))
+
+type node<'op> = {nid : Prims.string; nparents : Prims.list<Prims.string>; nop : 'op}
+
+
+let __proj__Mknode__item__nid = (fun ( projectee  :  node<'op> ) -> (match (projectee) with
+| {nid = nid; nparents = nparents; nop = nop} -> begin
+     nid
+     end))
+
+
+let __proj__Mknode__item__nparents = (fun ( projectee  :  node<'op> ) -> (match (projectee) with
+| {nid = nid; nparents = nparents; nop = nop} -> begin
+     nparents
+     end))
+
+
+let __proj__Mknode__item__nop = (fun ( projectee  :  node<'op> ) -> (match (projectee) with
+| {nid = nid; nparents = nparents; nop = nop} -> begin
+     nop
+     end))
+
+type dag<'op> = {nodes : Prims.list<node<'op>>}
+
+
+let __proj__Mkdag__item__nodes = (fun ( projectee  :  dag<'op> ) -> (match (projectee) with
+| {nodes = nodes} -> begin
+     nodes
+     end))
+
+type found<'a> =
+| Missing
+| Found of 'a
+
+
+let uu___is_Missing = (fun ( projectee  :  found<'a> ) -> (match (projectee) with
+| Missing -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Found = (fun ( projectee  :  found<'a> ) -> (match (projectee) with
+| Found (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Found__item___0 = (fun ( projectee  :  found<'a> ) -> (match (projectee) with
+| Found (_0) -> begin
+     _0
+     end))
+
+
+let rec lookup = (fun ( ns  :  Prims.list<node<'op>> ) ( id  :  Prims.string ) -> (match (ns) with
+| [] -> begin
+     Missing
+     end
+| (n)::t -> begin
+      
+if (Prims.op_Equals n.nid id) then begin
+     Found (n)
+     end else begin
+     (lookup t id)
+     end
+     end))
+
+
+let rec ids_of = (fun ( ns  :  Prims.list<node<'op>> ) -> (match (ns) with
+| [] -> begin
+     []
+     end
+| (n)::t -> begin
+     (n.nid)::(ids_of t)
+     end))
+
+
+let rec ops_of = (fun ( ns  :  Prims.list<node<'op>> ) -> (match (ns) with
+| [] -> begin
+     []
+     end
+| (n)::t -> begin
+     (n.nop)::(ops_of t)
+     end))
+
+
+let distinct_ids = (fun ( d  :  dag<'op> ) -> (distinct (ids_of d.nodes)))
+
+
+let rec chain_head_rev = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( rl  :  Prims.list<'op> ) -> (match (rl) with
+| [] -> begin
+     q
+     end
+| (o)::t -> begin
+     (mint (chain_head_rev mint actor q t) actor o)
+     end))
+
+
+let rec chain_rev = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( rl  :  Prims.list<'op> ) -> (match (rl) with
+| [] -> begin
+     []
+     end
+| (o)::t -> begin
+     (
+
+let p = (chain_head_rev mint actor q t)
+in ({nid = (mint p actor o); nparents = (p)::[]; nop = o})::(chain_rev mint actor q t))
+     end))
+
+
+let lane_nodes = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( l  :  Prims.list<'op> ) -> (rev (chain_rev mint actor q (rev l))))
+
+
+let lane_head = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( actor  :  Prims.string ) ( q  :  Prims.string ) ( l  :  Prims.list<'op> ) -> (chain_head_rev mint actor q (rev l)))
+
+type lane<'op> = {lactor : Prims.string; lops : Prims.list<'op>}
+
+
+let __proj__Mklane__item__lactor = (fun ( projectee  :  lane<'op> ) -> (match (projectee) with
+| {lactor = lactor; lops = lops} -> begin
+     lactor
+     end))
+
+
+let __proj__Mklane__item__lops = (fun ( projectee  :  lane<'op> ) -> (match (projectee) with
+| {lactor = lactor; lops = lops} -> begin
+     lops
+     end))
+
+
+let rec lanes_nodes = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( q  :  Prims.string ) ( lanes  :  Prims.list<lane<'op>> ) -> (match (lanes) with
+| [] -> begin
+     []
+     end
+| (ln)::t -> begin
+     (app (lane_nodes mint ln.lactor q ln.lops) (lanes_nodes mint q t))
+     end))
+
+
+let rec lane_heads = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( q  :  Prims.string ) ( lanes  :  Prims.list<lane<'op>> ) -> (match (lanes) with
+| [] -> begin
+     []
+     end
+| (ln)::t -> begin
+     ((lane_head mint ln.lactor q ln.lops))::(lane_heads mint q t)
+     end))
+
+
+let rec lane_ops = (fun ( lanes  :  Prims.list<lane<'op>> ) -> (match (lanes) with
+| [] -> begin
+     []
+     end
+| (ln)::t -> begin
+     (ln.lops)::(lane_ops t)
+     end))
+
+
+let build_dag = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( base_id  :  Prims.string ) ( base_op  :  'op ) ( lanes  :  Prims.list<lane<'op>> ) -> {nodes = ({nid = base_id; nparents = []; nop = base_op})::(lanes_nodes mint base_id lanes)})
+
+
+let rec ancestors_of = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( id  :  Prims.string ) -> (match (fuel) with
+| [] -> begin
+     []
+     end
+| (uu___)::fuel' -> begin
+     (match ((lookup d.nodes id)) with
+| Missing -> begin
+     []
+     end
+| Found (n) -> begin
+     (id)::(ancestors_all d fuel' n.nparents)
+     end)
+     end))
+and ancestors_all = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( ids  :  Prims.list<Prims.string> ) -> (match (ids) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+     (app (ancestors_of d fuel p) (ancestors_all d fuel t))
+     end))
+
+
+let rec covers = (fun ( fuel  :  Prims.list<'a> ) ( l  :  Prims.list<'b> ) -> (match (l) with
+| [] -> begin
+     (match (fuel) with
+| (hd)::tl -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| (uu___)::t -> begin
+     (match (fuel) with
+| [] -> begin
+     false
+     end
+| (uu___1)::f -> begin
+     (covers f t)
+     end)
+     end))
+
+
+let rec drop_by = (fun ( fuel  :  Prims.list<'a> ) ( l  :  Prims.list<'b> ) -> (match (l) with
+| [] -> begin
+     fuel
+     end
+| (uu___)::t -> begin
+     (match (fuel) with
+| [] -> begin
+     []
+     end
+| (uu___1)::f -> begin
+     (drop_by f t)
+     end)
+     end))
+
+
+let topo_of = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( head  :  Prims.string ) -> (rev (ancestors_of d fuel head)))
+
+
+let rec nodes_for = (fun ( d  :  dag<'op> ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (id)::t -> begin
+     (match ((lookup d.nodes id)) with
+| Missing -> begin
+     (nodes_for d t)
+     end
+| Found (n) -> begin
+     (n)::(nodes_for d t)
+     end)
+     end))
+
+
+let between = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (nodes_for d (diff (topo_of d fuel head) (ancestors_of d fuel base_id))))
+
+
+let between_ops = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (ops_of (between d fuel base_id head)))
+
+
+let rec deltas_of = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( heads  :  Prims.list<Prims.string> ) -> (match (heads) with
+| [] -> begin
+     []
+     end
+| (h)::t -> begin
+     ((between_ops d fuel base_id h))::(deltas_of d fuel base_id t)
+     end))
+
+
+let reconcile_many_dag = (fun ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( heads  :  Prims.list<Prims.string> ) -> (reconcile_many fp (deltas_of d fuel base_id heads)))
+
+
+let fold_once_dag = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( s0  :  'state ) ( heads  :  Prims.list<Prims.string> ) -> (fold_once apply fp s0 (deltas_of d fuel base_id heads)))
+
+
 
 
