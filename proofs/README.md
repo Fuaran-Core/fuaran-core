@@ -3,12 +3,13 @@
 **Status: GO** (Phase 131, 2026-09-12; the header last brought level with the body 2026-09-14).
 Phase 131's three exit criteria were met and remain met — the confluence proof is reproducible on
 the pinned prover, the extracted model agrees with production over every lane set the differential
-host draws, and the model reads beside the F# in one sitting — and four further theorems have
-shipped beside it since. **Shipped, five in all: fold confluence (131, with its hypothesis
+host draws, and the model reads beside the F# in one sitting — and five further theorems have
+shipped beside it since. **Shipped, six in all: fold confluence (131, with its hypothesis
 corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
 totality (135), independence soundness for the tree algebra (133), chain integrity (136, its
-content-id premise decomposed by 145), and
-`Json.parse` totality, bounded (146).** Each carries its own claims ladder in its own section
+content-id premise decomposed by 145),
+`Json.parse` totality, bounded (146), and apply-engine preservation (138, which also lifts 133's
+model to the validator 137 fixed).** Each carries its own claims ladder in its own section
 below; the "Next" section at the foot is the live list.
 
 This directory is the mechanised half of the correctness story whose differential half already
