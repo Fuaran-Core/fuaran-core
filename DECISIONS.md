@@ -1,5 +1,89 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-14 — D37: a graft's INTERIOR is inspected — `applyContained` walks the inserted subtree
+
+**Decided (Phase 161), by the operator, between two options the phase was chartered to put rather
+than to choose.** Phase 140 proved that `Ops.applyContained` does not preserve the invariant it
+exists to keep — "every node with children satisfies `canHold`" — and named two hypotheses the
+theorem has to carry to be true of the function that ships. One of them, `contained_op`, is about the
+graft: `canHold` is applied to the PARENT of an insert and to nothing inside the subtree being
+inserted, so a graft whose own interior node holds children while `canHold` refuses it is accepted
+whole and carries the violation in. The question was what to do about it.
+
+**(A) Inspect the graft — CHOSEN.** `validateInsert` walks the inserted subtree and refuses, with
+`NotAContainer` naming the first interior parent that holds children while `canHold` refuses it. A
+refusal-class widening on the Phase 137 pattern: an operation previously accepted is now refused, so
+a minor under the draft-slot rule, and the `contained_op` premise is discharged by the code rather
+than carried by the theorem.
+
+**(B) Interior containment is the domain's obligation — DECLINED.** `applyContained` keeps its
+shape; the README states that a domain grafting a subtree is responsible for its interior, exactly as
+137 scoped keyed positions; `contained_op` stays a named premise at level 3 of the claims ladder, and
+the new `Conformance.containerLaws` family gains a sampled interior check the domain runs over its
+own generator.
+
+**Why (A).** Four reasons, in the order they weighed.
+
+1. **(A) is the only option that discharges the premise in code.** Under (B) `contained_op` remains a
+   level-3 assumption — a sentence a reader has to believe about every caller — while the survey
+   Phase 137 ran found twenty consumers applying through Core with no pre-check of their own. An
+   obligation that is documented and unenforced, on a surface with that many callers, is an
+   obligation that is not met; the counterexample is already machine-checked, so the only open
+   question was who pays for it.
+2. **The traversal is already paid for.** Phase 137 made `validateInsert` walk the inserted subtree
+   for id collisions (`firstDuplicateId` reads `Tree.ids w node` over the whole graft). Checking
+   `canHold` on each interior node that has children is that same walk with one more predicate call
+   per node — not a new cost, and not a new traversal for a reader to reason about.
+3. **The only operations (A) refuses are bugs that succeed silently today**, and no host mirrors this
+   surface. A graft refused by the new clause is one that places children under a node the domain's
+   own `canHold` says cannot hold them; accepting it leaves a tree the domain's own predicate calls
+   invalid, and nothing downstream reports it. The container capability is Core's — the TypeScript,
+   Go, Rust and Python hosts model no `canHold` at all — so nothing outside this repository moves.
+4. **(B)'s one advantage is not real.** (B) avoids a contract change, but `containerLaws` names the
+   domain obligation either way, so the documentation half of (B) lands under (A) as well. What (B)
+   buys is the absence of a refusal — which is the thing being asked for.
+
+**What (A) does NOT cover, and this is the half that stays.** `child_blind` — the other hypothesis —
+is untouched by any amount of graft inspection. `canHold : 'Node -> bool` may read the node's child
+list, and a predicate that does can admit a node at the instant it is checked and refuse it the
+instant it gains a child; no check placed anywhere in the engine can repair that, because the
+predicate's answer changes under the very edit the check licensed. It stays a named premise of
+`contained_preserves`, and it becomes the **domain's** obligation, certified rather than asserted:
+`Conformance.containerLaws`' first law perturbs a node's children and requires `canHold` to be
+unchanged. A domain whose predicate reads the child list fails that law and learns it from its own
+conformance run.
+
+**Scope of the walk: `InsertChild` only, and the omission at `MoveNode` is argued rather than
+inherited.** A move relocates a subtree that is ALREADY IN THE TREE, so it introduces no interior
+structure the tree did not already hold: whatever the moved subtree's interior says about
+containment, it said before the operation, and a violation found there was carried in by some earlier
+insert. `contained_preserves`' move clause is the machine-checked form of that argument — it derives
+the moved subtree's containment from the tree's own (`find_in_contained`), and it needed no premise
+about the operation to do so. Walking the graft at `MoveNode` would refuse an operation that carries
+in nothing new, on the strength of a pre-existing violation elsewhere in the tree; that is an
+invariant-REPAIR gate, a different feature, and one nobody asked for. The new clause therefore sits
+in `validateInsert`, where new structure actually enters.
+
+**Precedence within `validateInsert`: the new check goes LAST.** After the duplicate-id scan, after
+the parent's existence, after the parent's own capability. The consequence is that **no operation
+refused before Phase 161 changes its class** — only operations that were ACCEPTED can now be refused
+— which is the smallest correct change and the one a consumer's existing envelope handling survives
+unaltered. It also keeps Phase 137's built-collision conformance arm reaching the check it is about:
+a deliberately colliding graft earns `DuplicateId` first, exactly as it did.
+
+**Rejected: refusing under a new rejection case.** A `GraftNotAContainer`, or a `NotAContainer`
+variant carrying the graft-relative path, would let a consumer distinguish "your parent is a leaf"
+from "your subtree's interior is wrong". It was declined for 137's reason, in 137's words: the class
+is the same failure the envelope already names, reached through more of the subtree, and a new case
+breaks every consumer matching on the envelope to buy a distinction they can already make — the
+named node is in their own graft, and they have it in hand.
+
+**Rejected: gating the walk behind a flag.** An `applyContainedDeep`, or a parameter on
+`applyContained`, would let a caller opt in. It multiplies the container-aware surface by two at the
+exact moment Phase 140 found that surface already had one gap too many — there is still no
+container-aware SEQUENCE surface (`container-sequence-gap`) — and it leaves the default answering
+wrongly, which is what this decision is about.
+
 ## 2026-09-14 — D36: the footprint's unknown-parent over-approximation is not tightened, because it cannot be tightened over this record
 
 **Decided (Phase 143).** `Ops.independent`'s last two clauses — a `RemoveNode`/`MoveNode` conflicts
