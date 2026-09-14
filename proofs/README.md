@@ -16,6 +16,9 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. |
+| `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. |
+| `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -102,19 +105,36 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    lanes all apply from the base state, the halt half under nothing at all. F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, cold-cache checks on three seeds and at a quarter
    of the rlimit the leg runs with.
+
+   **And, since Phase 133, the tree algebra's own diamond** — `TreeOps.tree_independence_diamond`,
+   which discharges that hypothesis for `SkeletonOp` rather than sampling it, and
+   `Skeleton.skeleton_fold_confluence`, the composite. See "Theorem 2" below for what the composite
+   covers and the two boundaries it names; this level's sentence about the fold theorem itself is
+   unchanged, because the theorem is still generic over a domain and still carries the hypothesis
+   for any other one.
 2. **Differentially tested.** Production's `betweenOps` recovery of each lane's delta from a
    content-addressed DAG, its pairwise `conflicts` sweep, `reconcileMany`'s composition and
    `foldOnce`'s replay and rendering together agree with the extracted model, over the pools
    above. Agreement is over sampled lane sets and the `arrivalOrders` sample (exhaustive to 4
-   lanes, 24 orders above), never over all inputs.
+   lanes, 24 orders above), never over all inputs. Since Phase 133 the same level also carries
+   the tree algebra's own differential — `Ops.apply` and `Ops.footprint` against the extracted
+   `TreeOps` over the generated op pool and every state a prefix of it reaches — with its own
+   go-red and its own adequacy guard; see "Theorem 2" below.
 3. **Assumed, and stated as such.**
    - `independence_diamond` — the domain's promise, and the only domain hypothesis the theorem
      carries. Independent ops that **both apply** at a state each apply after the other and reach
      the same state. This is Phase 80's law and no more than it: interleaving totality (accepted
-     scripts stay accepted) plus confluence, at op granularity. It is **sampled**, never proved —
-     Phase 80 for the tree algebra, Phase 100 for a domain's own witness, and the `Proofs.Oracle`
-     diamond family for the reference witness directly against the extracted model's own
-     `independent`. Sampling is what this level means.
+     scripts stay accepted) plus confluence, at op granularity. For **a domain's own witness** it
+     is still **sampled**, never proved — Phase 100, and the `Proofs.Oracle` diamond family for
+     the reference witness directly against the extracted model's own `independent`. Sampling is
+     what this level means, and the theorem is generic over the domain, so this entry does not
+     go away.
+
+     **For `SkeletonOp` it has left this level.** Phase 133 proves it — `TreeOps.fst` models the
+     tree algebra and `tree_independence_diamond` discharges the hypothesis for it, so what Phase
+     78/80 certified by sampling is now a theorem at level 1. Two boundaries come with that and
+     are stated as their own entries below rather than folded into this one, because they are
+     about the tree algebra and not about the fold.
    - **The lane set is assumed to apply.** The fold half is stated for a lane set whose every lane
      applies cleanly from the base state (`lanes_apply`), which is what `foldOnce`'s generators
      produce and what the differential host draws. Nothing is proved about a lane set one of whose
@@ -129,6 +149,13 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    - **Sets are lists.** The model reads F#'s `Set<string>` as lists under membership; the
      host compares canonical (deduplicated, sorted) reports, never raw conflict lists, so
      multiplicity and order in the model's reports are unobserved by construction.
+   - **The tree the skeleton algebra runs over is id-unique** (Phase 133). Not an oversight: the
+     diamond is FALSE without it, because `Tree.tryFind` returns the first match in document order
+     and a reorder moves document order. Nothing in the estate produces such a tree, but no
+     shipped type carries the invariant. "Theorem 2" below has the argument.
+   - **The composite's op alphabet excludes a nested `Batch`** (Phase 133). One pair shape, and
+     `Ops.apply` threads a `Batch` exactly as the fold threads a lane, so it removes no behaviour
+     — it declines to nest one lane inside another. Sized in "Theorem 2" below.
 4. **Not claimed.**
    - **Rejection identity.** That two independent ops, one of which rejects, reject *identically*
      whichever ran first. The reference algebra cannot keep it and the theorem no longer asks for
@@ -150,6 +177,8 @@ What may be said, and at what strength, per the attested-stack programme's §6:
 
 Theorem 1 — decoder totality — carries its own ladder of the same shape, in its own section below;
 what is said at each level there is said about the decode combinators and about nothing else.
+Theorem 2 — independence soundness for the tree algebra — carries a third, in the section after it;
+what is said there is said about `SkeletonOp` and about no other domain's witness.
 
 ## Exit criteria, with evidence
 
@@ -350,6 +379,160 @@ reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have c
    reference vocabulary modelled here (what carries to one is the combinator layer it is built
    from, not its clauses); and anything about encode — `Canon.render`'s key ordering and float
    layout are certified by the wire-format corpus, not by this theorem.
+
+## Theorem 2 — independence soundness for the tree algebra (Phase 133)
+
+Phase 131 proved fold confluence under one domain hypothesis, and Phase 132 established what that
+hypothesis has to be — the diamond, not rejection identity. `TreeOps.fst` **proves the diamond for
+the skeleton-op tree algebra**, and `Skeleton.fst` composes the two, so for `SkeletonOp` over any
+`NodeWitness` the fold-confluence law is a theorem with no domain hypothesis left. Phase 78's
+conservativity contract — `Ops.independent = true` is a *promise* that the scripts commute — stops
+being a contract and becomes a consequence.
+
+`TreeOps.fst` models the tree as the witness shows it: a node is an id, a kind tag and an ordered
+child list, and nothing else is visible to `Ops`. On top of that sit the five skeleton ops,
+`Ops.apply`'s validation clause for clause with the `Rejection` envelope it raises, and
+`Ops.footprint` clause for clause. It shares `DagFold.fst`'s list-as-set algebra, its `footprint`,
+its `independent` and its `diamond` rather than restating them, which is what makes the composition
+an instantiation instead of a second model that has to be argued equal to the first.
+
+### The proof is three facts, not fifteen cases
+
+- **The pinned over-approximation retires nine of the fifteen unordered pairs on its own**, and the
+  tree is never looked at. A `RemoveNode` or a `MoveNode` writes an UNKNOWN parent — its source
+  parent is a tree fact the script cannot name — and `Ops.independent` refuses independence between
+  an unknown-parent write and *any* structural write. Every skeleton op except a structure-free
+  `Batch` writes structure. So a remove or a move is independent only of an op that does nothing at
+  all, and `relocating_forces_inert` says exactly that. This is the phase's most useful finding: the
+  conservative clause the shard called a limitation is what makes most of the theorem free.
+- **The diamond's conclusion is symmetric in the pair**, so the remaining ordered cases halve
+  (`wstep_sym`), and `Ops.independent` is symmetric too (`independent_sym`).
+- **Three commutation equalities on the tree** carry the rest: insert/insert, insert/reorder and
+  reorder/reorder. Each side condition they need is exactly what independence buys, and one of them
+  is worth naming: `Ops.footprint` puts an op's structural PARENT id into `Reads` as well as into
+  `StructureWrites`, which is what guarantees that neither op's inserted subtree carries the other's
+  anchor. Without that clause two independent inserts would not commute.
+
+### The conservative footprint is the theorem's shape, not its limitation
+
+The theorem is about the pinned over-approximation, and it is **conservative rather than tight**.
+`MoveVsRemove` declares a remove or a move to interfere with every concurrent structural write, so
+fewer pairs have to commute — which is why nine of them are vacuous above. A *tighter* footprint,
+one that used the tree to see that two removes in disjoint subtrees do not interfere, would admit
+more pairs as independent and would need its own proof; nothing here carries to it. That is the
+right way round: `independent = true` is the promise, `independent = false` is always a safe answer,
+and a theorem about the promise is a theorem about the answer the code actually gives.
+
+### Well-formedness, and why it is a hypothesis rather than an oversight
+
+`Tree.tryFind` and `Tree.parentOf` resolve an id to the FIRST node in document order, and
+`ReorderChildren` validates against the children of the node they resolve to. A reorder moves
+document order. So on a tree carrying one id twice, two footprint-independent reorders of different
+parents can validate differently depending on which ran first — the diamond is **false** there, not
+merely unproved. The theorem is therefore about id-unique trees, and `TreeOps.wapply` is `Ops.apply`
+guarded to say so.
+
+That guard has a second half, and it is a finding about the shipped code rather than about the
+model. `Ops.validateInsert` checks the inserted node's **own** id against the tree and not its
+descendants, so an inserted subtree carrying an id the tree already holds is accepted and the result
+carries that id twice. `insert_breaks_wf` is a concrete accepted insert of exactly that kind,
+machine-checked — so "every accepted op preserves id uniqueness" is refuted here rather than
+asserted. What is proved beside it is the conditional form, `ins_wf`, and its converse
+`ins_wf_conv`: an insert preserves the invariant **exactly when** its subtree is internally
+id-unique and disjoint from the tree. That pair is the specification the Phase 137 validation has to meet,
+and it is why guarding on the result is an exact stand-in for the check rather than an approximation
+of it.
+
+### What is left open, and how big it is — twelve of the fifteen pairs, exactly
+
+Counted rather than estimated. The fifteen unordered pairs over the five ops are the ten pairs of
+non-`Batch` ops plus the five involving a `Batch`. **All ten non-`Batch` pairs are proved** — nine
+of them by `relocating_forces_inert` and the three commutation equalities covering the rest. **Two
+of the five `Batch` pairs are proved**: `RemoveNode`/`Batch` and `MoveNode`/`Batch`, because a
+relocating op forces the other side inert whatever it is, so no lift is needed.
+
+**Three remain open**, and all three are the same shape: `InsertChild`/`Batch`,
+`ReorderChildren`/`Batch` and `Batch`/`Batch`, where the batch is one that neither does nothing nor
+relocates — a batch built only from inserts and reorders. `TreeOps.covered` is that boundary written
+as a predicate, and `tree_independence_diamond` is stated over it.
+
+Lifting the leaf diamond along a batch's script is the argument `DagFold.replay_diamond` already
+performs at lane granularity — no new idea is needed — and it needs the id-uniqueness invariant at
+each intermediate state of the script, which is exactly what the paragraph above says the algebra
+does not currently give. It closes when Phase 137 lands.
+
+The composite theorem in `Skeleton.fst` takes the same boundary as its op alphabet. That costs less
+than it looks: `Ops.apply` threads a `Batch` exactly as the fold threads a lane, so the alphabet
+removes no behaviour from the fold — it declines to nest one lane inside another.
+
+`applyContained`'s container capability is out of scope and is Phase 140's; `Ops.invert` and `Diff` are
+Phase 141's. `NotAContainer` and
+`Rejected` are carried in the model's envelope vocabulary and are unreachable from `apply` —
+`canHold` is `fun _ -> true` there, and `Rejected` is the domain-side extension point Core never
+raises.
+
+### What the corpus covers
+
+| Pool | What is asked | Both classes exercised |
+|---|---|---|
+| the generated op pool × every state a prefix of it reaches | footprint as four address sets, verdict, accepted result through `Tree.encodeHash`, rejection by class | yes (asserted) |
+| hand-written refusals | every rejection class the plain `apply` can raise — each asserted reached by name, not counted | refuse path (asserted) |
+| the extracted model's own diamond | the theorem's instance on the code that ships, over the same pool | yes, with an adequacy count |
+
+The result hash runs production's own `Tree.encodeHash` on **both** sides, through a `NodeWitness`
+for each tree type, over the per-node content the witness exposes — id and kind tag. Hashing the
+reference node's value, hole or effect class would compare fields the model does not model, and
+agreeing about them would mean nothing. The **go-red case** hands the oracle a bridge that erases
+every kind tag: the verdicts still agree, because no clause reads a kind, and the result hash must
+lose — so a green report is known to be a comparison that can fail. The diamond family has its own,
+a blind footprint over a hand-made pair of same-parent inserts, which must break.
+
+### Two things this model cost that the first two did not
+
+Both are extensions of the Phase 131 findings rather than new classes, and both are worth knowing
+before the fourth model is written.
+
+- **The runtime floor grew by one type** (finding 2 again). `Tree.tryFind` and `Tree.parentOf`
+  return an `option`, so a faithful model does too — and the F# backend then emits
+  `FStar_Pervasives_Native.option` / `.Some` / `.None`, for which the release ships no F#
+  implementation any more than it does for `Prims`. `oracle/FStar_Pervasives_Native.fs` is the
+  two-line answer, hand-written and un-diffed exactly as `Prims.fs` is. The alternative — restate
+  `option` inside the model so the extraction depends on `Prims` alone, which is what `DagFold.fst`
+  does for its list helpers — buys a shorter floor at the cost of a model that no longer reads like
+  the F# it is about, and readability is exit criterion 3.
+- **Context pruning is the difference between seven minutes of CI and forty** (finding 1's
+  successor, put to work). This model is an order of magnitude larger than `DagFold.fst` — some
+  ninety definitions where that one has thirty — and the SMT context grows with it, because every
+  membership lemma's pattern stays live at every later query. Measured on the pinned prover:
+  **300s** to check with the default context, **56s** with `--ext context_pruning`. The leg runs
+  `--quake 3` three times from a cold cache, so the whole four-model leg is ~2 minutes per run
+  rather than ~15. It is set with `#set-options` inside `TreeOps.fst` rather than added to
+  `check.ps1`'s flags, deliberately: pruning changes which facts a query can see, and a module that
+  has not been checked under it must not be switched to it as a side effect of another module's
+  cost.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The diamond for every operation pair `covered` names,
+   at every id-unique tree; the composite fold-confluence law over the non-`Batch` alphabet, with
+   its halt half under no hypothesis at all; and the refutation of unconditional well-formedness
+   preservation with the conditional form and its converse beside it. F\* 2026.09.06, Z3 4.13.3,
+   every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
+2. **Differentially tested.** The extracted model agrees with `Ops.apply` and `Ops.footprint` over
+   the pools above. Agreement is over those pools, never over all inputs.
+3. **Assumed, and stated as such.**
+   - **The tree is id-unique.** As above: the diamond is false without it, and no shipped type
+     carries the invariant — `Diff.toOps` refuses an ill-formed tree with `DuplicateIdInTree`, and
+     that is the closest the code comes to enforcing it.
+   - **The op alphabet excludes a nested `Batch`.** The one open pair shape, and its size is stated
+     above rather than left to be guessed.
+   - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
+     the other two theorems.
+4. **Not claimed.** Rejection PAYLOADS: the differential compares a refusal by class, and
+   `UnknownNode`'s `addressable` and `ReorderMismatch`'s two orders are outside the comparison (the
+   Phase 132 entry says why they cannot be claimed to agree across orders in the first place).
+   Nothing about `applyContained`, `invert`, `normalize` or `Diff`. Nothing about a *tighter*
+   footprint than the pinned one.
 
 ## Next
 

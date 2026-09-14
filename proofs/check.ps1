@@ -46,7 +46,11 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 # at proofs/oracle/<name>.fs; they share nothing but oracle/Prims.fs.
 #   DagFold    — Phase 131, the N-lane DAG fold, with fold confluence proved.
 #   WireDecode — Phase 135, the wire decode combinators, with decoder totality proved.
-$modules = @('DagFold', 'WireDecode')
+#   TreeOps    — Phase 133, the skeleton-op tree algebra, with the fold theorem's domain
+#                hypothesis proved for it. Opens DagFold, so it follows it here.
+#   Skeleton   — Phase 133, the composite: DagFold's fold theorem instantiated at TreeOps, with
+#                no domain hypothesis left. Opens both, so it is last.
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 

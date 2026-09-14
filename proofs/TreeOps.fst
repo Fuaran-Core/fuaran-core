@@ -1,0 +1,1633 @@
+(*
+   TreeOps — an F* model of Fuaran.Core's skeleton-op tree algebra, with the fold theorem's one
+   DOMAIN HYPOTHESIS proved for it rather than sampled (fuaran-core Phase 133).
+
+   WHAT IS MODELLED. `Ops.apply` over the `NodeWitness`/`IdWitness` view of a tree: a node is an
+   id, a kind tag and an ordered child list, and nothing else is visible to the algebra. The five
+   skeleton ops (`InsertChild`, `RemoveNode`, `MoveNode`, `ReorderChildren`, `Batch`), each
+   validation clause and each `Rejection` it raises, and `Ops.footprint` clause for clause.
+
+   WHAT IS PROVED. `tree_independence_diamond`: for every pair of ops whose footprints
+   `Ops.independent` declares disjoint, and every WELL-FORMED tree at which both apply, each
+   applies after the other and the two orders reach the same tree. That is exactly
+   `DagFold.independence_diamond` at this domain, and `Skeleton.fst` composes the two into
+   `skeleton_fold_confluence` — fold confluence for `SkeletonOp` with no domain hypothesis left.
+
+   The proof is not fifteen bespoke cases. It is three facts:
+
+     1. `relocating_forces_inert` — the pinned over-approximation does most of the work. A
+        `RemoveNode` or a `MoveNode` writes an UNKNOWN parent, and `Ops.independent` refuses
+        independence between an unknown-parent write and ANY structural write. Every skeleton op
+        except a structure-free `Batch` writes structure, so a remove or a move is independent
+        only of an op that does nothing at all. NINE of the fifteen unordered pairs are closed
+        by this lemma alone, and the tree is never looked at.
+     2. `diamond_sym` — the diamond's conclusion is symmetric in the pair, so the remaining
+        ordered cases halve.
+     3. Three concrete commutation equalities on the tree — insert/insert, insert/reorder,
+        reorder/reorder — plus a flattening that reduces every `Batch` to its leaves and lifts
+        the leaf diamond along a script, in the shape `DagFold.replay_diamond` already uses.
+
+   WHY WELL-FORMEDNESS. `Tree.tryFind` and `Tree.parentOf` resolve an id to the FIRST node in
+   preorder, and `ReorderChildren` validates against the children of the node they resolve to.
+   `reorder_at` permutes a parent's children, which moves preorder positions — so on a tree
+   carrying one id twice, two footprint-independent reorders can validate differently depending
+   on which ran first. The diamond is therefore a statement about ID-UNIQUE trees. `Ops.apply` is
+   faithful to that; the refinement is where the model says it out loud.
+
+   WHAT IS NOT MODELLED. `applyContained`'s container capability (`canHold` is `fun _ -> true`
+   under `apply`, so `NotAContainer` is unreachable here and is carried in the rejection
+   vocabulary only so the envelope set is complete), `Ops.invert`, `Ops.normalize` and `Diff`.
+   The per-node payload a domain hangs off a node is invisible to the witness and so to this
+   model.
+
+   HOW TO READ IT. Every definition names its F# counterpart, as in `DagFold.fst`. The
+   list-as-set reading and the membership algebra are that module's, opened here rather than
+   restated — `TreeOps` extracts beside `DagFold` into the same oracle assembly.
+
+   Apache-2.0, like everything beside it.
+*)
+module TreeOps
+
+open DagFold
+
+(* This model is an order of magnitude larger than `DagFold.fst` — some ninety definitions and
+   lemmas where that one has thirty — and the SMT context grows with it: every membership lemma's
+   pattern is live at every subsequent query. Measured on the pinned prover, checking it takes
+   300s with the default context and 56s with upstream's context pruning, which is the successor
+   to the proof hints the pinned release removed (README finding 1). The leg runs `--quake 3`
+   three times from a cold cache, so that difference is forty minutes of CI against seven.
+   Scoped here rather than added to `check.ps1`'s flags: pruning changes which facts a query can
+   see, so a module that has not been checked under it must not be switched to it as a side
+   effect of another module's cost. *)
+#set-options "--ext context_pruning"
+
+(* ======================================================================================
+   0. The tree as the witness sees it (F#: `NodeWitness<'Node,'Id>` in Tree.fs — `Id`,
+      `KindTag`, `Children`, `ReplaceChildren`, and nothing else).
+
+      Ids are strings because `IdWitness.ToString` is the key form every address in
+      `Footprint` is written in; the algebra never demands `comparison` of an id, only
+      `Equals`, which is `=` here.
+   ====================================================================================== *)
+
+type tree =
+  | TNode : tid:string -> kind:string -> kids:list tree -> tree
+
+(* F#: `w.Id`, `w.KindTag`, `w.Children`. *)
+let tid_of (t:tree) : Tot string = match t with TNode i _ _ -> i
+let kind_of (t:tree) : Tot string = match t with TNode _ k _ -> k
+let kids_of (t:tree) : Tot (list tree) = match t with TNode _ _ cs -> cs
+
+(* F#: `Tree.preorder |> List.map w.Id` — `Tree.ids`. Node then children, left to right. *)
+let rec ids (t:tree) : Tot (list string) (decreases t) =
+  match t with
+  | TNode i _ cs -> i :: ids_all cs
+and ids_all (ts:list tree) : Tot (list string) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> app (ids t) (ids_all r)
+
+(* The ids of a child LIST at one level (F#: `w.Children p |> List.map w.Id`, the list
+   `validateReorder` compares against the proposed order). *)
+let rec kid_ids (ts:list tree) : Tot (list string) =
+  match ts with
+  | [] -> []
+  | t :: r -> tid_of t :: kid_ids r
+
+(* F#: `Tree.exists`. *)
+let has_id (x:string) (t:tree) : Tot bool = mem x (ids t)
+
+(* F#: `Tree.tryFind` — the FIRST preorder match. *)
+let rec find_in (x:string) (t:tree) : Tot (option tree) (decreases t) =
+  match t with
+  | TNode i _ cs -> if i = x then Some t else find_all x cs
+and find_all (x:string) (ts:list tree) : Tot (option tree) (decreases ts) =
+  match ts with
+  | [] -> None
+  | t :: r -> (match find_in x t with Some n -> Some n | None -> find_all x r)
+
+(* F#: `Tree.parentOf`, as its id — the first preorder node one of whose CHILDREN carries `x`. *)
+let rec has_kid (x:string) (ts:list tree) : Tot bool =
+  match ts with
+  | [] -> false
+  | t :: r -> tid_of t = x || has_kid x r
+
+let rec parent_of (x:string) (t:tree) : Tot (option string) (decreases t) =
+  match t with
+  | TNode i _ cs -> if has_kid x cs then Some i else parent_all x cs
+and parent_all (x:string) (ts:list tree) : Tot (option string) (decreases ts) =
+  match ts with
+  | [] -> None
+  | t :: r -> (match parent_of x t with Some p -> Some p | None -> parent_all x r)
+
+(* ======================================================================================
+   1. Well-formedness (F#: the invariant `Ops.apply` ASSUMES and never states — `Tree.updateNode`
+      rebuilds every node whose id matches, `tryFind`/`parentOf` resolve to the first).
+
+      Written structurally rather than as `no_dups (ids t)` — the two are the same predicate,
+      and this shape is the one the preservation arguments are about: a node's id is not in its
+      own subtree below it, and sibling subtrees share no id. Membership and disjointness only,
+      so the whole of DagFold's membership algebra applies to it directly.
+   ====================================================================================== *)
+
+let rec wf (t:tree) : Tot bool (decreases t) =
+  match t with
+  | TNode i _ cs -> not (mem i (ids_all cs)) && wf_all cs
+and wf_all (ts:list tree) : Tot bool (decreases ts) =
+  match ts with
+  | [] -> true
+  | t :: r -> wf t && wf_all r && disjoint (ids t) (ids_all r)
+
+(* ======================================================================================
+   2. The rejection envelope (F#: `Rejection<'Id>` in Ops.fs).
+
+      Seven cases there, FIVE of them reachable from `Ops.apply`: `NotAContainer` is raised only
+      by `applyContained`, whose `canHold` `apply` fixes at `fun _ -> true`, and `Rejected` is
+      the domain-side extension point Core itself never raises. Both are carried so the envelope
+      vocabulary is complete and the differential can compare by class over the whole of it.
+   ====================================================================================== *)
+
+type rejection =
+  | UnknownNode        : target:string -> addressable:list string -> rejection
+  | DuplicateId        : string -> rejection
+  | CannotRemoveRoot   : rejection
+  | WouldNestUnderSelf : string -> rejection
+  | NotAContainer      : target:string -> kind_tag:string -> rejection
+  | ReorderMismatch    : parent:string -> expected:list string -> got:list string -> rejection
+  | Rejected           : code:string -> message:string -> rejection
+
+(* ======================================================================================
+   3. The skeleton five (F#: `SkeletonOp<'Node,'Id>`).
+   ====================================================================================== *)
+
+type op =
+  | InsertChild     : parent:string -> node:tree -> op
+  | RemoveNode      : target:string -> op
+  | MoveNode        : target:string -> new_parent:string -> op
+  | ReorderChildren : parent:string -> order:list string -> op
+  | Batch           : list op -> op
+
+(* ======================================================================================
+   4. The three structural edits `Tree.updateNode` performs, first-order.
+
+      `Tree.updateNode w idw target f root` rebuilds bottom-up and applies `f` at EVERY node whose
+      id is `target` (the `hit` flag records only whether there was one). Under `wf` that is one
+      node; the model is faithful to the general case, which is what lets the differential run on
+      whatever the generator produces.
+   ====================================================================================== *)
+
+(* F#: the `InsertChild` arm — `updateNode parent (fun p -> ReplaceChildren p (Children p @ [node]))`.
+   The inserted subtree is appended RAW: the rebuild has already passed over the parent's children
+   by the time `f` runs, so nothing descends into `n`. *)
+let rec ins (p:string) (n:tree) (t:tree) : Tot tree (decreases t) =
+  match t with
+  | TNode i k cs ->
+    let cs' = ins_all p n cs in
+    if i = p then TNode i k (app cs' [n]) else TNode i k cs'
+and ins_all (p:string) (n:tree) (ts:list tree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> ins p n t :: ins_all p n r
+
+(* F#: `List.filter (fun c -> not (eq (w.Id c) target))` inside the `RemoveNode` arm — every
+   child carrying the id goes, not merely the first. *)
+let rec drop_kid (x:string) (ts:list tree) : Tot (list tree) =
+  match ts with
+  | [] -> []
+  | t :: r -> if tid_of t = x then drop_kid x r else t :: drop_kid x r
+
+(* F#: the `RemoveNode` arm — `updateNode (w.Id p) (fun p -> ReplaceChildren p (filtered))`, where
+   `p` is the SOURCE PARENT `Tree.parentOf` found. *)
+let rec rem_at (pid:string) (x:string) (t:tree) : Tot tree (decreases t) =
+  match t with
+  | TNode i k cs ->
+    let cs' = rem_all pid x cs in
+    if i = pid then TNode i k (drop_kid x cs') else TNode i k cs'
+and rem_all (pid:string) (x:string) (ts:list tree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> rem_at pid x t :: rem_all pid x r
+
+(* F#: `let byId = … |> Map.ofList in order |> List.map (fun i -> byId.[key i])`. `Map.ofList`
+   keeps the LAST entry for a repeated key, so the lookup is last-wins; and the indexer would
+   throw on a missing key, which `validateReorder` has already ruled out — the model drops such an
+   id instead of being partial, and the validation below makes the two agree. *)
+let rec pick_last (x:string) (ts:list tree) : Tot (option tree) =
+  match ts with
+  | [] -> None
+  | t :: r ->
+    (match pick_last x r with
+     | Some n -> Some n
+     | None -> if tid_of t = x then Some t else None)
+
+let rec arrange (order:list string) (ts:list tree) : Tot (list tree) =
+  match order with
+  | [] -> []
+  | x :: rest ->
+    (match pick_last x ts with
+     | Some n -> n :: arrange rest ts
+     | None -> arrange rest ts)
+
+(* F#: the `ReorderChildren` arm — `updateNode parent (fun p -> ReplaceChildren p reordered)`. *)
+let rec reorder_at (p:string) (order:list string) (t:tree) : Tot tree (decreases t) =
+  match t with
+  | TNode i k cs ->
+    let cs' = reorder_all p order cs in
+    if i = p then TNode i k (arrange order cs') else TNode i k cs'
+and reorder_all (p:string) (order:list string) (ts:list tree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> reorder_at p order t :: reorder_all p order r
+
+(* ======================================================================================
+   5. `validateReorder`'s permutation test.
+
+      F# compares `List.sort (List.map key current)` with `List.sort (List.map key order)` — two
+      sorted lists are equal exactly when the two lists are equal as MULTISETS, which is what this
+      decides, without needing a total order on ids (`IdWitness` exposes only `Equals`, so a model
+      that sorted would be modelling something the witness does not have).
+   ====================================================================================== *)
+
+let rec remove_first (x:string) (l:list string) : Tot (option (list string)) =
+  match l with
+  | [] -> None
+  | h :: t -> if h = x then Some t
+              else (match remove_first x t with None -> None | Some t' -> Some (h :: t'))
+
+let rec same_multiset (xs ys:list string) : Tot bool (decreases xs) =
+  match xs with
+  | [] -> is_empty ys
+  | x :: r -> (match remove_first x ys with
+               | None -> false
+               | Some ys' -> same_multiset r ys')
+
+(* ======================================================================================
+   6. `Ops.apply` (F#: `applyWith (fun _ -> true) w idw`, clause for clause).
+   ====================================================================================== *)
+
+let rec apply (o:op) (t:tree) : Tot (outcome tree rejection) (decreases o) =
+  match o with
+
+  (* F#: `validateInsert` — the inserted node's OWN id must be absent (its DESCENDANTS are not
+     checked: that is the gap `wf_broken_by_insert` below exhibits), then the parent must exist. *)
+  | InsertChild p n ->
+    if has_id (tid_of n) t then Error (DuplicateId (tid_of n))
+    else if not (has_id p t) then Error (UnknownNode p (ids t))
+    else Ok (ins p n t)
+
+  (* F#: `validateRemove` then the `parentOf` lookup. *)
+  | RemoveNode x ->
+    if tid_of t = x then Error CannotRemoveRoot
+    else if not (has_id x t) then Error (UnknownNode x (ids t))
+    else (match parent_of x t with
+          | None -> Error (UnknownNode x (ids t))
+          | Some pid -> Ok (rem_at pid x t))
+
+  (* F#: `validateReorder`. *)
+  | ReorderChildren p order ->
+    (match find_in p t with
+     | None -> Error (UnknownNode p (ids t))
+     | Some n ->
+       let current = kid_ids (kids_of n) in
+       if not (same_multiset current order) then Error (ReorderMismatch p current order)
+       else Ok (reorder_at p order t))
+
+  (* F#: the `MoveNode` arm — root guard, both endpoints must exist, the new parent must not be
+     inside the moved subtree (`Tree.ids w sub` INCLUDES the target, so a self-move is caught
+     here), then remove-and-append. *)
+  | MoveNode x np ->
+    if tid_of t = x then Error CannotRemoveRoot
+    else if not (has_id x t) then Error (UnknownNode x (ids t))
+    else if not (has_id np t) then Error (UnknownNode np (ids t))
+    else (match find_in x t with
+          | None -> Error (UnknownNode x (ids t))
+          | Some sub ->
+            if mem np (ids sub) then Error (WouldNestUnderSelf x)
+            else (match parent_of x t with
+                  | None -> Error (UnknownNode x (ids t))
+                  | Some pid ->
+                    let removed = rem_at pid x t in
+                    if not (has_id np removed) then Error (UnknownNode np (ids removed))
+                    else Ok (ins np sub removed)))
+
+  (* F#: `Batch` — all-or-nothing, threading the tree and abandoning the whole on first failure. *)
+  | Batch os -> apply_all os t
+
+and apply_all (os:list op) (t:tree) : Tot (outcome tree rejection) (decreases os) =
+  match os with
+  | [] -> Ok t
+  | o :: r -> (match apply o t with
+               | Ok t' -> apply_all r t'
+               | Error e -> Error e)
+
+(* ======================================================================================
+   7. `Ops.footprint` (F#: `ofOp`, clause for clause, folded over a `Batch`).
+
+      The four address kinds are `DagFold.footprint`'s, read as sets. Note what
+      `InsertChild` and `ReorderChildren` both do: the structural parent id lands in `Reads` as
+      well as in `StructureWrites`. That is not decoration — it is exactly what makes
+      `independent` guarantee that neither op's inserted subtree carries the other's structural
+      anchor, which is the fact the commutation lemmas below run on.
+   ====================================================================================== *)
+
+let empty_fp : footprint =
+  { reads = []; structure_writes = []; content_writes = []; unknown_parent_writes = [] }
+
+let union_fp (a b:footprint) : Tot footprint =
+  { reads                 = union a.reads b.reads;
+    structure_writes      = union a.structure_writes b.structure_writes;
+    content_writes        = union a.content_writes b.content_writes;
+    unknown_parent_writes = union a.unknown_parent_writes b.unknown_parent_writes }
+
+let rec op_fp (o:op) : Tot footprint (decreases o) =
+  match o with
+  | InsertChild p n ->
+    let inserted = ids n in
+    { reads = p :: inserted; structure_writes = [p];
+      content_writes = inserted; unknown_parent_writes = [] }
+  | RemoveNode x ->
+    { reads = [x]; structure_writes = [];
+      content_writes = [x]; unknown_parent_writes = [x] }
+  | MoveNode x np ->
+    { reads = [x; np]; structure_writes = [np];
+      content_writes = [x]; unknown_parent_writes = [x] }
+  | ReorderChildren p order ->
+    { reads = p :: order; structure_writes = [p];
+      content_writes = []; unknown_parent_writes = [] }
+  | Batch inner -> fp_all inner
+and fp_all (os:list op) : Tot footprint (decreases os) =
+  match os with
+  | [] -> empty_fp
+  | o :: r -> union_fp (op_fp o) (fp_all r)
+
+(* ======================================================================================
+   8. The pinned over-approximation does most of the work.
+
+      `Ops.independent`'s last two clauses refuse independence between an op with a NON-EMPTY
+      `UnknownParentWrites` and any op that writes structure at all. A `RemoveNode` or a
+      `MoveNode` always has one — its own target, whose source parent the script cannot name —
+      and every skeleton op except a structure-free `Batch` writes structure. So a remove or a
+      move is independent only of an op that DOES NOTHING, and the diamond for those pairs holds
+      without ever looking at a tree.
+
+      That is nine of the fifteen unordered pairs: remove/insert, remove/remove, remove/move,
+      remove/reorder, move/insert, move/move, move/reorder, and remove/batch and move/batch
+      wherever the batch is not inert. The commuting content of this algebra lives entirely in
+      the other six.
+   ====================================================================================== *)
+
+(* An op with no structural effect at all: the empty `Batch`, and nests of them. Every other
+   skeleton op writes at least one structural address. *)
+let rec inert (o:op) : Tot bool (decreases o) =
+  match o with
+  | Batch os -> inert_all os
+  | _ -> false
+and inert_all (os:list op) : Tot bool (decreases os) =
+  match os with
+  | [] -> true
+  | o :: r -> inert o && inert_all r
+
+let relocating (o:op) : Tot bool = not (is_empty (op_fp o).unknown_parent_writes)
+
+(* Structure-free is exactly inert — the model's link between the FOOTPRINT's verdict and the
+   op's shape, and what turns `independent`'s conservative clause into a case elimination. *)
+let rec structure_free_iff_inert (o:op)
+  : Lemma (ensures not (writes_structure (op_fp o)) == inert o) (decreases o)
+  = match o with
+    | Batch os -> structure_free_iff_inert_all os
+    | _ -> ()
+and structure_free_iff_inert_all (os:list op)
+  : Lemma (ensures not (writes_structure (fp_all os)) == inert_all os) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r -> structure_free_iff_inert o; structure_free_iff_inert_all r
+
+(* An inert op is the identity — nothing to thread, nothing to reject. *)
+let rec inert_is_identity (o:op) (t:tree)
+  : Lemma (requires inert o) (ensures apply o t == Ok t) (decreases o)
+  = match o with
+    | Batch os -> inert_all_is_identity os t
+    | _ -> ()
+and inert_all_is_identity (os:list op) (t:tree)
+  : Lemma (requires inert_all os) (ensures apply_all os t == Ok t) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r -> inert_is_identity o t; inert_all_is_identity r t
+
+(* THE ELIMINATION. A relocating op — any op carrying a `RemoveNode` or a `MoveNode` — is
+   independent only of an inert one. *)
+let relocating_forces_inert (a b:op)
+  : Lemma (requires independent (op_fp a) (op_fp b) /\ relocating a)
+          (ensures inert b)
+  = structure_free_iff_inert b
+
+(* … and a remove or a move IS relocating, so the elimination reaches the four leaf shapes it
+   names. Stated separately because it is the half a reader checks against `Ops.footprint`. *)
+let remove_is_relocating (x:string) : Lemma (ensures relocating (RemoveNode x)) = ()
+let move_is_relocating (x np:string) : Lemma (ensures relocating (MoveNode x np)) = ()
+
+(* ======================================================================================
+   9. The commuting half — the algebra of the two edits that survive the elimination.
+
+      Everything here is about `ins` and `reorder_at` alone: section 8 has already retired every
+      pair in which a `RemoveNode` or a `MoveNode` appears without the other side being inert.
+   ====================================================================================== *)
+
+(* Neither edit ever changes a node's id — which is what lets a reorder, which addresses children
+   BY id, be blind to an insert that happened inside them. *)
+let tid_ins (p:string) (n:tree) (t:tree)
+  : Lemma (ensures tid_of (ins p n t) == tid_of t) [SMTPat (tid_of (ins p n t))]
+  = match t with TNode _ _ _ -> ()
+
+let tid_reorder (p:string) (order:list string) (t:tree)
+  : Lemma (ensures tid_of (reorder_at p order t) == tid_of t)
+          [SMTPat (tid_of (reorder_at p order t))]
+  = match t with TNode _ _ _ -> ()
+
+(* An edit whose anchor is not in the tree is the identity on it. *)
+let rec ins_absent (p:string) (n:tree) (t:tree)
+  : Lemma (requires not (mem p (ids t))) (ensures ins p n t == t) (decreases t)
+  = match t with TNode _ _ cs -> ins_all_absent p n cs
+and ins_all_absent (p:string) (n:tree) (ts:list tree)
+  : Lemma (requires not (mem p (ids_all ts))) (ensures ins_all p n ts == ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ins_absent p n t; ins_all_absent p n r
+
+let rec reorder_absent (p:string) (order:list string) (t:tree)
+  : Lemma (requires not (mem p (ids t))) (ensures reorder_at p order t == t) (decreases t)
+  = match t with TNode _ _ cs -> reorder_all_absent p order cs
+and reorder_all_absent (p:string) (order:list string) (ts:list tree)
+  : Lemma (requires not (mem p (ids_all ts))) (ensures reorder_all p order ts == ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> reorder_absent p order t; reorder_all_absent p order r
+
+(* Both edits are per-element maps over a child list, so both distribute over `app` — which is how
+   the appended subtree at an insert's own parent is peeled off. *)
+let rec ins_all_app (p:string) (n:tree) (xs ys:list tree)
+  : Lemma (ensures ins_all p n (app xs ys) == app (ins_all p n xs) (ins_all p n ys)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> ins_all_app p n r ys
+
+let rec reorder_all_app (p:string) (order:list string) (xs ys:list tree)
+  : Lemma (ensures reorder_all p order (app xs ys) ==
+                   app (reorder_all p order xs) (reorder_all p order ys)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> reorder_all_app p order r ys
+
+(* `arrange` addresses children by id and both edits preserve ids, so a lookup through an edited
+   list is the edit of the lookup through the original. *)
+let rec pick_last_ins (x p:string) (n:tree) (ts:list tree)
+  : Lemma (ensures pick_last x (ins_all p n ts) ==
+                   (match pick_last x ts with None -> None | Some c -> Some (ins p n c)))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> pick_last_ins x p n r
+
+let rec pick_last_reorder (x p:string) (order:list string) (ts:list tree)
+  : Lemma (ensures pick_last x (reorder_all p order ts) ==
+                   (match pick_last x ts with None -> None | Some c -> Some (reorder_at p order c)))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> pick_last_reorder x p order r
+
+(* … hence a reorder of a parent's children and an edit INSIDE those children commute. This is
+   the lemma the whole reorder side rests on: stating an order by naming ids is stable under any
+   edit that leaves the ids alone. *)
+let rec arrange_ins (order:list string) (p:string) (n:tree) (ts:list tree)
+  : Lemma (ensures arrange order (ins_all p n ts) == ins_all p n (arrange order ts))
+          (decreases order)
+  = match order with
+    | [] -> ()
+    | x :: rest -> pick_last_ins x p n ts; arrange_ins rest p n ts
+
+let rec arrange_reorder (ord:list string) (p:string) (order:list string) (ts:list tree)
+  : Lemma (ensures arrange ord (reorder_all p order ts) == reorder_all p order (arrange ord ts))
+          (decreases ord)
+  = match ord with
+    | [] -> ()
+    | x :: rest -> pick_last_reorder x p order ts; arrange_reorder rest p order ts
+
+(* ---- COMMUTATION 1 of 3: two inserts under different parents. ----
+   The two side conditions are exactly what `Ops.independent` buys: the parent id of each insert
+   is in its own `Reads`, and the other insert's whole subtree is its `ContentWrites`, so
+   content-vs-read disjointness says neither subtree carries the other's anchor. Without that an
+   insert could land INSIDE the subtree the other one just added, in one order only. *)
+let rec ins_ins_comm (p1:string) (n1:tree) (p2:string) (n2:tree) (t:tree)
+  : Lemma (requires p1 <> p2 /\ not (mem p1 (ids n2)) /\ not (mem p2 (ids n1)))
+          (ensures ins p2 n2 (ins p1 n1 t) == ins p1 n1 (ins p2 n2 t))
+          (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ins_ins_comm_all p1 n1 p2 n2 cs;
+      if i = p1 then (ins_all_app p2 n2 (ins_all p1 n1 cs) [n1]; ins_absent p2 n2 n1)
+      else if i = p2 then (ins_all_app p1 n1 (ins_all p2 n2 cs) [n2]; ins_absent p1 n1 n2)
+      else ()
+and ins_ins_comm_all (p1:string) (n1:tree) (p2:string) (n2:tree) (ts:list tree)
+  : Lemma (requires p1 <> p2 /\ not (mem p1 (ids n2)) /\ not (mem p2 (ids n1)))
+          (ensures ins_all p2 n2 (ins_all p1 n1 ts) == ins_all p1 n1 (ins_all p2 n2 ts))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ins_ins_comm p1 n1 p2 n2 t; ins_ins_comm_all p1 n1 p2 n2 r
+
+(* ---- COMMUTATION 2 of 3: an insert and a reorder of a different parent. ----
+   `not (mem p2 (ids n1))` is again content-vs-read disjointness: the reorder's parent is in its
+   `Reads`, the inserted subtree is the insert's `ContentWrites`. *)
+let rec ins_reorder_comm (p1:string) (n1:tree) (p2:string) (order:list string) (t:tree)
+  : Lemma (requires p1 <> p2 /\ not (mem p2 (ids n1)))
+          (ensures reorder_at p2 order (ins p1 n1 t) == ins p1 n1 (reorder_at p2 order t))
+          (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ins_reorder_comm_all p1 n1 p2 order cs;
+      if i = p1 then
+        (reorder_all_app p2 order (ins_all p1 n1 cs) [n1]; reorder_absent p2 order n1)
+      else if i = p2 then
+        arrange_ins order p1 n1 (reorder_all p2 order cs)
+      else ()
+and ins_reorder_comm_all (p1:string) (n1:tree) (p2:string) (order:list string) (ts:list tree)
+  : Lemma (requires p1 <> p2 /\ not (mem p2 (ids n1)))
+          (ensures reorder_all p2 order (ins_all p1 n1 ts) ==
+                   ins_all p1 n1 (reorder_all p2 order ts))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ins_reorder_comm p1 n1 p2 order t; ins_reorder_comm_all p1 n1 p2 order r
+
+(* ---- COMMUTATION 3 of 3: two reorders of different parents. ----
+   The ONLY side condition is that the parents differ — which is `Ops.independent`'s shared-named-
+   structural-parent clause. A reorder writes no content at all, so nothing else can interfere. *)
+let rec reorder_reorder_comm (p1:string) (o1:list string) (p2:string) (o2:list string) (t:tree)
+  : Lemma (requires p1 <> p2)
+          (ensures reorder_at p2 o2 (reorder_at p1 o1 t) == reorder_at p1 o1 (reorder_at p2 o2 t))
+          (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      reorder_reorder_comm_all p1 o1 p2 o2 cs;
+      if i = p1 then arrange_reorder o1 p2 o2 (reorder_all p1 o1 cs)
+      else if i = p2 then arrange_reorder o2 p1 o1 (reorder_all p2 o2 cs)
+      else ()
+and reorder_reorder_comm_all (p1:string) (o1:list string) (p2:string) (o2:list string)
+                             (ts:list tree)
+  : Lemma (requires p1 <> p2)
+          (ensures reorder_all p2 o2 (reorder_all p1 o1 ts) ==
+                   reorder_all p1 o1 (reorder_all p2 o2 ts))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> reorder_reorder_comm p1 o1 p2 o2 t; reorder_reorder_comm_all p1 o1 p2 o2 r
+
+(* ======================================================================================
+   10. Lookups, and why they need well-formedness.
+
+       `Tree.tryFind` returns the FIRST preorder match, so what it returns is a fact about the
+       tree's ORDER as well as its contents. A reorder moves preorder positions. Under id
+       uniqueness that cannot matter — there is only one node to find — and this section is the
+       machinery that says so.
+   ====================================================================================== *)
+
+let rec no_dups (l:list string) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: r -> not (mem x r) && no_dups r
+
+(* An id is in a child list's ids exactly when it is in one of the children's. *)
+let rec mem_ids_all_intro (x:string) (c:tree) (ts:list tree)
+  : Lemma (requires mem c ts /\ mem x (ids c)) (ensures mem x (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> if t = c then () else mem_ids_all_intro x c r
+
+(* `tryFind` succeeds exactly where `exists` says it should (F#: `Tree.exists` IS
+   `tryFind |> Option.isSome`). *)
+let rec find_in_some_iff (x:string) (t:tree)
+  : Lemma (ensures Some? (find_in x t) == mem x (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = x then () else find_all_some_iff x cs
+and find_all_some_iff (x:string) (ts:list tree)
+  : Lemma (ensures Some? (find_all x ts) == mem x (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> find_in_some_iff x t; find_all_some_iff x r
+
+(* The child subtree the preorder walk descends into — `find_all` factored into "which child"
+   and "where inside it". *)
+let rec locate (x:string) (ts:list tree) : Tot (option tree) =
+  match ts with
+  | [] -> None
+  | t :: r -> if mem x (ids t) then Some t else locate x r
+
+let rec find_all_locate (x:string) (ts:list tree)
+  : Lemma (ensures find_all x ts == (match locate x ts with
+                                     | None -> None
+                                     | Some c -> find_in x c)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> find_in_some_iff x t; find_all_locate x r
+
+let rec locate_mem (x:string) (ts:list tree)
+  : Lemma (ensures (match locate x ts with
+                    | None -> forall (c:tree). mem c ts ==> not (mem x (ids c))
+                    | Some c -> mem c ts /\ mem x (ids c))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> locate_mem x r
+
+(* Under a uniqueness hypothesis the answer does not depend on the order the list is in — which
+   is the whole reason a reorder is invisible to a lookup elsewhere in the tree. *)
+let rec locate_unique (x:string) (c:tree) (ts:list tree)
+  : Lemma (requires mem c ts /\ mem x (ids c) /\
+                    (forall (d:tree). mem d ts ==> mem x (ids d) ==> d == c))
+          (ensures locate x ts == Some c) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> if mem x (ids t) then () else locate_unique x c r
+
+let locate_order_free (x:string) (l1 l2:list tree)
+  : Lemma (requires (forall (c:tree). mem c l1 == mem c l2) /\
+                    (forall (c d:tree). mem c l1 ==> mem d l1 ==>
+                                        mem x (ids c) ==> mem x (ids d) ==> c == d))
+          (ensures locate x l1 == locate x l2)
+  = locate_mem x l1; locate_mem x l2;
+    match locate x l1 with
+    | None -> (match locate x l2 with
+               | None -> ()
+               | Some c -> ())
+    | Some c -> locate_unique x c l2
+
+let find_all_order_free (x:string) (l1 l2:list tree)
+  : Lemma (requires (forall (c:tree). mem c l1 == mem c l2) /\
+                    (forall (c d:tree). mem c l1 ==> mem d l1 ==>
+                                        mem x (ids c) ==> mem x (ids d) ==> c == d))
+          (ensures find_all x l1 == find_all x l2)
+  = find_all_locate x l1; find_all_locate x l2; locate_order_free x l1 l2
+
+(* Well-formedness delivers that uniqueness hypothesis: sibling subtrees share no id. *)
+let rec wf_all_holder_unique (x:string) (ts:list tree)
+  : Lemma (requires wf_all ts)
+          (ensures forall (c d:tree). mem c ts ==> mem d ts ==>
+                                      mem x (ids c) ==> mem x (ids d) ==> c == d)
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      wf_all_holder_unique x r;
+      let aux (c d:tree)
+        : Lemma (mem c ts ==> mem d ts ==> mem x (ids c) ==> mem x (ids d) ==> c == d)
+        = if mem c ts && mem d ts && mem x (ids c) && mem x (ids d) then begin
+            if c = t && d = t then ()
+            else if c = t then mem_ids_all_intro x d r
+            else if d = t then mem_ids_all_intro x c r
+            else ()
+          end
+          else ()
+      in
+      FStar.Classical.forall_intro_2 aux
+
+(* … and that a well-formed parent's children carry distinct ids. *)
+let rec kid_ids_sub (x:string) (ts:list tree)
+  : Lemma (requires mem x (kid_ids ts)) (ensures mem x (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match t with TNode i _ _ -> if i = x then () else kid_ids_sub x r)
+
+let rec wf_all_kid_ids_no_dups (ts:list tree)
+  : Lemma (requires wf_all ts) (ensures no_dups (kid_ids ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      wf_all_kid_ids_no_dups r;
+      if mem (tid_of t) (kid_ids r) then (kid_ids_sub (tid_of t) r;
+                                          (match t with TNode i _ _ -> ()))
+      else ()
+
+(* ======================================================================================
+   11. What a lookup sees through an edit.
+
+       The validation half of the diamond: each op must still be ACCEPTED after the other has
+       run. For an insert that is membership only (`Tree.exists`), and membership is blind to
+       order. For a reorder it is `Tree.tryFind`, and this is where the work is.
+   ====================================================================================== *)
+
+(* ---- the permutation test, at membership ---- *)
+
+let rec remove_first_mem (x:string) (l l':list string)
+  : Lemma (requires remove_first x l == Some l')
+          (ensures forall (z:string). mem z l == (z = x || mem z l')) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t -> if h = x then ()
+                else (match remove_first x t with
+                      | None -> ()
+                      | Some t' -> remove_first_mem x t t')
+
+let rec same_multiset_mem (xs ys:list string)
+  : Lemma (requires same_multiset xs ys)
+          (ensures forall (z:string). mem z xs == mem z ys) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | x :: r -> (match remove_first x ys with
+                 | None -> ()
+                 | Some ys' -> remove_first_mem x ys ys'; same_multiset_mem r ys')
+
+(* ---- `arrange` keeps exactly the children it was given ---- *)
+
+let rec kid_ids_of_mem (c:tree) (ts:list tree)
+  : Lemma (requires mem c ts) (ensures mem (tid_of c) (kid_ids ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> if t = c then () else kid_ids_of_mem c r
+
+let rec pick_last_mem (x:string) (ts:list tree) (c:tree)
+  : Lemma (requires pick_last x ts == Some c) (ensures mem c ts /\ tid_of c == x) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match pick_last x r with
+                 | Some n -> pick_last_mem x r c
+                 | None -> ())
+
+let rec pick_last_unique (c:tree) (ts:list tree)
+  : Lemma (requires mem c ts /\ no_dups (kid_ids ts))
+          (ensures pick_last (tid_of c) ts == Some c) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      if t = c then
+        (match pick_last (tid_of c) r with
+         | Some d -> pick_last_mem (tid_of c) r d; kid_ids_of_mem d r
+         | None -> ())
+      else pick_last_unique c r
+
+let rec arrange_from (order:list string) (ts:list tree) (c:tree)
+  : Lemma (requires mem c (arrange order ts)) (ensures mem c ts) (decreases order)
+  = match order with
+    | [] -> ()
+    | x :: rest ->
+      (match pick_last x ts with
+       | Some n -> if n = c then pick_last_mem x ts n else arrange_from rest ts c
+       | None -> arrange_from rest ts c)
+
+let rec arrange_contains (order:list string) (ts:list tree) (c:tree)
+  : Lemma (requires mem (tid_of c) order /\ pick_last (tid_of c) ts == Some c)
+          (ensures mem c (arrange order ts)) (decreases order)
+  = match order with
+    | [] -> ()
+    | x :: rest -> if x = tid_of c then () else arrange_contains rest ts c
+
+(* The element set is preserved: nothing invented (`arrange_from`) and nothing dropped
+   (`same_multiset` says every child id is named, and `no_dups` says the name resolves to it). *)
+let arrange_elems (order:list string) (ts:list tree)
+  : Lemma (requires same_multiset (kid_ids ts) order /\ no_dups (kid_ids ts))
+          (ensures forall (c:tree). mem c ts == mem c (arrange order ts))
+  = same_multiset_mem (kid_ids ts) order;
+    let aux (c:tree) : Lemma (mem c ts == mem c (arrange order ts)) =
+      if mem c ts then (kid_ids_of_mem c ts; pick_last_unique c ts; arrange_contains order ts c)
+      else (if mem c (arrange order ts) then arrange_from order ts c else ())
+    in
+    FStar.Classical.forall_intro aux
+
+(* ---- the ids a lookup answer can carry ---- *)
+
+let rec find_in_sub (x y:string) (t:tree) (n:tree)
+  : Lemma (requires find_in x t == Some n /\ mem y (ids n)) (ensures mem y (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = x then () else find_all_sub x y cs n
+and find_all_sub (x y:string) (ts:list tree) (n:tree)
+  : Lemma (requires find_all x ts == Some n /\ mem y (ids n)) (ensures mem y (ids_all ts))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match find_in x t with
+                 | Some m -> find_in_sub x y t n
+                 | None -> find_all_sub x y r n)
+
+let rec find_all_app (x:string) (l m:list tree)
+  : Lemma (ensures find_all x (app l m) == (match find_all x l with
+                                            | Some n -> Some n
+                                            | None -> find_all x m)) (decreases l)
+  = match l with
+    | [] -> ()
+    | t :: r -> (match find_in x t with Some _ -> () | None -> find_all_app x r m)
+
+(* ---- a lookup through an INSERT: membership only, so no order question arises ---- *)
+
+let rec find_ins (x p:string) (n:tree) (t:tree)
+  : Lemma (requires not (mem x (ids n)))
+          (ensures find_in x (ins p n t) == (match find_in x t with
+                                             | None -> None
+                                             | Some m -> Some (ins p n m))) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = x then ()
+      else begin
+        find_ins_all x p n cs;
+        if i = p then (find_all_app x (ins_all p n cs) [n]; find_in_some_iff x n) else ()
+      end
+and find_ins_all (x p:string) (n:tree) (ts:list tree)
+  : Lemma (requires not (mem x (ids n)))
+          (ensures find_all x (ins_all p n ts) == (match find_all x ts with
+                                                   | None -> None
+                                                   | Some m -> Some (ins p n m))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> find_ins x p n t; find_ins_all x p n r
+
+(* ---- the reorder own validation, at every node rather than at the first ----
+   `validateReorder` checks the FIRST node carrying the parent id. Under well-formedness that is
+   the only one, so the check holds everywhere — which is what the induction below needs, since
+   it meets the parent id wherever it happens to sit. *)
+
+let rec reorder_ok (p:string) (o:list string) (t:tree) : Tot bool (decreases t) =
+  match t with
+  | TNode i _ cs -> (if i = p then same_multiset (kid_ids cs) o else true) && reorder_ok_all p o cs
+and reorder_ok_all (p:string) (o:list string) (ts:list tree) : Tot bool (decreases ts) =
+  match ts with
+  | [] -> true
+  | t :: r -> reorder_ok p o t && reorder_ok_all p o r
+
+let rec absent_reorder_ok (p:string) (o:list string) (t:tree)
+  : Lemma (requires not (mem p (ids t))) (ensures reorder_ok p o t) (decreases t)
+  = match t with TNode _ _ cs -> absent_reorder_ok_all p o cs
+and absent_reorder_ok_all (p:string) (o:list string) (ts:list tree)
+  : Lemma (requires not (mem p (ids_all ts))) (ensures reorder_ok_all p o ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> absent_reorder_ok p o t; absent_reorder_ok_all p o r
+
+let rec wf_reorder_ok (p:string) (o:list string) (t:tree)
+  : Lemma (requires wf t /\ (match find_in p t with
+                             | None -> True
+                             | Some n -> same_multiset (kid_ids (kids_of n)) o))
+          (ensures reorder_ok p o t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = p then (find_all_some_iff p cs; absent_reorder_ok_all p o cs)
+      else wf_reorder_ok_all p o cs
+and wf_reorder_ok_all (p:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ (match find_all p ts with
+                                  | None -> True
+                                  | Some n -> same_multiset (kid_ids (kids_of n)) o))
+          (ensures reorder_ok_all p o ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      (match find_in p t with
+       | Some n ->
+         wf_reorder_ok p o t;
+         find_in_some_iff p t;
+         find_all_some_iff p r;
+         wf_reorder_ok_all p o r
+       | None -> wf_reorder_ok p o t; wf_reorder_ok_all p o r)
+
+(* ---- a lookup through a REORDER. Under well-formedness the parent id does not occur below its
+   own node, so `reorder_all` is the identity on its children and `arrange` is applied to the
+   ORIGINAL child list — which is the list whose ids are known distinct. ---- *)
+
+let rec find_reorder (x p:string) (o:list string) (t:tree)
+  : Lemma (requires wf t /\ reorder_ok p o t)
+          (ensures find_in x (reorder_at p o t) == (match find_in x t with
+                                                    | None -> None
+                                                    | Some m -> Some (reorder_at p o m)))
+          (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = p then begin
+        reorder_all_absent p o cs;
+        if i = x then ()
+        else begin
+          wf_all_kid_ids_no_dups cs;
+          arrange_elems o cs;
+          wf_all_holder_unique x cs;
+          find_all_order_free x (arrange o cs) cs;
+          (match find_all x cs with
+           | None -> ()
+           | Some m ->
+             (* the answer sits inside `cs`, where `wf` says the parent id does not occur — so
+                the reorder is the identity on it *)
+             (if mem p (ids m) then find_all_sub x p cs m else ());
+             reorder_absent p o m)
+        end
+      end
+      else (if i = x then () else find_reorder_all x p o cs)
+and find_reorder_all (x p:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ reorder_ok_all p o ts)
+          (ensures find_all x (reorder_all p o ts) == (match find_all x ts with
+                                                       | None -> None
+                                                       | Some m -> Some (reorder_at p o m)))
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> find_reorder x p o t; find_reorder_all x p o r
+
+(* ---- and the id sets each edit leaves behind ---- *)
+
+let rec kid_ids_ins_all (p:string) (n:tree) (ts:list tree)
+  : Lemma (ensures kid_ids (ins_all p n ts) == kid_ids ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> kid_ids_ins_all p n r
+
+let rec kid_ids_reorder_all (p:string) (o:list string) (ts:list tree)
+  : Lemma (ensures kid_ids (reorder_all p o ts) == kid_ids ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> kid_ids_reorder_all p o r
+
+let rec ids_all_app (xs ys:list tree)
+  : Lemma (ensures ids_all (app xs ys) == app (ids_all xs) (ids_all ys)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> ids_all_app r ys
+
+let rec ids_ins_mem (x p:string) (n:tree) (t:tree)
+  : Lemma (ensures mem x (ids (ins p n t)) ==
+                   (mem x (ids t) || (mem p (ids t) && mem x (ids n)))) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ids_ins_mem_all x p n cs;
+      if i = p then ids_all_app (ins_all p n cs) [n] else ()
+and ids_ins_mem_all (x p:string) (n:tree) (ts:list tree)
+  : Lemma (ensures mem x (ids_all (ins_all p n ts)) ==
+                   (mem x (ids_all ts) || (mem p (ids_all ts) && mem x (ids n)))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ids_ins_mem x p n t; ids_ins_mem_all x p n r
+
+let rec ids_all_sub (x:string) (l1 l2:list tree)
+  : Lemma (requires (forall (c:tree). mem c l1 ==> mem c l2) /\ mem x (ids_all l1))
+          (ensures mem x (ids_all l2)) (decreases l1)
+  = match l1 with
+    | [] -> ()
+    | t :: r -> if mem x (ids t) then mem_ids_all_intro x t l2 else ids_all_sub x r l2
+
+let ids_all_mem_transfer (x:string) (l1 l2:list tree)
+  : Lemma (requires (forall (c:tree). mem c l1 == mem c l2))
+          (ensures mem x (ids_all l1) == mem x (ids_all l2))
+  = (if mem x (ids_all l1) then ids_all_sub x l1 l2 else ());
+    (if mem x (ids_all l2) then ids_all_sub x l2 l1 else ())
+
+let rec ids_reorder_mem (x p:string) (o:list string) (t:tree)
+  : Lemma (requires wf t /\ reorder_ok p o t)
+          (ensures mem x (ids (reorder_at p o t)) == mem x (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = p then begin
+        reorder_all_absent p o cs;
+        wf_all_kid_ids_no_dups cs;
+        arrange_elems o cs;
+        ids_all_mem_transfer x (arrange o cs) cs
+      end
+      else ids_reorder_mem_all x p o cs
+and ids_reorder_mem_all (x p:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ reorder_ok_all p o ts)
+          (ensures mem x (ids_all (reorder_all p o ts)) == mem x (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ids_reorder_mem x p o t; ids_reorder_mem_all x p o r
+
+(* ======================================================================================
+   12. The diamond at one state, for one pair.
+
+       `DagFold.diamond` quantified at a single state, with well-formedness as the standing
+       hypothesis. Six shapes reach this section — insert/insert, insert/reorder, reorder/reorder
+       and their swaps — because section 8 has already retired the nine that carry a relocating
+       op, and `wstep_sym` retires the swaps.
+   ====================================================================================== *)
+
+let wstep (a b:op) (s:tree) : prop =
+  wf s ==> Ok? (apply a s) ==> Ok? (apply b s) ==>
+  (Ok? (bind (apply a s) (apply b)) /\
+   bind (apply a s) (apply b) == bind (apply b s) (apply a))
+
+(* The conclusion is an equation between the two orders and an `Ok?` on one side of it, so it
+   already carries the swapped statement. *)
+let wstep_sym (a b:op) (s:tree)
+  : Lemma (requires wstep a b s) (ensures wstep b a s) = ()
+
+(* An inert op is the identity, so anything commutes with it. This is the whole of the nine
+   relocating pairs once `relocating_forces_inert` has fired. *)
+let inert_wstep_right (a b:op) (s:tree)
+  : Lemma (requires inert b) (ensures wstep a b s)
+  = inert_is_identity b s;
+    (match apply a s with
+     | Ok sa -> inert_is_identity b sa
+     | Error _ -> ())
+
+let inert_wstep_left (a b:op) (s:tree)
+  : Lemma (requires inert a) (ensures wstep a b s)
+  = inert_is_identity a s;
+    (match apply b s with
+     | Ok sb -> inert_is_identity a sb
+     | Error _ -> ())
+
+(* ---- small facts the three cases below share ---- *)
+
+let tid_in_ids (t:tree)
+  : Lemma (ensures mem (tid_of t) (ids t)) [SMTPat (mem (tid_of t) (ids t))]
+  = match t with TNode _ _ _ -> ()
+
+let rec find_in_id (x:string) (t:tree) (m:tree)
+  : Lemma (requires find_in x t == Some m) (ensures tid_of m == x) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = x then () else find_all_id x cs m
+and find_all_id (x:string) (ts:list tree) (m:tree)
+  : Lemma (requires find_all x ts == Some m) (ensures tid_of m == x) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match find_in x t with
+                 | Some q -> find_in_id x t m
+                 | None -> find_all_id x r m)
+
+(* ---- CASE 1: two inserts ---- *)
+
+let ins_ins_step (p1:string) (n1:tree) (p2:string) (n2:tree) (s:tree)
+  : Lemma (requires independent (op_fp (InsertChild p1 n1)) (op_fp (InsertChild p2 n2)))
+          (ensures wstep (InsertChild p1 n1) (InsertChild p2 n2) s)
+  = inter_nil_iff (ids n1) (p2 :: ids n2);
+    inter_nil_iff (ids n2) (p1 :: ids n1);
+    inter_nil_iff [p1] [p2];
+    ids_ins_mem (tid_of n2) p1 n1 s;
+    ids_ins_mem p2 p1 n1 s;
+    ids_ins_mem (tid_of n1) p2 n2 s;
+    ids_ins_mem p1 p2 n2 s;
+    ins_ins_comm p1 n1 p2 n2 s
+
+(* ---- CASE 2: an insert and a reorder ---- *)
+
+let ins_reorder_step (p1:string) (n1:tree) (p2:string) (o2:list string) (s:tree)
+  : Lemma (requires independent (op_fp (InsertChild p1 n1)) (op_fp (ReorderChildren p2 o2)))
+          (ensures wstep (InsertChild p1 n1) (ReorderChildren p2 o2) s)
+  = inter_nil_iff (ids n1) (p2 :: o2);
+    inter_nil_iff [p1] [p2];
+    if wf s && Ok? (apply (InsertChild p1 n1) s) && Ok? (apply (ReorderChildren p2 o2) s) then
+      begin
+        (* the reorder is still accepted after the insert: the insert cannot have moved the
+           parent it names, nor changed that parent's child ids *)
+        find_ins p2 p1 n1 s;
+        (match find_in p2 s with
+         | None -> ()
+         | Some m2 ->
+           find_in_id p2 s m2;
+           (match m2 with TNode _ _ cs2 -> kid_ids_ins_all p1 n1 cs2));
+        (* the insert is still accepted after the reorder: its two checks are membership, and a
+           reorder moves no id in or out of the tree *)
+        wf_reorder_ok p2 o2 s;
+        ids_reorder_mem (tid_of n1) p2 o2 s;
+        ids_reorder_mem p1 p2 o2 s;
+        ins_reorder_comm p1 n1 p2 o2 s
+      end
+    else ()
+
+(* ---- CASE 3: two reorders ---- *)
+
+let reorder_reorder_step (p1:string) (o1:list string) (p2:string) (o2:list string) (s:tree)
+  : Lemma (requires independent (op_fp (ReorderChildren p1 o1)) (op_fp (ReorderChildren p2 o2)))
+          (ensures wstep (ReorderChildren p1 o1) (ReorderChildren p2 o2) s)
+  = inter_nil_iff [p1] [p2];
+    if wf s && Ok? (apply (ReorderChildren p1 o1) s) && Ok? (apply (ReorderChildren p2 o2) s) then
+      begin
+        wf_reorder_ok p1 o1 s;
+        wf_reorder_ok p2 o2 s;
+        find_reorder p2 p1 o1 s;
+        find_reorder p1 p2 o2 s;
+        (match find_in p2 s with
+         | None -> ()
+         | Some m2 ->
+           find_in_id p2 s m2;
+           (match m2 with TNode _ _ cs2 -> kid_ids_reorder_all p1 o1 cs2));
+        (match find_in p1 s with
+         | None -> ()
+         | Some m1 ->
+           find_in_id p1 s m1;
+           (match m1 with TNode _ _ cs1 -> kid_ids_reorder_all p2 o2 cs1));
+        reorder_reorder_comm p1 o1 p2 o2 s
+      end
+    else ()
+
+(* ---- the leaf diamond: every ordered pair of NON-BATCH ops ---- *)
+
+(* `Ops.independent` is symmetric — every clause is either self-symmetric or paired with its
+   mirror — which is why only three of the six remaining shapes need a proof of their own. *)
+let disjoint_sym (#a:eqtype) (x y:list a)
+  : Lemma (ensures disjoint x y == disjoint y x)
+  = inter_nil_iff x y; inter_nil_iff y x
+
+let independent_sym (fa fb:footprint)
+  : Lemma (requires independent fa fb) (ensures independent fb fa)
+  = disjoint_sym fa.content_writes fb.content_writes;
+    disjoint_sym fa.structure_writes fb.structure_writes
+
+let is_leaf (o:op) : Tot bool = match o with Batch _ -> false | _ -> true
+
+let leaf_wstep (a b:op) (s:tree)
+  : Lemma (requires is_leaf a /\ is_leaf b /\ independent (op_fp a) (op_fp b))
+          (ensures wstep a b s)
+  = match a, b with
+    (* a relocating op is independent only of an inert one, and no leaf is inert *)
+    | RemoveNode _, _ | MoveNode _ _, _ ->
+      relocating_forces_inert a b; inert_wstep_right a b s
+    | _, RemoveNode _ | _, MoveNode _ _ ->
+      relocating_forces_inert b a; inert_wstep_left a b s
+    | InsertChild p1 n1, InsertChild p2 n2 -> ins_ins_step p1 n1 p2 n2 s
+    | InsertChild p1 n1, ReorderChildren p2 o2 -> ins_reorder_step p1 n1 p2 o2 s
+    | ReorderChildren p2 o2, InsertChild p1 n1 ->
+      independent_sym (op_fp a) (op_fp b);
+      ins_reorder_step p1 n1 p2 o2 s;
+      wstep_sym (InsertChild p1 n1) (ReorderChildren p2 o2) s
+    | ReorderChildren p1 o1, ReorderChildren p2 o2 -> reorder_reorder_step p1 o1 p2 o2 s
+
+(* ======================================================================================
+   13. Well-formedness under an accepted op — and the counterexample the algebra as it stands
+       admits.
+
+       `Ops.validateInsert` checks the inserted node's OWN id against the tree and nothing else.
+       An inserted SUBTREE carrying a descendant id the tree already holds — or carrying one
+       twice itself — is therefore accepted, and the result has a repeated id. So the
+       unconditional statement "every accepted op preserves well-formedness" is FALSE of the
+       shipped algebra, and this section proves that rather than asserting it: `insert_breaks_wf`
+       is a concrete accepted insert whose result is not well-formed.
+
+       What IS true is the conditional form, `ins_wf`: an insert whose subtree is internally
+       id-unique and disjoint from the tree preserves the invariant. That is exactly the
+       validation Phase 137 adds, so this lemma is the specification the fix has to meet.
+   ====================================================================================== *)
+
+(* ---- the counterexample ---- *)
+
+let cx_tree : tree = TNode "root" "doc" [TNode "a" "section" []]
+
+(* an id the inserted node's own id-check cannot see: "root" is a DESCENDANT of "fresh" *)
+let cx_insert : op = InsertChild "a" (TNode "fresh" "section" [TNode "root" "para" []])
+
+let insert_breaks_wf ()
+  : Lemma (ensures wf cx_tree /\
+                   (match apply cx_insert cx_tree with
+                    | Ok t' -> not (wf t')
+                    | Error _ -> False))
+  = assert_norm (wf cx_tree);
+    assert_norm (match apply cx_insert cx_tree with
+                 | Ok t' -> not (wf t')
+                 | Error _ -> False)
+
+(* ---- the conditional form, which is what Phase 137's validation buys ---- *)
+
+let disjoint_via_mem (#a:eqtype) (x y:list a)
+  : Lemma (requires forall (z:a). mem z x ==> not (mem z y)) (ensures disjoint x y)
+  = inter_nil_iff x y
+
+let rec inter_nil_r (#a:eqtype) (l:list a)
+  : Lemma (ensures inter l [] == []) [SMTPat (inter l [])]
+  = match l with
+    | [] -> ()
+    | _ :: t -> inter_nil_r t
+
+let nonempty_sub (#a:eqtype) (x y:list a)
+  : Lemma (requires (forall (z:a). mem z x ==> mem z y) /\ not (is_empty x))
+          (ensures not (is_empty y))
+  = match x with
+    | [] -> ()
+    | h :: _ -> ()
+
+let rec wf_all_elem (ts:list tree) (c:tree)
+  : Lemma (requires wf_all ts /\ mem c ts) (ensures wf c) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> if t = c then () else wf_all_elem r c
+
+let rec wf_all_app (xs ys:list tree)
+  : Lemma (requires wf_all xs /\ wf_all ys /\ disjoint (ids_all xs) (ids_all ys))
+          (ensures wf_all (app xs ys)) (decreases xs)
+  = inter_nil_iff (ids_all xs) (ids_all ys);
+    match xs with
+    | [] -> ()
+    | t :: r ->
+      inter_nil_iff (ids_all r) (ids_all ys);
+      disjoint_via_mem (ids_all r) (ids_all ys);
+      wf_all_app r ys;
+      ids_all_app r ys;
+      inter_nil_iff (ids t) (ids_all r);
+      disjoint_via_mem (ids t) (ids_all (app r ys))
+
+(* the two membership characterisations of section 11, quantified — the shape the disjointness
+   arguments below consume *)
+let ids_ins_mem_fa (p:string) (n:tree) (t:tree)
+  : Lemma (ensures forall (y:string). mem y (ids (ins p n t)) ==
+                     (mem y (ids t) || (mem p (ids t) && mem y (ids n))))
+  = let aux (y:string)
+      : Lemma (mem y (ids (ins p n t)) ==
+               (mem y (ids t) || (mem p (ids t) && mem y (ids n))))
+      = ids_ins_mem y p n t
+    in
+    FStar.Classical.forall_intro aux
+
+let ids_ins_mem_all_fa (p:string) (n:tree) (ts:list tree)
+  : Lemma (ensures forall (y:string). mem y (ids_all (ins_all p n ts)) ==
+                     (mem y (ids_all ts) || (mem p (ids_all ts) && mem y (ids n))))
+  = let aux (y:string)
+      : Lemma (mem y (ids_all (ins_all p n ts)) ==
+               (mem y (ids_all ts) || (mem p (ids_all ts) && mem y (ids n))))
+      = ids_ins_mem_all y p n ts
+    in
+    FStar.Classical.forall_intro aux
+
+let rec ins_wf (p:string) (n:tree) (t:tree)
+  : Lemma (requires wf t /\ wf n /\ disjoint (ids n) (ids t))
+          (ensures wf (ins p n t)) (decreases t)
+  = inter_nil_iff (ids n) (ids t);
+    match t with
+    | TNode i _ cs ->
+      inter_nil_iff (ids n) (ids_all cs);
+      disjoint_via_mem (ids n) (ids_all cs);
+      if i = p then begin
+        (* `wf t` says the parent id does not occur below its own node, so the rebuild leaves the
+           existing children alone and the inserted subtree is simply appended *)
+        ins_all_absent p n cs;
+        ids_all_app cs [n];
+        inter_nil_iff (ids_all cs) (ids n);
+        disjoint_via_mem (ids_all cs) (ids n);
+        wf_all_app cs [n]
+      end
+      else begin
+        ins_wf_all p n cs;
+        ids_ins_mem_all_fa p n cs
+      end
+and ins_wf_all (p:string) (n:tree) (ts:list tree)
+  : Lemma (requires wf_all ts /\ wf n /\ disjoint (ids n) (ids_all ts))
+          (ensures wf_all (ins_all p n ts)) (decreases ts)
+  = inter_nil_iff (ids n) (ids_all ts);
+    match ts with
+    | [] -> ()
+    | t :: r ->
+      inter_nil_iff (ids n) (ids t);
+      disjoint_via_mem (ids n) (ids t);
+      inter_nil_iff (ids n) (ids_all r);
+      disjoint_via_mem (ids n) (ids_all r);
+      ins_wf p n t;
+      ins_wf_all p n r;
+      ids_ins_mem_fa p n t;
+      ids_ins_mem_all_fa p n r;
+      inter_nil_iff (ids t) (ids_all r);
+      disjoint_via_mem (ids (ins p n t)) (ids_all (ins_all p n r))
+
+(* ======================================================================================
+   14. THE DOMAIN HYPOTHESIS, for the pair shapes this phase closes.
+
+       `DagFold.independence_diamond` at this domain, restricted to well-formed states (section
+       0's `WHY WELL-FORMEDNESS`) and to the pair shapes `covered` names:
+
+         - EITHER side relocating (a `RemoveNode` or a `MoveNode` anywhere in it) — nine of the
+           fifteen unordered pairs, closed by `relocating_forces_inert` with no tree involved;
+         - EITHER side inert — every remaining pair against an empty `Batch`;
+         - BOTH sides leaves — insert/insert, insert/reorder and reorder/reorder, the three
+           genuinely-commuting cases, plus their swaps.
+
+       What is NOT covered, and why: a pair in which one side is a NON-inert, NON-relocating
+       `Batch`. Lifting the leaf diamond along a batch's script is the shape
+       `DagFold.replay_diamond` already has, and it needs the well-formedness invariant to hold
+       at each intermediate state of the script — which section 13 has just shown the algebra
+       does not give, because `Ops.validateInsert` admits an insert that breaks id uniqueness.
+       That is a gap in the ALGEBRA rather than in the proof: it closes when Phase 137 lands the
+       validation `ins_wf` specifies, and the lift then goes through with no new ideas.
+   ====================================================================================== *)
+
+let covered (a b:op) : Tot bool =
+  (is_leaf a && is_leaf b) || inert a || inert b || relocating a || relocating b
+
+let tree_independence_diamond (a b:op) (s:tree)
+  : Lemma (requires independent (op_fp a) (op_fp b) /\ covered a b)
+          (ensures wstep a b s)
+  = if relocating a then (relocating_forces_inert a b; inert_wstep_right a b s)
+    else if relocating b then
+      (independent_sym (op_fp a) (op_fp b); relocating_forces_inert b a; inert_wstep_left a b s)
+    else if inert a then inert_wstep_left a b s
+    else if inert b then inert_wstep_right a b s
+    else leaf_wstep a b s
+
+(* ======================================================================================
+   15. The rest of the invariant: a reorder preserves it outright, and an insert whose result
+       is well-formed was a fresh one all along.
+
+       These two are what turn the single-step diamond of section 14 into a statement about a
+       WHOLE FOLD: `DagFold.replay_perm` threads the state through a script, so the invariant the
+       pair cases rest on has to survive each step. A reorder never touches an id, so it survives
+       unconditionally. An insert survives exactly when it was fresh — and `ins_wf_conv` says the
+       converse too, so "the result is well-formed" IS "the insert was fresh", which is what lets
+       the guard in section 16 stand in for the validation Phase 137 will add.
+   ====================================================================================== *)
+
+(* ---- the permutation test again: a no-duplicate list can only match a no-duplicate one ---- *)
+
+let rec remove_first_no_dups (x:string) (l l':list string)
+  : Lemma (requires remove_first x l == Some l' /\ no_dups l' /\ not (mem x l'))
+          (ensures no_dups l) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t -> if h = x then ()
+                else (match remove_first x t with
+                      | None -> ()
+                      | Some t' -> remove_first_no_dups x t t'; remove_first_mem x t t')
+
+let rec same_multiset_no_dups (xs ys:list string)
+  : Lemma (requires same_multiset xs ys /\ no_dups xs) (ensures no_dups ys) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | x :: r -> (match remove_first x ys with
+                 | None -> ()
+                 | Some ys' ->
+                   same_multiset_no_dups r ys';
+                   same_multiset_mem r ys';
+                   remove_first_no_dups x ys ys')
+
+(* ---- `arrange` picks each child at most once, so the rearranged list is still well-formed ---- *)
+
+let rec arrange_tids (ord:list string) (ts:list tree) (d:tree)
+  : Lemma (requires mem d (arrange ord ts)) (ensures mem (tid_of d) ord) (decreases ord)
+  = match ord with
+    | [] -> ()
+    | x :: rest ->
+      (match pick_last x ts with
+       | Some n -> if n = d then pick_last_mem x ts n else arrange_tids rest ts d
+       | None -> arrange_tids rest ts d)
+
+let wf_all_unique_all (ts:list tree)
+  : Lemma (requires wf_all ts)
+          (ensures forall (y:string) (c d:tree).
+                     mem c ts ==> mem d ts ==> mem y (ids c) ==> mem y (ids d) ==> c == d)
+  = let aux (y:string)
+      : Lemma (forall (c d:tree).
+                 mem c ts ==> mem d ts ==> mem y (ids c) ==> mem y (ids d) ==> c == d)
+      = wf_all_holder_unique y ts
+    in
+    FStar.Classical.forall_intro aux
+
+let rec no_shared_id (c:tree) (ts:list tree) (l:list tree) (y:string)
+  : Lemma (requires wf_all ts /\ mem c ts /\ mem y (ids c) /\
+                    (forall (d:tree). mem d l ==> mem d ts /\ ~(d == c)))
+          (ensures not (mem y (ids_all l))) (decreases l)
+  = match l with
+    | [] -> ()
+    | d :: r ->
+      assert (mem d l);
+      assert (mem d ts /\ ~(d == c));
+      wf_all_holder_unique y ts;
+      assert (not (mem y (ids d)));
+      no_shared_id c ts r y;
+      assert (ids_all l == app (ids d) (ids_all r))
+
+let no_shared_ids (c:tree) (ts:list tree) (l:list tree)
+  : Lemma (requires wf_all ts /\ mem c ts /\
+                    (forall (d:tree). mem d l ==> mem d ts /\ ~(d == c)))
+          (ensures forall (y:string). mem y (ids c) ==> not (mem y (ids_all l)))
+  = let aux (y:string) : Lemma (mem y (ids c) ==> not (mem y (ids_all l))) =
+      if mem y (ids c) then no_shared_id c ts l y else ()
+    in
+    FStar.Classical.forall_intro aux
+
+let rec arrange_wf_all (o:list string) (cs:list tree)
+  : Lemma (requires wf_all cs /\ no_dups o) (ensures wf_all (arrange o cs)) (decreases o)
+  = match o with
+    | [] -> ()
+    | x :: rest ->
+      arrange_wf_all rest cs;
+      (match pick_last x cs with
+       | None -> ()
+       | Some n ->
+         pick_last_mem x cs n;
+         wf_all_elem cs n;
+         let l = arrange rest cs in
+         let aux (d:tree) : Lemma (mem d l ==> (mem d cs /\ ~(d == n)))
+           = if mem d l then (arrange_from rest cs d; arrange_tids rest cs d) else ()
+         in
+         FStar.Classical.forall_intro aux;
+         no_shared_ids n cs l;
+         disjoint_via_mem (ids n) (ids_all l))
+
+(* ---- the two membership characterisations of a reorder, quantified ---- *)
+
+let ids_reorder_mem_fa (p:string) (o:list string) (t:tree)
+  : Lemma (requires wf t /\ reorder_ok p o t)
+          (ensures forall (y:string). mem y (ids (reorder_at p o t)) == mem y (ids t))
+  = let aux (y:string) : Lemma (mem y (ids (reorder_at p o t)) == mem y (ids t))
+      = ids_reorder_mem y p o t
+    in
+    FStar.Classical.forall_intro aux
+
+let ids_reorder_mem_all_fa (p:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ reorder_ok_all p o ts)
+          (ensures forall (y:string). mem y (ids_all (reorder_all p o ts)) == mem y (ids_all ts))
+  = let aux (y:string) : Lemma (mem y (ids_all (reorder_all p o ts)) == mem y (ids_all ts))
+      = ids_reorder_mem_all y p o ts
+    in
+    FStar.Classical.forall_intro aux
+
+(* ---- a reorder preserves well-formedness, outright ---- *)
+
+let rec reorder_wf (p:string) (o:list string) (t:tree)
+  : Lemma (requires wf t /\ reorder_ok p o t) (ensures wf (reorder_at p o t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = p then begin
+        reorder_all_absent p o cs;
+        wf_all_kid_ids_no_dups cs;
+        same_multiset_no_dups (kid_ids cs) o;
+        arrange_elems o cs;
+        arrange_wf_all o cs;
+        ids_all_mem_transfer i (arrange o cs) cs
+      end
+      else (reorder_wf_all p o cs; ids_reorder_mem_all_fa p o cs)
+and reorder_wf_all (p:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ reorder_ok_all p o ts)
+          (ensures wf_all (reorder_all p o ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      reorder_wf p o t;
+      reorder_wf_all p o r;
+      ids_reorder_mem_fa p o t;
+      ids_reorder_mem_all_fa p o r;
+      inter_nil_iff (ids t) (ids_all r);
+      disjoint_via_mem (ids (reorder_at p o t)) (ids_all (reorder_all p o r))
+
+(* ---- and an accepted insert whose RESULT is well-formed was fresh: the converse of `ins_wf`,
+   which is what makes "the result is id-unique" an exact stand-in for Phase 137's check ---- *)
+
+let rec wf_all_app_conv (xs ys:list tree)
+  : Lemma (requires wf_all (app xs ys))
+          (ensures wf_all xs /\ wf_all ys /\ disjoint (ids_all xs) (ids_all ys)) (decreases xs)
+  = match xs with
+    | [] -> (inter_nil_iff (ids_all ([] <: list tree)) (ids_all ys);
+             disjoint_via_mem (ids_all ([] <: list tree)) (ids_all ys))
+    | t :: r ->
+      wf_all_app_conv r ys;
+      ids_all_app r ys;
+      inter_nil_iff (ids t) (ids_all (app r ys));
+      inter_nil_iff (ids_all r) (ids_all ys);
+      disjoint_via_mem (ids t) (ids_all r);
+      disjoint_via_mem (ids_all (t :: r)) (ids_all ys)
+
+let rec ins_wf_conv (p:string) (n:tree) (t:tree)
+  : Lemma (requires wf (ins p n t) /\ mem p (ids t))
+          (ensures wf n /\ disjoint (ids n) (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ids_ins_mem_all_fa p n cs;
+      if i = p then begin
+        wf_all_app_conv (ins_all p n cs) [n];
+        mem_app n (ins_all p n cs) [n];
+        wf_all_elem (app (ins_all p n cs) [n]) n;
+        ids_all_app (ins_all p n cs) [n];
+        inter_nil_iff (ids_all (ins_all p n cs)) (ids n);
+        disjoint_via_mem (ids n) (ids t)
+      end
+      else begin
+        ins_wf_all_conv p n cs;
+        inter_nil_iff (ids n) (ids_all cs);
+        disjoint_via_mem (ids n) (ids t)
+      end
+and ins_wf_all_conv (p:string) (n:tree) (ts:list tree)
+  : Lemma (requires wf_all (ins_all p n ts) /\ mem p (ids_all ts))
+          (ensures wf n /\ disjoint (ids n) (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      ids_ins_mem_fa p n t;
+      ids_ins_mem_all_fa p n r;
+      inter_nil_iff (ids (ins p n t)) (ids_all (ins_all p n r));
+      if mem p (ids t) then begin
+        ins_wf_conv p n t;
+        inter_nil_iff (ids n) (ids t);
+        disjoint_via_mem (ids n) (ids_all (t :: r))
+      end
+      else begin
+        ins_absent p n t;
+        ins_wf_all_conv p n r;
+        inter_nil_iff (ids n) (ids_all r);
+        disjoint_via_mem (ids n) (ids_all (t :: r))
+      end
+
+(* ======================================================================================
+   16. The algebra the composite theorem is about.
+
+       `wapply` is `Ops.apply` with two guards, and each is a statement about the boundary of the
+       claim rather than a change of semantics:
+
+         - it declines at a tree that is not id-unique. Section 0 says why: `Tree.tryFind`
+           resolves to the FIRST preorder match, so on such a tree the answer is a fact about the
+           order as well as the contents, and a reorder moves the order. Nothing in the estate
+           produces such a tree — `Diff.toOps` refuses one outright with `DuplicateIdInTree` —
+           and declining is how a total function says "outside the claim".
+         - it declines a step whose RESULT is not id-unique. By `ins_wf` and `ins_wf_conv` that is
+           EXACTLY the class Phase 137 refuses: an insert whose subtree carries an id the tree
+           already holds, or carries one twice. `insert_breaks_wf` is a member of that class, so
+           the guard is not vacuous; `wapply_is_apply` is the statement that it is the only
+           difference.
+   ====================================================================================== *)
+
+let wapply (o:op) (t:tree) : Tot (outcome tree rejection) =
+  if not (wf t) then Error (Rejected "state-not-id-unique" "the tree carries an id twice")
+  else match apply o t with
+       | Ok t' -> if wf t' then Ok t'
+                  else Error (Rejected "would-duplicate-an-id"
+                                       "the inserted subtree carries an id the tree already holds")
+       | Error e -> Error e
+
+(* On a well-formed tree, `wapply` IS `Ops.apply` wherever the result is well-formed — so the
+   two differ on exactly the accepted steps that break id uniqueness, and on nothing else. *)
+let wapply_is_apply (o:op) (t:tree)
+  : Lemma (requires wf t /\ (match apply o t with Ok t' -> wf t' | Error _ -> True))
+          (ensures wapply o t == apply o t)
+  = ()
+
+(* ---- well-formedness IS preserved by `wapply`, by construction ---- *)
+
+let wapply_preserves_wf (o:op) (t:tree)
+  : Lemma (ensures (match wapply o t with Ok t' -> wf t /\ wf t' | Error _ -> True))
+  = ()
+
+(* ======================================================================================
+   17. THE DOMAIN HYPOTHESIS for the leaf alphabet, discharged.
+
+       `DagFold.independence_diamond` instantiated at the tree algebra over the NON-BATCH
+       skeleton ops. A `Batch` is a list of ops written as one op — `Ops.apply` threads it
+       exactly as the fold threads a lane — so restricting the op alphabet here removes no
+       behaviour from the fold, it only declines to nest one lane inside another. Closing that
+       nesting is the lift `DagFold.replay_diamond` already performs at lane granularity; it is
+       named in the README as the one pair shape left open.
+   ====================================================================================== *)
+
+type leaf_op = o:op{is_leaf o}
+
+let leaf_fp (o:leaf_op) : Tot footprint = op_fp o
+
+let leaf_diamond (a b:leaf_op) (s:tree)
+  : Lemma (requires independent (leaf_fp a) (leaf_fp b))
+          (ensures Ok? (wapply a s) ==> Ok? (wapply b s) ==>
+                   (Ok? (bind (wapply a s) (wapply b)) /\
+                    bind (wapply a s) (wapply b) == bind (wapply b s) (wapply a)))
+  = if wf s && Ok? (apply a s) && Ok? (apply b s) then begin
+      leaf_wstep a b s;
+      match apply a s, apply b s with
+      | Ok sa, Ok sb ->
+        if wf sa && wf sb then begin
+          (* the two orders reach one tree; all that is left is that it is still id-unique *)
+          match a, b with
+          | RemoveNode _, _ | MoveNode _ _, _ ->
+            relocating_forces_inert a b; inert_is_identity b sa; inert_is_identity b s
+          | _, RemoveNode _ | _, MoveNode _ _ ->
+            independent_sym (op_fp a) (op_fp b);
+            relocating_forces_inert b a; inert_is_identity a sb; inert_is_identity a s
+          | InsertChild p1 n1, InsertChild p2 n2 ->
+            inter_nil_iff (ids n1) (ids n2);
+            ins_wf_conv p1 n1 s;
+            ins_wf_conv p2 n2 s;
+            ids_ins_mem_fa p1 n1 s;
+            inter_nil_iff (ids n2) (ids s);
+            disjoint_via_mem (ids n2) (ids sa);
+            ins_wf p2 n2 sa
+          | InsertChild p1 n1, ReorderChildren p2 o2 ->
+            wf_reorder_ok p2 o2 s;
+            ins_wf_conv p1 n1 s;
+            ids_reorder_mem_fa p2 o2 s;
+            inter_nil_iff (ids n1) (ids s);
+            disjoint_via_mem (ids n1) (ids sb);
+            ins_wf p1 n1 sb
+          | ReorderChildren p1 o1, InsertChild p2 n2 ->
+            wf_reorder_ok p1 o1 s;
+            ins_wf_conv p2 n2 s;
+            ids_reorder_mem_fa p1 o1 s;
+            inter_nil_iff (ids n2) (ids s);
+            disjoint_via_mem (ids n2) (ids sa);
+            ins_wf p2 n2 sa
+          | ReorderChildren p1 o1, ReorderChildren p2 o2 ->
+            wf_reorder_ok p1 o1 s;
+            wf_reorder_ok p2 o2 s;
+            reorder_wf p1 o1 s;
+            (match apply b sa with
+             | Ok r -> wf_reorder_ok p2 o2 sa; reorder_wf p2 o2 sa
+             | Error _ -> ())
+        end
+        else ()
+      | _, _ -> ()
+    end
+    else ()
+
+let leaf_independence_diamond ()
+  : Lemma (ensures independence_diamond #leaf_op #tree #rejection leaf_fp wapply)
+  = let aux (a b:leaf_op) : Lemma (independent (leaf_fp a) (leaf_fp b) ==> diamond wapply a b) =
+      if independent (leaf_fp a) (leaf_fp b) then
+        let per_state (s:tree)
+          : Lemma (Ok? (wapply a s) ==> Ok? (wapply b s) ==>
+                   (Ok? (bind (wapply a s) (wapply b)) /\
+                    bind (wapply a s) (wapply b) == bind (wapply b s) (wapply a)))
+          = leaf_diamond a b s
+        in
+        FStar.Classical.forall_intro per_state
+      else ()
+    in
+    FStar.Classical.forall_intro_2 aux

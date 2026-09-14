@@ -980,6 +980,260 @@ let private policyProbe (d: MJValN) (t: PolicyTally) : PolicyTally =
                0) }
 
 // ---------------------------------------------------------------------------
+//  Phase 133 — the TREE ALGEBRA as a third oracle.
+//
+//  `proofs/TreeOps.fst` models `Ops.apply` and `Ops.footprint` over the tree as the
+//  `NodeWitness` shows it — an id, a kind tag and an ordered child list, and nothing else — and
+//  proves the fold theorem's one domain hypothesis for it: footprint-independent operations that
+//  both apply at a well-formed tree each apply after the other and reach the same tree.
+//  `proofs/Skeleton.fst` composes that with Phase 131's fold theorem.
+//  `proofs/oracle/TreeOps.fs` and `oracle/Skeleton.fs` are those models extracted by F*'s own
+//  code generator.
+//
+//  What runs here is the model BESIDE `Ops.apply` / `Ops.footprint`, over the op pool Phase 80's
+//  generator produces AND over every state a prefix of that pool reaches — the generator keeps
+//  only ACCEPTED ops, so without the states (and without the hand-written refusals below) the
+//  rejection arms would be sampled only by accident. Three things are compared per (op, state):
+//    1. the FOOTPRINT, as four address sets — the model reads sets as lists, so both sides are
+//       compared deduplicated and sorted, which is the reading `proofs/README.md` records;
+//    2. the VERDICT, accepted or rejected;
+//    3. an accepted RESULT through `Tree.encodeHash` — production's own function, run on both
+//       sides through a `NodeWitness` for each tree type, over the per-node content the witness
+//       exposes (id and kind tag). Hashing the reference node's value, hole or effect class would
+//       compare fields the model does not model, and agreeing about them would mean nothing.
+//    4. a rejection by CLASS, which is what the model claims. The envelope PAYLOADS carry id
+//       lists (`UnknownNode`'s `addressable`, `ReorderMismatch`'s two orders) and are outside it.
+// ---------------------------------------------------------------------------
+
+/// The reference node as the tree model reads it — the three accessors, and no more.
+let rec private toModelTree (n: RNode) : TreeOps.tree =
+    TreeOps.TNode(n.Id, n.Kind, n.Children |> List.map toModelTree)
+
+/// The BLIND bridge — the go-red instrument, and the tree family's counterpart to the fold
+/// family's blind footprint. It erases every kind tag, so the model is asked about a different
+/// tree from the one production was asked about and the result comparison must lose. It leaves
+/// every id alone, so the VERDICTS still agree: what fails is the hash, which is the half that
+/// would otherwise be the least exercised.
+let rec private toModelTreeBlind (n: RNode) : TreeOps.tree =
+    TreeOps.TNode(n.Id, "", n.Children |> List.map toModelTreeBlind)
+
+let private mTid (t: TreeOps.tree) =
+    match t with
+    | TreeOps.TNode(i, _, _) -> i
+
+let private mKind (t: TreeOps.tree) =
+    match t with
+    | TreeOps.TNode(_, k, _) -> k
+
+let private mKids (t: TreeOps.tree) =
+    match t with
+    | TreeOps.TNode(_, _, cs) -> cs
+
+/// A `NodeWitness` over the MODEL's tree, so the comparison runs production's own
+/// `Tree.encodeHash` on both sides rather than a re-implementation of it beside the model.
+let private modelTreeW: NodeWitness<TreeOps.tree, string> =
+    { Id = mTid
+      KindTag = mKind
+      Children = mKids
+      ReplaceChildren = fun t cs -> TreeOps.TNode(mTid t, mKind t, cs) }
+
+let rec private toModelOpWith (bridge: RNode -> TreeOps.tree) (op: SkeletonOp<RNode, string>) : TreeOps.op =
+    match op with
+    | InsertChild(p, node) -> TreeOps.InsertChild(p, bridge node)
+    | RemoveNode t -> TreeOps.RemoveNode t
+    | MoveNode(t, np) -> TreeOps.MoveNode(t, np)
+    | ReorderChildren(p, order) -> TreeOps.ReorderChildren(p, order)
+    | Batch inner -> TreeOps.Batch(inner |> List.map (toModelOpWith bridge))
+
+let private encWitnessNode (nodeId: string) (kindTag: string) = nodeId + "|" + kindTag
+
+let private prodTreeHash (t: RNode) =
+    Tree.encodeHash nodew (fun n -> encWitnessNode n.Id n.Kind) t
+
+let private modelTreeHash (t: TreeOps.tree) =
+    Tree.encodeHash modelTreeW (fun n -> encWitnessNode (mTid n) (mKind n)) t
+
+let private prodRejClass (r: Rejection<string>) =
+    match r with
+    | UnknownNode _ -> "UnknownNode"
+    | DuplicateId _ -> "DuplicateId"
+    | CannotRemoveRoot -> "CannotRemoveRoot"
+    | WouldNestUnderSelf _ -> "WouldNestUnderSelf"
+    | NotAContainer _ -> "NotAContainer"
+    | ReorderMismatch _ -> "ReorderMismatch"
+    | Rejected _ -> "Rejected"
+
+let private modelRejClass (r: TreeOps.rejection) =
+    match r with
+    | TreeOps.UnknownNode _ -> "UnknownNode"
+    | TreeOps.DuplicateId _ -> "DuplicateId"
+    | TreeOps.CannotRemoveRoot -> "CannotRemoveRoot"
+    | TreeOps.WouldNestUnderSelf _ -> "WouldNestUnderSelf"
+    | TreeOps.NotAContainer _ -> "NotAContainer"
+    | TreeOps.ReorderMismatch _ -> "ReorderMismatch"
+    | TreeOps.Rejected _ -> "Rejected"
+
+/// Membership is the meaning on both sides: production carries `Set<string>`, the model carries
+/// lists read as sets (proofs/README.md, "sets are lists").
+let private asSet (xs: string list) = xs |> List.distinct |> List.sort
+
+let private prodFpParts (f: Footprint) =
+    [ asSet (Set.toList f.Reads)
+      asSet (Set.toList f.StructureWrites)
+      asSet (Set.toList f.ContentWrites)
+      asSet (Set.toList f.UnknownParentWrites) ]
+
+let private modelFpParts (f: DagFold.footprint) =
+    [ asSet f.reads
+      asSet f.structure_writes
+      asSet f.content_writes
+      asSet f.unknown_parent_writes ]
+
+type private TreeTally =
+    { Diffs: string list
+      Accepted: int
+      Rejected: int
+      Classes: Set<string> }
+
+let private emptyTreeTally =
+    { Diffs = []
+      Accepted = 0
+      Rejected = 0
+      Classes = Set.empty }
+
+/// One (op, state) asked of both sides.
+let private treeProbe
+    (bridge: RNode -> TreeOps.tree)
+    (op: SkeletonOp<RNode, string>)
+    (st: RNode)
+    (acc: TreeTally)
+    : TreeTally =
+    let mop = toModelOpWith bridge op
+    let mst = bridge st
+    let where = sprintf "op %s at tree %s" (treeW.Encode op) (prodTreeHash st)
+
+    let fpDiff =
+        let p = prodFpParts (Ops.footprint nodew idw [ op ])
+        let m = modelFpParts (TreeOps.op_fp mop)
+
+        if p <> m then
+            [ sprintf "footprint differs — %s\n  production: %A\n  oracle:     %A" where p m ]
+        else
+            []
+
+    let prod = Ops.apply nodew idw op st
+    let model = TreeOps.apply mop mst
+
+    let applyDiff, accepted, rejected, cls =
+        match prod, model with
+        | Ok pt, DagFold.Ok mt ->
+            let ph = prodTreeHash pt
+            let mh = modelTreeHash mt
+
+            (if ph <> mh then
+                 [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
+             else
+                 []),
+            1,
+            0,
+            None
+        | Error pe, DagFold.Error me ->
+            let pc = prodRejClass pe
+            let mc = modelRejClass me
+
+            (if pc <> mc then
+                 [ sprintf "rejection class differs — %s\n  production: %s\n  oracle:     %s" where pc mc ]
+             else
+                 []),
+            0,
+            1,
+            Some pc
+        | Ok _, DagFold.Error me ->
+            [ sprintf "production ACCEPTED but the oracle rejected (%s) — %s" (modelRejClass me) where ], 0, 0, None
+        | Error pe, DagFold.Ok _ ->
+            [ sprintf "production REJECTED (%s) but the oracle accepted — %s" (prodRejClass pe) where ], 0, 0, None
+
+    { Diffs = acc.Diffs @ fpDiff @ applyDiff
+      Accepted = acc.Accepted + accepted
+      Rejected = acc.Rejected + rejected
+      Classes =
+        match cls with
+        | Some c -> Set.add c acc.Classes
+        | None -> acc.Classes }
+
+/// Ops that REACH each rejection class the plain `apply` can raise, against the base tree
+/// `root(doc)[a(section)[a1,a2], b(section)[b1]]`. The generator keeps only accepted ops, so the
+/// refusal arms are supplied rather than hoped for.
+let private treeRefusals: SkeletonOp<RNode, string> list =
+    [ InsertChild("no-such-parent", RNode.leaf "fresh-133" "para" "v") // UnknownNode (parent)
+      InsertChild("a", RNode.leaf "a1" "para" "v") // DuplicateId
+      RemoveNode "root" // CannotRemoveRoot
+      RemoveNode "no-such-node" // UnknownNode (target)
+      MoveNode("a", "a1") // WouldNestUnderSelf
+      MoveNode("a", "no-such-parent") // UnknownNode (new parent)
+      ReorderChildren("a", [ "a1" ]) // ReorderMismatch
+      ReorderChildren("no-such-parent", []) // UnknownNode (reorder)
+      Batch [ InsertChild("b", RNode.leaf "b133" "para" "v"); RemoveNode "root" ] ] // all-or-nothing
+
+/// Every op the generator yields, plus the refusals, asked at every state a prefix of the
+/// generated pool reaches — the same construction the Phase 132 diamond family uses, and for the
+/// same reason: a check at the base tree alone measures one instance.
+let private treeDifferential (bridge: RNode -> TreeOps.tree) (seed: int) (trials: int) : TreeTally =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable tally = emptyTreeTally
+
+    for _ in 1..trials do
+        let lanes, r' = treeLaneGen.Lanes 3 r
+        r <- r'
+        let generated = List.concat lanes
+
+        let states =
+            generated
+            |> List.fold
+                (fun (acc, cur) op ->
+                    match Ops.apply nodew idw op cur with
+                    | Ok t -> (acc @ [ t ]), t
+                    | Error _ -> acc, cur)
+                ([ treeBase ], treeBase)
+            |> fst
+
+        for op in generated @ treeRefusals do
+            for st in states do
+                tally <- treeProbe bridge op st tally
+
+    tally
+
+/// The theorem's own instance on the EXTRACTED code: for every pair the model's `independent`
+/// declares disjoint and every state where both halves of the guarded algebra accept, the two
+/// orders agree. `oracleFp` is the footprint the check runs under — the real one in the green
+/// run, a blind one in the go-red.
+let private modelDiamondBreaks
+    (oracleFp: TreeOps.op -> DagFold.footprint)
+    (ops: TreeOps.op list)
+    (states: TreeOps.tree list)
+    : string list * int =
+    let mutable met = 0
+    let mutable breaks = []
+
+    for a in ops do
+        for b in ops do
+            if DagFold.independent (oracleFp a) (oracleFp b) then
+                for s in states do
+                    match TreeOps.wapply a s, TreeOps.wapply b s with
+                    | DagFold.Ok sa, DagFold.Ok sb ->
+                        met <- met + 1
+
+                        match TreeOps.wapply b sa, TreeOps.wapply a sb with
+                        | DagFold.Ok t1, DagFold.Ok t2 when t1 = t2 -> ()
+                        | _ ->
+                            breaks <-
+                                breaks
+                                @ [ sprintf "the extracted model breaks the diamond at a well-formed tree" ]
+                    | _ -> ()
+
+    breaks, met
+
+// ---------------------------------------------------------------------------
 
 [<Tests>]
 let proofOracleTests =
@@ -1380,4 +1634,127 @@ let proofOracleTests =
                       rng <- r'
                       swept <- runProbes toModelBlind "blind" v swept
 
-                  Expect.isNonEmpty swept.Disagreements "the blind bridge loses over the generated sample as well" ]
+                  Expect.isNonEmpty swept.Disagreements "the blind bridge loses over the generated sample as well"
+
+          // ---- Phase 133: the TREE ALGEBRA model beside Ops.apply / Ops.footprint ----
+
+          testCase "the tree oracle agrees with Ops.apply and Ops.footprint over the generated pool"
+          <| fun _ ->
+              let t = treeDifferential toModelTree 1330 30
+
+              match t.Diffs with
+              | d :: _ -> failtestf "the tree oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // The pack's sample-adequacy posture: an agreement that never met a rejection
+                  // certifies one arm only, and one that never met an acceptance certifies none.
+                  Expect.isGreaterThan
+                      t.Accepted
+                      0
+                      (sprintf "(op, state) pairs were ACCEPTED (accepted=%d rejected=%d)" t.Accepted t.Rejected)
+
+                  Expect.isGreaterThan
+                      t.Rejected
+                      0
+                      (sprintf "(op, state) pairs were REJECTED (accepted=%d rejected=%d)" t.Accepted t.Rejected)
+
+                  // Every rejection class the plain `apply` can raise was reached — named rather
+                  // than counted, because a count cannot say WHICH arm went unexercised.
+                  // `NotAContainer` is `applyContained`'s alone and `Rejected` is the domain-side
+                  // extension point Core never raises, so the reachable set is these five.
+                  for cls in
+                      [ "UnknownNode"
+                        "DuplicateId"
+                        "CannotRemoveRoot"
+                        "WouldNestUnderSelf"
+                        "ReorderMismatch" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.Classes)
+                          (sprintf "the sample reached a %s rejection (reached: %A)" cls t.Classes)
+
+          testCase "a tree oracle handed a blind bridge DISAGREES with Ops.apply"
+          <| fun _ ->
+              // The teeth. The blind bridge erases every kind tag, so the model is asked about a
+              // different tree from the one production was asked about. The VERDICTS still agree —
+              // no clause in the algebra reads a kind — so what has to lose is the accepted-result
+              // hash, which is otherwise the half a coincidence could carry. A green report above
+              // is therefore known to be a comparison that can fail.
+              let t = treeDifferential toModelTreeBlind 1330 3
+
+              Expect.isNonEmpty t.Diffs "a bridge that erases every kind tag must lose the result comparison"
+
+              Expect.isTrue
+                  (t.Diffs |> List.exists (fun d -> d.Contains "accepted result differs"))
+                  (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head t.Diffs))
+
+          testCase "the extracted tree model keeps the diamond its own theorem proves"
+          <| fun _ ->
+              // `TreeOps.leaf_independence_diamond` is proved on the model; this is that theorem's
+              // instance on the EXTRACTED code, over the pool Phase 80's generator produces. The
+              // alphabet is the non-`Batch` ops, which is the alphabet the theorem is stated over.
+              let mutable r = ConfRng.ofSeed 1331
+              let mutable breaks = []
+              let mutable met = 0
+
+              for _ in 1..60 do
+                  let lanes, r' = treeLaneGen.Lanes 3 r
+                  r <- r'
+                  let ops = List.concat lanes
+
+                  let states =
+                      ops
+                      |> List.fold
+                          (fun (acc, cur) op ->
+                              match Ops.apply nodew idw op cur with
+                              | Ok t -> (acc @ [ t ]), t
+                              | Error _ -> acc, cur)
+                          ([ treeBase ], treeBase)
+                      |> fst
+
+                  let mops =
+                      ops
+                      |> List.filter (fun o ->
+                          match o with
+                          | Batch _ -> false
+                          | _ -> true)
+                      |> List.map (toModelOpWith toModelTree)
+
+                  let b, m = modelDiamondBreaks TreeOps.op_fp mops (states |> List.map toModelTree)
+                  breaks <- breaks @ b
+                  met <- met + m
+
+              match breaks with
+              | why :: _ -> failtest why
+              | [] ->
+                  // The premise here is narrower than the Phase 132 family's: `wapply` demands a
+                  // well-formed state AND a well-formed result, so a (pair, state) triple counts
+                  // only where both halves of the guarded algebra accept. Measured at 60 trials:
+                  // 155. The threshold is below that with room and is there to catch a generator
+                  // that stops producing independent pairs, not to pin the number.
+                  Expect.isGreaterThan met 100 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+
+          testCase "a blind footprint BREAKS the extracted model's diamond — the measurement can fail"
+          <| fun _ ->
+              // The teeth for the family above, on a pair chosen so the break is not a matter of
+              // luck: two inserts under the SAME parent both apply and do not commute (the appended
+              // order differs), and `Ops.independent` correctly refuses them. A footprint that
+              // declares every pair independent must therefore break the diamond here.
+              let blind (_: TreeOps.op) : DagFold.footprint =
+                  { DagFold.reads = []
+                    DagFold.structure_writes = []
+                    DagFold.content_writes = []
+                    DagFold.unknown_parent_writes = [] }
+
+              let x = TreeOps.InsertChild("a", TreeOps.TNode("x133", "para", []))
+              let y = TreeOps.InsertChild("a", TreeOps.TNode("y133", "para", []))
+              let s0 = toModelTree treeBase
+
+              Expect.isFalse
+                  (DagFold.independent (TreeOps.op_fp x) (TreeOps.op_fp y))
+                  "the two same-parent inserts are NOT independent — the shared structural parent"
+
+              let breaks, met = modelDiamondBreaks blind [ x; y ] [ s0 ]
+              Expect.isGreaterThan met 0 "the blind run met the premise, so it had something to measure"
+
+              Expect.isNonEmpty
+                  breaks
+                  "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose" ]
