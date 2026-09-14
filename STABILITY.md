@@ -2269,8 +2269,62 @@ whoever brings the op type. Same division of labour as the fold theorem's `indep
 left-inverse law demands a working `Decode`. A witness that legitimately stubs it — a domain that never
 reads a stream back — would go red inside an aggregate it passes today, for something that is not about
 its op algebra. So this joins the snapshot and DAG surfaces as a family a domain calls beside its base
-certification, and the `certify` count above stays at 14. A domain whose `Decode` is real should run it:
-nothing else in the kit certifies this premise. `'Op` needs equality.
+certification, and it does not enter the `certify` aggregate at all (that count moved to 15 in Phase 139,
+which added a law to `opAlgebra` rather than a family beside it). A domain whose `Decode` is real should
+run it: nothing else in the kit certifies this premise. `'Op` needs equality.
+
+### `Tree.WellFormed` — structural validity, named once (`0.24.0`, Phase 139) — ADDITIVE
+
+`Fuaran.Core.Tree` gains a named predicate and Core's other id-uniqueness call sites become projections
+of it:
+
+- **`Tree.WellFormed<'Id>`** — `Structural | RepeatedId of 'Id`, the verdict.
+- **`Tree.wellFormed w idw root`** — is this tree structurally valid, and if not, which id breaks it.
+- **`Tree.isWellFormed w idw root`** — the boolean form.
+- **`Tree.graftWellFormed w idw node root`** — the verdict for the tree that grafting `node` into `root`
+  WOULD produce, computed without building it. This is the question every insert validator asks.
+
+**Its scope is the WITNESS SURFACE** — `NodeWitness.Children` and nothing else — stated in the type's
+own doc comment and in the README's "What the witness surface covers" section. A domain holding nodes in
+keyed, non-structural positions owes its own check over its own traversal; the predicate says so rather
+than implying a guarantee Core cannot make. That is Phase 137's scoping, now attached to the name.
+
+**One clause, not two.** The obvious pairing is "unique ids and a single root", but a `'Node` value IS
+its tree here: the walk starts at exactly one node by construction of the type, so single-rootedness is a
+type-level guarantee rather than a checkable clause, and the predicate carries the one clause that can
+actually be violated and that everything downstream depends on.
+
+`Ops`'s insert validator and `Diff.toOps`'s tree check now both read it, so the accept path and the diff
+path cannot drift into two notions of the same defect.
+
+**One OBSERVABLE change, and it is which id is NAMED — never whether a tree is refused.**
+`Diff.DiffError.DuplicateIdInTree d` previously reported the first id whose duplicate GROUP appeared
+earliest; it now reports the first id at its SECOND occurrence in preorder. For `[a; b; b; a]` the old
+answer was `a` and the new is `b`. The new answer is the one `Rejection.DuplicateId` already gave on the
+accept path, so the two paths now name the same offender for the same tree. Additive rather than
+breaking: the error CASE and the refusal are unchanged, and nothing in the kit ever pinned which of
+several duplicates was named.
+
+### `Conformance.opAlgebra` gains a preservation law (`0.24.0`, Phase 139) — ADDITIVE
+
+`opAlgebra` reports a fifth law, **"apply's accept path preserves `Tree.WellFormed`"**: over every op the
+sample reaches, if the pre-state is well-formed and `apply` ACCEPTS, the post-state is well-formed too.
+It is the sampled twin of Phase 138's machine-checked `apply_preserves_wf`, and it is wider than the
+Phase 137 law beside it, which is about inserts alone — a `MoveNode` or a `Batch` that broke uniqueness
+would be invisible to that one.
+
+**`Conformance.certify` therefore reports 15 law results, not 14** (witness 4 + algebra 5 + diff 3 +
+stream 3). A domain that pins the count updates it; the other four laws are unchanged.
+
+### The `apply/` conformance family (`0.24.0`, Phase 139) — ADDITIVE, and it is a CORPUS artefact
+
+The shared wire-format conformance corpus gains a self-enumerated `apply/` family: one vector per
+validator clause per skeleton op, `Batch` all-or-nothing, and the Phase 137 collision cases, each an
+authored `(tree, op)` pair with the outcome computed by calling `Ops.apply`. See
+[`docs/conformance-corpus.md`](docs/conformance-corpus.md) for the shape, the per-host rejection-code
+mapping and what the family deliberately does not pin. Emitted by
+`dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>`; nothing in this repository's
+public package surface changes.
 
 ## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
 

@@ -252,9 +252,10 @@ let tests =
 
               Expect.equal
                   (report.Results |> List.length)
-                  14
-                  // algebra gained the insert-uniqueness law in Phase 137.
-                  "witness (4) + algebra (4) + diff (3) + stream (3) laws reported"
+                  15
+                  // algebra gained the insert-uniqueness law in Phase 137 and the
+                  // WellFormed-preservation law in Phase 139.
+                  "witness (4) + algebra (5) + diff (3) + stream (3) laws reported"
 
           // ---- Phase 145: the op codec's own injectivity, the content-id theorem's fourth premise ----
 
