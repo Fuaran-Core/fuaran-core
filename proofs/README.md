@@ -496,7 +496,7 @@ naming what was expected is most of what these combinators are for. On top of th
 vocabulary, its `Json.kindObj` encoder, and the kind-dispatch node decoder a domain writes from
 those combinators.
 
-Four things are proved:
+Five things are proved:
 
 - **`decode_total`.** Every combinator reaches exactly one outcome on every input — `Ok` or a named
   `Error` — and WHICH one is characterised structurally: `as_string` succeeds exactly on a string,
@@ -516,6 +516,10 @@ Four things are proved:
 - **`lenient_agrees_off_policy` / `strict_unchanged_on_null_free`.** The Phase 102 promise — see
   the policy note below, which is also where this model diverges from what the phase's brief
   assumed.
+- **`decode_perm_invariant` / `decode_node_perm_invariant`.** Key-order invariance: WIRE_FORMAT §2
+  rule 2's obligation on the decoder, and §20's one-answer rule at this layer. Added by Phase 152
+  — see the section below, which is also where the duplicate-key premise is argued and proved
+  necessary.
 
 ### The boundary — `Json.parse` is excluded, and why
 
@@ -570,6 +574,48 @@ that HAS a null into the wire model that cannot carry one, which is the type-lev
   arm; `nullish`, which the following `,`/`}` expectation catches) are grammar, and stay with
   `Json.parse`. The differential below is the evidence for the assumption, not a proof of it.
 
+### Key order — rule 2's decoder obligation, and §20's one answer (Phase 152)
+
+WIRE_FORMAT §2 rule 2 obliges every decoder to accept an object's members in **any order**, and §20
+ratifies that the same bytes decode to the same tree on every conformant host. Both were pinned by
+`reject` and round-trip fixtures and neither was a theorem — and **every fixture in the corpus is
+canonically ordered**, so a decoder that silently depended on member order would have passed all of
+them. That is the gap this closes, and it is why the differential below SHUFFLES rather than adding
+fixtures: a fixture family cannot test a property its own canonical form excludes.
+
+**The relation.** `member_perm` relates two documents that differ only by the order of object
+members, at any depth. Arrays are compared **pointwise** — an array's order is content, not
+presentation, and a relation that permuted them too would be proving something false. Scalars must
+be equal. An object's members are matched **by key**, with the matched values related recursively,
+so it is a congruence and not a shallow list permutation: `{"a":{"x":1,"y":2}}` and
+`{"a":{"y":2,"x":1}}` are related.
+
+**What is proved, in both directions.** Forwards: `decode_perm_invariant` — for every related pair,
+the scalar readers, `kindOf`, `strField`, `intField` and `mapList` return **equal** outcomes,
+message included, and `getProp`, whose result is itself a reordered subtree, returns a **related**
+one. `decode_node_perm_invariant` is §20's sentence at this layer: the node decoder returns the
+*same tree*, literally equal, since a decoded node carries no members of its own. Backwards — and
+this is the half that keeps the first from being vacuous, since every invariance lemma above is
+trivially true of a relation that holds of nothing — `perm_covers_reorder` shows the relation
+**contains every reordering of a duplicate-free member list whose values are themselves related**.
+That is one level of a deep reordering, with `member_perm`'s scalar arms as the base cases, so it is
+the induction step rather than a claim about the root; `member_perm_refl` and
+`perm_covers_selection` are the instances a reader can check by eye.
+
+**The premise, and why it is necessary rather than convenient.** `getProp` is a `List.tryFind` over
+the member list, so it answers with the **first** member of the given name. On a list with no
+repeated key that is order-independent; on one with a repeated key it is not — and **nothing
+upstream excludes the case**: `Json.parseObject` appends every member with no key check, and Phase
+146's `parse_members` models exactly that accumulation. So the duplicate-free premise is carried
+here rather than inherited from the parser, and `duplicate_keys_break_order_invariance` proves it
+cannot be dropped: two documents that are the same members in a different order, and `getProp`
+answers differently. Matching by key is where the premise lives in this formulation — the relation
+declines to relate that pair rather than relating it and lying.
+
+**Not claimed.** The relation is not proved transitive or symmetric; nothing needs either, and
+neither is asserted. And nothing here is said about `Canon.render`'s key ordering on the way **out**
+— that is the wire-format corpus's, not this theorem's.
+
 ### What the corpus covers
 
 The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs
@@ -585,25 +631,47 @@ agreeing on accept-vs-refuse alone would not notice a decoder that named the wro
 | the reference vocabulary | 150 generated nodes encoded and decoded, model against the same decoder written from the shipped combinators — the round-trip theorem's instance on the extracted code | accept path |
 | the same, refused | every corpus `nodes/` value and 400 generated documents through both node decoders | refuse path (asserted) |
 | the read policy | 7 hand-written null positions + 400 generated documents carrying the token at every position, rendered to wire text and read by `Json.parseDetailedWithPolicy` under BOTH policies | yes, and the policy is asserted to have FIRED |
+| the same corpus, SHUFFLED (Phase 152) | every value of every `nodes/` and `ops/` fixture, members reordered at every depth, 4 seeded shuffles each: production against ITSELF across the shuffle, and the oracle against production on the shuffled document | refuse path (asserted) |
+| the reference vocabulary, shuffled | 150 generated nodes encoded and reordered, 4 shuffles each, plus 300 generated documents | both (each asserted where its pool reaches it) |
 
-The **go-red case** hands the oracle a *blind bridge* that reads every wire integer as a float — the
-decode family's counterpart to the fold family's blind footprint — and requires `asInt` to
-disagree, on a hand-made value and over the generated sample. A green report is therefore known to
-be a comparison that can lose.
+The **go-red cases** are two, because this theorem has two halves to lose. The Phase 135 one hands
+the oracle a *blind bridge* that reads every wire integer as a float — the decode family's
+counterpart to the fold family's blind footprint — and requires `asInt` to disagree, on a hand-made
+value and over the generated sample. The Phase 152 one hands the SHUFFLE differential a `getProp`
+that reads the **first** member of an object rather than the one it was asked for: on the
+canonically ordered corpus that decoder is very nearly right and every pool above it passes, and
+under a reordering it must lose. That case also asserts its shuffles actually **moved** a member and
+that every drawn pair is one the extracted relation relates — so a failure there is the decoder's
+and not the probe's. A green report is therefore known to be a comparison that can lose, in both
+directions.
+
+Each shuffle is additionally checked to be an instance of the theorem at all: the extracted
+`member_perm` — the model's own relation, not a second one written in the host — must hold of the
+pair, and duplicate-keyed documents are filtered out by the extracted `keys_unique_deep` for the
+reason the section above gives.
 
 The **proof** was falsified the same way before it was trusted, on scratch copies: dropping
 `as_float`'s `JInt` clause reddens `decode_total`; renaming the `"text"` kind tag in the encoder
 reddens `decode_encode_roundtrip`; making the tolerant reader erase one off-policy member shape
-reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have caught it.
+reddens `lenient_agrees_off_policy`. Phase 152 added four more, each on a scratch copy and each
+landing on a different lemma: making `extract_field` ignore the name it was given reddens
+`perm_covers_selection`; relating arrays by length alone reddens `map_list_go_perm`; dropping
+`keys_unique` from `perm_covers_reorder`'s hypotheses reddens it at exactly the step the premise
+pays for (`key_count k hs' == 0`); and relating two `JInt`s without their payloads being equal
+reddens `perm_as_int`. Each landed on the lemma that should have caught it.
 
 ### The claims ladder, for this theorem
 
-1. **Proved (machine-checked, no admits).** On the model: the four results above, for every input,
+1. **Proved (machine-checked, no admits).** On the model: the five results above, for every input,
    under no hypothesis at all — unlike the fold theorem, which rests on `independence_diamond`,
    this one assumes nothing about a domain. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Wire.Decode` over the pools above,
-   on class, value and message. Agreement is over those pools, never over all inputs.
+   on class, value and message. Agreement is over those pools, never over all inputs. Since Phase
+   152 that includes each pool SHUFFLED: production's answers are compared against its own on the
+   unreordered document — equality for every combinator whose result carries no members, the
+   extracted `outcome_perm` for `getProp`, whose result is itself reordered — with a decoder that
+   reads members by position required to lose.
 3. **Assumed, and stated as such.**
    - **The numeric payloads are opaque.** `jval` is parametric in the int and float carriers, and
      `as_float` takes the widening `to_flt` where F# writes `float i`. No combinator in `Decode`
@@ -616,10 +684,18 @@ reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have c
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as
      for the fold model. The leg holds the committed oracle to a fresh extraction byte for byte,
      which makes "the oracle is the model" a checked claim and nothing more.
+   - **Duplicate keys are out of scope, by a premise taken HERE.** Nothing upstream excludes a
+     repeated member name — the parser appends every member, and Phase 146's model says so — and on
+     one `getProp` genuinely does depend on order. `member_perm` therefore does not relate a
+     duplicate-key reordering, and `duplicate_keys_break_order_invariance` proves that is
+     necessary rather than convenient. What the key-order result claims is claimed about
+     duplicate-free documents; on a document with a repeated key the question is open and the
+     answer is "whichever came first".
 4. **Not claimed.** Anything about `Json.parse`; anything about a domain's own decoder beyond the
    reference vocabulary modelled here (what carries to one is the combinator layer it is built
-   from, not its clauses); and anything about encode — `Canon.render`'s key ordering and float
-   layout are certified by the wire-format corpus, not by this theorem.
+   from, not its clauses); anything about encode — `Canon.render`'s key ordering and float layout
+   are certified by the wire-format corpus, not by this theorem; and transitivity or symmetry of
+   `member_perm`, which nothing here needs and nothing here asserts.
 
 ## Theorem 2 — independence soundness for the tree algebra (Phase 133)
 
