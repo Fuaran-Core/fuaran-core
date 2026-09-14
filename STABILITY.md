@@ -2134,10 +2134,12 @@ correction with the other hosts), Phase 147 (`Dag.DagBreak.Reason` becomes a clo
 sibling of `ChainBreak.Reason`), Phase 143 (which set out to widen `Ops.independent`'s promise
 under a proved clause and instead proved the promise cannot widen over this record — **no contract
 change; see its entry below**), Phase 145 (a `codecInjectivityLaws` family in the conformance
-kit), and Phase 161 (a previously accepted `InsertChild` whose subtree places children under a node
+kit), Phase 161 (a previously accepted `InsertChild` whose subtree places children under a node
 `canHold` refuses is now refused with `NotAContainer` naming that node — the container-capability
 sibling of 137's widening, plus the `containerLaws` family that makes the one premise no engine
-check can discharge a domain obligation the domain certifies). Each phase appends
+check can discharge a domain obligation the domain certifies), and the additive riders — Phase 139
+(`Tree.WellFormed`, the `apply/` corpus family), Phase 160 (`applyAllWith` / `canApplyAllWith`) and
+Phase 141 (`diffContainedLaws`). Each phase appends
 its own entry beneath this header as it lands; the version moves only if a later class outranks
 what the draft already carries (the draft-slot rule).
 
@@ -2469,19 +2471,6 @@ script cannot be refused for containment at any step. Reconstruction itself stay
 tested; `proofs/README.md`'s theorem 6 says why, and says it plainly rather than leaving a reader to
 infer that "the diff is proved" covers it.
 
-## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
-
-**This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists
-yet, so the entries below are the contract a consumer will meet when the release gesture is made —
-not one anybody can pin today. They are grouped as one section because they are cut as ONE minor
-deliberately: each is a separate ask, and raising a pin four times to adopt four asks costs every
-consumer three raises it gains nothing from.
-
-Three of the four are BREAKING in shape and one is additive; a fifth entry is a removal, and a sixth
-is a codegen NARROWING the fourth ask's own property found and the operator ruled on the same day.
-Each names the consumer that deletes a workaround on adoption, because that is the only reliable way
-to tell afterwards whether the ask was answered or merely implemented.
-
 ### `applyContained` refuses a graft whose INTERIOR is not a container (`0.24.0`, Phase 161) — a REFUSAL-CLASS WIDENING
 
 `Ops.applyContained` / `canApplyContained` now reject `InsertChild(parent, node)` with
@@ -2559,6 +2548,18 @@ notion. **`Conformance.certify` still returns 14 law results**; a consumer asser
 not move it. A domain with a container notion calls `containerLaws` alongside its base run; one that
 calls it with `CanHold = None` is reported by name rather than skipped.
 
+## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
+
+**This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists
+yet, so the entries below are the contract a consumer will meet when the release gesture is made —
+not one anybody can pin today. They are grouped as one section because they are cut as ONE minor
+deliberately: each is a separate ask, and raising a pin four times to adopt four asks costs every
+consumer three raises it gains nothing from.
+
+Three of the four are BREAKING in shape and one is additive; a fifth entry is a removal, and a sixth
+is a codegen NARROWING the fourth ask's own property found and the operator ruled on the same day.
+Each names the consumer that deletes a workaround on adoption, because that is the only reliable way
+to tell afterwards whether the ask was answered or merely implemented.
 
 ### `ChainBreak.Reason` is a closed DU (`0.23.0`) — BREAKING
 
