@@ -21,7 +21,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`). Every definition names its F# counterpart. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`); and, since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter. Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -154,6 +154,89 @@ ladder's "not claimed" entry, and the `Proofs.Oracle` case that holds the refuti
 
 `--report_assumes error` is on: the module carries no `assume`, no `admit`, no `assume val`.
 
+### The drain over an abstract DAG (Phase 156)
+
+Section 12 proves the order on a SPINE. The shape a clone actually folds is the UNION of N lanes,
+and there the ready frontier is N wide once the base is drained — so the tie-break section 12 could
+leave as an unexercised parameter is what decides the sequence, and the determinism claim every
+convergent consumer rests on ("the same node set gives the same order on every machine") rests on
+it. Section 13 is that case, over an **abstract** node set: no `mint`, no lanes, no base, just
+nodes naming parents.
+
+It is section 12's own `kahn`, at the selector `pick_min lt`, and not a second drain. Three
+theorems, no admits:
+
+- **`drain_linear_extension`** — every node the drain places stands after every one of its in-set
+  parents. Stated over the nodes it PLACED rather than over all of them, because on a cyclic set
+  it places only a prefix, and a statement quantified over all of them would be false there rather
+  than silent.
+- **`drain_total_on_acyclic`** — on an acyclic set it places every node exactly once, and what it
+  produces is itself a topological enumeration.
+- **`drain_deterministic`** — the sequence is a function of the node SET: permute the work list
+  (F#: receive the lanes in any arrival order) and the same list comes back, under either policy.
+
+**This is where the tie-break stops being decoration.** `frontier` answers in the work list's
+order, so a permuted node set hands the selector a permuted frontier; `pick_min` is invariant under
+that and section 12's `pick_head` is not. A drain taking the head of an unsorted frontier satisfies
+`picks_from_frontier` and FAILS `drain_deterministic` — which is the precise sense in which
+smallest-id-first is load-bearing. Section 12's two spine results are re-derived here as corollaries
+by instantiating its selector at `pick_min lt` (`spine_drain_is_the_parent_walk`,
+`spine_drain_is_append_order`), so the spine case is this section's special case rather than a
+parallel claim to keep in step.
+
+**The ID ORDER is a parameter, and that is the stronger statement rather than a weaker one.** The
+model takes any `lt` satisfying `total_order` — irreflexive, transitive, trichotomous — and every
+result holds for all of them. What determinism needs is that all clones use the SAME order, never
+that the order is any particular one, and quantifying over total orders says exactly that without
+the module acquiring the character arithmetic a concrete string comparison would need (finding 2).
+Production's `List.sort` on a string list is F#'s structural comparison and so
+`String.CompareOrdinal`; tying the abstract order to that one is the differential's job rather than
+the model's, and the host instantiates `lt` there.
+
+**The DANGLING-PARENT POLICY is a parameter, because the two production call sites differ on it**
+and a theorem about "the drain" that did not say which would be a theorem about neither:
+
+- `IgnoreDangling` — `Dag.topoCore`'s closure walk (`match Map.tryFind id dag.Nodes with | Some n
+  -> … | None -> collect acc rest`) with `Dag.ancestorsOf`'s `ContainsKey` guard beside it and the
+  `parentsIn` filter that follows. A parent the set does not hold never enters the closure and is
+  filtered out of the in-degree, so it constrains nothing and the drain proceeds. This is the
+  policy on the FOLD path — `topoOrder` -> `between` -> `betweenOps` -> `reconcileMany` ->
+  `foldOnce` — and on `replayTo`.
+- `RefuseDangling` — `Dag.firstBreak` (`n.Parents |> List.tryFind (fun p -> not
+  (dag.Nodes.ContainsKey p))` -> `MissingParent`), hence `verifyDag` and `fromJsonlVerified`,
+  which refuse the whole set before any drain runs.
+
+`drain_policies_agree` proves the two are the same function on a set with no dangling parent — so
+the fold path pays nothing for the refusing one's existence — and `drain_refusal_characterised`
+proves the refusal fires exactly when a parent lies outside. The refusal names the SMALLEST such id
+rather than the first in the work list, which is not a liberty: `firstBreak` scans `Map.toList`, in
+id order, and its docstring says so, so the refusal is order-invariant on both sides and
+`drain_deterministic` covers it. What the model does NOT carry is the refusal's diagnostic payload
+— `firstBreak` reports the missing parent beside the node, and the node determines the parent, so
+the model names the node and stops there.
+
+**How a cycle is surfaced, stated exactly, because it is a claim about production.** `topoCore`
+does not raise: a node inside a cycle never reaches in-degree zero, so the emitted list is strictly
+SHORTER than the closure — `isAcyclic` and `tryTopoOrder` read that length comparison and surface
+it, while `replayTo` and `between` fold the truncated prefix. The model says the same thing without
+lengths. `drain_total_on_acyclic` gives completeness from acyclicity; `drain_complete_is_acyclic`
+reads the converse off the linear-extension theorem, because a complete drain IS a topological
+enumeration and so witnesses acyclicity. The two are an iff, and that iff is exactly what
+`isAcyclic`'s comparison claims.
+
+**Acyclicity is "a topological enumeration exists", supplied as a witness LIST.** It is the standard
+characterisation of a finite acyclic digraph; it is not circular, because the witness is any such
+list and never the drain's own output; and taking it as a parameter rather than as an existential
+or as the absence of a self-reachable node keeps every statement in the first-order fragment this
+module stays inside. `drain_complete_is_acyclic` is what keeps the hypothesis non-vacuous in the
+direction that matters — the drain's own output is such a witness whenever it is complete.
+
+**What is still NOT claimed here.** That any particular id ordering is production's — `lt` is a
+parameter and the differential is the tie. The DELTA RECOVERY over a merge DAG: `between_chain` is
+still stated for the base-plus-N-chains shape, and what Phase 156 adds is the ORDER over an
+arbitrary set, not the recovery over one. `Dag.mergeBase`, still. And any consumer's own
+instantiation of this theorem for its own total order, which is that consumer's work.
+
 ## What the corpus covers
 
 The differential host draws lane sets from three pools and compares, per lane set and per sampled
@@ -191,6 +274,28 @@ which is the thing under test — and the comparison is required to fail. Two va
 with it, in the pack's posture: a run that recovered no ops compared two empty lists, and a run
 whose every lane was one op walked no chain at all. Both are asserted.
 
+**And since Phase 156 the ORDER itself is measured over a MERGE DAG, which is the case the
+delta-recovery cases above structurally cannot reach.** The lane heads are folded into one
+convergent head with `Dag.merge` — the node a real reconciliation writes — so the union head's
+closure is every node and the ready frontier is N wide once the base is drained. The extracted
+`drain`, instantiated at `String.CompareOrdinal`, is compared against `Dag.tryTopoOrder` over the
+same nodes: per lane head (the spine case, which no tie-break can get wrong) and per union (the
+case that needs one). Its adequacy guard is the frontier WIDTH — a run whose frontier never passed
+one node has re-measured the spine under a different name, and the case says so by number. Its
+**go-red** is a model draining LARGEST-id-first, as legitimate a selector as the model's own since
+it still returns a member of the frontier it is handed, so what it breaks is agreement with
+production and nothing else; it is run over the unions and not the lane heads, deliberately,
+because a one-element frontier has one minimum and one maximum and no tie-break can lose there.
+Three further cases ride with it: every permutation of the node set drained and compared against
+the drain of the set, which is `drain_deterministic` measured; the two policies, agreeing on a
+closure and diverging the moment the base node is dropped from it, which is `drain_policies_agree`
+and `drain_refusal_characterised` measured against the two callers they model; and a cyclic node
+set built by hand — unreachable through `Dag.append`, whose parent id is minted before its child's,
+and exactly the hand-crafted or tampered JSONL load `Dag.fromJsonl`'s docstring warns about — where
+production's `isAcyclic` must see the cycle and the model's drain must stop at the same short
+prefix, with an acyclic control beside it so the comparison is a discrimination rather than a
+refusal of everything.
+
 **And the theorem's HYPOTHESIS is measured, not only stated.** Over the same generator, for every
 op pair the model's own `independent` declares disjoint and every state where both ops apply, the
 host checks the diamond directly on the tree `apply`: each applies after the other, and the two
@@ -222,8 +327,22 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`), so no result here depends on
    which topological order was walked. The tie-break is a parameter constrained only to select from
    the frontier, and the frontier on a spine is one element wide at every step
-   (`kahn_frontier_singleton`) — so this says nothing about how ids compare, and nothing about a
-   MERGE DAG, where the frontier genuinely widens. That case stays unclaimed, below.
+   (`kahn_frontier_singleton`) — so that phase says nothing about how ids compare.
+
+   **And, since Phase 156, the ORDER OVER AN ARBITRARY ACYCLIC SET, which is where the tie-break
+   does become observable.** The drain is deterministic — a function of the node set alone,
+   invariant under the order the lanes arrived (`drain_deterministic`) — a linear extension of the
+   parent relation over every node it places (`drain_linear_extension`), and TOTAL on an acyclic
+   set, placing each node exactly once and producing a topological enumeration
+   (`drain_total_on_acyclic`). The id order is a parameter constrained to be a total order, so the
+   claim is that all clones using the SAME order agree, and the differential is what ties that
+   parameter to `String.CompareOrdinal`. The dangling-parent policy is likewise a parameter, and
+   `drain_policies_agree` / `drain_refusal_characterised` say which of the two production call
+   sites gets which. `drain_complete_is_acyclic` gives the converse of totality, so a complete
+   drain and an acyclic set are an iff — which is exactly the length comparison `Dag.isAcyclic` and
+   `Dag.tryTopoOrder` make. Section 12's spine results are corollaries of this one at
+   `pick_min lt`. What is NOT here is the DELTA RECOVERY over a merge DAG, which stays where Phase
+   134 put it, below.
 
    **And, since Phase 133, the tree algebra's own diamond** — `TreeOps.tree_independence_diamond`,
    which discharges that hypothesis for `SkeletonOp` rather than sampling it, and
@@ -265,12 +384,15 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      is the only way `lookup` returns a node other than the one a chain named. The model states it
      as `distinct_ids` and consumes it as `resolves`, with `resolves_of_distinct` between them.
    - _(**How the topological order is CHOSEN** left this level at Phase 142 and is now at level 1
-     above. What remains assumed about the order is nothing on this shape; over a MERGE DAG it is
-     not claimed at any level, below.)_
+     above. Nothing about the order is assumed at any shape since Phase 156: the drain over an
+     arbitrary acyclic set is proved deterministic, a linear extension and total, and the only
+     parameters left — which total order on ids, and which dangling-parent policy — are universally
+     quantified rather than assumed, with the differential tying the first to production's.)_
    - **`Dag.mergeBase` is outside the model**, because it is outside this path: `foldOnce` hands
      `reconcileMany` the base node's id directly and never locates a divergence point. Level 2 is
-     the only evidence about it, and the general topological order over an arbitrary MERGE DAG is
-     not claimed at any level.
+     the only evidence about it. _(The general topological ORDER over an arbitrary acyclic set —
+     merge DAGs included — is at level 1 since Phase 156; what is still unclaimed over a merge DAG
+     is the delta RECOVERY, below.)_
    - **The extractor and the F# compiler are trusted.** The proof leg holds the committed oracle
      to a fresh extraction byte for byte, which makes "the oracle is the model" a checked claim;
      it does not make the F# backend correct. The backend is second-class upstream (findings
@@ -299,9 +421,13 @@ What may be said, and at what strength, per the attested-stack programme's §6:
 
    - **Delta recovery over a MERGE DAG.** `between_chain` is stated for the base-plus-N-chains
      shape, which is what `foldOnce` builds and what the fold-confluence pack certifies. A DAG
-     whose heads have already been merged has nodes with two parents, `mergeBase` on its path, and
-     a topological order that is genuinely a choice rather than a forced one; none of that is
-     modelled, and a consumer folding over already-merged heads is outside every level here.
+     whose heads have already been merged has nodes with two parents and `mergeBase` on its path,
+     and neither is modelled, so a consumer folding over already-merged heads is outside every
+     level here. **What this entry no longer covers is the ORDER**: Phase 156 proves the drain
+     deterministic, a linear extension and total over an arbitrary acyclic node set, so the third
+     thing this entry used to name — "a topological order that is genuinely a choice rather than a
+     forced one" — is at level 1 above, and is measured over a real `Dag.merge` union. The
+     RECOVERY over such a DAG is what remains.
 
    Also not claimed: anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over
@@ -389,6 +515,8 @@ pwsh ./proofs/check.ps1            # check (once), re-extract + diff, run the or
 pwsh ./proofs/check.ps1 -Runs 3    # what CI runs
 pwsh ./proofs/check.ps1 -Extract   # after editing a model: rewrite its oracle/*.fs, then commit it
 pwsh ./proofs/check.ps1 -Strict    # turn a cost finding (below) from a warning into a red leg
+pwsh ./proofs/check.ps1 -NoFloor   # do not enforce the per-module time floors (below)
+pwsh ./proofs/check.ps1 -CacheDir <dir>   # put the checked-module cache somewhere you name
 pwsh ./verify.ps1 -Proofs          # the whole repo gate plus the proof leg
 ```
 
@@ -398,6 +526,44 @@ budget entry to `modules.json` beside it. The first
 run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`; `FSTAR_HOME`
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
+
+### "Cold cache" means it, and "verified" has a floor (Phase 164)
+
+On 2026-09-14 a background `check.ps1` was orphaned at a turn boundary and went on writing the
+then-shared `proofs/obj/cache` while a replacement run started in the same worktree; the
+replacement found the orphan's `.checked` files, reported `TreeOps 0s`, `Skeleton 0s`, `Chain 0s`
+and printed `==== proofs: green`, and it was caught only because a human read the timings rather
+than the verdict. Two mechanisms come from that, one closing the cause and one closing the class.
+
+**The cache is per invocation.** Each run uses `proofs/obj/cache-<pid>`, created at its head and
+removed when it exits, so two invocations in one worktree cannot share checked files and the
+`-Runs` loop's cache-clear means what it says. Before Phase 164 the directory was a constant, and
+clearing it only made a run cold if nothing else was writing there — which the script cannot see,
+because a second writer arrives *after* the clear. A run that is killed outright cannot remove its
+own directory, so the next run sweeps any `cache-<pid>` whose process is gone; a live invocation's
+cache is never touched, which is the point of naming it after the process. `-CacheDir <dir>` puts
+the cache somewhere you name instead: it is still cleared before every run — otherwise the flag
+would quietly mean "warm" — so the script refuses a directory holding anything but `*.checked`
+files, and leaves it in place at exit, because you named it.
+
+**Each module declares a floor as well as a budget**, `floorSeconds` beside `budgetSeconds` in
+`modules.json`, and a module that verifies in **less** than its floor **fails** the leg on the
+spot, naming the module and the time. The asymmetry with the ceiling is deliberate. An overshoot
+is a true measurement of a true cost, so it warns and the leg stays green; an undershoot says the
+apparatus is broken rather than the module fast, and every module measured after it shares that
+apparatus — implausibly fast is the one direction in which a lie looks like good news. The seeding
+rule is the budget's mirror, in the file's own `floorSeeding` block: **the fastest genuine cold run
+ever observed, halved**, rounded down, and **0** for a module whose fastest cold run is under 5s,
+where halving lands inside process-start noise. `Skeleton` is that case at about one second, so its
+floor is 0 and the file says so — which makes it the one module a shared cache could still speed up
+unnoticed, and the per-invocation directory rather than the floor is what covers it. Halving on top
+of the fastest-ever run leaves an enormous margin, and it costs nothing in detection because the
+failure this catches lands at or near zero seconds. A module with **no** `floorSeconds` is a cost
+finding, not a failure — a sibling adding a model should no more go red for a floor nobody has
+measured than for a budget nobody has measured — and re-seeding a floor downwards is the same
+recorded act as bumping a budget upwards: the new number, the `fastestSeconds` it came from, and
+your phase. `-NoFloor` is the deliberate opt-out for a machine genuinely that fast, and the log
+says when it was passed.
 
 **The host step runs two families, and the second is about this document.** `../proofs.json`
 declares the claims ladders below as data — what is proved, what is only tested, what is assumed —
@@ -1805,10 +1971,13 @@ self-delimitation has to be composed with the sequence numeral's. It is the item
 precedent sitting beside it.
 
 _(**The topological order's uniqueness on a spine** was named here and is DONE — Phase 142,
-`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. What it
-deliberately did not take is the general order over a MERGE DAG, where the frontier widens past one
-and the tie-break would have to be modelled for real; that is the larger successor, and it travels
-with `Dag.mergeBase`.)_
+`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. **And
+the successor it named — the general order over a MERGE DAG, where the frontier widens past one and
+the tie-break has to be modelled for real — is DONE too**, Phase 156, section 13: the drain over an
+abstract acyclic node set at an abstract total order, proved deterministic, a linear extension and
+total, with the dangling-parent policy a parameter naming which production caller gets which. What
+those two did NOT take, and what still travels with `Dag.mergeBase`, is the delta RECOVERY over a
+merge DAG — `between_chain` remains stated for the base-plus-N-chains shape.)_
 
 **A `Footprint` record that can name a relocation's KIND** — the successor Phase 143 priced and
 deliberately did not take. Section 18 of `TreeOps.fst` proves that no clause over the four address

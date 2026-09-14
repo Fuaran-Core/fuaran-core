@@ -1158,6 +1158,120 @@ let private expectDeltaAgreement (label: string) (t: DeltaTally) =
             t.Chains
             0
             (sprintf "%s: no trial carried a lane longer than one op, so no chain was walked" label)
+
+// ---------------------------------------------------------------------------
+//  Phase 156 — the ID-ORDERED DRAIN over an abstract node set, beside production's own.
+//
+//  Section 13 of `proofs/DagFold.fst` proves the drain deterministic, a linear extension of the
+//  parent relation, and total on an acyclic set — over an ABSTRACT node set and an ABSTRACT total
+//  order on ids. What ties that abstract order to production's is here and nowhere else:
+//  `Dag.topoCore` keeps its ready frontier sorted with `List.sort`, which on strings is F#'s
+//  structural comparison and so `String.CompareOrdinal`, and that is the `lt` the model is
+//  instantiated at below.
+//
+//  Two shapes are compared, and the second is the point. Per LANE HEAD the closure is a spine and
+//  the frontier is one element wide at every step, which is the case Phase 142 already proves and
+//  which no tie-break can get wrong. Over a MULTI-HEAD UNION — the lane heads folded together with
+//  `Dag.merge`, the convergent node a real reconciliation writes — the frontier is N wide once the
+//  base is drained, and the tie-break is what decides the sequence. That is the case section 13
+//  exists for, and it is why the go-red below runs there.
+// ---------------------------------------------------------------------------
+
+/// The id order production's `List.sort` imposes — the model's `lt` parameter, instantiated.
+let private ordLt (a: string) (b: string) = System.String.CompareOrdinal(a, b) < 0
+
+/// The go-red instrument: the same drain at the REVERSED order, which is `pick_min` of a flipped
+/// total order and so the frontier's MAXIMUM. It satisfies everything the model asks of a
+/// selector — it is still a member of the frontier it is handed — so what it breaks is agreement
+/// with production and nothing else, which is exactly the claim these cases make. On a spine it
+/// cannot lose, because a one-element frontier has one minimum and one maximum; the multi-head
+/// union is what gives it room.
+let private ordGt (a: string) (b: string) = System.String.CompareOrdinal(a, b) > 0
+
+/// The model's `covers` bound: one walk step per node, plus the one its base case asks for.
+let private drainFuel (ns: 'a list) : 'a list =
+    match ns with
+    | [] -> []
+    | n :: _ -> n :: ns
+
+/// The model nodes of a production DAG restricted to one head's ancestor closure — "the union" the
+/// drain is over. Nothing is recomputed across the bridge: the ids are the content hashes
+/// production minted, so a disagreement can only be about the ORDER.
+let private modelClosure (dag: Dag.T<'Op>) (head: string) : DagFold.node<'Op> list =
+    let anc = Dag.ancestorsOf dag head
+
+    dag.Nodes
+    |> Map.toList
+    |> List.filter (fun (id, _) -> Set.contains id anc)
+    |> List.map (fun (_, n) ->
+        { DagFold.nid = n.Id
+          DagFold.nparents = n.Parents
+          DagFold.nop = n.Op })
+
+/// One head whose closure is EVERY node: the lane heads folded together with `Dag.merge`. Returns
+/// the union head and the DAG carrying the merge nodes.
+let private mergedUnion
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (mergeOp: 'Op)
+    (baseId: string)
+    (heads: string list)
+    (dag: Dag.T<'Op>)
+    : string * Dag.T<'Op> =
+    match heads with
+    | [] -> baseId, dag
+    | h0 :: rest ->
+        rest
+        |> List.fold
+            (fun (acc, d) h ->
+                if h = acc then
+                    acc, d
+                else
+                    Dag.merge OpStream.defaultHash w (Human "merge") mergeOp acc h d)
+            (h0, dag)
+
+let private drainedOrder (r: DagFold.drain_result) : string list option =
+    match r with
+    | DagFold.Drained ord -> Some ord
+    | DagFold.Refused _ -> None
+
+/// Every way the extracted drain and production's own topological order disagree over one head's
+/// closure, plus how wide the ready frontier ever got — a run whose frontier never passed one
+/// compared two spines and measured nothing the spine theorem did not already cover.
+let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) (head: string) : string list * int =
+    let ns = modelClosure dag head
+    let model = drainedOrder (DagFold.drain DagFold.IgnoreDangling lt (drainFuel ns) ns)
+
+    // The widest ready frontier the closure ever presents: the nodes whose in-closure parents are
+    // all drained, at the step that has the most of them. Computed from the model's own `frontier`
+    // over its own emitted prefix, so it measures the drain that ran rather than a re-derivation.
+    let widest =
+        match model with
+        | None -> 0
+        | Some ord ->
+            let closure = ns |> List.map (fun (n: DagFold.node<'Op>) -> n.nid)
+
+            let rec go (rest: DagFold.node<'Op> list) (emitted: string list) (pending: string list) best =
+                match pending with
+                | [] -> best
+                | id :: tl ->
+                    let f = DagFold.frontier rest closure emitted
+                    let best' = max best (List.length f)
+                    go (DagFold.remove_id rest id) (emitted @ [ id ]) tl best'
+
+            go ns [] ord 0
+
+    match Dag.tryTopoOrder dag head, model with
+    | Ok production, Some m when production = m -> [], widest
+    | Ok production, Some m ->
+        [ sprintf
+              "head %s: the drain differs\n  production: [%s]\n  model:      [%s]"
+              head
+              (String.concat "; " production)
+              (String.concat "; " m) ],
+        widest
+    | Ok _, None -> [ sprintf "head %s: the model REFUSED a closure with no dangling parent" head ], widest
+    | Error e, _ -> [ sprintf "head %s: production reports a cyclic closure it cannot have: %s" head e ], widest
+
 //  Phase 133 — the TREE ALGEBRA as a third oracle.
 //
 //  `proofs/TreeOps.fst` models `Ops.apply` and `Ops.footprint` over the tree as the
@@ -4304,6 +4418,265 @@ let proofOracleTests =
                   "a DAG whose lanes hang off the wrong parent must recover different deltas — this comparison cannot lose"
 
               Expect.stringContains example "the recovered delta differs" "the disagreement names what moved"
+
+          // ---- Phase 156: the ID-ORDERED DRAIN beside production's own topological order ----
+
+          testCase "the extracted drain is production's topological order over every lane head"
+          <| fun _ ->
+              // The SPINE case: one head's closure is a chain, the frontier is one element wide at
+              // every step, and Phase 142 already proves the two orders coincide there. It runs
+              // because a green multi-head case means little if the easy case is broken.
+              let mutable rng = ConfRng.ofSeed 1560
+              let mutable heads = 0
+
+              for i in 1..80 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+
+                  for h in hs do
+                      heads <- heads + 1
+
+                      match drainDisagreements ordLt dag h with
+                      | [], _ -> ()
+                      | d :: _, _ -> failtestf "iter %d\n%s\n%s" i (renderLanes encPlanOp lanes) d
+
+                  ignore baseId
+
+              Expect.isGreaterThan heads 0 "some lane heads were drained"
+
+          testCase "the extracted drain is production's topological order over a MULTI-HEAD UNION"
+          <| fun _ ->
+              // The case Phase 142 does not cover and section 13 exists for: the lane heads folded
+              // into one convergent head with `Dag.merge`, so the union head's closure is every
+              // node and the ready frontier is N wide once the base is drained. The adequacy guard
+              // is the frontier WIDTH — a run whose frontier never passed one has re-measured the
+              // spine case under a different name.
+              let mutable rng = ConfRng.ofSeed 1561
+              let mutable widest = 0
+              let mutable unions = 0
+
+              for i in 1..80 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
+                  unions <- unions + 1
+
+                  match drainDisagreements ordLt merged unionHead with
+                  | [], w -> widest <- max widest w
+                  | d :: _, _ -> failtestf "iter %d\n%s\n%s" i (renderLanes encPlanOp lanes) d
+
+              for i in 1..40 do
+                  let lanes, r' = treeLaneGen.Lanes 4 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag treeW treeLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion treeW treeLaneGen.BaseOp baseId hs dag
+                  unions <- unions + 1
+
+                  match drainDisagreements ordLt merged unionHead with
+                  | [], w -> widest <- max widest w
+                  | d :: _, _ -> failtestf "reference witness iter %d\n%s\n%s" i (renderLanes treeW.Encode lanes) d
+
+              Expect.isGreaterThan unions 0 "some unions were drained"
+
+              Expect.isGreaterThan
+                  widest
+                  1
+                  (sprintf
+                      "the ready frontier never held more than one node (widest=%d), so the tie-break was never exercised and this case re-measured the spine"
+                      widest)
+
+          testCase "a model draining LARGEST-id-first loses over the same unions — the measurement can fail"
+          <| fun _ ->
+              // The teeth. The reversed order is as legitimate a selector as the model's own — it
+              // returns a member of the frontier it is handed, which is all `picks_from_frontier`
+              // asks — so a green run above certifies nothing unless this one is red. It is
+              // deliberately run over the UNIONS and not the lane heads: on a spine the frontier
+              // holds one id, whose minimum and maximum are the same id, and no tie-break can lose.
+              let mutable rng = ConfRng.ofSeed 1561
+              let mutable found = 0
+              let mutable example = ""
+
+              for _ in 1..80 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
+
+                  match drainDisagreements ordGt merged unionHead with
+                  | [], _ -> ()
+                  | d :: _, _ ->
+                      found <- found + 1
+
+                      if example = "" then
+                          example <- d
+
+              Expect.isGreaterThan
+                  found
+                  0
+                  "a drain taking the LARGEST ready id must disagree with production — this comparison cannot lose"
+
+              Expect.stringContains example "the drain differs" "the disagreement names what moved"
+
+          testCase "the drain is a function of the node SET — every arrival order gives one sequence"
+          <| fun _ ->
+              // `drain_deterministic`, measured. `DagFold.frontier` answers in the WORK LIST's
+              // order, so permuting the node set hands the selector a permuted frontier; only an
+              // order-invariant selector survives that, and this is the arm that would catch a
+              // drain that took the head of an unsorted frontier instead of its minimum.
+              let mutable rng = ConfRng.ofSeed 1562
+              let mutable compared = 0
+
+              for i in 1..60 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
+                  let ns = modelClosure merged unionHead
+                  let canonical = DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns) ns
+
+                  // Three permutations, two of them fixed so the case cannot go quiet on a seed
+                  // that happened to shuffle nothing, and one drawn.
+                  let shuffled, r'' = ConfRng.shuffle ns rng
+                  rng <- r''
+
+                  for perm in
+                      [ List.rev ns
+                        (match ns with
+                         | [] -> []
+                         | h :: t -> t @ [ h ])
+                        shuffled ] do
+                      compared <- compared + 1
+                      let got = DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel perm) perm
+
+                      if got <> canonical then
+                          failtestf
+                              "iter %d: a permuted node set drained differently\n%s\n  canonical: %A\n  permuted:  %A"
+                              i
+                              (renderLanes encPlanOp lanes)
+                              canonical
+                              got
+
+              Expect.isGreaterThan compared 0 "some permutations were drained"
+
+          testCase "the two dangling-parent policies are the two production call sites, and differ only on a dangler"
+          <| fun _ ->
+              // `drain_policies_agree` and `drain_refusal_characterised`, measured against the two
+              // callers they model. On a closure — which is parent-closed, so no parent lies
+              // outside — the policies agree and `Dag.verifyDag` is happy. Drop the BASE node from
+              // the set and every lane's first node names a parent outside it: `RefuseDangling`
+              // refuses, exactly as `Dag.firstBreak` reports `MissingParent`, while
+              // `IgnoreDangling` still drains every remaining node, exactly as `Dag.topoCore`'s
+              // `parentsIn` filter makes it.
+              let mutable rng = ConfRng.ofSeed 1563
+              let mutable refusals = 0
+              let mutable agreements = 0
+
+              for i in 1..60 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
+                  let ns = modelClosure merged unionHead
+
+                  Expect.isTrue
+                      (Dag.verifyDag OpStream.defaultHash planW merged)
+                      "the production DAG holds every parent it names"
+
+                  let ignored = DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns) ns
+                  let refused = DagFold.drain DagFold.RefuseDangling ordLt (drainFuel ns) ns
+
+                  if ignored <> refused then
+                      failtestf "iter %d: the policies differ on a closure with no dangling parent" i
+
+                  agreements <- agreements + 1
+
+                  // … and now WITH one: the base node dropped, so every lane's first node names it
+                  // from outside the set.
+                  let orphaned = ns |> List.filter (fun n -> n.nid <> baseId)
+
+                  match DagFold.drain DagFold.RefuseDangling ordLt (drainFuel orphaned) orphaned with
+                  | DagFold.Refused id ->
+                      refusals <- refusals + 1
+
+                      Expect.isTrue
+                          (orphaned |> List.exists (fun n -> n.nid = id && List.contains baseId n.nparents))
+                          "the refusal names a node that really does name the dropped base"
+                  | DagFold.Drained _ -> failtestf "iter %d: RefuseDangling drained a set missing the base" i
+
+                  match DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel orphaned) orphaned with
+                  | DagFold.Drained ord ->
+                      Expect.equal
+                          (List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) ord)
+                          (orphaned
+                           |> List.map (fun n -> n.nid)
+                           |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)))
+                          "IgnoreDangling places every remaining node — the dropped parent constrains nothing"
+                  | DagFold.Refused _ -> failtestf "iter %d: IgnoreDangling refused" i
+
+              Expect.isGreaterThan agreements 0 "the policies were compared on a clean closure"
+              Expect.isGreaterThan refusals 0 "the refusing policy was made to refuse"
+
+          testCase "a CYCLE is surfaced as a SHORT drain — the model and production read the same signal"
+          <| fun _ ->
+              // `drain_complete_is_acyclic`'s other side, measured. Production's `topoCore` does
+              // not raise on a cycle: a node inside one never reaches in-degree zero, so the
+              // emitted list is strictly shorter than the closure, and `Dag.isAcyclic` /
+              // `Dag.tryTopoOrder` are the callers that read that comparison. A cyclic DAG cannot
+              // be built through `Dag.append` (the parent's id is minted before the child's), so
+              // it is built by hand here — which is exactly the hand-crafted or tampered JSONL load
+              // `Dag.fromJsonl`'s docstring warns about.
+              let node id parents : DagNode<PlanOp> =
+                  { Id = id
+                    Parents = parents
+                    Actor = Human "cyclic"
+                    Op = planLaneGen.BaseOp }
+
+              let cyclic: Dag.T<PlanOp> =
+                  { Nodes =
+                      [ node "a" []
+                        node "b" [ "a"; "d" ] // b waits on d …
+                        node "c" [ "b" ]
+                        node "d" [ "c" ] ] // … and d waits on c waits on b
+                      |> List.map (fun n -> n.Id, n)
+                      |> Map.ofList }
+
+              // Production: the closure is four nodes and only "a" is ever ready.
+              Expect.isFalse (Dag.isAcyclic cyclic "d") "production sees the cycle"
+
+              match Dag.tryTopoOrder cyclic "d" with
+              | Ok _ -> failtest "production must refuse a cyclic closure through tryTopoOrder"
+              | Error e -> Expect.stringContains e "cyclic history" "production names the cycle"
+
+              // The model: the same short drain, from the same nodes.
+              let ns = modelClosure cyclic "d"
+              Expect.equal (List.length ns) 4 "the closure is the whole hand-built set"
+
+              match DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns) ns with
+              | DagFold.Drained ord ->
+                  Expect.equal ord [ "a" ] "the model drains the acyclic prefix and stops, as topoCore does"
+
+                  Expect.isFalse
+                      (DagFold.is_topo_enum ns ord)
+                      "and a short drain is not a topological enumeration — which is the signal isAcyclic reads"
+              | DagFold.Refused _ -> failtest "the hand-built set holds every parent it names"
+
+              // … and the same set with the back edge removed drains completely and IS one, so the
+              // comparison above is a discrimination rather than a refusal of everything.
+              let acyclic: Dag.T<PlanOp> =
+                  { Nodes =
+                      [ node "a" []; node "b" [ "a" ]; node "c" [ "b" ]; node "d" [ "c" ] ]
+                      |> List.map (fun n -> n.Id, n)
+                      |> Map.ofList }
+
+              let ns' = modelClosure acyclic "d"
+
+              match DagFold.drain DagFold.IgnoreDangling ordLt (drainFuel ns') ns', Dag.tryTopoOrder acyclic "d" with
+              | DagFold.Drained ord, Ok production ->
+                  Expect.equal ord production "the model and production agree once the back edge is gone"
+                  Expect.isTrue (DagFold.is_topo_enum ns' ord) "and the complete drain IS a topological enumeration"
+              | m, p -> failtestf "the acyclic control disagreed: model=%A production=%A" m p
           // ---- Phase 133: the TREE ALGEBRA model beside Ops.apply / Ops.footprint ----
 
           testCase "the tree oracle agrees with Ops.apply and Ops.footprint over the generated pool"

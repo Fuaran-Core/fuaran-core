@@ -211,12 +211,51 @@
     {
       "id": "topological-order-choice",
       "level": "proved",
-      "claim": "That the order production picks and the order the model computes are the same order, on the base-plus-N-chains shape. Two lemmas: a distinct enumeration of a spine's closure in which every node follows its single parent is that spine in append order (`spine_order_forced`, a list argument naming no DAG and no hash), and the frontier drain over that closure produces such an enumeration (`kahn_drain_is_such_an_enumeration`). The recovery is therefore restated with the order universally quantified rather than fixed to the parent-walk reversal (`between_chain_any_order`), and the fold above it with it (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`). The smallest-id tie-break is NOT modelled and does not need to be: the selector is a parameter constrained only to return a member of the frontier it is handed, and on a spine that frontier is one element wide at every step (`kahn_frontier_singleton`), so every selector agrees and nothing here says how ids compare. The order over a MERGE DAG, where the frontier genuinely widens, remains unclaimed at any level.",
+      "claim": "That the order production picks and the order the model computes are the same order, on the base-plus-N-chains shape. Two lemmas: a distinct enumeration of a spine's closure in which every node follows its single parent is that spine in append order (`spine_order_forced`, a list argument naming no DAG and no hash), and the frontier drain over that closure produces such an enumeration (`kahn_drain_is_such_an_enumeration`). The recovery is therefore restated with the order universally quantified rather than fixed to the parent-walk reversal (`between_chain_any_order`), and the fold above it with it (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`). The smallest-id tie-break is NOT modelled and does not need to be: the selector is a parameter constrained only to return a member of the frontier it is handed, and on a spine that frontier is one element wide at every step (`kahn_frontier_singleton`), so every selector agrees and nothing here says how ids compare. The order over a MERGE DAG, where the frontier genuinely widens and the tie-break becomes observable, was left unclaimed here and is PROVED since Phase 156, at `general-topological-order`; this row's spine results are corollaries of that one, re-derived at its selector (`spine_drain_is_the_parent_walk`, `spine_drain_is_append_order`).",
       "phase": "fuaran-core#142",
       "evidence": {
         "theorem": "topo_of_is_the_kahn_drain",
         "model": "proofs/DagFold.fst",
         "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "general-topological-order",
+      "level": "proved",
+      "claim": "The id-ordered Kahn drain over an ABSTRACT node set \u2014 no base, no lanes, no hash \u2014 is DETERMINISTIC, a function of the node set alone and invariant under the order the nodes arrived (`drain_deterministic`, stated over the module's own permutation relation); a LINEAR EXTENSION of the parent relation over every node it places (`drain_linear_extension`); and TOTAL on an acyclic set, placing every node exactly once and producing a topological enumeration (`drain_total_on_acyclic`). Acyclicity is taken as a topological enumeration supplied as a witness list, which is the standard characterisation and is not circular \u2014 the witness is never the drain's own output \u2014 and `drain_complete_is_acyclic` gives the converse from the linear-extension theorem, so complete drain and acyclic set are an IFF, which is exactly the length comparison `Dag.isAcyclic` / `Dag.tryTopoOrder` make. This is where the smallest-id tie-break stops being decoration: `frontier` answers in the work list's order, so only an order-invariant selector survives `drain_deterministic`, and Phase 142's `pick_head` does not. The id order is a PARAMETER constrained to be a total order, so the claim is that clones sharing an order agree rather than that any particular order is production's \u2014 the differential ties it to `String.CompareOrdinal`, which is what `List.sort` gives a string list. Phase 142's spine results are corollaries at this selector. NOT claimed: the delta RECOVERY over a merge DAG, which stays at `dag-delta-recovery`'s shape; `Dag.mergeBase`; and any consumer's own instantiation.",
+      "phase": "fuaran-core#156",
+      "evidence": {
+        "theorem": "drain_deterministic",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "dangling-parent-policy",
+      "level": "proved",
+      "claim": "What the drain does with a parent OUTSIDE the set is a parameter of the model, because the two production call sites differ on it and a theorem about \"the drain\" that did not say which would be a theorem about neither. `IgnoreDangling` is `Dag.topoCore`'s closure walk with `Dag.ancestorsOf`'s `ContainsKey` guard and the `parentsIn` filter that follows \u2014 the parent never enters the closure, is filtered out of the in-degree, constrains nothing, and the drain proceeds; it is the policy on the fold path (`topoOrder` to `between` to `betweenOps` to `reconcileMany` to `foldOnce`) and on `replayTo`. `RefuseDangling` is `Dag.firstBreak`'s `MissingParent`, hence `verifyDag` and `fromJsonlVerified`, which refuse the whole set before any drain runs. `drain_policies_agree` proves the two are the same function on a set holding every parent it names, so the fold path pays nothing for the refusing one's existence; `drain_refusal_characterised` proves the refusal fires exactly when a parent lies outside, and `drain_refusal_needs_a_dangler` the converse. The refusal names the SMALLEST offending id rather than the first in the work list, matching `firstBreak`'s `Map.toList` id-ordered scan, which is what lets `drain_deterministic` cover the refusing policy too. NOT modelled: the refusal's diagnostic payload \u2014 `firstBreak` reports the missing parent beside the node, and the node determines it.",
+      "phase": "fuaran-core#156",
+      "evidence": {
+        "theorem": "drain_policies_agree",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "general-drain-differential",
+      "level": "tested",
+      "claim": "The extracted drain, instantiated at `String.CompareOrdinal`, run beside `Dag.tryTopoOrder` over the same nodes \u2014 per LANE HEAD, whose closure is a spine and where no tie-break can be wrong, and per MULTI-HEAD UNION built with `Dag.merge`, where the frontier is N wide once the base is drained and the tie-break decides the sequence. The adequacy guard is the frontier WIDTH: a run whose frontier never passed one node re-measured the spine under another name, and the case fails by number rather than passing quietly. The go-red is a model draining LARGEST-id-first \u2014 as legitimate a selector as the model's own, since it still returns a member of the frontier it is handed \u2014 run over the unions and not the lane heads, because a one-element frontier has one minimum and one maximum. Three cases ride with it: every permutation of the node set drained and compared against the set's own drain; the two policies, agreeing on a parent-closed closure and diverging the moment the base node is dropped from it; and a hand-built cyclic set, unreachable through `Dag.append`, where production's `isAcyclic` must see the cycle and the model's drain must stop at the same short prefix, with an acyclic control beside it. Agreement is over the sets drawn, never over all inputs.",
+      "phase": "fuaran-core#156",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the extracted drain is production's topological order over every lane head",
+          "the extracted drain is production's topological order over a MULTI-HEAD UNION",
+          "a model draining LARGEST-id-first loses over the same unions \u2014 the measurement can fail",
+          "the drain is a function of the node SET \u2014 every arrival order gives one sequence",
+          "the two dangling-parent policies are the two production call sites, and differ only on a dangler",
+          "a CYCLE is surfaced as a SHORT drain \u2014 the model and production read the same signal"
+        ]
       }
     },
     {
