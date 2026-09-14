@@ -814,5 +814,192 @@ let reconcile_many_dag_ordered = (fun ( fp  :  'op  ->  footprint ) ( d  :  dag<
 let fold_once_dag_ordered = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( s0  :  'state ) ( ords  :  Prims.list<Prims.list<Prims.string>> ) -> (fold_once apply fp s0 (deltas_of_ordered d fuel base_id ords)))
 
 
+let rec pick_min : (Prims.string  ->  Prims.string  ->  Prims.bool)  ->  Prims.list<Prims.string>  ->  Prims.string = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     ""
+     end
+| (x)::[] -> begin
+     x
+     end
+| (x)::t -> begin
+     (
+
+let m = (pick_min lt t)
+in  
+if (lt x m) then begin
+     x
+     end else begin
+     m
+     end)
+     end))
+
+
+let rec remove_first : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( e  :  Prims.string ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+      
+if (Prims.op_Equals x e) then begin
+     t
+     end else begin
+     (x)::(remove_first e t)
+     end
+     end))
+
+
+let rec all_before_or_emitted : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( ps  :  Prims.list<Prims.string> ) ( child  :  Prims.string ) ( emitted  :  Prims.list<Prims.string> ) ( ord  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     (((mem p emitted) || (before p child ord)) && (all_before_or_emitted t child emitted ord))
+     end))
+
+
+let rec follows_parents_or_emitted = (fun ( ns  :  Prims.list<node<'op>> ) ( closure  :  Prims.list<Prims.string> ) ( emitted  :  Prims.list<Prims.string> ) ( ord  :  Prims.list<Prims.string> ) -> (match (ns) with
+| [] -> begin
+     true
+     end
+| (n)::t -> begin
+     ((all_before_or_emitted (parents_in n.nparents closure) n.nid emitted ord) && (follows_parents_or_emitted t closure emitted ord))
+     end))
+
+
+let follows_parents_in = (fun ( ns  :  Prims.list<node<'op>> ) ( closure  :  Prims.list<Prims.string> ) ( ord  :  Prims.list<Prims.string> ) -> (follows_parents_or_emitted ns closure [] ord))
+
+
+let rec placed_follow_parents = (fun ( ns  :  Prims.list<node<'op>> ) ( closure  :  Prims.list<Prims.string> ) ( emitted  :  Prims.list<Prims.string> ) ( ord  :  Prims.list<Prims.string> ) -> (match (ns) with
+| [] -> begin
+     true
+     end
+| (n)::t -> begin
+     (( 
+if (mem n.nid ord) then begin
+     (all_before_or_emitted (parents_in n.nparents closure) n.nid emitted ord)
+     end else begin
+     true
+     end) && (placed_follow_parents t closure emitted ord))
+     end))
+
+
+let rec sub_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) ( m  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (x)::t -> begin
+     ((mem x m) && (sub_ids t m))
+     end))
+
+
+let same_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( l  :  Prims.list<Prims.string> ) ( m  :  Prims.list<Prims.string> ) -> ((sub_ids l m) && (sub_ids m l)))
+
+
+let is_topo_enum = (fun ( ns  :  Prims.list<node<'op>> ) ( ord  :  Prims.list<Prims.string> ) -> (((distinct ord) && (same_ids ord (ids_of ns))) && (follows_parents_in ns (ids_of ns) ord)))
+
+
+let rec first_outside : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  found<Prims.string> = (fun ( ps  :  Prims.list<Prims.string> ) ( closure  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     Missing
+     end
+| (p)::t -> begin
+      
+if (mem p closure) then begin
+     (first_outside t closure)
+     end else begin
+     Found (p)
+     end
+     end))
+
+
+let rec dangling_ids = (fun ( ns  :  Prims.list<node<'op>> ) ( closure  :  Prims.list<Prims.string> ) -> (match (ns) with
+| [] -> begin
+     []
+     end
+| (n)::t -> begin
+     (match ((first_outside n.nparents closure)) with
+| Missing -> begin
+     (dangling_ids t closure)
+     end
+| Found (uu___) -> begin
+     (n.nid)::(dangling_ids t closure)
+     end)
+     end))
+
+type dangling_policy =
+| IgnoreDangling
+| RefuseDangling
+
+
+let uu___is_IgnoreDangling : dangling_policy  ->  Prims.bool = (fun ( projectee  :  dangling_policy ) -> (match (projectee) with
+| IgnoreDangling -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_RefuseDangling : dangling_policy  ->  Prims.bool = (fun ( projectee  :  dangling_policy ) -> (match (projectee) with
+| RefuseDangling -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+type drain_result =
+| Drained of Prims.list<Prims.string>
+| Refused of Prims.string
+
+
+let uu___is_Drained : drain_result  ->  Prims.bool = (fun ( projectee  :  drain_result ) -> (match (projectee) with
+| Drained (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Drained__item___0 : drain_result  ->  Prims.list<Prims.string> = (fun ( projectee  :  drain_result ) -> (match (projectee) with
+| Drained (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_Refused : drain_result  ->  Prims.bool = (fun ( projectee  :  drain_result ) -> (match (projectee) with
+| Refused (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Refused__item___0 : drain_result  ->  Prims.string = (fun ( projectee  :  drain_result ) -> (match (projectee) with
+| Refused (_0) -> begin
+     _0
+     end))
+
+
+let drain_order = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fuel  :  Prims.list<node<'op>> ) ( ns  :  Prims.list<node<'op>> ) -> (kahn (pick_min lt) fuel ns (ids_of ns) []))
+
+
+let drain = (fun ( policy  :  dangling_policy ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fuel  :  Prims.list<node<'op>> ) ( ns  :  Prims.list<node<'op>> ) -> (match (policy) with
+| IgnoreDangling -> begin
+     Drained ((drain_order lt fuel ns))
+     end
+| RefuseDangling -> begin
+     (match ((dangling_ids ns (ids_of ns))) with
+| [] -> begin
+     Drained ((drain_order lt fuel ns))
+     end
+| ds -> begin
+     Refused ((pick_min lt ds))
+     end)
+     end))
+
+
 
 

@@ -1929,3 +1929,939 @@ let fold_once_dag_ordered_eq (#op:eqtype) (#state #rej:Type)
           (ensures fold_once_dag_ordered apply fp d fuel bn.nid s0 ords
                    == fold_once apply fp s0 (lane_ops lanes))
   = deltas_of_ordered_lanes d mint bn fuel lanes ords
+
+(* ======================================================================================
+   13. The Kahn drain over an ABSTRACT DAG (Phase 156).
+
+   Section 12 proves the order on a SPINE, which is the shape one writer's lane has. The shape a
+   clone actually folds is the UNION of N lanes off a shared base, and there the ready frontier is
+   N wide at its first step — so the tie-break section 12 could leave as an unexercised parameter
+   is what decides the sequence, and "every clone computes the same order from the same node set"
+   rests on it. This section is that sentence, mechanised, over an abstract node set rather than
+   over the base-plus-N-chains shape: no `mint`, no lanes, no base — just nodes naming parents.
+
+   THE DRAIN. `drain` is section 12's own `kahn` at the selector `pick_min lt` — the smallest id
+   in the ready frontier — wrapped by the dangling-parent policy below. It is the same function
+   and not a second one, deliberately: a re-modelled drain would have to be re-related to the one
+   section 12's spine results are about, and the relating is the part that goes wrong.
+
+   THE ID ORDER IS A PARAMETER, and that is the stronger statement rather than a weaker one.
+   Production compares ids with `List.sort`, which on strings is F#'s structural comparison and so
+   `String.CompareOrdinal`. The model takes any `lt` satisfying `total_order` — irreflexive,
+   transitive, trichotomous — and every result below holds for all of them. What the determinism
+   claim needs is that all clones use the SAME order, never that the order is any particular one;
+   quantifying over total orders says exactly that, and says it without the module acquiring the
+   character arithmetic a concrete string comparison would need (README, finding 2). The
+   differential host instantiates `lt` at ordinal comparison, which is what production's sort is.
+
+   THE DANGLING-PARENT POLICY IS A PARAMETER, because the two production call sites differ on it
+   and a theorem about "the drain" that did not say which would be a theorem about neither:
+     - `IgnoreDangling` — F#: `Dag.topoCore`'s closure walk (`match Map.tryFind id dag.Nodes with
+       | Some n -> … | None -> collect acc rest`) with `Dag.ancestorsOf`'s `ContainsKey` guard
+       beside it, and the `parentsIn` filter that follows. A parent the node set does not hold
+       never enters the closure and is filtered out of the in-degree, so it constrains nothing and
+       the drain proceeds. This is the policy on the FOLD path — `topoOrder` -> `between` ->
+       `betweenOps` -> `reconcileMany` -> `foldOnce` — and on `replayTo`.
+     - `RefuseDangling` — F#: `Dag.firstBreak` (`n.Parents |> List.tryFind (fun p -> not
+       (dag.Nodes.ContainsKey p))` -> `MissingParent`), hence `verifyDag` and `fromJsonlVerified`,
+       which refuse the whole set before any drain runs.
+   `drain_policies_agree` proves the two are the same function on a set with no dangling parent, so
+   the parameter costs the fold path nothing; `drain_refusal_characterised` proves the refusal
+   fires exactly when a parent lies outside.
+
+   THE THREE THEOREMS.
+     - `drain_linear_extension` — every node the drain places is placed after every one of its
+       parents that is inside the set. Stated over the nodes it PLACED rather than over all of
+       them, because on a cyclic set it places only some, and a statement quantified over all of
+       them would be false there rather than silent.
+     - `drain_total_on_acyclic` — on an acyclic set the drain places every node exactly once, and
+       what it produces is itself a topological enumeration.
+     - `drain_deterministic` — the sequence is a function of the node SET: for every permutation of
+       the node list (F#: every order the lanes arrived in), the same list comes back. This is
+       where the tie-break does the work. `frontier` returns its answers in the work list's order,
+       so a permuted node set hands the selector a permuted frontier; `pick_min` is invariant under
+       that and section 12's `pick_head` is not. A drain taking the head of an unsorted frontier
+       satisfies `picks_from_frontier` and FAILS this theorem, which is the precise sense in which
+       smallest-id-first is load-bearing rather than decoration.
+
+   HOW A CYCLE IS SURFACED, which is a claim about production and worth stating exactly.
+   `topoCore` does not raise: a node inside a cycle never reaches in-degree zero, so the emitted
+   list is strictly SHORTER than the closure, and `isAcyclic` / `tryTopoOrder` read that length
+   comparison and surface it while `replayTo` and `between` fold the truncated prefix. The model
+   says the same thing without lengths: `drain_total_on_acyclic` gives completeness from
+   acyclicity, and `drain_complete_is_acyclic` reads the converse off the linear-extension theorem
+   — a complete drain IS a topological enumeration, so it witnesses acyclicity. The two are an
+   iff, which is exactly the claim `isAcyclic`'s comparison makes.
+
+   ACYCLICITY IS "A TOPOLOGICAL ENUMERATION EXISTS", supplied as a WITNESS LIST rather than as an
+   existential or as the absence of a self-reachable node. It is the standard characterisation of
+   a finite acyclic digraph, it is not circular (the witness is any such list, never the drain's
+   own output), and taking it as a parameter keeps these statements in the first-order fragment
+   this module stays inside. `drain_complete_is_acyclic` is what makes it non-vacuous in the
+   direction that matters: the drain's own output is such a witness whenever it is complete.
+
+   WHAT IS NOT CLAIMED. That any particular id ordering is the one production uses — `lt` is a
+   parameter, and the differential is what ties it to `String.CompareOrdinal`. The DIAGNOSTIC
+   payload of a refusal: `Dag.firstBreak` reports the missing parent beside the node and the model
+   reports only the node, because the node determines the parent (`first_outside` of its own
+   parent list) and the model's subject is the ORDER. `Dag.mergeBase`, still. And any consumer's
+   instantiation of this theorem for its own total order, which is that consumer's work and not
+   this module's.
+
+   NO SMT PATTERNS, for section 11's reason: `rev`, `app`, `ids_of`, `remove_first` and
+   `remove_id` rewrite into one another, and left to fire on their own they turn these queries
+   into ones Z3 does not return from. Every lemma below is called by name.
+   ====================================================================================== *)
+
+(* ---- 13.1 the id order, as a parameter ---- *)
+
+(* F#: what `List.sort` gives a string list — ordinal comparison, a strict total order. Spelled as
+   three properties of an abstract `lt` rather than as a comparison, so nothing here depends on how
+   strings compare and the extracted oracle stays free of a character algebra. *)
+let total_order (lt:string -> string -> bool) : prop =
+  (forall (x:string). not (lt x x)) /\
+  (forall (x y z:string). lt x y /\ lt y z ==> lt x z) /\
+  (forall (x y:string). x =!= y ==> (lt x y \/ lt y x))
+
+(* F#: `List.head (List.sort ready)` — the smallest id in the ready frontier, computed as a fold
+   because the model needs the minimum and not the sorted list. *)
+let rec pick_min (lt:string -> string -> bool) (l:list string) : Tot string =
+  match l with
+  | [] -> ""
+  | [ x ] -> x
+  | x :: t -> let m = pick_min lt t in if lt x m then x else m
+
+let rec pick_min_mem (lt:string -> string -> bool) (l:list string)
+  : Lemma (requires Cons? l) (ensures mem (pick_min lt l) l) (decreases l)
+  = match l with
+    | [] -> ()
+    | [ _ ] -> ()
+    | _ :: t -> pick_min_mem lt t
+
+let rec pick_min_least (lt:string -> string -> bool) (l:list string) (y:string)
+  : Lemma (requires total_order lt /\ mem y l)
+          (ensures pick_min lt l == y \/ lt (pick_min lt l) y)
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | [ _ ] -> ()
+    | x :: t ->
+      pick_min_mem lt t;
+      let m = pick_min lt t in
+      if y = x then assert (x == m \/ lt x m \/ lt m x)
+      else begin
+        pick_min_least lt t y;
+        assert (lt x m /\ lt m y ==> lt x y)
+      end
+
+(* THE TIE-BREAK IS ORDER-INVARIANT, which is the whole of why the drain is deterministic: two
+   frontiers holding the same ids in different orders have the same minimum. `pick_head` does not
+   have this property, and section 12 did not need it — on a spine the frontier is one element
+   wide at every step. *)
+let pick_min_same (lt:string -> string -> bool) (l1 l2:list string)
+  : Lemma (requires total_order lt /\ Cons? l1 /\ Cons? l2 /\
+                    (forall (x:string). mem x l1 == mem x l2))
+          (ensures pick_min lt l1 == pick_min lt l2)
+  = pick_min_mem lt l1;
+    pick_min_mem lt l2;
+    pick_min_least lt l1 (pick_min lt l2);
+    pick_min_least lt l2 (pick_min lt l1)
+
+(* … and it is a tie-break in section 12's sense, so every result there holds of it. *)
+let pick_min_is_a_tie_break (lt:string -> string -> bool)
+  : Lemma (ensures picks_from_frontier (pick_min lt))
+  = let aux (l:list string) : Lemma (Cons? l ==> mem (pick_min lt l) l) =
+      if Cons? l then pick_min_mem lt l else ()
+    in
+    FStar.Classical.forall_intro aux
+
+(* ---- 13.2 the list algebra the drain's step needs ---- *)
+
+(* Dropping one id. F#: what removing an emitted node from the work set does to any list that
+   holds it once. *)
+let rec remove_first (e:string) (l:list string) : Tot (list string) =
+  match l with
+  | [] -> []
+  | x :: t -> if x = e then t else x :: remove_first e t
+
+let rec mem_remove_first (l:list string) (e x:string)
+  : Lemma (requires distinct l)
+          (ensures mem x (remove_first e l) == (mem x l && not (x = e)))
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> mem_remove_first t e x
+
+let rec distinct_remove_first (l:list string) (e:string)
+  : Lemma (requires distinct l) (ensures distinct (remove_first e l)) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t ->
+      distinct_remove_first t e;
+      mem_remove_first t e h
+
+(* `covers` forces a non-empty fuel whatever the list — its base case asks for one step past the
+   end. Pulled out because every drain lemma below needs it before it can case on the fuel. *)
+let covers_cons_fuel (#a #b:Type) (fuel:list a) (l:list b)
+  : Lemma (requires covers fuel l) (ensures Cons? fuel)
+  = match l with
+    | [] -> ()
+    | _ :: _ -> ()
+
+let rec covers_remove_first (#a:Type) (fuel:list a) (l:list string) (e:string)
+  : Lemma (requires covers fuel l /\ mem e l)
+          (ensures Cons? fuel /\ covers (Cons?.tl fuel) (remove_first e l))
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | x :: t ->
+      (match fuel with
+       | [] -> ()
+       | _ :: f -> if x = e then () else covers_remove_first f t e)
+
+(* `remove_id` on the nodes is `remove_first` on their ids — the bridge that lets every list lemma
+   above serve the node list. Needs no distinctness: both functions drop the first match. *)
+let rec ids_of_remove_id (#op:eqtype) (ns:list (node op)) (id:string)
+  : Lemma (ensures ids_of (remove_id ns id) == remove_first id (ids_of ns)) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t -> if n.nid = id then () else ids_of_remove_id t id
+
+let rec mem_remove_id (#op:eqtype) (ns:list (node op)) (id:string) (n:node op)
+  : Lemma (requires distinct (ids_of ns))
+          (ensures mem n (remove_id ns id) == (mem n ns && not (n.nid = id)))
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | _ :: t ->
+      mem_ids_of n t;
+      mem_remove_id t id n
+
+let rec remove_id_not_id (#op:eqtype) (ns:list (node op)) (id:string) (n:node op)
+  : Lemma (requires distinct (ids_of ns) /\ mem n (remove_id ns id)) (ensures n.nid =!= id)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | m :: t ->
+      if m.nid = id then mem_ids_of n t
+      else if m = n then ()
+      else remove_id_not_id t id n
+
+let rec lookup_of_mem_ids (#op:eqtype) (ns:list (node op)) (id:string)
+  : Lemma (requires mem id (ids_of ns))
+          (ensures Found? (lookup ns id) /\ (Found?._0 (lookup ns id)).nid == id /\
+                   mem (Found?._0 (lookup ns id)) ns)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t -> if n.nid = id then () else lookup_of_mem_ids t id
+
+(* Two node lists with the same members have the same ids — one direction is `mem_ids_of`, the
+   other needs a node to point at and `lookup` is what produces one without an existential. *)
+let ids_same_of_nodes_same (#op:eqtype) (r1 r2:list (node op)) (y:string)
+  : Lemma (requires forall (n:node op). mem n r1 == mem n r2)
+          (ensures mem y (ids_of r1) == mem y (ids_of r2))
+  = (if mem y (ids_of r1) then begin
+       lookup_of_mem_ids r1 y;
+       mem_ids_of (Found?._0 (lookup r1 y)) r2
+     end
+     else ());
+    (if mem y (ids_of r2) then begin
+       lookup_of_mem_ids r2 y;
+       mem_ids_of (Found?._0 (lookup r2 y)) r1
+     end
+     else ())
+
+(* ---- 13.3 what a topological enumeration IS, over an abstract set ---- *)
+
+(* Section 12's `all_before` weakened by an ALREADY-PLACED set: a parent is satisfied either by
+   having been emitted before this call began, or by standing earlier in the order. The weakening
+   is what lets one induction carry the drain's own accumulator. *)
+let rec all_before_or_emitted (ps:list string) (child:string) (emitted ord:list string) : Tot bool =
+  match ps with
+  | [] -> true
+  | p :: t -> (mem p emitted || before p child ord) && all_before_or_emitted t child emitted ord
+
+let rec follows_parents_or_emitted (#op:eqtype) (ns:list (node op)) (closure emitted ord:list string)
+  : Tot bool =
+  match ns with
+  | [] -> true
+  | n :: t -> all_before_or_emitted (parents_in n.nparents closure) n.nid emitted ord
+              && follows_parents_or_emitted t closure emitted ord
+
+(* Every node's IN-SET parents precede it — section 12's `follows_parents` with `parents_in` in
+   place of the whole parent list, which is the `IgnoreDangling` reading made explicit. *)
+let follows_parents_in (#op:eqtype) (ns:list (node op)) (closure ord:list string) : Tot bool =
+  follows_parents_or_emitted ns closure [] ord
+
+(* The same, read only of the nodes the drain PLACED. On a cyclic set the drain places a prefix
+   and says nothing about the rest, so this is the honest shape of the linear-extension claim. *)
+let rec placed_follow_parents (#op:eqtype) (ns:list (node op)) (closure emitted ord:list string)
+  : Tot bool =
+  match ns with
+  | [] -> true
+  | n :: t ->
+    (if mem n.nid ord
+     then all_before_or_emitted (parents_in n.nparents closure) n.nid emitted ord
+     else true)
+    && placed_follow_parents t closure emitted ord
+
+let rec sub_ids (l m:list string) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: t -> mem x m && sub_ids t m
+
+let same_ids (l m:list string) : Tot bool = sub_ids l m && sub_ids m l
+
+let rec sub_ids_mem (l m:list string) (x:string)
+  : Lemma (requires sub_ids l m /\ mem x l) (ensures mem x m) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t -> if x = h then () else sub_ids_mem t m x
+
+let rec sub_ids_of_mem (l m:list string)
+  : Lemma (requires forall (x:string). mem x l ==> mem x m) (ensures sub_ids l m) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> sub_ids_of_mem t m
+
+(* THE ACYCLICITY WITNESS. A distinct enumeration of exactly this set's ids in which every node's
+   in-set parents precede it. A finite digraph admits one iff it is acyclic; taking it as a
+   parameter rather than asserting an existential keeps every statement below first-order, and
+   `drain_complete_is_acyclic` produces one, so the hypothesis is never vacuous. *)
+let is_topo_enum (#op:eqtype) (ns:list (node op)) (ord:list string) : Tot bool =
+  distinct ord && same_ids ord (ids_of ns) && follows_parents_in ns (ids_of ns) ord
+
+(* ---- 13.4 the dangling-parent policy, and the drain ---- *)
+
+let rec first_outside (ps:list string) (closure:list string) : Tot (found string) =
+  match ps with
+  | [] -> Missing
+  | p :: t -> if mem p closure then first_outside t closure else Found p
+
+(* F#: the nodes `Dag.firstBreak` would fault with `MissingParent`. It scans `Map.toList`, which is
+   id-ordered, and its docstring says so — so its answer does not depend on insertion order, which
+   is why the refusal below names the SMALLEST such id rather than the first in the work list, and
+   why `drain_deterministic` can cover the refusing policy too. *)
+let rec dangling_ids (#op:eqtype) (ns:list (node op)) (closure:list string) : Tot (list string) =
+  match ns with
+  | [] -> []
+  | n :: t ->
+    (match first_outside n.nparents closure with
+     | Missing -> dangling_ids t closure
+     | Found _ -> n.nid :: dangling_ids t closure)
+
+type dangling_policy =
+  | IgnoreDangling
+  | RefuseDangling
+
+type drain_result =
+  | Drained : list string -> drain_result
+  | Refused : string -> drain_result
+
+(* F#: `topoCore`'s emitted order at the smallest-id tie-break, over the set as its own closure. *)
+let drain_order (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
+  (ns:list (node op)) : Tot (list string) =
+  kahn (pick_min lt) fuel ns (ids_of ns) []
+
+let drain (#op:eqtype) (policy:dangling_policy) (lt:string -> string -> bool)
+  (fuel:list (node op)) (ns:list (node op)) : Tot drain_result =
+  match policy with
+  | IgnoreDangling -> Drained (drain_order lt fuel ns)
+  | RefuseDangling ->
+    (match dangling_ids ns (ids_of ns) with
+     | [] -> Drained (drain_order lt fuel ns)
+     | ds -> Refused (pick_min lt ds))
+
+(* ---- 13.5 the frontier, read as a set ---- *)
+
+let rec frontier_sub (#op:eqtype) (rest:list (node op)) (closure emitted:list string) (id:string)
+  : Lemma (requires mem id (frontier rest closure emitted)) (ensures mem id (ids_of rest))
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | n :: t -> if n.nid = id then () else frontier_sub t closure emitted id
+
+let rec frontier_contains (#op:eqtype) (rest:list (node op)) (closure emitted:list string)
+  (n:node op)
+  : Lemma (requires mem n rest /\ all_emitted (parents_in n.nparents closure) emitted)
+          (ensures mem n.nid (frontier rest closure emitted))
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | m :: t -> if m = n then () else frontier_contains t closure emitted n
+
+(* A frontier entry came from a node that is READY — the converse of `frontier_contains`, and the
+   only place this section consumes the id-distinctness premise on the drain's own path. *)
+let rec frontier_ready (#op:eqtype) (rest:list (node op)) (closure emitted:list string) (n:node op)
+  : Lemma (requires distinct (ids_of rest) /\ mem n rest /\
+                    mem n.nid (frontier rest closure emitted))
+          (ensures all_emitted (parents_in n.nparents closure) emitted)
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | m :: t ->
+      mem_ids_of n t;
+      if m = n then begin
+        if all_emitted (parents_in m.nparents closure) emitted then ()
+        else frontier_sub t closure emitted n.nid
+      end
+      else frontier_ready t closure emitted n
+
+(* The frontier is a function of the node SET: the readiness test reads one node and the ambient
+   closure and emitted list, never the work list's order. *)
+let rec frontier_transfer (#op:eqtype) (r1 r2:list (node op)) (closure emitted:list string)
+  (id:string)
+  : Lemma (requires (forall (n:node op). mem n r1 ==> mem n r2) /\
+                    mem id (frontier r1 closure emitted))
+          (ensures mem id (frontier r2 closure emitted))
+          (decreases r1)
+  = match r1 with
+    | [] -> ()
+    | n :: t ->
+      if all_emitted (parents_in n.nparents closure) emitted && n.nid = id
+      then frontier_contains r2 closure emitted n
+      else frontier_transfer t r2 closure emitted id
+
+(* … and of the closure only through its MEMBERS, which is what lets the determinism theorem below
+   compare two permutations whose own `ids_of` lists are permutations too. *)
+let rec parents_in_same (ps c1 c2:list string)
+  : Lemma (requires forall (y:string). mem y c1 == mem y c2)
+          (ensures parents_in ps c1 == parents_in ps c2)
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | _ :: t -> parents_in_same t c1 c2
+
+let rec frontier_same_closure (#op:eqtype) (rest:list (node op)) (c1 c2 emitted:list string)
+  : Lemma (requires forall (y:string). mem y c1 == mem y c2)
+          (ensures frontier rest c1 emitted == frontier rest c2 emitted)
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | n :: t ->
+      parents_in_same n.nparents c1 c2;
+      frontier_same_closure t c1 c2 emitted
+
+(* ---- 13.6 the step lemmas ---- *)
+
+let rec all_before_or_emitted_none (ps:list string) (child:string) (emitted ord:list string)
+  : Lemma (requires all_before_or_emitted ps child emitted ord /\
+                    (forall (p:string). before p child ord == false))
+          (ensures all_emitted ps emitted)
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | _ :: t -> all_before_or_emitted_none t child emitted ord
+
+let rec all_emitted_weakens (ps:list string) (child:string) (emitted ord:list string)
+  : Lemma (requires all_emitted ps emitted)
+          (ensures all_before_or_emitted ps child emitted ord)
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | _ :: t -> all_emitted_weakens t child emitted ord
+
+(* Nothing precedes the head of a distinct list. The force of the whole totality argument: the
+   witness enumeration's head names a node no unemitted in-set parent blocks, so the frontier of a
+   non-empty work set is never empty. *)
+let before_nothing_at_head (p h:string) (wt:list string)
+  : Lemma (requires distinct (h :: wt)) (ensures before p h (h :: wt) == false)
+  = assert (not (mem h wt))
+
+let rec before_mem_snd (x y:string) (l:list string)
+  : Lemma (requires before x y l) (ensures mem y l) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t -> if h = x then () else if h = y then () else before_mem_snd x y t
+
+let before_cons (x y h:string) (l:list string)
+  : Lemma (requires before x y l /\ h =!= y) (ensures before x y (h :: l))
+  = before_mem_snd x y l
+
+let before_head (h y:string) (t:list string)
+  : Lemma (requires mem y t) (ensures before h y (h :: t))
+  = ()
+
+let rec before_remove_first (x y e:string) (l:list string)
+  : Lemma (requires before x y l /\ x =!= e /\ y =!= e /\ distinct l)
+          (ensures before x y (remove_first e l))
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t ->
+      if h = x then mem_remove_first t e y
+      else if h = y then ()
+      else if h = e then ()
+      else before_remove_first x y e t
+
+let rec all_before_or_emitted_step (ps:list string) (child id:string) (emitted w:list string)
+  : Lemma (requires all_before_or_emitted ps child emitted w /\ distinct w /\ child =!= id)
+          (ensures all_before_or_emitted ps child (app emitted [ id ]) (remove_first id w))
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | p :: t ->
+      mem_app p emitted [ id ];
+      (if p = id then ()
+       else if mem p emitted then ()
+       else before_remove_first p child id w);
+      all_before_or_emitted_step t child id emitted w
+
+let rec follows_remove_id (#op:eqtype) (ns:list (node op)) (closure emitted w:list string)
+  (id:string)
+  : Lemma (requires follows_parents_or_emitted ns closure emitted w)
+          (ensures follows_parents_or_emitted (remove_id ns id) closure emitted w)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t -> if n.nid = id then () else follows_remove_id t closure emitted w id
+
+let rec follows_step (#op:eqtype) (sub:list (node op)) (closure emitted w:list string) (id:string)
+  : Lemma (requires follows_parents_or_emitted sub closure emitted w /\ distinct w /\
+                    (forall (n:node op). mem n sub ==> n.nid =!= id))
+          (ensures follows_parents_or_emitted sub closure (app emitted [ id ]) (remove_first id w))
+          (decreases sub)
+  = match sub with
+    | [] -> ()
+    | n :: t ->
+      all_before_or_emitted_step (parents_in n.nparents closure) n.nid id emitted w;
+      follows_step t closure emitted w id
+
+let rec follows_mem (#op:eqtype) (ns:list (node op)) (closure emitted w:list string) (n:node op)
+  : Lemma (requires follows_parents_or_emitted ns closure emitted w /\ mem n ns)
+          (ensures all_before_or_emitted (parents_in n.nparents closure) n.nid emitted w)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | m :: t -> if m = n then () else follows_mem t closure emitted w n
+
+(* ---- 13.7 the drain places a node AFTER ITS PARENTS ---- *)
+
+let rec placed_follow_nil (#op:eqtype) (ns:list (node op)) (closure emitted:list string)
+  : Lemma (ensures placed_follow_parents ns closure emitted []) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | _ :: t -> placed_follow_nil t closure emitted
+
+let rec all_before_or_emitted_uncons (ps:list string) (child id:string) (emitted out:list string)
+  : Lemma (requires all_before_or_emitted ps child (app emitted [ id ]) out /\ child =!= id /\
+                    mem child out)
+          (ensures all_before_or_emitted ps child emitted (id :: out))
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | p :: t ->
+      mem_app p emitted [ id ];
+      (if mem p emitted then ()
+       else if p = id then before_head id child out
+       else before_cons p child id out);
+      all_before_or_emitted_uncons t child id emitted out
+
+let rec placed_follow_cons (#op:eqtype) (ns:list (node op)) (closure emitted:list string)
+  (id:string) (out:list string)
+  : Lemma (requires placed_follow_parents ns closure (app emitted [ id ]) out /\
+                    (forall (n:node op). mem n ns ==> n.nid =!= id))
+          (ensures placed_follow_parents ns closure emitted (id :: out))
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      (if mem n.nid out
+       then all_before_or_emitted_uncons (parents_in n.nparents closure) n.nid id emitted out
+       else ());
+      placed_follow_cons t closure emitted id out
+
+(* The node just placed satisfies the claim because it was READY; every other node of `ns` is a
+   node of `remove_id ns id` and satisfies it already. Factored out so the induction below reads
+   as the step it is. *)
+let rec placed_follow_step (#op:eqtype) (ns:list (node op)) (closure emitted:list string)
+  (id:string) (out:list string) (nh:node op)
+  : Lemma (requires placed_follow_parents (remove_id ns id) closure emitted (id :: out) /\
+                    distinct (ids_of ns) /\ nh.nid == id /\ mem nh ns /\
+                    all_emitted (parents_in nh.nparents closure) emitted)
+          (ensures placed_follow_parents ns closure emitted (id :: out))
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      mem_ids_of nh t;
+      if n.nid = id then
+        all_emitted_weakens (parents_in n.nparents closure) n.nid emitted (id :: out)
+      else placed_follow_step t closure emitted id out nh
+
+#push-options "--z3rlimit 200 --fuel 2 --ifuel 2"
+let rec kahn_extends (#op:eqtype) (pick:list string -> string) (fuel:list (node op))
+  (rest:list (node op)) (closure emitted:list string)
+  : Lemma (requires picks_from_frontier pick /\ distinct (ids_of rest) /\
+                    (forall (y:string). mem y (ids_of rest) ==> not (mem y emitted)))
+          (ensures (let out = kahn pick fuel rest closure emitted in
+                    distinct out /\
+                    (forall (x:string). mem x out ==> mem x (ids_of rest)) /\
+                    placed_follow_parents rest closure emitted out))
+          (decreases fuel)
+  = match fuel with
+    | [] -> placed_follow_nil rest closure emitted
+    | _ :: fuel' ->
+      (match frontier rest closure emitted with
+       | [] -> placed_follow_nil rest closure emitted
+       | f ->
+         let id = pick f in
+         assert (mem id f);
+         frontier_sub rest closure emitted id;
+         let rest' = remove_id rest id in
+         let emitted' = app emitted [ id ] in
+         ids_of_remove_id rest id;
+         distinct_remove_first (ids_of rest) id;
+         let aux1 (y:string) : Lemma (mem y (ids_of rest') ==> not (mem y emitted')) =
+           if mem y (ids_of rest') then begin
+             mem_remove_first (ids_of rest) id y;
+             mem_app y emitted [ id ]
+           end
+           else ()
+         in
+         FStar.Classical.forall_intro aux1;
+         kahn_extends pick fuel' rest' closure emitted';
+         let out' = kahn pick fuel' rest' closure emitted' in
+         mem_remove_first (ids_of rest) id id;
+         let aux2 (x:string) : Lemma (mem x out' ==> mem x (ids_of rest)) =
+           if mem x out' then mem_remove_first (ids_of rest) id x else ()
+         in
+         FStar.Classical.forall_intro aux2;
+         lookup_of_mem_ids rest id;
+         let nh = Found?._0 (lookup rest id) in
+         frontier_ready rest closure emitted nh;
+         let aux3 (n:node op) : Lemma (mem n rest' ==> n.nid =!= id) =
+           if mem n rest' then remove_id_not_id rest id n else ()
+         in
+         FStar.Classical.forall_intro aux3;
+         placed_follow_cons rest' closure emitted id out';
+         placed_follow_step rest closure emitted id out' nh)
+#pop-options
+
+(* ---- 13.8 … and on an ACYCLIC set it places every node ---- *)
+
+#push-options "--z3rlimit 250 --fuel 2 --ifuel 2"
+let rec kahn_complete (#op:eqtype) (pick:list string -> string) (fuel:list (node op))
+  (rest:list (node op)) (closure emitted w:list string) (x:string)
+  : Lemma (requires picks_from_frontier pick /\ distinct (ids_of rest) /\
+                    covers fuel (ids_of rest) /\
+                    (forall (y:string). mem y (ids_of rest) ==> not (mem y emitted)) /\
+                    distinct w /\ (forall (y:string). mem y w == mem y (ids_of rest)) /\
+                    follows_parents_or_emitted rest closure emitted w)
+          (ensures mem x (kahn pick fuel rest closure emitted) == mem x (ids_of rest))
+          (decreases fuel)
+  = covers_cons_fuel fuel (ids_of rest);
+    match fuel with
+    | [] -> ()
+    | _ :: fuel' ->
+      (match w with
+       | [] ->
+         (* an empty witness enumerates an empty set, so there is nothing left to place *)
+         (match rest with
+          | [] -> ()
+          | n :: _ -> mem_ids_of n rest)
+       | h :: wt ->
+         lookup_of_mem_ids rest h;
+         let nh = Found?._0 (lookup rest h) in
+         follows_mem rest closure emitted w nh;
+         let auxb (p:string) : Lemma (before p h w == false) = before_nothing_at_head p h wt in
+         FStar.Classical.forall_intro auxb;
+         all_before_or_emitted_none (parents_in nh.nparents closure) nh.nid emitted w;
+         frontier_contains rest closure emitted nh;
+         (match frontier rest closure emitted with
+          | [] -> ()
+          | f ->
+            let id = pick f in
+            assert (mem id f);
+            frontier_sub rest closure emitted id;
+            let rest' = remove_id rest id in
+            let emitted' = app emitted [ id ] in
+            let w' = remove_first id w in
+            ids_of_remove_id rest id;
+            distinct_remove_first (ids_of rest) id;
+            distinct_remove_first w id;
+            covers_remove_first fuel (ids_of rest) id;
+            let aux1 (y:string) : Lemma (mem y (ids_of rest') ==> not (mem y emitted')) =
+              if mem y (ids_of rest') then begin
+                mem_remove_first (ids_of rest) id y;
+                mem_app y emitted [ id ]
+              end
+              else ()
+            in
+            FStar.Classical.forall_intro aux1;
+            let aux2 (y:string) : Lemma (mem y w' == mem y (ids_of rest')) =
+              mem_remove_first w id y;
+              mem_remove_first (ids_of rest) id y
+            in
+            FStar.Classical.forall_intro aux2;
+            follows_remove_id rest closure emitted w id;
+            let aux3 (n:node op) : Lemma (mem n rest' ==> n.nid =!= id) =
+              if mem n rest' then remove_id_not_id rest id n else ()
+            in
+            FStar.Classical.forall_intro aux3;
+            follows_step rest' closure emitted w id;
+            kahn_complete pick fuel' rest' closure emitted' w' x;
+            mem_remove_first (ids_of rest) id x))
+#pop-options
+
+(* ---- 13.9 … and the sequence is a function of the node SET ---- *)
+
+#push-options "--z3rlimit 250 --fuel 2 --ifuel 2"
+let rec kahn_det (#op:eqtype) (lt:string -> string -> bool)
+  (f1 f2 r1 r2:list (node op)) (c1 c2 emitted:list string)
+  : Lemma (requires total_order lt /\
+                    (forall (n:node op). mem n r1 == mem n r2) /\
+                    (forall (y:string). mem y c1 == mem y c2) /\
+                    distinct (ids_of r1) /\ distinct (ids_of r2) /\
+                    covers f1 (ids_of r1) /\ covers f2 (ids_of r2))
+          (ensures kahn (pick_min lt) f1 r1 c1 emitted == kahn (pick_min lt) f2 r2 c2 emitted)
+          (decreases f1)
+  = covers_cons_fuel f1 (ids_of r1);
+    covers_cons_fuel f2 (ids_of r2);
+    match f1 with
+    | [] -> ()
+    | _ :: g1 ->
+      (match f2 with
+       | [] -> ()
+       | _ :: g2 ->
+         frontier_same_closure r1 c1 c2 emitted;
+         let fr1 = frontier r1 c2 emitted in
+         let fr2 = frontier r2 c2 emitted in
+         let auxf (y:string) : Lemma (mem y fr1 == mem y fr2) =
+           (if mem y fr1 then frontier_transfer r1 r2 c2 emitted y else ());
+           (if mem y fr2 then frontier_transfer r2 r1 c2 emitted y else ())
+         in
+         FStar.Classical.forall_intro auxf;
+         (match fr1 with
+          | [] -> (match fr2 with | [] -> () | y :: _ -> assert (mem y fr1))
+          | _ :: _ ->
+            (match fr2 with
+             | [] -> (match fr1 with | [] -> () | y :: _ -> assert (mem y fr2))
+             | _ :: _ ->
+               pick_min_same lt fr1 fr2;
+               let id = pick_min lt fr1 in
+               pick_min_mem lt fr1;
+               frontier_sub r1 c2 emitted id;
+               frontier_sub r2 c2 emitted id;
+               ids_of_remove_id r1 id;
+               ids_of_remove_id r2 id;
+               distinct_remove_first (ids_of r1) id;
+               distinct_remove_first (ids_of r2) id;
+               covers_remove_first f1 (ids_of r1) id;
+               covers_remove_first f2 (ids_of r2) id;
+               let auxn (n:node op) : Lemma (mem n (remove_id r1 id) == mem n (remove_id r2 id)) =
+                 mem_remove_id r1 id n;
+                 mem_remove_id r2 id n
+               in
+               FStar.Classical.forall_intro auxn;
+               kahn_det lt g1 g2 (remove_id r1 id) (remove_id r2 id) c1 c2 (app emitted [ id ]))))
+#pop-options
+
+let rec first_outside_same (ps c1 c2:list string)
+  : Lemma (requires forall (y:string). mem y c1 == mem y c2)
+          (ensures first_outside ps c1 == first_outside ps c2)
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | _ :: t -> first_outside_same t c1 c2
+
+let rec dangling_contains (#op:eqtype) (ns:list (node op)) (closure:list string) (n:node op)
+  : Lemma (requires mem n ns /\ Found? (first_outside n.nparents closure))
+          (ensures mem n.nid (dangling_ids ns closure))
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | m :: t -> if m = n then () else dangling_contains t closure n
+
+let rec dangling_transfer (#op:eqtype) (r1 r2:list (node op)) (c1 c2:list string) (id:string)
+  : Lemma (requires (forall (n:node op). mem n r1 ==> mem n r2) /\
+                    (forall (y:string). mem y c1 == mem y c2) /\
+                    mem id (dangling_ids r1 c1))
+          (ensures mem id (dangling_ids r2 c2))
+          (decreases r1)
+  = match r1 with
+    | [] -> ()
+    | n :: t ->
+      first_outside_same n.nparents c1 c2;
+      if Found? (first_outside n.nparents c1) && n.nid = id
+      then dangling_contains r2 c2 n
+      else dangling_transfer t r2 c1 c2 id
+
+(* A `placed_follow_parents` over an order that holds EVERY id is a `follows_parents_in`: the
+   guard that made the claim conditional on placement is true of every node. *)
+let rec placed_follow_all (#op:eqtype) (ns:list (node op)) (closure ord:list string)
+  : Lemma (requires placed_follow_parents ns closure [] ord /\
+                    (forall (y:string). mem y (ids_of ns) ==> mem y ord))
+          (ensures follows_parents_in ns closure ord)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      assert (mem n.nid (ids_of ns));
+      placed_follow_all t closure ord
+
+(* ---- 13.10 THE THEOREMS ---- *)
+
+(* THEOREM (task 1a). Every node the drain places stands after every one of its in-set parents.
+   F#: what `topoCore`'s emitted list has by construction — a node is emitted only once its
+   in-degree over the closure has reached zero, and that in-degree counts exactly the in-closure
+   parents still unemitted. Quantified over the nodes it PLACED, which is the whole of them
+   whenever the set is acyclic and a prefix of them when it is not. *)
+let drain_linear_extension (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
+  (ns:list (node op))
+  : Lemma (requires distinct (ids_of ns))
+          (ensures (let ord = drain_order lt fuel ns in
+                    distinct ord /\
+                    (forall (x:string). mem x ord ==> mem x (ids_of ns)) /\
+                    placed_follow_parents ns (ids_of ns) [] ord))
+  = pick_min_is_a_tie_break lt;
+    kahn_extends (pick_min lt) fuel ns (ids_of ns) []
+
+(* THEOREM (task 1b). On an ACYCLIC set — one admitting any topological enumeration `w` at all —
+   the drain places every node exactly once, and what it produces is itself such an enumeration.
+   So the drain does not merely terminate: it is TOTAL, and its output is a linear extension of
+   the parent relation over the whole set. *)
+#push-options "--z3rlimit 100"
+let drain_total_on_acyclic (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
+  (ns:list (node op)) (w:list string)
+  : Lemma (requires distinct (ids_of ns) /\ covers fuel (ids_of ns) /\ is_topo_enum ns w)
+          (ensures (let ord = drain_order lt fuel ns in
+                    distinct ord /\ (forall (x:string). mem x ord == mem x (ids_of ns)) /\
+                    is_topo_enum ns ord))
+  = pick_min_is_a_tie_break lt;
+    drain_linear_extension lt fuel ns;
+    let ord = drain_order lt fuel ns in
+    let auxw (y:string) : Lemma (mem y w == mem y (ids_of ns)) =
+      (if mem y w then sub_ids_mem w (ids_of ns) y else ());
+      (if mem y (ids_of ns) then sub_ids_mem (ids_of ns) w y else ())
+    in
+    FStar.Classical.forall_intro auxw;
+    let auxm (x:string) : Lemma (mem x ord == mem x (ids_of ns)) =
+      kahn_complete (pick_min lt) fuel ns (ids_of ns) [] w x
+    in
+    FStar.Classical.forall_intro auxm;
+    sub_ids_of_mem ord (ids_of ns);
+    sub_ids_of_mem (ids_of ns) ord;
+    placed_follow_all ns (ids_of ns) ord
+#pop-options
+
+
+(* THEOREM. The converse, read off the linear-extension theorem rather than proved again: a drain
+   that placed every node IS a topological enumeration, so it witnesses the set's acyclicity.
+   With the theorem above this is an IFF — complete drain if and only if acyclic — and that iff is
+   exactly the claim `Dag.isAcyclic` / `Dag.tryTopoOrder` make by comparing the emitted list's
+   length against the closure's size. A cycle is therefore not "surfaced as an error" by the drain
+   itself; it is surfaced as the drain being SHORT, which is what those two read. *)
+let drain_complete_is_acyclic (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
+  (ns:list (node op))
+  : Lemma (requires distinct (ids_of ns) /\
+                    (forall (y:string). mem y (ids_of ns) ==>
+                                        mem y (drain_order lt fuel ns)))
+          (ensures is_topo_enum ns (drain_order lt fuel ns))
+  = drain_linear_extension lt fuel ns;
+    let ord = drain_order lt fuel ns in
+    sub_ids_of_mem ord (ids_of ns);
+    sub_ids_of_mem (ids_of ns) ord;
+    placed_follow_all ns (ids_of ns) ord
+
+(* THEOREM (task 1c). The sequence is a function of the node SET: permute the work list — F#:
+   receive the lanes in any order at all — and the same list comes back, under either policy.
+   This is the claim every clone's determinism rests on, and it is the one that CONSUMES the
+   tie-break: `frontier` answers in the work list's order, so a permuted set hands the selector a
+   permuted frontier, and only an order-invariant selector survives that. Section 12's `pick_head`
+   satisfies `picks_from_frontier` and does not survive it. *)
+#push-options "--z3rlimit 150"
+let drain_deterministic (#op:eqtype) (policy:dangling_policy) (lt:string -> string -> bool)
+  (f1 f2 r1 r2:list (node op)) (p:perm (node op) r1 r2)
+  : Lemma (requires total_order lt /\ distinct (ids_of r1) /\ distinct (ids_of r2) /\
+                    covers f1 (ids_of r1) /\ covers f2 (ids_of r2))
+          (ensures drain policy lt f1 r1 == drain policy lt f2 r2)
+  = let auxn (n:node op) : Lemma (mem n r1 == mem n r2) = perm_mem r1 r2 p n in
+    FStar.Classical.forall_intro auxn;
+    let auxi (y:string) : Lemma (mem y (ids_of r1) == mem y (ids_of r2)) =
+      ids_same_of_nodes_same r1 r2 y
+    in
+    FStar.Classical.forall_intro auxi;
+    kahn_det lt f1 f2 r1 r2 (ids_of r1) (ids_of r2) [];
+    match policy with
+    | IgnoreDangling -> ()
+    | RefuseDangling ->
+      let d1 = dangling_ids r1 (ids_of r1) in
+      let d2 = dangling_ids r2 (ids_of r2) in
+      let auxd (y:string) : Lemma (mem y d1 == mem y d2) =
+        (if mem y d1 then dangling_transfer r1 r2 (ids_of r1) (ids_of r2) y else ());
+        (if mem y d2 then dangling_transfer r2 r1 (ids_of r2) (ids_of r1) y else ())
+      in
+      FStar.Classical.forall_intro auxd;
+      (match d1 with
+       | [] -> (match d2 with | [] -> () | y :: _ -> assert (mem y d1))
+       | _ :: _ ->
+         (match d2 with
+          | [] -> (match d1 with | [] -> () | y :: _ -> assert (mem y d2))
+          | _ :: _ -> pick_min_same lt d1 d2))
+#pop-options
+
+(* ---- 13.11 the two policies, and what each production caller gets ---- *)
+
+
+(* THEOREM. The policy is invisible on a set that holds every parent it names: the two production
+   call sites compute the same order, and the fold path pays nothing for the refusing one's
+   existence. (`Dag.topoCore`'s `parentsIn` filter and `Dag.firstBreak`'s `tryFind` are asking the
+   same question of the same data; they differ only in what they do with the answer.) *)
+let drain_policies_agree (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
+  (ns:list (node op))
+  : Lemma (requires dangling_ids ns (ids_of ns) == [])
+          (ensures drain IgnoreDangling lt fuel ns == drain RefuseDangling lt fuel ns)
+  = ()
+
+(* THEOREM. … and where they differ, they differ exactly on the presence of a parent outside the
+   set. F#: `MissingParent`, which `verifyDag` raises before any drain runs and which `topoOrder`
+   silently drops. *)
+let drain_refusal_characterised (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
+  (ns:list (node op)) (n:node op)
+  : Lemma (requires mem n ns /\ Found? (first_outside n.nparents (ids_of ns)))
+          (ensures Refused? (drain RefuseDangling lt fuel ns))
+  = dangling_contains ns (ids_of ns) n
+
+(* … and the refusal is not vacuous in the other direction either: a set with no outside parent is
+   drained rather than refused, which is the clause `drain_policies_agree` rests on. *)
+let drain_refusal_needs_a_dangler (#op:eqtype) (lt:string -> string -> bool) (fuel:list (node op))
+  (ns:list (node op))
+  : Lemma (requires Refused? (drain RefuseDangling lt fuel ns))
+          (ensures Cons? (dangling_ids ns (ids_of ns)))
+  = ()
+
+(* ---- 13.12 section 12's spine case, as a corollary ---- *)
+
+(* COROLLARY. Phase 142 quantified over every selector because on a spine the frontier is one
+   element wide and the tie-break is unexercised. `pick_min lt` is such a selector
+   (`pick_min_is_a_tie_break`), so the spine results instantiate at the id-ordered drain with no
+   second argument: section 12's theorem is this section's special case, rather than a parallel
+   one that has to be kept in step. *)
+let spine_drain_is_the_parent_walk (#op:eqtype) (lt:string -> string -> bool)
+  (d:dag op) (mint:string -> string -> op -> string) (actor:string) (bn:node op) (l:list op)
+  (fuel kfuel:list (node op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lane_recovers d mint bn fuel ({ lactor = actor; lops = l }) /\
+                    lane_ids_distinct mint bn ({ lactor = actor; lops = l }) /\
+                    covers kfuel (bn.nid :: ids_of (lane_nodes mint actor bn.nid l)))
+          (ensures kahn (pick_min lt) kfuel
+                        (bn :: lane_nodes mint actor bn.nid l)
+                        (bn.nid :: ids_of (lane_nodes mint actor bn.nid l))
+                        []
+                   == topo_of d fuel (lane_head mint actor bn.nid l))
+  = pick_min_is_a_tie_break lt;
+    topo_of_is_the_kahn_drain (pick_min lt) d mint actor bn l fuel kfuel
+
+(* COROLLARY. And the same instantiation of the other half: over a base node and a spine hanging
+   off it, the id-ordered drain emits the base and then the spine in append order. Which is
+   `drain_order` itself, because a spine's closure is its own node set. *)
+let spine_drain_is_append_order (#op:eqtype) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (bn:node op) (ns:list (node op))
+  : Lemma (requires bn.nparents == [] /\ parents_chain ns bn.nid /\
+                    distinct (bn.nid :: ids_of ns) /\
+                    covers kfuel (bn.nid :: ids_of ns))
+          (ensures drain_order lt kfuel (bn :: ns) == bn.nid :: ids_of ns)
+  = pick_min_is_a_tie_break lt;
+    kahn_drain_is_such_an_enumeration (pick_min lt) kfuel bn ns
