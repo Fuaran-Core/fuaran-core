@@ -15,8 +15,11 @@ type Rejection<'Id> =
     | CannotRemoveRoot
     /// A move whose new parent is the target itself or one of its descendants.
     | WouldNestUnderSelf of 'Id
-    /// The (new) parent of an insert/move is a leaf that cannot hold children (Phase 251).
-    /// Only the container-aware `applyContained` / `canApplyContained` raise this; the
+    /// A node that holds children while `canHold` refuses it (Phase 251). Two sites raise it, and
+    /// `target` names a node in a different place at each: the (new) PARENT of an insert/move, which
+    /// is a node of the tree; or — since Phase 161 (DECISIONS D37) — an interior node of the SUBTREE
+    /// an `InsertChild` carries, which is a node of the caller's own graft. `kindTag` is always that
+    /// node's own. Only the container-aware `applyContained` / `canApplyContained` raise this; the
     /// plain `apply` / `canApply` treat every node as able to hold children.
     | NotAContainer of target: 'Id * kindTag: string
     /// A reorder whose proposed order is not a permutation of the parent's children.
@@ -129,6 +132,46 @@ module Ops =
 
         scan (Tree.ids w root |> List.map idw.ToString |> Set.ofList) (Tree.ids w node)
 
+    /// The first node of a graft (preorder) that HOLDS children while `canHold` refuses it — the
+    /// interior offender an inserted subtree carries in. `None` when the graft's own interior
+    /// already satisfies the invariant `applyContained` exists to keep ("every node with children
+    /// satisfies `canHold`"). A childless node is unconstrained: the predicate answers "can this
+    /// node hold children AT ALL", so a leaf that holds none says nothing.
+    ///
+    /// **Phase 161 (DECISIONS D37).** `canHold` used to be applied to the PARENT of an insert and
+    /// to nothing inside the subtree being inserted, so a graft whose own interior node was a
+    /// non-container carried the violation in and the invariant broke across an ACCEPTED operation
+    /// — machine-checked as `contained_needs_op_hypothesis` in `proofs/Preservation.fst` before it
+    /// was a refusal. The operator's ruling was to inspect the graft.
+    ///
+    /// The predicate is `Diff.toOpsContained`'s, deliberately: the diff path has walked an `after`
+    /// tree for exactly this shape since Phase 09, and the accept path was the one place the check
+    /// was missing — word for word Phase 137's situation with `DuplicateIdInTree`.
+    let private firstUncontained (canHold: 'Node -> bool) (w: NodeWitness<'Node, 'Id>) (node: 'Node) : 'Node option =
+        Tree.preorder w node
+        |> List.tryFind (fun n -> not (List.isEmpty (w.Children n)) && not (canHold n))
+
+    /// The graft-containment clause of `validateInsert` (Phase 161), factored out so the check has
+    /// one name and one home. `NotAContainer` names the offending node in the GRAFT — not the
+    /// parent in the tree — reporting that node's own id and kind tag, which is what a caller needs
+    /// to repair a subtree it authored.
+    ///
+    /// **Not called from the `MoveNode` arm, and that is a decision rather than an omission
+    /// (D37).** A move relocates a subtree that is already in the tree, so it introduces no interior
+    /// structure the tree did not already hold: a violation found inside it was carried in by an
+    /// earlier insert, and refusing the move for it would be an invariant-REPAIR gate rather than a
+    /// graft check. The machine-checked form of that argument is `contained_preserves`' move clause,
+    /// which derives the moved subtree's containment from the tree's own and needs no hypothesis
+    /// about the operation at all.
+    let private validateGraftContainment
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (node: 'Node)
+        : Result<unit, Rejection<'Id>> =
+        match firstUncontained canHold w node with
+        | Some offender -> Error(NotAContainer(w.Id offender, w.KindTag offender))
+        | None -> Ok()
+
     let private validateInsert
         (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
@@ -149,7 +192,12 @@ module Ops =
                 match Tree.tryFind w idw parent root with
                 | None -> Error(UnknownNode(parent, Tree.ids w root))
                 | Some p when not (canHold p) -> Error(NotAContainer(parent, w.KindTag p))
-                | Some _ -> Ok()
+                // Phase 161 — the graft's own interior, checked LAST. The ordering is D37's: no
+                // operation that was REFUSED before this phase changes its class, because every
+                // earlier clause still fires first. Only operations that were ACCEPTED can now be
+                // refused, which is what makes this a widening rather than a re-shuffling — and it
+                // is what keeps Phase 137's built-collision conformance arm reaching `DuplicateId`.
+                | Some _ -> validateGraftContainment canHold w node
 
     let private validateRemove
         (w: NodeWitness<'Node, 'Id>)
@@ -301,6 +349,15 @@ module Ops =
     /// kind-sets that have leaves dispatch through this. Containment *legality* (which kinds
     /// may parent which) stays domain-side — `canHold` answers only "can this node hold
     /// children at all".
+    ///
+    /// **Phase 161 (DECISIONS D37): an `InsertChild` also has its GRAFT inspected.** The subtree is
+    /// walked and the first interior node that holds children while `canHold` refuses it earns the
+    /// same `NotAContainer`, naming that node. So `applyContained` now keeps the invariant
+    /// `contained_preserves` is about — every node with children satisfies `canHold` — against a
+    /// graft as well as against a parent. The one premise no engine check can discharge is
+    /// `child_blind`: a `canHold` that READS the child list can admit a node at the instant it is
+    /// checked and refuse it the instant it gains one. That is the domain's obligation, certified
+    /// by `Conformance.containerLaws` rather than assumed.
     let applyContained
         (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)

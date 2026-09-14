@@ -209,6 +209,12 @@ module SampleAdequacy =
           "Conformance.concurrencyLawsWith", Guarded [ "independent pair (its own Phase 80 vacuity guard)" ]
           "Conformance.concurrencyLaws", Guarded [ "independent pair (delegates to concurrencyLawsWith)" ]
           "Conformance.schemaWalkLaws", Guarded [ "derivation verdict (its own parity vacuity guard)" ]
+          // Phase 161. Every arm is BUILT — a perturbed child list, an operation over a drawn tree,
+          // a graft carrying its own interior offender — but whether the WITNESS honours the rebuild
+          // is drawn, and a witness whose `ReplaceChildren` is partial on leaves reaches none of
+          // them. So the family counts what each arm actually reached and emits the guard, rather
+          // than claiming an unconditionality it cannot have over an arbitrary witness.
+          "Conformance.containerLaws", Guarded [ "built arm (child perturbation / invariant probe / interior graft)" ]
 
           // ---- unconditional: every iteration builds the evidence for every branch ----
           "Conformance.witnessLaws", Unconditional "each iteration rebuilds a drawn node and re-reads every accessor"
