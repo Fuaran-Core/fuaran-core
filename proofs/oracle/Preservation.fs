@@ -208,5 +208,341 @@ let invert_leaf : TreeOps.leaf_op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps
      end))
 
 
+let rec contained : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.tree  ->  Prims.bool = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( t  :  TreeOps.tree ) -> (match (t) with
+| TreeOps.TNode (uu___, uu___1, cs) -> begin
+     ((match (cs) with
+| [] -> begin
+     true
+     end
+| uu___2 -> begin
+     (ch t)
+     end) && (contained_all ch cs))
+     end))
+and contained_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.tree>  ->  Prims.bool = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( ts  :  Prims.list<TreeOps.tree> ) -> (match (ts) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((contained ch t) && (contained_all ch r))
+     end))
+
+
+let rec contained_op : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.op  ->  Prims.bool = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( o  :  TreeOps.op ) -> (match (o) with
+| TreeOps.InsertChild (uu___, n) -> begin
+     (contained ch n)
+     end
+| TreeOps.Batch (os) -> begin
+     (contained_op_all ch os)
+     end
+| uu___ -> begin
+     true
+     end))
+and contained_op_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.op>  ->  Prims.bool = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( os  :  Prims.list<TreeOps.op> ) -> (match (os) with
+| [] -> begin
+     true
+     end
+| (o)::r -> begin
+     ((contained_op ch o) && (contained_op_all ch r))
+     end))
+
+
+let rec apply_contained : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( o  :  TreeOps.op ) ( t  :  TreeOps.tree ) -> (match (o) with
+| TreeOps.InsertChild (p, n) -> begin
+     (match ((TreeOps.first_dup n t)) with
+| FStar_Pervasives_Native.Some (d) -> begin
+     DagFold.Error (TreeOps.DuplicateId (d))
+     end
+| FStar_Pervasives_Native.None -> begin
+      
+if (not ((TreeOps.has_id p t))) then begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end else begin
+     (match ((TreeOps.find_in p t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (pn) -> begin
+      
+if (not ((ch pn))) then begin
+     DagFold.Error (TreeOps.NotAContainer (p, (TreeOps.kind_of pn)))
+     end else begin
+     DagFold.Ok ((TreeOps.ins p n t))
+     end
+     end)
+     end
+     end)
+     end
+| TreeOps.RemoveNode (x) -> begin
+      
+if (Prims.op_Equals (TreeOps.tid_of t) x) then begin
+     DagFold.Error (TreeOps.CannotRemoveRoot)
+     end else begin
+      
+if (not ((TreeOps.has_id x t))) then begin
+     DagFold.Error (TreeOps.UnknownNode (x, (TreeOps.ids t)))
+     end else begin
+     (match ((TreeOps.parent_of x t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (x, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (pid) -> begin
+     DagFold.Ok ((TreeOps.rem_at pid x t))
+     end)
+     end
+     end
+     end
+| TreeOps.ReorderChildren (p, order) -> begin
+     (match ((TreeOps.find_in p t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (n) -> begin
+     (
+
+let current = (TreeOps.kid_ids (TreeOps.kids_of n))
+in  
+if (not ((TreeOps.same_multiset current order))) then begin
+     DagFold.Error (TreeOps.ReorderMismatch (p, current, order))
+     end else begin
+     DagFold.Ok ((TreeOps.reorder_at p order t))
+     end)
+     end)
+     end
+| TreeOps.MoveNode (x, np) -> begin
+      
+if (Prims.op_Equals (TreeOps.tid_of t) x) then begin
+     DagFold.Error (TreeOps.CannotRemoveRoot)
+     end else begin
+      
+if (not ((TreeOps.has_id x t))) then begin
+     DagFold.Error (TreeOps.UnknownNode (x, (TreeOps.ids t)))
+     end else begin
+      
+if (not ((TreeOps.has_id np t))) then begin
+     DagFold.Error (TreeOps.UnknownNode (np, (TreeOps.ids t)))
+     end else begin
+     (match ((TreeOps.find_in np t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (np, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (np0) -> begin
+      
+if (not ((ch np0))) then begin
+     DagFold.Error (TreeOps.NotAContainer (np, (TreeOps.kind_of np0)))
+     end else begin
+     (match ((TreeOps.find_in x t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (x, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (sub) -> begin
+      
+if (DagFold.mem np (TreeOps.ids sub)) then begin
+     DagFold.Error (TreeOps.WouldNestUnderSelf (x))
+     end else begin
+     (match ((TreeOps.parent_of x t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (x, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (pid) -> begin
+     (
+
+let removed = (TreeOps.rem_at pid x t)
+in  
+if (not ((TreeOps.has_id np removed))) then begin
+     DagFold.Error (TreeOps.UnknownNode (np, (TreeOps.ids removed)))
+     end else begin
+     DagFold.Ok ((TreeOps.ins np sub removed))
+     end)
+     end)
+     end
+     end)
+     end
+     end)
+     end
+     end
+     end
+     end
+| TreeOps.Batch (os) -> begin
+     (apply_contained_all ch os t)
+     end))
+and apply_contained_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( os  :  Prims.list<TreeOps.op> ) ( t  :  TreeOps.tree ) -> (match (os) with
+| [] -> begin
+     DagFold.Ok (t)
+     end
+| (o)::r -> begin
+     (match ((apply_contained ch o t)) with
+| DagFold.Ok (t') -> begin
+     (apply_contained_all ch r t')
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end)
+     end))
+
+
+let can_apply_contained : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.op  ->  TreeOps.tree  ->  DagFold.outcome<unit, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( o  :  TreeOps.op ) ( t  :  TreeOps.tree ) -> (match (o) with
+| TreeOps.InsertChild (p, n) -> begin
+     (match ((TreeOps.first_dup n t)) with
+| FStar_Pervasives_Native.Some (d) -> begin
+     DagFold.Error (TreeOps.DuplicateId (d))
+     end
+| FStar_Pervasives_Native.None -> begin
+      
+if (not ((TreeOps.has_id p t))) then begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end else begin
+     (match ((TreeOps.find_in p t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (pn) -> begin
+      
+if (not ((ch pn))) then begin
+     DagFold.Error (TreeOps.NotAContainer (p, (TreeOps.kind_of pn)))
+     end else begin
+     DagFold.Ok (())
+     end
+     end)
+     end
+     end)
+     end
+| TreeOps.RemoveNode (x) -> begin
+      
+if (Prims.op_Equals (TreeOps.tid_of t) x) then begin
+     DagFold.Error (TreeOps.CannotRemoveRoot)
+     end else begin
+      
+if (not ((TreeOps.has_id x t))) then begin
+     DagFold.Error (TreeOps.UnknownNode (x, (TreeOps.ids t)))
+     end else begin
+     DagFold.Ok (())
+     end
+     end
+     end
+| TreeOps.ReorderChildren (p, order) -> begin
+     (match ((TreeOps.find_in p t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (n) -> begin
+     (
+
+let current = (TreeOps.kid_ids (TreeOps.kids_of n))
+in  
+if (not ((TreeOps.same_multiset current order))) then begin
+     DagFold.Error (TreeOps.ReorderMismatch (p, current, order))
+     end else begin
+     DagFold.Ok (())
+     end)
+     end)
+     end
+| TreeOps.MoveNode (uu___, uu___1) -> begin
+     (match ((apply_contained ch o t)) with
+| DagFold.Ok (uu___2) -> begin
+     DagFold.Ok (())
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end)
+     end
+| TreeOps.Batch (uu___) -> begin
+     (match ((apply_contained ch o t)) with
+| DagFold.Ok (uu___1) -> begin
+     DagFold.Ok (())
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end)
+     end))
+
+
+let rec can_apply_all : Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<unit, TreeOps.rejection> = (fun ( os  :  Prims.list<TreeOps.op> ) ( t  :  TreeOps.tree ) -> (match (os) with
+| [] -> begin
+     DagFold.Ok (())
+     end
+| (o)::r -> begin
+     (match ((TreeOps.apply o t)) with
+| DagFold.Ok (t') -> begin
+     (can_apply_all r t')
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end)
+     end))
+
+
+let rec apply_contained_insert_only : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( o  :  TreeOps.op ) ( t  :  TreeOps.tree ) -> (match (o) with
+| TreeOps.InsertChild (uu___, uu___1) -> begin
+     (apply_contained ch o t)
+     end
+| TreeOps.Batch (os) -> begin
+     (apply_contained_insert_only_all ch os t)
+     end
+| uu___ -> begin
+     (TreeOps.apply o t)
+     end))
+and apply_contained_insert_only_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( os  :  Prims.list<TreeOps.op> ) ( t  :  TreeOps.tree ) -> (match (os) with
+| [] -> begin
+     DagFold.Ok (t)
+     end
+| (o)::r -> begin
+     (match ((apply_contained_insert_only ch o t)) with
+| DagFold.Ok (t') -> begin
+     (apply_contained_insert_only_all ch r t')
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end)
+     end))
+
+
+let rec ch_at : (TreeOps.tree  ->  Prims.bool)  ->  Prims.string  ->  TreeOps.tree  ->  Prims.bool = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( p  :  Prims.string ) ( t  :  TreeOps.tree ) -> (match (t) with
+| TreeOps.TNode (i, uu___, cs) -> begin
+     (( 
+if (Prims.op_Equals i p) then begin
+     (ch t)
+     end else begin
+     true
+     end) && (ch_at_all ch p cs))
+     end))
+and ch_at_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.string  ->  Prims.list<TreeOps.tree>  ->  Prims.bool = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( p  :  Prims.string ) ( ts  :  Prims.list<TreeOps.tree> ) -> (match (ts) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((ch_at ch p t) && (ch_at_all ch p r))
+     end))
+
+
+let cx_doc_only : TreeOps.tree  ->  Prims.bool = (fun ( n  :  TreeOps.tree ) -> (Prims.op_Equals (TreeOps.kind_of n) "doc"))
+
+
+let cx_childless : TreeOps.tree  ->  Prims.bool = (fun ( n  :  TreeOps.tree ) -> (match ((TreeOps.kids_of n)) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let cx_root_doc : TreeOps.tree = TreeOps.TNode ("root", "doc", [])
+
+
+let cx_nested_graft : TreeOps.op = TreeOps.InsertChild ("root", TreeOps.TNode ("a", "para", (TreeOps.TNode ("b", "para", []))::[]))
+
+
+let cx_leaf_graft : TreeOps.op = TreeOps.InsertChild ("root", TreeOps.TNode ("a", "para", []))
+
+
+let cx_box : TreeOps.tree  ->  Prims.bool = (fun ( n  :  TreeOps.tree ) -> (Prims.op_Equals (TreeOps.kind_of n) "box"))
+
+
+let cx_box_tree : TreeOps.tree = TreeOps.TNode ("root", "box", (TreeOps.TNode ("leaf", "para", []))::(TreeOps.TNode ("x", "para", []))::[])
+
+
+let cx_move_into_leaf : TreeOps.op = TreeOps.MoveNode ("x", "leaf")
+
+
 
 
