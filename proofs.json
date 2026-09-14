@@ -241,10 +241,10 @@
     {
       "id": "insert-breaks-id-uniqueness",
       "level": "proved",
-      "claim": "The unconditional statement 'every accepted skeleton operation preserves id uniqueness' is FALSE of the algebra as it stands, and this is a machine-checked counterexample rather than an assertion: the insert validation tests the inserted node's OWN id against the tree and not its descendants, so a concrete accepted insert leaves the tree carrying an id twice. Proved beside it: the conditional form — an insert whose subtree is internally id-unique and disjoint from the tree preserves the invariant — and its converse, so 'the result is id-unique' and 'the insert was fresh' are the same statement. That pair is the specification the fix has to meet.",
+      "claim": "HISTORICAL SINCE PHASE 138, and kept rather than deleted. Phase 133 refuted the unconditional statement 'every accepted skeleton operation preserves id uniqueness' against the validator of the day: it tested the inserted node's OWN id against the tree and not its descendants, so a concrete accepted insert left the tree carrying an id twice. Phase 137 fixed the validator and Phase 138 lifted the model to it, so this is no longer a claim about the LIVE algebra — the counterexample and the clause it is about are named `insert_breaks_wf_pre137` and `apply_pre137`, and the refutation stands exactly as it did. What it refuted is now TRUE and proved, at `apply-preserves-wf`; that the fix closes THIS counterexample is proved at `insert-subtree-check-closes-it`. Proved beside it throughout, and unchanged: the conditional form `ins_wf` and its converse `ins_wf_conv`, which were the specification the fix had to meet.",
       "phase": "fuaran-core#133",
       "evidence": {
-        "theorem": "insert_breaks_wf",
+        "theorem": "insert_breaks_wf_pre137",
         "model": "proofs/TreeOps.fst",
         "prover": "proofs/fstar-pin.json"
       }
@@ -267,7 +267,7 @@
     {
       "id": "tree-algebra-well-formed-states",
       "level": "assumed",
-      "claim": "The tree the algebra runs over carries each id at most once. This is a hypothesis rather than an oversight: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved. Nothing in the estate produces such a tree and the structural diff refuses one outright, but no shipped type carries the invariant.",
+      "claim": "The tree the algebra runs over carries each id at most once. This is a hypothesis rather than an oversight: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved. Nothing in the estate produces such a tree and the structural diff refuses one outright, but no shipped type carries the invariant. NARROWED BY PHASE 138 to what it now is — a hypothesis about the INPUT alone. Until Phase 137 the algebra could also break the invariant on a tree that had it (`insert-breaks-id-uniqueness`); since Phase 138 that half is a theorem, `apply-preserves-wf`, so a tree that starts id-unique stays id-unique under every accepted operation. What remains unenforced is the entry point, and only the entry point.",
       "phase": "fuaran-core#133",
       "evidence": {
         "assumption": "the tree the fold runs over carries each id at most once"
@@ -276,7 +276,7 @@
     {
       "id": "tree-algebra-batch-nesting",
       "level": "assumed",
-      "claim": "The proved diamond covers twelve of the fifteen operation pairs; the three left open are one shape — either side a batch that neither does nothing nor relocates. A batch is a list of operations written as one operation and the fold already threads a list, so excluding it removes no behaviour: it declines to nest one lane inside another. Lifting the leaf diamond along a batch script is the argument the fold theorem already performs at lane granularity, and it needs the id-uniqueness invariant at each intermediate state of the script, which is what `insert-breaks-id-uniqueness` currently denies.",
+      "claim": "The proved diamond covers twelve of the fifteen operation pairs; the three left open are one shape — either side a batch that neither does nothing nor relocates. A batch is a list of operations written as one operation and the fold already threads a list, so excluding it removes no behaviour: it declines to nest one lane inside another. Lifting the leaf diamond along a batch script is the argument the fold theorem already performs at lane granularity, and it needs the id-uniqueness invariant at each intermediate state of the script. PHASE 138 SUPPLIES THAT INVARIANT and does not perform the lift: `apply-preserves-wf` is exactly the missing hypothesis, so this boundary is now unblocked rather than blocked, and the three pairs stay open because nobody has done the induction. That is a different statement from the one this row carried, and the distinction is the point — a boundary waiting on a theorem and a boundary waiting on labour are not the same debt.",
       "phase": "fuaran-core#133",
       "evidence": {
         "assumption": "an operation pair in which either side is a non-trivial nested batch"
@@ -361,6 +361,115 @@
       "phase": "fuaran-core#136",
       "evidence": {
         "assumption": "the entry list the model is handed is Map.toList's own order"
+      }
+    },
+    {
+      "id": "validator-decides-the-invariant",
+      "level": "proved",
+      "claim": "The insert graft's uniqueness scan decides EXACTLY the hypothesis the preservation argument needs: it finds nothing precisely when the graft's ids repeat neither the tree's nor each other's. Both directions, and both matter. Left to right is soundness — an accepted graft cannot break the invariant. Right to left is sharpness — a refused graft genuinely would have broken it, so the check refuses nothing safe. Beside it, `wf_iff_no_dups`: the structural well-formedness predicate the preservation arguments are written over and the flat no-duplicates list the scan computes are the same predicate, which was a sentence in a comment until Phase 137's check made it load-bearing.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "theorem": "first_dup_none_iff",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "insert-subtree-check-closes-it",
+      "level": "proved",
+      "claim": "The concrete accepted insert Phase 133 exhibited as a counterexample is REFUSED by the lifted model, naming the descendant id as the offender. The fix machine-checked at the exact point where the algebra was broken, and a go-red by construction: narrow the validator back and this stops verifying. Its historical twin, `insert_breaks_wf_pre137`, proves the same insert is still admitted by the clause as it stood.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "theorem": "cx_insert_refused_now",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "apply-total",
+      "level": "proved",
+      "claim": "The apply engine reaches exactly one outcome on every operation and every tree — which in the model is the type of the function, discharged by construction — and WHICH rejection each clause can raise is characterised, not listed. The characterisation is the content: `NotAContainer` and `Rejected` are proved unreachable from `apply` (`apply_never_container_or_domain`), where the README asserted it in prose; a `Batch` inherits exactly the union of its members'.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "theorem": "apply_total",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "reject-identity",
+      "level": "proved",
+      "claim": "A refused step leaves the caller holding the input tree. For one operation that is a type-level fact of persistent values that no test and no conformance law names; for a script it is the all-or-nothing discipline, and there it has content — the statement is quantified over an ARBITRARY failure position in an arbitrary batch, so however many intermediate trees the prefix built, none of them escapes.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "theorem": "reject_identity",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "apply-preserves-wf",
+      "level": "proved",
+      "claim": "Every accepted operation preserves id uniqueness — unconditionally, for all five skeleton operations including a nested batch. This is the statement Phase 133 REFUTED and could only prove in conditional form, and it is true now because Phase 137 changed the code rather than because the model changed its mind: `validator-decides-the-invariant` is the link between the two. Its remove and move clauses needed machinery Phase 133 never had, principally that a remove takes the whole removed subtree's ids away with it, which is what makes the move's re-insert provably fresh.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "theorem": "apply_preserves_wf",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canapply-preserves",
+      "level": "proved",
+      "claim": "The dry run and the mutating call accept exactly the same operations, and what the mutating call then produces is well-formed. The sampled `canApply` = `apply` law becomes a corollary. The part worth naming is what the proof needed: two defensive `UnknownNode` fallbacks the shipped engine carries after its `parentOf` lookup are UNREACHABLE, because a non-root id the tree holds always has a parent — so the two surfaces cannot diverge by one of them taking a branch the other does not.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "theorem": "canapply_preserves",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "invert-round-trip",
+      "level": "proved",
+      "claim": "The inverse of an accepted operation is itself accepted at the result and restores the input exactly, for the four non-batch operations. Both halves in one statement: nothing about the derived inverse can be refused at the tree the forward step produced, and applying it gives back the tree the forward step was applied to. The defining law `apply (invert op pre) (apply op pre) = pre`, which the engine's own doc comment states and the conformance pack samples, is a theorem here. The batch alphabet is excluded and the exclusion is stated: a batch's inverse is its members' inverses in reverse order, each derived against the state that member saw, so the lift is the one the fold theorem already performs at lane granularity.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "theorem": "invert_applicable",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "preservation-differential",
+      "level": "tested",
+      "claim": "The extracted preservation model agrees with the shipped `Ops.apply`, `Ops.canApply` and `Ops.invert` over the generated pool AND over grafts minted per state from the state's own ids: a subtree whose descendant id the tree already holds, a subtree that repeats an id within itself, and one that does both. Compared at once: the verdict, an accepted result through production's own `Tree.encodeHash`, a rejection by class, the dry run against the mutating call on each side separately, the derived inverse as an operation, and the round trip run on production. The go-red hands the differential the model of the PRE-137 validator and requires it to lose — which is the same comparison that was silently green throughout Phase 137, because the generator's contract is a fresh id and it cannot mint a colliding graft. Agreement is over the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the preservation oracle agrees with Ops.apply over colliding and duplicated grafts",
+          "a validator that SKIPS the subtree check loses against production — the measurement can fail",
+          "the retired counterexample is refused by the shipped engine, and admitted by the model of the old validator"
+        ]
+      }
+    },
+    {
+      "id": "lawful-abstract-witness",
+      "level": "assumed",
+      "claim": "The witness laws themselves. The model reads a node as an id, a kind tag and an ordered child list, and treats `ReplaceChildren` as an abstract function satisfying `Conformance.witnessLaws` — exactly as the fold theorem takes the independence diamond abstractly. A domain's own `ReplaceChildren` is that domain's promise, sampled by the conformance pack and proved by nothing; where it does not hold, every theorem above is about a different function from the one that runs. Note the pack's own boundary here: `witnessLaws` exempts a leaf from the round trip, so a witness whose `ReplaceChildren` is partial on leaves is lawful.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "assumption": "the domain's ReplaceChildren satisfies Conformance.witnessLaws"
+      }
+    },
+    {
+      "id": "witness-surface-scope",
+      "level": "assumed",
+      "claim": "That the witness surface is the whole of the tree. `Tree.ids` walks `NodeWitness.Children`, so a node a domain holds in a keyed, non-structural position is invisible to the uniqueness scan, to every theorem above, and to the differential. Uniqueness over those positions is the domain's own obligation. Stated as an assumption rather than a limitation because it is what the theorems quantify over: they are true of the witness view, and the witness view is what `Ops` can see.",
+      "phase": "fuaran-core#138",
+      "evidence": {
+        "assumption": "the domain exposes every node it wants the algebra to see through NodeWitness.Children"
       }
     }
   ]

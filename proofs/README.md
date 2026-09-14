@@ -25,6 +25,8 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under one named injective-hash premise. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Preservation.fst` | The fifth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. |
+| `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -576,14 +578,22 @@ as a predicate, and `tree_independence_diamond` is stated over it.
 Lifting the leaf diamond along a batch's script is the argument `DagFold.replay_diamond` already
 performs at lane granularity — no new idea is needed — and it needs the id-uniqueness invariant at
 each intermediate state of the script, which is exactly what the paragraph above says the algebra
-does not currently give. It closes when Phase 137 lands.
+does not currently give.
+
+**That invariant arrived in Phase 138 and the three pairs are still open** — the sentence here used
+to read "it closes when Phase 137 lands", which was true of the BLOCKER and not of the work. Phase
+137 fixed the validator, Phase 138 lifted this model to it and proved `apply_preserves_wf`
+unconditionally, so the hypothesis the lift was waiting on now holds; what remains is the induction,
+which nobody has done. The distinction is worth keeping visible: a boundary waiting on a theorem and
+a boundary waiting on labour are not the same kind of open.
 
 The composite theorem in `Skeleton.fst` takes the same boundary as its op alphabet. That costs less
 than it looks: `Ops.apply` threads a `Batch` exactly as the fold threads a lane, so the alphabet
 removes no behaviour from the fold — it declines to nest one lane inside another.
 
-`applyContained`'s container capability is out of scope and is Phase 140's; `Ops.invert` and `Diff` are
-Phase 141's. `NotAContainer` and
+`applyContained`'s container capability is out of scope and is Phase 140's; `Diff` is Phase 141's.
+`Ops.invert` was named here as Phase 141's too and is theorem 4's — see
+[Theorem 4](#theorem-4--apply-engine-preservation-phase-138). `NotAContainer` and
 `Rejected` are carried in the model's envelope vocabulary and are unreachable from `apply` —
 `canHold` is `fun _ -> true` there, and `Rejected` is the domain-side extension point Core never
 raises.
@@ -828,6 +838,149 @@ landed on the lemma that should have caught it.
      second model, and nothing here is said about the migration between them.
    - **`Json.parse`, `Dag.fromJsonl` and the JSONL scanners.** Loading is not verifying — that is
      `fromJsonlVerified`'s whole point — and the model begins at a structure that already exists.
+
+## Theorem 4 — apply-engine preservation (Phase 138)
+
+_(This directory's fourth; the attested-stack programme's SECOND. The heading numbers here are the
+running count, per the note under theorem 3 — the programme's numbering is separate, and this is the
+one place the two are far apart.)_
+
+The programme states it in one sentence, and it is quoted here as the claim rather than paraphrased:
+
+> **WS6.1(b): a legal op applied to a valid tree yields a valid tree.**
+
+[Phase 133](../proofs/TreeOps.fst) proved one clause of that — id uniqueness preserved by an insert,
+and only conditionally, because the validator of the day admitted a graft that broke it. The other
+clauses were stated nowhere: not in a test, not in the conformance pack, not in this file.
+`Preservation.fst` states and proves them, importing `TreeOps.fst` rather than remodelling, over a
+**lawful abstract witness** — `ReplaceChildren` taken as an abstract function satisfying
+`Conformance.witnessLaws`, exactly as `DagFold.fst` takes the diamond.
+
+### What the four other clauses say, and why each is worth a theorem
+
+- **`apply_total`.** The engine reaches exactly one outcome on every input — the type of the
+  function, discharged by construction — and WHICH rejection each clause can raise is characterised
+  rather than listed. That is the content: `NotAContainer` and `Rejected` are now *proved*
+  unreachable from `apply`, where three README sections asserted it in prose. A `Batch` inherits
+  exactly the union of its members'.
+- **`reject_identity`.** A refused step leaves the caller holding the input tree. For one operation
+  that is a type-level fact of persistent values that no test and no law names; the theorem names
+  it. For a script it has real content, because `applyWith`'s `go` threads the tree and several
+  intermediate trees exist by the time a step fails — so the statement is quantified over an
+  arbitrary failure position in an arbitrary batch, and says none of them escapes.
+- **`apply_preserves_wf`.** Unconditional at last, for all five operations. It is true now because
+  Phase 137 changed the CODE, not because the model changed its mind, and the bridge between those
+  two facts is its own theorem: `TreeOps.first_dup_none_iff` proves the shipped scan decides exactly
+  `ins_wf`'s hypothesis — neither weaker, which would leave the invariant breakable, nor stronger,
+  which would refuse safe grafts. Its remove and move clauses needed machinery Phase 133 never had,
+  chiefly that a remove takes the whole removed subtree's ids away with it (`rem_kills`), which is
+  what makes the move's re-insert provably fresh.
+- **`canapply_preserves`.** The dry run accepts exactly what the mutating call accepts. The sampled
+  law becomes a corollary — and the proof turned up something better than the law: the two
+  `| None -> Error(UnknownNode …)` fallbacks the engine carries after its `Tree.parentOf` lookup are
+  UNREACHABLE, because a non-root id the tree holds always has a parent (`parent_exists`). The two
+  surfaces cannot diverge by one of them taking a branch the other does not.
+- **`invert_applicable`.** The inverse of an accepted operation is accepted at the result AND
+  restores the input. `Ops.invert`'s own doc comment states `apply (invert op pre) (apply op pre) =
+  pre` as its defining law and the conformance pack samples it; here it is proved, for the four
+  non-`Batch` operations.
+
+### Phase 133's refutation is restated, not deleted — and that is deliberate
+
+The model carried `insert_breaks_wf`, a machine-checked counterexample to the unconditional
+statement above. Lifting the model to Phase 137's validator makes that lemma FALSE, and there were
+two honest things to do with it. Deleting it loses the record of what was wrong, which is the part a
+reader a year from now needs most. So it is restated: `validate_insert_pre137` and `apply_pre137`
+name the old clause explicitly, `insert_breaks_wf_pre137` is its counterexample unchanged, and
+`cx_insert_refused_now` proves the LIVE model refuses that very insert, naming the descendant id as
+the offender. The pair reads as one sentence — this was admitted, and it is not any more — and the
+second half is a go-red by construction: narrow the validator back and it stops verifying.
+
+### The differential the Phase 133 family structurally could not run
+
+Phase 133's tree differential draws its inserts from Phase 80's generator, whose `FreshNode`
+contract is *an id not in the tree*. It therefore cannot mint a colliding graft — so for the whole
+of Phase 137 it was green while the extracted model carried the old validator and production carried
+the fixed one. **A differential over a pool that cannot reach the disputed inputs is not evidence of
+agreement about them**, and this family exists to say so with a measurement rather than an argument.
+
+| Pool | What is asked | Both classes exercised |
+|---|---|---|
+| the generated op pool × every state a prefix of it reaches | apply verdict, accepted result through `Tree.encodeHash`, rejection by class | yes (asserted) |
+| grafts minted per state from the state's OWN ids — a descendant the tree holds, an id repeated within the graft, both at once, and a clean multi-node graft | the same, plus `canApply` against `apply` on each side separately | yes, counted per disputed shape |
+| every accepted leaf operation | the derived inverse as an OPERATION, and the round trip run on production | yes (asserted) |
+
+The adequacy guards are per disputed shape rather than in aggregate, and each is re-read through
+`Tree.ids` rather than trusted from the construction that made it: measured at 12 trials, 276
+accepted, 1,082 refused, 507 colliding grafts, 294 internally-duplicated grafts, 276 inversions.
+
+**The go-red needs no instrument built for it.** `TreeOps.apply_pre137` IS the model of a validator
+that skips the subtree check, so handing it to the same differential is exactly the measurement —
+and it must lose, naming the specific disagreement (production refuses the graft; the old clause
+admits it). A third case pins the concrete counterexample on the SHIPPED engine as well as on both
+models, so the refutation and its fix are recorded on all three surfaces rather than two.
+
+**Phase 139's `apply/` fixture family does not exist yet** — it lands after this phase — so the pool
+above is the generator plus the constructed grafts, and the differential says so rather than
+implying corpus coverage it does not have.
+
+### One finding about proof cost, and it is not the one Phase 133 recorded
+
+Phase 133's finding was that context pruning is the difference between seven minutes of CI and
+forty. This one is about the QUERY BOUNDARY, and it was worth more than the flag. The remove round
+trip was first written as one lemma: the tree descent and the children-level rearrangement argument
+in a single proof. Z3 spent 507 seconds of CPU and 2.7 GB on it and did not terminate inside ten
+minutes. Splitting the children-level fact into `parent_node_restore` — its own lemma, its own small
+context, the same lemmas in the same order — took the whole module to 21 seconds. Nothing about the
+mathematics changed; what changed is how much of it any one query had to see at once.
+
+The second half of the same finding: `invert_applicable` proves 78 goals in one query, and at the
+leg's default budget it sat close enough to the ceiling that a different `--quake` seed exhausted
+it. It was green run standalone and RED under `check.ps1`. A proof that flakes near the ceiling is a
+leg that fails in CI and passes on a desk, which costs more than a slow leg; the budget is raised
+locally with `#push-options` and the reason is in the source beside it.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The five lemmas above, over the five skeleton operations
+   and any tree, plus the two bridges the lift needed (`first_dup_none_iff`, `wf_iff_no_dups`) and
+   the restated counterexample with its closure. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
+2. **Differentially tested.** The extracted model agrees with `Ops.apply`, `Ops.canApply` and
+   `Ops.invert` over the pools above, with the go-red required to lose. Agreement is over those
+   pools, never over all inputs.
+3. **Assumed, and stated as such.**
+   - **The witness laws themselves.** `ReplaceChildren` is an abstract function satisfying
+     `Conformance.witnessLaws`; a domain's own is that domain's promise, sampled by the pack and
+     proved by nothing. Where it does not hold, every theorem here is about a different function
+     from the one that runs. The pack's own boundary is worth knowing: `witnessLaws` exempts a leaf
+     from the round trip, so a witness whose `ReplaceChildren` is partial on leaves is lawful.
+   - **The witness surface is the whole tree.** `Tree.ids` walks `NodeWitness.Children`, so a node a
+     domain holds in a keyed, non-structural position is invisible to the uniqueness scan and to
+     every theorem here. Uniqueness over those positions is the domain's own obligation.
+   - **The tree the engine is handed is id-unique.** Unchanged from theorem 2, and NARROWED by this
+     one: the algebra can no longer break the invariant on a tree that has it, so what remains
+     unenforced is the entry point and only the entry point. No shipped type carries it.
+   - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
+     the other three theorems.
+4. **Not claimed.**
+   - **A `Batch`'s inverse.** `invert_applicable` is stated over the four non-`Batch` operations. A
+     batch's inverse is its members' inverses in reverse order, each derived against the state that
+     member saw, so the lift is the one `DagFold.replay_diamond` already performs at lane
+     granularity — no new idea, and not done here.
+   - **`applyContained`'s container capability** — Phase 140's. `canHold` is `fun _ -> true` under
+     `apply`, which is exactly why `NotAContainer` comes out unreachable above rather than unmet.
+   - **`Diff`** — Phase 141's — and **`Ops.normalize`**, which no theorem in this directory reaches.
+   - **Vocabulary and schema validity.** Whether a tree is a legal DOCUMENT is the wire boundary's
+     question (`decode_node_wf`, theorem 1) and the domain rule families'; nothing here says a
+     preserved tree is a meaningful one.
+   - **Rejection PAYLOADS.** As for theorem 2: the differential compares a refusal by class, and
+     `UnknownNode`'s `addressable` and `ReorderMismatch`'s two orders are outside the comparison.
+   - **The three open `Batch` diamond pairs**, which theorem 2 left open pending exactly the
+     invariant proved here. They are now **unblocked rather than blocked** — `apply_preserves_wf` is
+     the hypothesis the lift was waiting on — and they stay open because nobody has done the
+     induction. A boundary waiting on a theorem and a boundary waiting on labour are different
+     things, and the distinction is recorded rather than smoothed over.
 
 ## Next
 

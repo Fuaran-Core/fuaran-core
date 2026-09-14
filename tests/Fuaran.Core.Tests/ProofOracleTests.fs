@@ -1889,6 +1889,348 @@ let private rawW: StreamWitness<string, string, string> =
 
 
 // ---------------------------------------------------------------------------
+//  Phase 138 — the APPLY-ENGINE PRESERVATION model beside `Ops.apply` / `canApply` / `invert`.
+//
+//  WHY THIS FAMILY EXISTS SEPARATELY FROM THE PHASE 133 ONE, which already runs the tree model
+//  beside `Ops.apply`. That family draws its inserts from Phase 80's generator, whose `FreshNode`
+//  contract is an id NOT in the tree — so it cannot draw a colliding graft, and for the whole of
+//  Phase 137 it was green while the extracted model carried the pre-137 validator and production
+//  carried the fixed one. A differential over a pool that cannot reach the disputed inputs is not
+//  evidence of agreement about them. This one MINTS the disputed inputs, per state, from the
+//  state's own ids: a subtree whose DESCENDANT id the tree already holds, a subtree that repeats an
+//  id WITHIN itself, and one that does both — the two halves of `firstDuplicateId`.
+//
+//  FOUR COMPARISONS, per (op, state):
+//    1. `Ops.apply` vs the model's `apply` — verdict, accepted result through `Tree.encodeHash`
+//       (production's own function on both sides), rejection by CLASS.
+//    2. `Ops.canApply` vs the model's `can_apply` — the dry run, same shape.
+//    3. that `canApply` and `apply` agree on EACH side, which is `canapply_preserves` instantiated.
+//    4. `Ops.invert` vs the model's `invert_leaf` on an accepted leaf operation, compared as the
+//       OPERATION each returns, plus the round trip run on production: applying the inverse to the
+//       result must give the input back, which is `invert_applicable` instantiated.
+//
+//  THE GO-RED IS THE RETIRED COUNTEREXAMPLE. `TreeOps.apply_pre137` is the pre-Phase-137 clause
+//  kept under its own name (proofs/TreeOps.fst section 13), so the "a validator that skips the
+//  subtree check must LOSE" case needs no instrument built for it: the model of that validator is
+//  already extracted, and handing it to the differential is exactly the measurement.
+// ---------------------------------------------------------------------------
+
+/// Both renderings are written out rather than shared, deliberately: one function over both sides
+/// could not tell a divergence from its own convention.
+let rec private renderProdOp (op: SkeletonOp<RNode, string>) : string =
+    match op with
+    | InsertChild(p, node) ->
+        "I|"
+        + p
+        + "|"
+        + (Tree.preorder nodew node
+           |> List.map (fun n -> encWitnessNode n.Id n.Kind)
+           |> String.concat ",")
+    | RemoveNode t -> "R|" + t
+    | MoveNode(t, np) -> "M|" + t + "|" + np
+    | ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
+    | Batch inner -> "B|" + (inner |> List.map renderProdOp |> String.concat ";")
+
+let rec private renderModelOp (op: TreeOps.op) : string =
+    match op with
+    | TreeOps.InsertChild(p, node) ->
+        "I|"
+        + p
+        + "|"
+        + (Tree.preorder modelTreeW node
+           |> List.map (fun n -> encWitnessNode (mTid n) (mKind n))
+           |> String.concat ",")
+    | TreeOps.RemoveNode t -> "R|" + t
+    | TreeOps.MoveNode(t, np) -> "M|" + t + "|" + np
+    | TreeOps.ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
+    | TreeOps.Batch inner -> "B|" + (inner |> List.map renderModelOp |> String.concat ";")
+
+type private PresTally =
+    {
+        Diffs: string list
+        /// Grafts the tree accepted, and the three disputed classes, counted separately so a run
+        /// that reached none of them cannot report agreement about them.
+        Accepted: int
+        Rejected: int
+        Collided: int
+        Duplicated: int
+        Inverted: int
+        Classes: Set<string>
+    }
+
+let private emptyPresTally =
+    { Diffs = []
+      Accepted = 0
+      Rejected = 0
+      Collided = 0
+      Duplicated = 0
+      Inverted = 0
+      Classes = Set.empty }
+
+/// The disputed grafts, minted from the state's OWN ids so the collision is real rather than
+/// hoped for. `existing` is the state's id list; `n` seeds the fresh names.
+let private disputedInserts (existing: string list) (parent: string) (n: int) : SkeletonOp<RNode, string> list =
+    let tag s = sprintf "p138-%s-%d" s n
+    let victim = existing |> List.tryLast |> Option.defaultValue parent
+    let root = List.head existing
+
+    [
+      // a DESCENDANT the tree already holds — invisible to the pre-137 check, which read the
+      // graft's own id alone.
+      InsertChild(parent, RNode.node (tag "shell") "section" [ RNode.leaf victim "para" "v" ])
+      // the same, one level deeper, and naming the ROOT — the shape TreeOps' own counterexample uses
+      InsertChild(
+          parent,
+          RNode.node (tag "outer") "section" [ RNode.node (tag "inner") "section" [ RNode.leaf root "para" "v" ] ]
+      )
+      // an id repeated WITHIN the graft, with nothing in common with the tree: the half no host
+      // outside Core refuses at all (the TS, Go and Rust engines seed their comparison from the
+      // root alone), and the half the pre-137 check could not see either.
+      InsertChild(
+          parent,
+          RNode.node (tag "twins") "section" [ RNode.leaf (tag "twin") "para" "a"; RNode.leaf (tag "twin") "para" "b" ]
+      )
+      // both at once, so precedence is exercised: the FIRST offender in `Tree.ids` order is named
+      InsertChild(
+          parent,
+          RNode.node (tag "both") "section" [ RNode.leaf victim "para" "a"; RNode.leaf (tag "both") "para" "b" ]
+      )
+      // and a clean multi-node graft, so the ACCEPT path is exercised with a subtree rather than a
+      // leaf — otherwise a validator that refused every non-leaf graft would pass this family
+      InsertChild(
+          parent,
+          RNode.node
+              (tag "clean")
+              "section"
+              [ RNode.leaf (tag "clean-a") "para" "a"; RNode.leaf (tag "clean-b") "para" "b" ]
+      ) ]
+
+/// One (op, state) asked of both sides, across all four comparisons. `modelApply` is the model's
+/// apply arm — the real one in the green run, `apply_pre137` in the go-red.
+let private presProbe
+    (modelApply: TreeOps.op -> TreeOps.tree -> DagFold.outcome<TreeOps.tree, TreeOps.rejection>)
+    (op: SkeletonOp<RNode, string>)
+    (st: RNode)
+    (acc: PresTally)
+    : PresTally =
+    let mop = toModelOpWith toModelTree op
+    let mst = toModelTree st
+    let where = sprintf "op %s at tree %s" (renderProdOp op) (prodTreeHash st)
+
+    let prod = Ops.apply nodew idw op st
+    let model = modelApply mop mst
+    let prodCan = Ops.canApply nodew idw op st
+    let modelCan = Preservation.can_apply mop mst
+
+    // 1. apply
+    let applyDiff, accepted, rejected, cls =
+        match prod, model with
+        | Ok pt, DagFold.Ok mt ->
+            let ph = prodTreeHash pt
+            let mh = modelTreeHash mt
+
+            (if ph <> mh then
+                 [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
+             else
+                 []),
+            1,
+            0,
+            None
+        | Error pe, DagFold.Error me ->
+            let pc = prodRejClass pe
+            let mc = modelRejClass me
+
+            (if pc <> mc then
+                 [ sprintf "rejection class differs — %s\n  production: %s\n  oracle:     %s" where pc mc ]
+             else
+                 []),
+            0,
+            1,
+            Some pc
+        | Ok _, DagFold.Error me ->
+            [ sprintf "production ACCEPTED but the oracle rejected (%s) — %s" (modelRejClass me) where ], 0, 0, None
+        | Error pe, DagFold.Ok _ ->
+            [ sprintf "production REJECTED (%s) but the oracle accepted — %s" (prodRejClass pe) where ], 0, 0, None
+
+    // 2. canApply, and 3. canApply-vs-apply on each side
+    let canDiff =
+        let pv =
+            match prodCan with
+            | Ok() -> "ok"
+            | Error e -> prodRejClass e
+
+        let mv =
+            match modelCan with
+            | DagFold.Ok() -> "ok"
+            | DagFold.Error e -> modelRejClass e
+
+        let differs =
+            if pv <> mv then
+                [ sprintf "canApply differs — %s\n  production: %s\n  oracle:     %s" where pv mv ]
+            else
+                []
+
+        let prodSelf =
+            if
+                Result.isOk prodCan
+                <> (match prod with
+                    | Ok _ -> true
+                    | Error _ -> false)
+            then
+                [ sprintf "production's canApply and apply DISAGREE — %s (canApply %s)" where pv ]
+            else
+                []
+
+        let modelSelf =
+            let mcOk =
+                match modelCan with
+                | DagFold.Ok() -> true
+                | _ -> false
+
+            let maOk =
+                match model with
+                | DagFold.Ok _ -> true
+                | _ -> false
+
+            if mcOk <> maOk then
+                [ sprintf "the oracle's can_apply and apply DISAGREE — %s (can_apply %s)" where mv ]
+            else
+                []
+
+        differs @ prodSelf @ modelSelf
+
+    // 4. invert, on an accepted leaf operation
+    let isLeaf =
+        match op with
+        | Batch _ -> false
+        | _ -> true
+
+    let invDiff, inverted =
+        match prod, model with
+        | Ok pt, DagFold.Ok mt when isLeaf ->
+            let pInv = Ops.invert nodew idw op st
+            let mInv = Preservation.invert_leaf mop mst
+
+            let names =
+                match pInv, mInv with
+                | Ok pi, DagFold.Ok mi ->
+                    let pr = renderProdOp pi
+                    let mr = renderModelOp mi
+
+                    if pr <> mr then
+                        [ sprintf "the derived INVERSE differs — %s\n  production: %s\n  oracle:     %s" where pr mr ]
+                    else
+                        []
+                | Error pe, DagFold.Error me ->
+                    let pc = prodRejClass pe
+                    let mc = modelRejClass me
+
+                    if pc <> mc then
+                        [ sprintf "invert's rejection class differs — %s\n  production: %s\n  oracle: %s" where pc mc ]
+                    else
+                        []
+                | Ok _, DagFold.Error _
+                | Error _, DagFold.Ok _ -> [ sprintf "invert's verdict differs — %s" where ]
+
+            // the theorem instantiated on the shipped code: undoing an accepted step restores the
+            // tree it was applied to, compared through the content hash rather than by equality of
+            // a record the model does not model.
+            let roundTrip =
+                match pInv with
+                | Ok pi ->
+                    (match Ops.apply nodew idw pi pt with
+                     | Ok back ->
+                         if prodTreeHash back <> prodTreeHash st then
+                             [ sprintf
+                                   "the inverse did NOT restore the input — %s\n  before: %s\n  after:  %s"
+                                   where
+                                   (prodTreeHash st)
+                                   (prodTreeHash back) ]
+                         else
+                             []
+                     | Error e -> [ sprintf "the inverse was REJECTED at the result (%s) — %s" (prodRejClass e) where ])
+                | Error _ -> []
+
+            let mRoundTrip =
+                match mInv with
+                | DagFold.Ok mi ->
+                    (match TreeOps.apply mi mt with
+                     | DagFold.Ok back ->
+                         if modelTreeHash back <> modelTreeHash mst then
+                             [ sprintf "the ORACLE's inverse did not restore the input — %s" where ]
+                         else
+                             []
+                     | DagFold.Error e ->
+                         [ sprintf "the oracle's inverse was rejected at the result (%s) — %s" (modelRejClass e) where ])
+                | DagFold.Error _ -> []
+
+            names @ roundTrip @ mRoundTrip, 1
+        | _ -> [], 0
+
+    // sample adequacy: which DISPUTED shapes this probe actually reached, judged by re-reading the
+    // graft through `Tree.ids` rather than by trusting the construction above.
+    let collided, duplicated =
+        match op with
+        | InsertChild(_, node) ->
+            let sub = Tree.ids nodew node
+            let treeIds = Tree.ids nodew st |> Set.ofList
+            let hits = sub |> List.filter treeIds.Contains |> List.length
+            let internalDup = List.length sub <> List.length (List.distinct sub)
+            (if hits > 0 then 1 else 0), (if internalDup then 1 else 0)
+        | _ -> 0, 0
+
+    { Diffs = acc.Diffs @ applyDiff @ canDiff @ invDiff
+      Accepted = acc.Accepted + accepted
+      Rejected = acc.Rejected + rejected
+      Collided = acc.Collided + collided
+      Duplicated = acc.Duplicated + duplicated
+      Inverted = acc.Inverted + inverted
+      Classes =
+        match cls with
+        | Some c -> Set.add c acc.Classes
+        | None -> acc.Classes }
+
+/// Every op the generator yields, the Phase 133 refusals, AND the disputed grafts minted per state,
+/// asked at every state a prefix of the generated pool reaches.
+///
+/// Phase 139's `apply/` fixture family does not exist yet — it lands after this phase — so the pool
+/// here is the generator plus the constructed grafts, and that is stated rather than implied. When
+/// those fixtures land, this differential gains them as a third source.
+let private presDifferential
+    (modelApply: TreeOps.op -> TreeOps.tree -> DagFold.outcome<TreeOps.tree, TreeOps.rejection>)
+    (seed: int)
+    (trials: int)
+    : PresTally =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable tally = emptyPresTally
+    let mutable n = 0
+
+    for _ in 1..trials do
+        let lanes, r' = treeLaneGen.Lanes 3 r
+        r <- r'
+        let generated = List.concat lanes
+
+        let states =
+            generated
+            |> List.fold
+                (fun (acc, cur) op ->
+                    match Ops.apply nodew idw op cur with
+                    | Ok t -> (acc @ [ t ]), t
+                    | Error _ -> acc, cur)
+                ([ treeBase ], treeBase)
+            |> fst
+
+        for st in states do
+            n <- n + 1
+            let existing = Tree.ids nodew st
+            let parents = existing |> List.truncate 3
+
+            let disputed = parents |> List.collect (fun p -> disputedInserts existing p n)
+
+            for op in generated @ treeRefusals @ disputed do
+                tally <- presProbe modelApply op st tally
+
+    tally
 
 [<Tests>]
 let proofOracleTests =
@@ -2781,4 +3123,108 @@ let proofOracleTests =
                               "{}")
                           lr
                           "and the model mints that same id from the reversed parent list"
-                  | _ -> failtest "two rebuilt nodes are needed to exercise a merge" ]
+                  | _ -> failtest "two rebuilt nodes are needed to exercise a merge"
+
+          // ---- Phase 138 — the APPLY ENGINE: apply, canApply and invert against the model ----
+
+          testCase "the preservation oracle agrees with Ops.apply over colliding and duplicated grafts"
+          <| fun _ ->
+              let t = presDifferential TreeOps.apply 1380 12
+
+              match t.Diffs with
+              | d :: _ -> failtestf "the preservation oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Adequacy, per disputed shape rather than in aggregate: a count of probes cannot
+                  // say WHICH of the two halves of `firstDuplicateId` was exercised, and this family
+                  // exists precisely because the Phase 133 pool reaches neither. Measured at 12
+                  // trials: accepted 276, rejected 1082, collided 507, duplicated 294, inverted 276.
+                  // Each threshold sits below its measurement with room — they are here to catch a
+                  // generator that stops reaching a shape, not to pin the numbers.
+                  Expect.isGreaterThan t.Accepted 150 (sprintf "grafts were accepted (accepted=%d)" t.Accepted)
+                  Expect.isGreaterThan t.Rejected 600 (sprintf "grafts were refused (rejected=%d)" t.Rejected)
+
+                  Expect.isGreaterThan
+                      t.Collided
+                      250
+                      (sprintf
+                          "the sample carried grafts whose ids the tree ALREADY HOLDS (collided=%d) — re-read through Tree.ids, not assumed from the construction"
+                          t.Collided)
+
+                  Expect.isGreaterThan
+                      t.Duplicated
+                      150
+                      (sprintf
+                          "the sample carried grafts that repeat an id WITHIN themselves (duplicated=%d)"
+                          t.Duplicated)
+
+                  Expect.isGreaterThan
+                      t.Inverted
+                      150
+                      (sprintf "accepted leaf operations were inverted and undone (inverted=%d)" t.Inverted)
+
+                  for cls in
+                      [ "UnknownNode"
+                        "DuplicateId"
+                        "CannotRemoveRoot"
+                        "WouldNestUnderSelf"
+                        "ReorderMismatch" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.Classes)
+                          (sprintf "the sample reached a %s rejection (reached: %A)" cls t.Classes)
+
+          testCase "a validator that SKIPS the subtree check loses against production — the measurement can fail"
+          <| fun _ ->
+              // The teeth, and they cost nothing to build: `TreeOps.apply_pre137` IS the validator
+              // that reads the graft's own id alone, kept under its own name when Phase 138 lifted
+              // the model. Handing it to the same differential is the go-red — and it is the same
+              // comparison that was silently GREEN for the whole of Phase 137, because the Phase 80
+              // generator cannot mint a colliding graft. If this ever passes, the disputed inputs
+              // have stopped reaching the comparison and the green run above means nothing.
+              let t = presDifferential TreeOps.apply_pre137 1380 3
+
+              // Measured at 3 trials: 126 colliding grafts reached. A go-red that met none of the
+              // disputed inputs would agree with production perfectly and certify nothing, so this
+              // is asserted before the disagreement is.
+              Expect.isGreaterThan
+                  t.Collided
+                  60
+                  (sprintf
+                      "the go-red run reached the disputed inputs at all (collided=%d) — otherwise it proves nothing"
+                      t.Collided)
+
+              Expect.isNonEmpty
+                  t.Diffs
+                  "a model whose insert validator reads the graft's own id alone MUST disagree with production"
+
+              Expect.isTrue
+                  (t.Diffs
+                   |> List.exists (fun d -> d.Contains "production REJECTED (DuplicateId) but the oracle accepted"))
+                  (sprintf
+                      "the disagreement is the one this phase is about — production refuses the graft, the old validator admits it. Got:\n%s"
+                      (List.head t.Diffs))
+
+          testCase
+              "the retired counterexample is refused by the shipped engine, and admitted by the model of the old validator"
+          <| fun _ ->
+              // `TreeOps.insert_breaks_wf_pre137` is machine-checked against `apply_pre137`, and
+              // `TreeOps.cx_insert_refused_now` against the live model. This is the third leg: the
+              // SHIPPED engine, on the same concrete tree, so the refutation and its fix are pinned
+              // on all three surfaces rather than two.
+              let cxTree = RNode.node "root" "doc" [ RNode.leaf "a" "section" "" ]
+
+              let cxInsert =
+                  InsertChild("a", RNode.node "fresh" "section" [ RNode.leaf "root" "para" "v" ])
+
+              match Ops.apply nodew idw cxInsert cxTree with
+              | Ok _ -> failtest "the shipped engine ADMITS the Phase 133 counterexample — Phase 137 has regressed"
+              | Error(DuplicateId d) ->
+                  Expect.equal d "root" "the offender named is the DESCENDANT id, which the pre-137 check could not see"
+              | Error e -> failtestf "refused, but not as a duplicate id: %A" e
+
+              // and the old validator's model admits it, which is what made it a counterexample
+              match TreeOps.apply_pre137 (toModelOpWith toModelTree cxInsert) (toModelTree cxTree) with
+              | DagFold.Ok _ -> ()
+              | DagFold.Error e ->
+                  failtestf
+                      "the model of the PRE-137 validator refused it too — then it was never a counterexample: %A"
+                      e ]
