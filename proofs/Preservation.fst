@@ -1245,28 +1245,34 @@ let invert_applicable (o:leaf_op) (t:tree)
       `--report_assumes error`, so an `assume val can_hold` would fail it, and rightly.
 
       WHERE THE PREDICATE IS CONSULTED, read off `Ops.fs` rather than off the doc comment:
-      `validateInsert` applies it to the node `Tree.tryFind` returns for the PARENT (Ops.fs:151),
-      and the `MoveNode` arm applies it to the NEW PARENT (Ops.fs:249). Nowhere else — not on
-      remove, not on reorder, and — this is the load-bearing one — never on the nodes of the
-      subtree being inserted.
+      `validateInsert` applies it to the node `Tree.tryFind` returns for the PARENT, and — since
+      Phase 161 — to every node of the INSERTED SUBTREE that holds children; the `MoveNode` arm
+      applies it to the NEW PARENT. Nowhere else: not on remove, not on reorder, and not on the
+      interior of a MOVED subtree, which is deliberate and is argued at the move clause of 8.5.
 
-      TWO HYPOTHESES, BOTH REFUTED WITHOUT THEM. The sentence "`applyContained` preserves the
-      invariant that every node with children satisfies `canHold`" is FALSE as stated of the
-      shipped function, in two independent ways, and section 8.6 exhibits both as machine-checked
-      counterexamples rather than leaving them to be discovered:
+      ONE HYPOTHESIS, AND ONE THAT WAS DISCHARGED BY A CODE CHANGE. The sentence "`applyContained`
+      preserves the invariant that every node with children satisfies `canHold`" was FALSE as
+      stated of the function Phase 140 measured, in two independent ways. Section 8.6 exhibits
+      both, and they now have different statuses:
 
-        - `contained_op` — the graft is never inspected, so inserting a subtree whose own interior
-          node is a non-container carries the violation in with it. The hypothesis says the
-          operation's own trees satisfy the invariant; a domain that builds its grafts from its own
-          validated documents has it, and one that accepts a foreign tree does not.
-        - `child_blind` — `canHold` has type `'Node -> bool`, so it may read the CHILD LIST, and a
-          predicate that does can flip from admitting to refusing at the instant its node gains a
-          child. Every domain writes it as a function of the kind tag (which is also what
-          `NotAContainer` reports back), and this hypothesis is that habit made a premise.
+        - `child_blind` — STILL A HYPOTHESIS, and it always will be. `canHold` has type
+          `'Node -> bool`, so it may read the CHILD LIST, and a predicate that does can flip from
+          admitting to refusing at the instant its node gains a child. No check placed anywhere in
+          the engine repairs that, because the predicate's answer changes under the very edit the
+          check licensed. Every domain writes it as a function of the kind tag (which is also what
+          `NotAContainer` reports back), and this hypothesis is that habit made a premise — now a
+          habit the domain CERTIFIES, by `Conformance.containerLaws`' child-perturbation law.
+        - `contained_op` — DISCHARGED BY THE CODE (Phase 161, DECISIONS D38). The graft used not to
+          be inspected, so inserting a subtree whose own interior node was a non-container carried
+          the violation in with it; the operator's ruling was to inspect it. The hypothesis is gone
+          from `contained_preserves`, and section 8.6's `nested_graft_refused` keeps the refutation
+          evaluable against `apply_contained_pre161` beside the refusal the shipped engine now
+          makes — so the reason the premise was needed survives the premise.
 
-      Neither is a modelling convenience. Each is a real property of a real predicate that the
+      Neither was a modelling convenience. Each was a real property of a real predicate that the
       engine's TYPE does not demand, and naming them is the difference between a theorem about
-      `applyContained` and a theorem about a function nobody calls.
+      `applyContained` and a theorem about a function nobody calls. What changed is that one of
+      them is now a property of a real ENGINE instead.
    ====================================================================================== *)
 
 (* ---- 8.1 the invariant, the operation's own trees, and the stability premise ---- *)
@@ -1298,6 +1304,71 @@ and contained_op_all (ch:tree -> bool) (os:list op) : Tot bool (decreases os) =
 let child_blind (ch:tree -> bool) : prop =
   forall (i k:string) (cs cs':list tree). ch (TNode i k cs) == ch (TNode i k cs')
 
+(* ---- 8.1a the graft's own interior (Phase 161) ----
+
+   F#: `Ops.firstUncontained`. The first node of a subtree, in preorder, that HOLDS children while
+   the capability refuses it — the offender `validateInsert` now names. This is the decidable form
+   of `contained`: the engine cannot branch on a proposition, so the clause it gained branches on
+   this, and `first_uncontained_none` below is the bridge between the two. *)
+let rec first_uncontained (ch:tree -> bool) (t:tree) : Tot (option tree) (decreases t) =
+  match t with
+  | TNode _ _ cs -> if Cons? cs && not (ch t) then Some t else first_uncontained_all ch cs
+and first_uncontained_all (ch:tree -> bool) (ts:list tree) : Tot (option tree) (decreases ts) =
+  match ts with
+  | [] -> None
+  | t :: r -> (match first_uncontained ch t with
+               | Some o -> Some o
+               | None -> first_uncontained_all ch r)
+
+(* THE BRIDGE. `None` exactly when the subtree satisfies the invariant — so the clause the engine
+   added is a decision procedure for `contained`, and the preservation proof can read `contained ch
+   n` off a branch the engine actually took. Both directions, because both are used: the accept
+   branch needs `None ==> contained`, and section 8.6's historical counterexample needs the
+   converse to show the refusal is not over-eager. *)
+let rec first_uncontained_none (ch:tree -> bool) (t:tree)
+  : Lemma (ensures (None? (first_uncontained ch t) <==> contained ch t)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> if Cons? cs && not (ch t) then () else first_uncontained_none_all ch cs
+and first_uncontained_none_all (ch:tree -> bool) (ts:list tree)
+  : Lemma (ensures (None? (first_uncontained_all ch ts) <==> contained_all ch ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> first_uncontained_none ch t;
+                (match first_uncontained ch t with
+                 | Some _ -> ()
+                 | None -> first_uncontained_none_all ch r)
+
+(* WHERE THE OFFENDER IS. The node the refusal names is one the GRAFT holds, it really does hold
+   children, and the predicate really does refuse it. The counterpart of `not_a_container_locates`
+   for the new site — and it has to be a separate statement, because the node is in the caller's own
+   subtree rather than in the tree the operation was applied to. *)
+let rec first_uncontained_some (ch:tree -> bool) (t:tree) (o:tree)
+  : Lemma (requires first_uncontained ch t == Some o)
+          (ensures mem (tid_of o) (ids t) /\ not (ch o) /\ Cons? (kids_of o)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> if Cons? cs && not (ch t) then () else first_uncontained_some_all ch cs o
+and first_uncontained_some_all (ch:tree -> bool) (ts:list tree) (o:tree)
+  : Lemma (requires first_uncontained_all ch ts == Some o)
+          (ensures mem (tid_of o) (ids_all ts) /\ not (ch o) /\ Cons? (kids_of o)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match first_uncontained ch t with
+                 | Some _ -> first_uncontained_some ch t o
+                 | None -> first_uncontained_some_all ch r o)
+
+(* At `fun _ -> true` nothing is ever an offender, so the clause is INERT under `Ops.apply` and the
+   plain engine is byte-for-byte what it was. Section 8.3's first theorem is where that is cashed
+   in; the production-side assertion is the `Ops.applyContained` suite's
+   "the plain apply is byte-for-byte unaffected by the interior walk". *)
+let rec first_uncontained_trivial (t:tree)
+  : Lemma (ensures first_uncontained (fun _ -> true) t == None) (decreases t)
+  = match t with TNode _ _ cs -> first_uncontained_trivial_all cs
+and first_uncontained_trivial_all (ts:list tree)
+  : Lemma (ensures first_uncontained_all (fun _ -> true) ts == None) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> first_uncontained_trivial t; first_uncontained_trivial_all r
+
 (* ---- 8.2 `Ops.applyContained`, clause for clause ---- *)
 
 (* F#: `applyWith canHold w idw`, of which `Ops.apply` (section 6 of `TreeOps.fst`) is the
@@ -1314,7 +1385,10 @@ let rec apply_contained (ch:tree -> bool) (o:op) (t:tree)
   : Tot (outcome tree rejection) (decreases o) =
   match o with
 
-  (* F#: `validateInsert` — the Phase 137 scan, the parent's existence, THEN the capability. *)
+  (* F#: `validateInsert` — the Phase 137 scan, the parent's existence, the parent's capability,
+     and THEN (Phase 161) the graft's own interior. The order is `Ops.fs`'s and it is D38's
+     decision: the new clause is last, so no operation that was refused before Phase 161 changes
+     its class. *)
   | InsertChild p n ->
     (match first_dup n t with
      | Some d -> Error (DuplicateId d)
@@ -1324,7 +1398,9 @@ let rec apply_contained (ch:tree -> bool) (o:op) (t:tree)
              | None -> Error (UnknownNode p (ids t))
              | Some pn ->
                if not (ch pn) then Error (NotAContainer p (kind_of pn))
-               else Ok (ins p n t)))
+               else (match first_uncontained ch n with
+                     | Some off -> Error (NotAContainer (tid_of off) (kind_of off))
+                     | None -> Ok (ins p n t))))
 
   (* F#: `validateRemove` then the `parentOf` lookup — `canHold` is not consulted. *)
   | RemoveNode x ->
@@ -1389,7 +1465,9 @@ let can_apply_contained (ch:tree -> bool) (o:op) (t:tree) : Tot (outcome unit re
              | None -> Error (UnknownNode p (ids t))
              | Some pn ->
                if not (ch pn) then Error (NotAContainer p (kind_of pn))
-               else Ok ()))
+               else (match first_uncontained ch n with
+                     | Some off -> Error (NotAContainer (tid_of off) (kind_of off))
+                     | None -> Ok ())))
   | RemoveNode x ->
     if tid_of t = x then Error CannotRemoveRoot
     else if not (has_id x t) then Error (UnknownNode x (ids t))
@@ -1414,6 +1492,28 @@ let rec can_apply_all (os:list op) (t:tree) : Tot (outcome unit rejection) (decr
   | o :: r -> (match apply o t with
                | Ok t' -> can_apply_all r t'
                | Error e -> Error e)
+
+(* THE PRE-161 ENGINE, kept for the same reason `TreeOps.apply_pre137` is kept: the counterexample
+   that motivated a change stays evaluable after the change, so the refutation can be RE-STATED as
+   history rather than deleted along with the defect. Its insert clause is the one above without
+   the graft walk — `canHold` on the parent and on nothing inside the subtree.
+
+   Section 8.6 is where the pair is put to work: this engine admits a graft that breaks the
+   invariant, and the shipped one refuses it naming the offender. Delete it and the ONLY record
+   that the premise was ever needed is prose. *)
+let apply_contained_pre161 (ch:tree -> bool) (o:op) (t:tree) : Tot (outcome tree rejection) =
+  match o with
+  | InsertChild p n ->
+    (match first_dup n t with
+     | Some d -> Error (DuplicateId d)
+     | None ->
+       if not (has_id p t) then Error (UnknownNode p (ids t))
+       else (match find_in p t with
+             | None -> Error (UnknownNode p (ids t))
+             | Some pn ->
+               if not (ch pn) then Error (NotAContainer p (kind_of pn))
+               else Ok (ins p n t)))
+  | _ -> apply_contained ch o t
 
 (* THE GO-RED INSTRUMENT, and it is a definition rather than a test fixture for the same reason
    `TreeOps.apply_pre137` is: an instrument the model can evaluate is one the model can be held
@@ -1446,7 +1546,10 @@ and apply_contained_insert_only_all (ch:tree -> bool) (os:list op) (t:tree)
 let rec apply_contained_is_apply (o:op) (t:tree)
   : Lemma (ensures apply_contained (fun _ -> true) o t == apply o t) (decreases o)
   = match o with
-    | InsertChild p n -> if has_id p t then find_in_some_iff p t else ()
+    (* Phase 161's clause is INERT here: at `fun _ -> true` no node is ever an offender, so the
+       graft walk answers `None` and the plain engine is byte-for-byte what it was. *)
+    | InsertChild p n -> first_uncontained_trivial n;
+                         if has_id p t then find_in_some_iff p t else ()
     | MoveNode x np ->
       if tid_of t <> x && has_id x t && has_id np t then find_in_some_iff np t else ()
     | Batch os -> apply_contained_all_is_apply os t
@@ -1491,20 +1594,46 @@ and apply_contained_all_diff (ch:tree -> bool) (os:list op) (t:tree)
        | Ok t' -> apply_contained_all_diff ch r t'
        | Error _ -> ())
 
-(* WHERE THE OFFENDER IS. A `NotAContainer` names a node the tree actually holds, reports THAT
-   node's own kind tag, and the predicate refuses it. Stated for the leaf alphabet: inside a
-   `Batch` the offending node lives in an intermediate tree rather than in `t`, so the honest
-   statement there is the inheritance above and not this. *)
+(* WHERE THE OFFENDER IS. A `NotAContainer` names a node that really holds children, reports THAT
+   node's own kind tag, and the predicate really refuses it — so a caller handed the envelope can
+   go to the node it names and find the fault there.
+
+   Since Phase 161 it is a DISJUNCTION, and the disjunction is the content rather than a weakening.
+   There are two capability sites and they name nodes in two different places: the (new) PARENT,
+   which is a node of `t`; and an interior node of the SUBTREE an `InsertChild` carries, which is a
+   node of the caller's own graft and is deliberately NOT in `t` — the duplicate-id scan has
+   already refused a graft sharing any id with the tree, so a reader looking the named id up in `t`
+   would find nothing. Stating it as one `find_in p t` lookup would therefore have been false of
+   the second site, and saying so is the point of the split.
+
+   Stated for the leaf alphabet: inside a `Batch` the offending node lives in an intermediate tree
+   rather than in `t`, so the honest statement there is the inheritance above and not this. *)
 let not_a_container_locates (ch:tree -> bool) (o:op) (t:tree)
   : Lemma (requires is_leaf o)
           (ensures (match apply_contained ch o t with
                     | Error (NotAContainer p k) ->
-                      mem p (ids t) /\
-                      (match find_in p t with
-                       | Some pn -> kind_of pn == k /\ not (ch pn)
-                       | None -> False)
+                      (* the parent site: a node of the tree *)
+                      (mem p (ids t) /\
+                       (match find_in p t with
+                        | Some pn -> kind_of pn == k /\ not (ch pn)
+                        | None -> False))
+                      \/
+                      (* the graft site (Phase 161): a node of the inserted subtree *)
+                      (match o with
+                       | InsertChild _ n ->
+                         mem p (ids n) /\
+                         (match first_uncontained ch n with
+                          | Some off -> tid_of off == p /\ kind_of off == k /\
+                                        not (ch off) /\ Cons? (kids_of off)
+                          | None -> False)
+                       | _ -> False)
                     | _ -> True))
-  = ()
+  = match o with
+    | InsertChild _ n ->
+      (match first_uncontained ch n with
+       | Some off -> first_uncontained_some ch n off
+       | None -> ())
+    | _ -> ()
 
 (* THE SIXTH LEMMA, as one statement: `apply` never raises the class (section 1), the
    container-aware engine differs from `apply` only by raising it, and where it raises it there is
@@ -1523,6 +1652,13 @@ let not_a_container_exact (ch:tree -> bool) (o:op) (t:tree)
                         (match find_in p t with
                          | Some pn -> kind_of pn == k /\ not (ch pn)
                          | None -> False)
+                        \/
+                        (match o with
+                         | InsertChild _ n ->
+                           (match first_uncontained ch n with
+                            | Some off -> tid_of off == p /\ kind_of off == k /\ not (ch off)
+                            | None -> False)
+                         | _ -> False)
                       | _ -> True)))
   = apply_never_container_or_domain o t;
     apply_contained_diff ch o t;
@@ -1702,12 +1838,18 @@ and reorder_contained_all (ch:tree -> bool) (p:string) (ord:list string) (ts:lis
 
 #push-options "--z3rlimit 120"
 let rec contained_preserves (ch:tree -> bool) (o:op) (t:tree)
-  : Lemma (requires child_blind ch /\ wf t /\ contained ch t /\ contained_op ch o)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t)
           (ensures (match apply_contained ch o t with
                     | Ok t' -> contained ch t'
                     | Error _ -> True)) (decreases o)
   = match o with
 
+    (* Phase 161. The `contained_op` hypothesis used to sit in the `requires` above and its whole
+       work was here: `ins_contained` needs `contained ch n`, and nothing in the engine established
+       it. The graft walk establishes it now — an accepted insert is one whose `first_uncontained`
+       answered `None`, and `first_uncontained_none` turns that branch into the fact. So the
+       premise is discharged by the code rather than carried by the theorem, which is what the
+       operator's ruling bought (DECISIONS D38). *)
     | InsertChild p n ->
       (match first_dup n t with
        | Some _ -> ()
@@ -1718,7 +1860,14 @@ let rec contained_preserves (ch:tree -> bool) (o:op) (t:tree)
            match find_in p t with
            | None -> ()
            | Some pn ->
-             if ch pn then (ch_at_of_find ch p t pn; ins_contained ch p n t) else ()
+             if ch pn then
+               (match first_uncontained ch n with
+                | Some _ -> ()
+                | None ->
+                  first_uncontained_none ch n;
+                  ch_at_of_find ch p t pn;
+                  ins_contained ch p n t)
+             else ()
          end)
 
     | RemoveNode x ->
@@ -1736,7 +1885,14 @@ let rec contained_preserves (ch:tree -> bool) (o:op) (t:tree)
        subtree of a tree that does; the removal preserves both the invariant and the capability at
        the destination (which is a DIFFERENT node from the one removed, and survives — `child_blind`
        is what lets the pre-removal check answer for the post-removal node); and the graft is then
-       an insert under an admitted parent. *)
+       an insert under an admitted parent.
+
+       AND THIS CLAUSE IS WHY `MoveNode` DOES NOT WALK (DECISIONS D38). `find_in_contained` derives
+       the moved subtree's containment from the TREE's, with no hypothesis about the operation at
+       all — a move relocates structure that is already there, so it introduces no interior the
+       tree did not already hold, and a walk here would refuse an operation for a violation some
+       earlier insert carried in. The walk belongs at `InsertChild`, where new structure enters,
+       and that is exactly where the shipped engine puts it. *)
     | MoveNode x np ->
       if tid_of t = x || not (has_id x t) || not (has_id np t) then ()
       else begin
@@ -1766,7 +1922,7 @@ let rec contained_preserves (ch:tree -> bool) (o:op) (t:tree)
     | Batch os -> contained_preserves_all ch os t
 
 and contained_preserves_all (ch:tree -> bool) (os:list op) (t:tree)
-  : Lemma (requires child_blind ch /\ wf t /\ contained ch t /\ contained_op_all ch os)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t)
           (ensures (match apply_contained_all ch os t with
                     | Ok t' -> contained ch t'
                     | Error _ -> True)) (decreases os)
@@ -1796,13 +1952,15 @@ let can_apply_contained_agrees (ch:tree -> bool) (o:op) (t:tree)
     | RemoveNode x -> if tid_of t <> x && has_id x t then parent_exists x t else ()
     | _ -> ()
 
-(* ---- 8.6 the four counterexamples ----
+(* ---- 8.6 the counterexamples ----
 
    Each is a concrete tree and a concrete predicate, decided by `assert_norm`, in the shape
    `TreeOps.insert_breaks_wf_pre137` established: a refutation that the module can evaluate rather
-   than a caveat a reader has to believe. The first two are why section 8.5 has two hypotheses;
-   the third is the go-red instrument's teeth; the fourth is a finding about the shipped surface,
-   not about the model. *)
+   than a caveat a reader has to believe. The first two are Phase 161's pair — the premise that WAS
+   needed, restated against the engine that needed it beside the refusal that replaced it, and then
+   the graft that is still admitted, which is what stops the refusal from being over-eager. The
+   third is why section 8.5 still has `child_blind`. The fourth is the go-red instrument's teeth;
+   the fifth is a finding about the shipped surface, not about the model. *)
 
 (* "everything but a paragraph can hold children", the shape every domain writes. *)
 let cx_doc_only (n:tree) : Tot bool = kind_of n = "doc"
@@ -1818,19 +1976,54 @@ let cx_nested_graft : op = InsertChild "root" (TNode "a" "para" [TNode "b" "para
 (* a graft that is itself contained — so this one isolates the child-blindness premise *)
 let cx_leaf_graft : op = InsertChild "root" (TNode "a" "para" [])
 
-(* WITHOUT `contained_op`: the invariant is broken by a graft the engine admits, because
-   `canHold` is applied to the PARENT and to nothing inside the subtree. *)
-let contained_needs_op_hypothesis ()
+(* THE PREMISE THAT IS NOW HISTORY (Phase 161), and both halves are stated in one lemma so the
+   second cannot be read without the first.
+
+   Before this phase the theorem above carried `contained_op` — "the operation's own trees satisfy
+   the invariant" — because `canHold` was applied to the PARENT and to nothing inside the subtree,
+   so a graft whose own interior node was a non-container carried the violation in. The FIRST half
+   below is that refutation, restated against `apply_contained_pre161` so it stays evaluable: the
+   engine as it stood admits `cx_nested_graft` and the invariant breaks.
+
+   The SECOND half is what the operator's ruling bought (DECISIONS D38): the shipped engine refuses
+   the same operation, naming "a" — the graft's own root, which holds "b" while the predicate
+   refuses it — and not "root", which is the parent and is perfectly able to hold children. That
+   is the disjunction in `not_a_container_locates` at a concrete pair.
+
+   Read the pair as the reason `contained_preserves` no longer has the hypothesis: not that the
+   sentence became true of a cleaner function, but that the function changed and this is the
+   difference, machine-checked. If the walk is ever removed, the second half goes red. *)
+let nested_graft_refused ()
   : Lemma (ensures contained cx_doc_only cx_root_doc /\
                    not (contained_op cx_doc_only cx_nested_graft) /\
-                   (match apply_contained cx_doc_only cx_nested_graft cx_root_doc with
+                   (match apply_contained_pre161 cx_doc_only cx_nested_graft cx_root_doc with
                     | Ok t' -> not (contained cx_doc_only t')
-                    | Error _ -> False))
+                    | Error _ -> False) /\
+                   apply_contained cx_doc_only cx_nested_graft cx_root_doc ==
+                     Error (NotAContainer "a" "para") /\
+                   can_apply_contained cx_doc_only cx_nested_graft cx_root_doc ==
+                     Error (NotAContainer "a" "para"))
   = assert_norm (contained cx_doc_only cx_root_doc);
     assert_norm (not (contained_op cx_doc_only cx_nested_graft));
-    assert_norm (match apply_contained cx_doc_only cx_nested_graft cx_root_doc with
+    assert_norm (match apply_contained_pre161 cx_doc_only cx_nested_graft cx_root_doc with
                  | Ok t' -> not (contained cx_doc_only t')
-                 | Error _ -> False)
+                 | Error _ -> False);
+    assert_norm (apply_contained cx_doc_only cx_nested_graft cx_root_doc ==
+                 Error (NotAContainer "a" "para"));
+    assert_norm (can_apply_contained cx_doc_only cx_nested_graft cx_root_doc ==
+                 Error (NotAContainer "a" "para"))
+
+(* AND THE WALK IS NOT OVER-EAGER. A graft that is itself contained still goes in — the clause
+   refuses a subtree that PLACES CHILDREN under a node the predicate refuses, never a childless
+   node the predicate refuses, because the invariant constrains nodes that have children. Without
+   this half the first would be satisfied by an engine that refused every insert. *)
+let contained_graft_still_admitted ()
+  : Lemma (ensures contained_op cx_doc_only cx_leaf_graft /\
+                   apply_contained cx_doc_only cx_leaf_graft cx_root_doc ==
+                     Ok (TNode "root" "doc" [TNode "a" "para" []]))
+  = assert_norm (contained_op cx_doc_only cx_leaf_graft);
+    assert_norm (apply_contained cx_doc_only cx_leaf_graft cx_root_doc ==
+                 Ok (TNode "root" "doc" [TNode "a" "para" []]))
 
 (* WITHOUT `child_blind`: every other hypothesis holds — the tree is contained, the graft is
    contained, the parent is admitted at the moment it is checked — and the invariant breaks anyway,
@@ -1964,8 +2157,12 @@ let rec can_apply_all_with (ch:tree -> bool) (i:nat) (os:list op) (t:tree)
 (* ---- 9.2 THE EIGHTH LEMMA — the invariant survives a script, refusal included ---- *)
 
 #push-options "--z3rlimit 120"
+(* Phase 161 removed `contained_op_all` from the `requires` here for the same reason it removed
+   `contained_op` from 8.5: the engine inspects a graft now, so an accepted step's own tree
+   satisfies the invariant by the step having been accepted. The sequence lemma inherits that
+   through `contained_preserves`, which is the only place the premise was ever used. *)
 let rec contained_preserves_all_with (ch:tree -> bool) (i:nat) (os:list op) (t:tree)
-  : Lemma (requires child_blind ch /\ wf t /\ contained ch t /\ contained_op_all ch os)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t)
           (ensures (match apply_all_with ch i os t with
                     | Ok t' -> contained ch t'
                     | Error (_, _, t') -> contained ch t')) (decreases os)

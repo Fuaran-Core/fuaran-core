@@ -2133,8 +2133,11 @@ already-present or internally duplicated id is now refused with `DuplicateId` �
 correction with the other hosts), Phase 147 (`Dag.DagBreak.Reason` becomes a closed DU, the
 sibling of `ChainBreak.Reason`), Phase 143 (which set out to widen `Ops.independent`'s promise
 under a proved clause and instead proved the promise cannot widen over this record — **no contract
-change; see its entry below**), and Phase 145 (a `codecInjectivityLaws` family in the conformance
-kit). Each phase appends
+change; see its entry below**), Phase 145 (a `codecInjectivityLaws` family in the conformance
+kit), and Phase 161 (a previously accepted `InsertChild` whose subtree places children under a node
+`canHold` refuses is now refused with `NotAContainer` naming that node — the container-capability
+sibling of 137's widening, plus the `containerLaws` family that makes the one premise no engine
+check can discharge a domain obligation the domain certifies). Each phase appends
 its own entry beneath this header as it lands; the version moves only if a later class outranks
 what the draft already carries (the draft-slot rule).
 
@@ -2478,6 +2481,84 @@ Three of the four are BREAKING in shape and one is additive; a fifth entry is a 
 is a codegen NARROWING the fourth ask's own property found and the operator ruled on the same day.
 Each names the consumer that deletes a workaround on adoption, because that is the only reliable way
 to tell afterwards whether the ask was answered or merely implemented.
+
+### `applyContained` refuses a graft whose INTERIOR is not a container (`0.24.0`, Phase 161) — a REFUSAL-CLASS WIDENING
+
+`Ops.applyContained` / `canApplyContained` now reject `InsertChild(parent, node)` with
+`NotAContainer(id, kindTag)` when **any** node of `node`'s subtree holds children while `canHold`
+refuses it. The named node is the FIRST such node in preorder — the same first-offender discipline
+`DuplicateId` follows. The plain `apply` / `canApply` are unaffected in every respect: they pass
+`canHold = fun _ -> true`, under which no node is ever an offender, so the clause is inert there.
+This is the sibling of Phase 137's entry above and rides the same `0.24.0` draft as a minor.
+
+**Read this as a widened refusal surface, not as a bug fix that moved bytes.** Nothing about the
+accept path changes: a script whose inserts were legal before produces the identical tree, byte for
+byte, and that is asserted rather than asserted-about — `proofs/Preservation.fst`'s
+`apply_contained_is_apply` proves the two engines are the same function at `fun _ -> true`, and the
+`Ops.applyContained` suite compares the whole result tree on a graft the real predicate refuses.
+What changes is that an operation a host previously ACCEPTED can now be refused, which is
+wire-visible to anything replaying a stored op-stream, so it is recorded here as a contract change.
+
+**Which operations, exactly.** Only ones that were already producing a tree the domain's own
+predicate calls invalid. `canHold` used to be applied to the parent of an insert and to nothing
+inside the subtree, so a graft that placed children under its own non-container node was accepted
+whole and the invariant `applyContained` exists to keep — *every node with children satisfies
+`canHold`* — broke across an accepted operation, silently. That was machine-checked as a
+counterexample by Phase 140 (`contained_needs_op_hypothesis`, now `nested_graft_refused`) before it
+was a refusal.
+
+**The class stays `NotAContainer`, and `target` now names a node in one of two places.** A parent
+refusal names a node of the TREE; a graft refusal names a node of the caller's own INSERTED SUBTREE,
+which the duplicate-id scan guarantees is not in the tree. A consumer that resolves `target` against
+the tree and reports "unknown node" will be wrong about the second site; resolve it against the
+graft you supplied. A new rejection case was considered and declined for Phase 137's reason, in
+Phase 137's words: it is the same failure the envelope already names, reached through more of the
+subtree, and a new case breaks every consumer matching on it to buy a distinction they can already
+make — the node is in their own graft, and they have it in hand. (`DECISIONS.md` D38 records the
+choice and the option declined.)
+
+**Precedence is unchanged, deliberately.** The new check is the LAST clause of `validateInsert` —
+after the duplicate-id scan, after the parent's existence, after the parent's own capability — so
+**no operation that was refused before Phase 161 changes its class.** Only operations that were
+accepted can now be refused. A graft that breaks both invariants still earns `DuplicateId` first,
+and that is pinned by a test.
+
+**`MoveNode` is NOT walked, and the omission is argued rather than inherited.** A move relocates a
+subtree that is already in the tree, so it introduces no interior structure the tree did not already
+hold: a violation found inside it was carried in by some earlier insert. Refusing the move for it
+would be an invariant-REPAIR gate, a different feature. The machine-checked form of that argument is
+`contained_preserves`' move clause, which derives the moved subtree's containment from the tree's
+own and needs no hypothesis about the operation at all.
+
+**Scope: the WITNESS surface, exactly as Phase 137's entry scopes id uniqueness.** The walk is
+`Tree.preorder` over `NodeWitness.Children`, so a node a domain holds in a keyed, non-structural
+position is invisible to it, and containment over those positions is the domain's own obligation.
+
+**No other language host mirrors this surface.** `canHold`, `applyContained` and `NotAContainer`
+have no counterpart in the TypeScript, Go, Rust or Python hosts, which model no container capability
+at all, and no committed conformance-corpus `apply/` vector exercises one. So unlike Phase 137's
+widening — half of which was a parity correction — this one is Core's alone and nothing outside this
+repository moves.
+
+**What it buys, in the proof ladder's terms.** `contained_preserves` carried TWO hypotheses and was
+refuted without either. This change discharges one of them **in code**: `contained_op` is gone from
+the theorem's premises, and the counterexample is kept evaluable against a model of the pre-161
+engine so the reason it was needed survives the premise (`proofs.json` row `graft-containment`). The
+other, `child_blind`, stays and always will — a `canHold` that reads the child list can admit a node
+at the instant it is checked and refuse it the instant the licensed insert gives it a child, and no
+check placed anywhere in the engine repairs that.
+
+**So `child_blind` becomes the DOMAIN's obligation, certified rather than assumed.**
+`Conformance.containerLaws` is new: three laws and an adequacy guard, certifying that the domain's
+`canHold` is child-blind (sampled by perturbing a drawn node's children, emptied and extended by
+one), that the engine preserves the container invariant over the domain's own witness, and that a
+graft with an interior non-container is refused naming that node. It is **opt-in** — the
+`chainBreakReasonLaws` / `dagBreakReasonLaws` shape — because `OpGen.CanHold` is an option and
+folding it into `certify` would add laws that cannot fail for every domain without a container
+notion. **`Conformance.certify` still returns 14 law results**; a consumer asserting that count does
+not move it. A domain with a container notion calls `containerLaws` alongside its base run; one that
+calls it with `CanHold = None` is reported by name rather than skipped.
+
 
 ### `ChainBreak.Reason` is a closed DU (`0.23.0`) — BREAKING
 

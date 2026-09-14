@@ -93,6 +93,30 @@ insert introduces no id already present"` is about the op that can create a dupl
 `"apply's accept path preserves Tree.WellFormed"` is about every op, so a `MoveNode` or a `Batch`
 that broke it could not hide behind the first.
 
+### The container capability — what `applyContained` enforces, and the one thing it asks of you
+
+`Ops.applyContained canHold` is the variant for a domain with leaves: `canHold` answers *can this
+node hold children at all*, and a node that cannot earns a typed `NotAContainer` instead of an
+op that silently does nothing. Containment **legality** — which kinds may parent which — stays
+yours; this is the coarse question only.
+
+It is enforced at three places, and the third is worth stating because it is the one a caller
+authoring a subtree meets: the PARENT of an `InsertChild`, the NEW PARENT of a `MoveNode`, and
+**every node of the inserted subtree that holds children**. A graft whose own interior places
+children under a node your predicate refuses is rejected, with `NotAContainer` naming that node —
+which is a node of *your* graft, not of the tree, so look for it there. A `MoveNode` is deliberately
+not walked: the subtree is already in the tree, so it carries in no interior the tree did not
+already hold.
+
+**What it asks of you in return: write `canHold` over the node's own kind (or its own fields), never
+over its children.** The type is `'Node -> bool`, so a predicate *may* read the child list — and one
+that does can admit a node at the instant the engine checks it and refuse it the instant the very
+insert that check licensed gives it a child. No check placed anywhere in this library repairs that,
+because the answer changes under the edit. `Conformance.containerLaws` perturbs a node's children
+and requires the predicate to be unchanged, so you meet this as a red law rather than as a tree your
+own predicate calls invalid. Run it alongside `certify`; it is opt-in because a domain with no
+container notion has nothing for it to say.
+
 ## The artifact-function three laws (`Fuaran.Core.Function`)
 
 A saved typed tree behaves as a function of its declared holes. The contract bakes in:

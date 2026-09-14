@@ -2677,11 +2677,16 @@ let private presDifferential
 //    3. `Ops.applyContained` against `Ops.apply` ON PRODUCTION: the two must agree exactly unless
 //       the container-aware one raises `NotAContainer`, which is `not_a_container_exact` asked of
 //       the shipped engine rather than of the model.
-//    4. where a `NotAContainer` is raised, that the node it names is one the tree holds whose kind
-//       tag it reports and whose capability the predicate refuses (`not_a_container_locates`).
-//    5. THE INVARIANT: where the state and the operation's graft both satisfy "every node with
-//       children can hold children", so must the result (`contained_preserves`). Counted, because
-//       a run in which the hypothesis was never met would assert the theorem vacuously.
+//    4. where a `NotAContainer` is raised, that the node it names really holds children, that its
+//       own kind tag is what was reported, and that the predicate really refuses it
+//       (`not_a_container_locates`). Since Phase 161 the node is looked for in the TREE or in the
+//       op's own inserted SUBTREE, because there are two capability sites and they name nodes in
+//       two different places — a parent, and an interior node of a graft.
+//    5. THE INVARIANT: where the STATE satisfies "every node with children can hold children", so
+//       must the result (`contained_preserves`). Counted, because a run in which the hypothesis
+//       was never met would assert the theorem vacuously. Phase 161 retired the second half of
+//       that hypothesis — the operation's own graft — by making the engine refuse a graft that
+//       breaks it, so this arm now asserts the conclusion on strictly more probes.
 //
 //  THE GO-RED IS THE MODEL'S OWN INSTRUMENT. `Preservation.apply_contained_insert_only` is the
 //  engine that checks the capability on insert and not on move, and
@@ -2740,6 +2745,9 @@ type private ContTally =
         InsertRefusals: int
         MoveRefusals: int
         BatchRefusals: int
+        /// (Phase 161) refusals raised by the GRAFT walk rather than by either parent check — a
+        /// fourth capability site, and the one a pool of leaf-only inserts can never reach.
+        GraftRefusals: int
         /// probes where the capability PRE-EMPTED another refusal — the shape the first run of
         /// this differential turned up, and the one an `adds a refusal` reading gets wrong
         Preempted: int
@@ -2756,6 +2764,7 @@ let private emptyContTally =
       InsertRefusals = 0
       MoveRefusals = 0
       BatchRefusals = 0
+      GraftRefusals = 0
       Preempted = 0
       Preserved = 0
       Predicates = Set.empty
@@ -2890,32 +2899,63 @@ let private contProbe
                 []
         | Error a, Ok _ -> [ sprintf "applyContained ACCEPTED what apply refused (%s) — %s" (prodRejClass a) where ]
 
-    // 4. where the refusal is a NotAContainer, it names a node the tree holds, reports that node's
-    //    own kind tag, and the predicate refuses it
+    // 4. where the refusal is a NotAContainer, it names a node that really holds children, reports
+    //    that node's own kind tag, and the predicate really refuses it. Since Phase 161 there are
+    //    TWO places the node can be, and which one is not a detail: a parent refusal names a node
+    //    of the TREE, and a graft refusal names a node of the op's own inserted SUBTREE, which the
+    //    duplicate-id scan guarantees is not in the tree at all. Looking only in the tree would
+    //    report every graft refusal as a defect; looking in either without saying which would let a
+    //    refusal that named nothing pass.
     let locateDiff =
         match prod with
         | Error(NotAContainer(target, kindTag)) ->
-            (match Tree.tryFind nodew idw target st with
-             | None -> [ sprintf "NotAContainer named %s, which the tree does not hold — %s" target where ]
-             | Some n ->
-                 (if nodew.KindTag n <> kindTag then
-                      [ sprintf
-                            "NotAContainer reported kind %s for %s, whose kind is %s — %s"
-                            kindTag
-                            target
-                            (nodew.KindTag n)
-                            where ]
-                  else
-                      [])
-                 @ (if canHold n then
-                        [ sprintf "NotAContainer named %s, which canHold ADMITS — %s" target where ]
-                    else
-                        []))
+            let inTree = Tree.tryFind nodew idw target st
+
+            let inGraft =
+                match op with
+                | InsertChild(_, graft) -> Tree.tryFind nodew idw target graft
+                | _ -> None
+
+            match inTree, inGraft with
+            | None, None ->
+                [ sprintf "NotAContainer named %s, which neither the tree nor the graft holds — %s" target where ]
+            | _ ->
+                let site, n =
+                    match inTree with
+                    | Some n -> "the tree", n
+                    | None -> "the graft", Option.get inGraft
+
+                (if nodew.KindTag n <> kindTag then
+                     [ sprintf
+                           "NotAContainer reported kind %s for %s in %s, whose kind is %s — %s"
+                           kindTag
+                           target
+                           site
+                           (nodew.KindTag n)
+                           where ]
+                 else
+                     [])
+                @ (if canHold n then
+                       [ sprintf "NotAContainer named %s in %s, which canHold ADMITS — %s" target site where ]
+                   else
+                       [])
+                @ (match inTree, inGraft with
+                   | None, Some g when List.isEmpty (nodew.Children g) ->
+                       // the graft walk refuses a node that HOLDS children; a childless one the
+                       // predicate merely dislikes is not a violation of the invariant at all
+                       [ sprintf "the graft refusal named %s, which holds no children — %s" target where ]
+                   | _ -> [])
         | _ -> []
 
-    // 5. the invariant, on production, where its hypotheses are met
+    // 5. the invariant, on production, where its hypothesis is met.
+    //
+    // Phase 161 RETIRED the second hypothesis: `contained_op` used to gate this arm too, because
+    // the engine never inspected a graft and an insert could therefore carry a violation in. The
+    // engine refuses such a graft now (`nested_graft_refused`), so the only premise left is that
+    // the input tree satisfies the invariant — which is why this arm asserts the conclusion on
+    // strictly MORE probes than it did before the phase, including every graft probe below.
     let preservedDiff, preserved =
-        if prodContained canHold st && prodContainedOp canHold op then
+        if prodContained canHold st then
             match prod with
             | Ok result ->
                 (if prodContained canHold result then
@@ -2941,12 +2981,24 @@ let private contProbe
         | Some "NotAContainer", Batch _ -> 0, 0, 1
         | _ -> 0, 0, 0
 
+    // Phase 161's site, told from the parent site by WHERE the named node is: a graft refusal names
+    // a node the tree does not hold (the duplicate-id scan has already refused a graft sharing an
+    // id with it), so the two are distinguishable from the envelope alone.
+    let graftRef =
+        match prod, op with
+        | Error(NotAContainer(target, _)), InsertChild(_, graft) ->
+            (match Tree.tryFind nodew idw target st, Tree.tryFind nodew idw target graft with
+             | None, Some _ -> 1
+             | _ -> 0)
+        | _ -> 0
+
     { Diffs = acc.Diffs @ applyDiff @ canDiff @ diffDiff @ locateDiff @ preservedDiff
       Accepted = acc.Accepted + accepted
       Refused = acc.Refused + refused
       InsertRefusals = acc.InsertRefusals + insertRef
       MoveRefusals = acc.MoveRefusals + moveRef
       BatchRefusals = acc.BatchRefusals + batchRef
+      GraftRefusals = acc.GraftRefusals + graftRef
       Preempted = acc.Preempted + preempted
       Preserved = acc.Preserved + preserved
       Predicates = Set.add (showKinds kinds) acc.Predicates
@@ -2999,6 +3051,24 @@ let private contDifferential
                 ids
                 |> List.map (fun p -> InsertChild(p, RNode.leaf (sprintf "p140-%s-%d" p n) "para" "v"))
 
+            // Phase 161's site, reached by CONSTRUCTION for the reason the file's header gives: the
+            // pool above mints leaf grafts only, and a leaf graft can never carry an interior
+            // offender, so the walk would have been certified by a sample that could not reach it.
+            // Each graft's root holds a child, so whether it is an offender is exactly whether the
+            // drawn predicate admits its kind — and both kinds are minted, so both verdicts arise
+            // within one run rather than across lucky seeds.
+            let grafts =
+                ids
+                |> List.collect (fun p ->
+                    [ for kind in [ "para"; "section" ] ->
+                          InsertChild(
+                              p,
+                              RNode.node
+                                  (sprintf "p161-%s-%s-%d" kind p n)
+                                  kind
+                                  [ RNode.leaf (sprintf "p161i-%s-%s-%d" kind p n) "para" "v" ]
+                          ) ])
+
             let moves =
                 ids |> List.collect (fun p -> leaves |> List.map (fun l -> MoveNode(l, p)))
 
@@ -3013,7 +3083,7 @@ let private contDifferential
                             InsertChild(l, RNode.leaf (sprintf "p140-d-%d" n) "para" "v") ] ]
                 | _ -> []
 
-            for op in generated @ inserts @ moves @ batches do
+            for op in generated @ inserts @ grafts @ moves @ batches do
                 tally <- contProbe modelApply kinds op st tally
 
     tally
@@ -5264,10 +5334,18 @@ let proofOracleTests =
                   // refusal would agree with production perfectly and certify nothing about the
                   // guard; a run that met only insert refusals would not have been able to catch
                   // the go-red below, which is a move. Measured at 30 trials, seed 1400: accepted
-                  // 897, refused 841, insert refusals 185, move refusals 370, batch 112,
-                  // pre-emptions 89, invariant asserted on 704 probes, all eight predicates drawn.
-                  // Each threshold sits below its measurement with room — they are here to catch a
-                  // pool that stops reaching a shape, not to pin the numbers.
+                  // 1,245, refused 1,305, insert refusals 649, move refusals 370, batch 112, graft
+                  // refusals 124, pre-emptions 89, invariant asserted on 1,028 probes, all eight
+                  // predicates drawn. Each threshold sits below its measurement with room — they
+                  // are here to catch a pool that stops reaching a shape, not to pin the numbers.
+                  //
+                  // Re-measured at Phase 161, and TWO of the numbers moved for reasons worth
+                  // knowing rather than because the pool grew. The graft probes are new, so the
+                  // insert count rose with them (185 → 649, of which 124 are the graft site). And
+                  // the invariant is now asserted on half again as many probes (704 → 1,028)
+                  // because retiring the `contained_op` premise removed a GATE from arm 5, not
+                  // because more probes were drawn: probes whose graft broke the invariant used to
+                  // be skipped, and the engine refuses them now.
                   Expect.isGreaterThan t.Accepted 500 (sprintf "operations were accepted (accepted=%d)" t.Accepted)
 
                   Expect.isGreaterThan
@@ -5286,6 +5364,18 @@ let proofOracleTests =
                       (sprintf
                           "a BATCH inherited a member's NotAContainer (batch=%d) — the clause the model's inheritance half is about"
                           t.BatchRefusals)
+
+                  // Phase 161's site. Counted separately from `InsertRefusals` for the reason the
+                  // move half is counted separately from the insert half: a run that reached only
+                  // the parent check could not have caught a graft walk that never fired, and
+                  // before this phase the pool literally could not reach it — every insert it minted
+                  // was a leaf.
+                  Expect.isGreaterThan
+                      t.GraftRefusals
+                      50
+                      (sprintf
+                          "the sample refused a GRAFT for its own interior (graft=%d) — the Phase 161 site"
+                          t.GraftRefusals)
 
                   // The theorem is quantified over `canHold`; a differential that drew one
                   // predicate would say nothing about the quantifier. Five of the eight subsets is
@@ -5359,14 +5449,20 @@ let proofOracleTests =
                       "the disagreement is the one this phase is about — production refuses the MOVE, the insert-only engine admits it. Got:\n%s"
                       (List.head t.Diffs))
 
-          testCase "canHold is consulted on the PARENT and on nothing inside the graft — the shipped engine"
+          testCase "canHold is consulted on the graft's INTERIOR too — the shipped engine, since Phase 161"
           <| fun _ ->
-              // `contained_needs_op_hypothesis`, on production. The engine admits a subtree whose
-              // own interior node is a non-container, because `validateInsert` applies `canHold` to
-              // the node `tryFind` returns for the parent and to nothing else. This is not a defect
-              // to fix here — it is the reason the theorem carries `contained_op` as a hypothesis,
-              // and this case is what makes the hypothesis a fact about the code rather than a
-              // convenience of the model.
+              // `nested_graft_refused`, on production, and BOTH halves of it — because the half
+              // that matters is the difference between them.
+              //
+              // Until Phase 161 this case asserted the opposite: `validateInsert` applied `canHold`
+              // to the parent and to nothing else, so the engine ADMITTED a subtree whose own
+              // interior node was a non-container and the invariant broke across an accepted
+              // operation. That was not a defect to fix in the test — it was the reason the theorem
+              // carried `contained_op` as a hypothesis. The operator's ruling (DECISIONS D38) was to
+              // inspect the graft, so the premise is discharged by the code and the case is
+              // rewritten rather than deleted: the model still evaluates the old engine
+              // (`apply_contained_pre161`), and what is asserted here is that production no longer
+              // behaves like it.
               let canHold (n: RNode) = n.Kind = "doc"
               let tree = RNode.node "root" "doc" []
 
@@ -5375,13 +5471,32 @@ let proofOracleTests =
               Expect.isTrue (prodContained canHold tree) "the tree satisfies the invariant to begin with"
               Expect.isFalse (prodContainedOp canHold graft) "the GRAFT does not — its own interior node is a leaf kind"
 
-              match Ops.applyContained canHold nodew idw graft tree with
-              | Error e ->
-                  failtestf "the engine refused the graft (%A) — then the hypothesis is unnecessary" (prodRejClass e)
-              | Ok result ->
+              // (1) the engine as it stood still breaks the invariant, which is what made the
+              //     premise necessary. Asked of the MODEL, because production no longer has it.
+              match
+                  Preservation.apply_contained_pre161
+                      (fun t -> TreeOps.kind_of t = "doc")
+                      (toModelOpWith toModelTree graft)
+                      (toModelTree tree)
+              with
+              | DagFold.Error e ->
+                  failtestf "the PRE-161 engine refused the graft (%A) — then the premise was never necessary" e
+              | DagFold.Ok result ->
                   Expect.isFalse
-                      (prodContained canHold result)
-                      "the invariant broke, which is what `contained_op` is a hypothesis about"
+                      (Preservation.contained (fun t -> TreeOps.kind_of t = "doc") result)
+                      "the pre-161 engine broke the invariant, which is what `contained_op` was a hypothesis about"
+
+              // (2) and the shipped engine refuses it, naming the offender IN THE GRAFT — "a",
+              //     which holds "b" while the predicate refuses it — and not "root", which is the
+              //     parent and can hold children perfectly well.
+              match Ops.applyContained canHold nodew idw graft tree with
+              | Error(NotAContainer("a", "para")) -> ()
+              | other -> failtestf "expected NotAContainer naming the interior offender 'a', got %A" other
+
+              Expect.equal
+                  (Ops.canApplyContained canHold nodew idw graft tree)
+                  (Ops.applyContained canHold nodew idw graft tree |> Result.map ignore)
+                  "the dry run sees the interior refusal too"
 
           testCase "the sequence surface sees containment and the plain pair still does not — both halves"
           <| fun _ ->

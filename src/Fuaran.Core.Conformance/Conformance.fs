@@ -444,9 +444,16 @@ module Conformance =
                 | Error _ -> ()
 
             // ---- Phase 137: the deliberate-collision arm (BUILT, not drawn) ----
-            // Only the PARENT is asked to hold children — `validateInsert` never applies `canHold`
-            // to the incoming subtree — so drawing the parent from the holders is enough to reach
-            // the check under a container-aware witness whose fresh nodes are leaves.
+            // Drawing the parent from the holders is what gets past the parent's own capability
+            // check under a container-aware witness whose fresh nodes are leaves.
+            //
+            // Phase 161 widened `validateInsert` to walk the GRAFT's interior as well, and this arm
+            // builds a shell that HOLDS children — so the note that used to stand here ("`canHold`
+            // is never applied to the incoming subtree") is no longer true. The arm is unaffected,
+            // and by construction rather than by luck: the duplicate-id scan runs FIRST (D38's
+            // precedence decision), and `carries` below is exactly the condition that makes it
+            // fire, so a built candidate always earns `DuplicateId` before the interior walk is
+            // reached. `containerLaws` is where the interior walk is certified.
             match Tree.preorder nodew tree |> List.filter canHold with
             | [] -> ()
             | holders ->
@@ -7951,4 +7958,258 @@ module Conformance =
                       "the DAG walk never reported: "
                       + (missing |> Set.toList |> String.concat ", ")
                       + " — the laws above hold vacuously for the break kinds that were never produced"
+                  ) } ]
+
+    /// The body of `containerLaws`, under a predicate the domain actually declared. Private so the
+    /// census's reflection over public `…Laws` entry points sees one family rather than two.
+    let private containerLawsOver
+        (canHold: 'Node -> bool)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable blind = None
+        let mutable preservation = None
+        let mutable graftRefusal = None
+        // the three built arms, counted so an arm nothing reached is REPORTED rather than assumed
+        let mutable perturbations = 0
+        let mutable probes = 0
+        let mutable grafts = 0
+
+        /// The invariant, over the domain's own witness: the first node that holds children while
+        /// `canHold` refuses it, or `None`. Written out here rather than shared with the engine's
+        /// own `validateInsert` helper — a law that read the engine's helper would agree with the
+        /// engine by construction, which is the one thing a conformance law must not do.
+        let firstUncontained (t: 'Node) : 'Node option =
+            Tree.preorder nodew t
+            |> List.tryFind (fun n -> not (List.isEmpty (nodew.Children n)) && not (canHold n))
+
+        /// Did the witness honour a rebuild, and does the node still have the identity the
+        /// predicate was asked about? A rebuild the witness declined is not evidence; one that
+        /// moved the id or the kind is a WITNESS defect (`witnessLaws`' territory), and reporting
+        /// it here would localise it to the wrong place — the F1 lesson.
+        let sameIdentity (original: 'Node) (rebuilt: 'Node) =
+            idw.Equals (nodew.Id rebuilt) (nodew.Id original)
+            && nodew.KindTag rebuilt = nodew.KindTag original
+
+        let keysOf (n: 'Node) =
+            Tree.ids nodew n |> List.map idw.ToString
+
+        for i in 0 .. iterations - 1 do
+            let tree, r1 = gen.Tree rng
+            rng <- r1
+            let treeKeys = keysOf tree |> Set.ofList
+
+            // ---- arm 1: child-blindness, by PERTURBATION (built, never drawn) ----
+            let subject, r2 = ConfRng.choose (Tree.preorder nodew tree) rng
+            let filler, r3 = gen.FreshNode treeKeys r2
+            rng <- r3
+
+            let kids = nodew.Children subject
+            let emptied = nodew.ReplaceChildren subject []
+            let extended = nodew.ReplaceChildren subject (kids @ [ filler ])
+
+            let notePerturbation (label: string) (rebuilt: 'Node) =
+                perturbations <- perturbations + 1
+
+                if canHold rebuilt <> canHold subject && blind.IsNone then
+                    blind <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: canHold READS THE CHILD LIST — node %s (kind %s) answers %b holding %d child(ren) and %b %s. A predicate that changes under an edit can be satisfied at the instant applyContained checks it and violated by the very insert that check licensed, so applyContained does not preserve the container invariant for this domain (proofs/Preservation.fst, contained_needs_child_blind). Write canHold over the node's own kind, or its own fields, and never over its children."
+                                seed
+                                i
+                                (idw.ToString(nodew.Id subject))
+                                (nodew.KindTag subject)
+                                (canHold subject)
+                                (List.length kids)
+                                (canHold rebuilt)
+                                label
+                        )
+
+            if
+                not (List.isEmpty kids)
+                && sameIdentity subject emptied
+                && List.isEmpty (nodew.Children emptied)
+            then
+                notePerturbation "with none" emptied
+
+            if
+                sameIdentity subject extended
+                && List.length (nodew.Children extended) = List.length kids + 1
+            then
+                notePerturbation "with one more" extended
+
+            // ---- arm 2: the engine keeps the invariant, over the domain's own witness ----
+            // Phase 161 retired the `contained_op` hypothesis, so the only premise left is that the
+            // INPUT tree satisfies the invariant. A generator that draws a tree already in violation
+            // is not tested by this law, and is not failed by it either.
+            let op, r4 = genOp nodew idw gen tree rng
+            rng <- r4
+
+            if (firstUncontained tree).IsNone then
+                match Ops.applyContained canHold nodew idw op tree with
+                | Ok post ->
+                    probes <- probes + 1
+
+                    match firstUncontained post with
+                    | Some offender when preservation.IsNone ->
+                        preservation <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: the container invariant BROKE across an ACCEPTED %A — node %s (kind %s) holds %d child(ren) in the result and canHold refuses it, though every node with children satisfied canHold in the input"
+                                    seed
+                                    i
+                                    op
+                                    (idw.ToString(nodew.Id offender))
+                                    (nodew.KindTag offender)
+                                    (List.length (nodew.Children offender))
+                            )
+                    | _ -> ()
+                | Error _ -> ()
+
+            // ---- arm 3: a graft carrying an interior offender is refused, NAMING it (built) ----
+            // The offender is the graft's own root — a fresh node given a child, where the domain's
+            // own predicate refuses it. That is Phase 140's `cx_nested_graft` shape expressed over
+            // the domain's own nodes.
+            let shell, r5 = gen.FreshNode treeKeys rng
+            let shellKey = idw.ToString(nodew.Id shell)
+            let inner, r6 = gen.FreshNode (Set.add shellKey treeKeys) r5
+            rng <- r6
+            let graft = nodew.ReplaceChildren shell [ inner ]
+            let graftKeys = keysOf graft
+
+            // Evidence only where the witness carried the shape AND the graft is clean by every
+            // OTHER clause of `validateInsert` — a candidate that also breaks id uniqueness earns
+            // `DuplicateId` first (D38's precedence), and would measure that instead.
+            let usable =
+                sameIdentity shell graft
+                && nodew.Children graft |> List.map (fun c -> idw.ToString(nodew.Id c)) = [ idw.ToString(nodew.Id inner) ]
+                && not (canHold graft)
+                && List.length (List.distinct graftKeys) = List.length graftKeys
+                && graftKeys |> List.forall (fun k -> not (treeKeys.Contains k))
+
+            match
+                (if usable then
+                     Tree.preorder nodew tree |> List.filter canHold
+                 else
+                     [])
+            with
+            | [] -> ()
+            | holders ->
+                let parent, r7 = ConfRng.choose holders rng
+                rng <- r7
+                grafts <- grafts + 1
+
+                match Ops.applyContained canHold nodew idw (InsertChild(nodew.Id parent, graft)) tree with
+                | Error(NotAContainer(named, kindTag)) ->
+                    if
+                        graftRefusal.IsNone
+                        && (not (idw.Equals named (nodew.Id shell)) || kindTag <> nodew.KindTag shell)
+                    then
+                        graftRefusal <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: the interior refusal named %s (kind %s), but the offending node is %s (kind %s) — a caller repairs the node the envelope names, so naming another one sends them to the wrong place"
+                                    seed
+                                    i
+                                    (idw.ToString named)
+                                    kindTag
+                                    shellKey
+                                    (nodew.KindTag shell)
+                            )
+                | other ->
+                    if graftRefusal.IsNone then
+                        graftRefusal <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: a graft whose root %s (kind %s) holds a child while canHold refuses it was answered with %A — it must be NotAContainer naming that node (DECISIONS D38; proofs/Preservation.fst, nested_graft_refused)"
+                                    seed
+                                    i
+                                    shellKey
+                                    (nodew.KindTag shell)
+                                    other
+                            )
+
+        [ { Law = "canHold is child-blind (perturbing a node's children leaves it unchanged)"
+            Passed = blind.IsNone
+            Counterexample = blind }
+          { Law = "applyContained preserves the container invariant over this witness"
+            Passed = preservation.IsNone
+            Counterexample = preservation }
+          { Law = "a graft with an interior non-container is refused, naming that node"
+            Passed = graftRefusal.IsNone
+            Counterexample = graftRefusal }
+          SampleAdequacy.reached
+              "Conformance.containerLaws"
+              "built arm"
+              seed
+              [ "child perturbation", perturbations
+                "invariant probe", probes
+                "interior graft", grafts ] ]
+
+    /// **The container capability's two obligations, certified rather than assumed** (Phase 161).
+    ///
+    /// Phase 140 proved `Ops.applyContained` preserves the invariant it exists to keep — *every node
+    /// with children satisfies `canHold`* — and named the two hypotheses the theorem must carry to
+    /// be true of the function that ships. Phase 161 discharged one of them in code (DECISIONS D38:
+    /// `validateInsert` walks the graft). The other cannot be discharged by any engine check, and
+    /// this family is where it lands instead. Three laws and an adequacy guard:
+    ///
+    /// - **`canHold` is CHILD-BLIND.** Its type is `'Node -> bool`, so it may read the node's child
+    ///   list — and a predicate that does can admit a node at the instant it is checked and refuse
+    ///   it the instant it gains a child. No check placed anywhere in the engine repairs that,
+    ///   because the predicate's answer changes under the very edit the check licensed. So it is the
+    ///   DOMAIN's obligation, sampled here by PERTURBING a drawn node's children — emptied, and
+    ///   extended by one — and requiring `canHold` to be unchanged. A domain whose predicate reads
+    ///   the child list learns it from its own conformance run rather than from a broken tree.
+    /// - **The engine keeps the invariant over the domain's own witness.** Phase 140's theorem is
+    ///   about a model of the engine; this is the same sentence sampled against the shipped engine
+    ///   with the domain's own nodes, operations and predicate — available to an adopter who has
+    ///   neither a prover nor the model.
+    /// - **A graft's interior is refused, naming the offender.** Phase 161's widening, sampled the
+    ///   same way: a subtree that places children under a node `canHold` refuses is rejected with
+    ///   `NotAContainer` carrying THAT node's id and kind tag, not the parent's. A caller repairs
+    ///   the node the envelope names, so which node is named is the law, not an implementation
+    ///   detail.
+    ///
+    /// **Opt-in, not folded into `certify`** — the `chainBreakReasonLaws` / `dagBreakReasonLaws`
+    /// shape (Phase 147). `certify` runs over any `OpGen`, and `OpGen.CanHold` is an OPTION: folding
+    /// this family in would add laws that cannot fail for every domain that leaves it `None`, which
+    /// is the vacuity this kit exists to refuse, and would make `certify`'s law count depend on its
+    /// input. A domain with a container notion calls this alongside its base run;
+    /// `Conformance.certify` still returns 14 results.
+    ///
+    /// **A domain that declares NO predicate is reported by name rather than skipped** — the
+    /// `constructThenEncodeLaws` precedent. Calling this family is a claim to have a container
+    /// notion; `CanHold = None` contradicts the claim, and a green report over no predicate would
+    /// look exactly like certification of something.
+    ///
+    /// **The built arms are GUARDED, because whether the witness honours them is drawn.** Each arm
+    /// rebuilds a node through `ReplaceChildren` and counts as evidence only where the rebuild was
+    /// honoured and the id and kind survived it: the kit deliberately admits a witness whose
+    /// `ReplaceChildren` is partial on leaves (`witnessLaws`), and `opAlgebra`'s built collision arm
+    /// takes the same care for the same reason. What differs here is that an arm nothing reached is
+    /// REPORTED — the family emits a `SampleAdequacy.reached` law over the three arms, so a run that
+    /// measured nothing says so with the counts instead of passing quietly.
+    let containerLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        match gen.CanHold with
+        | Some canHold -> containerLawsOver canHold nodew idw gen seed iterations
+        | None ->
+            [ { Law = "the domain declares a container predicate (OpGen.CanHold)"
+                Passed = false
+                Counterexample =
+                  Some(
+                      "seed="
+                      + string seed
+                      + ": OpGen.CanHold is None, so there is no container capability to certify — a domain without one has nothing for this family to say, and answering with a green report would look like certification of a claim nobody made"
                   ) } ]

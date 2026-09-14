@@ -1344,7 +1344,7 @@ it. It was green run standalone and RED under `check.ps1`. A proof that flakes n
 leg that fails in CI and passes on a desk, which costs more than a slow leg; the budget is raised
 locally with `#push-options` and the reason is in the source beside it.
 
-### The container variant — `applyContained`, and the two premises the sentence needs (Phase 140)
+### The container variant — `applyContained`, the premise that remains, and the one the code took over (Phases 140, 161)
 
 Everything above is about `Ops.apply`, which is `applyWith (fun _ -> true)`. `Ops.applyContained
 canHold` is the variant every domain with a leaf actually runs, and it is the one where the
@@ -1357,8 +1357,16 @@ and is not available in any case: the leg runs `--report_assumes error`.
 rather than one. `apply` never raises the class (the characterisation above). The container-aware
 engine differs from `apply` **only** by raising it — never accepting what `apply` refuses, never
 producing a different tree, never refusing under some other class of its own. And where it raises
-it, the node named is one the tree holds, the kind tag reported is that node's own, and the
+it, the node named really holds children, the kind tag reported is that node's own, and the
 predicate refuses it.
+
+**Where that node IS became a disjunction at Phase 161, and the disjunction is content rather than
+a weakening.** There are two capability sites and they name nodes in two different places: the (new)
+PARENT, which is a node of the tree; and an interior node of the SUBTREE an `InsertChild` carries,
+which is a node of the caller's own graft and is deliberately *not* in the tree — the duplicate-id
+scan has already refused a graft sharing any id with it. A reader who looked the named id up in the
+tree and found nothing would be right to call that a defect, which is why the theorem says which
+lookup succeeds rather than asserting one that is false of the second site.
 
 **What that formulation deliberately does not say is the part the differential taught.** The
 capability can **pre-empt** another refusal rather than only adding one: the shipped `MoveNode` arm
@@ -1368,33 +1376,67 @@ asserted that the two engines refuse the same operation with the same class unle
 adds a refusal, and it went red on the first run against a tree the generator had built. The
 theorem reads "identical, **or** `NotAContainer`" because the stronger sentence is false.
 
-**The preservation statement needs two hypotheses, and without either it is false of the shipped
-function.** Both are exhibited as machine-checked counterexamples, in the shape Phase 133's
-`insert_breaks_wf_pre137` established, rather than left to be discovered:
+**The preservation statement needed two hypotheses, and without either it was false of the function
+Phase 140 measured.** Both are exhibited as machine-checked counterexamples, in the shape Phase 133's
+`insert_breaks_wf_pre137` established, rather than left to be discovered. **They now have different
+statuses, and the difference is Phase 161.**
 
-- **`contained_op`** — `canHold` is applied to the PARENT and to nothing inside the graft, so
-  inserting a subtree whose own interior node is a non-container carries the violation in with it.
-  A domain grafting its own validated documents has the hypothesis; one accepting a foreign tree
-  does not.
-- **`child_blind`** — `canHold` has type `'Node -> bool`, so it may read the CHILD LIST, and a
-  predicate that does can admit a node at the moment it is checked and refuse it the instant it
-  gains a child. Every domain writes it as a function of the kind tag — which is also what
-  `NotAContainer` reports back — and this hypothesis is that habit made a premise.
+- **`contained_op` — DISCHARGED BY THE CODE (Phase 161).** `canHold` used to be applied to the
+  PARENT and to nothing inside the graft, so inserting a subtree whose own interior node was a
+  non-container carried the violation in with it: a domain grafting its own validated documents had
+  the hypothesis, and one accepting a foreign tree did not. The operator's ruling was to inspect the
+  graft (`DECISIONS.md` D38), so `validateInsert` now walks the inserted subtree and refuses, with
+  `NotAContainer` naming the first interior offender. The premise is gone from
+  `contained_preserves`. The counterexample is **not** gone: `nested_graft_refused` states both
+  halves in one lemma — the pre-161 engine (`apply_contained_pre161`, kept for the reason
+  `apply_pre137` is kept) still admits the graft and still breaks the invariant, and the shipped one
+  refuses the same operation naming the offender. So the reason the premise was needed survives the
+  premise, and removing the walk turns the second half red. `contained_graft_still_admitted` is
+  beside it, because without it the first half would be satisfied by an engine that refused
+  everything.
+- **`child_blind` — STILL A HYPOTHESIS, and it always will be.** `canHold` has type
+  `'Node -> bool`, so it may read the CHILD LIST, and a predicate that does can admit a node at the
+  moment it is checked and refuse it the instant it gains a child. **No check placed anywhere in the
+  engine repairs that**, because the predicate's answer changes under the very edit the check
+  licensed — which is why it is the one of the pair that could not be discharged by a code change.
+  Every domain writes `canHold` as a function of the kind tag, which is also what `NotAContainer`
+  reports back, and this hypothesis is that habit made a premise. Since Phase 161 it is a habit the
+  domain **certifies**: `Conformance.containerLaws`' first law perturbs a node's children and
+  requires the predicate to be unchanged, so an adopting domain meets the premise as a red law
+  rather than as a broken tree.
 
-With both, `contained_preserves` holds for all five operations including a nested batch, and
-`MoveNode` is covered as well as `InsertChild`: the moved subtree inherits the invariant from the
-tree it came out of, the removal preserves both the invariant and the destination's capability, and
-the graft is then an insert under an admitted parent.
+With `child_blind`, `contained_preserves` holds for all five operations including a nested batch,
+and `MoveNode` is covered as well as `InsertChild`: the moved subtree inherits the invariant from
+the tree it came out of, the removal preserves both the invariant and the destination's capability,
+and the graft is then an insert under an admitted parent.
+
+**And that move clause is why the Phase 161 walk is at `InsertChild` ONLY.** It derives the moved
+subtree's containment from the tree's own, with no hypothesis about the operation at all — a move
+relocates structure that is already there, so it introduces no interior the tree did not already
+hold, and a violation found inside a moved subtree was carried in by some earlier insert. Walking
+there would refuse an operation for a pre-existing fault elsewhere: an invariant-repair gate, which
+is a different feature. The walk belongs where new structure enters.
 
 **The differential draws the predicate**, because the theorems quantify over it and a run against
 one hand-picked `canHold` certifies that instance and nothing about the quantifier. Each trial
 draws a random subset of the pool's kind vocabulary; all eight are drawn at 30 trials, the empty
 predicate (nothing can hold children) and the total one (where the engine is `apply` again)
 included. Adequacy is counted per capability SITE — insert refusals, move refusals, batch
-inheritance and pre-emptions separately — because a run reaching only the insert site could not
-catch the go-red, which is a move. The go-red is the model's own instrument
-(`apply_contained_insert_only`), proved in F\* to admit a move the real one refuses and to break
-the invariant doing it, before the differential is asked to lose against it.
+inheritance, **graft refusals** (Phase 161) and pre-emptions separately — because a run reaching
+only the insert site could not catch the go-red, which is a move. The go-red is the model's own
+instrument (`apply_contained_insert_only`), proved in F\* to admit a move the real one refuses and
+to break the invariant doing it, before the differential is asked to lose against it.
+
+**The graft site had to be reached by CONSTRUCTION, and that is worth knowing because the pool could
+not reach it at all.** Every insert the Phase 140 pool minted was a leaf, and a leaf graft can never
+carry an interior offender — so a differential left as it was would have certified the new walk with
+a sample structurally incapable of exercising it, and reported green. Phase 161 mints a graft whose
+root holds a child, in both a container kind and a leaf kind, so whether it is an offender is exactly
+whether the drawn predicate admits its kind and both verdicts arise within one run. Measured at 30
+trials, seed 1400: 124 graft refusals. Two of the family's other numbers moved with it, for reasons
+that are not "the pool grew": insert refusals rose 185 → 649 because the graft probes are inserts,
+and the invariant is now asserted on 1,028 probes where it was 704, because retiring `contained_op`
+removed a *gate* — probes whose graft broke the invariant used to be skipped, and are refused now.
 
 **And one finding about the shipped surface, which is not about the model.** When Phase 140 ran
 there was **no container-aware sequence surface**: `Ops.canApplyAll` and `Ops.applyAll` both
@@ -1424,9 +1466,11 @@ they differ in what the failure carries, and that difference is the semantics.
 **So the preservation statement is stronger here than per operation.** A per-op theorem may say
 nothing about a refusal, because a refused `applyContained` hands back nothing at all. A refused
 script hands back a tree the caller keeps, so `contained_preserves_all_with` covers **both** arms —
-the accepted tree and the partial tree — under the same two hypotheses section 8.5 carries. That is
-the statement that makes a non-atomic container-aware surface safe to use rather than merely
-available.
+the accepted tree and the partial tree — under the same hypothesis section 8.5 carries. That is the
+statement that makes a non-atomic container-aware surface safe to use rather than merely available.
+(It carried section 8.5's *two* hypotheses when Phase 160 cut it, and lost `contained_op_all` with
+Phase 161 for exactly the reason 8.5 lost `contained_op`: the sequence lemma only ever used that
+premise *through* the per-operation call, and the engine inspects a graft now.)
 
 **`can_apply_all_with_agrees` needs no hypothesis, and 8.5's per-op `can_apply_contained_agrees`
 needs `wf t`.** The per-op dry run reaches the three validators directly and has to be shown not to
@@ -1462,14 +1506,21 @@ already proves — must make the run lose, and it does.
    any tree and ANY predicate: `apply_contained_is_apply` (the container-aware engine at
    `fun _ -> true` IS `apply`, which is what makes the clause-for-clause model checkable rather
    than asserted), `not_a_container_exact`, `contained_preserves`, `can_apply_contained_agrees`, and
-   the two premise refutations `contained_needs_child_blind` / `contained_needs_op_hypothesis` —
-   plus `can_apply_all_ignores_containment`, which proves the sequence-surface gap above.
+   the premise refutation `contained_needs_child_blind` — plus `can_apply_all_ignores_containment`,
+   which proves the sequence-surface gap above.
    **Phase 160 adds four**, over the sequence surface that closes that gap, any script, any tree
    and ANY predicate: `contained_preserves_all_with` (the invariant survives a script including the
    partial tree a refusal returns), `can_apply_all_with_agrees` (the dry run reaches the same
    verdict, index and envelope as the mutating call), `all_with_at_total_is_plain` (the plain pair
    IS the `fun _ -> true` instance, discharged against the pre-160 folds) and
    `can_apply_all_with_sees_containment` (140's counterexample, answered at the same tree).
+   **Phase 161 adds two and REMOVES a hypothesis from three**: `nested_graft_refused` (the pre-161
+   engine breaks the invariant on a graft the shipped one now refuses, naming the offender) and
+   `contained_graft_still_admitted` (the refusal is not over-eager — a contained graft still goes
+   in), while `contained_preserves`, `contained_preserves_all` and 160's
+   `contained_preserves_all_with` all shed `contained_op`. That is the only direction of travel the
+   ladder should ever show for a premise: discharged by a code change, with the refutation kept
+   evaluable, never quietly dropped.
    F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply`, `Ops.canApply` and
@@ -1477,10 +1528,12 @@ already proves — must make the run lose, and it does.
    pools, never over all inputs. The container family is a second pool with its own go-red: the
    extracted `apply_contained` / `can_apply_contained` beside `Ops.applyContained` /
    `Ops.canApplyContained` under a drawn predicate, with the invariant asserted on production
-   wherever its hypotheses are met. The SCRIPT family (Phase 160) is a third: the extracted
-   `apply_all_with` / `can_apply_all_with` beside `Ops.applyAllWith` / `Ops.canApplyAllWith` over
-   generated scripts and a drawn predicate, comparing the refusal index and the partial tree as
-   well as the verdict and the class, with the capability-free sequence check as its go-red.
+   wherever its hypothesis is met — which since Phase 161 is the input tree alone, so the
+   conclusion is asserted on more probes than the phase before it. The SCRIPT family (Phase 160) is
+   a third: the extracted `apply_all_with` / `can_apply_all_with` beside `Ops.applyAllWith` /
+   `Ops.canApplyAllWith` over generated scripts and a drawn predicate, comparing the refusal index
+   and the partial tree as well as the verdict and the class, with the capability-free sequence
+   check as its go-red.
 3. **Assumed, and stated as such.**
    - **The witness laws themselves.** `ReplaceChildren` is an abstract function satisfying
      `Conformance.witnessLaws`; a domain's own is that domain's promise, sampled by the pack and
