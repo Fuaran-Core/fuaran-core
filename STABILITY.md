@@ -2141,6 +2141,55 @@ check can discharge a domain obligation the domain certifies). Each phase append
 its own entry beneath this header as it lands; the version moves only if a later class outranks
 what the draft already carries (the draft-slot rule).
 
+### A container-aware SEQUENCE surface — `Ops.applyAllWith` / `Ops.canApplyAllWith` (`0.24.0`, Phase 160) — ADDITIVE
+
+Two new public functions in `Fuaran.Core.Ops`, and nothing existing changes shape:
+
+```fsharp
+Ops.applyAllWith    : ('Node -> bool) -> NodeWitness<'Node,'Id> -> IdWitness<'Id>
+                          -> SkeletonOp<'Node,'Id> list -> 'Node
+                          -> Result<'Node, int * Rejection<'Id> * 'Node>
+Ops.canApplyAllWith : ('Node -> bool) -> NodeWitness<'Node,'Id> -> IdWitness<'Id>
+                          -> SkeletonOp<'Node,'Id> list -> 'Node
+                          -> Result<unit, int * Rejection<'Id>>
+```
+
+They are `applyAll` / `canApplyAll` with the container capability threaded — the same relation
+`applyContained` / `canApplyContained` have had to `apply` / `canApply` since Phase 251, now at the
+SEQUENCE level. Same result shapes, same 0-based step index, same first-refusal-wins fold.
+
+**What this closes.** Until now there was no container-aware sequence surface at all: `applyAll` and
+`canApplyAll` both threaded the plain `apply`, so a script `canApplyAll` certified could be refused
+by `applyContained` at its first step — one move of a leaf under a leaf is the counterexample, and
+Phase 140 proved it (`can_apply_all_ignores_containment`). A domain with leaves that wanted to apply
+a script had to write its own loop over `applyContained` and lose the index contract, which is what
+every container-aware consumer in the estate does today. It can now call `applyAllWith` and get the
+same `(index, envelope, partial tree)` triple back, `NotAContainer` included.
+
+**`applyAll` and `canApplyAll` are now defined AS the `fun _ -> true` instances, and their behaviour
+is unchanged.** Nothing to adopt, nothing to re-test: the restatement is proved in
+`proofs/Preservation.fst` section 9 (`all_with_at_total_is_plain`, discharged against the folds as
+they stood before this phase) and measured on the shipped functions over a generated script pool
+(`OpsTests`, "applyAll and canApplyAll ARE the `fun _ -> true` instances"). A consequence worth
+stating plainly, because it reads like an omission: the plain pair remains BLIND to containment, and
+always will be — that is what being the total instance means. A container-aware caller pre-flights
+with `canApplyAllWith` and executes with `applyAllWith`; a caller that pre-flights with `canApplyAll`
+and executes with `applyContained` still has the Phase 140 gap, and now has a surface that closes it.
+
+**A script is not a `Batch`, and the doc comments say so.** `Batch` is all-or-nothing inside one
+operation: it aborts and the caller's original tree survives. A script stops at the first refusal and
+hands back the tree the accepted prefix reached, so the accepted prefix is KEPT. That tree satisfies
+the container invariant — `contained_preserves_all_with` covers the refusal arm as well as the
+accepted one, which is the statement that makes a non-atomic container-aware surface safe to use.
+
+**Proved, not merely tested.** Section 9 of `proofs/Preservation.fst` models both functions clause
+for clause and proves four things with no admits, for any predicate and any tree: the invariant
+survives a script including the partial tree a refusal returns; the dry run reaches the same verdict,
+the same index and the same envelope as the mutating call; the plain pair is the total instance; and
+the Phase 140 counterexample is answered — the same script, at the same tree, refused at index 0 by
+the new pair. The extracted model runs beside the shipped pair in the `Proofs.Oracle` family, with a
+go-red (the capability-free sequence check in the dry-run slot) required to lose.
+
 ### The unknown-parent over-approximation is NECESSARY, not merely conservative (`0.24.0`, Phase 143) — NO CONTRACT CHANGE
 
 **Nothing in the promise moves, and that is the result.** `Ops.footprint` and `Ops.independent` are

@@ -2085,3 +2085,165 @@ let can_apply_all_ignores_containment ()
     assert_norm (match apply_contained cx_box (Batch [cx_move_into_leaf]) cx_box_tree with
                  | Error (NotAContainer p k) -> p == "leaf" /\ k == "para"
                  | _ -> False)
+
+(* ======================================================================================
+   9. THE SEQUENCE SURFACE — `Ops.applyAllWith` / `Ops.canApplyAllWith` (Phase 160).
+
+      Section 8's last lemma is a FINDING: `Ops.applyAll` and `Ops.canApplyAll` thread the plain
+      `apply`, so there was no container-aware sequence surface at all and a script the dry run
+      certified could be refused by `applyContained` at its first step. This section is the
+      surface that closes it, modelled clause for clause, and the three statements that say the
+      closure is real and that it cost no existing caller anything.
+
+      WHAT A SCRIPT IS, AND IS NOT. A `Batch` is all-or-nothing INSIDE one operation — section
+      8.2's `apply_contained_all` abandons the whole on the first refusal, and `apply_contained`
+      returns that refusal, leaving the caller's original tree. A SCRIPT is not: it stops at the
+      first refusal and hands back the tree the accepted prefix reached. Structurally the two
+      folds are the same walk; they differ in what the failure CARRIES, and that difference is
+      the whole of the semantics. So the failure payload is modelled rather than dropped — the
+      index and the partial tree, exactly the `(int * Rejection * 'Node)` the F# returns — where
+      section 8's `can_apply_all` dropped the index because nothing there turned on it. Here
+      everything does: the index is what tells a caller WHICH step was refused, and the partial
+      tree is what it is left holding.
+
+      AND THAT PARTIAL TREE IS WHY THE PRESERVATION STATEMENT IS STRONGER HERE THAN PER OP. A
+      per-op theorem may say nothing about a refusal, because a refused `applyContained` hands
+      back nothing at all. A refused script hands back a tree the caller keeps, so a preservation
+      theorem that spoke only of the accepted case would be silent about precisely the state a
+      non-atomic surface exists to produce. `contained_preserves_all_with` covers BOTH arms.
+
+      THE PLAIN PAIR DOES NOT MOVE, and it is proved rather than asserted. `Ops.applyAll` and
+      `Ops.canApplyAll` are restated as the `fun _ -> true` instances of the new functions — the
+      same relation `Ops.apply` has to `applyWith`, now at the sequence level — and
+      `all_with_at_total_is_plain` is that restatement discharged against section 8's
+      `can_apply_all` and `TreeOps.apply_all`: at the total predicate the new fold reaches the
+      same verdict, the same tree and the same envelope as the fold that shipped before this
+      phase. Every existing caller is therefore where it was, which is the one thing an additive
+      API change has to earn.
+
+      NAMING. `contained_preserves_all_with` is NOT a variant spelling of 8.5's
+      `contained_preserves_all`, which is that theorem's mutual companion over a `Batch`'s member
+      list (`apply_contained_all`). The theorem names here mirror the function names they are
+      about, as they do throughout: `apply_all_with` takes `contained_preserves_all_with`, exactly
+      as `apply_contained_all` takes `contained_preserves_all`.
+   ====================================================================================== *)
+
+(* ---- 9.1 the two sequence functions, clause for clause ---- *)
+
+(* F#: `Ops.applyAllWith canHold w idw`. The accumulator `i` is the F#'s own — 0-based, counting
+   steps OFFERED, so the reported index is the position of the refused operation rather than the
+   number that succeeded. The tree in the failure arm is `t`, the state the refused step was
+   offered against, which is the tree the accepted prefix reached. *)
+let rec apply_all_with (ch:tree -> bool) (i:nat) (os:list op) (t:tree)
+  : Tot (outcome tree (nat & rejection & tree)) (decreases os) =
+  match os with
+  | [] -> Ok t
+  | o :: r -> (match apply_contained ch o t with
+               | Ok t' -> apply_all_with ch (i + 1) r t'
+               | Error e -> Error (i, e, t))
+
+(* F#: `Ops.canApplyAllWith canHold w idw` — the same walk, discarding the materialised tree. Note
+   it threads the MUTATING per-op call, as `Ops.canApplyAll` has since Phase 246: a sequence is
+   order-dependent, so each step's check must see the prior step's tree and there is nothing to
+   gain by checking without building. *)
+let rec can_apply_all_with (ch:tree -> bool) (i:nat) (os:list op) (t:tree)
+  : Tot (outcome unit (nat & rejection)) (decreases os) =
+  match os with
+  | [] -> Ok ()
+  | o :: r -> (match apply_contained ch o t with
+               | Ok t' -> can_apply_all_with ch (i + 1) r t'
+               | Error e -> Error (i, e))
+
+(* ---- 9.2 THE EIGHTH LEMMA — the invariant survives a script, refusal included ---- *)
+
+#push-options "--z3rlimit 120"
+(* Phase 161 removed `contained_op_all` from the `requires` here for the same reason it removed
+   `contained_op` from 8.5: the engine inspects a graft now, so an accepted step's own tree
+   satisfies the invariant by the step having been accepted. The sequence lemma inherits that
+   through `contained_preserves`, which is the only place the premise was ever used. *)
+let rec contained_preserves_all_with (ch:tree -> bool) (i:nat) (os:list op) (t:tree)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t)
+          (ensures (match apply_all_with ch i os t with
+                    | Ok t' -> contained ch t'
+                    | Error (_, _, t') -> contained ch t')) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      contained_preserves ch o t;
+      (* well-formedness travels with the tree through the script, and it travels through the
+         PLAIN engine's theorem: the two agree on every accepted step (`apply_contained_diff`).
+         The same step 8.5's batch companion takes, for the same reason. *)
+      apply_contained_diff ch o t;
+      apply_preserves_wf o t;
+      (match apply_contained ch o t with
+       | Ok t' -> contained_preserves_all_with ch (i + 1) r t'
+       | Error _ -> ())
+#pop-options
+
+(* ---- 9.3 the dry run agrees with the mutating call, index and envelope included ----
+
+   Note what this needs and 8.5's `can_apply_contained_agrees` did: nothing. That lemma needed
+   `wf t` because the per-op dry run reaches the three validators directly and has to be shown not
+   to take a branch the mutating call does not. The sequence pair cannot diverge that way by
+   construction — both fold the SAME per-op call — so the agreement is structural, and saying so
+   is the honest reading of why the shipped `canApplyAll` threads `apply` rather than `canApply`. *)
+let rec can_apply_all_with_agrees (ch:tree -> bool) (i:nat) (os:list op) (t:tree)
+  : Lemma (ensures can_apply_all_with ch i os t ==
+                   (match apply_all_with ch i os t with
+                    | Ok _ -> Ok ()
+                    | Error (j, e, _) -> Error (j, e))) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r -> (match apply_contained ch o t with
+                 | Ok t' -> can_apply_all_with_agrees ch (i + 1) r t'
+                 | Error _ -> ())
+
+(* ---- 9.4 and the plain pair IS the total instance ----
+
+   `Ops.applyAll` is `applyAllWith (fun _ -> true)` and `Ops.canApplyAll` is
+   `canApplyAllWith (fun _ -> true)`, so no caller of either moved when the capability arrived.
+   Discharged against `TreeOps.apply_all` and section 8's `can_apply_all` — the two folds as they
+   stood BEFORE this phase — so what is proved is agreement with the shipped behaviour rather than
+   agreement with a restatement of itself. The index and the partial tree are the new surface's
+   own and have no counterpart on the old side; everything the old side reports, the new one
+   reports identically. *)
+let rec all_with_at_total_is_plain (i:nat) (os:list op) (t:tree)
+  : Lemma (ensures (match apply_all_with (fun _ -> true) i os t with
+                    | Ok t' -> apply_all os t == Ok t'
+                    | Error (_, e, _) -> apply_all os t == Error e) /\
+                   (match can_apply_all_with (fun _ -> true) i os t with
+                    | Ok () -> can_apply_all os t == Ok ()
+                    | Error (_, e) -> can_apply_all os t == Error e)) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      apply_contained_is_apply o t;
+      (match apply o t with
+       | Ok t' -> all_with_at_total_is_plain (i + 1) r t'
+       | Error _ -> ())
+
+(* ---- 9.5 the gap, closed — the counterexample section 8.6 recorded, answered ----
+
+   `can_apply_all_ignores_containment` above is KEPT, and it is worth being exact about why,
+   because the obvious reading is that this phase should have retired it. It is still TRUE, and
+   after this phase it is no longer only a finding: it is the pin that the plain pair's behaviour
+   did NOT move. What 160 closes is the absence of ANY container-aware sequence surface, not the
+   plain pair's blindness — the plain pair is blind BY CONSTRUCTION, being the `fun _ -> true`
+   instance, and a phase that changed that would have broken every existing caller.
+
+   So the two lemmas are read together: the same script, at the same tree. The plain dry run
+   certifies it and always will; the container-aware one refuses it at index 0 with the envelope
+   `applyAllWith` will raise, naming the leaf and its kind tag; and the mutating call hands back
+   the tree untouched, because the refusal is at the first step and the accepted prefix is
+   empty. *)
+let can_apply_all_with_sees_containment ()
+  : Lemma (ensures can_apply_all [cx_move_into_leaf] cx_box_tree == Ok () /\
+                   can_apply_all_with cx_box 0 [cx_move_into_leaf] cx_box_tree ==
+                     Error (0, NotAContainer "leaf" "para") /\
+                   apply_all_with cx_box 0 [cx_move_into_leaf] cx_box_tree ==
+                     Error (0, NotAContainer "leaf" "para", cx_box_tree))
+  = assert_norm (can_apply_all [cx_move_into_leaf] cx_box_tree == Ok ());
+    assert_norm (can_apply_all_with cx_box 0 [cx_move_into_leaf] cx_box_tree ==
+                 Error (0, NotAContainer "leaf" "para"));
+    assert_norm (apply_all_with cx_box 0 [cx_move_into_leaf] cx_box_tree ==
+                 Error (0, NotAContainer "leaf" "para", cx_box_tree))

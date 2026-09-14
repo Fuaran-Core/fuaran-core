@@ -389,10 +389,20 @@ module Ops =
         : Result<unit, Rejection<'Id>> =
         canApplyWith canHold w idw op root
 
-    /// Apply a sequence non-atomically, threading the tree. On failure returns the
-    /// failing index, the envelope, and the partial tree built so far (the shape every
-    /// domain `applyAll` returns).
-    let applyAll
+    /// Apply a sequence non-atomically under a container capability (Phase 160) — the
+    /// sequence-level `applyContained`, threading `applyWith canHold` so every step sees the
+    /// capability the per-op surface has consulted since Phase 251.
+    ///
+    /// FIRST REFUSAL WINS, and a script is **not** a `Batch`. `Batch` is all-or-nothing inside
+    /// one op: it aborts and the original tree survives. A script stops at the first refusal and
+    /// returns the tree built so far, so the accepted prefix is kept. On failure the payload is
+    /// `(index, envelope, partial tree)`: the **index** is the 0-based position of the refused op
+    /// in `ops` (it counts steps offered, so it is the position of the step that failed, not the
+    /// count that succeeded), and the tree is the one the accepted prefix reached — the state the
+    /// refused step was offered against. That triple is the shape every domain `applyAll`
+    /// returns and the contract consumers already rely on.
+    let applyAllWith
+        (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
@@ -402,16 +412,21 @@ module Ops =
             function
             | [] -> Ok node
             | o :: rest ->
-                match apply w idw o node with
+                match applyWith canHold w idw o node with
                 | Ok node' -> go (i + 1) node' rest
                 | Error e -> Error(i, e, node)
 
         go 0 root ops
 
-    /// Dry-run a sequence (Phase 246): report the first failing index + envelope without
-    /// returning a tree. The sequence is order-dependent, so this threads through `apply`
-    /// (each step's check sees the prior step's tree) and discards the materialised tree.
-    let canApplyAll
+    /// Dry-run a sequence under a container capability (Phase 160) — the `canApplyAll` mirror of
+    /// `applyAllWith`, and the pre-flight a container-aware executor needs: it reports the same
+    /// first-refusal index and the same envelope `applyAllWith` would, `NotAContainer` included.
+    ///
+    /// The sequence is order-dependent, so this threads through `applyWith canHold` (each step's
+    /// check sees the prior step's tree) and discards the materialised tree — the same shape
+    /// `canApplyAll` has carried since Phase 246, with the capability now threaded.
+    let canApplyAllWith
+        (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
@@ -421,11 +436,37 @@ module Ops =
             function
             | [] -> Ok()
             | o :: rest ->
-                match apply w idw o node with
+                match applyWith canHold w idw o node with
                 | Ok node' -> go (i + 1) node' rest
                 | Error e -> Error(i, e)
 
         go 0 root ops
+
+    /// Apply a sequence non-atomically, threading the tree. Every node is treated as able to hold
+    /// children, so this is `applyAllWith (fun _ -> true)` and its behaviour is exactly what it
+    /// was before Phase 160 — the instance relation `apply`/`applyContained` have carried since
+    /// Phase 251, now at the sequence level. First refusal wins: on failure the failing index, the
+    /// envelope, and the partial tree built so far.
+    let applyAll
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        applyAllWith (fun _ -> true) w idw ops root
+
+    /// Dry-run a sequence (Phase 246): report the first failing index + envelope without
+    /// returning a tree. `canApplyAllWith (fun _ -> true)` since Phase 160 — the check consults
+    /// no capability, so a script it certifies can still be refused by `applyContained` /
+    /// `applyAllWith` at a step whose parent cannot hold children. A container-aware caller
+    /// pre-flights with `canApplyAllWith` and executes with `applyAllWith`.
+    let canApplyAll
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<unit, int * Rejection<'Id>> =
+        canApplyAllWith (fun _ -> true) w idw ops root
 
     /// Derive the inverse of an op from the **pre-state** tree (the tree the op applied to)
     /// — Phase 242. The skeleton-five are structural, so each inverse is recoverable from
