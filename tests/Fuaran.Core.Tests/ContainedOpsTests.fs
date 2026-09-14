@@ -58,7 +58,7 @@ let tests =
                   (Ops.applyContained canHold nodew idw op (mixed ()) |> Result.map ignore)
                   "check ≡ apply (contained)"
 
-          // ---- Phase 161 (DECISIONS D37, option A): the graft's INTERIOR is inspected ----
+          // ---- Phase 161 (DECISIONS D38, option A): the graft's INTERIOR is inspected ----
           // Phase 140's `contained_op` counterexample, now a refusal. `canHold` used to be applied
           // to the PARENT and to nothing inside the inserted subtree, so a graft that placed
           // children under its own non-container node was accepted whole and the invariant
@@ -124,7 +124,7 @@ let tests =
 
           testCase "the duplicate-id scan still outranks the interior walk"
           <| fun _ ->
-              // D37's precedence decision, pinned: the new check goes LAST, so no operation that
+              // D38's precedence decision, pinned: the new check goes LAST, so no operation that
               // was refused before Phase 161 changes its class. This graft breaks BOTH invariants.
               let graft = InsertChild("s", RNode.node "p" "para" [ RNode.leaf "b" "para" "" ])
 
@@ -134,7 +134,7 @@ let tests =
 
           testCase "MoveNode does NOT walk the moved subtree's interior"
           <| fun _ ->
-              // D37's scope decision. The moved subtree is already in the tree, so a move carries
+              // D38's scope decision. The moved subtree is already in the tree, so a move carries
               // in no interior structure the tree did not already hold; refusing it would be an
               // invariant-REPAIR gate rather than a graft check. Built by hand because the engine
               // will not produce this tree any more: `s` holds a para that holds a para.

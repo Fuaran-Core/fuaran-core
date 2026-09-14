@@ -296,8 +296,9 @@ module Conformance =
             Counterexample = idRoundTrip } ]
 
     /// The op-algebra laws: apply totality (never throws), `canApply` ≡ `apply` (same
-    /// accept/reject + envelope), apply∘invert = identity on every applyable op, and — Phase 137 —
-    /// an accepted insert introduces no id already present.
+    /// accept/reject + envelope), apply∘invert = identity on every applyable op, — Phase 137 —
+    /// an accepted insert introduces no id already present, and — Phase 139 — apply's accept path
+    /// preserves `Tree.WellFormed`, the sampled twin of the apply-engine preservation theorem.
     ///
     /// **The insert-uniqueness law needs a BUILT arm, and that is the whole reason it reads the way
     /// it does.** `genOp`'s insert branch calls `gen.FreshNode idKeys`, whose contract is a node
@@ -325,6 +326,7 @@ module Conformance =
         let mutable equivalence = None
         let mutable inversion = None
         let mutable uniqueness = None
+        let mutable preservation = None
 
         /// The first id `t` carries twice (by key), if any — the post-condition an accepted insert
         /// must not create.
@@ -346,6 +348,32 @@ module Conformance =
             let tree, r1 = gen.Tree rng
             let op, r2 = genOp nodew idw gen tree r1
             rng <- r2
+
+            /// Phase 139 — the sampled twin of the apply-engine preservation theorem: if the
+            /// pre-state is `Tree.WellFormed` and `apply` ACCEPTS, the post-state is too. Quantified
+            /// over every op the sample reaches, where the Phase 137 law beside it is about inserts
+            /// alone — a `MoveNode` or a `Batch` that broke uniqueness would be invisible to that
+            /// one and is exactly what the theorem claims cannot happen.
+            ///
+            /// The pre-state guard is load-bearing rather than defensive: the law says apply
+            /// PRESERVES well-formedness, and an op applied to an already-malformed tree can leave
+            /// it malformed without any of that being apply's doing. A generator that happened to
+            /// draw a malformed tree would otherwise turn a true theorem into a red law.
+            let notePreserves (origin: string) (op: SkeletonOp<'Node, 'Id>) (pre: 'Node) (post: 'Node) =
+                if preservation.IsNone && Tree.isWellFormed nodew idw pre then
+                    match Tree.wellFormed nodew idw post with
+                    | Tree.RepeatedId d ->
+                        preservation <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: an ACCEPTED %s %A left a WELL-FORMED tree carrying id %s twice"
+                                    seed
+                                    i
+                                    origin
+                                    op
+                                    (idw.ToString d)
+                            )
+                    | Tree.Structural -> ()
 
             /// Record an accepted insert that left a repeated id behind. Shared by the drawn and the
             /// built arms, because the property is the same one either way.
@@ -396,6 +424,9 @@ module Conformance =
                      | InsertChild(_, inserted) -> noteIfRepeats "drawn" inserted post
                      | _ -> ())
 
+                    // Phase 139 — over EVERY drawn op, not just inserts.
+                    notePreserves "drawn" op tree post
+
                     match Ops.invert nodew idw op tree with
                     | Error e ->
                         if inversion.IsNone then
@@ -419,7 +450,7 @@ module Conformance =
             // Phase 161 widened `validateInsert` to walk the GRAFT's interior as well, and this arm
             // builds a shell that HOLDS children — so the note that used to stand here ("`canHold`
             // is never applied to the incoming subtree") is no longer true. The arm is unaffected,
-            // and by construction rather than by luck: the duplicate-id scan runs FIRST (D37's
+            // and by construction rather than by luck: the duplicate-id scan runs FIRST (D38's
             // precedence decision), and `carries` below is exactly the condition that makes it
             // fire, so a built candidate always earns `DuplicateId` before the interior walk is
             // reached. `containerLaws` is where the interior walk is certified.
@@ -487,7 +518,9 @@ module Conformance =
                                     )
 
                             match res with
-                            | Ok post -> noteIfRepeats origin candidate post
+                            | Ok post ->
+                                noteIfRepeats origin candidate post
+                                notePreserves origin colliding tree post
                             | Error _ -> ()
 
         [ { Law = "apply totality (never throws)"
@@ -501,7 +534,10 @@ module Conformance =
             Counterexample = inversion }
           { Law = "an accepted insert introduces no id already present"
             Passed = uniqueness.IsNone
-            Counterexample = uniqueness } ]
+            Counterexample = uniqueness }
+          { Law = "apply's accept path preserves Tree.WellFormed"
+            Passed = preservation.IsNone
+            Counterexample = preservation } ]
 
     /// The op-stream laws: `verifyChain` accepts an intact chain and rejects a tampered
     /// op; `replay` re-derives the live state from the base state.
@@ -7876,7 +7912,7 @@ module Conformance =
 
             // Evidence only where the witness carried the shape AND the graft is clean by every
             // OTHER clause of `validateInsert` — a candidate that also breaks id uniqueness earns
-            // `DuplicateId` first (D37's precedence), and would measure that instead.
+            // `DuplicateId` first (D38's precedence), and would measure that instead.
             let usable =
                 sameIdentity shell graft
                 && nodew.Children graft |> List.map (fun c -> idw.ToString(nodew.Id c)) = [ idw.ToString(nodew.Id inner) ]
@@ -7918,7 +7954,7 @@ module Conformance =
                         graftRefusal <-
                             Some(
                                 sprintf
-                                    "seed=%d iter=%d: a graft whose root %s (kind %s) holds a child while canHold refuses it was answered with %A — it must be NotAContainer naming that node (DECISIONS D37; proofs/Preservation.fst, nested_graft_refused)"
+                                    "seed=%d iter=%d: a graft whose root %s (kind %s) holds a child while canHold refuses it was answered with %A — it must be NotAContainer naming that node (DECISIONS D38; proofs/Preservation.fst, nested_graft_refused)"
                                     seed
                                     i
                                     shellKey
@@ -7947,7 +7983,7 @@ module Conformance =
     ///
     /// Phase 140 proved `Ops.applyContained` preserves the invariant it exists to keep — *every node
     /// with children satisfies `canHold`* — and named the two hypotheses the theorem must carry to
-    /// be true of the function that ships. Phase 161 discharged one of them in code (DECISIONS D37:
+    /// be true of the function that ships. Phase 161 discharged one of them in code (DECISIONS D38:
     /// `validateInsert` walks the graft). The other cannot be discharged by any engine check, and
     /// this family is where it lands instead. Three laws and an adequacy guard:
     ///

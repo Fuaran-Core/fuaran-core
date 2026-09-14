@@ -2323,6 +2323,12 @@ let private adversarialOpEncodings: string list =
 //       OPERATION each returns, plus the round trip run on production: applying the inverse to the
 //       result must give the input back, which is `invert_applicable` instantiated.
 //
+//  TWO SOURCES OF (op, state) PAIRS, since Phase 139. The generator plus the minted grafts is the
+//  first; the shared corpus's `apply/` family is the second, decoded through its own envelope and
+//  asked of both sides through this same probe. That family is also what four other hosts certify
+//  against, so running it here joins "the model agrees with production" to "production agrees with
+//  the published contract" instead of leaving them two unconnected claims.
+//
 //  THE GO-RED IS THE RETIRED COUNTEREXAMPLE. `TreeOps.apply_pre137` is the pre-Phase-137 clause
 //  kept under its own name (proofs/TreeOps.fst section 13), so the "a validator that skips the
 //  subtree check must LOSE" case needs no instrument built for it: the model of that validator is
@@ -2607,9 +2613,10 @@ let private presProbe
 /// Every op the generator yields, the Phase 133 refusals, AND the disputed grafts minted per state,
 /// asked at every state a prefix of the generated pool reaches.
 ///
-/// Phase 139's `apply/` fixture family does not exist yet — it lands after this phase — so the pool
-/// here is the generator plus the constructed grafts, and that is stated rather than implied. When
-/// those fixtures land, this differential gains them as a third source.
+/// This is the GENERATED source. Phase 139 landed the second one — the shared corpus's `apply/`
+/// family, run by `presCorpusDifferential` below — and the two answer different questions rather
+/// than one twice: this pool is wide and nobody chose it, and the corpus pool is narrow and
+/// deliberately covers one clause per op, so a shape the generator never draws is still asked.
 let private presDifferential
     (modelApply: TreeOps.op -> TreeOps.tree -> DagFold.outcome<TreeOps.tree, TreeOps.rejection>)
     (seed: int)
@@ -3011,6 +3018,23 @@ let private contDifferential
 
     tally
 
+
+/// The SECOND source (Phase 139): the shared corpus's `apply/` family, decoded through the
+/// envelope's own codec and asked of both sides through the same probe.
+///
+/// Why a committed corpus is worth running beside a generator that already draws thousands of
+/// pairs. The generator's pool is whatever its lane draws reach, so it is wide and unchosen —
+/// good for finding a disagreement nobody anticipated, and silent about any clause it happens
+/// never to draw. The corpus is the opposite: one vector per validator clause per op, authored,
+/// and the same bytes four other hosts are asked to certify against. Running it here means the
+/// F* model is held to the SAME artefact the hosts are, so "the model agrees with production"
+/// and "production agrees with the published contract" stop being two unconnected claims.
+let private presCorpusDifferential
+    (modelApply: TreeOps.op -> TreeOps.tree -> DagFold.outcome<TreeOps.tree, TreeOps.rejection>)
+    (vectors: ApplyVectorExport.ParsedVector list)
+    : PresTally =
+    vectors
+    |> List.fold (fun acc (v: ApplyVectorExport.ParsedVector) -> presProbe modelApply v.Op v.Tree acc) emptyPresTally
 
 [<Tests>]
 let proofOracleTests =
@@ -4452,6 +4476,67 @@ let proofOracleTests =
                       Expect.isTrue
                           (Set.contains cls t.Classes)
                           (sprintf "the sample reached a %s rejection (reached: %A)" cls t.Classes)
+
+          // ---- Phase 139 — the same differential, over the corpus `apply/` family ----
+
+          testCase "the preservation oracle agrees with Ops.apply over the corpus `apply/` fixtures"
+          <| fun _ ->
+              match SiblingCorpus.resolve ApplyVectorExport.familyDirName with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let path = ApplyVectorExport.vectorsPath root
+
+                  if not (System.IO.File.Exists path) then
+                      failtestf
+                          "the corpus at '%s' carries no %s — the differential's second host is not published there"
+                          root
+                          ApplyVectorExport.vectorsFileName
+
+                  match ApplyVectorExport.parseVectors (System.IO.File.ReadAllText path) with
+                  | Error m -> failtest ("the committed apply vectors did not read: " + m)
+                  | Ok vectors ->
+                      let t = presCorpusDifferential TreeOps.apply vectors
+
+                      match t.Diffs with
+                      | d :: _ -> failtestf "the preservation oracle and production DISAGREE on a corpus fixture\n%s" d
+                      | [] ->
+                          // Adequacy over the committed sample, so a corpus that quietly stopped
+                          // carrying a clause cannot read as agreement about it. The bounds are the
+                          // family's own claim about itself, not a count of this run.
+                          Expect.isGreaterThan
+                              t.Accepted
+                              0
+                              (sprintf "the corpus sample carries accepted ops (accepted=%d)" t.Accepted)
+
+                          Expect.isGreaterThan
+                              t.Rejected
+                              0
+                              (sprintf "the corpus sample carries refused ops (rejected=%d)" t.Rejected)
+
+                          Expect.isGreaterThan
+                              t.Collided
+                              0
+                              (sprintf
+                                  "the corpus sample carries a graft whose id the tree already holds (collided=%d)"
+                                  t.Collided)
+
+                          Expect.isGreaterThan
+                              t.Duplicated
+                              0
+                              (sprintf
+                                  "the corpus sample carries a graft repeating an id WITHIN itself (duplicated=%d)"
+                                  t.Duplicated)
+
+                          for cls in
+                              [ "UnknownNode"
+                                "DuplicateId"
+                                "CannotRemoveRoot"
+                                "WouldNestUnderSelf"
+                                "ReorderMismatch" ] do
+                              Expect.isTrue
+                                  (Set.contains cls t.Classes)
+                                  (sprintf "the corpus sample reached a %s rejection (reached: %A)" cls t.Classes)
 
           testCase "a validator that SKIPS the subtree check loses against production — the measurement can fail"
           <| fun _ ->

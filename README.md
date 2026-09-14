@@ -65,8 +65,18 @@ surface**, and it is the exact scope of the one structural invariant the engine 
 
 > **each id occurs at most once over the witness's `Children` traversal.**
 
-`Ops.apply` keeps it. An `InsertChild` whose subtree carries an id the tree already holds — or
-which repeats an id within itself — is refused with `DuplicateId`, naming the first offender.
+That invariant has a name — **`Tree.WellFormed`** — and one definition. `Tree.wellFormed` answers it
+for a tree and names the first id that breaks it; `Tree.graftWellFormed` answers it for the tree a
+graft would produce, without building it. `Ops.apply` keeps it by reading the second: an
+`InsertChild` whose subtree carries an id the tree already holds — or which repeats an id within
+itself — is refused with `DuplicateId`, naming the first offender. `Diff.toOps` reads the first.
+Asking whether a tree is valid and refusing an op that would invalidate it are therefore the same
+question, asked of the same function.
+
+**"Valid" here means STRUCTURALLY valid and nothing more.** Validity is three layers and only the
+first is this library's: structural (the invariant above), vocabulary (your wire boundary decides
+whether a kind and its fields are ones you know), and rule families (your own pre-emit lint). A
+claim that says only "valid" has not said which, and `Tree.WellFormed` exists so that it can.
 
 **A node your domain holds in a keyed, non-structural position is invisible to that traversal**,
 and uniqueness over those positions is **your domain's obligation, not this library's.** If your
@@ -77,9 +87,11 @@ before handing an op to `Ops.apply`; this engine cannot see those nodes and will
 That boundary is deliberate rather than a gap waiting to be closed. `Children` is also what the
 engine **rebuilds** through, so widening the witness to reach keyed positions would oblige every
 domain to re-express them as an ordered list — a large change to what a domain must model, to buy
-a check the domain is far better placed to make. `Conformance.opAlgebra`'s
-`"an accepted insert introduces no id already present"` law certifies the invariant at exactly
-this scope over your own witness.
+a check the domain is far better placed to make. `Conformance.opAlgebra` certifies the invariant at
+exactly this scope over your own witness, with two laws that say different things: `"an accepted
+insert introduces no id already present"` is about the op that can create a duplicate, and
+`"apply's accept path preserves Tree.WellFormed"` is about every op, so a `MoveNode` or a `Batch`
+that broke it could not hide behind the first.
 
 ## The artifact-function three laws (`Fuaran.Core.Function`)
 

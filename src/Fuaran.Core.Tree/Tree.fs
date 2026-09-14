@@ -44,6 +44,85 @@ module Tree =
     /// Every id in the tree, in preorder.
     let ids (w: NodeWitness<'Node, 'Id>) (root: 'Node) : 'Id list = preorder w root |> List.map w.Id
 
+    // ---- structural validity (Phase 139) ----
+
+    /// The verdict of `Tree.wellFormed` — Core's ONE definition of STRUCTURAL validity, named so a
+    /// claim can point at the layer it is about.
+    ///
+    /// **Validity is three layers and this is the first of them.** Structural validity is what the
+    /// witness surface can see; a domain's wire boundary decides VOCABULARY validity (is this a kind
+    /// I know, with the fields it declares), and a domain's pre-emit lint decides its own RULE
+    /// families. Nothing here says anything about the other two, and a reader who wants "is this
+    /// tree valid" has to say which question they are asking.
+    ///
+    /// **Scope: the WITNESS SURFACE.** `Tree.ids` walks `NodeWitness.Children`, so this predicate
+    /// quantifies over exactly the nodes Core can reach and rebuild through. A domain that holds
+    /// nodes in KEYED, NON-STRUCTURAL positions — a switch case table, a named slot map — keeps
+    /// them outside `Children`, so they are invisible here and uniqueness over them is the domain's
+    /// own obligation. The predicate says so rather than implying a whole-tree guarantee Core cannot
+    /// see; see the README, and Phase 137, which scoped the insert validator the same way.
+    ///
+    /// **One clause, not two, and that is a correction to how this was described.** The natural
+    /// pairing is "unique ids AND a single root", but a `'Node` value IS its tree here: the walk
+    /// starts at exactly one node by construction of the type, there is no forest to exclude and no
+    /// second parent to find, so single-rootedness is a TYPE-LEVEL guarantee rather than a
+    /// checkable clause. What remains checkable — and what every downstream function actually
+    /// depends on — is id uniqueness: `Tree.updateNode` rewrites EVERY node matching a repeated id,
+    /// and `Tree.Index.build`'s `Map.ofList` silently keeps the last. So the predicate has one
+    /// clause and says why.
+    type WellFormed<'Id> =
+        /// Every id the `Children` preorder reaches is distinct.
+        | Structural
+        /// The FIRST id, in `Children` preorder, that the tree carries twice.
+        | RepeatedId of 'Id
+
+    /// The first id in `ids` that `seen` already holds or that `ids` repeats within itself — the one
+    /// scan both public forms below project from, so "already in the tree" and "duplicated inside
+    /// the graft" cannot drift apart into two different notions of the same defect.
+    let private firstRepeat (idw: IdWitness<'Id>) (seen: Set<string>) (candidates: 'Id list) : 'Id option =
+        let rec scan (seen: Set<string>) ids =
+            match ids with
+            | [] -> None
+            | i :: rest ->
+                let k = idw.ToString i
+
+                if Set.contains k seen then
+                    Some i
+                else
+                    scan (Set.add k seen) rest
+
+        scan seen candidates
+
+    /// Is `root` structurally well-formed, and if not, which id breaks it? One preorder scan.
+    let wellFormed (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : WellFormed<'Id> =
+        match firstRepeat idw Set.empty (ids w root) with
+        | Some d -> RepeatedId d
+        | None -> Structural
+
+    /// The boolean form, for a caller that does not need the offender named.
+    let isWellFormed (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : bool =
+        match wellFormed w idw root with
+        | Structural -> true
+        | RepeatedId _ -> false
+
+    /// The verdict for the tree that WOULD result from grafting `node` anywhere into `root` —
+    /// computed without building it. Seeded from the root's ids, so one scan decides both halves:
+    /// an id the tree already carries, and an id the graft repeats within itself. The offender named
+    /// is the first in `Tree.ids node` order, which for a preorder walk means the graft's own id
+    /// outranks its descendants'.
+    ///
+    /// This is the question every insert validator asks; `Ops`'s reads it, so the accept path and
+    /// this predicate cannot diverge.
+    let graftWellFormed
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (node: 'Node)
+        (root: 'Node)
+        : WellFormed<'Id> =
+        match firstRepeat idw (ids w root |> List.map idw.ToString |> Set.ofList) (ids w node) with
+        | Some d -> RepeatedId d
+        | None -> Structural
+
     /// The node carrying `target`, if present.
     let tryFind (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (target: 'Id) (root: 'Node) : 'Node option =
         preorder w root |> List.tryFind (fun n -> idw.Equals (w.Id n) target)

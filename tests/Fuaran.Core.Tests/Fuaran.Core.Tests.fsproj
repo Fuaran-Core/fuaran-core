@@ -87,6 +87,12 @@
          reference witness, a second non-tree domain, and the order-sensitive go-red case.
          Depends on nothing here either, so it simply follows. -->
     <Compile Include="FoldConfluenceTests.fs" />
+    <!-- Phase 139 — the `apply/` corpus family: the host-neutral skeleton envelope, its codec,
+         and the emitter behind the `emit-apply` flag. It sits HERE rather than beside the other
+         corpus exporters further down because ProofOracleTests.fs below reads its decoder, to run the
+         Phase 138 preservation differential over the committed fixtures as a second host beside
+         the generator. Reads Reference.fs and the kit, and nothing else here. -->
+    <Compile Include="ApplyVectorExport.fs" />
     <!-- Phase 131 — the F* oracle as a corpus host: the extracted model of the DAG fold run
          beside the production Dag.reconcileMany over the Phase 100 lane generators (which it
          reads from FoldConfluenceTests.fs above) and over the wire corpus's ops/ fixtures. -->
@@ -134,6 +140,12 @@
          checked out alongside. Reads nothing here, so it simply follows. -->
     <Compile Include="LawVectorExport.fs" />
     <Compile Include="LawVectorTests.fs" />
+    <!-- Phase 139 — the checks that keep the `apply/` family an oracle: a decode-and-recompute
+         pass over every rendered vector, three go-reds proving the pass can fail, the sample's
+         adequacy to its own description, and the byte comparison against the shared corpus.
+         Reads ApplyVectorExport.fs above and SiblingCorpus.fs; appended beside the sibling
+         law-vector family it mirrors. -->
+    <Compile Include="ApplyVectorTests.fs" />
     <!-- Phase 126 — the construct-then-encode family over the reference witness: the authoring
          surface certified, and the go-red on a constructor that widens a field the encoder does
          not expect. Reads only Reference.fs and the kit, so it simply follows. -->
