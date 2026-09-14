@@ -4358,7 +4358,11 @@ let proofOracleTests =
           <| fun _ ->
               // `TreeOps.leaf_independence_diamond` is proved on the model; this is that theorem's
               // instance on the EXTRACTED code, over the pool Phase 80's generator produces. The
-              // alphabet is the non-`Batch` ops, which is the alphabet the theorem is stated over.
+              // alphabet is the non-`Batch` ops, which is the alphabet THAT theorem is stated over
+              // — Phase 133's, and this case is Phase 133's evidence, unchanged. Since Phase 162
+              // the model also carries `op_independence_diamond` over the whole alphabet, batches
+              // included; its evidence is the case below rather than a widening of this one, so
+              // that the two alphabets stay separately measured.
               let mutable r = ConfRng.ofSeed 1331
               let mutable breaks = []
               let mutable met = 0
@@ -4426,6 +4430,98 @@ let proofOracleTests =
               Expect.isNonEmpty
                   breaks
                   "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose"
+
+          // ---- Phase 162 — the same diamond over the WHOLE alphabet, nested batches included ----
+
+          testCase "the extracted model keeps the diamond on BATCH pairs — the shape Phase 133 left open"
+          <| fun _ ->
+              // `TreeOps.covered` named three pair shapes the Phase 133 diamond could not reach:
+              // either side a `Batch` that neither does nothing nor relocates. Phase 162 lifted the
+              // diamond along a batch's script, deleted `covered`, and stated
+              // `op_independence_diamond` over the whole `SkeletonOp` alphabet. This is that
+              // widening measured on the EXTRACTED code, and it is a case of its own rather than a
+              // change to the one above, so Phase 133's evidence stays exactly what it was.
+              //
+              // The pool is built from the generated ops the case above filters out batches from,
+              // wrapped three ways: a singleton batch (same footprint as its member, so it inherits
+              // that member's independence and guarantees the premise is met at all), a paired
+              // batch, and one doubly-nested batch — because "nested to any depth" is the part of
+              // the claim a single wrapping would not exercise. Only inserts and reorders are
+              // wrapped: a batch carrying a remove or a move RELOCATES, and such a pair was already
+              // closed by Phase 133 without any lift.
+              let mutable r = ConfRng.ofSeed 1620
+              let mutable breaks = []
+              let mutable met = 0
+              let mutable batchMet = 0
+
+              for _ in 1..20 do
+                  let lanes, r' = treeLaneGen.Lanes 3 r
+                  r <- r'
+                  let ops = List.concat lanes
+
+                  let states =
+                      ops
+                      |> List.fold
+                          (fun (acc, cur) op ->
+                              match Ops.apply nodew idw op cur with
+                              | Ok t -> (acc @ [ t ]), t
+                              | Error _ -> acc, cur)
+                          ([ treeBase ], treeBase)
+                      |> fst
+                      |> List.map toModelTree
+
+                  let leaves =
+                      ops
+                      |> List.filter (fun o ->
+                          match o with
+                          | Batch _ -> false
+                          | _ -> true)
+                      |> List.map (toModelOpWith toModelTree)
+
+                  let liftable =
+                      leaves
+                      |> List.filter (fun o ->
+                          match o with
+                          | TreeOps.InsertChild _
+                          | TreeOps.ReorderChildren _ -> true
+                          | _ -> false)
+
+                  let batches =
+                      (liftable |> List.map (fun o -> TreeOps.Batch [ o ]))
+                      @ (liftable |> List.chunkBySize 2 |> List.map TreeOps.Batch)
+                      @ (match liftable with
+                         | o :: _ -> [ TreeOps.Batch [ TreeOps.Batch [ o ] ] ]
+                         | [] -> [])
+
+                  let b, m = modelDiamondBreaks TreeOps.op_fp (leaves @ batches) states
+                  breaks <- breaks @ b
+                  met <- met + m
+
+                  // The adequacy this family cannot read off `met`: how many of the met pairs
+                  // carried a batch at all. Without it the pool could collapse to leaves and the
+                  // widening would be measured by nothing while the case still passed. Measured at
+                  // 20 trials, seed 1620: met=156 of which batchMet=91. The thresholds are below
+                  // both with room and are there to catch a generator that stops producing
+                  // independent pairs, not to pin the numbers.
+                  for a in batches do
+                      for bb in leaves @ batches do
+                          if DagFold.independent (TreeOps.op_fp a) (TreeOps.op_fp bb) then
+                              for s in states do
+                                  match TreeOps.wapply a s, TreeOps.wapply bb s with
+                                  | DagFold.Ok _, DagFold.Ok _ -> batchMet <- batchMet + 1
+                                  | _ -> ()
+
+              match breaks with
+              | why :: _ -> failtest why
+              | [] ->
+                  Expect.isGreaterThan met 100 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+
+                  Expect.isGreaterThan
+                      batchMet
+                      0
+                      (sprintf
+                          "the pool met the premise on pairs carrying a BATCH — the shape Phase 133 left open (batchMet=%d)"
+                          batchMet)
 
           // ---- Phase 143 — the precision ceiling: the pinned unknown-parent clause is NECESSARY ----
 

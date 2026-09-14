@@ -2247,3 +2247,42 @@ let can_apply_all_with_sees_containment ()
                  Error (0, NotAContainer "leaf" "para"));
     assert_norm (apply_all_with cx_box 0 [cx_move_into_leaf] cx_box_tree ==
                  Error (0, NotAContainer "leaf" "para", cx_box_tree))
+
+
+(* ======================================================================================
+   10. THE PREORDER-POSITION LEMMA UNDER A REMOVE, AND UNDER ANY ACCEPTED OPERATION
+       (Phase 162).
+
+       `TreeOps` section 19 proves `preorder_parent_first`: on a well-formed tree, a parent
+       precedes each of its children in `Tree.preorder`. It states the corollary for `ins` and for
+       `reorder_at` there, off `ins_wf` and `reorder_wf`, and leaves the `rem_at` corollary here
+       because `rem_wf` is this module's (section 3) and `TreeOps` cannot cite it — this module
+       OPENS that one.
+
+       WHAT "PRESERVATION UNDER A REMOVE" MEANS, since the naive reading is not a statement. A
+       remove takes ids AWAY: the positions of a removed subtree do not move, they VANISH, so
+       there is nothing to preserve about them, and a lemma quantifying over the ORIGINAL tree's
+       nodes would be false on exactly the nodes the operation exists to destroy. The statement is
+       therefore over the SURVIVORS — the tree the remove hands back — and it says that whatever
+       parent relation survives is still respected by the walk. That is the shape a reconstruction
+       argument wants, because what it asks about a removal is precisely what is still there.
+
+       The general form is the one to cite. `apply_preserves_wf` (section 4) covers all five
+       clauses including a nested `Batch`, so the corollary over any ACCEPTED operation is one
+       line and subsumes the three per-edit ones. It is stated second, and it is the one a
+       reconstruction theorem consumes.
+   ====================================================================================== *)
+
+(* ---- the remove, in its survivor form ---- *)
+
+let rem_preserves_parent_first (pid x:string) (t:tree) (y q:string)
+  : Lemma (requires wf t /\ parent_of y (rem_at pid x t) == Some q)
+          (ensures precedes q y (ids (rem_at pid x t)))
+  = rem_wf pid x t; preorder_parent_first (rem_at pid x t) y q
+
+(* ---- and the general form: ANY accepted operation, including a batch ---- *)
+
+let apply_preserves_parent_first (o:op) (t:tree) (t':tree) (y q:string)
+  : Lemma (requires wf t /\ apply o t == Ok t' /\ parent_of y t' == Some q)
+          (ensures precedes q y (ids t'))
+  = apply_preserves_wf o t; preorder_parent_first t' y q
