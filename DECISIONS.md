@@ -1,5 +1,43 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-14 — D35: a union-case name shared by two types in one namespace is a Fable defect, so every reason family qualifies its cases
+
+**Decided (Phase 147).** `Fuaran.Core` now carries two namespace-level closed unions for a
+walker's break reason — `ChainBreakReason` (Phase 125) and `DagBreakReason` (Phase 147) — and both
+declare an `Unrecognised of string` arm, deliberately, because the two shapes are meant to read
+alike. The day the second one landed, the pre-existing `chainBreakReasonLaws` in
+`Fuaran.Core.Conformance` stopped compiling **on the Fable pipeline only**: an unqualified pattern
+`| Unrecognised s -> …` matched against a `ChainBreakReason` scrutinee was reported as
+`expected 'ChainBreakReason' but here has type 'DagBreakReason'`, on a tree the .NET compiler had
+just built with zero errors and zero warnings and whose full Expecto suite was green.
+
+**The general fact, stated so it is not rediscovered.** The .NET F# compiler resolves an unqualified
+union-case PATTERN from the scrutinee's already-known type; Fable does not, and resolves it by
+plain name lookup in scope, taking whichever type declared that case last. So two types in one
+namespace sharing a case name compile clean on .NET and fail under Fable — and only in the file
+that happens to have both types in scope, which is typically the conformance kit rather than the
+file that added the second type. The build is not the gate for this class; the Fable-clean leg of
+`verify.ps1` is, and this is the first phase on which that leg was load-bearing rather than a
+formality.
+
+**The rule.** A pattern over a case that ANY other union in the same namespace also declares is
+written type-qualified (`ChainBreakReason.Unrecognised s`, `DagBreakReason.Unrecognised s`), in
+library code and in the conformance kit alike, and a comment at the site says why. Renaming the
+arms apart (`UnrecognisedChain` / `UnrecognisedDag`) was rejected: the whole point of the sibling
+shape is that a reader of one family already knows the other, and a name that differs only to
+placate a compiler makes the two families read as different contracts. `[<RequireQualifiedAccess>]`
+on the unions was rejected too, for now: both types are public since 0.23.0 and 0.24.0
+respectively and consumers construct and match their named cases unqualified; forcing
+qualification is a source-breaking change on every consumer, whereas the hazard exists only where
+both types are in scope at once — which, inside this repository, is one file. It becomes worth
+revisiting if a third reason family lands.
+
+**The falsifier, and where it lives.** The fix is commit `910a3ee`: two pattern sites in
+`Conformance.fs` qualified, nothing else changed, and the Fable leg went from two errors to clean
+with the .NET build unchanged. No new test pins the class — the Fable-clean leg already does, on
+every gate — so the obligation this entry adds is to the AUTHOR of the next sibling type: run the
+Fable leg before claiming the tree is green, and expect the failure to surface in a file you did
+not edit.
 ## 2026-09-14 — D34: the apply engine's id-uniqueness gap is FIXED, not assumed away by the theorem
 
 **Decided (Phase 137).** The skeleton-op tree algebra has exactly one structural invariant that is not
