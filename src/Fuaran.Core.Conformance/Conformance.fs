@@ -296,7 +296,22 @@ module Conformance =
             Counterexample = idRoundTrip } ]
 
     /// The op-algebra laws: apply totality (never throws), `canApply` ≡ `apply` (same
-    /// accept/reject + envelope), and apply∘invert = identity on every applyable op.
+    /// accept/reject + envelope), apply∘invert = identity on every applyable op, and — Phase 137 —
+    /// an accepted insert introduces no id already present.
+    ///
+    /// **The insert-uniqueness law needs a BUILT arm, and that is the whole reason it reads the way
+    /// it does.** `genOp`'s insert branch calls `gen.FreshNode idKeys`, whose contract is a node
+    /// whose id is *not* in the tree, so a DRAWN insert never collides — a law quantified over the
+    /// drawn sample alone would certify a validator that checked nothing, which is exactly the
+    /// vacuity `SampleAdequacy` was cut for. Each iteration therefore BUILDS two subtrees whose root
+    /// id is fresh but whose contents repeat an id — one taken from the tree, one repeated within
+    /// itself — and feeds them to this law and to the `canApply ≡ apply` law beside it.
+    ///
+    /// A built candidate is re-read through `Tree.ids` before it counts as evidence: the kit
+    /// deliberately admits a witness whose `ReplaceChildren` is partial on leaves, and the shell
+    /// comes from `FreshNode`, which may be one. A witness that cannot carry a multi-node subtree at
+    /// all cannot exhibit the defect this law is about, so the arm reports nothing rather than
+    /// failing — the law over the drawn sample stays true, just narrower.
     let opAlgebra
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -309,11 +324,45 @@ module Conformance =
         let mutable totality = None
         let mutable equivalence = None
         let mutable inversion = None
+        let mutable uniqueness = None
+
+        /// The first id `t` carries twice (by key), if any — the post-condition an accepted insert
+        /// must not create.
+        let repeatedId (t: 'Node) : string option =
+            let rec scan (seen: Set<string>) ids =
+                match ids with
+                | [] -> None
+                | i :: rest ->
+                    let k = idw.ToString i
+
+                    if Set.contains k seen then
+                        Some k
+                    else
+                        scan (Set.add k seen) rest
+
+            scan Set.empty (Tree.ids nodew t)
 
         for i in 0 .. iterations - 1 do
             let tree, r1 = gen.Tree rng
             let op, r2 = genOp nodew idw gen tree r1
             rng <- r2
+
+            /// Record an accepted insert that left a repeated id behind. Shared by the drawn and the
+            /// built arms, because the property is the same one either way.
+            let noteIfRepeats (origin: string) (inserted: 'Node) (post: 'Node) =
+                match repeatedId post with
+                | Some d when uniqueness.IsNone ->
+                    uniqueness <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: an ACCEPTED %s insert left id %s in the tree twice — the inserted subtree carried ids %A"
+                                seed
+                                i
+                                origin
+                                d
+                                (Tree.ids nodew inserted |> List.map idw.ToString)
+                        )
+                | _ -> ()
 
             let applied =
                 try
@@ -340,6 +389,13 @@ module Conformance =
 
                 match res with
                 | Ok post ->
+                    // Phase 137 — the drawn arm. `FreshNode` should make this unreachable as a
+                    // failure; it is checked anyway, because a generator that breaks its own
+                    // contract is precisely the case nobody would otherwise notice.
+                    (match op with
+                     | InsertChild(_, inserted) -> noteIfRepeats "drawn" inserted post
+                     | _ -> ())
+
                     match Ops.invert nodew idw op tree with
                     | Error e ->
                         if inversion.IsNone then
@@ -356,6 +412,77 @@ module Conformance =
                                     )
                 | Error _ -> ()
 
+            // ---- Phase 137: the deliberate-collision arm (BUILT, not drawn) ----
+            // Only the PARENT is asked to hold children — `validateInsert` never applies `canHold`
+            // to the incoming subtree — so drawing the parent from the holders is enough to reach
+            // the check under a container-aware witness whose fresh nodes are leaves.
+            match Tree.preorder nodew tree |> List.filter canHold with
+            | [] -> ()
+            | holders ->
+                let parent, r3 = ConfRng.choose holders rng
+                let victim, r4 = ConfRng.choose (Tree.preorder nodew tree) r3
+                let treeKeys = Tree.ids nodew tree |> List.map idw.ToString |> Set.ofList
+                let shell, r5 = gen.FreshNode treeKeys r4
+                let inner, r6 = gen.FreshNode (Set.add (idw.ToString(nodew.Id shell)) treeKeys) r5
+                rng <- r6
+
+                let candidates =
+                    [ "descendant-collision", nodew.ReplaceChildren shell [ victim ]
+                      "internal-duplication", nodew.ReplaceChildren shell [ inner; inner ] ]
+
+                for origin, candidate in candidates do
+                    // Evidence only if the witness actually honoured `ReplaceChildren` here, so the
+                    // subtree genuinely repeats an id against the tree or against itself.
+                    let carries =
+                        let rec scan (seen: Set<string>) ids =
+                            match ids with
+                            | [] -> false
+                            | i :: rest ->
+                                let k = idw.ToString i
+                                Set.contains k seen || scan (Set.add k seen) rest
+
+                        scan treeKeys (Tree.ids nodew candidate)
+
+                    if carries then
+                        let colliding = InsertChild(nodew.Id parent, candidate)
+
+                        let applied =
+                            try
+                                Some(Ops.applyContained canHold nodew idw colliding tree)
+                            with _ ->
+                                None
+
+                        match applied with
+                        | None ->
+                            if totality.IsNone then
+                                totality <-
+                                    Some(sprintf "seed=%d iter=%d: apply threw on the built %s insert" seed i origin)
+                        | Some res ->
+                            // the `canApply ≡ apply` family, re-run over the widened op population
+                            let chk = Ops.canApplyContained canHold nodew idw colliding tree
+
+                            let equiv =
+                                match res, chk with
+                                | Ok _, Ok() -> true
+                                | Error e1, Error e2 -> e1 = e2
+                                | _ -> false
+
+                            if not equiv && equivalence.IsNone then
+                                equivalence <-
+                                    Some(
+                                        sprintf
+                                            "seed=%d iter=%d: canApply≠apply on the built %s insert (apply=%A canApply=%A)"
+                                            seed
+                                            i
+                                            origin
+                                            res
+                                            chk
+                                    )
+
+                            match res with
+                            | Ok post -> noteIfRepeats origin candidate post
+                            | Error _ -> ()
+
         [ { Law = "apply totality (never throws)"
             Passed = totality.IsNone
             Counterexample = totality }
@@ -364,7 +491,10 @@ module Conformance =
             Counterexample = equivalence }
           { Law = "apply ∘ invert = identity"
             Passed = inversion.IsNone
-            Counterexample = inversion } ]
+            Counterexample = inversion }
+          { Law = "an accepted insert introduces no id already present"
+            Passed = uniqueness.IsNone
+            Counterexample = uniqueness } ]
 
     /// The op-stream laws: `verifyChain` accepts an intact chain and rejects a tampered
     /// op; `replay` re-derives the live state from the base state.

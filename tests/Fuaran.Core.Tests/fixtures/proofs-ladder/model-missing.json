@@ -1,0 +1,29 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the second proved row cites a model file that is not there at all — the shape a rename or a deletion leaves behind. The module list this fixture is checked against DOES name `Gone`, so the every-module clause stays quiet and the finding is the missing file alone.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-vanished",
+      "level": "proved",
+      "claim": "A proved row over a model file that no longer exists.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "psi",
+        "model": "Gone.fst",
+        "prover": "fixture"
+      }
+    }
+  ]
+}

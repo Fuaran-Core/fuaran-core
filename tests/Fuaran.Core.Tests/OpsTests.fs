@@ -170,3 +170,174 @@ let tests =
               let results = Conformance.normalizeLaws nodew idw opGen 1234 200
               Expect.equal (List.length results) 3 "preservation + idempotence + non-growth"
               Expect.isTrue (results |> List.forall (fun r -> r.Passed)) (sprintf "all pass: %A" results) ]
+
+// ---------------------------------------------------------------------------
+//  Phase 137 — insert-subtree id uniqueness
+//
+//  `validateInsert` used to check only the inserted node's OWN id, so a subtree whose
+//  DESCENDANT id was already in the tree — or which repeated an id within itself — was
+//  accepted, after which `Tree.updateNode` rewrites every node carrying the repeated id and
+//  `Tree.Index.build`'s `Map.ofList` silently keeps the last. These cases are the go-red
+//  proof: each one is accepted before the fix and refused after it.
+//
+//  In `sample ()` the ids are root / a / a1 / a2 / b / b1.
+// ---------------------------------------------------------------------------
+
+/// In the reference domain a "para" is a leaf; everything else can hold children — the same
+/// predicate `ContainedOpsTests` uses, so the contained path is exercised as a domain would.
+let private canHold137 (n: RNode) = n.Kind <> "para"
+
+/// Root id fresh, one DESCENDANT id ("a1") already in the tree.
+let private descendantCollision () =
+    RNode.node "z" "section" [ RNode.leaf "a1" "para" "clash" ]
+
+/// Root id fresh, and NEITHER child id is in the tree — the subtree repeats an id within itself.
+let private internallyDuplicated () =
+    RNode.node "z" "section" [ RNode.leaf "dup" "para" "1"; RNode.leaf "dup" "para" "2" ]
+
+[<Tests>]
+let insertIdUniquenessTests =
+    testList
+        "Ops.InsertChild id uniqueness (Phase 137)"
+        [ testCase "a subtree whose descendant id is already in the tree is refused by apply"
+          <| fun _ ->
+              match Ops.apply nodew idw (InsertChild("b", descendantCollision ())) (sample ()) with
+              | Error(DuplicateId "a1") -> ()
+              | other -> failtestf "expected DuplicateId \"a1\", got %A" other
+
+          testCase "canApply gives the same envelope for the descendant collision"
+          <| fun _ ->
+              let op = InsertChild("b", descendantCollision ())
+
+              Expect.equal
+                  (Ops.canApply nodew idw op (sample ()))
+                  (Ops.apply nodew idw op (sample ()) |> Result.map ignore)
+                  "canApply ≡ apply on the descendant collision"
+
+              match Ops.canApply nodew idw op (sample ()) with
+              | Error(DuplicateId "a1") -> ()
+              | other -> failtestf "expected DuplicateId \"a1\", got %A" other
+
+          testCase "applyContained inherits the check — it shares one validateInsert"
+          <| fun _ ->
+              // The container predicate is applied to the PARENT, never to the inserted node, so
+              // the id check is reached whatever kind the incoming subtree carries.
+              let op = InsertChild("b", descendantCollision ())
+
+              match Ops.applyContained canHold137 nodew idw op (sample ()) with
+              | Error(DuplicateId "a1") -> ()
+              | other -> failtestf "expected DuplicateId \"a1\", got %A" other
+
+              Expect.equal
+                  (Ops.canApplyContained canHold137 nodew idw op (sample ()))
+                  (Ops.applyContained canHold137 nodew idw op (sample ()) |> Result.map ignore)
+                  "canApplyContained ≡ applyContained"
+
+          testCase "a subtree duplicated WITHIN ITSELF is refused even though no id is in the tree"
+          <| fun _ ->
+              // The half none of the sibling hosts covers: they seed their `existing` set from the
+              // root alone, so this shape is accepted there. Core refuses it, because the invariant
+              // is about the tree that RESULTS, and this one carries "dup" twice.
+              let op = InsertChild("b", internallyDuplicated ())
+
+              match Ops.apply nodew idw op (sample ()) with
+              | Error(DuplicateId "dup") -> ()
+              | other -> failtestf "expected DuplicateId \"dup\", got %A" other
+
+              match Ops.canApply nodew idw op (sample ()) with
+              | Error(DuplicateId "dup") -> ()
+              | other -> failtestf "expected DuplicateId \"dup\" from canApply, got %A" other
+
+              match Ops.applyContained canHold137 nodew idw op (sample ()) with
+              | Error(DuplicateId "dup") -> ()
+              | other -> failtestf "expected DuplicateId \"dup\" from applyContained, got %A" other
+
+          testCase "the FIRST offender in Tree.ids order is named"
+          <| fun _ ->
+              // preorder over the incoming subtree is z, b1, a1 — so "b1" is named, not "a1".
+              let sub =
+                  RNode.node "z" "section" [ RNode.leaf "b1" "para" "x"; RNode.leaf "a1" "para" "y" ]
+
+              match Ops.apply nodew idw (InsertChild("b", sub)) (sample ()) with
+              | Error(DuplicateId "b1") -> ()
+              | other -> failtestf "expected the first offender \"b1\", got %A" other
+
+          testCase "the node's own id still outranks an unknown parent (precedence unchanged)"
+          <| fun _ ->
+              // The pre-137 validator checked the inserted node's own id BEFORE parent existence.
+              // `Tree.ids` is preorder, so the widened scan checks that same id first and the
+              // precedence is preserved rather than quietly reordered.
+              match Ops.apply nodew idw (InsertChild("ghost", RNode.leaf "b1" "para" "")) (sample ()) with
+              | Error(DuplicateId "b1") -> ()
+              | other -> failtestf "expected DuplicateId \"b1\" ahead of UnknownNode, got %A" other
+
+          testCase "a descendant collision also outranks an unknown parent"
+          <| fun _ ->
+              match Ops.apply nodew idw (InsertChild("ghost", descendantCollision ())) (sample ()) with
+              | Error(DuplicateId "a1") -> ()
+              | other -> failtestf "expected DuplicateId \"a1\" ahead of UnknownNode, got %A" other
+
+          testCase "the ACCEPT path is unchanged — a genuinely fresh subtree still inserts"
+          <| fun _ ->
+              // The rejection surface widens; the accepted bytes do not move.
+              let fresh =
+                  RNode.node "z" "section" [ RNode.leaf "z1" "para" "x"; RNode.leaf "z2" "para" "y" ]
+
+              match Ops.apply nodew idw (InsertChild("b", fresh)) (sample ()) with
+              | Ok r ->
+                  Expect.equal (childIds nodew "b" r) [ "b1"; "z" ] "appended under b"
+
+                  Expect.equal
+                      (Tree.ids nodew r)
+                      [ "root"; "a"; "a1"; "a2"; "b"; "b1"; "z"; "z1"; "z2" ]
+                      "every id occurs exactly once"
+              | Error e -> failtestf "a fresh subtree must still insert, got %A" e
+
+          testCase "Batch is all-or-nothing over the widened refusal"
+          <| fun _ ->
+              // The first op is legal; the second collides on a descendant. The batch aborts and
+              // the original tree survives, so a partially-grafted duplicate can never be observed.
+              let ops =
+                  Batch
+                      [ InsertChild("a", RNode.leaf "a3" "para" "ok")
+                        InsertChild("b", descendantCollision ()) ]
+
+              match Ops.apply nodew idw ops (sample ()) with
+              | Error(DuplicateId "a1") -> ()
+              | other -> failtestf "expected the batch to abort with DuplicateId \"a1\", got %A" other
+
+          testCase "MoveNode is unaffected — relocation carries no new id"
+          <| fun _ ->
+              // A move takes an EXISTING subtree to a new parent, so its ids are already in the
+              // tree by construction; the insert-side check must not make a legal move look like a
+              // collision.
+              match Ops.apply nodew idw (MoveNode("a1", "b")) (sample ()) with
+              | Ok r -> Expect.equal (childIds nodew "b" r) [ "b1"; "a1" ] "the move still lands"
+              | Error e -> failtestf "a legal move must not be refused, got %A" e
+
+          testCase "the conformance law certifies the reference witness green (Phase 137)"
+          <| fun _ ->
+              let genFresh (taken: Set<string>) (rng: ConfRng.T) =
+                  let n, r = ConfRng.next rng
+                  let mutable id = sprintf "n%d" (abs n)
+
+                  while taken.Contains id do
+                      id <- id + "'"
+
+                  RNode.leaf id "para" "v", r
+
+              let opGen: OpGen<RNode, string> =
+                  { Tree = (fun rng -> sample (), rng)
+                    FreshNode = genFresh
+                    CanHold = None }
+
+              let results = Conformance.opAlgebra nodew idw opGen 137 200
+
+              let law =
+                  results
+                  |> List.tryFind (fun r -> r.Law = "an accepted insert introduces no id already present")
+
+              match law with
+              | None ->
+                  failtestf "opAlgebra no longer reports the insert-uniqueness law: %A" (results |> List.map _.Law)
+              | Some r -> Expect.isTrue r.Passed (sprintf "the law must hold on the reference witness: %A" r) ]

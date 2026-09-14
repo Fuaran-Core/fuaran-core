@@ -50,12 +50,36 @@ let nodew : NodeWitness<MyNode, MyId> =
       ReplaceChildren = fun n cs -> { n with Children = cs } }
 
 // now the whole skeleton op algebra works over MyNode, with no core change:
-Ops.apply nodew idw (InsertChild(parentId, 0, child)) tree
+Ops.apply nodew idw (InsertChild(parentId, child)) tree
 ```
 
 The one genuine cross-domain divergence — id representation — is a witness too:
 `IdWitness<'Id> = { ToString; OfString; Equals }`. Doc/Calc keep human-meaningful string
 ids; UI/Music keep Guids; both over one `Core.Tree`.
+
+### What the witness surface covers — and what stays yours
+
+Every traversal in this library — `Tree.ids`, `Tree.exists`, `Tree.updateNode`, and the whole op
+algebra built on them — walks `NodeWitness.Children` and nothing else. That is the **witness
+surface**, and it is the exact scope of the one structural invariant the engine enforces for you:
+
+> **each id occurs at most once over the witness's `Children` traversal.**
+
+`Ops.apply` keeps it. An `InsertChild` whose subtree carries an id the tree already holds — or
+which repeats an id within itself — is refused with `DuplicateId`, naming the first offender.
+
+**A node your domain holds in a keyed, non-structural position is invisible to that traversal**,
+and uniqueness over those positions is **your domain's obligation, not this library's.** If your
+node type keeps children anywhere `Children` does not report them — a case table, a fallback slot,
+a named alternative, an argument position — then run your own id check over your own full walk
+before handing an op to `Ops.apply`; this engine cannot see those nodes and will not pretend to.
+
+That boundary is deliberate rather than a gap waiting to be closed. `Children` is also what the
+engine **rebuilds** through, so widening the witness to reach keyed positions would oblige every
+domain to re-express them as an ordered list — a large change to what a domain must model, to buy
+a check the domain is far better placed to make. `Conformance.opAlgebra`'s
+`"an accepted insert introduces no id already present"` law certifies the invariant at exactly
+this scope over your own witness.
 
 ## The artifact-function three laws (`Fuaran.Core.Function`)
 

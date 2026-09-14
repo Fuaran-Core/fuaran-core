@@ -1,0 +1,27 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the tested row names its family in prose and no case at all, which is what every tested row looked like before Phase 144 — the clause would be vacuous for such a row, so it is a finding rather than a pass.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-differential",
+      "level": "tested",
+      "claim": "A tested row carrying no case at all.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "family": "Proofs.Oracle"
+      }
+    }
+  ]
+}

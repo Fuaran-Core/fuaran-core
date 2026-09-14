@@ -1,0 +1,30 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the tested row names a differential case the test tree does not carry — a case renamed or deleted with the row left behind.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-differential",
+      "level": "tested",
+      "claim": "A tested row naming a case that is not there.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "a case that does not exist"
+        ]
+      }
+    }
+  ]
+}

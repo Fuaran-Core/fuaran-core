@@ -1,0 +1,18 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the proved row names a theorem `Model.fst` does not declare. Nothing else here is wrong.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A proved row naming a theorem that is not there.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha_not_declared",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    }
+  ]
+}

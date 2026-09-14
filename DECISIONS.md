@@ -1,5 +1,75 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-14 — D34: the apply engine's id-uniqueness gap is FIXED, not assumed away by the theorem
+
+**Decided (Phase 137).** The skeleton-op tree algebra has exactly one structural invariant that is not
+free from the inductive `'Node` type. Parent/child consistency, acyclicity and child order all come with
+the type; **"a well-formed tree carries each id at most once" does not** — it has to be written down and
+enforced. It was written down on the diff path (`Diff.toOps` refuses a duplicated tree with
+`DiffError.DuplicateIdInTree`) and it was NOT enforced on the accept path: `validateInsert` rejected only
+when the inserted node's OWN id already existed, so a subtree whose descendant id was present, or which
+repeated an id within itself, was accepted.
+
+**The choice was between a hypothesis and a fix, and it is a real choice.** The preservation lemma the
+proof programme is building — *apply takes a well-formed tree to a well-formed tree* — can be discharged
+two ways. It can carry the gap as an ANTECEDENT ("…provided the inserted subtree's ids are fresh"), which
+is sound, cheap, and true. Or the engine can establish the antecedent itself. We took the second, and the
+machine-checked counterexample is already in the tree: `TreeOps.insert_breaks_wf` exhibits the accepted
+insert that duplicates an id, and `ins_wf` / `ins_wf_conv` state that guarding on the RESULT is exactly
+the validation this decision adds. The lemma would have handed that counterexample back on its first
+attempt; fixing it first is the cheaper order.
+
+**Why the hypothesis is the wrong answer here, in one sentence: a theorem that assumes fresh ids is sound
+about a tree nobody can guarantee they hold.** The freshness would have to be established by every caller,
+of which there are many and which mostly do not know they are callers — a domain applies through
+`Ops.apply` and gets no signal that an unstated precondition exists. An unenforced precondition on a
+generic library's accept path is not a weaker guarantee, it is a guarantee that reads as one and is not.
+And what it costs is not a clean failure: `Tree.updateNode` rewrites *every* node matching a repeated id
+and `Tree.Index.build`'s `Map.ofList` keeps the last, so the tree keeps working and answers wrongly.
+
+**Remapping was considered and rejected.** The engine could have accepted the insert and renamed the
+colliding ids. That would make the accept path emit bytes the op did not carry, which breaks the one
+property an op-stream is for: replaying a recorded script must reproduce the recorded tree. Refusal keeps
+apply faithful to its input; remapping is a caller's decision, made with a caller's knowledge, and
+`Tree.remapIds` already exists for it.
+
+**Parity was the deciding external evidence, and it is only parity on one of the two halves.** A survey of
+the sibling engines found that the TypeScript, Go and Rust reference implementations all refuse an insert
+whose subtree carries an already-present id (`DuplicateNodeId`), and the UI tier runs its own pre-check
+ahead of this engine — so on that half Core was the outlier and this is a correction, not a new opinion.
+On the other half — an id repeated *within* the inserted subtree, none of them present in the tree — all
+three of those implementations ACCEPT, because each seeds its comparison set from the destination tree
+alone. Core refuses it. That is deliberate and it is deliberately recorded as stricter rather than
+described as parity: the invariant is a property of the tree that results, and a reader porting between
+engines needs to be told which of the two claims they are relying on. `STABILITY.md` states the two
+separately for the same reason.
+
+**The rejection class stays `DuplicateId`.** It is the same failure the envelope already names, reached
+through more of the subtree. The per-engine code correspondence (`DuplicateNodeId` on the sibling hosts)
+is pinned by the fixture family rather than by renaming a case every consumer matches on.
+
+**Scope is the WITNESS surface, and naming that limit is part of the decision.** `Tree.ids` walks
+`NodeWitness.Children`, so a node held in a keyed, non-structural position is invisible here. The
+invariant therefore reads *each id occurs at most once over the witness's `Children` traversal*, the
+domain owns uniqueness over its keyed positions, and the pre-check a domain runs ahead of this engine
+must stay. Widening the witness was rejected: `Children` is also what the engine rebuilds through, so a
+wider witness would oblige a domain to restructure keyed cases as an ordered list — a large change to the
+adoption contract to buy a check the domain is better placed to make.
+
+**Precedence was preserved rather than tidied.** The old validator checked the inserted node's own id
+before parent existence. `Tree.ids` is preorder, so the widened scan reaches that id first and the
+envelope ordering a consumer already handles does not move. Reordering it would have been a second,
+unrequested behaviour change hidden inside the first.
+
+**What certifies it.** Ten unit cases that were each red before the change (descendant collision and
+internal duplication across `apply`, `canApply` and `applyContained`; first-offender order; batch
+all-or-nothing; the partially-remapped and non-injective-remap copies), plus a fourth `opAlgebra` law,
+`"an accepted insert introduces no id already present"`. That law needs a BUILT arm and the reason is
+worth recording: the conformance generator's `FreshNode` contract is "an id not in the tree", so a DRAWN
+insert can never collide, and a law quantified over the drawn sample alone would have certified a
+validator that checked nothing. Each iteration therefore constructs two colliding subtrees rather than
+hoping to draw one.
+
 ## 2026-09-13 — D33: four API asks cut as one minor — and the fourth was already shipped, so what it gets is the property
 
 **Decided (Phase 125).** The UI tier routed four Core API asks here. They are cut as

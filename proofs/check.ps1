@@ -13,9 +13,14 @@
 #               (proofs/oracle/<Module>.fs). A difference fails: the oracle the suite runs must be
 #               the model the theorem is about, byte for byte. -Extract overwrites the committed
 #               files with the fresh extractions instead (then commit them).
-#   3. HOST   — the Expecto Proofs.Oracle family runs the extracted models beside the production
-#               code (the differential tests). -SkipOracleHost leaves that to ./verify.ps1, which
-#               already runs the whole suite.
+#   3. HOST   — two Expecto families. Proofs.Oracle runs the extracted models beside the production
+#               code (the differential tests); Proofs.Ladder holds ../proofs.json — the claims
+#               ladder declared as data — to this tree, so a row naming a theorem no model
+#               declares, or a module in $modules with no row at all, fails the leg with the row
+#               named. Two invocations rather than one prefix filter, so the two failures read as
+#               what they are: a model and production disagreeing, versus the ladder and the tree
+#               disagreeing. -SkipOracleHost leaves both to ./verify.ps1, which already runs the
+#               whole suite.
 #
 # The prover is resolved from $env:FSTAR_HOME (a release directory holding bin/fstar.exe), else
 # from proofs/.fstar/ (a previous install by this script), else DOWNLOADED from the pinned GitHub
@@ -167,6 +172,9 @@ if (-not $SkipOracleHost) {
 
         dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter Proofs.Oracle
         if ($LASTEXITCODE -ne 0) { Fail "the oracle host (Proofs.Oracle) is RED — an extracted model and production disagree" $LASTEXITCODE }
+
+        dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter Proofs.Ladder
+        if ($LASTEXITCODE -ne 0) { Fail "the claims ladder (Proofs.Ladder) is RED — ../proofs.json and this tree disagree; the failing row and clause are named above" $LASTEXITCODE }
     }
     finally { Pop-Location }
 }
