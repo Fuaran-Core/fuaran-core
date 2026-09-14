@@ -50,6 +50,13 @@
       "measuredSeconds": 99,
       "phase": "fuaran-core#148",
       "note": "Carries `#set-options \"--ext context_pruning\"` at line 98 — 128s default against 72s pruned. The widest spread in the leg (52s to 99s across one three-run pass), because a 45-constructor alphabet in a large mutual group is exactly the shape a loaded machine punishes; the budget is sized for the top of that spread and not its middle."
+    },
+    {
+      "module": "Preservation",
+      "budgetSeconds": 80,
+      "measuredSeconds": 39,
+      "phase": "fuaran-core#138",
+      "note": "The apply engine, seeded by the phase that added the model: 39s, 36s and 27s across the three cold runs of one `-Runs 3` pass on a machine also running four sibling sessions, so 39s is the slowest observed and 2x it rounds to 80s. Carries `#set-options \"--ext context_pruning\"` like the two modules above, and one SCOPED exception beside it that this budget depends on: `invert_applicable` proves 78 goals in a single query and sits under `#push-options \"--z3rlimit 200\"`, because at the leg's default 40 it was close enough to the ceiling that a different `--quake` seed exhausted it — green standalone, red under check.ps1. If this module ever needs a large bump, check that BOTH are still in force before believing the growth is ordinary: losing the scoped rlimit does not read as slowness, it reads as a flake."
     }
   ]
 }

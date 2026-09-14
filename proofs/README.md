@@ -313,7 +313,11 @@ chain integrity — carries a fourth, and what is said there is said about the t
 and about nothing else; in particular it says nothing about signatures. Theorem 4 — `Json.parse`
 totality, bounded — carries a fifth, and what is said there is said about the recursive-descent
 parser's two guards and its error classification; in particular it is not a grammar-conformance
-claim, and its section says exactly which grammar paths remain sampled.
+claim, and its section says exactly which grammar paths remain sampled. Theorem 5 — apply-engine
+preservation — carries a sixth, and what is said there is said about `Ops.apply`, `Ops.canApply`
+and `Ops.invert` over the tree as the `NodeWitness` shows it; in particular the witness itself is
+assumed lawful there rather than proved so, and the invariant preserved is id uniqueness and not
+any domain's rule family.
 
 ## Exit criteria, with evidence
 
