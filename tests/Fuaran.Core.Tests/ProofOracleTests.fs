@@ -2653,6 +2653,372 @@ let private presDifferential
 
     tally
 
+// ---------------------------------------------------------------------------
+//  Phase 140 — the CONTAINER CAPABILITY: `Ops.applyContained` / `Ops.canApplyContained` beside
+//  the model, over a GENERATED `canHold`.
+//
+//  WHY A GENERATED PREDICATE RATHER THAN A FIXED ONE. `canHold` is a parameter of the engine, and
+//  the model proves its theorems for EVERY predicate. A differential run against one hand-picked
+//  predicate (`ContainedOpsTests`' "a para is a leaf") certifies that instance and nothing about
+//  the quantifier. Each trial here draws a random SUBSET of the pool's kind vocabulary — including
+//  the empty set, where nothing can hold children and every insert and move is refused, and the
+//  full set, where the engine is `Ops.apply` again. Both extremes are inside the theorem, so both
+//  are inside the sample.
+//
+//  The predicates on both sides decide on the KIND TAG alone, which is `child_blind` — the model's
+//  own premise — instantiated: it is how every domain writes `canHold`, and the model's
+//  counterexample `contained_needs_child_blind` is what says the type permits worse.
+//
+//  FIVE COMPARISONS, per (op, state, predicate):
+//    1. `Ops.applyContained` vs the model's `apply_contained` — verdict, accepted result through
+//       `Tree.encodeHash`, rejection by CLASS.
+//    2. `Ops.canApplyContained` vs the model's `can_apply_contained`, and that the dry run and the
+//       mutating call agree on EACH side separately (`can_apply_contained_agrees` instantiated).
+//    3. `Ops.applyContained` against `Ops.apply` ON PRODUCTION: the two must agree exactly unless
+//       the container-aware one raises `NotAContainer`, which is `not_a_container_exact` asked of
+//       the shipped engine rather than of the model.
+//    4. where a `NotAContainer` is raised, that the node it names is one the tree holds whose kind
+//       tag it reports and whose capability the predicate refuses (`not_a_container_locates`).
+//    5. THE INVARIANT: where the state and the operation's graft both satisfy "every node with
+//       children can hold children", so must the result (`contained_preserves`). Counted, because
+//       a run in which the hypothesis was never met would assert the theorem vacuously.
+//
+//  THE GO-RED IS THE MODEL'S OWN INSTRUMENT. `Preservation.apply_contained_insert_only` is the
+//  engine that checks the capability on insert and not on move, and
+//  `insert_only_breaks_contained` proves — in F\*, before this file runs — that it admits a move
+//  the real one refuses and breaks the invariant doing it. Handing it to the same differential is
+//  the measurement, and it must lose on a MOVE.
+// ---------------------------------------------------------------------------
+
+/// The kind vocabulary the pool actually uses: the base tree's three, which is also every kind the
+/// generator and the probes below mint. A subset of it is a `canHold`.
+let private containerKinds = [ "doc"; "para"; "section" ]
+
+let private drawCanHold (r0: ConfRng.T) : Set<string> * ConfRng.T =
+    let mutable r = r0
+    let mutable acc = Set.empty
+
+    for k in containerKinds do
+        let b, r' = ConfRng.intBelow 2 r
+        r <- r'
+
+        if b = 1 then
+            acc <- Set.add k acc
+
+    acc, r
+
+let private showKinds (kinds: Set<string>) =
+    if Set.isEmpty kinds then
+        "(nothing)"
+    else
+        kinds |> Set.toList |> String.concat "+"
+
+/// "every node with children satisfies `canHold`", written directly over the witness — the model's
+/// `contained` asked of a production tree. Written out rather than routed through the extracted
+/// model, for the reason the two op renderers are written out: one function over both sides could
+/// not tell a divergence from its own convention.
+let rec private prodContained (canHold: RNode -> bool) (n: RNode) : bool =
+    (match nodew.Children n with
+     | [] -> true
+     | _ -> canHold n)
+    && nodew.Children n |> List.forall (prodContained canHold)
+
+/// The invariant's second hypothesis, on the operation's own trees.
+let rec private prodContainedOp (canHold: RNode -> bool) (op: SkeletonOp<RNode, string>) : bool =
+    match op with
+    | InsertChild(_, node) -> prodContained canHold node
+    | Batch inner -> inner |> List.forall (prodContainedOp canHold)
+    | _ -> true
+
+type private ContTally =
+    {
+        Diffs: string list
+        Accepted: int
+        Refused: int
+        /// `NotAContainer` refusals, counted per SITE — the go-red is about the move half, so a run
+        /// that reached only the insert half could not have caught it.
+        InsertRefusals: int
+        MoveRefusals: int
+        BatchRefusals: int
+        /// probes where the capability PRE-EMPTED another refusal — the shape the first run of
+        /// this differential turned up, and the one an `adds a refusal` reading gets wrong
+        Preempted: int
+        /// probes where the invariant's hypotheses were MET, and the conclusion therefore asserted
+        Preserved: int
+        Predicates: Set<string>
+        Classes: Set<string>
+    }
+
+let private emptyContTally =
+    { Diffs = []
+      Accepted = 0
+      Refused = 0
+      InsertRefusals = 0
+      MoveRefusals = 0
+      BatchRefusals = 0
+      Preempted = 0
+      Preserved = 0
+      Predicates = Set.empty
+      Classes = Set.empty }
+
+let private contProbe
+    (modelApply:
+        (TreeOps.tree -> bool) -> TreeOps.op -> TreeOps.tree -> DagFold.outcome<TreeOps.tree, TreeOps.rejection>)
+    (kinds: Set<string>)
+    (op: SkeletonOp<RNode, string>)
+    (st: RNode)
+    (acc: ContTally)
+    : ContTally =
+    let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
+    let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
+    let mop = toModelOpWith toModelTree op
+    let mst = toModelTree st
+
+    let where =
+        sprintf "op %s at tree %s under canHold={%s}" (renderProdOp op) (prodTreeHash st) (showKinds kinds)
+
+    let prod = Ops.applyContained canHold nodew idw op st
+    let model = modelApply mCanHold mop mst
+    let prodCan = Ops.canApplyContained canHold nodew idw op st
+    let modelCan = Preservation.can_apply_contained mCanHold mop mst
+    let plain = Ops.apply nodew idw op st
+
+    // 1. applyContained
+    let applyDiff, accepted, refused, cls =
+        match prod, model with
+        | Ok pt, DagFold.Ok mt ->
+            let ph = prodTreeHash pt
+            let mh = modelTreeHash mt
+
+            (if ph <> mh then
+                 [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
+             else
+                 []),
+            1,
+            0,
+            None
+        | Error pe, DagFold.Error me ->
+            let pc = prodRejClass pe
+            let mc = modelRejClass me
+
+            (if pc <> mc then
+                 [ sprintf "rejection class differs — %s\n  production: %s\n  oracle:     %s" where pc mc ]
+             else
+                 []),
+            0,
+            1,
+            Some pc
+        | Ok _, DagFold.Error me ->
+            [ sprintf "production ACCEPTED but the oracle rejected (%s) — %s" (modelRejClass me) where ], 0, 0, None
+        // The refusal is COUNTED even where the two sides disagree about it, unlike the Phase 138
+        // family's corresponding arm. That is what lets the go-red's adequacy guard say which
+        // capability SITE it reached: in the go-red the model accepts every move, so a move
+        // refusal exists only on production's side of a divergence, and a probe that did not
+        // count it would report the run as having reached no move at all.
+        | Error pe, DagFold.Ok _ ->
+            [ sprintf "production REJECTED (%s) but the oracle accepted — %s" (prodRejClass pe) where ],
+            0,
+            1,
+            Some(prodRejClass pe)
+
+    // 2. canApplyContained, and the dry run against the mutating call on each side
+    let canDiff =
+        let pv =
+            match prodCan with
+            | Ok() -> "ok"
+            | Error e -> prodRejClass e
+
+        let mv =
+            match modelCan with
+            | DagFold.Ok() -> "ok"
+            | DagFold.Error e -> modelRejClass e
+
+        let differs =
+            if pv <> mv then
+                [ sprintf "canApplyContained differs — %s\n  production: %s\n  oracle:     %s" where pv mv ]
+            else
+                []
+
+        let prodSelf =
+            if
+                Result.isOk prodCan
+                <> (match prod with
+                    | Ok _ -> true
+                    | Error _ -> false)
+            then
+                [ sprintf "production's canApplyContained and applyContained DISAGREE — %s (check %s)" where pv ]
+            else
+                []
+
+        differs @ prodSelf
+
+    // 3. the DIFFERENCE, on production: the two engines agree EXCEPT where the container-aware one
+    //    raises `NotAContainer` — `apply_contained_diff` asked of the shipped code rather than of
+    //    the model. This is the half that says `applyContained` is `apply` plus a guard rather
+    //    than a second engine.
+    //
+    //    Note the shape of the exception, which the first run of this differential is what taught:
+    //    the capability check can PRE-EMPT another refusal rather than only adding one. The
+    //    `MoveNode` arm tests `canHold` on the new parent (Ops.fs:249) BEFORE the descendant test
+    //    (Ops.fs:258), so a self-move into a leaf is `NotAContainer` here and `WouldNestUnderSelf`
+    //    under `apply` — two engines refusing the same operation with different classes, which is
+    //    correct and is why the theorem is stated as "identical, or `NotAContainer`" rather than
+    //    as "the same class unless the capability adds one".
+    let diffDiff =
+        match plain, prod with
+        | Ok a, Ok b ->
+            if prodTreeHash a <> prodTreeHash b then
+                [ sprintf "apply and applyContained both accepted but produced DIFFERENT trees — %s" where ]
+            else
+                []
+        | Ok _, Error e ->
+            if prodRejClass e <> "NotAContainer" then
+                [ sprintf
+                      "applyContained refused what apply accepted, and NOT as NotAContainer (%s) — %s"
+                      (prodRejClass e)
+                      where ]
+            else
+                []
+        | Error a, Error b ->
+            if prodRejClass b <> "NotAContainer" && prodRejClass a <> prodRejClass b then
+                [ sprintf
+                      "apply and applyContained refused DIFFERENTLY, and not by the capability — %s\n  apply:           %s\n  applyContained: %s"
+                      where
+                      (prodRejClass a)
+                      (prodRejClass b) ]
+            else
+                []
+        | Error a, Ok _ -> [ sprintf "applyContained ACCEPTED what apply refused (%s) — %s" (prodRejClass a) where ]
+
+    // 4. where the refusal is a NotAContainer, it names a node the tree holds, reports that node's
+    //    own kind tag, and the predicate refuses it
+    let locateDiff =
+        match prod with
+        | Error(NotAContainer(target, kindTag)) ->
+            (match Tree.tryFind nodew idw target st with
+             | None -> [ sprintf "NotAContainer named %s, which the tree does not hold — %s" target where ]
+             | Some n ->
+                 (if nodew.KindTag n <> kindTag then
+                      [ sprintf
+                            "NotAContainer reported kind %s for %s, whose kind is %s — %s"
+                            kindTag
+                            target
+                            (nodew.KindTag n)
+                            where ]
+                  else
+                      [])
+                 @ (if canHold n then
+                        [ sprintf "NotAContainer named %s, which canHold ADMITS — %s" target where ]
+                    else
+                        []))
+        | _ -> []
+
+    // 5. the invariant, on production, where its hypotheses are met
+    let preservedDiff, preserved =
+        if prodContained canHold st && prodContainedOp canHold op then
+            match prod with
+            | Ok result ->
+                (if prodContained canHold result then
+                     []
+                 else
+                     [ sprintf
+                           "the container invariant BROKE across an accepted operation — %s\n  a node with children fails canHold in the result"
+                           where ]),
+                1
+            | Error _ -> [], 1
+        else
+            [], 0
+
+    let preempted =
+        match plain, prod with
+        | Error a, Error b when prodRejClass b = "NotAContainer" && prodRejClass a <> "NotAContainer" -> 1
+        | _ -> 0
+
+    let insertRef, moveRef, batchRef =
+        match cls, op with
+        | Some "NotAContainer", InsertChild _ -> 1, 0, 0
+        | Some "NotAContainer", MoveNode _ -> 0, 1, 0
+        | Some "NotAContainer", Batch _ -> 0, 0, 1
+        | _ -> 0, 0, 0
+
+    { Diffs = acc.Diffs @ applyDiff @ canDiff @ diffDiff @ locateDiff @ preservedDiff
+      Accepted = acc.Accepted + accepted
+      Refused = acc.Refused + refused
+      InsertRefusals = acc.InsertRefusals + insertRef
+      MoveRefusals = acc.MoveRefusals + moveRef
+      BatchRefusals = acc.BatchRefusals + batchRef
+      Preempted = acc.Preempted + preempted
+      Preserved = acc.Preserved + preserved
+      Predicates = Set.add (showKinds kinds) acc.Predicates
+      Classes =
+        match cls with
+        | Some c -> Set.add c acc.Classes
+        | None -> acc.Classes }
+
+/// The generated pool, plus probes MINTED PER STATE that address the two capability sites
+/// directly: an insert under every id, a move of every leaf under every id, and a batch whose
+/// second step is a move into a leaf. The generated pool alone reaches the sites by luck — the
+/// probes reach them by construction, which is what the Phase 138 family's own lesson says to do.
+let private contDifferential
+    (modelApply:
+        (TreeOps.tree -> bool) -> TreeOps.op -> TreeOps.tree -> DagFold.outcome<TreeOps.tree, TreeOps.rejection>)
+    (seed: int)
+    (trials: int)
+    : ContTally =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable tally = emptyContTally
+    let mutable n = 0
+
+    for _ in 1..trials do
+        let lanes, r1 = treeLaneGen.Lanes 3 r
+        let kinds, r2 = drawCanHold r1
+        r <- r2
+        let generated = List.concat lanes
+
+        let states =
+            generated
+            |> List.fold
+                (fun (acc, cur) op ->
+                    match Ops.apply nodew idw op cur with
+                    | Ok t -> (acc @ [ t ]), t
+                    | Error _ -> acc, cur)
+                ([ treeBase ], treeBase)
+            |> fst
+
+        for st in states do
+            n <- n + 1
+            let ids = Tree.ids nodew st |> List.truncate 4
+
+            let leaves =
+                Tree.preorder nodew st
+                |> List.filter (fun c -> List.isEmpty (nodew.Children c))
+                |> List.map nodew.Id
+                |> List.truncate 2
+
+            let inserts =
+                ids
+                |> List.map (fun p -> InsertChild(p, RNode.leaf (sprintf "p140-%s-%d" p n) "para" "v"))
+
+            let moves =
+                ids |> List.collect (fun p -> leaves |> List.map (fun l -> MoveNode(l, p)))
+
+            let batches =
+                match ids, leaves with
+                | root :: _, l :: _ ->
+                    [ Batch
+                          [ InsertChild(root, RNode.leaf (sprintf "p140-b-%d" n) "para" "v")
+                            MoveNode(l, root) ]
+                      Batch
+                          [ InsertChild(root, RNode.leaf (sprintf "p140-c-%d" n) "section" "")
+                            InsertChild(l, RNode.leaf (sprintf "p140-d-%d" n) "para" "v") ] ]
+                | _ -> []
+
+            for op in generated @ inserts @ moves @ batches do
+                tally <- contProbe modelApply kinds op st tally
+
+    tally
+
+
 /// The SECOND source (Phase 139): the shared corpus's `apply/` family, decoded through the
 /// envelope's own codec and asked of both sides through the same probe.
 ///
@@ -4083,4 +4449,167 @@ let proofOracleTests =
               | DagFold.Error e ->
                   failtestf
                       "the model of the PRE-137 validator refused it too — then it was never a counterexample: %A"
-                      e ]
+                      e
+
+          // ---- Phase 140 — the CONTAINER CAPABILITY: applyContained under a generated canHold ----
+
+          testCase "the container oracle agrees with Ops.applyContained under a generated canHold"
+          <| fun _ ->
+              let t = contDifferential Preservation.apply_contained 1400 30
+
+              match t.Diffs with
+              | d :: _ -> failtestf "the container oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Adequacy, per capability SITE rather than in aggregate. A run that never met a
+                  // refusal would agree with production perfectly and certify nothing about the
+                  // guard; a run that met only insert refusals would not have been able to catch
+                  // the go-red below, which is a move. Measured at 30 trials, seed 1400: accepted
+                  // 897, refused 841, insert refusals 185, move refusals 370, batch 112,
+                  // pre-emptions 89, invariant asserted on 704 probes, all eight predicates drawn.
+                  // Each threshold sits below its measurement with room — they are here to catch a
+                  // pool that stops reaching a shape, not to pin the numbers.
+                  Expect.isGreaterThan t.Accepted 500 (sprintf "operations were accepted (accepted=%d)" t.Accepted)
+
+                  Expect.isGreaterThan
+                      t.InsertRefusals
+                      100
+                      (sprintf "the sample refused an INSERT under a non-container (insert=%d)" t.InsertRefusals)
+
+                  Expect.isGreaterThan
+                      t.MoveRefusals
+                      200
+                      (sprintf "the sample refused a MOVE into a non-container (move=%d)" t.MoveRefusals)
+
+                  Expect.isGreaterThan
+                      t.BatchRefusals
+                      50
+                      (sprintf
+                          "a BATCH inherited a member's NotAContainer (batch=%d) — the clause the model's inheritance half is about"
+                          t.BatchRefusals)
+
+                  // The theorem is quantified over `canHold`; a differential that drew one
+                  // predicate would say nothing about the quantifier. Five of the eight subsets is
+                  // the measured floor, and the two extremes are named because they are the
+                  // degenerate readings: nothing can hold children, and the engine is `apply`.
+                  Expect.isGreaterThan
+                      (Set.count t.Predicates)
+                      5
+                      (sprintf "several DIFFERENT canHold predicates were drawn (%A)" t.Predicates)
+
+                  Expect.isTrue
+                      (Set.contains "(nothing)" t.Predicates)
+                      (sprintf "the empty predicate was drawn — nothing can hold children (%A)" t.Predicates)
+
+                  Expect.isTrue
+                      (Set.contains "doc+para+section" t.Predicates)
+                      (sprintf "the total predicate was drawn — applyContained IS apply there (%A)" t.Predicates)
+
+                  // and the invariant was not asserted vacuously
+                  Expect.isGreaterThan
+                      t.Preserved
+                      400
+                      (sprintf
+                          "the container invariant's hypotheses were MET on this many probes, and the conclusion therefore asserted (preserved=%d)"
+                          t.Preserved)
+
+                  Expect.isTrue
+                      (Set.contains "NotAContainer" t.Classes)
+                      (sprintf "the sample reached a NotAContainer rejection (reached: %A)" t.Classes)
+
+                  // and the PRE-EMPTION was reached — the capability refusing an operation `apply`
+                  // also refuses, but under a different class. It is asserted rather than merely
+                  // permitted because it is the shape that made the first draft of comparison 3
+                  // wrong, and a sample that stopped reaching it would let that draft back in.
+                  Expect.isGreaterThan
+                      t.Preempted
+                      40
+                      (sprintf
+                          "the capability PRE-EMPTED another refusal on this many probes (preempted=%d) — a self-move into a leaf is NotAContainer here and WouldNestUnderSelf under apply"
+                          t.Preempted)
+
+          testCase "an engine that checks canHold on insert but NOT on move loses — the measurement can fail"
+          <| fun _ ->
+              // The teeth, and the model built them: `apply_contained_insert_only` is the engine a
+              // plausible reading of the doc comment describes, and `insert_only_breaks_contained`
+              // proves in F* that it admits a move the real one refuses and breaks the invariant
+              // doing it. If this ever passes, the move site has stopped reaching the comparison
+              // and the green run above means nothing about half the guard.
+              let t = contDifferential Preservation.apply_contained_insert_only 1400 3
+
+              // Measured at 3 trials: 42 moves into a non-container reached, and 42 disagreements.
+              // A go-red that met none of the disputed inputs would agree with production and
+              // certify nothing, so this is asserted before the disagreement is.
+              Expect.isGreaterThan
+                  t.MoveRefusals
+                  20
+                  (sprintf
+                      "the go-red run reached a move into a non-container at all (move=%d) — otherwise it proves nothing"
+                      t.MoveRefusals)
+
+              Expect.isNonEmpty
+                  t.Diffs
+                  "an engine that skips the capability check on MoveNode MUST disagree with production"
+
+              Expect.isTrue
+                  (t.Diffs
+                   |> List.exists (fun d ->
+                       d.Contains "production REJECTED (NotAContainer) but the oracle accepted"
+                       && d.Contains "op M|"))
+                  (sprintf
+                      "the disagreement is the one this phase is about — production refuses the MOVE, the insert-only engine admits it. Got:\n%s"
+                      (List.head t.Diffs))
+
+          testCase "canHold is consulted on the PARENT and on nothing inside the graft — the shipped engine"
+          <| fun _ ->
+              // `contained_needs_op_hypothesis`, on production. The engine admits a subtree whose
+              // own interior node is a non-container, because `validateInsert` applies `canHold` to
+              // the node `tryFind` returns for the parent and to nothing else. This is not a defect
+              // to fix here — it is the reason the theorem carries `contained_op` as a hypothesis,
+              // and this case is what makes the hypothesis a fact about the code rather than a
+              // convenience of the model.
+              let canHold (n: RNode) = n.Kind = "doc"
+              let tree = RNode.node "root" "doc" []
+
+              let graft = InsertChild("root", RNode.node "a" "para" [ RNode.leaf "b" "para" "" ])
+
+              Expect.isTrue (prodContained canHold tree) "the tree satisfies the invariant to begin with"
+              Expect.isFalse (prodContainedOp canHold graft) "the GRAFT does not — its own interior node is a leaf kind"
+
+              match Ops.applyContained canHold nodew idw graft tree with
+              | Error e ->
+                  failtestf "the engine refused the graft (%A) — then the hypothesis is unnecessary" (prodRejClass e)
+              | Ok result ->
+                  Expect.isFalse
+                      (prodContained canHold result)
+                      "the invariant broke, which is what `contained_op` is a hypothesis about"
+
+          testCase "canApplyAll is NOT container-aware — a script it admits, applyContained refuses"
+          <| fun _ ->
+              // `can_apply_all_ignores_containment`, on production, and a FINDING rather than a
+              // model artefact: `Ops.canApplyAll` and `Ops.applyAll` both thread the plain `apply`
+              // (Ops.fs), so there is no container-aware sequence surface at all. A caller that
+              // pre-flights a script with `canApplyAll` and executes it with `applyContained` —
+              // the combination the two doc comments invite — has a check that cannot see the
+              // refusal its executor will make.
+              //
+              // This case goes RED if that gap is ever closed, which is the point: closing it is a
+              // deliberate act, and whoever takes it should be made to retire this assertion by
+              // hand rather than discover the surface had quietly changed.
+              let canHold (n: RNode) = n.Kind = "box"
+
+              let tree =
+                  RNode.node "root" "box" [ RNode.leaf "leaf" "para" ""; RNode.leaf "x" "para" "" ]
+
+              let script = [ MoveNode("x", "leaf") ]
+
+              Expect.isTrue (prodContained canHold tree) "the tree satisfies the invariant to begin with"
+
+              Expect.isOk
+                  (Ops.canApplyAll nodew idw script tree
+                   |> Result.mapError (fun (i, e) -> sprintf "%d:%A" i e))
+                  "canApplyAll certifies the script — it consults no capability"
+
+              match Ops.applyContained canHold nodew idw (Batch script) tree with
+              | Error(NotAContainer("leaf", "para")) -> ()
+              | other ->
+                  failtestf "applyContained was expected to refuse the very script canApplyAll certified, got %A" other ]

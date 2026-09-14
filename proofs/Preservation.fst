@@ -1228,3 +1228,667 @@ let invert_applicable (o:leaf_op) (t:tree)
        | _, _ -> ())
 
 #pop-options
+
+(* ======================================================================================
+   8. THE CONTAINER CAPABILITY — `Ops.applyContained`, and the invariant it exists to keep
+      (Phase 140).
+
+      `Ops.apply` is `applyWith (fun _ -> true)`, which is why section 1 could prove
+      `NotAContainer` UNREACHABLE from it: the clause that raises it is dead when every node can
+      hold children. `Ops.applyContained canHold` is the variant every domain with a leaf actually
+      runs, and it is the one where that clause is live. This section models it with `canHold`
+      ABSTRACT and proves the three things the shipped code's doc comment asserts.
+
+      ABSTRACT MEANS A PARAMETER, not an assumption. `ch` is a parameter of every definition and
+      every theorem below, so each is universally quantified over it — a strictly stronger reading
+      than one assumed constant, and the only one available in any case: the leg runs
+      `--report_assumes error`, so an `assume val can_hold` would fail it, and rightly.
+
+      WHERE THE PREDICATE IS CONSULTED, read off `Ops.fs` rather than off the doc comment:
+      `validateInsert` applies it to the node `Tree.tryFind` returns for the PARENT (Ops.fs:151),
+      and the `MoveNode` arm applies it to the NEW PARENT (Ops.fs:249). Nowhere else — not on
+      remove, not on reorder, and — this is the load-bearing one — never on the nodes of the
+      subtree being inserted.
+
+      TWO HYPOTHESES, BOTH REFUTED WITHOUT THEM. The sentence "`applyContained` preserves the
+      invariant that every node with children satisfies `canHold`" is FALSE as stated of the
+      shipped function, in two independent ways, and section 8.6 exhibits both as machine-checked
+      counterexamples rather than leaving them to be discovered:
+
+        - `contained_op` — the graft is never inspected, so inserting a subtree whose own interior
+          node is a non-container carries the violation in with it. The hypothesis says the
+          operation's own trees satisfy the invariant; a domain that builds its grafts from its own
+          validated documents has it, and one that accepts a foreign tree does not.
+        - `child_blind` — `canHold` has type `'Node -> bool`, so it may read the CHILD LIST, and a
+          predicate that does can flip from admitting to refusing at the instant its node gains a
+          child. Every domain writes it as a function of the kind tag (which is also what
+          `NotAContainer` reports back), and this hypothesis is that habit made a premise.
+
+      Neither is a modelling convenience. Each is a real property of a real predicate that the
+      engine's TYPE does not demand, and naming them is the difference between a theorem about
+      `applyContained` and a theorem about a function nobody calls.
+   ====================================================================================== *)
+
+(* ---- 8.1 the invariant, the operation's own trees, and the stability premise ---- *)
+
+(* "every node with children satisfies `canHold`". A childless node is unconstrained: the predicate
+   answers "can this node hold children AT ALL", so a leaf that never holds any says nothing. *)
+let rec contained (ch:tree -> bool) (t:tree) : Tot bool (decreases t) =
+  match t with
+  | TNode _ _ cs -> (match cs with [] -> true | _ -> ch t) && contained_all ch cs
+and contained_all (ch:tree -> bool) (ts:list tree) : Tot bool (decreases ts) =
+  match ts with
+  | [] -> true
+  | t :: r -> contained ch t && contained_all ch r
+
+(* The trees an operation CARRIES — only `InsertChild` carries one, and a `Batch` its members'. *)
+let rec contained_op (ch:tree -> bool) (o:op) : Tot bool (decreases o) =
+  match o with
+  | InsertChild _ n -> contained ch n
+  | Batch os -> contained_op_all ch os
+  | _ -> true
+and contained_op_all (ch:tree -> bool) (os:list op) : Tot bool (decreases os) =
+  match os with
+  | [] -> true
+  | o :: r -> contained_op ch o && contained_op_all ch r
+
+(* The predicate does not read the child list. Stated over the constructor rather than as "depends
+   only on the kind tag", because that is exactly the fact every proof below needs and it leaves a
+   predicate reading the ID lawful — which some domains' do. *)
+let child_blind (ch:tree -> bool) : prop =
+  forall (i k:string) (cs cs':list tree). ch (TNode i k cs) == ch (TNode i k cs')
+
+(* ---- 8.2 `Ops.applyContained`, clause for clause ---- *)
+
+(* F#: `applyWith canHold w idw`, of which `Ops.apply` (section 6 of `TreeOps.fst`) is the
+   instance at `fun _ -> true`. Every clause below is that model's clause with the container check
+   spliced in at the two places `Ops.fs` splices it, in the ORDER it splices them — which matters:
+   a move into a non-container that would also nest under itself earns `NotAContainer`, because
+   the capability check comes first (Ops.fs:249 precedes the descendant test at Ops.fs:258).
+
+   The two `| None ->` arms after a `find_in` guarded by `has_id` are the model's total form of a
+   lookup the shipped code writes as a `match` with a fall-through: they are UNREACHABLE, by
+   `find_in_some_iff`, and section 8.3's first theorem is where that is discharged rather than
+   asserted. *)
+let rec apply_contained (ch:tree -> bool) (o:op) (t:tree)
+  : Tot (outcome tree rejection) (decreases o) =
+  match o with
+
+  (* F#: `validateInsert` — the Phase 137 scan, the parent's existence, THEN the capability. *)
+  | InsertChild p n ->
+    (match first_dup n t with
+     | Some d -> Error (DuplicateId d)
+     | None ->
+       if not (has_id p t) then Error (UnknownNode p (ids t))
+       else (match find_in p t with
+             | None -> Error (UnknownNode p (ids t))
+             | Some pn ->
+               if not (ch pn) then Error (NotAContainer p (kind_of pn))
+               else Ok (ins p n t)))
+
+  (* F#: `validateRemove` then the `parentOf` lookup — `canHold` is not consulted. *)
+  | RemoveNode x ->
+    if tid_of t = x then Error CannotRemoveRoot
+    else if not (has_id x t) then Error (UnknownNode x (ids t))
+    else (match parent_of x t with
+          | None -> Error (UnknownNode x (ids t))
+          | Some pid -> Ok (rem_at pid x t))
+
+  (* F#: `validateReorder` — `canHold` is not consulted, and a reorder cannot give a childless
+     node children. *)
+  | ReorderChildren p order ->
+    (match find_in p t with
+     | None -> Error (UnknownNode p (ids t))
+     | Some n ->
+       let current = kid_ids (kids_of n) in
+       if not (same_multiset current order) then Error (ReorderMismatch p current order)
+       else Ok (reorder_at p order t))
+
+  (* F#: the `MoveNode` arm, with the capability test on the NEW PARENT between the endpoint
+     existence checks and the descendant test. *)
+  | MoveNode x np ->
+    if tid_of t = x then Error CannotRemoveRoot
+    else if not (has_id x t) then Error (UnknownNode x (ids t))
+    else if not (has_id np t) then Error (UnknownNode np (ids t))
+    else (match find_in np t with
+          | None -> Error (UnknownNode np (ids t))
+          | Some np0 ->
+            if not (ch np0) then Error (NotAContainer np (kind_of np0))
+            else (match find_in x t with
+                  | None -> Error (UnknownNode x (ids t))
+                  | Some sub ->
+                    if mem np (ids sub) then Error (WouldNestUnderSelf x)
+                    else (match parent_of x t with
+                          | None -> Error (UnknownNode x (ids t))
+                          | Some pid ->
+                            let removed = rem_at pid x t in
+                            if not (has_id np removed) then Error (UnknownNode np (ids removed))
+                            else Ok (ins np sub removed))))
+
+  | Batch os -> apply_contained_all ch os t
+
+and apply_contained_all (ch:tree -> bool) (os:list op) (t:tree)
+  : Tot (outcome tree rejection) (decreases os) =
+  match os with
+  | [] -> Ok t
+  | o :: r -> (match apply_contained ch o t with
+               | Ok t' -> apply_contained_all ch r t'
+               | Error e -> Error e)
+
+(* F#: `canApplyWith canHold` — the same three validators, and the same simulation for the two
+   order-dependent operations. `Ops.canApplyContained` is this; `Ops.canApply` is it at
+   `fun _ -> true`. *)
+let can_apply_contained (ch:tree -> bool) (o:op) (t:tree) : Tot (outcome unit rejection) =
+  match o with
+  | InsertChild p n ->
+    (match first_dup n t with
+     | Some d -> Error (DuplicateId d)
+     | None ->
+       if not (has_id p t) then Error (UnknownNode p (ids t))
+       else (match find_in p t with
+             | None -> Error (UnknownNode p (ids t))
+             | Some pn ->
+               if not (ch pn) then Error (NotAContainer p (kind_of pn))
+               else Ok ()))
+  | RemoveNode x ->
+    if tid_of t = x then Error CannotRemoveRoot
+    else if not (has_id x t) then Error (UnknownNode x (ids t))
+    else Ok ()
+  | ReorderChildren p order ->
+    (match find_in p t with
+     | None -> Error (UnknownNode p (ids t))
+     | Some n ->
+       let current = kid_ids (kids_of n) in
+       if not (same_multiset current order) then Error (ReorderMismatch p current order)
+       else Ok ())
+  | MoveNode _ _
+  | Batch _ -> (match apply_contained ch o t with Ok _ -> Ok () | Error e -> Error e)
+
+(* F#: `Ops.canApplyAll` — and note what it threads. It is `apply`, not `applyWith canHold`
+   (Ops.fs:382), as is `Ops.applyAll` (Ops.fs:363): there is NO container-aware sequence surface
+   in the shipped code. The model drops the failing INDEX the production signature returns, which
+   is the only thing it drops; section 8.6's last lemma is what that clause is here for. *)
+let rec can_apply_all (os:list op) (t:tree) : Tot (outcome unit rejection) (decreases os) =
+  match os with
+  | [] -> Ok ()
+  | o :: r -> (match apply o t with
+               | Ok t' -> can_apply_all r t'
+               | Error e -> Error e)
+
+(* THE GO-RED INSTRUMENT, and it is a definition rather than a test fixture for the same reason
+   `TreeOps.apply_pre137` is: an instrument the model can evaluate is one the model can be held
+   to. This is the engine a plausible reading of the doc comment describes — "an `InsertChild`
+   under a leaf is a typed `NotAContainer`" — with the move half left out. Section 8.6 proves it
+   admits a tree the real one refuses, so handing it to the differential is a measurement rather
+   than a hope. *)
+let rec apply_contained_insert_only (ch:tree -> bool) (o:op) (t:tree)
+  : Tot (outcome tree rejection) (decreases o) =
+  match o with
+  | InsertChild _ _ -> apply_contained ch o t
+  | Batch os -> apply_contained_insert_only_all ch os t
+  | _ -> apply o t
+and apply_contained_insert_only_all (ch:tree -> bool) (os:list op) (t:tree)
+  : Tot (outcome tree rejection) (decreases os) =
+  match os with
+  | [] -> Ok t
+  | o :: r -> (match apply_contained_insert_only ch o t with
+               | Ok t' -> apply_contained_insert_only_all ch r t'
+               | Error e -> Error e)
+
+(* ---- 8.3 THE SIXTH LEMMA — `NotAContainer` is exactly the container refusal ----
+
+   Three statements that together say what the class means, and the first is the one that makes
+   the model's fidelity checkable rather than asserted. *)
+
+(* At `fun _ -> true` the container-aware engine IS `Ops.apply`. Clause-for-clause fidelity to
+   `TreeOps.apply`, discharged by the prover rather than by reading the two side by side — and
+   with it the two unreachable `find_in` fall-throughs above. *)
+let rec apply_contained_is_apply (o:op) (t:tree)
+  : Lemma (ensures apply_contained (fun _ -> true) o t == apply o t) (decreases o)
+  = match o with
+    | InsertChild p n -> if has_id p t then find_in_some_iff p t else ()
+    | MoveNode x np ->
+      if tid_of t <> x && has_id x t && has_id np t then find_in_some_iff np t else ()
+    | Batch os -> apply_contained_all_is_apply os t
+    | _ -> ()
+and apply_contained_all_is_apply (os:list op) (t:tree)
+  : Lemma (ensures apply_contained_all (fun _ -> true) os t == apply_all os t) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      apply_contained_is_apply o t;
+      (match apply o t with
+       | Ok t' -> apply_contained_all_is_apply r t'
+       | Error _ -> ())
+
+(* THE DIFFERENCE. The container-aware engine agrees with the plain one EXCEPT where it raises
+   `NotAContainer` — one statement carrying both halves of "exactly": the capability can only ever
+   refuse (never accept something `apply` refuses, never refuse it differently, never produce a
+   different tree), and the refusal it makes is always this class.
+
+   For a `Batch` the inheritance is what makes the statement worth having: a script whose third
+   step lands under a leaf is refused as a whole, with the same envelope, and the two engines are
+   otherwise indistinguishable on it. *)
+let rec apply_contained_diff (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (ensures (match apply_contained ch o t with
+                    | Error (NotAContainer _ _) -> True
+                    | r -> r == apply o t)) (decreases o)
+  = match o with
+    | InsertChild p n -> if has_id p t then find_in_some_iff p t else ()
+    | MoveNode x np ->
+      if tid_of t <> x && has_id x t && has_id np t then find_in_some_iff np t else ()
+    | Batch os -> apply_contained_all_diff ch os t
+    | _ -> ()
+and apply_contained_all_diff (ch:tree -> bool) (os:list op) (t:tree)
+  : Lemma (ensures (match apply_contained_all ch os t with
+                    | Error (NotAContainer _ _) -> True
+                    | r -> r == apply_all os t)) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      apply_contained_diff ch o t;
+      (match apply_contained ch o t with
+       | Ok t' -> apply_contained_all_diff ch r t'
+       | Error _ -> ())
+
+(* WHERE THE OFFENDER IS. A `NotAContainer` names a node the tree actually holds, reports THAT
+   node's own kind tag, and the predicate refuses it. Stated for the leaf alphabet: inside a
+   `Batch` the offending node lives in an intermediate tree rather than in `t`, so the honest
+   statement there is the inheritance above and not this. *)
+let not_a_container_locates (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (requires is_leaf o)
+          (ensures (match apply_contained ch o t with
+                    | Error (NotAContainer p k) ->
+                      mem p (ids t) /\
+                      (match find_in p t with
+                       | Some pn -> kind_of pn == k /\ not (ch pn)
+                       | None -> False)
+                    | _ -> True))
+  = ()
+
+(* THE SIXTH LEMMA, as one statement: `apply` never raises the class (section 1), the
+   container-aware engine differs from `apply` only by raising it, and where it raises it there is
+   a node the predicate refuses. So `NotAContainer` is the container violation's refusal, it is the
+   ONLY refusal a violation earns, and nothing else earns it. *)
+let not_a_container_exact (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (ensures (match apply o t with
+                    | Error (NotAContainer _ _) -> False
+                    | _ -> True) /\
+                   (match apply_contained ch o t with
+                    | Error (NotAContainer _ _) -> True
+                    | r -> r == apply o t) /\
+                   (is_leaf o ==>
+                     (match apply_contained ch o t with
+                      | Error (NotAContainer p k) ->
+                        (match find_in p t with
+                         | Some pn -> kind_of pn == k /\ not (ch pn)
+                         | None -> False)
+                      | _ -> True)))
+  = apply_never_container_or_domain o t;
+    apply_contained_diff ch o t;
+    if is_leaf o then not_a_container_locates ch o t else ()
+
+(* ---- 8.4 the machinery the preservation argument needs ---- *)
+
+let rec contained_all_elem (ch:tree -> bool) (ts:list tree) (c:tree)
+  : Lemma (requires contained_all ch ts /\ mem c ts) (ensures contained ch c) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> if t = c then () else contained_all_elem ch r c
+
+let rec contained_all_app (ch:tree -> bool) (xs ys:list tree)
+  : Lemma (requires contained_all ch xs /\ contained_all ch ys)
+          (ensures contained_all ch (app xs ys)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> contained_all_app ch r ys
+
+(* A list whose members all come from a contained list is contained. Both the reorder clause (the
+   rearranged children are the same children) and the remove clause (a sublist) turn on it. *)
+let rec contained_all_of_members (ch:tree -> bool) (l l':list tree)
+  : Lemma (requires contained_all ch l /\ (forall (c:tree). mem c l' ==> mem c l))
+          (ensures contained_all ch l') (decreases l')
+  = match l' with
+    | [] -> ()
+    | c :: r -> contained_all_elem ch l c; contained_all_of_members ch l r
+
+let rec find_in_contained (ch:tree -> bool) (x:string) (t:tree) (sub:tree)
+  : Lemma (requires contained ch t /\ find_in x t == Some sub) (ensures contained ch sub)
+          (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = x then () else find_all_contained ch x cs sub
+and find_all_contained (ch:tree -> bool) (x:string) (ts:list tree) (sub:tree)
+  : Lemma (requires contained_all ch ts /\ find_all x ts == Some sub) (ensures contained ch sub)
+          (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match find_in x t with
+                 | Some _ -> find_in_contained ch x t sub
+                 | None -> find_all_contained ch x r sub)
+
+(* ---- the capability, at every node carrying an id ----
+
+   `find_in` answers with the FIRST node of that id, and `ins` edits EVERY node of that id (the
+   `Tree.updateNode` fidelity `TreeOps.fst` section 4 records). Under `wf` those are the same node,
+   and this predicate plus the lemma below is where that gap is closed rather than assumed. *)
+let rec ch_at (ch:tree -> bool) (p:string) (t:tree) : Tot bool (decreases t) =
+  match t with
+  | TNode i _ cs -> (if i = p then ch t else true) && ch_at_all ch p cs
+and ch_at_all (ch:tree -> bool) (p:string) (ts:list tree) : Tot bool (decreases ts) =
+  match ts with
+  | [] -> true
+  | t :: r -> ch_at ch p t && ch_at_all ch p r
+
+let rec ch_at_absent (ch:tree -> bool) (p:string) (t:tree)
+  : Lemma (requires not (mem p (ids t))) (ensures ch_at ch p t) (decreases t)
+  = match t with TNode _ _ cs -> ch_at_all_absent ch p cs
+and ch_at_all_absent (ch:tree -> bool) (p:string) (ts:list tree)
+  : Lemma (requires not (mem p (ids_all ts))) (ensures ch_at_all ch p ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ch_at_absent ch p t; ch_at_all_absent ch p r
+
+let rec ch_at_of_find (ch:tree -> bool) (p:string) (t:tree) (pn:tree)
+  : Lemma (requires wf t /\ find_in p t == Some pn /\ ch pn) (ensures ch_at ch p t) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = p then ch_at_all_absent ch p cs
+                      else (find_all_some_iff p cs; ch_at_all_of_find ch p cs pn)
+and ch_at_all_of_find (ch:tree -> bool) (p:string) (ts:list tree) (pn:tree)
+  : Lemma (requires wf_all ts /\ find_all p ts == Some pn /\ ch pn)
+          (ensures ch_at_all ch p ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      find_in_some_iff p t;
+      if mem p (ids t) then begin
+        ch_at_of_find ch p t pn;
+        inter_nil_iff (ids t) (ids_all r);
+        ch_at_all_absent ch p r
+      end
+      else (ch_at_absent ch p t; ch_at_all_of_find ch p r pn)
+
+let rec ch_at_drop_kid (ch:tree -> bool) (p:string) (x:string) (ts:list tree)
+  : Lemma (requires ch_at_all ch p ts) (ensures ch_at_all ch p (drop_kid x ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> ch_at_drop_kid ch p x r
+
+(* A remove neither invents an id nor changes a kind, so the capability survives it — but only
+   because the predicate does not read the child list, which is where `child_blind` earns its
+   place in the move clause. *)
+let rec rem_ch_at (ch:tree -> bool) (p:string) (pid x:string) (t:tree)
+  : Lemma (requires child_blind ch /\ ch_at ch p t)
+          (ensures ch_at ch p (rem_at pid x t)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> rem_ch_at_all ch p pid x cs; ch_at_drop_kid ch p x (rem_all pid x cs)
+and rem_ch_at_all (ch:tree -> bool) (p:string) (pid x:string) (ts:list tree)
+  : Lemma (requires child_blind ch /\ ch_at_all ch p ts)
+          (ensures ch_at_all ch p (rem_all pid x ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> rem_ch_at ch p pid x t; rem_ch_at_all ch p pid x r
+
+(* ---- the three structural edits, against the invariant ---- *)
+
+(* An insert under a node the capability admits, of a subtree that satisfies the invariant. Both
+   hypotheses are used exactly once and section 8.6 refutes the statement without either. *)
+let rec ins_contained (ch:tree -> bool) (p:string) (n:tree) (t:tree)
+  : Lemma (requires child_blind ch /\ contained ch t /\ contained ch n /\ ch_at ch p t)
+          (ensures contained ch (ins p n t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      ins_contained_all ch p n cs;
+      if i = p then contained_all_app ch (ins_all p n cs) [n] else ()
+and ins_contained_all (ch:tree -> bool) (p:string) (n:tree) (ts:list tree)
+  : Lemma (requires child_blind ch /\ contained_all ch ts /\ contained ch n /\ ch_at_all ch p ts)
+          (ensures contained_all ch (ins_all p n ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ins_contained ch p n t; ins_contained_all ch p n r
+
+let rec drop_kid_sub (x:string) (ts:list tree) (c:tree)
+  : Lemma (ensures mem c (drop_kid x ts) ==> mem c ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> drop_kid_sub x r c
+
+(* A remove can only take children away, and the invariant constrains nodes that HAVE children —
+   so it survives, with `child_blind` carrying the node that lost one. *)
+let rec rem_contained (ch:tree -> bool) (pid x:string) (t:tree)
+  : Lemma (requires child_blind ch /\ contained ch t)
+          (ensures contained ch (rem_at pid x t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      rem_contained_all ch pid x cs;
+      let cs' = rem_all pid x cs in
+      let aux (c:tree) : Lemma (mem c (drop_kid x cs') ==> mem c cs') = drop_kid_sub x cs' c in
+      FStar.Classical.forall_intro aux;
+      contained_all_of_members ch cs' (drop_kid x cs')
+and rem_contained_all (ch:tree -> bool) (pid x:string) (ts:list tree)
+  : Lemma (requires child_blind ch /\ contained_all ch ts)
+          (ensures contained_all ch (rem_all pid x ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> rem_contained ch pid x t; rem_contained_all ch pid x r
+
+let rec arrange_nil (order:list string) : Lemma (ensures arrange order [] == []) (decreases order)
+  = match order with
+    | [] -> ()
+    | _ :: rest -> arrange_nil rest
+
+(* A reorder invents no child and gives no childless node children, so the invariant survives it
+   with no capability check at all — which is why `Ops.fs` does not make one. *)
+let rec reorder_contained (ch:tree -> bool) (p:string) (ord:list string) (t:tree)
+  : Lemma (requires child_blind ch /\ contained ch t)
+          (ensures contained ch (reorder_at p ord t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      reorder_contained_all ch p ord cs;
+      let cs' = reorder_all p ord cs in
+      arrange_nil ord;
+      let aux (c:tree) : Lemma (mem c (arrange ord cs') ==> mem c cs') =
+        if mem c (arrange ord cs') then arrange_from ord cs' c else ()
+      in
+      FStar.Classical.forall_intro aux;
+      contained_all_of_members ch cs' (arrange ord cs')
+and reorder_contained_all (ch:tree -> bool) (p:string) (ord:list string) (ts:list tree)
+  : Lemma (requires child_blind ch /\ contained_all ch ts)
+          (ensures contained_all ch (reorder_all p ord ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> reorder_contained ch p ord t; reorder_contained_all ch p ord r
+
+(* ---- 8.5 THE SEVENTH LEMMA — the container capability is preserved ---- *)
+
+#push-options "--z3rlimit 120"
+let rec contained_preserves (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t /\ contained_op ch o)
+          (ensures (match apply_contained ch o t with
+                    | Ok t' -> contained ch t'
+                    | Error _ -> True)) (decreases o)
+  = match o with
+
+    | InsertChild p n ->
+      (match first_dup n t with
+       | Some _ -> ()
+       | None ->
+         if not (has_id p t) then ()
+         else begin
+           find_in_some_iff p t;
+           match find_in p t with
+           | None -> ()
+           | Some pn ->
+             if ch pn then (ch_at_of_find ch p t pn; ins_contained ch p n t) else ()
+         end)
+
+    | RemoveNode x ->
+      if tid_of t = x || not (has_id x t) then ()
+      else (match parent_of x t with
+            | None -> ()
+            | Some pid -> rem_contained ch pid x t)
+
+    | ReorderChildren p order ->
+      (match find_in p t with
+       | None -> ()
+       | Some _ -> reorder_contained ch p order t)
+
+    (* The one clause with real content. The moved subtree satisfies the invariant because it is a
+       subtree of a tree that does; the removal preserves both the invariant and the capability at
+       the destination (which is a DIFFERENT node from the one removed, and survives — `child_blind`
+       is what lets the pre-removal check answer for the post-removal node); and the graft is then
+       an insert under an admitted parent. *)
+    | MoveNode x np ->
+      if tid_of t = x || not (has_id x t) || not (has_id np t) then ()
+      else begin
+        find_in_some_iff np t;
+        match find_in np t with
+        | None -> ()
+        | Some np0 ->
+          if not (ch np0) then ()
+          else (match find_in x t with
+                | None -> ()
+                | Some sub ->
+                  if mem np (ids sub) then ()
+                  else (match parent_of x t with
+                        | None -> ()
+                        | Some pid ->
+                          let removed = rem_at pid x t in
+                          if not (has_id np removed) then ()
+                          else begin
+                            find_in_contained ch x t sub;
+                            rem_contained ch pid x t;
+                            ch_at_of_find ch np t np0;
+                            rem_ch_at ch np pid x t;
+                            ins_contained ch np sub removed
+                          end))
+      end
+
+    | Batch os -> contained_preserves_all ch os t
+
+and contained_preserves_all (ch:tree -> bool) (os:list op) (t:tree)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t /\ contained_op_all ch os)
+          (ensures (match apply_contained_all ch os t with
+                    | Ok t' -> contained ch t'
+                    | Error _ -> True)) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      contained_preserves ch o t;
+      (* well-formedness travels with the tree through the script, and it travels through the
+         PLAIN engine's theorem: the two agree on every accepted step (`apply_contained_diff`). *)
+      apply_contained_diff ch o t;
+      apply_preserves_wf o t;
+      (match apply_contained ch o t with
+       | Ok t' -> contained_preserves_all ch r t'
+       | Error _ -> ())
+#pop-options
+
+(* The dry run and the container-aware mutating call accept exactly the same operations, and
+   refuse with the same envelope — F#'s `canApplyContained` is `canApplyWith canHold`, sharing the
+   three validators with `applyWith` and simulating the two order-dependent clauses. Section 5's
+   corollary carries over unchanged: the `parentOf` fallback the remove clause carries is
+   unreachable, so the two surfaces cannot diverge by one taking a branch the other does not. *)
+let can_apply_contained_agrees (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (requires wf t)
+          (ensures can_apply_contained ch o t ==
+                   (match apply_contained ch o t with Ok _ -> Ok () | Error e -> Error e))
+  = match o with
+    | RemoveNode x -> if tid_of t <> x && has_id x t then parent_exists x t else ()
+    | _ -> ()
+
+(* ---- 8.6 the four counterexamples ----
+
+   Each is a concrete tree and a concrete predicate, decided by `assert_norm`, in the shape
+   `TreeOps.insert_breaks_wf_pre137` established: a refutation that the module can evaluate rather
+   than a caveat a reader has to believe. The first two are why section 8.5 has two hypotheses;
+   the third is the go-red instrument's teeth; the fourth is a finding about the shipped surface,
+   not about the model. *)
+
+(* "everything but a paragraph can hold children", the shape every domain writes. *)
+let cx_doc_only (n:tree) : Tot bool = kind_of n = "doc"
+
+(* the predicate that reads the CHILD LIST — lawful by the engine's type, and unstable *)
+let cx_childless (n:tree) : Tot bool = match kids_of n with [] -> true | _ -> false
+
+let cx_root_doc : tree = TNode "root" "doc" []
+
+(* a graft whose OWN interior node is not a container: the engine never looks inside it *)
+let cx_nested_graft : op = InsertChild "root" (TNode "a" "para" [TNode "b" "para" []])
+
+(* a graft that is itself contained — so this one isolates the child-blindness premise *)
+let cx_leaf_graft : op = InsertChild "root" (TNode "a" "para" [])
+
+(* WITHOUT `contained_op`: the invariant is broken by a graft the engine admits, because
+   `canHold` is applied to the PARENT and to nothing inside the subtree. *)
+let contained_needs_op_hypothesis ()
+  : Lemma (ensures contained cx_doc_only cx_root_doc /\
+                   not (contained_op cx_doc_only cx_nested_graft) /\
+                   (match apply_contained cx_doc_only cx_nested_graft cx_root_doc with
+                    | Ok t' -> not (contained cx_doc_only t')
+                    | Error _ -> False))
+  = assert_norm (contained cx_doc_only cx_root_doc);
+    assert_norm (not (contained_op cx_doc_only cx_nested_graft));
+    assert_norm (match apply_contained cx_doc_only cx_nested_graft cx_root_doc with
+                 | Ok t' -> not (contained cx_doc_only t')
+                 | Error _ -> False)
+
+(* WITHOUT `child_blind`: every other hypothesis holds — the tree is contained, the graft is
+   contained, the parent is admitted at the moment it is checked — and the invariant breaks anyway,
+   because the check was answered by a node that no longer exists in that shape. *)
+let contained_needs_child_blind ()
+  : Lemma (ensures contained cx_childless cx_root_doc /\
+                   contained_op cx_childless cx_leaf_graft /\
+                   ~(child_blind cx_childless) /\
+                   (match apply_contained cx_childless cx_leaf_graft cx_root_doc with
+                    | Ok t' -> not (contained cx_childless t')
+                    | Error _ -> False))
+  = assert_norm (contained cx_childless cx_root_doc);
+    assert_norm (contained_op cx_childless cx_leaf_graft);
+    assert_norm (cx_childless (TNode "r" "k" []) == true);
+    assert_norm (cx_childless (TNode "r" "k" [TNode "c" "k" []]) == false);
+    assert_norm (match apply_contained cx_childless cx_leaf_graft cx_root_doc with
+                 | Ok t' -> not (contained cx_childless t')
+                 | Error _ -> False)
+
+(* ---- the move half, which is what the differential's go-red is about ---- *)
+
+let cx_box (n:tree) : Tot bool = kind_of n = "box"
+
+(* root(box) [ leaf(para), x(para) ] — a leaf and a movable node as siblings *)
+let cx_box_tree : tree = TNode "root" "box" [TNode "leaf" "para" []; TNode "x" "para" []]
+
+let cx_move_into_leaf : op = MoveNode "x" "leaf"
+
+(* THE GO-RED'S TEETH. An engine that checks the capability on insert and not on move admits a
+   move under a leaf, and the invariant breaks — while the real one refuses it, naming the leaf
+   and its kind tag. Both halves in one statement, so the instrument is proved to be a real
+   weakening before the differential is asked to lose against it. *)
+let insert_only_breaks_contained ()
+  : Lemma (ensures contained cx_box cx_box_tree /\
+                   apply_contained cx_box cx_move_into_leaf cx_box_tree ==
+                     Error (NotAContainer "leaf" "para") /\
+                   (match apply_contained_insert_only cx_box cx_move_into_leaf cx_box_tree with
+                    | Ok t' -> not (contained cx_box t')
+                    | Error _ -> False))
+  = assert_norm (contained cx_box cx_box_tree);
+    assert_norm (apply_contained cx_box cx_move_into_leaf cx_box_tree ==
+                 Error (NotAContainer "leaf" "para"));
+    assert_norm (match apply_contained_insert_only cx_box cx_move_into_leaf cx_box_tree with
+                 | Ok t' -> not (contained cx_box t')
+                 | Error _ -> False)
+
+(* THE FINDING, and it is about the shipped code rather than about this model. `Ops.canApplyAll`
+   is the dry run for a SCRIPT, and it threads the plain `apply`: there is no container-aware
+   sequence surface at all, so a script it certifies can be refused by `applyContained` at the
+   first step. A caller that pre-flights with `canApplyAll` and then executes with
+   `applyContained` — which is the combination the two doc comments invite — has a check that
+   cannot see the refusal its executor will make. `Ops.applyAll` has the same shape. *)
+let can_apply_all_ignores_containment ()
+  : Lemma (ensures can_apply_all [cx_move_into_leaf] cx_box_tree == Ok () /\
+                   (match apply_contained cx_box (Batch [cx_move_into_leaf]) cx_box_tree with
+                    | Error (NotAContainer p k) -> p == "leaf" /\ k == "para"
+                    | _ -> False))
+  = assert_norm (can_apply_all [cx_move_into_leaf] cx_box_tree == Ok ());
+    assert_norm (match apply_contained cx_box (Batch [cx_move_into_leaf]) cx_box_tree with
+                 | Error (NotAContainer p k) -> p == "leaf" /\ k == "para"
+                 | _ -> False)
