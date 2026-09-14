@@ -246,6 +246,36 @@ and contained_op_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.op
      end))
 
 
+let rec first_uncontained : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.tree  ->  FStar_Pervasives_Native.option<TreeOps.tree> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( t  :  TreeOps.tree ) -> (match (t) with
+| TreeOps.TNode (uu___, uu___1, cs) -> begin
+      
+if ((match (cs) with
+| (hd)::tl -> begin
+     true
+     end
+| uu___2 -> begin
+     false
+     end) && (not ((ch t)))) then begin
+     FStar_Pervasives_Native.Some (t)
+     end else begin
+     (first_uncontained_all ch cs)
+     end
+     end))
+and first_uncontained_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.tree>  ->  FStar_Pervasives_Native.option<TreeOps.tree> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( ts  :  Prims.list<TreeOps.tree> ) -> (match (ts) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (t)::r -> begin
+     (match ((first_uncontained ch t)) with
+| FStar_Pervasives_Native.Some (o) -> begin
+     FStar_Pervasives_Native.Some (o)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (first_uncontained_all ch r)
+     end)
+     end))
+
+
 let rec apply_contained : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( o  :  TreeOps.op ) ( t  :  TreeOps.tree ) -> (match (o) with
 | TreeOps.InsertChild (p, n) -> begin
      (match ((TreeOps.first_dup n t)) with
@@ -266,7 +296,13 @@ if (not ((TreeOps.has_id p t))) then begin
 if (not ((ch pn))) then begin
      DagFold.Error (TreeOps.NotAContainer (p, (TreeOps.kind_of pn)))
      end else begin
+     (match ((first_uncontained ch n)) with
+| FStar_Pervasives_Native.Some (off) -> begin
+     DagFold.Error (TreeOps.NotAContainer ((TreeOps.tid_of off), (TreeOps.kind_of off)))
+     end
+| FStar_Pervasives_Native.None -> begin
      DagFold.Ok ((TreeOps.ins p n t))
+     end)
      end
      end)
      end
@@ -400,7 +436,13 @@ if (not ((TreeOps.has_id p t))) then begin
 if (not ((ch pn))) then begin
      DagFold.Error (TreeOps.NotAContainer (p, (TreeOps.kind_of pn)))
      end else begin
+     (match ((first_uncontained ch n)) with
+| FStar_Pervasives_Native.Some (off) -> begin
+     DagFold.Error (TreeOps.NotAContainer ((TreeOps.tid_of off), (TreeOps.kind_of off)))
+     end
+| FStar_Pervasives_Native.None -> begin
      DagFold.Ok (())
+     end)
      end
      end)
      end
@@ -468,6 +510,37 @@ let rec can_apply_all : Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.ou
 | DagFold.Error (e) -> begin
      DagFold.Error (e)
      end)
+     end))
+
+
+let apply_contained_pre161 : (TreeOps.tree  ->  Prims.bool)  ->  TreeOps.op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( o  :  TreeOps.op ) ( t  :  TreeOps.tree ) -> (match (o) with
+| TreeOps.InsertChild (p, n) -> begin
+     (match ((TreeOps.first_dup n t)) with
+| FStar_Pervasives_Native.Some (d) -> begin
+     DagFold.Error (TreeOps.DuplicateId (d))
+     end
+| FStar_Pervasives_Native.None -> begin
+      
+if (not ((TreeOps.has_id p t))) then begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end else begin
+     (match ((TreeOps.find_in p t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (pn) -> begin
+      
+if (not ((ch pn))) then begin
+     DagFold.Error (TreeOps.NotAContainer (p, (TreeOps.kind_of pn)))
+     end else begin
+     DagFold.Ok ((TreeOps.ins p n t))
+     end
+     end)
+     end
+     end)
+     end
+| uu___ -> begin
+     (apply_contained ch o t)
      end))
 
 

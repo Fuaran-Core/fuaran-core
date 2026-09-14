@@ -17,8 +17,10 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //                           `let rec` of that name in the model it names.
 //   model-registered        that model file exists, and its module is one `check.ps1` checks — a
 //                           row over a model the leg never runs claims a proof nothing reproduces.
-//   tested-case-exists      a `tested` row names at least one `Proofs.Oracle` case, and every case
-//                           it names is in the test tree.
+//   tested-case-exists      a `tested` row names at least one case, and every case it names is in
+//                           the test tree. The citable set is the differential host `Proofs.Oracle`
+//                           plus (Phase 161) the `containerLaws` conformance suite — see
+//                           `realCases` for why it is an enumeration of suites and not a walk.
 //   every-module-has-a-row  every module in `$modules` is named by at least one `proved` row.
 //   phase-form              every row's `phase` is the `fuaran-core#NNN` form.
 //   closed-level-set        every row's `level` is one of the closed four.
@@ -281,8 +283,21 @@ let private fixtureDir =
 let private realModules () =
     parseModules (File.ReadAllText checkScriptPath)
 
+/// The case names a `tested` row may cite. `Proofs.Oracle` is where every differential row's
+/// evidence lives, and it was the whole set until Phase 161 — whose `container-laws` row is
+/// evidenced by a CONFORMANCE FAMILY rather than by a differential, and whose cases therefore live
+/// in the suite that certifies that family. Read from the TREE in both cases, so a sibling
+/// appending a case is picked up with no edit here.
+///
+/// Widening the set rather than moving the cases is deliberate: the clause's content is "a `tested`
+/// row's evidence names a case that exists", and a row evidenced by a conformance family is as
+/// checkable as one evidenced by a differential. What the clause must never become is a set so wide
+/// that any string is in it — which is why this is an enumeration of suites and not a walk of the
+/// whole tree.
 let private realCases () =
-    caseNames ProofOracleTests.proofOracleTests |> Set.ofList
+    Set.union
+        (caseNames ProofOracleTests.proofOracleTests |> Set.ofList)
+        (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
 
 /// A fixture ladder is measured against a FIXTURE module list and a FIXTURE case set, so nothing a
 /// sibling adds to `$modules` or to `Proofs.Oracle` can move a go-red in either direction.
@@ -332,7 +347,7 @@ let proofsLadderTests =
                   let model = Path.Combine(repoRoot, "proofs", m + ".fst")
                   Expect.isTrue (File.Exists model) (sprintf "the leg checks '%s' but %s is not there" m model)
 
-          testCase "the Proofs.Oracle case names are readable from the test tree"
+          testCase "the case names a tested row may cite are readable from the test tree"
           <| fun _ ->
               // Read from the TREE, not from the source text, so a sibling appending a case is
               // picked up with no edit here. If this ever collapsed to a handful, the
@@ -340,7 +355,17 @@ let proofsLadderTests =
               Expect.isGreaterThan
                   (Set.count (realCases ()))
                   20
-                  "the Proofs.Oracle family's case names are readable, and there are as many as the differential host declares"
+                  "the cited suites' case names are readable, and there are as many as the differential host declares"
+
+              // and BOTH suites are in it — a union that silently degenerated to one of its
+              // members would leave the other's rows uncheckable while reporting nothing.
+              Expect.isNonEmpty
+                  (caseNames ProofOracleTests.proofOracleTests)
+                  "the Proofs.Oracle differential host contributes cases"
+
+              Expect.isNonEmpty
+                  (caseNames ContainedOpsTests.containerLawTests)
+                  "the containerLaws conformance suite contributes cases"
 
           // ---- the subject ----
 
