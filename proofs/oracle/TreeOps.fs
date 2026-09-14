@@ -522,19 +522,37 @@ let rec same_multiset : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  
      end))
 
 
+let rec scan_dup : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( seen  :  Prims.list<Prims.string> ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (i)::rest -> begin
+      
+if (DagFold.mem i seen) then begin
+     FStar_Pervasives_Native.Some (i)
+     end else begin
+     (scan_dup ((i)::seen) rest)
+     end
+     end))
+
+
+let first_dup : tree  ->  tree  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( n  :  tree ) ( t  :  tree ) -> (scan_dup (ids t) (ids n)))
+
+
 let rec apply : op  ->  tree  ->  DagFold.outcome<tree, rejection> = (fun ( o  :  op ) ( t  :  tree ) -> (match (o) with
 | InsertChild (p, n) -> begin
-      
-if (has_id (tid_of n) t) then begin
-     DagFold.Error (DuplicateId ((tid_of n)))
-     end else begin
+     (match ((first_dup n t)) with
+| FStar_Pervasives_Native.Some (d) -> begin
+     DagFold.Error (DuplicateId (d))
+     end
+| FStar_Pervasives_Native.None -> begin
       
 if (not ((has_id p t))) then begin
      DagFold.Error (UnknownNode (p, (ids t)))
      end else begin
      DagFold.Ok ((ins p n t))
      end
-     end
+     end)
      end
 | RemoveNode (x) -> begin
       
@@ -740,6 +758,28 @@ let cx_tree : tree = TNode ("root", "doc", (TNode ("a", "section", []))::[])
 
 
 let cx_insert : op = InsertChild ("a", TNode ("fresh", "section", (TNode ("root", "para", []))::[]))
+
+
+let validate_insert_pre137 : tree  ->  tree  ->  Prims.bool = (fun ( n  :  tree ) ( t  :  tree ) -> (has_id (tid_of n) t))
+
+
+let apply_pre137 : op  ->  tree  ->  DagFold.outcome<tree, rejection> = (fun ( o  :  op ) ( t  :  tree ) -> (match (o) with
+| InsertChild (p, n) -> begin
+      
+if (validate_insert_pre137 n t) then begin
+     DagFold.Error (DuplicateId ((tid_of n)))
+     end else begin
+      
+if (not ((has_id p t))) then begin
+     DagFold.Error (UnknownNode (p, (ids t)))
+     end else begin
+     DagFold.Ok ((ins p n t))
+     end
+     end
+     end
+| uu___ -> begin
+     (apply o t)
+     end))
 
 
 let covered : op  ->  op  ->  Prims.bool = (fun ( a  :  op ) ( b  :  op ) -> ((((((is_leaf a) && (is_leaf b)) || (inert a)) || (inert b)) || (relocating a)) || (relocating b)))

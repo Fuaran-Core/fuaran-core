@@ -262,18 +262,44 @@ let rec same_multiset (xs ys:list string) : Tot bool (decreases xs) =
                | Some ys' -> same_multiset r ys')
 
 (* ======================================================================================
+   5b. `Ops.firstDuplicateId` — the insert graft's uniqueness scan (Phase 137, modelled by
+       Phase 138).
+
+       F#: one scan over `Tree.ids w node` in preorder, seeded from `Tree.ids w root`, naming the
+       FIRST id already seen. The seen set is a `Set<string>` there and a list read under `mem`
+       here, which is the pack's standing list-for-set reading (README, "sets are lists"); the
+       decision is membership only, so nothing the comparison observes is lost.
+
+       Before Phase 137 the check read the inserted node's own id alone. Section 13 keeps that
+       older clause under its own name and keeps its refutation with it, so the record of what
+       was wrong survives the fix rather than being deleted by it.
+   ====================================================================================== *)
+
+let rec scan_dup (seen:list string) (l:list string) : Tot (option string) (decreases l) =
+  match l with
+  | [] -> None
+  | i :: rest -> if mem i seen then Some i else scan_dup (i :: seen) rest
+
+(* F#: `firstDuplicateId w idw node root`. *)
+let first_dup (n:tree) (t:tree) : Tot (option string) = scan_dup (ids t) (ids n)
+
+(* ======================================================================================
    6. `Ops.apply` (F#: `applyWith (fun _ -> true) w idw`, clause for clause).
    ====================================================================================== *)
 
 let rec apply (o:op) (t:tree) : Tot (outcome tree rejection) (decreases o) =
   match o with
 
-  (* F#: `validateInsert` — the inserted node's OWN id must be absent (its DESCENDANTS are not
-     checked: that is the gap `wf_broken_by_insert` below exhibits), then the parent must exist. *)
+  (* F#: `validateInsert` — SINCE PHASE 137 the whole inserted subtree is scanned, against the
+     tree and against itself, and the first offender in `Tree.ids` order is named; then the parent
+     must exist. `Tree.ids` is preorder, so its head is the inserted node's own id and the widened
+     scan subsumes the pre-137 check while keeping its precedence over `UnknownNode`. *)
   | InsertChild p n ->
-    if has_id (tid_of n) t then Error (DuplicateId (tid_of n))
-    else if not (has_id p t) then Error (UnknownNode p (ids t))
-    else Ok (ins p n t)
+    (match first_dup n t with
+     | Some d -> Error (DuplicateId d)
+     | None ->
+       if not (has_id p t) then Error (UnknownNode p (ids t))
+       else Ok (ins p n t))
 
   (* F#: `validateRemove` then the `parentOf` lookup. *)
   | RemoveNode x ->
@@ -596,6 +622,62 @@ let rec no_dups (l:list string) : Tot bool =
   match l with
   | [] -> true
   | x :: r -> not (mem x r) && no_dups r
+
+(* ---- what `Ops.firstDuplicateId` DECIDES (Phase 138) ----
+
+   The validator is a scan and the invariant is a pair of set facts, so nothing downstream can use
+   the one until it is expressed as the other. `scan_dup seen l` finds nothing exactly when `l` has
+   no repeat and shares nothing with `seen`; at `seen = ids t` that is precisely the hypothesis
+   `ins_wf` (section 13) asks for. This lemma is the whole bridge between Phase 137's code and
+   Phase 133's specification, which is why it is stated as an `<==>` rather than as the one
+   direction the preservation argument happens to need: the converse is what makes the refusal
+   sharp — an insert this validator refuses is one that genuinely would have broken the invariant,
+   never merely one it could not prove safe. *)
+let rec scan_dup_none_iff (seen l:list string)
+  : Lemma (ensures (None? (scan_dup seen l)) <==> (no_dups l /\ disjoint l seen)) (decreases l)
+  = inter_nil_iff l seen;
+    match l with
+    | [] -> ()
+    | i :: rest ->
+      if mem i seen then ()
+      else begin
+        scan_dup_none_iff (i :: seen) rest;
+        inter_nil_iff rest (i :: seen);
+        inter_nil_iff rest seen
+      end
+
+let first_dup_none_iff (n:tree) (t:tree)
+  : Lemma (ensures (None? (first_dup n t)) <==> (no_dups (ids n) /\ disjoint (ids n) (ids t)))
+  = scan_dup_none_iff (ids t) (ids n)
+
+(* ---- and that `wf` IS `no_dups (ids _)` (Phase 138) ----
+
+   Section 1 says the structural predicate and the flat one are the same predicate; until now that
+   was a sentence in a comment. The validator decides the FLAT one and every preservation argument
+   in this module is stated over the STRUCTURAL one, so the sentence became load-bearing the moment
+   Phase 137's check was modelled, and it is proved here rather than believed. *)
+let rec no_dups_app (x y:list string)
+  : Lemma (ensures no_dups (app x y) <==> (no_dups x /\ no_dups y /\ disjoint x y)) (decreases x)
+  = inter_nil_iff x y;
+    match x with
+    | [] -> ()
+    | h :: t ->
+      no_dups_app t y;
+      inter_nil_iff t y;
+      mem_app h t y
+
+let rec wf_iff_no_dups (t:tree)
+  : Lemma (ensures wf t <==> no_dups (ids t)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> wf_all_iff_no_dups cs
+and wf_all_iff_no_dups (ts:list tree)
+  : Lemma (ensures wf_all ts <==> no_dups (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      wf_iff_no_dups t;
+      wf_all_iff_no_dups r;
+      no_dups_app (ids t) (ids_all r)
 
 (* An id is in a child list's ids exactly when it is in one of the children's. *)
 let rec mem_ids_all_intro (x:string) (c:tree) (ts:list tree)
@@ -991,6 +1073,46 @@ and ids_reorder_mem_all (x p:string) (o:list string) (ts:list tree)
     | [] -> ()
     | t :: r -> ids_reorder_mem x p o t; ids_reorder_mem_all x p o r
 
+(* The same two facts QUANTIFIED — the shape both the diamond's insert cases (section 12, since
+   Phase 138 widened the insert validator into a statement about a whole id SET) and the
+   disjointness arguments of section 13 consume. They sat in section 13 until Phase 138 and moved
+   here unchanged; nothing but their position is different. *)
+let ids_ins_mem_fa (p:string) (n:tree) (t:tree)
+  : Lemma (ensures forall (y:string). mem y (ids (ins p n t)) ==
+                     (mem y (ids t) || (mem p (ids t) && mem y (ids n))))
+  = let aux (y:string)
+      : Lemma (mem y (ids (ins p n t)) ==
+               (mem y (ids t) || (mem p (ids t) && mem y (ids n))))
+      = ids_ins_mem y p n t
+    in
+    FStar.Classical.forall_intro aux
+
+let ids_ins_mem_all_fa (p:string) (n:tree) (ts:list tree)
+  : Lemma (ensures forall (y:string). mem y (ids_all (ins_all p n ts)) ==
+                     (mem y (ids_all ts) || (mem p (ids_all ts) && mem y (ids n))))
+  = let aux (y:string)
+      : Lemma (mem y (ids_all (ins_all p n ts)) ==
+               (mem y (ids_all ts) || (mem p (ids_all ts) && mem y (ids n))))
+      = ids_ins_mem_all y p n ts
+    in
+    FStar.Classical.forall_intro aux
+
+let ids_reorder_mem_fa (p:string) (o:list string) (t:tree)
+  : Lemma (requires wf t /\ reorder_ok p o t)
+          (ensures forall (y:string). mem y (ids (reorder_at p o t)) == mem y (ids t))
+  = let aux (y:string) : Lemma (mem y (ids (reorder_at p o t)) == mem y (ids t))
+      = ids_reorder_mem y p o t
+    in
+    FStar.Classical.forall_intro aux
+
+let ids_reorder_mem_all_fa (p:string) (o:list string) (ts:list tree)
+  : Lemma (requires wf_all ts /\ reorder_ok_all p o ts)
+          (ensures forall (y:string). mem y (ids_all (reorder_all p o ts)) == mem y (ids_all ts))
+  = let aux (y:string) : Lemma (mem y (ids_all (reorder_all p o ts)) == mem y (ids_all ts))
+      = ids_reorder_mem_all y p o ts
+    in
+    FStar.Classical.forall_intro aux
+
 (* ======================================================================================
    12. The diamond at one state, for one pair.
 
@@ -1056,6 +1178,23 @@ let ins_ins_step (p1:string) (n1:tree) (p2:string) (n2:tree) (s:tree)
     ids_ins_mem p2 p1 n1 s;
     ids_ins_mem (tid_of n1) p2 n2 s;
     ids_ins_mem p1 p2 n2 s;
+    (* Phase 138: acceptance is now a statement about the whole inserted id SET rather than about
+       one id, so each side's still-accepted-after-the-other step needs the set facts, not the two
+       point instances above. Independence supplies `ids n1 ∩ ids n2 = ∅` (each subtree's ids are
+       in the other's `reads`), and an insert adds exactly its own ids — so neither subtree's ids
+       can appear in the tree the other insert left behind, and internal uniqueness is a property
+       of the subtree alone and is untouched by either. *)
+    first_dup_none_iff n1 s;
+    first_dup_none_iff n2 s;
+    first_dup_none_iff n2 (ins p1 n1 s);
+    first_dup_none_iff n1 (ins p2 n2 s);
+    ids_ins_mem_fa p1 n1 s;
+    ids_ins_mem_fa p2 n2 s;
+    inter_nil_iff (ids n1) (ids s);
+    inter_nil_iff (ids n2) (ids s);
+    inter_nil_iff (ids n1) (ids n2);
+    inter_nil_iff (ids n2) (ids (ins p1 n1 s));
+    inter_nil_iff (ids n1) (ids (ins p2 n2 s));
     ins_ins_comm p1 n1 p2 n2 s
 
 (* ---- CASE 2: an insert and a reorder ---- *)
@@ -1075,11 +1214,18 @@ let ins_reorder_step (p1:string) (n1:tree) (p2:string) (o2:list string) (s:tree)
          | Some m2 ->
            find_in_id p2 s m2;
            (match m2 with TNode _ _ cs2 -> kid_ids_ins_all p1 n1 cs2));
-        (* the insert is still accepted after the reorder: its two checks are membership, and a
-           reorder moves no id in or out of the tree *)
+        (* the insert is still accepted after the reorder: its checks are membership of the whole
+           inserted subtree (Phase 138) plus the parent's, and a reorder moves no id in or out of
+           the tree — so the id SET the scan is against is unchanged, and internal uniqueness of
+           the subtree is not a fact about the tree at all *)
         wf_reorder_ok p2 o2 s;
         ids_reorder_mem (tid_of n1) p2 o2 s;
         ids_reorder_mem p1 p2 o2 s;
+        first_dup_none_iff n1 s;
+        first_dup_none_iff n1 (reorder_at p2 o2 s);
+        ids_reorder_mem_fa p2 o2 s;
+        inter_nil_iff (ids n1) (ids s);
+        inter_nil_iff (ids n1) (ids (reorder_at p2 o2 s));
         ins_reorder_comm p1 n1 p2 o2 s
       end
     else ()
@@ -1143,37 +1289,68 @@ let leaf_wstep (a b:op) (s:tree)
     | ReorderChildren p1 o1, ReorderChildren p2 o2 -> reorder_reorder_step p1 o1 p2 o2 s
 
 (* ======================================================================================
-   13. Well-formedness under an accepted op — and the counterexample the algebra as it stands
-       admits.
+   13. Well-formedness under an accepted op — the refutation Phase 133 recorded, and the fix
+       Phase 137 landed, kept side by side.
 
-       `Ops.validateInsert` checks the inserted node's OWN id against the tree and nothing else.
-       An inserted SUBTREE carrying a descendant id the tree already holds — or carrying one
-       twice itself — is therefore accepted, and the result has a repeated id. So the
-       unconditional statement "every accepted op preserves well-formedness" is FALSE of the
-       shipped algebra, and this section proves that rather than asserting it: `insert_breaks_wf`
-       is a concrete accepted insert whose result is not well-formed.
+       PHASE 133 FOUND: `Ops.validateInsert` checked the inserted node's OWN id against the tree
+       and nothing else, so an inserted SUBTREE carrying a descendant id the tree already held —
+       or carrying one twice itself — was accepted and the result had a repeated id. The
+       unconditional statement "every accepted op preserves well-formedness" was FALSE of the
+       shipped algebra, and 133 proved that rather than asserting it.
 
-       What IS true is the conditional form, `ins_wf`: an insert whose subtree is internally
-       id-unique and disjoint from the tree preserves the invariant. That is exactly the
-       validation Phase 137 adds, so this lemma is the specification the fix has to meet.
+       PHASE 137 FIXED IT, and Phase 138 lifted this model to the fixed validator (section 5b).
+       The refutation is therefore no longer a claim about the LIVE algebra, and carrying it as
+       one would have been false — but DELETING it would throw away the machine-checked record of
+       what was wrong, which is the part a reader a year from now needs most. So it is restated
+       rather than removed: `validate_insert_pre137` / `apply_pre137` name the OLD clause
+       explicitly, `insert_breaks_wf_pre137` is its counterexample unchanged, and
+       `cx_insert_refused_now` proves the LIVE model refuses that very insert. The pair reads as
+       one sentence — this was admitted, and it is not any more — and the second half is a go-red
+       by construction: revert the validator and it stops verifying.
+
+       What was true throughout is the conditional form, `ins_wf`: an insert whose subtree is
+       internally id-unique and disjoint from the tree preserves the invariant. That was the
+       specification the fix had to meet, and `first_dup_none_iff` (section 10) is the proof that
+       what the fix decides IS that condition, neither weaker nor stronger.
    ====================================================================================== *)
 
-(* ---- the counterexample ---- *)
+(* ---- the pre-137 clause, named, and its counterexample ---- *)
 
 let cx_tree : tree = TNode "root" "doc" [TNode "a" "section" []]
 
 (* an id the inserted node's own id-check cannot see: "root" is a DESCENDANT of "fresh" *)
 let cx_insert : op = InsertChild "a" (TNode "fresh" "section" [TNode "root" "para" []])
 
-let insert_breaks_wf ()
+(* F#, BEFORE Phase 137: `validateInsert`'s first clause read `has_id (tid_of n) t` — the
+   inserted node's own id and no descendant of it. Preserved here as a definition rather than as
+   prose so the refutation below is a statement about something the module can still evaluate. *)
+let validate_insert_pre137 (n:tree) (t:tree) : Tot bool = has_id (tid_of n) t
+
+let apply_pre137 (o:op) (t:tree) : Tot (outcome tree rejection) =
+  match o with
+  | InsertChild p n ->
+    if validate_insert_pre137 n t then Error (DuplicateId (tid_of n))
+    else if not (has_id p t) then Error (UnknownNode p (ids t))
+    else Ok (ins p n t)
+  | _ -> apply o t
+
+(* Phase 133's counterexample, unchanged, now explicitly about the pre-137 algebra. *)
+let insert_breaks_wf_pre137 ()
   : Lemma (ensures wf cx_tree /\
-                   (match apply cx_insert cx_tree with
+                   (match apply_pre137 cx_insert cx_tree with
                     | Ok t' -> not (wf t')
                     | Error _ -> False))
   = assert_norm (wf cx_tree);
-    assert_norm (match apply cx_insert cx_tree with
+    assert_norm (match apply_pre137 cx_insert cx_tree with
                  | Ok t' -> not (wf t')
                  | Error _ -> False)
+
+(* … and the other half of the sentence: the LIVE validator refuses exactly that insert, naming
+   the descendant id as the offender. This is the fix machine-checked at the point where it was
+   broken, and it goes red if the validator is ever narrowed back. *)
+let cx_insert_refused_now ()
+  : Lemma (ensures apply cx_insert cx_tree == Error (DuplicateId "root"))
+  = assert_norm (apply cx_insert cx_tree == Error (DuplicateId "root"))
 
 (* ---- the conditional form, which is what Phase 137's validation buys ---- *)
 
@@ -1214,27 +1391,8 @@ let rec wf_all_app (xs ys:list tree)
       inter_nil_iff (ids t) (ids_all r);
       disjoint_via_mem (ids t) (ids_all (app r ys))
 
-(* the two membership characterisations of section 11, quantified — the shape the disjointness
-   arguments below consume *)
-let ids_ins_mem_fa (p:string) (n:tree) (t:tree)
-  : Lemma (ensures forall (y:string). mem y (ids (ins p n t)) ==
-                     (mem y (ids t) || (mem p (ids t) && mem y (ids n))))
-  = let aux (y:string)
-      : Lemma (mem y (ids (ins p n t)) ==
-               (mem y (ids t) || (mem p (ids t) && mem y (ids n))))
-      = ids_ins_mem y p n t
-    in
-    FStar.Classical.forall_intro aux
-
-let ids_ins_mem_all_fa (p:string) (n:tree) (ts:list tree)
-  : Lemma (ensures forall (y:string). mem y (ids_all (ins_all p n ts)) ==
-                     (mem y (ids_all ts) || (mem p (ids_all ts) && mem y (ids n))))
-  = let aux (y:string)
-      : Lemma (mem y (ids_all (ins_all p n ts)) ==
-               (mem y (ids_all ts) || (mem p (ids_all ts) && mem y (ids n))))
-      = ids_ins_mem_all y p n ts
-    in
-    FStar.Classical.forall_intro aux
+(* (the two membership characterisations of section 11 are quantified at the end of that section
+   since Phase 138 — `ids_ins_mem_fa` / `ids_ins_mem_all_fa`, where the diamond can reach them too) *)
 
 let rec ins_wf (p:string) (n:tree) (t:tree)
   : Lemma (requires wf t /\ wf n /\ disjoint (ids n) (ids t))
@@ -1408,23 +1566,8 @@ let rec arrange_wf_all (o:list string) (cs:list tree)
          no_shared_ids n cs l;
          disjoint_via_mem (ids n) (ids_all l))
 
-(* ---- the two membership characterisations of a reorder, quantified ---- *)
-
-let ids_reorder_mem_fa (p:string) (o:list string) (t:tree)
-  : Lemma (requires wf t /\ reorder_ok p o t)
-          (ensures forall (y:string). mem y (ids (reorder_at p o t)) == mem y (ids t))
-  = let aux (y:string) : Lemma (mem y (ids (reorder_at p o t)) == mem y (ids t))
-      = ids_reorder_mem y p o t
-    in
-    FStar.Classical.forall_intro aux
-
-let ids_reorder_mem_all_fa (p:string) (o:list string) (ts:list tree)
-  : Lemma (requires wf_all ts /\ reorder_ok_all p o ts)
-          (ensures forall (y:string). mem y (ids_all (reorder_all p o ts)) == mem y (ids_all ts))
-  = let aux (y:string) : Lemma (mem y (ids_all (reorder_all p o ts)) == mem y (ids_all ts))
-      = ids_reorder_mem_all y p o ts
-    in
-    FStar.Classical.forall_intro aux
+(* (the two membership characterisations of a reorder are quantified at the end of section 11
+   since Phase 138 — `ids_reorder_mem_fa` / `ids_reorder_mem_all_fa`) *)
 
 (* ---- a reorder preserves well-formedness, outright ---- *)
 
