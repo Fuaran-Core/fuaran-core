@@ -347,6 +347,72 @@ let tests =
               // determinism: the same seed reproduces the identical verdict (seed-replay)
               Expect.equal (Conformance.diffLaws nodew idw opGen 4242 200) results "same seed ⇒ identical report"
 
+          testCase "contained diff laws certify a container-bearing witness green (Phase 141)"
+          <| fun _ ->
+              // `diffLaws` above certifies `Diff.toOps`' scripts with the PLAIN sequence pair,
+              // which is blind to containment by construction. This family asks the questions of
+              // the pair that belong together: `toOpsContained` emitted the script, so
+              // `canApplyAllWith` / `applyAllWith` under the SAME predicate are what must accept
+              // it. Run against a witness with a real capability — the generator builds "section"
+              // internally and "para" at the leaves, so a para is a genuine non-container and the
+              // family's minted probe has somewhere to graft.
+              let containerGen =
+                  { opGen with
+                      CanHold = Some(fun (n: RNode) -> n.Kind <> "para") }
+
+              // The probe was MEASURED rather than trusted, because a refusal law is green whether
+              // or not its demanding direction is ever taken: under this predicate 100 of 200
+              // iterations mint the violating probe (the rest draw an `after` with no para at all),
+              // all 100 are refused with the offender named by id AND kind, and all 100 are
+              // ACCEPTED by the plain `toOps` — so the refusal really is the container check's
+              // contribution and not something else's.
+              let results = Conformance.diffContainedLaws nodew idw containerGen 4242 200
+              Expect.equal (List.length results) 3 "reconstruction + applyability + refusal exactness"
+
+              if results |> List.exists (fun r -> not r.Passed) then
+                  let fails =
+                      results
+                      |> List.filter (fun r -> not r.Passed)
+                      |> List.map (fun r -> sprintf "%s — %A" r.Law r.Counterexample)
+
+                  failtestf "reference witness failed the contained diff laws:\n%s" (String.concat "\n" fails)
+
+              Expect.equal
+                  (Conformance.diffContainedLaws nodew idw containerGen 4242 200)
+                  results
+                  "same seed ⇒ identical report"
+
+          testCase "the contained diff laws have teeth — a witness whose canHold refuses everything"
+          <| fun _ ->
+              // The go-red the green run above cannot be: with a predicate that admits nothing, any
+              // `after` carrying a child is a container violation, so the refusal law's DEMANDING
+              // direction is the only one exercised. If `toOpsContained` ever stopped consulting
+              // the predicate, this run would report a script where a refusal is required and the
+              // family would go red — which is what makes the green run above evidence rather than
+              // an assertion about a branch nothing takes.
+              // MEASURED here too: 132 of 200 generated `after` trees violate natively under this
+              // predicate, plus 68 minted probes — so the demanding direction is what this run is
+              // almost entirely made of.
+              let refuseAll =
+                  { opGen with
+                      CanHold = Some(fun (_: RNode) -> false) }
+
+              let results = Conformance.diffContainedLaws nodew idw refuseAll 4242 200
+
+              Expect.isTrue
+                  (results |> List.forall (fun r -> r.Passed))
+                  (sprintf
+                      "a predicate that refuses everything must still be certified — every diff is a refusal and the refusal must be exact: %A"
+                      (results |> List.filter (fun r -> not r.Passed)))
+
+              // and the refusal really was the branch taken: the plain family still certifies the
+              // same witness, so the difference between the two reports is the container check and
+              // nothing else.
+              Expect.isTrue
+                  (Conformance.diffLaws nodew idw refuseAll 4242 200
+                   |> List.forall (fun r -> r.Passed))
+                  "the PLAIN diff laws are unaffected by the predicate — the container check is the only difference"
+
           testCase "a deliberately-broken witness fails with a reproducible counterexample"
           <| fun _ ->
               // ReplaceChildren that ignores the new children — structural edits silently

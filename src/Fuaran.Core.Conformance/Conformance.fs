@@ -747,6 +747,178 @@ module Conformance =
             Passed = survivor.IsNone
             Counterexample = survivor } ]
 
+    /// The CONTAINER-AWARE structural-diff laws (Phase 141) — `Diff.toOpsContained` certified
+    /// through the container-aware sequence surface, with the witness's own `canHold`.
+    ///
+    /// **Why a twin rather than a widening of `diffLaws`.** `diffLaws` above certifies
+    /// `Diff.toOps`' scripts with the PLAIN `Ops.canApplyAll` and `Ops.applyAll`, which are the
+    /// `fun _ -> true` instances of the container-aware pair and therefore blind to containment by
+    /// construction (Phase 160's `all_with_at_total_is_plain`). So a script emitted for a
+    /// container-aware witness was never shown applyable under the engine that witness actually
+    /// runs: the check and the executor disagreed about what a refusal is. This family asks the
+    /// same questions of the pair that belong together — `toOpsContained` emitted it, so
+    /// `applyAllWith` / `canApplyAllWith` under the same predicate are what must accept it.
+    ///
+    /// Three laws, mirroring `diffLaws`' three: **reconstruction**
+    /// (`applyAllWith canHold (toOpsContained before after) before = after`), **applyability**
+    /// (`canApplyAllWith canHold` accepts every emitted step — `Diff.fst`'s
+    /// `diff_applicable_contained` asked of the shipped engine), and **refusal exactness**
+    /// (`toOpsContained` refuses with `TargetNotAContainer` exactly when `after` nests children
+    /// under a node the predicate rejects, and the plain `toOps` accepts the same pair — so the
+    /// refusal is the container check's contribution and nothing else's).
+    ///
+    /// The third law mints a probe as well as checking the generated pair: where the witness's
+    /// predicate refuses some node of `after`, a fresh child is grafted under the first such node
+    /// and the refusal is demanded by name. A witness that supplies no `CanHold` exercises only the
+    /// trivial direction of that iff — which is what a witness with no container capability HAS to
+    /// exercise, and is why the census row for this family reads as it does. `'Node` needs
+    /// equality. Opt-in, like the snapshot and DAG families: a domain with a container capability
+    /// runs it beside `certify`.
+    let diffContainedLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable reconstruction = None
+        let mutable applyability = None
+        let mutable refusal = None
+
+        /// the first node of `t` the predicate refuses, if any — the offender `toOpsContained`
+        /// names once it also carries children
+        let firstRefused (t: 'Node) =
+            Tree.preorder nodew t |> List.tryFind (fun n -> not (canHold n))
+
+        /// "`after` nests children under a node `canHold` rejects" — the condition the diff-side
+        /// check is exactly about
+        let violates (t: 'Node) =
+            Tree.preorder nodew t
+            |> List.exists (fun n -> not (List.isEmpty (nodew.Children n)) && not (canHold n))
+
+        let checkRefusal (i: int) (before: 'Node) (after: 'Node) =
+            let expected = violates after
+
+            match Diff.toOpsContained canHold nodew idw before after with
+            | Error(Diff.TargetNotAContainer(p, _)) when expected ->
+                // the node it names must be one `after` really carries, really has children, and
+                // the predicate really rejects
+                let named =
+                    Tree.tryFind nodew idw p after
+                    |> Option.map (fun n -> not (List.isEmpty (nodew.Children n)) && not (canHold n))
+
+                if named <> Some true && refusal.IsNone then
+                    refusal <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: TargetNotAContainer named %s, which is not a childful non-container of `after`"
+                                seed
+                                i
+                                (idw.ToString p)
+                        )
+            | Error(Diff.TargetNotAContainer(p, _)) ->
+                if refusal.IsNone then
+                    refusal <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: TargetNotAContainer(%s) on an `after` every parent of which can hold children"
+                                seed
+                                i
+                                (idw.ToString p)
+                        )
+            | _ when expected ->
+                if refusal.IsNone then
+                    refusal <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: `after` nests under a non-container and the diff did not refuse"
+                                seed
+                                i
+                        )
+            | _ -> ()
+
+        for i in 0 .. iterations - 1 do
+            let before, r1 = gen.Tree rng
+            rng <- r1
+
+            // derive `after` with the container-aware engine, so the pair is one the witness's own
+            // predicate admits — the reconstruction and applyability laws are about THAT pair
+            let mutable after = before
+
+            for _ in 1..4 do
+                let op, r' = genOp nodew idw gen after rng
+                rng <- r'
+
+                match Ops.applyContained canHold nodew idw op after with
+                | Ok t' -> after <- t'
+                | Error _ -> ()
+
+            checkRefusal i before after
+
+            match Diff.toOpsContained canHold nodew idw before after with
+            | Error e ->
+                if not (violates after) && reconstruction.IsNone then
+                    reconstruction <-
+                        Some(sprintf "seed=%d iter=%d: toOpsContained errored on a container-valid pair: %A" seed i e)
+            | Ok ops ->
+                match Ops.applyAllWith canHold nodew idw ops before with
+                | Ok rebuilt when rebuilt = after -> ()
+                | other ->
+                    if reconstruction.IsNone then
+                        reconstruction <-
+                            Some(sprintf "seed=%d iter=%d: applyAllWith(toOpsContained) ≠ after (got %A)" seed i other)
+
+                match Ops.canApplyAllWith canHold nodew idw ops before with
+                | Ok() -> ()
+                | Error(j, e) ->
+                    if applyability.IsNone then
+                        applyability <-
+                            Some(sprintf "seed=%d iter=%d: emitted op %d rejects under canHold: %A" seed i j e)
+
+            // and the minted probe: graft a child under a node the predicate refuses, so the
+            // refusal direction of the third law is exercised rather than merely stated
+            match firstRefused after with
+            | Some offender when not (violates after) ->
+                let fresh, r2 =
+                    gen.FreshNode (Tree.ids nodew after |> List.map idw.ToString |> Set.ofList) rng
+
+                rng <- r2
+
+                match
+                    Tree.updateNode nodew idw (nodew.Id offender) (fun n -> nodew.ReplaceChildren n [ fresh ]) after
+                with
+                | Some violating ->
+                    checkRefusal i before violating
+
+                    // and the plain diff must ACCEPT the same pair: the refusal is the container
+                    // check's contribution and nothing else's
+                    match Diff.toOps nodew idw before violating with
+                    | Ok _ -> ()
+                    | Error e ->
+                        if refusal.IsNone then
+                            refusal <-
+                                Some(
+                                    sprintf
+                                        "seed=%d iter=%d: the plain toOps also refused the probe (%A), so the refusal is not the container check's"
+                                        seed
+                                        i
+                                        e
+                                )
+                | None -> ()
+            | _ -> ()
+
+        [ { Law = "contained diff reconstruction (applyAllWith (toOpsContained before after) before = after)"
+            Passed = reconstruction.IsNone
+            Counterexample = reconstruction }
+          { Law = "contained diff applyability (canApplyAllWith accepts the emitted script)"
+            Passed = applyability.IsNone
+            Counterexample = applyability }
+          { Law = "contained diff refuses exactly a non-container after-parent"
+            Passed = refusal.IsNone
+            Counterexample = refusal } ]
+
     /// The op-script normalisation laws (Phase 23) — the teeth on `Ops.normalize`. Build a random
     /// *applyable* script (apply random ops, keep the accepted ones), then check: **preservation**
     /// (`applyAll (normalize ops) = applyAll ops` — the result is unchanged), **idempotence**

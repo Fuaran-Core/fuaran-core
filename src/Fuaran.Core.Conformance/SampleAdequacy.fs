@@ -214,6 +214,9 @@ module SampleAdequacy =
           "Conformance.witnessLaws", Unconditional "each iteration rebuilds a drawn node and re-reads every accessor"
           "Conformance.streamLaws", Unconditional "each iteration applies, replays and tampers the same chain"
           "Conformance.diffLaws", Unconditional "each iteration diffs a pair and re-applies the emitted script"
+          "Conformance.diffContainedLaws",
+          Unconditional
+              "each iteration diffs a pair under the witness's own canHold and asks all three questions of it — the refusal law is an IFF checked every iteration, so a witness supplying no CanHold exercises its trivial direction rather than missing a branch"
           "Conformance.normalizeLaws", Unconditional "each iteration normalises a drawn script and compares both ways"
           "Conformance.snapshotLawsWith", Unconditional "each iteration takes a snapshot and replays across it"
           "Conformance.snapshotLaws", Unconditional "delegates to snapshotLawsWith"
