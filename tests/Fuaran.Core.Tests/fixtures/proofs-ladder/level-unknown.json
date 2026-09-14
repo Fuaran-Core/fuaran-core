@@ -1,0 +1,27 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: a row claims a level outside the closed four, which is how a claim quietly acquires a strength the ladder never defined.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-invented",
+      "level": "believed",
+      "claim": "A row at a level the ladder does not define.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "assumption": "nothing"
+      }
+    }
+  ]
+}

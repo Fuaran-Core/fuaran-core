@@ -1,0 +1,29 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the second proved row cites a model file that EXISTS and declares the theorem, but is absent from the module list the proof leg checks — so the row claims a proof nothing verifies.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-unchecked",
+      "level": "proved",
+      "claim": "A proved row over a model the leg never checks.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "omega",
+        "model": "Unregistered.fst",
+        "prover": "fixture"
+      }
+    }
+  ]
+}

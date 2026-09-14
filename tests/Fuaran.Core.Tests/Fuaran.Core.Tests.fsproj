@@ -158,6 +158,13 @@
          and reads Snapshots.fs for the repository root. Appended here (append-only
          registration) — it depends on nothing else in this list. -->
     <Compile Include="SiblingCorpusTests.fs" />
+    <!-- Phase 144 — the claims ladder (/proofs.json) held to the tree: the theorem a proved row
+         names is a top-level declaration of the model it names, that model is one the proof leg
+         checks, a tested row's cases are in the test tree, every checked module has a row, and the
+         phase citations and levels are the closed forms. Reads the Proofs.Oracle test TREE for the
+         case names, so it compiles after ProofOracleTests.fs, and Snapshots.fs for the repository
+         root. Appended here (append-only registration) — nothing else in this list reads it. -->
+    <Compile Include="ProofsLadderTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

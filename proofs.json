@@ -1,7 +1,7 @@
 {
   "kind": "proofs",
   "subject": "Fuaran-Core",
-  "$comment": "This repository's claims ladder, declared as data. It is `proofs/README.md`'s own ladder — what is PROVED, what is only TESTED, what is ASSUMED — in a schema a tool can read, so the question does not have to be answered by reading prose and hoping two documents use the same words. A `not claimed` item is the ABSENCE of a row, never a row: the README enumerates those, and enumerating them here would turn a disclaimer into a claim. Levels are the closed set proved | tested | assumed | policy. Authored by hand, never generated — editing the ladder means editing this file and the README together.",
+  "$comment": "This repository's claims ladder, declared as data. It is `proofs/README.md`'s own ladder — what is PROVED, what is only TESTED, what is ASSUMED — in a schema a tool can read, so the question does not have to be answered by reading prose and hoping two documents use the same words. A `not claimed` item is the ABSENCE of a row, never a row: the README enumerates those, and enumerating them here would turn a disclaimer into a claim. Levels are the closed set proved | tested | assumed | policy. Authored by hand, never generated — editing the ladder means editing this file and the README together. Since Phase 144 it is CHECKED rather than trusted: the proof leg's host step runs the `Proofs.Ladder` family (tests/Fuaran.Core.Tests/ProofsLadderTests.fs), which holds every row to the tree — a proved row's theorem is a top-level declaration of the model it names, that model is one `proofs/check.ps1` actually checks, a tested row's named cases exist in the `Proofs.Oracle` family, every checked module has a proved row, and the phase citations and levels are the closed forms. Row-to-tree agreement only: whether a row says the same thing as the README's prose stays a human act.",
   "claims": [
     {
       "id": "fold-confluence",
@@ -64,7 +64,17 @@
       "claim": "Production's delta recovery from a content-addressed DAG, its pairwise conflict sweep, the composition and the replay together agree with the extracted model over three lane pools, per lane set and per sampled arrival order — outcome and composed merge script, not merely a hash. Agreement is over the sets drawn and the orders enumerated, never over all inputs.",
       "phase": "fuaran-core#131",
       "evidence": {
-        "family": "Proofs.Oracle"
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the oracle agrees with production over the reference witness at 3 lanes",
+          "the oracle agrees with production over the reference witness at 4 lanes",
+          "the oracle agrees with production over the work-plan domain",
+          "the oracle agrees with production over the work-plan domain at 5 lanes (sampled orders)",
+          "the oracle agrees with production over every pair and triple of corpus ops",
+          "an oracle handed a blind footprint DISAGREES with production, shrunk to two lanes",
+          "the model's independence agrees with Ops.independent over the reference footprints",
+          "the model's conflicts are Dag.conflicts up to the canonical rendering"
+        ]
       }
     },
     {
@@ -73,7 +83,16 @@
       "claim": "The extracted decode model agrees with the shipped combinators over the wire corpus and a generated sample, compared on outcome CLASS, decoded VALUE and error MESSAGE at once — a model agreeing on accept-versus-refuse alone would not notice a decoder naming the wrong expectation. A blind bridge reading every integer as a float is required to make the comparison fail, so a green report is known to be one that can lose.",
       "phase": "fuaran-core#135",
       "evidence": {
-        "family": "Proofs.Oracle"
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the decode oracle agrees with Wire.Decode over every nodes/ fixture",
+          "the decode oracle agrees with Wire.Decode over every ops/ fixture",
+          "the decode oracle agrees with Wire.Decode over a generated JVal sample",
+          "the model's node decoder inverts its encoder, on both sides",
+          "the model's node decoder agrees with production on documents it REFUSES",
+          "the model's null-policy reader agrees with the parser under BOTH policies",
+          "a decode oracle handed a blind bridge DISAGREES with Wire.Decode"
+        ]
       }
     },
     {
@@ -167,7 +186,16 @@
       "claim": "Production's own ancestor closure, topological order and delta recovery, on the DAG the fold's generator actually builds, agree per lane with the extracted model's recovery over the SAME nodes across three lane pools — the ids the model walks are the content hashes production minted, so a disagreement can only be about the recovery and never about the hash. A DAG whose lanes hang off the wrong parent is required to make the comparison fail, and two vacuity guards refuse a run that recovered no ops or walked no chain longer than one node.",
       "phase": "fuaran-core#134",
       "evidence": {
-        "family": "Proofs.Oracle"
+        "family": "Proofs.Oracle",
+        "tests": [
+          "production's betweenOps recovers the model's delta over the reference witness",
+          "production's betweenOps recovers the model's delta over the reference witness at 4 lanes",
+          "production's betweenOps recovers the model's delta over the work-plan domain",
+          "production's betweenOps recovers the model's delta over the work-plan domain at 5 lanes",
+          "production's betweenOps recovers the model's delta over the corpus ops pool",
+          "the oracle's DAG-shaped fold agrees with production over the work-plan domain",
+          "a model DAG whose lanes hang off the WRONG parent disagrees with production"
+        ]
       }
     },
     {
@@ -227,7 +255,13 @@
       "claim": "The extracted tree model agrees with the shipped apply engine and footprint derivation over the generated operation pool and every state a prefix of it reaches — the footprint as four address sets, the verdict, an accepted result through the content hash computed by production's own function on both sides, and a rejection by class. Every rejection class the plain apply can raise is asserted reached BY NAME rather than counted, and a bridge that erases every kind tag is required to make the result comparison fail, so a green report is known to be one that can lose.",
       "phase": "fuaran-core#133",
       "evidence": {
-        "family": "Proofs.Oracle"
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the tree oracle agrees with Ops.apply and Ops.footprint over the generated pool",
+          "a tree oracle handed a blind bridge DISAGREES with Ops.apply",
+          "the extracted tree model keeps the diamond its own theorem proves",
+          "a blind footprint BREAKS the extracted model's diamond — the measurement can fail"
+        ]
       }
     },
     {
@@ -298,7 +332,17 @@
       "claim": "The extracted model agrees with Dag.firstBreak and OpStream.firstChainBreak over generated DAGs and chains and every single-node tamper of each, comparing the verdict, the location, WHICH check failed and the expected and got values at once — and mints production's own content ids node by node, which is checkable only through append because nodeHash is private. Two go-red cases require a model handed a different hash to disagree, and a third runs one tamper under two hashes: found under the real one, INVISIBLE under a deliberately non-injective one, to production and to the model alike. Every run asserts that detection actually happened, because two walkers that both say intact agree perfectly and certify nothing.",
       "phase": "fuaran-core#136",
       "evidence": {
-        "family": "Proofs.Oracle"
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the chain oracle agrees with production over the reference witness's DAG and every tamper of it",
+          "the chain oracle agrees with production over the work-plan DAG and every tamper of it",
+          "the chain oracle agrees with production over the linear op-stream and every tamper of it",
+          "the chain oracle agrees with production over the reference witness's linear op-stream",
+          "a model handed a DIFFERENT hash reports a break where production sees none",
+          "a model handed a DIFFERENT hash reports a break on an intact linear chain",
+          "under a NON-INJECTIVE hash the tamper is invisible — to production and to the model alike",
+          "the corpus dag/ family's shapes, rebuilt through production's own append and merge"
+        ]
       }
     },
     {

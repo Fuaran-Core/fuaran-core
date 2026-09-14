@@ -1,0 +1,18 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the proved row names a binding that appears in `Model.fst` but is INDENTED inside a body, so it is not a top-level declaration. The clause is about a declaration, not about a name occurring in the text.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A proved row naming a local binding rather than a top-level declaration.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "delta_indented",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    }
+  ]
+}

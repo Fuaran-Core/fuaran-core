@@ -1,0 +1,16 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the module list carries `Model` and no proved row names it — a model added to the proof leg whose claim was never written down.",
+  "claims": [
+    {
+      "id": "fixture-premise",
+      "level": "assumed",
+      "claim": "An assumed row, so the ladder is not empty.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "assumption": "the fixture assumes nothing that matters"
+      }
+    }
+  ]
+}
