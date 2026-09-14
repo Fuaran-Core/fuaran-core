@@ -475,6 +475,12 @@ the skeleton-op tree algebra**, and `Skeleton.fst` composes the two, so for `Ske
 conservativity contract — `Ops.independent = true` is a *promise* that the scripts commute — stops
 being a contract and becomes a consequence.
 
+**Two boundaries come with that sentence and are stated here rather than in a footnote**, because a
+reader who takes it at face value would be over-reading it: the theorem is about ID-UNIQUE trees,
+and the composite's op alphabet is the four NON-`Batch` ops. Both are argued below — the first
+because the diamond is *false* without it and not merely unproved, the second because it is three
+of the fifteen pairs and they are counted rather than estimated.
+
 `TreeOps.fst` models the tree as the witness shows it: a node is an id, a kind tag and an ordered
 child list, and nothing else is visible to `Ops`. On top of that sit the five skeleton ops,
 `Ops.apply`'s validation clause for clause with the `Rejection` envelope it raises, and
