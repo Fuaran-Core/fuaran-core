@@ -525,6 +525,25 @@ module Ops =
     //       Sound for the skeleton five because every skeleton op is a structural write, so (1) already
     //       serialises a remove/move against any concurrent structural op; a domain that layers a *pure
     //       in-place* content op on top must fold the removed subtree in itself (it has the tree).
+    //
+    // Phase 143 asked whether (1) could now be TIGHTENED, with Phase 138's preservation theorem in
+    // hand: a relocation ought to commute with a structural write under an unrelated parent. It
+    // cannot be, over THIS record, and that is now a theorem rather than a suspicion
+    // (`proofs/TreeOps.fst` section 18, `relocation_clause_is_necessary`). The witness is one
+    // well-formed tree and three ops: a `MoveNode` and a structural write under a parent inside the
+    // moved subtree DO commute (`relocation_disjoint_diamond`); the same shape with a `RemoveNode`
+    // in it does NOT, because the insert's parent is destroyed with the subtree
+    // (`relocation_diamond_fails_for_a_remove`); and the two ops carry the SAME four address sets
+    // (`relocation_footprints_coincide`). A predicate over footprints alone gives one verdict to
+    // both, so freeing the safe pair frees the fatal one. That is (2) being load-bearing for (1)
+    // and (1) being load-bearing for (2), each proved rather than asserted.
+    //
+    // So the last two clauses of `independent` below are NECESSARY, not a placeholder. Tightening
+    // them needs a footprint that can NAME the difference — a fifth address kind carrying the
+    // relocation's kind, or a destroyed-subtree set the pure script cannot compute — which is a
+    // change to the record, not to a clause. `relocation_move_pair_also_fails` adds the second
+    // reason: two moves nesting into each other's subtrees reject each other with
+    // `WouldNestUnderSelf`, and no record could free that pair at all.
 
     let private emptyFootprint =
         { Reads = Set.empty
@@ -603,6 +622,16 @@ module Ops =
     ///     *any* structural write — known or unknown — in the other script (the pinned unknown-parent
     ///     over-approximation): a remove/move is only independent of a structure-free script.
     /// `true` is a promise (they commute); `false` is always a safe answer. Total, no throws (GP4).
+    ///
+    /// **The last clause is NECESSARY over this record, not merely conservative (Phase 143).** A move
+    /// and a batch that removes and reorders carry the SAME four address sets, and one of them
+    /// commutes with a structural write under a parent inside the relocated subtree while the other
+    /// destroys that parent — so no predicate over footprints alone can free the first without
+    /// freeing the second. Proved, with the witness, in `proofs/TreeOps.fst` section 18
+    /// (`relocation_clause_is_necessary`); pinned in the test tree by the `Proofs.Oracle` case
+    /// "the pinned unknown-parent clause is necessary" and by the `Conformance.concurrencyLaws`
+    /// teeth-check that erases `UnknownParentWrites`. Tightening it is a change to the `Footprint`
+    /// record and to every consumer that reads it, not a change to this function.
     let independent (a: Footprint) (b: Footprint) : bool =
         let disjoint x y = Set.isEmpty (Set.intersect x y)
 

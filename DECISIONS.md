@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-09-14 — D36: structural validity is ONE clause and ONE definition, and the apply corpus family carries no version stamp
+## 2026-09-14 — D37: structural validity is ONE clause and ONE definition, and the apply corpus family carries no version stamp
 
 **Decided (Phase 139).** Three calls, each of which had a plausible alternative.
 
@@ -44,6 +44,74 @@ manifest — which is the `laws/` and `merge-conformance/` precedent and, separa
 that does not redden a host on arrival: at least one host's certification kit reads the root
 manifest's fixture list as a whole and asserts that its per-kind leg tallies account for exactly the
 manifest's fixture count, so a new `kind` there fails a repository that has adopted nothing.
+
+## 2026-09-14 — D36: the footprint's unknown-parent over-approximation is not tightened, because it cannot be tightened over this record
+
+**Decided (Phase 143).** `Ops.independent`'s last two clauses — a `RemoveNode`/`MoveNode` conflicts
+with any structural write in a concurrent script — stay exactly as Phase 78 pinned them. The phase
+was chartered to tighten them under a proof, and shipped the proof that they cannot be.
+
+**Why the tightening was worth attempting.** Phase 133 measured what the clause costs: nine of the
+fifteen unordered operation pairs are closed by it alone and never look at a tree, because every
+skeleton operation except a do-nothing batch writes structure, so a relocation is independent only of
+an operation that does nothing (`relocating_forces_inert`). Every multi-writer fold with a relocation
+on one lane and any structural edit on another therefore halts. Phase 78 pinned the clause as
+conservative-not-tight on the grounds that *nothing could then say what a tighter clause would be
+sound against*; Phase 138's preservation theorem removed that obstacle, and 143 was the phase that
+cashed it in.
+
+**What was found instead.** The tightening is sound for a `MoveNode` and unsound for a `RemoveNode`,
+and **the `Footprint` record cannot tell them apart.** Three facts, proved at one well-formed tree in
+`proofs/TreeOps.fst` section 18 with no admits under the pinned prover:
+
+1. `relocation_disjoint_diamond` — a `MoveNode` and an `InsertChild` under a parent inside the moved
+   subtree commute. The subtree travels intact, so an edit within it lands in the same place
+   whichever order the two are made in. Every clause of `independent` except the pinned pair already
+   holds of them.
+2. `relocation_diamond_fails_for_a_remove` — the same shape with a `RemoveNode` in it does not. Both
+   operations apply at the tree, but remove-then-insert is `UnknownNode` (the insert's parent was
+   destroyed with the subtree) while insert-then-remove succeeds.
+3. `relocation_footprints_coincide` — a `MoveNode`, and a batch that removes and then reorders, fold
+   to **byte-identical** footprints across all four address sets.
+
+A predicate over the four sets assigns one verdict to both, so freeing the safe pair frees the fatal
+one. That is `relocation_clause_is_necessary`, and a single witness is enough because the claim being
+refuted is universal.
+
+**Read this as the second pinned over-approximation being load-bearing for the first.** STABILITY.md
+has said since Phase 78 that a `RemoveNode`'s content-write records the target id and not its
+tree-unknown subtree, and that this is *sound because* the unknown-parent rule already serialises the
+pair. Dropping the unknown-parent rule re-opens the content-write gap, in exactly the shape the
+entry predicted. What was prose is now a theorem.
+
+**Rejected: widening `Footprint` to carry the discriminator.** A fifth address kind naming the
+relocation's kind, or a destroyed-subtree set, would let the clause split — and both are breaking
+changes to a record every consumer reads, taken on speculation about how much fold availability the
+move half actually buys. The estate has no measurement of that, and this phase's scope excluded the
+record by charter. It stays available, priced, and unchosen; the price is recorded in STABILITY.md's
+0.24.0 entry so the next attempt starts from it rather than from the beginning.
+
+**Rejected: proving the general move-versus-structural-write theorem anyway.** It is true, and fact 1
+is an instance of it, but `Ops.independent` could not consume it — a theorem whose conclusion no
+clause can read buys nothing and costs prover budget on every run for as long as it stands. If the
+record ever gains the discriminator, that is the phase that should prove it, against the clause it
+will actually license.
+
+**Also found, and recorded because two later claims rest on it.** No other language host mirrors
+`Ops.footprint`, `Ops.independent` or the `Footprint` record at all — checked across the TypeScript,
+Go, Rust and Python hosts. The footprint surface is not on STABILITY.md's "members the other language
+hosts mirror name for name" list either, and that list's six members are all elsewhere. And no
+committed conformance-corpus `ops/` vector carries an expected independence verdict: those fixtures
+are operation-wire documents, and the footprint they are read under is computed at test time by
+`corpusFootprint` in `ProofOracleTests.fs`. So a change to `independent` would have had no host to
+adopt it and no vector to re-emit — which is worth knowing before the next phase sizes one.
+
+**How the decision is held.** The `Proofs.Oracle` case "the pinned unknown-parent clause is
+necessary" runs the witness on the extracted model and on production side by side, and the
+`Conformance.concurrencyLaws` teeth-check erases `UnknownParentWrites` and nothing else — precisely
+`independent` with its last two clauses removed — and requires the confluence or totality law to go
+red over a generated pool. Both are red the moment someone tightens the clause, which is the only
+form in which a decision not to do something survives.
 
 ## 2026-09-14 — D35: a union-case name shared by two types in one namespace is a Fable defect, so every reason family qualifies its cases
 

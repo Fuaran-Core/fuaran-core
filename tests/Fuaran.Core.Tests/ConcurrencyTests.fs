@@ -86,6 +86,50 @@ let concurrencyLawTests =
                   (results |> List.exists (fun r -> not r.Passed))
                   "falsely-declared independence must produce a counterexample — the law has teeth"
 
+          testCase "teeth-check: dropping ONLY the unknown-parent clause makes the law bite (Phase 143)"
+          <| fun _ ->
+              // The sharper teeth. The case above erases every address, which proves the law can
+              // fail but says nothing about WHICH clause was earning its keep. This erases exactly
+              // one set — `UnknownParentWrites` — and nothing else, which is precisely
+              // `Ops.independent` with its last two clauses removed: with both sides' unknown set
+              // empty, those two clauses are vacuously true and the other four still read the real
+              // addresses. So this run IS the tightened `independent` Phase 143 set out to ship.
+              //
+              // It must go red. A relocation freed against a concurrent structural write includes
+              // the case where that write's parent is inside the removed subtree, and there the two
+              // orders do not agree — `proofs/TreeOps.fst` section 18 proves it at a named witness
+              // (`relocation_diamond_fails_for_a_remove`), and this is the same fact over a
+              // generated pool. If it ever comes back green, either the generator stopped producing
+              // relocations or the algebra changed under the theorem: read section 18 before
+              // treating a green here as permission to tighten the clause.
+              let noUnknownParent (ops: SkeletonOp<RNode, string> list) =
+                  let fp = Ops.footprint nodew idw ops
+
+                  { fp with
+                      UnknownParentWrites = Set.empty }
+
+              let results =
+                  Conformance.concurrencyLawsWith noUnknownParent nodew idw opGen encNode 8080 300
+
+              // The failing law is NAMED, not merely counted. `coverage` is a vacuity guard and
+              // erasing an address set can only ever make MORE pairs independent, so a run that
+              // "failed" on coverage alone would be this check passing for the opposite of its
+              // reason. What has to lose is totality or confluence — the two laws that assert
+              // something about a pair the footprint declared independent.
+              let failed =
+                  results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law)
+
+              Expect.isNonEmpty
+                  failed
+                  "erasing UnknownParentWrites is exactly the tightened clause — it must produce a counterexample, or the pinned over-approximation is buying nothing"
+
+              Expect.isTrue
+                  (failed
+                   |> List.exists (fun l -> l.Contains "totality" || l.Contains "confluence"))
+                  (sprintf
+                      "the break must be a pair that was asserted and did not hold, not the vacuity guard — failed laws: %s"
+                      (String.concat "; " failed))
+
           testCase "dependent pairs are skipped, not asserted — and the coverage guard names the vacuous run"
           <| fun _ ->
               // Force EVERY pair dependent: grafting a RemoveNode onto each script's footprint puts

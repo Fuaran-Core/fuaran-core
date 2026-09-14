@@ -810,5 +810,29 @@ type leaf_op = op
 let leaf_fp : leaf_op  ->  DagFold.footprint = (fun ( o  :  leaf_op ) -> (op_fp o))
 
 
+let but_for_relocation : DagFold.footprint  ->  DagFold.footprint  ->  Prims.bool = (fun ( a  :  DagFold.footprint ) ( b  :  DagFold.footprint ) -> ((((DagFold.disjoint a.content_writes b.content_writes) && (DagFold.disjoint a.content_writes b.reads)) && (DagFold.disjoint b.content_writes a.reads)) && (DagFold.disjoint a.structure_writes b.structure_writes)))
+
+
+let reloc_tree : tree = TNode ("root", "doc", (TNode ("x", "sec", (TNode ("p", "sec", []))::[]))::(TNode ("q", "sec", []))::[])
+
+
+let reloc_move : op = MoveNode ("x", "q")
+
+
+let reloc_remove : op = Batch ((RemoveNode ("x"))::(ReorderChildren ("q", []))::[])
+
+
+let reloc_insert : op = InsertChild ("p", TNode ("n", "para", []))
+
+
+let cross_tree : tree = TNode ("root", "doc", (TNode ("x", "sec", (TNode ("mp", "sec", []))::[]))::(TNode ("y", "sec", (TNode ("np", "sec", []))::[]))::[])
+
+
+let cross_a : op = MoveNode ("x", "np")
+
+
+let cross_b : op = MoveNode ("y", "mp")
+
+
 
 
