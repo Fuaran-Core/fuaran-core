@@ -2124,7 +2124,19 @@ disagree.
 
 Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).
 
-## 0.23.0 — DRAFT: the Core API asks routed here from the UI tier (Phase 125)
+## 0.24.0 — DRAFT: the apply-engine correctness campaign and the proof programme's contract changes
+
+**This section describes a DRAFT slot.** `<Version>` reads `0.24.0` and no `v0.24.0` tag exists
+yet. Cut 2026-09-14 by the campaign driver so the phases below can ride one slot rather than each
+minting a number: Phase 137 (a previously accepted `InsertChild` whose subtree carries an
+already-present or internally duplicated id is now refused with `DuplicateId` — a parity
+correction with the other hosts), Phase 147 (`Dag.DagBreak.Reason` becomes a closed DU, the
+sibling of `ChainBreak.Reason`), Phase 143 (`Ops.independent` widens its promise under a proved
+clause), and Phase 145 (a `codecInjectivityLaws` family in the conformance kit). Each phase appends
+its own entry beneath this header as it lands; the version moves only if a later class outranks
+what the draft already carries (the draft-slot rule).
+
+## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists
 yet, so the entries below are the contract a consumer will meet when the release gesture is made —
