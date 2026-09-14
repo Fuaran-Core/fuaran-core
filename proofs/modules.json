@@ -18,13 +18,13 @@
   "modules": [
     {
       "module": "DagFold",
-      "budgetSeconds": 100,
-      "measuredSeconds": 48,
+      "budgetSeconds": 130,
+      "measuredSeconds": 65,
       "floorSeconds": 12,
       "fastestSeconds": 24,
       "floorPhase": "fuaran-core#164",
-      "phase": "fuaran-core#148",
-      "note": "The first model, and the one section 11's delta recovery lives in. It carries no `--ext context_pruning`; what it carries instead is the SMT-pattern lesson (see the README's per-module costs) — `rev` / `app` / `ids_of` / `ops_of` rewrite into one another and their lemmas deliberately have NO `SMTPat`. Adding one back is the cost cliff here, and it is a cliff rather than a slope: the query stops returning."
+      "phase": "fuaran-core#156",
+      "note": "The first model, and the one section 11's delta recovery lives in. It carries no `--ext context_pruning`; what it carries instead is the SMT-pattern lesson (see the README's per-module costs) — `rev` / `app` / `ids_of` / `ops_of` rewrite into one another and their lemmas deliberately have NO `SMTPat`. Adding one back is the cost cliff here, and it is a cliff rather than a slope: the query stops returning. BUMPED by fuaran-core#156 from 100s/48s: section 13 added the general drain — the id-ordered frontier drain over an abstract node set, three theorems, and three inductions over the drain's own accumulator (`kahn_extends`, `kahn_complete`, `kahn_det`) with about twenty list lemmas under them. Seeded from FIVE cold observations taken across the phase: 64s standalone, then 58s, 54s, 62s and 65s across four cold passes of the leg, so the rule's slowest observed is 65s and 2x65 rounds to 130. Three of the new lemmas carry a scoped `#push-options \"--z3rlimit 200\"` or `250`; if this budget is ever bumped again, check those are still SCOPED rather than hoisted to the file, because a file-wide rlimit would inflate every query in sections 0-12 as well and would read as ordinary growth — the shape `TreeOps`'s entry warns about for `--ext context_pruning`. The Phase 164 FLOOR is deliberately left at 12s/24s: the module got slower and never faster, so the floor stays correct and merely conservative, and `floorSeeding`'s own rule forces a re-seed only on a breach."
     },
     {
       "module": "WireDecode",
