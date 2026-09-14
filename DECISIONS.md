@@ -1,5 +1,50 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-14 — D37: structural validity is ONE clause and ONE definition, and the apply corpus family carries no version stamp
+
+**Decided (Phase 139).** Three calls, each of which had a plausible alternative.
+
+**(1) `Tree.WellFormed` has one clause, not two.** The phase was specified as "`uniqueIds`,
+`singleRoot`", which is the natural pairing and is how the invariant reads in most tree libraries.
+It is not a pairing that means anything here. A tree in this core is a `'Node` value reached through
+`NodeWitness.Children`: the walk starts at exactly one node by construction of the type, there is no
+forest to exclude, and no node can be reached as the child of two parents without also appearing
+twice in the preorder — which is the uniqueness clause. So single-rootedness is a TYPE-LEVEL
+guarantee, and a second clause would have been either redundant (a restatement of uniqueness) or
+false (a claim about a shape the type cannot hold). The predicate carries the one clause that can
+actually be violated, and says so where it is defined rather than leaving a reader to infer it.
+
+The alternative — ship the second clause anyway, because the specification named it — would have put
+a permanently-true field in a public verdict type, which is worse than it looks: a reader who sees
+two clauses reasonably concludes that two things are being checked, and writes code that branches on
+an arm nothing can produce.
+
+**(2) One definition, and the OFFENDER moved.** `Ops`'s insert validator and `Diff.toOps` each
+carried their own id-uniqueness scan. Both now read `Tree.wellFormed` / `Tree.graftWellFormed`. The
+cost is one observable change: `Diff.DiffError.DuplicateIdInTree` used to name the first id whose
+duplicate GROUP appeared earliest and now names the first id reached twice in preorder, which
+differs for `[a; b; b; a]`. That was accepted rather than preserved, because preserving it would
+have meant keeping the second scan — and the answer the accept path already gave is the one worth
+converging on. Recorded in `STABILITY.md` as additive: the error case and the refusal are unchanged,
+and nothing ever pinned which of several duplicates was named.
+
+**(3) The `apply/` corpus family carries NO `kitVersion` stamp.** `laws/transform-laws.json` carries
+one and is then byte-compared whole, so any `<Version>` move reddens its freshness leg until the
+corpus is re-emitted — including a draft-slot cut, which is made once and ridden by several phases
+landing days apart, so every one of them inherits a red gate for a file none of them touched. Phase
+137 hit exactly that and recorded it. Copying the stamp into a second file would have doubled the
+class for no gain, because the two families are not the same kind of artefact: the law vectors are a
+SAMPLE of what one pinned kit answered, and the apply vectors are a SPECIFICATION of apply semantics
+whose every expectation is recomputed by the suite on each run. An artefact whose answers are
+re-derived does not need a stamp saying who derived them, and one that cannot go stale for a reason
+unrelated to its content should not be able to.
+
+The family is also SELF-ENUMERATED — its own `apply/manifest.json`, not an entry in the corpus root
+manifest — which is the `laws/` and `merge-conformance/` precedent and, separately, the only shape
+that does not redden a host on arrival: at least one host's certification kit reads the root
+manifest's fixture list as a whole and asserts that its per-kind leg tallies account for exactly the
+manifest's fixture count, so a new `kind` there fails a repository that has adopted nothing.
+
 ## 2026-09-14 — D36: the footprint's unknown-parent over-approximation is not tightened, because it cannot be tightened over this record
 
 **Decided (Phase 143).** `Ops.independent`'s last two clauses — a `RemoveNode`/`MoveNode` conflicts

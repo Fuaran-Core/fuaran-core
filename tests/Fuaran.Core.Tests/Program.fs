@@ -28,6 +28,19 @@ let main argv =
         LawVectorExport.write dir
         printfn "Wrote %s" (LawVectorExport.transformPath dir)
         0
+    // Phase 139 — write the `apply/` family (the skeleton-op apply contract: one
+    // vector per validator clause per op, Batch atomicity, the id-collision
+    // shapes) into the shared conformance corpus:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>
+    // A flag rather than a test side-effect, for the reason `--emit-laws` above
+    // is one. Note the name: the UI language repo's `--emit-corpus` renders THAT
+    // domain's node vectors and knows nothing about this engine; the apply
+    // semantics are Core's, so Core emits them.
+    | "--emit-apply" :: dir :: _ ->
+        ApplyVectorExport.write dir
+        printfn "Wrote %s" (ApplyVectorExport.vectorsPath dir)
+        printfn "Wrote %s" (ApplyVectorExport.manifestPath dir)
+        0
     | "--idl-diff" :: oldPath :: newPath :: rest ->
         let read (p: string) = System.IO.File.ReadAllText p
 

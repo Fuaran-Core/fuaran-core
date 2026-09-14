@@ -492,4 +492,108 @@ let insertIdUniquenessTests =
               Expect.isLessThan
                   refusals
                   110
-                  (sprintf "…and acceptances as well as refusals (%d refused of 120)" refusals) ]
+                  (sprintf "…and acceptances as well as refusals (%d refused of 120)" refusals)
+
+          // ---- Phase 139: Tree.WellFormed, and the validators that read it ----
+
+          testCase "wellFormed accepts a clean tree and names the FIRST repeated id in preorder"
+          <| fun _ ->
+              match Tree.wellFormed nodew idw (sample ()) with
+              | Tree.Structural -> ()
+              | Tree.RepeatedId d -> failtestf "the reference sample is well-formed, but `%s` was reported twice" d
+
+              // `[root; a; a1; a1]` — the offender is reported at its SECOND occurrence.
+              let twice =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "a" "section" [ RNode.leaf "a1" "para" "x" ]
+                        RNode.leaf "a1" "para" "y" ]
+
+              match Tree.wellFormed nodew idw twice with
+              | Tree.RepeatedId d -> Expect.equal d "a1" "the repeated id is named"
+              | Tree.Structural -> failtest "a tree carrying `a1` twice read as well-formed"
+
+              Expect.isTrue (Tree.isWellFormed nodew idw (sample ())) "the boolean form agrees"
+              Expect.isFalse (Tree.isWellFormed nodew idw twice) "and disagrees where it should"
+
+          testCase "wellFormed names the offender at its SECOND occurrence, not by duplicate-group order"
+          <| fun _ ->
+              // `[root; a; b; a]` in preorder: `a` repeats last, `b` is the first id seen twice.
+              // Two answers are defensible and the engine now gives ONE of them everywhere — this is
+              // the case that tells them apart, and it is what Phase 139 moved `Diff`'s check onto.
+              let t =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "a" "section" [ RNode.leaf "b" "para" "x"; RNode.leaf "b" "para" "y" ]
+                        RNode.leaf "a" "para" "z" ]
+
+              match Tree.wellFormed nodew idw t with
+              | Tree.RepeatedId d -> Expect.equal d "b" "the first id reached twice in preorder is named"
+              | Tree.Structural -> failtest "a tree carrying `a` and `b` twice read as well-formed"
+
+              match Diff.toOps nodew idw t (sample ()) with
+              | Error(Diff.DuplicateIdInTree d) ->
+                  Expect.equal d "b" "Diff names the same offender the accept path would — one definition, one answer"
+              | other -> failtestf "the diff should refuse a malformed `before` tree: %A" other
+
+          testCase "graftWellFormed answers for the tree a graft WOULD produce, and Ops.apply reads it"
+          <| fun _ ->
+              let t = sample ()
+              let clean = RNode.node "fresh" "section" [ RNode.leaf "fresh-a" "para" "x" ]
+              let collides = RNode.node "fresh" "section" [ RNode.leaf "a1" "para" "x" ]
+
+              let internalDup =
+                  RNode.node "fresh" "section" [ RNode.leaf "twin" "para" "x"; RNode.leaf "twin" "para" "y" ]
+
+              match Tree.graftWellFormed nodew idw clean t with
+              | Tree.Structural -> ()
+              | Tree.RepeatedId d -> failtestf "a graft of entirely fresh ids was refused, naming `%s`" d
+
+              match Tree.graftWellFormed nodew idw collides t with
+              | Tree.RepeatedId d -> Expect.equal d "a1" "the descendant id the tree already holds is named"
+              | Tree.Structural -> failtest "a graft carrying an id the tree holds read as clean"
+
+              match Tree.graftWellFormed nodew idw internalDup t with
+              | Tree.RepeatedId d -> Expect.equal d "twin" "the id the graft repeats within itself is named"
+              | Tree.Structural -> failtest "a graft repeating an id within itself read as clean"
+
+              // and the validator is a projection of it rather than a second copy: the same three
+              // grafts, through the shipped accept path.
+              let verdict graft =
+                  match Ops.apply nodew idw (InsertChild("b", graft)) t with
+                  | Ok _ -> "accept"
+                  | Error(DuplicateId d) -> "duplicate:" + d
+                  | Error e -> sprintf "%A" e
+
+              Expect.equal (verdict clean) "accept" "the clean graft is accepted"
+              Expect.equal (verdict collides) "duplicate:a1" "the colliding graft is refused, naming the same id"
+              Expect.equal (verdict internalDup) "duplicate:twin" "so is the internally duplicated one"
+
+          testCase "opAlgebra reports the WellFormed-preservation law, and it holds on the reference witness"
+          <| fun _ ->
+              let genFresh (taken: Set<string>) (rng: ConfRng.T) =
+                  let n, r = ConfRng.next rng
+                  let mutable id = sprintf "n%d" (abs n)
+
+                  while taken.Contains id do
+                      id <- id + "'"
+
+                  RNode.leaf id "para" "v", r
+
+              let opGen: OpGen<RNode, string> =
+                  { Tree = (fun rng -> sample (), rng)
+                    FreshNode = genFresh
+                    CanHold = None }
+
+              let results = Conformance.opAlgebra nodew idw opGen 139 200
+
+              match
+                  results
+                  |> List.tryFind (fun r -> r.Law = "apply's accept path preserves Tree.WellFormed")
+              with
+              | None -> failtestf "opAlgebra no longer reports the preservation law: %A" (results |> List.map _.Law)
+              | Some r -> Expect.isTrue r.Passed (sprintf "the law must hold on the reference witness: %A" r)
+
+              Expect.equal (List.length results) 5 "the algebra family reports five laws" ]

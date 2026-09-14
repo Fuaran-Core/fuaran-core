@@ -95,39 +95,24 @@ module Ops =
     /// The first id in `node`'s subtree (preorder) that breaks uniqueness — one already carried by
     /// `root`, or one the subtree repeats within itself. `None` when the graft is clean.
     ///
-    /// **Phase 137.** This check used to read `w.Id node` alone, so a subtree whose DESCENDANT id
-    /// was already present — or which carried the same id twice — was accepted, and the tree then
-    /// held one id twice. Nothing downstream survives that: `Tree.updateNode` rewrites *every* node
-    /// matching the repeated id, and `Tree.Index.build`'s `Map.ofList` silently keeps the last. The
-    /// notion was already computed two hundred lines away (`footprint`'s `subtreeKeys`) and already
-    /// enforced on the diff path (`Diff.toOps` → `DiffError.DuplicateIdInTree`); the accept path was
-    /// the one place it was missing.
+    /// **Phase 137** widened this from the graft's own id to its whole subtree; **Phase 139** moved
+    /// the scan itself into `Tree.graftWellFormed`, so this is now a projection of Core's ONE named
+    /// definition of structural validity rather than a second, separately-maintained copy of it.
+    /// The behaviour is unchanged — same seed, same preorder, same first offender — and the point of
+    /// the move is that it can no longer drift from `Tree.wellFormed`, which is what a caller
+    /// checks the RESULT with.
     ///
-    /// **Scope: the WITNESS surface.** `Tree.ids` walks `NodeWitness.Children`, so a node a domain
-    /// holds in a keyed, non-structural position is invisible here — see the README. Uniqueness over
-    /// those positions is the domain's own obligation, and a domain that has them keeps its own
-    /// pre-check rather than expecting this one to see them.
-    ///
-    /// One scan, seeded from the root's ids, decides both halves and names the FIRST offender in
-    /// `Tree.ids` order.
+    /// Scope, damage and precedence are all stated where the predicate is defined
+    /// (`Tree.WellFormed`); this comment deliberately does not restate them.
     let private firstDuplicateId
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (node: 'Node)
         (root: 'Node)
         : 'Id option =
-        let rec scan (seen: Set<string>) (ids: 'Id list) =
-            match ids with
-            | [] -> None
-            | i :: rest ->
-                let k = idw.ToString i
-
-                if Set.contains k seen then
-                    Some i
-                else
-                    scan (Set.add k seen) rest
-
-        scan (Tree.ids w root |> List.map idw.ToString |> Set.ofList) (Tree.ids w node)
+        match Tree.graftWellFormed w idw node root with
+        | Tree.RepeatedId d -> Some d
+        | Tree.Structural -> None
 
     let private validateInsert
         (canHold: 'Node -> bool)
@@ -735,12 +720,21 @@ module Diff =
 
         let key (i: 'Id) = idw.ToString i
 
-        // First duplicated id in a tree (by key), if any.
+        // First duplicated id in a tree (by key), if any — Core's named structural predicate
+        // (Phase 139). This was a `groupBy` of its own until then, and the retirement is the point:
+        // a diff refusing a malformed tree and an insert refusing a malformed graft are the same
+        // notion of malformed, and they now read the same function.
+        //
+        // ONE OBSERVABLE CHANGE, and it is which id is NAMED, never whether the tree is refused.
+        // The `groupBy` form reported the first id whose GROUP had more than one member, in
+        // first-appearance order of the keys; `Tree.wellFormed` reports the first id at its SECOND
+        // occurrence in preorder. For `[a; b; b; a]` the old form said `a` and the new says `b`.
+        // The new answer is the one `Rejection.DuplicateId` already gave on the accept path, so the
+        // two paths now name the same offender for the same tree. Recorded in STABILITY.md.
         let dupId (root: 'Node) =
-            Tree.preorder w root
-            |> List.map w.Id
-            |> List.groupBy key
-            |> List.tryPick (fun (_, ids) -> if List.length ids > 1 then Some(List.head ids) else None)
+            match Tree.wellFormed w idw root with
+            | Tree.RepeatedId d -> Some d
+            | Tree.Structural -> None
 
         // key -> parent id, for every non-root node.
         let parentMap (nodes: 'Node list) =

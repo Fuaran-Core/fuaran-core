@@ -296,8 +296,9 @@ module Conformance =
             Counterexample = idRoundTrip } ]
 
     /// The op-algebra laws: apply totality (never throws), `canApply` ≡ `apply` (same
-    /// accept/reject + envelope), apply∘invert = identity on every applyable op, and — Phase 137 —
-    /// an accepted insert introduces no id already present.
+    /// accept/reject + envelope), apply∘invert = identity on every applyable op, — Phase 137 —
+    /// an accepted insert introduces no id already present, and — Phase 139 — apply's accept path
+    /// preserves `Tree.WellFormed`, the sampled twin of the apply-engine preservation theorem.
     ///
     /// **The insert-uniqueness law needs a BUILT arm, and that is the whole reason it reads the way
     /// it does.** `genOp`'s insert branch calls `gen.FreshNode idKeys`, whose contract is a node
@@ -325,6 +326,7 @@ module Conformance =
         let mutable equivalence = None
         let mutable inversion = None
         let mutable uniqueness = None
+        let mutable preservation = None
 
         /// The first id `t` carries twice (by key), if any — the post-condition an accepted insert
         /// must not create.
@@ -346,6 +348,32 @@ module Conformance =
             let tree, r1 = gen.Tree rng
             let op, r2 = genOp nodew idw gen tree r1
             rng <- r2
+
+            /// Phase 139 — the sampled twin of the apply-engine preservation theorem: if the
+            /// pre-state is `Tree.WellFormed` and `apply` ACCEPTS, the post-state is too. Quantified
+            /// over every op the sample reaches, where the Phase 137 law beside it is about inserts
+            /// alone — a `MoveNode` or a `Batch` that broke uniqueness would be invisible to that
+            /// one and is exactly what the theorem claims cannot happen.
+            ///
+            /// The pre-state guard is load-bearing rather than defensive: the law says apply
+            /// PRESERVES well-formedness, and an op applied to an already-malformed tree can leave
+            /// it malformed without any of that being apply's doing. A generator that happened to
+            /// draw a malformed tree would otherwise turn a true theorem into a red law.
+            let notePreserves (origin: string) (op: SkeletonOp<'Node, 'Id>) (pre: 'Node) (post: 'Node) =
+                if preservation.IsNone && Tree.isWellFormed nodew idw pre then
+                    match Tree.wellFormed nodew idw post with
+                    | Tree.RepeatedId d ->
+                        preservation <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: an ACCEPTED %s %A left a WELL-FORMED tree carrying id %s twice"
+                                    seed
+                                    i
+                                    origin
+                                    op
+                                    (idw.ToString d)
+                            )
+                    | Tree.Structural -> ()
 
             /// Record an accepted insert that left a repeated id behind. Shared by the drawn and the
             /// built arms, because the property is the same one either way.
@@ -395,6 +423,9 @@ module Conformance =
                     (match op with
                      | InsertChild(_, inserted) -> noteIfRepeats "drawn" inserted post
                      | _ -> ())
+
+                    // Phase 139 — over EVERY drawn op, not just inserts.
+                    notePreserves "drawn" op tree post
 
                     match Ops.invert nodew idw op tree with
                     | Error e ->
@@ -480,7 +511,9 @@ module Conformance =
                                     )
 
                             match res with
-                            | Ok post -> noteIfRepeats origin candidate post
+                            | Ok post ->
+                                noteIfRepeats origin candidate post
+                                notePreserves origin colliding tree post
                             | Error _ -> ()
 
         [ { Law = "apply totality (never throws)"
@@ -494,7 +527,10 @@ module Conformance =
             Counterexample = inversion }
           { Law = "an accepted insert introduces no id already present"
             Passed = uniqueness.IsNone
-            Counterexample = uniqueness } ]
+            Counterexample = uniqueness }
+          { Law = "apply's accept path preserves Tree.WellFormed"
+            Passed = preservation.IsNone
+            Counterexample = preservation } ]
 
     /// The op-stream laws: `verifyChain` accepts an intact chain and rejects a tampered
     /// op; `replay` re-derives the live state from the base state.
