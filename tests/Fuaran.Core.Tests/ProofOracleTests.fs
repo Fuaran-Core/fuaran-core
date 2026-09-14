@@ -3762,6 +3762,427 @@ let private diffDifferential' (containedDiff: ContainedDiff) (seed: int) (trials
 let private diffDifferential (seed: int) (trials: int) : DiffTally =
     diffDifferential' TreeDiff.to_ops_contained seed trials
 
+// ---------------------------------------------------------------------------
+//  Phase 149 — the CANONICAL ENCODER. `proofs/WireCanon.fst`'s extracted `render`
+//  beside `Fuaran.Core.Canon.render`, byte for byte.
+//
+//  The model is named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is
+//  not called `Ops` and `TreeDiff.fst` is not called `Diff`: the extracted oracle is
+//  a top-level F# module and this host opens `Fuaran.Core`, which already carries a
+//  `Canon`. The two would shadow each other exactly where the differential needs both.
+// ---------------------------------------------------------------------------
+
+/// The model's hex nibble, by value. Used in both directions of the bridge.
+let private canonHexdOf (n: int) : WireCanon.hexd =
+    match n with
+    | 0 -> WireCanon.HD0
+    | 1 -> WireCanon.HD1
+    | 2 -> WireCanon.HD2
+    | 3 -> WireCanon.HD3
+    | 4 -> WireCanon.HD4
+    | 5 -> WireCanon.HD5
+    | 6 -> WireCanon.HD6
+    | 7 -> WireCanon.HD7
+    | 8 -> WireCanon.HD8
+    | 9 -> WireCanon.HD9
+    | 10 -> WireCanon.HDa
+    | 11 -> WireCanon.HDb
+    | 12 -> WireCanon.HDc
+    | 13 -> WireCanon.HDd
+    | 14 -> WireCanon.HDe
+    | 15 -> WireCanon.HDf
+    | _ -> failwithf "not a hex nibble: %d" n
+
+let private canonHexdChar (d: WireCanon.hexd) : char =
+    match d with
+    | WireCanon.HD0 -> '0'
+    | WireCanon.HD1 -> '1'
+    | WireCanon.HD2 -> '2'
+    | WireCanon.HD3 -> '3'
+    | WireCanon.HD4 -> '4'
+    | WireCanon.HD5 -> '5'
+    | WireCanon.HD6 -> '6'
+    | WireCanon.HD7 -> '7'
+    | WireCanon.HD8 -> '8'
+    | WireCanon.HD9 -> '9'
+    | WireCanon.HDa -> 'a'
+    | WireCanon.HDb -> 'b'
+    | WireCanon.HDc -> 'c'
+    | WireCanon.HDd -> 'd'
+    | WireCanon.HDe -> 'e'
+    | WireCanon.HDf -> 'f'
+
+/// A .NET `char` as one of the model's constructors. TOTAL and CLASSIFYING: every character the
+/// canonical encoder distinguishes has its own constructor, and `CPlain` catches the rest
+/// VERBATIM — so two different ordinary characters are never identified, and `WireCanon.bridged`
+/// (the model's own statement of what this function has to be: a `CPlain` never carries a
+/// spelling another constructor already denotes) holds of everything produced here by
+/// construction. That is the level-3 assumption, written where it is discharged.
+let private canonToCh (c: char) : WireCanon.ch =
+    match c with
+    | '"' -> WireCanon.CQuote
+    | '\\' -> WireCanon.CBackslash
+    | '{' -> WireCanon.CLBrace
+    | '}' -> WireCanon.CRBrace
+    | '[' -> WireCanon.CLBrack
+    | ']' -> WireCanon.CRBrack
+    | ':' -> WireCanon.CColon
+    | ',' -> WireCanon.CComma
+    | '-' -> WireCanon.CMinus
+    | '+' -> WireCanon.CPlus
+    | '.' -> WireCanon.CDot
+    | 'E' -> WireCanon.CUpE
+    | 'u' -> WireCanon.CLu
+    | c when c < ' ' -> WireCanon.CCtrl(int c >= 16, canonHexdOf (int c % 16))
+    | c when c >= '0' && c <= '9' -> WireCanon.CHexCh(canonHexdOf (int c - int '0'))
+    | c when c >= 'a' && c <= 'f' -> WireCanon.CHexCh(canonHexdOf (int c - int 'a' + 10))
+    | c -> WireCanon.CPlain(string c)
+
+let private canonFromCh (c: WireCanon.ch) : string =
+    match c with
+    | WireCanon.CQuote -> "\""
+    | WireCanon.CBackslash -> "\\"
+    | WireCanon.CLBrace -> "{"
+    | WireCanon.CRBrace -> "}"
+    | WireCanon.CLBrack -> "["
+    | WireCanon.CRBrack -> "]"
+    | WireCanon.CColon -> ":"
+    | WireCanon.CComma -> ","
+    | WireCanon.CMinus -> "-"
+    | WireCanon.CPlus -> "+"
+    | WireCanon.CDot -> "."
+    | WireCanon.CUpE -> "E"
+    | WireCanon.CLu -> "u"
+    | WireCanon.CHexCh d -> string (canonHexdChar d)
+    | WireCanon.CCtrl(hi, lo) ->
+        string (
+            char (
+                (if hi then 16 else 0)
+                + int (
+                    canonHexdChar lo
+                    |> fun ch ->
+                        if ch <= '9' then
+                            int ch - int '0'
+                        else
+                            int ch - int 'a' + 10
+                )
+            )
+        )
+    | WireCanon.CPlain s -> s
+
+let private canonToChs (s: string) : WireCanon.ch list = s |> Seq.map canonToCh |> List.ofSeq
+
+let private canonFromChs (l: WireCanon.ch list) : string =
+    l |> List.map canonFromCh |> String.concat ""
+
+let rec private canonToModel (v: JVal) : WireCanon.jval<int, float> =
+    match v with
+    | JStr s -> WireCanon.JStr(canonToChs s)
+    | JInt i -> WireCanon.JInt i
+    | JBool b -> WireCanon.JBool b
+    | JFloat f -> WireCanon.JFloat f
+    | JArr xs -> WireCanon.JArr(xs |> List.map canonToModel)
+    | JObj fs -> WireCanon.JObj(fs |> List.map (fun (k, v) -> (canonToChs k, canonToModel v)))
+
+let rec private canonOfModel (v: WireCanon.jval<int, float>) : JVal =
+    match v with
+    | WireCanon.JStr s -> JStr(canonFromChs s)
+    | WireCanon.JInt i -> JInt i
+    | WireCanon.JBool b -> JBool b
+    | WireCanon.JFloat f -> JFloat f
+    | WireCanon.JArr xs -> JArr(xs |> List.map canonOfModel)
+    | WireCanon.JObj fs -> JObj(fs |> List.map (fun (k, v) -> (canonFromChs k, canonOfModel v)))
+
+/// The `wire` the model is parametric over, instantiated at production's own layouts. Two of the
+/// seven fields are worth naming.
+///
+/// `float_str` is `Double.ToString("R", InvariantCulture)` DIRECTLY and not `Canon.canonicalFloat`,
+/// so the `-0` collapse and the three non-finite tokens stay the MODEL's clauses to get right
+/// rather than being handed to it — that is the difference between a comparison and a tautology.
+/// The digits themselves are .NET's, per the opaque-numeral boundary theorems 1 and 4 also draw.
+///
+/// `tok_read` is the numeral READ-BACK the model does not compute: production's own parser over
+/// the token the model scanned. `tok_read_ok`, the one premise the theorems carry, is exactly the
+/// claim that this function inverts the two layouts above — which is what rule 5 means by "the
+/// shortest digit sequence that ROUND-TRIPS", so the premise is the layout's definition rather
+/// than an extra assumption about it.
+let private canonWire: WireCanon.wire<int, float> =
+    { int_str = fun i -> canonToChs (string i)
+      float_str = fun f -> canonToChs (f.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+      fclass =
+        fun f ->
+            if System.Double.IsNaN f then
+                WireCanon.FNaN
+            elif System.Double.IsPositiveInfinity f then
+                WireCanon.FPosInf
+            elif System.Double.IsNegativeInfinity f then
+                WireCanon.FNegInf
+            else
+                WireCanon.FFinite
+      is_zero = fun f -> f = 0.0
+      pos_zero = 0.0
+      key_le = fun a b -> System.String.CompareOrdinal(canonFromChs a, canonFromChs b) <= 0
+      tok_read =
+        fun t ->
+            match Json.parse (canonFromChs t) with
+            | Result.Ok v -> WireCanon.Ok(canonToModel v)
+            | Result.Error m -> WireCanon.Error m }
+
+/// The GO-RED instrument, and this family's counterpart to the fold family's blind footprint and
+/// the decode family's blind integer bridge: rule 2's comparator REVERSED, so the sort the rule
+/// mandates still runs but orders keys the other way. Every object carrying two distinct keys must
+/// then disagree with production, and a document carrying none still agrees — so the comparison is
+/// known to be both one that can lose and one that is narrow to the rule it is about.
+let private canonWireGoRed: WireCanon.wire<int, float> =
+    { canonWire with
+        key_le = fun a b -> System.String.CompareOrdinal(canonFromChs a, canonFromChs b) >= 0 }
+
+/// Rule 5's own slot rule, as a predicate on a value: a token with no `.`, no `e`/`E` and a
+/// magnitude inside the int53 window "keeps integer identity", so a float whose canonical token
+/// carries neither marker is INDISTINGUISHABLE ON THE WIRE from the integer of that token. That is
+/// the model's `canonical`, and the subset every theorem in section 10 is stated over.
+let rec private isCanonicalValue (v: JVal) : bool =
+    match v with
+    | JFloat f ->
+        System.Double.IsFinite f
+        && (let t = Canon.canonicalFloat f in t.Contains "." || t.Contains "E")
+    | JArr xs -> xs |> List.forall isCanonicalValue
+    | JObj fs -> fs |> List.forall (snd >> isCanonicalValue)
+    | _ -> true
+
+/// The extracted model is a CHARACTER-LIST interpreter, and F*'s F# backend emits plain recursion
+/// with no tail calls (README, finding 3's neighbour: the backend is second-class upstream). So
+/// rendering a multi-kilobyte corpus fixture walks a stack proportional to the document's BYTES,
+/// and the largest fixture in the corpus overflows the default 1 MB one. That is a property of the
+/// EXTRACTION and not of the model — the theorem is about a function, not about a runtime's frame
+/// budget — so the differential runs on a thread with a stack sized for the corpus rather than
+/// shrinking the pool until it fits the default. Shrinking would silently narrow what the corpus
+/// leg certifies, and the fixture it would drop first is the deepest one.
+let private onBigStack (f: unit -> 'a) : 'a =
+    let mutable result = Unchecked.defaultof<'a>
+    let mutable failure: exn = null
+
+    let body () =
+        try
+            result <- f ()
+        with e ->
+            failure <- e
+
+    let t = System.Threading.Thread(body, 128 * 1024 * 1024)
+    t.Start()
+    t.Join()
+
+    if not (isNull failure) then
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw()
+
+    result
+
+type private CanonTally =
+    {
+        Docs: int
+        Diffs: string list
+        /// Objects carrying two or more DISTINCT keys — the shape rule 2's sort is observable on,
+        /// and therefore the shape the go-red needs to have met.
+        SortableObjects: int
+        /// Strings carrying a character rule 6 escapes.
+        EscapedStrings: int
+        /// Strings carrying a control character — the `\u00xx` arm specifically.
+        ControlStrings: int
+        /// Floats whose canonical token is in scientific notation — rule 5's other layout.
+        ScientificFloats: int
+        /// Canonical documents whose model round trip was checked.
+        RoundTrips: int
+    }
+
+let private emptyCanonTally =
+    { Docs = 0
+      Diffs = []
+      SortableObjects = 0
+      EscapedStrings = 0
+      ControlStrings = 0
+      ScientificFloats = 0
+      RoundTrips = 0 }
+
+let rec private canonShape (v: JVal) (t: CanonTally) : CanonTally =
+    match v with
+    | JStr s ->
+        let t =
+            if s |> Seq.exists (fun c -> c = '"' || c = '\\' || c < ' ') then
+                { t with
+                    EscapedStrings = t.EscapedStrings + 1 }
+            else
+                t
+
+        if s |> Seq.exists (fun c -> c < ' ') then
+            { t with
+                ControlStrings = t.ControlStrings + 1 }
+        else
+            t
+    | JFloat f when System.Double.IsFinite f && (Canon.canonicalFloat f).Contains "E" ->
+        { t with
+            ScientificFloats = t.ScientificFloats + 1 }
+    | JArr xs -> xs |> List.fold (fun acc x -> canonShape x acc) t
+    | JObj fs ->
+        let t =
+            if (fs |> List.map fst |> List.distinct |> List.length) >= 2 then
+                { t with
+                    SortableObjects = t.SortableObjects + 1 }
+            else
+                t
+
+        fs |> List.fold (fun acc (_, x) -> canonShape x acc) t
+    | _ -> t
+
+/// One document, asked of production and of the model. The comparison is the BYTES — which is the
+/// only comparison that means anything for an encoder whose whole job is to produce a digest input.
+let private canonProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: CanonTally) : CanonTally =
+    let expected = Canon.render v
+    let got = canonFromChs (WireCanon.render w (canonToModel v))
+
+    let t = canonShape v { t with Docs = t.Docs + 1 }
+
+    if expected = got then
+        t
+    else
+        { t with
+            Diffs =
+                sprintf "%s: production rendered\n  %s\nthe model rendered\n  %s" label expected got
+                :: t.Diffs }
+
+/// The value-level round trip, on the canonical subset: the model's own reader over the model's
+/// own rendering, against production's parser over production's rendering. A disagreement here
+/// says the reader and the encoder have drifted apart, which is the one way the injectivity
+/// theorem could be true of a model that is not this encoder.
+let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTally =
+    if not (isCanonicalValue v) then
+        t
+    else
+        let t = { t with RoundTrips = t.RoundTrips + 1 }
+
+        let modelSide =
+            match WireCanon.read canonWire (WireCanon.render canonWire (canonToModel v)) with
+            | WireCanon.Ok(mv, []) -> Result.Ok(canonOfModel mv)
+            | WireCanon.Ok(_, rest) -> Result.Error(sprintf "the reader left %d characters unread" (List.length rest))
+            | WireCanon.Error m -> Result.Error m
+
+        let productionSide =
+            match Json.parse (Canon.render v) with
+            | Result.Ok pv -> Result.Ok pv
+            | Result.Error m -> Result.Error m
+
+        if modelSide = productionSide then
+            t
+        else
+            { t with
+                Diffs =
+                    sprintf "%s: round trip — production read %A, the model read %A" label productionSide modelSide
+                    :: t.Diffs }
+
+// ---- the generated pool ----
+
+let private canonKeys =
+    [| "$type"
+       "a"
+       "b"
+       "Z"
+       "z"
+       "0"
+       "_x"
+       "é"
+       "\u00e9x"
+       "\U0001D11E"
+       "\uE000"
+       "kind"
+       "A"
+       "aa" |]
+
+let private canonChars =
+    [| "a"
+       "Z"
+       "0"
+       " "
+       "/"
+       "\""
+       "\\"
+       "\n"
+       "\r"
+       "\t"
+       "\u0000"
+       "\u0007"
+       "\u001f"
+       "é"
+       "字"
+       "\U0001D11E"
+       "$"
+       "E"
+       "." |]
+
+let private canonFloats =
+    [| 0.5
+       -1.25
+       1e21
+       1e-7
+       1.602e-19
+       5e-324
+       0.1
+       3.141592653589793
+       -0.0
+       0.0
+       2.0
+       1e17
+       100.0 |]
+
+let private nextCanonSeed (r: int) : int = (r * 1103515245 + 12345) &&& 0x3FFFFFFF
+
+let private genCanonValue (r: int ref) (depth: int) : JVal =
+    let draw (n: int) =
+        r.Value <- nextCanonSeed r.Value
+        r.Value % n
+
+    let rec go (depth: int) : JVal =
+        match draw (if depth <= 0 then 5 else 7) with
+        | 0 ->
+            let n = draw 5
+            JStr(String.concat "" [ for _ in 1..n -> canonChars[draw canonChars.Length] ])
+        | 1 -> JInt(draw 2000 - 1000)
+        | 2 -> JBool(draw 2 = 0)
+        | 3 -> JFloat canonFloats[draw canonFloats.Length]
+        | 4 -> JStr canonKeys[draw canonKeys.Length]
+        | 5 -> JArr [ for _ in 1 .. draw 4 -> go (depth - 1) ]
+        | _ -> JObj [ for _ in 1 .. draw 5 -> canonKeys[draw canonKeys.Length], go (depth - 1) ]
+
+    go depth
+
+let private canonGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) (roundTrip: bool) : CanonTally =
+    let r = ref seed
+    let mutable t = emptyCanonTally
+
+    for i in 1..trials do
+        let v = genCanonValue r 3
+        t <- canonProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+        if roundTrip then
+            t <- canonRoundTrip (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+    t
+
+let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundTrip: bool) : CanonTally =
+    let mutable t = emptyCanonTally
+
+    for name, text in JsonParseDiff.corpusTexts family do
+        match Json.parse text with
+        | Result.Error m -> failtestf "the corpus fixture %s/%s did not parse: %s" family name m
+        | Result.Ok v ->
+            t <- canonProbe w (sprintf "%s/%s" family name) v t
+
+            if roundTrip then
+                t <- canonRoundTrip (sprintf "%s/%s" family name) v t
+
+    t
+
+let private renderCanonDiffs (diffs: string list) : string =
+    diffs |> List.rev |> List.truncate 5 |> String.concat "\n"
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -5719,4 +6140,187 @@ let proofOracleTests =
                   (t.Diffs |> List.exists (fun d -> d.Contains "toOpsContained differs"))
                   (sprintf
                       "the disagreement is the one this phase is about — production refuses the pair up front, the unchecked one emits a script. Got:\n%s"
-                      (List.head t.Diffs)) ]
+                      (List.head t.Diffs))
+
+          // ---- the canonical encoder, over the corpus and a generated pool (Phase 149) ----
+
+          testCase "the canon oracle agrees with Canon.render over every nodes/ fixture"
+          <| fun _ ->
+              let t = onBigStack (fun () -> canonCorpus canonWire "nodes" true)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan t.Docs 100 (sprintf "the nodes/ family was read at all (%d fixtures)" t.Docs)
+
+              Expect.isGreaterThan
+                  t.SortableObjects
+                  100
+                  (sprintf
+                      "fixtures carrying an object with two or more DISTINCT keys (%d) — rule 2's sort is unobservable without one"
+                      t.SortableObjects)
+
+              Expect.isGreaterThan
+                  t.RoundTrips
+                  100
+                  (sprintf "fixtures inside the canonical subset, whose round trip was checked (%d)" t.RoundTrips)
+
+          testCase "the canon oracle agrees with Canon.render over every ops/ fixture"
+          <| fun _ ->
+              let t = onBigStack (fun () -> canonCorpus canonWire "ops" true)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan t.Docs 10 (sprintf "the ops/ family was read at all (%d fixtures)" t.Docs)
+
+          testCase "the canon oracle agrees with Canon.render over a generated JVal pool"
+          <| fun _ ->
+              // The pool is where the corpus is thin: rule 6's three escape classes (a quote, a
+              // backslash, a control character), rule 2's comparator above the BMP (an astral key
+              // beside a private-use one — the pair WIRE_FORMAT's own rule-2 note says UTF-16
+              // order decides differently from code-point order), and rule 5's scientific layout.
+              let t = onBigStack (fun () -> canonGenerated canonWire 1490 1200 true)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // adequacy — a pool that never reached a shape measures nothing about the rule that
+              // governs it. MEASURED at 1200 documents, seed 1490, and every threshold below sits
+              // under its measurement with headroom and above zero.
+              Expect.isGreaterThan
+                  t.SortableObjects
+                  100
+                  (sprintf "documents carrying a sortable object (%d)" t.SortableObjects)
+
+              Expect.isGreaterThan
+                  t.EscapedStrings
+                  100
+                  (sprintf "strings carrying a character rule 6 escapes (%d)" t.EscapedStrings)
+
+              Expect.isGreaterThan
+                  t.ControlStrings
+                  20
+                  (sprintf "strings carrying a CONTROL character — the \\u00xx arm specifically (%d)" t.ControlStrings)
+
+              Expect.isGreaterThan
+                  t.ScientificFloats
+                  20
+                  (sprintf "floats whose canonical token is in scientific notation (%d)" t.ScientificFloats)
+
+              Expect.isGreaterThan
+                  t.RoundTrips
+                  200
+                  (sprintf "documents inside the canonical subset, whose round trip was checked (%d)" t.RoundTrips)
+
+          testCase "a model with rule 2's key order REVERSED loses — the comparison can fail"
+          <| fun _ ->
+              // The go-red. `render_injective_up_to_key_order` and `render_deterministic` both turn
+              // on the sort being a canonical choice, so the instrument that must lose is one whose
+              // sort is a DIFFERENT choice: the same comparator, reversed. Every object carrying two
+              // distinct keys must then disagree — and a document carrying none must still agree,
+              // which is what says the instrument is narrow to the rule rather than broken.
+              let t = onBigStack (fun () -> canonGenerated canonWireGoRed 1490 1200 false)
+
+              Expect.isGreaterThan
+                  t.SortableObjects
+                  100
+                  (sprintf
+                      "the go-red run reached objects with two distinct keys at all (%d) — otherwise it proves nothing"
+                      t.SortableObjects)
+
+              Expect.isNonEmpty t.Diffs "a model that sorts object keys the other way MUST disagree with Canon.render"
+
+              // and it must NOT disagree on everything: a document with no sortable object is
+              // outside rule 2 entirely, and an instrument that reddened those too would be
+              // measuring something other than the key order.
+              Expect.isLessThan
+                  (List.length t.Diffs)
+                  t.Docs
+                  (sprintf
+                      "the reversed comparator disagreed on %d of %d documents — it must leave the ones with no sortable object alone"
+                      (List.length t.Diffs)
+                      t.Docs)
+
+          testCase "the four renderings that ALIAS — `render_injective` is false, and this is why"
+          <| fun _ ->
+              // The phase's finding, as assertions over PRODUCTION rather than as prose. The shard
+              // asked for `render a == render b ==> a == b`; these are the four ways it fails, and
+              // `proofs/WireCanon.fst` carries each as a lemma. They go red if the encoder ever
+              // changes — which is the point: three of them are documented design choices that a
+              // future session must not "fix" by accident, and the first is the one worth knowing.
+
+              // 1. a non-finite float is a STRING on the wire. `Json.render` has the guarded
+              //    `Json.tryRender` beside it; `Canon.render` has no guarded counterpart, so a
+              //    digest over `JFloat nan` collides with the digest over `JStr "NaN"`.
+              Expect.equal
+                  (Canon.render (JFloat nan))
+                  (Canon.render (JStr "NaN"))
+                  "rule 5 renders NaN as the quoted string \"NaN\", which is what that STRING renders as"
+
+              Expect.equal (Canon.render (JFloat infinity)) (Canon.render (JStr "Infinity")) "the same, for +infinity"
+
+              Expect.equal (Canon.render (JFloat -infinity)) (Canon.render (JStr "-Infinity")) "the same, for -infinity"
+
+              // 2. an integral float is an INTEGER on the wire — the documented normalisation
+              //    `JVal`'s own type doc names.
+              Expect.equal (Canon.render (JFloat 2.0)) (Canon.render (JInt 2)) "rule 5: `render (JFloat 2.0)` emits `2`"
+
+              // 3. the two zeroes are one token — rule 5's `-0` collapse.
+              Expect.equal (Canon.render (JFloat -0.0)) (Canon.render (JFloat 0.0)) "rule 5 collapses -0 to 0"
+
+              // 4. member order is not observable — rule 2's sort. Not a loss: it is the purpose of
+              //    a canonical form, and the reason the theorem is stated up to member order.
+              Expect.equal
+                  (Canon.render (JObj [ "a", JInt 1; "b", JInt 2 ]))
+                  (Canon.render (JObj [ "b", JInt 2; "a", JInt 1 ]))
+                  "rule 2 sorts, so the authored member order does not reach the bytes"
+
+              // and the model agrees with production on all four, which is what makes the lemmas
+              // statements about THIS encoder rather than about a model of one.
+              for a, b in
+                  [ JFloat nan, JStr "NaN"
+                    JFloat infinity, JStr "Infinity"
+                    JFloat -infinity, JStr "-Infinity"
+                    JFloat 2.0, JInt 2
+                    JFloat -0.0, JFloat 0.0
+                    JObj [ "a", JInt 1; "b", JInt 2 ], JObj [ "b", JInt 2; "a", JInt 1 ] ] do
+                  Expect.equal
+                      (canonFromChs (WireCanon.render canonWire (canonToModel a)))
+                      (canonFromChs (WireCanon.render canonWire (canonToModel b)))
+                      (sprintf "the model aliases the pair production aliases: %A / %A" a b)
+
+          testCase "the canon oracle handles the non-canonical arms production reaches"
+          <| fun _ ->
+              // Outside the canonical subset the theorems say nothing, but the DIFFERENTIAL still
+              // has to agree — the model is a model of the whole encoder, not only of the part the
+              // theorem covers, and a model that diverged here would be a model of something else.
+              let mutable t = emptyCanonTally
+
+              for v in
+                  [ JFloat nan
+                    JFloat infinity
+                    JFloat -infinity
+                    JFloat -0.0
+                    JFloat 0.0
+                    JFloat 2.0
+                    JFloat 1e17
+                    JInt 0
+                    JInt -2147483648
+                    JInt 2147483647
+                    JStr ""
+                    JStr "\u0000\u001f\"\\/"
+                    JArr []
+                    JObj []
+                    JObj [ "a", JFloat nan; "$type", JStr "X" ]
+                    JArr [ JFloat infinity; JObj [ "b", JArr [ JFloat -0.0 ] ] ] ] do
+                  t <- canonProbe canonWire "non-canonical arm" v t
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf
+                      "the canon oracle disagreed with production off the canonical subset:\n%s"
+                      (renderCanonDiffs t.Diffs)) ]

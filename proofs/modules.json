@@ -64,6 +64,20 @@
       "measuredSeconds": 12,
       "phase": "fuaran-core#141",
       "note": "The diff — `Diff.toOps`'s two refusals, the four passes, and the container-aware mirror. Seeded over EIGHT cold runs: 9s, 10s, 9s, 9s, 9s before the Phase 161 merge and 12s, 9s, 9s after it, so the rule's slowest observed is 12s, 2x is 24s and the next 10s is 30. It was first written as the 20s floor off the first five runs, and the 12s arrived in the very pass that would have shipped that number — the same shape `Preservation`'s entry below records, and the reason the rule says slowest rather than typical. Nothing regressed: the 12s run is inside the old 20s too, and the module is unchanged between the two passes; what moved is which runs the rule had seen. It is the cheapest model in the leg after `Skeleton`, and the reason is worth knowing before anyone reads a future bump as ordinary growth: what is proved here is what the four passes GUARANTEE ABOUT THE SCRIPT — shape, order and the refusal characterisation — and not what applying that script DOES, which the README's theorem 6 carries at level 2 instead. The lemmas are therefore structural inductions over lists, which Z3 discharges quickly; the reconstruction theorem, if it is ever taken, reasons about `ins` and `rem_at` over intermediate trees and would put this module in `Preservation`'s cost class rather than `Chain`'s. Carries `#set-options \"--ext context_pruning\"`, like the three modules above and for the same reason — it opens `TreeOps` and `DagFold`, whose ninety-odd patterned lemmas would otherwise be live at every query here."
+    },
+    {
+      "module": "Limits",
+      "budgetSeconds": 20,
+      "measuredSeconds": 1,
+      "phase": "fuaran-core#149",
+      "note": "The WIRE_FORMAT section-21 resource limits as named premises. Eight constants and two lemmas about the relations between them, so there is nothing here for the prover to work at: both cold runs measured under a second and the entry sits at the 20s floor for exactly the reason the seeding note gives — 2x of a 1s measurement is inside process-start noise, and a budget that fires on a busy afternoon teaches a reader to ignore it. If this one ever overshoots, the module has stopped being a table of constants and the growth is the finding."
+    },
+    {
+      "module": "WireCanon",
+      "budgetSeconds": 180,
+      "measuredSeconds": 86,
+      "phase": "fuaran-core#149",
+      "note": "The canonical encoder, its reader, and the canonical form proved in both directions. Seeded over two cold `--quake 3` runs measuring 86s and 40s, so the rule's SLOWEST observed is the 86s and 2x86 rounds to 180. The spread is the widest in the leg after JsonParse's and has the same cause: the 86s run had a sibling session's full repo gate running beside it, which is precisely the contention the tolerance absorbs rather than a run to discard. Carries `#set-options \"--ext context_pruning\"` like the four modules above, and for the same reason it matters here in particular: the reader is a mutual group whose termination rides refinements in the return types, the shape this file's own note names as the expensive one under the default context. Two things to check before reading a future bump as ordinary growth. The first is that the pruning option is still in force. The second is specific to this module: the reader exists because a LEFT INVERSE is the cheap route to injectivity, and the alternative — a direct first-difference induction over the rendered byte lists — is a different cost class entirely, so a rewrite that removed the reader would not read in the log as a rewrite."
     }
   ]
 }

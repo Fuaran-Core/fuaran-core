@@ -76,7 +76,16 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 #                two refusals characterised exactly, the four-pass emission order, what each pass
 #                guarantees about the block it emits, and the container-aware mirror's pre-emptive
 #                refusal. Opens TreeOps (and through it DagFold), so it follows both.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff')
+#   Limits     — Phase 149, the WIRE_FORMAT section-21 resource limits as named premises and
+#                nothing else: eight constants with their captions, and the two relations the
+#                specification's own argument uses. It models no enforcement and opens nothing;
+#                it is here because `WireCanon` imports it, which is why it precedes it.
+#   WireCanon  — Phase 149, the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and
+#                `Canon.render` clause for clause, with a reader for exactly the grammar they
+#                emit, and the canonical form proved in both directions: equal bytes imply equal
+#                normal forms, equal normal forms imply equal bytes. It `open`s Limits, so it
+#                follows it.
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
