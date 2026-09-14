@@ -3311,6 +3311,150 @@ let proofOracleTests =
                   breaks
                   "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose"
 
+          // ---- Phase 143 — the precision ceiling: the pinned unknown-parent clause is NECESSARY ----
+
+          testCase "the pinned unknown-parent clause is necessary — both classes, on the model and on production"
+          <| fun _ ->
+              // `proofs/TreeOps.fst` section 18 proves this; this is that section's witness run on
+              // the EXTRACTED model and, in the same case, on PRODUCTION `Ops.footprint` /
+              // `Ops.independent` over the reference witness. Two classes are named:
+              //
+              //   NOW-INDEPENDENT-IF-THE-CLAUSE-WERE-DROPPED — a `MoveNode` and an `InsertChild`
+              //     under a parent inside the moved subtree. They DO commute; only the pinned
+              //     clause refuses them.
+              //   STILL-REFUSED-AND-RIGHTLY — the same shape with a `RemoveNode` in it. It does NOT
+              //     commute: the insert's parent goes with the destroyed subtree.
+              //
+              // And the reason the first cannot be freed: the two ops carry the SAME footprint, so
+              // any predicate over the four address sets gives them one verdict. This case goes RED
+              // if `Ops.independent` is ever tightened, which is the point of writing it down.
+
+              // ---- the model half ----
+              Expect.equal
+                  (TreeOps.op_fp TreeOps.reloc_move)
+                  (TreeOps.op_fp TreeOps.reloc_remove)
+                  "the move and the remove-shaped batch are footprint-INDISTINGUISHABLE on the model"
+
+              Expect.isFalse
+                  (DagFold.independent (TreeOps.op_fp TreeOps.reloc_move) (TreeOps.op_fp TreeOps.reloc_insert))
+                  "the model refuses the pair — the pinned clause is the only clause doing so"
+
+              let modelOrder (first: TreeOps.op) (second: TreeOps.op) =
+                  match TreeOps.apply first TreeOps.reloc_tree with
+                  | DagFold.Ok t -> TreeOps.apply second t
+                  | e -> e
+
+              Expect.equal
+                  (modelOrder TreeOps.reloc_move TreeOps.reloc_insert)
+                  (modelOrder TreeOps.reloc_insert TreeOps.reloc_move)
+                  "NOW-INDEPENDENT class: the move and the insert commute on the model"
+
+              Expect.isTrue
+                  (match modelOrder TreeOps.reloc_remove TreeOps.reloc_insert with
+                   | DagFold.Error _ -> true
+                   | _ -> false)
+                  "STILL-REFUSED class: the remove-shaped batch destroys the insert's parent"
+
+              // ---- the production half: the same witness over the reference witness ----
+              let pTree =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "x" "section" [ RNode.node "p" "section" [] ]
+                        RNode.node "q" "section" [] ]
+
+              let pMove: SkeletonOp<RNode, string> = MoveNode("x", "q")
+
+              let pRemove: SkeletonOp<RNode, string> =
+                  Batch [ RemoveNode "x"; ReorderChildren("q", []) ]
+
+              let pInsert: SkeletonOp<RNode, string> = InsertChild("p", RNode.node "n" "para" [])
+
+              let fp (o: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ o ]
+
+              Expect.equal (fp pMove) (fp pRemove) "production agrees: the two ops carry the same four address sets"
+
+              // every clause EXCEPT the pinned pair holds — so the pinned pair is load-bearing here
+              let fpM, fpI = fp pMove, fp pInsert
+              let disjoint (a: Set<string>) b = Set.isEmpty (Set.intersect a b)
+
+              Expect.isTrue
+                  (disjoint fpM.ContentWrites fpI.ContentWrites
+                   && disjoint fpM.ContentWrites fpI.Reads
+                   && disjoint fpI.ContentWrites fpM.Reads
+                   && disjoint fpM.StructureWrites fpI.StructureWrites)
+                  "every clause but the pinned relocation pair is satisfied — nothing else is refusing this"
+
+              Expect.isFalse (Ops.independent fpM fpI) "production refuses the pair, by the pinned clause alone"
+
+              let prodOrder first second =
+                  match Ops.apply nodew idw first pTree with
+                  | Ok t -> Ops.apply nodew idw second t
+                  | e -> e
+
+              Expect.equal
+                  (prodOrder pMove pInsert)
+                  (prodOrder pInsert pMove)
+                  "NOW-INDEPENDENT class, in production: the move and the insert commute"
+
+              Expect.isTrue
+                  (match prodOrder pRemove pInsert with
+                   | Error _ -> true
+                   | Ok _ -> false)
+                  "STILL-REFUSED class, in production: remove-then-insert cannot find the insert's parent"
+
+              Expect.isTrue
+                  (match Ops.apply nodew idw pRemove pTree, Ops.apply nodew idw pInsert pTree with
+                   | Ok _, Ok _ -> true
+                   | _ -> false)
+                  "both halves apply at the tree on their own — so the divergence is the pair's, not one op's"
+
+          testCase "a move pair nesting into each other's subtrees is refused, and no record could free it"
+          <| fun _ ->
+              // The second, independent reason the refused set is not one homogeneous class waiting
+              // on a better footprint. `TreeOps.relocation_move_pair_also_fails` proves it; here it
+              // is on the extracted model and on production.
+              let modelStep (first: TreeOps.op) (second: TreeOps.op) =
+                  match TreeOps.apply first TreeOps.cross_tree with
+                  | DagFold.Ok t -> TreeOps.apply second t
+                  | e -> e
+
+              Expect.isTrue
+                  (match
+                      TreeOps.apply TreeOps.cross_a TreeOps.cross_tree, TreeOps.apply TreeOps.cross_b TreeOps.cross_tree
+                   with
+                   | DagFold.Ok _, DagFold.Ok _ -> true
+                   | _ -> false)
+                  "each move applies on its own"
+
+              Expect.isTrue
+                  (match modelStep TreeOps.cross_a TreeOps.cross_b with
+                   | DagFold.Error _ -> true
+                   | _ -> false)
+                  "after either, the other would nest a node under its own subtree — the cycle check refuses it"
+
+              let cTree =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "x" "section" [ RNode.node "mp" "section" [] ]
+                        RNode.node "y" "section" [ RNode.node "np" "section" [] ] ]
+
+              let a: SkeletonOp<RNode, string> = MoveNode("x", "np")
+              let b: SkeletonOp<RNode, string> = MoveNode("y", "mp")
+              let fp (o: SkeletonOp<RNode, string>) = Ops.footprint nodew idw [ o ]
+
+              Expect.isFalse (Ops.independent (fp a) (fp b)) "production refuses the move pair"
+
+              Expect.isTrue
+                  (match Ops.apply nodew idw a cTree with
+                   | Ok t ->
+                       match Ops.apply nodew idw b t with
+                       | Error _ -> true
+                       | Ok _ -> false
+                   | Error _ -> false)
+                  "and it is genuinely dependent — the obstruction is the cycle check, not the addresses"
+
           // ---- Phase 136 — the two integrity walkers, and the tampers they are for ----
 
           testCase "the chain oracle agrees with production over the reference witness's DAG and every tamper of it"

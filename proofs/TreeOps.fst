@@ -1774,3 +1774,192 @@ let leaf_independence_diamond ()
       else ()
     in
     FStar.Classical.forall_intro_2 aux
+
+(* ======================================================================================
+   18. THE PRECISION CEILING of the footprint record — the pinned unknown-parent clause is
+       NECESSARY, not merely conservative (Phase 143).
+
+       Phase 78 pinned `Ops.independent`'s last two clauses as conservative-not-tight, and
+       section 8 above measured what that costs: a `RemoveNode` or a `MoveNode` is independent
+       only of an op that does nothing. Phase 143 set out to tighten it — a relocation ought to
+       commute with a structural write under an unrelated parent — with Phase 138's preservation
+       theorem now available as the invariant such an argument needs.
+
+       IT DOES NOT GO THROUGH, and the reason is a property of the RECORD rather than of the
+       argument. This section proves that, because a ceiling nobody has proved is one the next
+       phase spends its budget rediscovering.
+
+       THE THREE FACTS, at one well-formed tree and three concrete ops:
+
+         1. `relocation_disjoint_diamond` — a `MoveNode` and an `InsertChild` under a parent
+            INSIDE the moved subtree DO commute. This is the diamond the tightening was after,
+            and it is real: the subtree travels intact, so an edit within it arrives at the same
+            place whichever order it is made in. Every clause of `independent` except the pinned
+            pair already holds of this pair, so the pinned clause is the only thing refusing it.
+
+         2. `relocation_diamond_fails_for_a_remove` — swap the move for a `RemoveNode` and the
+            diamond BREAKS. Both ops apply at the tree; `remove` then `insert` is
+            `UnknownNode`, because the insert's parent went with the destroyed subtree, while
+            `insert` then `remove` succeeds. This is pinned over-approximation (2) of
+            STABILITY.md's "Op-script footprint + independence" biting exactly where that entry
+            says it would: a `RemoveNode`'s `ContentWrites` records the target id and not its
+            tree-unknown subtree, and it is SOUND only because clause (1) — the one this phase
+            proposed to drop — already serialises the pair.
+
+         3. `relocation_footprints_coincide` — and the two ops carry THE SAME FOOTPRINT. A move
+            and a batch that removes and then reorders produce byte-identical records across all
+            four address sets, because `union_fp` is a union and neither the op's shape nor the
+            direction of its structural write survives the fold.
+
+       Together (`relocation_clause_is_necessary`) they say: no predicate over the four address
+       sets can free the safe pair without also freeing the fatal one. A single witness refutes a
+       universal, and this is that witness — so the tightening needs a footprint that can NAME
+       the difference (a fifth address kind carrying the relocation's kind, or a destroyed-subtree
+       set the script cannot compute), which is a change to the record and to every host that
+       reads it, not a change to a clause.
+
+       `relocation_move_pair_also_fails` adds the second, independent reason. Two moves whose
+       destinations sit inside each other's subtrees each apply alone and reject each other with
+       `WouldNestUnderSelf`; that pair could not be freed by ANY record, because the obstruction
+       is the validation and not the addresses. So the refused set is not one homogeneous class
+       waiting on a better footprint — part of it is genuinely dependent.
+
+       WHAT THIS SECTION DOES NOT CLAIM. That the general move-versus-structural-write theorem is
+       false: it is not, and fact 1 is an instance of it. What is claimed is that proving it in
+       general would buy nothing today, because `Ops.independent` could not consume it — which is
+       why this phase does not prove it. `relocating_forces_inert` (section 8) therefore STANDS,
+       live and unamended, and `still_refused` restates its reach as the enumeration the pinned
+       clause governs.
+   ====================================================================================== *)
+
+(* Every clause of `independent` EXCEPT the pinned relocation pair — the predicate the tightening
+   would have reduced `independent` to for a relocating op. Named so the witnesses below can say
+   "only the pinned clause refuses this" as a checkable statement rather than as prose. *)
+let but_for_relocation (a b:footprint) : Tot bool =
+  disjoint a.content_writes b.content_writes &&
+  disjoint a.content_writes b.reads &&
+  disjoint b.content_writes a.reads &&
+  disjoint a.structure_writes b.structure_writes
+
+(* ---- the witness: one tree, a move, a remove-shaped batch with the SAME footprint, and a
+   structural write under a parent inside the relocated subtree ---- *)
+
+let reloc_tree : tree =
+  TNode "root" "doc" [ TNode "x" "sec" [ TNode "p" "sec" [] ]; TNode "q" "sec" [] ]
+
+let reloc_move : op = MoveNode "x" "q"
+
+(* The remove-shaped op. A bare `RemoveNode "x"` would carry no structure write and so would be
+   distinguishable from the move; this batch carries one, and reaches the same four sets. *)
+let reloc_remove : op = Batch [ RemoveNode "x"; ReorderChildren "q" [] ]
+
+let reloc_insert : op = InsertChild "p" (TNode "n" "para" [])
+
+let reloc_tree_wf () : Lemma (ensures wf reloc_tree) = assert_norm (wf reloc_tree)
+
+(* ---- FACT 1: the diamond the tightening was after — and it holds ---- *)
+
+let relocation_disjoint_diamond ()
+  : Lemma (ensures wf reloc_tree /\
+                   but_for_relocation (op_fp reloc_move) (op_fp reloc_insert) /\
+                   not (independent (op_fp reloc_move) (op_fp reloc_insert)) /\
+                   Ok? (apply reloc_move reloc_tree) /\
+                   Ok? (apply reloc_insert reloc_tree) /\
+                   Ok? (bind (apply reloc_move reloc_tree) (apply reloc_insert)) /\
+                   bind (apply reloc_move reloc_tree) (apply reloc_insert) ==
+                   bind (apply reloc_insert reloc_tree) (apply reloc_move))
+  = assert_norm (wf reloc_tree);
+    assert_norm (but_for_relocation (op_fp reloc_move) (op_fp reloc_insert));
+    assert_norm (not (independent (op_fp reloc_move) (op_fp reloc_insert)));
+    assert_norm (Ok? (apply reloc_move reloc_tree));
+    assert_norm (Ok? (apply reloc_insert reloc_tree));
+    assert_norm (Ok? (bind (apply reloc_move reloc_tree) (apply reloc_insert)));
+    assert_norm (bind (apply reloc_move reloc_tree) (apply reloc_insert) ==
+                 bind (apply reloc_insert reloc_tree) (apply reloc_move))
+
+(* ---- FACT 2: the same shape with a REMOVE in it breaks the diamond ---- *)
+
+let relocation_diamond_fails_for_a_remove ()
+  : Lemma (ensures but_for_relocation (op_fp reloc_remove) (op_fp reloc_insert) /\
+                   Ok? (apply reloc_remove reloc_tree) /\
+                   Ok? (apply reloc_insert reloc_tree) /\
+                   Error? (bind (apply reloc_remove reloc_tree) (apply reloc_insert)))
+  = assert_norm (but_for_relocation (op_fp reloc_remove) (op_fp reloc_insert));
+    assert_norm (Ok? (apply reloc_remove reloc_tree));
+    assert_norm (Ok? (apply reloc_insert reloc_tree));
+    assert_norm (Error? (bind (apply reloc_remove reloc_tree) (apply reloc_insert)))
+
+(* ---- FACT 3: and the footprint cannot tell them apart ---- *)
+
+let relocation_footprints_coincide ()
+  : Lemma (ensures op_fp reloc_move == op_fp reloc_remove)
+  = assert_norm (op_fp reloc_move == op_fp reloc_remove)
+
+(* ---- THE CEILING: the three facts as one statement ----
+   A predicate over footprints alone assigns ONE verdict to `op_fp reloc_move`, which is also
+   `op_fp reloc_remove`. Freeing the pair frees both; one of them breaks the diamond. So the
+   pinned clause is not a placeholder for a sharper clause over these sets — there is no sharper
+   clause over these sets. *)
+let relocation_clause_is_necessary ()
+  : Lemma (ensures op_fp reloc_move == op_fp reloc_remove /\
+                   but_for_relocation (op_fp reloc_move) (op_fp reloc_insert) /\
+                   not (independent (op_fp reloc_move) (op_fp reloc_insert)) /\
+                   wstep reloc_move reloc_insert reloc_tree /\
+                   ~(wstep reloc_remove reloc_insert reloc_tree))
+  = relocation_disjoint_diamond ();
+    relocation_diamond_fails_for_a_remove ();
+    relocation_footprints_coincide ();
+    assert_norm (wf reloc_tree)
+
+(* ---- the second, independent reason: part of the refused set is GENUINELY dependent ----
+   Two moves whose destinations sit inside each other's subtrees. Each applies alone; after
+   either, the other is `WouldNestUnderSelf`. Their footprints satisfy every clause but the
+   pinned pair, and no footprint record could rescue them: the obstruction is the cycle check,
+   which is a fact about the tree's shape at the moment the second op runs. *)
+
+let cross_tree : tree =
+  TNode "root" "doc"
+        [ TNode "x" "sec" [ TNode "mp" "sec" [] ]; TNode "y" "sec" [ TNode "np" "sec" [] ] ]
+
+let cross_a : op = MoveNode "x" "np"
+let cross_b : op = MoveNode "y" "mp"
+
+let relocation_move_pair_also_fails ()
+  : Lemma (ensures wf cross_tree /\
+                   but_for_relocation (op_fp cross_a) (op_fp cross_b) /\
+                   not (independent (op_fp cross_a) (op_fp cross_b)) /\
+                   Ok? (apply cross_a cross_tree) /\
+                   Ok? (apply cross_b cross_tree) /\
+                   Error? (bind (apply cross_a cross_tree) (apply cross_b)))
+  = assert_norm (wf cross_tree);
+    assert_norm (but_for_relocation (op_fp cross_a) (op_fp cross_b));
+    assert_norm (not (independent (op_fp cross_a) (op_fp cross_b)));
+    assert_norm (Ok? (apply cross_a cross_tree));
+    assert_norm (Ok? (apply cross_b cross_tree));
+    assert_norm (Error? (bind (apply cross_a cross_tree) (apply cross_b)))
+
+(* ---- the pairs the clause still refuses, as one lemma ----
+
+   `relocating_forces_inert` (section 8) reads forward: independence plus a relocation gives an
+   inert partner. This is its contrapositive, which is the shape a reader asking "what is still
+   refused, exactly?" wants: the refused set is precisely {relocating} x {not inert}, and by
+   `structure_free_iff_inert` "not inert" is "writes some structure". Enumerated at the leaf
+   alphabet that is remove-or-move against insert, remove, move and reorder — nine of the fifteen
+   unordered pairs, unchanged from Phase 133 — of which:
+
+     - remove x insert     REFUSED, and `relocation_diamond_fails_for_a_remove` shows a member
+                           that genuinely does not commute;
+     - move x move         REFUSED, and `relocation_move_pair_also_fails` shows the same;
+     - move x insert       REFUSED, and `relocation_disjoint_diamond` shows a member that DOES
+     - move x reorder      commute — these are refused for want of a discriminator the record
+                           does not carry, not because they interfere;
+     - remove x remove     REFUSED; not examined by this phase, and no claim is made here about
+     - remove x move       whether their members commute. Section 8's argument is what refuses
+     - remove x reorder    them, and it is unchanged.
+
+   The three genuinely-commuting pairs (insert/insert, insert/reorder, reorder/reorder) are
+   section 12's and are unaffected. *)
+let still_refused (a b:op)
+  : Lemma (requires relocating a /\ not (inert b))
+          (ensures not (independent (op_fp a) (op_fp b)))
+  = if independent (op_fp a) (op_fp b) then relocating_forces_inert a b else ()

@@ -667,6 +667,57 @@ more pairs as independent and would need its own proof; nothing here carries to 
 right way round: `independent = true` is the promise, `independent = false` is always a safe answer,
 and a theorem about the promise is a theorem about the answer the code actually gives.
 
+#### The precision ceiling — the clause is NECESSARY, and that is Phase 143's result
+
+Phase 143 was chartered to tighten it. Phase 78 pinned the clause as conservative-not-tight because
+nothing could then say what a tighter clause would be sound against; Phase 138's preservation
+theorem removed that obstacle, so the phase set out to prove that a relocation commutes with a
+structural write under an unrelated parent and then to narrow `Ops.independent` to match.
+
+**It proved the opposite, and section 18 of the model carries the proof.** Three facts at one
+well-formed tree, `assert_norm`-checked with no admits:
+
+- `relocation_disjoint_diamond` — a `MoveNode` and an `InsertChild` under a parent **inside the
+  moved subtree** DO commute. The subtree travels intact. Every clause of `independent` except the
+  pinned relocation pair already holds of them (`but_for_relocation`), so that clause is the only
+  thing refusing them. The tightening's premise is real.
+- `relocation_diamond_fails_for_a_remove` — swap the move for a `RemoveNode` and the diamond breaks.
+  Both operations apply at the tree; remove-then-insert is `UnknownNode`, because the insert's
+  parent was destroyed with the subtree, while insert-then-remove succeeds.
+- `relocation_footprints_coincide` — and **the two operations carry the same footprint.** A move,
+  and a batch that removes and then reorders, fold to byte-identical records across all four address
+  sets, because `union_fp` is a union and neither the operation's shape nor the direction of its
+  structural write survives the fold.
+
+`relocation_clause_is_necessary` is the three together: a predicate over the four sets gives both
+operations one verdict, so freeing the safe pair frees the fatal one. A single witness refutes a
+universal, and that is what this is. The paragraph above therefore reads more sharply than it did: a
+tighter **clause** over this record is not merely unproved, it does not exist; a tighter **footprint
+record** — a fifth address kind naming the relocation's kind, or a destroyed-subtree set the pure
+script cannot compute — is what a future tightening needs, and that is a breaking change to every
+consumer that reads a `Footprint`.
+
+This is also the second pinned over-approximation being load-bearing for the first. STABILITY.md has
+said since Phase 78 that a `RemoveNode`'s content-write records the target id and not its
+tree-unknown subtree, and that this is sound *because* the unknown-parent rule already serialises
+the pair. Fact 2 is that sentence's counterexample.
+
+**And part of the refused set could not be freed by any record.**
+`relocation_move_pair_also_fails` is two `MoveNode`s whose destinations sit inside each other's
+subtrees: each applies alone, and after either the other is `WouldNestUnderSelf`. The obstruction
+there is the cycle check rather than the addresses. So the nine refused pairs are not one
+homogeneous class waiting on a better footprint — `still_refused` enumerates them with, for each,
+whether a member is known to commute (move × insert, move × reorder), known not to (remove × insert,
+move × move), or unexamined by this phase.
+
+`relocating_forces_inert` is unchanged and stays live: it is what refuses the pairs, and section 18
+is why it must.
+
+**What Phase 143 deliberately did NOT prove.** The general move-versus-structural-write theorem, of
+which fact 1 is an instance. It is true; `Ops.independent` cannot consume it, so proving it would
+add prover budget to every run in exchange for nothing. The phase that gains the record's
+discriminator is the phase that should prove it, against the clause it will license.
+
 ### Well-formedness, and why it is a hypothesis rather than an oversight
 
 `Tree.tryFind` and `Tree.parentOf` resolve an id to the FIRST node in document order, and
@@ -767,9 +818,14 @@ before the fourth model is written.
 
 1. **Proved (machine-checked, no admits).** The diamond for every operation pair `covered` names,
    at every id-unique tree; the composite fold-confluence law over the non-`Batch` alphabet, with
-   its halt half under no hypothesis at all; and the refutation of unconditional well-formedness
-   preservation with the conditional form and its converse beside it. F\* 2026.09.06, Z3 4.13.3,
-   every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
+   its halt half under no hypothesis at all; the refutation of unconditional well-formedness
+   preservation with the conditional form and its converse beside it; and, since Phase 143, that
+   the pinned unknown-parent clause is NECESSARY over this `Footprint` record
+   (`relocation_clause_is_necessary`, with `relocation_disjoint_diamond`,
+   `relocation_diamond_fails_for_a_remove` and `relocation_footprints_coincide` under it, plus
+   `relocation_move_pair_also_fails` and the `still_refused` enumeration). F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
+   `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply` and `Ops.footprint` over
    the pools above. Agreement is over those pools, never over all inputs.
 3. **Assumed, and stated as such.**
@@ -783,8 +839,11 @@ before the fourth model is written.
 4. **Not claimed.** Rejection PAYLOADS: the differential compares a refusal by class, and
    `UnknownNode`'s `addressable` and `ReorderMismatch`'s two orders are outside the comparison (the
    Phase 132 entry says why they cannot be claimed to agree across orders in the first place).
-   Nothing about `applyContained`, `invert`, `normalize` or `Diff`. Nothing about a *tighter*
-   footprint than the pinned one.
+   Nothing about `applyContained`, `invert`, `normalize` or `Diff`. About a *tighter* footprint than
+   the pinned one, exactly one thing is now claimed and no more: that **no tighter clause exists
+   over the four address sets this record carries** (Phase 143, above). Nothing is claimed about
+   what a WIDER record would admit, about the general move-versus-structural-write theorem, or about
+   the remove × remove, remove × move and remove × reorder pairs, which that phase did not examine.
 
 ## Theorem 3 — chain integrity (Phase 136)
 
@@ -1352,6 +1411,20 @@ _(**The topological order's uniqueness on a spine** was named here and is DONE �
 deliberately did not take is the general order over a MERGE DAG, where the frontier widens past one
 and the tie-break would have to be modelled for real; that is the larger successor, and it travels
 with `Dag.mergeBase`.)_
+
+**A `Footprint` record that can name a relocation's KIND** — the successor Phase 143 priced and
+deliberately did not take. Section 18 of `TreeOps.fst` proves that no clause over the four address
+sets can widen `Ops.independent`'s promise, because a `MoveNode` and a remove-shaped batch carry
+byte-identical footprints while only one of them commutes with a structural write under a parent
+inside the relocated subtree. Widening the promise therefore means widening the RECORD — a fifth
+address kind carrying the relocation's kind, or a destroyed-subtree set the pure script cannot
+compute without the tree — which is a breaking change to every consumer that reads a `Footprint`,
+weighed against fold availability nobody has measured. The theorem it would license is the general
+move-versus-structural-write diamond, which is true and unproved here for exactly that reason: a
+theorem no clause can consume costs prover budget on every run and buys nothing. Two of the nine
+refused pairs are known to have commuting members (move × insert, move × reorder); two are known to
+have non-commuting ones (remove × insert, move × move); three are unexamined. That is the shape of
+what widening would actually recover.
 
 **The signing composition** — the successor Phase 136 names and deliberately does not take.
 Chain integrity says a tampered node is found; it says nothing about a REWRITE, which re-mints

@@ -2131,10 +2131,66 @@ yet. Cut 2026-09-14 by the campaign driver so the phases below can ride one slot
 minting a number: Phase 137 (a previously accepted `InsertChild` whose subtree carries an
 already-present or internally duplicated id is now refused with `DuplicateId` — a parity
 correction with the other hosts), Phase 147 (`Dag.DagBreak.Reason` becomes a closed DU, the
-sibling of `ChainBreak.Reason`), Phase 143 (`Ops.independent` widens its promise under a proved
-clause), and Phase 145 (a `codecInjectivityLaws` family in the conformance kit). Each phase appends
+sibling of `ChainBreak.Reason`), Phase 143 (which set out to widen `Ops.independent`'s promise
+under a proved clause and instead proved the promise cannot widen over this record — **no contract
+change; see its entry below**), and Phase 145 (a `codecInjectivityLaws` family in the conformance
+kit). Each phase appends
 its own entry beneath this header as it lands; the version moves only if a later class outranks
 what the draft already carries (the draft-slot rule).
+
+### The unknown-parent over-approximation is NECESSARY, not merely conservative (`0.24.0`, Phase 143) — NO CONTRACT CHANGE
+
+**Nothing in the promise moves, and that is the result.** `Ops.footprint` and `Ops.independent` are
+byte-for-byte what they were; no type, signature, address set or verdict changes; a host reading this
+entry has nothing to adopt. What changes is what is *known* about the entry above
+("Op-script footprint + independence", Phase 78), which recorded the first two pinned
+over-approximations as deliberate coarseness that a tree-aware analysis could in principle sharpen.
+
+Phase 143 asked whether the first one could be sharpened now, with Phase 138's preservation theorem
+in hand: a relocation ought to commute with a structural write under an unrelated parent, so
+`independent` ought to be able to stop serialising every remove/move against every structural write.
+**It cannot, over this `Footprint` record, and that is now a theorem** — `proofs/TreeOps.fst`
+section 18, `relocation_clause_is_necessary`, verified with no admits under the pinned prover.
+
+The witness is one well-formed tree and three operations:
+
+- a `MoveNode` and an `InsertChild` under a parent **inside the moved subtree** DO commute
+  (`relocation_disjoint_diamond`). Every clause of `independent` except the pinned relocation pair
+  already holds of them, so that clause is the only thing refusing them — exactly the tightening
+  this phase was after, and it is real;
+- the same shape with a `RemoveNode` in it does NOT
+  (`relocation_diamond_fails_for_a_remove`): both operations apply at the tree, but
+  remove-then-insert is `UnknownNode`, because the insert's parent was destroyed with the subtree,
+  while insert-then-remove succeeds;
+- and the two operations carry **the same four address sets**
+  (`relocation_footprints_coincide`) — a move, and a batch that removes and then reorders, fold to
+  byte-identical footprints.
+
+A predicate over footprints alone therefore gives both operations one verdict. Freeing the safe pair
+frees the fatal one. This is the *second* pinned over-approximation above — a `RemoveNode`'s
+content-write records the target id and not its tree-unknown subtree — being load-bearing for the
+first, which that entry already said in prose and which is now machine-checked.
+
+**What a future tightening would cost, stated so it is not re-attempted cheaply.** It needs a
+footprint that can NAME the difference between a relocation that preserves its subtree and one that
+destroys it: a fifth address kind carrying the relocation's kind, or a destroyed-subtree set the
+pure script cannot compute without the tree. Either is a change to the `Footprint` record and to
+every consumer that reads it, not a change to a clause — a breaking change with its own version,
+weighed against how much fold availability it actually buys.
+
+**And part of the refused set could not be freed by any record.** Two `MoveNode`s whose destinations
+sit inside each other's subtrees each apply alone and reject each other with `WouldNestUnderSelf`
+(`relocation_move_pair_also_fails`). The obstruction there is the cycle check — a fact about the
+tree's shape at the moment the second operation runs — so the refused set is not one homogeneous
+class waiting on a better footprint.
+
+**Pinned in the tree, both ways.** The `Proofs.Oracle` case "the pinned unknown-parent clause is
+necessary" runs the witness on the extracted model and on production `Ops.footprint` /
+`Ops.independent` side by side, and the `Conformance.concurrencyLaws` teeth-check
+"dropping ONLY the unknown-parent clause makes the law bite" erases `UnknownParentWrites` and
+nothing else — which is precisely `independent` with its last two clauses removed — and requires
+the confluence or totality law to go red over a generated pool. A session that tightens the clause
+meets both.
 
 ### `InsertChild` refuses a subtree that breaks id uniqueness (`0.24.0`, Phase 137) — a REFUSAL-CLASS WIDENING
 
