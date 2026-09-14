@@ -2192,6 +2192,56 @@ so an adopting domain certifies the property over its own witness rather than tr
 `Conformance.certify` therefore returns **14** law results where it returned 13; a consumer asserting the
 count updates it. `witnessLaws` is unchanged.
 
+### `Dag.DagBreak.Reason` is a closed DU (`0.24.0`, Phase 147) — BREAKING
+
+`DagBreak.Reason` is `DagBreakReason`, not `string`:
+
+```fsharp
+type DagBreakReason =
+    | ContentIdMismatch
+    | MissingParent
+    | Unrecognised of reason: string
+```
+
+`Dag.firstBreak` mints the two named cases and never the third — which is what
+`Conformance.dagBreakReasonLaws` certifies, over every kind of break the walker can produce. Two
+named cases for two spellings, unlike the chain's three-for-four: the DAG walker makes exactly two
+checks, so there is no collapse to justify.
+
+**Why `Unrecognised` exists on a type this library alone mints** — the same argument the chain's
+carries. It is the honest arm for a reason that arrives from outside the walker: a DAG verified by a
+host's own verifier, a reason carried across a wire or a process boundary, a `DagBreak` a consumer
+constructs itself. `DagBreakReason.ofString` is total and lands there; `toString` renders a named
+case back to the exact string the walker emitted before this release. The pair round-trips on the
+named cases, and that is a law too.
+
+**The rendered bytes are UNCHANGED, and that is the load-bearing half of this entry.**
+`Dag.fromJsonlVerified`'s error still reads `Dag.fromJsonlVerified: <reason> at node <id>` with
+`<reason>` one of the two pre-release spellings, because it renders `DagBreakReason.toString`.
+Downstream consumers matching that error text exist. A sweep for the two spellings across every
+repository available when this was written found **two**, both asserting by substring on the string a
+verified load returns — one on a DAG store's own load wrapper, one on a session history's — and
+neither reads the `Reason` field, so both are unaffected without doing anything. `DagTests` pins both
+spellings by exact comparison rather than by substring, so a later reword goes red here instead of
+downstream.
+
+**The consumer that deletes its projection is this repo's own proof differential.** Phase 136's
+`Chain.fst` model carries the walker's two break classes as a closed set, and its differential
+compared production against the model *by class* — through those two string spellings, which is
+exactly the re-typing this DU removes. That differential now compares typed verdicts, on both
+walkers, and a model whose reason string ever drifted lands in `Unrecognised` against a named case
+instead of failing as an unexplained textual mismatch. Outside that, the sweep found no consumer of
+the `Reason` field at all: the remaining matches are this library's own walker, the model, the
+extracted oracle, and their tests.
+
+**This is deliberately NOT a merge with `ChainBreakReason`.** The chain and the DAG fail
+differently, and a shared type would have to carry cases each walker never mints. `0.23.0`'s entry
+below said this sibling would take the same shape when it was asked for; Phase 136 is the ask, and
+this is that shape.
+
+**`Conformance.certify` is unchanged.** `dagBreakReasonLaws` is a standalone opt-in family beside
+`chainBreakReasonLaws`, not folded into the aggregate, so no consumer's law count moves for it.
+
 ### `Conformance.codecInjectivityLaws` — the op codec's own contract, certifiable (`0.24.0`, Phase 145) — ADDITIVE
 
 A new opt-in law family:
@@ -2272,9 +2322,11 @@ measured consumer collapses them already, and a distinction every consumer immed
 worse contract than no distinction. `toString` therefore renders the op-walk spelling for both, and
 `ofString` accepts either.
 
-**The sibling `Dag.DagBreak.Reason` is UNCHANGED and still a string.** It is a different type with
-its own two spellings and no measured consumer, so widening it here would be an unrequested breaking
-change made on the strength of a symmetry argument. When it is asked for, it takes the same shape.
+**The sibling `Dag.DagBreak.Reason` is UNCHANGED and still a string** *as of this release*. It is a
+different type with its own two spellings and no measured consumer, so widening it here would be an
+unrequested breaking change made on the strength of a symmetry argument. When it is asked for, it
+takes the same shape. (It was asked for, by Phase 136, and took that shape in `0.24.0` — the entry
+above.)
 
 ### `ColExpr.Now` — a `now` literal at a declared grain (`0.23.0`) — BREAKING
 

@@ -21,11 +21,59 @@ type DagNode<'Op> =
       Actor: Actor
       Op: 'Op }
 
+/// WHICH integrity check a `DagBreak` failed (Phase 147) — the closed set of reasons the DAG
+/// walker can report, typed where the reason is MINTED rather than re-derived downstream by
+/// string-matching this library's spellings. The sibling of `ChainBreakReason`, and deliberately
+/// NOT a merge with it: the chain and the DAG fail differently, so a shared type would have to
+/// carry cases each walker never mints.
+///
+/// **Two named cases for two spellings**, unlike the chain's three-for-four — the DAG walker makes
+/// exactly two checks, so there is no collapse to justify here.
+///
+/// **`Unrecognised` is the honest arm, not a hedge**, on the same argument the chain's carries: a
+/// `DagBreak` also reaches a reader from outside this walker — a host's own verifier, a reason
+/// carried across a wire or a process boundary, a record a consumer constructs itself — and the
+/// alternative to naming that case is a reader that claims to know which check failed when it does
+/// not. `DagBreakReason.ofString` is total and lands there; `firstBreak` never does
+/// (`Conformance.dagBreakReasonLaws`).
+type DagBreakReason =
+    /// The node's stored id is not the content hash of its (parents, actor, op) — a tampered node.
+    | ContentIdMismatch
+    /// The node names a parent the DAG does not contain.
+    | MissingParent
+    /// A reason that did not come from this module's walker. Reported AS unknown: the DAG is
+    /// genuinely broken, and nothing here will claim to know which check failed.
+    | Unrecognised of reason: string
+
+/// Render / parse a `DagBreakReason` as the wire-and-log string the walker emitted before the type
+/// existed, so a consumer that logged those bytes keeps logging them — including the one that
+/// matches `fromJsonlVerified`'s error text, which this pair is what keeps byte-identical.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module DagBreakReason =
+
+    /// The canonical string for a reason — the exact spelling `firstBreak` minted before this type.
+    let toString (r: DagBreakReason) : string =
+        match r with
+        | ContentIdMismatch -> "content-id mismatch (tampered node)"
+        | MissingParent -> "missing parent"
+        | Unrecognised s -> s
+
+    /// Total: both strings the walker ever emitted classify, and anything else is `Unrecognised`
+    /// verbatim rather than swept into the nearer-looking case. `toString >> ofString` is the
+    /// identity on the named cases.
+    let ofString (s: string) : DagBreakReason =
+        match s with
+        | "content-id mismatch (tampered node)" -> ContentIdMismatch
+        | "missing parent" -> MissingParent
+        | other -> Unrecognised other
+
 /// The first integrity fault found in a DAG (Phase 21) — the node it occurs at, why, and the
 /// expected vs got value. `verifyDag` is `firstBreak … |> Option.isNone`; this names *where*.
+/// `Reason` is the closed `DagBreakReason` as of `0.24.0` — it was a bare `string`, which the
+/// measured consumer (this repo's own proof differential) had to compare by spelling.
 type DagBreak =
     { NodeId: string
-      Reason: string
+      Reason: DagBreakReason
       Expected: string
       Got: string }
 
@@ -157,7 +205,7 @@ module Dag =
             if id <> h then
                 Some
                     { NodeId = id
-                      Reason = "content-id mismatch (tampered node)"
+                      Reason = ContentIdMismatch
                       Expected = h
                       Got = id }
             else
@@ -165,7 +213,7 @@ module Dag =
                 | Some missing ->
                     Some
                         { NodeId = id
-                          Reason = "missing parent"
+                          Reason = MissingParent
                           Expected = ""
                           Got = missing }
                 | None -> None)
@@ -624,7 +672,10 @@ module Dag =
         |> Result.bind (fun dag ->
             match firstBreak hashFn w dag with
             | None -> Ok dag
-            | Some b -> Error(sprintf "Dag.fromJsonlVerified: %s at node %s" b.Reason b.NodeId))
+            | Some b ->
+                // `toString` renders the pre-0.24.0 spelling, so this error's bytes are unchanged by
+                // Phase 147 — a consumer matching this text keeps matching it.
+                Error(sprintf "Dag.fromJsonlVerified: %s at node %s" (DagBreakReason.toString b.Reason) b.NodeId))
 
     // ---- merge-base / branch-delta (Phase 08) ----
     // The *generic* half of a merge: locate the divergence point of two heads and enumerate
