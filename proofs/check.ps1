@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131 and 135).
+# fuaran-core — the proof leg (Phases 131, 135 and 136).
 #
 # EVERY MODULE in $modules below goes through the same three steps, and each step can fail on its
 # own. Adding a model is adding its name to that list: nothing else here is per-module.
@@ -46,7 +46,9 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 # at proofs/oracle/<name>.fs; they share nothing but oracle/Prims.fs.
 #   DagFold    — Phase 131, the N-lane DAG fold, with fold confluence proved.
 #   WireDecode — Phase 135, the wire decode combinators, with decoder totality proved.
-$modules = @('DagFold', 'WireDecode')
+#   Chain      — Phase 136, the two integrity walkers, with tamper detection proved under a
+#                named injective-hash premise.
+$modules = @('DagFold', 'WireDecode', 'Chain')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
