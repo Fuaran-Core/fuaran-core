@@ -92,6 +92,43 @@ module Ops =
     // tree), so their validation simulates through `apply` — the rejection returned is
     // exactly the one `apply` would produce.
 
+    /// The first id in `node`'s subtree (preorder) that breaks uniqueness — one already carried by
+    /// `root`, or one the subtree repeats within itself. `None` when the graft is clean.
+    ///
+    /// **Phase 137.** This check used to read `w.Id node` alone, so a subtree whose DESCENDANT id
+    /// was already present — or which carried the same id twice — was accepted, and the tree then
+    /// held one id twice. Nothing downstream survives that: `Tree.updateNode` rewrites *every* node
+    /// matching the repeated id, and `Tree.Index.build`'s `Map.ofList` silently keeps the last. The
+    /// notion was already computed two hundred lines away (`footprint`'s `subtreeKeys`) and already
+    /// enforced on the diff path (`Diff.toOps` → `DiffError.DuplicateIdInTree`); the accept path was
+    /// the one place it was missing.
+    ///
+    /// **Scope: the WITNESS surface.** `Tree.ids` walks `NodeWitness.Children`, so a node a domain
+    /// holds in a keyed, non-structural position is invisible here — see the README. Uniqueness over
+    /// those positions is the domain's own obligation, and a domain that has them keeps its own
+    /// pre-check rather than expecting this one to see them.
+    ///
+    /// One scan, seeded from the root's ids, decides both halves and names the FIRST offender in
+    /// `Tree.ids` order.
+    let private firstDuplicateId
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (node: 'Node)
+        (root: 'Node)
+        : 'Id option =
+        let rec scan (seen: Set<string>) (ids: 'Id list) =
+            match ids with
+            | [] -> None
+            | i :: rest ->
+                let k = idw.ToString i
+
+                if Set.contains k seen then
+                    Some i
+                else
+                    scan (Set.add k seen) rest
+
+        scan (Tree.ids w root |> List.map idw.ToString |> Set.ofList) (Tree.ids w node)
+
     let private validateInsert
         (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
@@ -100,15 +137,19 @@ module Ops =
         (node: 'Node)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
-        if Tree.exists w idw (w.Id node) root then
-            Error(DuplicateId(w.Id node))
-        elif not (Tree.exists w idw parent root) then
-            Error(UnknownNode(parent, Tree.ids w root))
-        else
-            match Tree.tryFind w idw parent root with
-            | None -> Error(UnknownNode(parent, Tree.ids w root))
-            | Some p when not (canHold p) -> Error(NotAContainer(parent, w.KindTag p))
-            | Some _ -> Ok()
+        // `Tree.ids` is preorder, so its head is the inserted node's OWN id: the widened scan
+        // subsumes the pre-137 root-id check and keeps its precedence over `UnknownNode` rather
+        // than quietly reordering the envelope a caller already handles.
+        match firstDuplicateId w idw node root with
+        | Some d -> Error(DuplicateId d)
+        | None ->
+            if not (Tree.exists w idw parent root) then
+                Error(UnknownNode(parent, Tree.ids w root))
+            else
+                match Tree.tryFind w idw parent root with
+                | None -> Error(UnknownNode(parent, Tree.ids w root))
+                | Some p when not (canHold p) -> Error(NotAContainer(parent, w.KindTag p))
+                | Some _ -> Ok()
 
     let private validateRemove
         (w: NodeWitness<'Node, 'Id>)
@@ -529,6 +570,13 @@ module Ops =
                 let inserted = subtreeKeys node
                 // parent existence + the inserted ids' dup-check are reads; the parent's child-list is a
                 // (known) structure-write; the inserted subtree is authored into being — a content-write.
+                //
+                // Phase 137: the dup-check named here is now the one `validateInsert` actually performs
+                // — `firstDuplicateId` reads exactly this `Tree.ids w node` set against the whole tree,
+                // so `Reads` describes a read that happens rather than one the footprint assumed. The
+                // set is unchanged: the validator's other half (is the subtree unique WITHIN ITSELF?) is
+                // internal to the op and reads no tree state, so it adds nothing to the footprint and
+                // creates no new collision between concurrent scripts.
                 { Reads = Set.add (key parent) inserted
                   StructureWrites = Set.singleton (key parent)
                   ContentWrites = inserted
