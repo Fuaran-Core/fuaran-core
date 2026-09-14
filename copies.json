@@ -1,0 +1,39 @@
+{
+  "kind": "copies",
+  "producer": "fuaran-core",
+  "note": "The proof-leg kit (proofs/kit/, Phase 155) is a scaffold other repositories adopt BY COPY: no package, no reference, nothing restored. This file is where those copies are declared, so that the workspace copy registry names a copy that has drifted from the source before anyone meets a red gate they did not cause. `records` is EMPTY TODAY, and that is a measurement rather than an omission — see `$adoptionStatus` below. `$sources` is the copy set written out, so that an adopter's record is this file's shape with one path filled in; it is inert data the registry ignores, and it moves into `records` the moment a real copy exists.",
+  "$adoptionStatus": "Measured 2026-09-15, across the whole workspace: exactly ONE proof leg exists — this repository's. No other repository holds a `check.ps1`, an `fstar-pin.json`, a `proofs/` directory or a `.fst` model. The phase that cut this kit was written against the expectation that three consumers (the program tier, the app-composition tier, the remoting decoder) had already copied the leg by hand and that the pin was therefore four numbers; they had not and it was not. The kit is still the right artefact — a scaffold shipped once is worth the same before the first adopter as after — but the drift half has nothing to check yet, and declaring records for copies that do not exist would put a permanent finding on every workspace sweep about an adoption nobody has scheduled. Each adopter appends its own record, from `$sources`, in the change-set that adopts.",
+  "$sources": [
+    {
+      "source": "proofs/kit/check-proof-leg.ps1",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/check-proof-leg.ps1 from the fuaran-core repository",
+      "$note": "The engine. Copied verbatim — an adopter edits its own proofs/check.ps1, never this."
+    },
+    {
+      "source": "proofs/kit/templates/oracle.fsproj.template",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/templates/oracle.fsproj.template from the fuaran-core repository",
+      "$note": "Copied AND edited by the adopter, so an adopter that has renamed it declares its own template copy rather than the project it produced."
+    },
+    {
+      "source": "proofs/fstar-pin.json",
+      "check": "bytes",
+      "regen": "copy proofs/fstar-pin.json from the fuaran-core repository",
+      "$note": "THE pin. This is the record that makes the kit worth having: one number, in one place, with every copy of it named. `bytes` rather than `fingerprint` because a pin is a hash-verified declaration and a byte is a byte."
+    },
+    {
+      "source": "proofs/oracle/Prims.fs",
+      "check": "fingerprint",
+      "regen": "copy proofs/oracle/Prims.fs from the fuaran-core repository",
+      "$note": "The hand-written runtime floor the extractor's output compiles against. It GROWS as models reach for more of F*'s library, so a copy goes stale by the source moving rather than by anyone editing the copy — which is the drift a registry catches and a reader does not."
+    },
+    {
+      "source": "proofs/oracle/FStar_Pervasives_Native.fs",
+      "check": "fingerprint",
+      "regen": "copy proofs/oracle/FStar_Pervasives_Native.fs from the fuaran-core repository",
+      "$note": "The second half of the same floor."
+    }
+  ],
+  "records": []
+}

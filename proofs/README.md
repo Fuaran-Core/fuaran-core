@@ -494,8 +494,12 @@ a budget at all.
 **Bumping a budget is a deliberate, recorded act.** Time the module on a cold, otherwise-quiet run,
 then edit that module's entry: the new `budgetSeconds`, the `measuredSeconds` it was seeded from,
 **your phase**, and a note saying what grew and why the cost is worth paying. The seeding rule lives
-in the file's own `seeding` block — `max(2 × the slowest observed cold run, 20s)`, rounded up to the
-next 10s, the floor being for the sub-5s modules where 2× is inside process-start noise. Editing the
+in the file's own `seeding` block — `max(2 × the slowest observed cold run, minimumBudgetSeconds)`,
+rounded up to the next 10s, that minimum being 20s and being for the sub-5s modules where 2× is
+inside process-start noise. (It was spelled `floorSeconds` until Phase 155, which is the same word
+the per-module TIME floor above uses for the opposite thing — the smallest a budget may be against
+the smallest a run may be — and the collision was renamed rather than documented because the kit
+below ships this file's skeleton.) Editing the
 number alone is how a budget stops meaning anything: the point of the entry is that a later reader
 can tell a cost someone decided to pay from a drift nobody noticed.
 
@@ -521,6 +525,69 @@ numbers the family beside it would not be checking.
   called by name at the point it is needed, which is also what makes the proof read as the
   calculation it is. A pattern added to a lemma of that shape does not make a module slower — it
   makes it not finish, and no budget catches that, because there is no measurement to compare.
+
+## Adopting the leg elsewhere — `proofs/kit/` (Phase 155)
+
+Everything above this line is about *this* repository's models. This section is about the leg
+itself, which is not specific to them: a pinned prover, a script that locates or downloads it and
+checks each model from a cold cache, an extraction diffed against a committed oracle, a host step,
+a budget and a floor, two hand-written runtime shims, a never-packed oracle project, a CI job, a
+claims ladder and a cost declaration. Any repository that wants an F\* proof leg wants all of it,
+and writing it out by hand each time means **N copies of one design and N prover pins, N−1 of which
+are behind the day the Nth moves** — F\* releases weekly, so that is a when and not an if.
+
+`proofs/kit/` is that design, extracted and shipped once. **This repository consumes it in place:**
+`proofs/check.ps1` is now a thin caller that declares what this repository has — the `$modules`
+list, the two host families, where the test project is — and hands them to
+`kit/check-proof-leg.ps1`, which runs the leg. Nothing about the mechanism is in the caller and
+nothing about this repository is in the kit. The public surface did not move: the same flags, the
+same output lines, the same exit codes, and `$modules` is still one literal line in
+`proofs/check.ps1`, which is where a reader looks for it and where the `Proofs.Ladder` family reads
+it from.
+
+Two small things that were measured rather than assumed while doing it, because both would have
+been silent:
+
+- **The caller invokes the engine with `&`, never with a dot-source.** A dot-sourced script's
+  `exit` does not propagate to its caller — measured both ways — so a dot-source would have printed
+  the engine's red `==== proofs:` line and then returned **0**. That is a green leg over a failed
+  proof: the Phase 164 class, re-created one level up, and the reason the caller carries a comment
+  saying so.
+- **The engine cannot use `$PSScriptRoot` for the proofs directory**, because inside a called
+  script that resolves to the *kit's* directory rather than the caller's. It takes `-ProofsDir` and
+  derives everything else from it; a repository that wants a different layout passes `-RepoRoot`,
+  `-PinFile`, `-BudgetFile`, `-OracleDir` or `-WorkDir` instead of forking the script.
+
+**How another repository adopts it:** `proofs/kit/README.md` has the file-by-file table and the
+nine steps. In one sentence — copy `proofs/kit/` plus the three live files it deliberately does not
+duplicate (`proofs/fstar-pin.json` and the two shims under `proofs/oracle/`), fill in the three
+declarations at the top of `templates/check.ps1`, and declare every copy in your own `copies.json`.
+
+**The pin moves in one place, and the copies are named.** `copies.json` at this repository's root is
+where a copy of any kit file is declared: `source` relative to the declaring repository's own root,
+each `consumers` entry relative to the workspace root, `check` of `bytes` or `fingerprint`, and a
+`regen` command. The workspace copy registry then names a drifted copy on its sweep — warn-first,
+offline, and it never edits anything. That is the whole mechanism by which one pin bump here becomes
+a named obligation everywhere else instead of a silent divergence.
+
+**What the file actually says today, which is not what the kit's phase expected.** `copies.json`
+ships with an **empty `records` array**, because the copies it was written to check do not exist.
+Measured across the workspace on 2026-09-15: this is the only proof leg there is. No other
+repository holds a `check.ps1`, an `fstar-pin.json`, a `proofs/` directory or a `.fst` model — the
+three consumers the kit was cut for (the program tier, the app-composition tier, the remoting
+decoder) had been expected to have copied the leg by hand already, and had not. The kit is still
+worth shipping, because a scaffold shipped once is worth the same before the first adopter as after;
+what is not worth shipping is a record for a file that does not exist, which would put a permanent
+finding on every workspace sweep about an adoption nobody has scheduled. The copy set is therefore
+written out in the file's `$sources` block — inert data the registry ignores — so that an adopter's
+record is that shape with one path filled in, and adoption is an append in the change-set that
+adopts rather than a design decision taken again.
+
+**Adopting is the adopter's act, not this repository's.** Re-pointing a hand-rolled leg at the kit
+means reading a diff, running the leg, and committing the copies; nobody can do that from here, and
+nothing here will do it for them. Until an adopter appends its record, the registry is silent about
+that repository — which is honest, and is the reason the empty array is a measurement rather than a
+gap.
 
 ## Theorem 1 — decoder totality (Phase 135)
 
