@@ -1887,6 +1887,326 @@ let private rawW: StreamWitness<string, string, string> =
       Encode = id
       Decode = Ok }
 
+// ---------------------------------------------------------------------------
+//  The PARSER differential (Phase 146) — `JsonParse.parse` beside
+//  `Json.parseDetailedWithPolicy`.
+//
+//  Everything above this line begins at a `JVal` that already exists, which is exactly the
+//  boundary Phase 135's theorem 1 drew. What runs here is the model of the recursive-descent
+//  parser itself, over the same TEXT production reads: the corpus fixtures as raw bytes, a
+//  near-miss table that reaches every classified failure, and generated deep, wide and random
+//  inputs.
+//
+//  Each probe renders both answers into ONE string carrying the outcome class, the decoded value,
+//  and — on a failure — the KIND, the POSITION and the MESSAGE. A model agreeing on accept-vs-
+//  refuse alone would not notice a parser that classified the wrong thing or pointed at the wrong
+//  character, and the position is the half most likely to drift silently.
+// ---------------------------------------------------------------------------
+
+module private JsonParseDiff =
+
+    /// A production character as the model reads it. Every character the parser DISTINGUISHES has
+    /// its own constructor; every other is carried verbatim, so two different characters are never
+    /// identified and the bridge loses nothing.
+    let toCh (c: char) : JsonParse.ch =
+        match c with
+        | ' ' -> JsonParse.CSpace
+        | '\t' -> JsonParse.CTab
+        | '\n' -> JsonParse.CNewline
+        | '\r' -> JsonParse.CReturn
+        | '"' -> JsonParse.CQuote
+        | '\\' -> JsonParse.CBackslash
+        | '/' -> JsonParse.CSlash
+        | '{' -> JsonParse.CLBrace
+        | '}' -> JsonParse.CRBrace
+        | '[' -> JsonParse.CLBrack
+        | ']' -> JsonParse.CRBrack
+        | ':' -> JsonParse.CColon
+        | ',' -> JsonParse.CComma
+        | '-' -> JsonParse.CMinus
+        | '+' -> JsonParse.CPlus
+        | '.' -> JsonParse.CDot
+        | '0' -> JsonParse.CD0
+        | '1' -> JsonParse.CD1
+        | '2' -> JsonParse.CD2
+        | '3' -> JsonParse.CD3
+        | '4' -> JsonParse.CD4
+        | '5' -> JsonParse.CD5
+        | '6' -> JsonParse.CD6
+        | '7' -> JsonParse.CD7
+        | '8' -> JsonParse.CD8
+        | '9' -> JsonParse.CD9
+        | 'a' -> JsonParse.CLa
+        | 'b' -> JsonParse.CLb
+        | 'c' -> JsonParse.CLc
+        | 'd' -> JsonParse.CLd
+        | 'e' -> JsonParse.CLe
+        | 'f' -> JsonParse.CLf
+        | 'l' -> JsonParse.CLl
+        | 'n' -> JsonParse.CLn
+        | 'r' -> JsonParse.CLr
+        | 's' -> JsonParse.CLs
+        | 't' -> JsonParse.CLt
+        | 'u' -> JsonParse.CLu
+        | 'A' -> JsonParse.CUa
+        | 'B' -> JsonParse.CUb
+        | 'C' -> JsonParse.CUc
+        | 'D' -> JsonParse.CUd
+        | 'E' -> JsonParse.CUe
+        | 'F' -> JsonParse.CUf
+        | other -> JsonParse.COther(string other)
+
+    let toChs (s: string) : JsonParse.ch list = s |> Seq.map toCh |> List.ofSeq
+
+    /// The BLIND bridge — the go-red instrument for the comparison itself, and this family's
+    /// counterpart to the decode family's blind integer bridge. It hides the two container
+    /// characters, so the model is asked about a document production was not asked about and every
+    /// structured input must disagree. It touches nothing else, so a scalar still agrees, which is
+    /// what keeps the instrument narrow enough to be informative.
+    let toChsBlind (s: string) : JsonParse.ch list =
+        s
+        |> Seq.map (fun c ->
+            match c with
+            | '{'
+            | '[' -> JsonParse.COther(string c)
+            | other -> toCh other)
+        |> List.ofSeq
+
+    let private inv = System.Globalization.CultureInfo.InvariantCulture
+
+    /// The model's own spelling of a character, so the two sides never disagree merely about how a
+    /// character is written.
+    let chStr (c: JsonParse.ch) : string = JsonParse.ch_str c
+
+    let tokStr (t: JsonParse.ch list) : string = t |> List.map chStr |> String.concat ""
+
+    /// The four hex digits a `\uXXXX` carried, resolved to the code point HERE. The model declines
+    /// to compute it (it carries no integers); the host can, so the differential still compares the
+    /// decoded character rather than only the escape's guards.
+    let private hexVal (c: JsonParse.ch) : int = System.Convert.ToInt32(chStr c, 16)
+
+    let private ochToString (o: JsonParse.och) : string =
+        match o with
+        | JsonParse.OLit c -> chStr c
+        | JsonParse.OEsc e ->
+            match chStr e with
+            | "n" -> "\n"
+            | "r" -> "\r"
+            | "t" -> "\t"
+            | "b" -> "\b"
+            | "f" -> "\f"
+            | other -> other
+        | JsonParse.OUni(a, b, c, d) ->
+            string (char ((hexVal a <<< 12) + (hexVal b <<< 8) + (hexVal c <<< 4) + hexVal d))
+
+    let private modelStr (os: JsonParse.och list) : string =
+        os |> List.map ochToString |> String.concat ""
+
+    let rec private renderProd (v: JVal) : string =
+        match v with
+        | JStr s -> "s:" + s
+        | JInt i -> "i:" + string i
+        | JBool b -> "b:" + string b
+        | JFloat f -> "f:" + f.ToString("R", inv)
+        | JArr xs -> "[" + (xs |> List.map renderProd |> String.concat ",") + "]"
+        | JObj fs ->
+            "{"
+            + (fs |> List.map (fun (k, v) -> k + "=" + renderProd v) |> String.concat ",")
+            + "}"
+
+    /// The model's tree in the same rendering. A number carries its TOKEN, so this is where the
+    /// token boundaries are checked: reading it back with the same .NET call production made means
+    /// a model that scanned one character more or less renders a different value.
+    let rec private renderModel (v: JsonParse.jval) : string =
+        match v with
+        | JsonParse.JStr s -> "s:" + modelStr s
+        | JsonParse.JInt tok -> "i:" + string (System.Int32.Parse(tokStr tok, inv))
+        | JsonParse.JBool b -> "b:" + string b
+        | JsonParse.JFloat tok ->
+            let d =
+                System.Double.Parse(tokStr tok, System.Globalization.NumberStyles.Float, inv)
+
+            "f:" + d.ToString("R", inv)
+        | JsonParse.JArr xs -> "[" + (xs |> List.map renderModel |> String.concat ",") + "]"
+        | JsonParse.JObj fs ->
+            "{"
+            + (fs
+               |> List.map (fun (k, v) -> modelStr k + "=" + renderModel v)
+               |> String.concat ",")
+            + "}"
+
+    /// The model's one opacity parameter, instantiated: `System.Double.TryParse` plus the
+    /// finiteness gate, which is exactly what `parseNumber` asks.
+    let floatRead (tok: JsonParse.ch list) : JsonParse.freadv =
+        match System.Double.TryParse(tokStr tok, System.Globalization.NumberStyles.Float, inv) with
+        | true, v when System.Double.IsNaN v || System.Double.IsInfinity v -> JsonParse.FNonFinite
+        | true, _ -> JsonParse.FFinite
+        | _ -> JsonParse.FUnparsable
+
+    /// The depth cap as the model spends it — one element per descent (`proofs/README.md`: the
+    /// extraction carries no integers).
+    let budget (n: int) : unit list = List.replicate n ()
+
+    let private modelPolicy (p: NullPolicy) : JsonParse.policy =
+        match p with
+        | RejectNull -> JsonParse.RejectNull
+        | EraseMemberNull -> JsonParse.EraseMemberNull
+
+    let prodAnswer (policy: NullPolicy) (maxDepth: int) (input: string) : string =
+        match Json.parseDetailedWithPolicy policy maxDepth input with
+        | Ok v -> "ok " + renderProd v
+        | Error e -> sprintf "err %A @%d %s" e.Kind e.Position e.Message
+
+    /// The model's answer. `modelBudget` and `cap` are separate arguments only so the go-red case
+    /// can hand the model a cap production is not using; every real run passes `budget maxDepth`.
+    let modelAnswer
+        (bridge: string -> JsonParse.ch list)
+        (policy: NullPolicy)
+        (cap: int)
+        (modelBudget: unit list)
+        (input: string)
+        : string =
+        match JsonParse.parse floatRead (string cap) (modelPolicy policy) modelBudget (bridge input) with
+        | JsonParse.ROk v -> "ok " + renderModel v
+        | JsonParse.RErr(k, m, at) -> sprintf "err %A @%d %s" k (input.Length - List.length at) m
+
+    /// Every way the two disagree over one pool, plus how many inputs reached each outcome class —
+    /// a run that only ever refused has compared twelve error messages and measured no parse at
+    /// all, and a run that only ever accepted has measured none of the classification.
+    let sweep (policy: NullPolicy) (maxDepth: int) (inputs: (string * string) list) =
+        let mutable accepted = 0
+        let mutable refused = 0
+        let bad = ResizeArray<string>()
+
+        for (name, input) in inputs do
+            let p = prodAnswer policy maxDepth input
+            let m = modelAnswer toChs policy maxDepth (budget maxDepth) input
+
+            if p.StartsWith "ok " then
+                accepted <- accepted + 1
+            else
+                refused <- refused + 1
+
+            if p <> m then
+                bad.Add(sprintf "%s: input %s\n    production %s\n    model      %s" name input p m)
+
+        List.ofSeq bad, accepted, refused
+
+    let expectAgreement (label: string) (bad: string list, accepted: int, refused: int) =
+        if not bad.IsEmpty then
+            failtestf
+                "%s: the model and production disagree on %d input(s). First 5:\n%s"
+                label
+                bad.Length
+                (bad |> List.truncate 5 |> String.concat "\n")
+
+        Expect.isGreaterThan accepted 0 (label + ": no input was ACCEPTED — the accept path measured nothing")
+
+        Expect.isGreaterThan refused 0 (label + ": no input was REFUSED — the classification measured nothing")
+
+    // ---- the pools ----
+
+    /// Every corpus fixture, as the raw TEXT production reads. The differential above this one asks
+    /// about the decoded value; this one asks about the bytes.
+    let corpusTexts (family: string) : (string * string) list =
+        match SiblingCorpus.resolve family with
+        | SiblingCorpus.Found root ->
+            Directory.GetFiles(Path.Combine(root, family), "*.json")
+            |> Array.sort
+            |> Array.toList
+            |> List.map (fun p -> Path.GetFileNameWithoutExtension p, File.ReadAllText p)
+        | SiblingCorpus.SkippedByRequest why -> failtest why
+        | SiblingCorpus.Absent why -> failtest why
+
+    /// The near misses, hand-written so every classified failure is REACHED rather than hoped for —
+    /// the host's counterpart to the model's own reachability theorem. The two `null` near misses
+    /// are the ones Phase 135's ladder names as the reason its policy entry is an assumption:
+    /// `nul` falls through to the strict arm, `nullish` is caught by the following expectation.
+    let nearMisses: (string * string) list =
+        [ "empty", ""
+          "whitespace only", "   \t\r\n"
+          "bare word", "%"
+          "true", "true"
+          "truncated true", "tru"
+          "truncated false", "fals"
+          "bare null", "null"
+          "member null", "{\"a\":null}"
+          "member nul", "{\"a\":nul}"
+          "member nullish", "{\"a\":nullish}"
+          "array null", "[null]"
+          "unterminated string", "\"abc"
+          "unterminated escape", "\"abc\\"
+          "bad escape", "\"a\\q\""
+          "truncated unicode", "\"\\u12\""
+          "bad hex digit", "\"\\uzzzz\""
+          "good unicode", "\"\\u0041\\u00e9\""
+          "all short escapes", "\"\\\"\\\\\\/\\n\\r\\t\\b\\f\""
+          "trailing characters", "0 0"
+          "trailing brace", "{} }"
+          "object missing colon", "{\"a\" 1}"
+          "object trailing comma", "{\"a\":1,}"
+          "array trailing comma", "[1,]"
+          "array missing comma", "[1 2]"
+          "unclosed object", "{\"a\":1"
+          "unclosed array", "[1"
+          "empty object", "{}"
+          "empty array", "[]"
+          "nested empties", "{\"a\":[],\"b\":{}}"
+          "zero", "0"
+          "negative zero", "-0"
+          "leading zeros small", "007"
+          "leading zeros int53", "0009007199254740992"
+          "int53 boundary", "9007199254740992"
+          "int53 boundary plus one", "9007199254740993"
+          "int32 boundary", "2147483647"
+          "int32 boundary plus one", "2147483648"
+          "int32 min", "-2147483648"
+          "int32 min minus one", "-2147483649"
+          "seventeen nines", "99999999999999999"
+          "bare minus", "-"
+          "float", "1.5"
+          "float exponent", "1e3"
+          "float exponent plus", "1e+3"
+          "float exponent minus", "1.5e-3"
+          "exponent no digits", "1e"
+          "exponent sign no digits", "1e+"
+          "trailing dot", "1."
+          "overflowing float", "1e400"
+          "negative overflowing float", "-1e400"
+          "deep-ish", "[[[[[1]]]]]"
+          "wide", "[1,2,3,4,5,6,7,8,9,10]"
+          "whitespace everywhere", " { \"a\" : [ 1 , 2 ] , \"b\" : true } "
+          "unicode key", "{\"kéy\":1}"
+          "colon only", ":"
+          "comma only", ","
+          "close brace only", "}" ]
+
+    /// A nesting of exactly `k` arrays around a scalar — the family the model's `depth_bound_exact`
+    /// is stated over, built here so the theorem's instance and the differential's input are the
+    /// same shape.
+    let nestArr (k: int) : string =
+        String.replicate k "[" + "0" + String.replicate k "]"
+
+    let nestObj (k: int) : string =
+        String.replicate k "{\"a\":" + "0" + String.replicate k "}"
+
+    /// Deterministic character soup over the parser's own alphabet — most of it malformed, which is
+    /// the point: it is the only pool that reaches failure positions nobody thought to write down.
+    let soup (seed: int) (count: int) : (string * string) list =
+        let alphabet = "{}[]\",:0123456789-+.eE\\ \ttnrufalse\u00e9%"
+        let mutable state = uint64 seed * 6364136223846793005UL + 1442695040888963407UL
+
+        let next () =
+            state <- state * 6364136223846793005UL + 1442695040888963407UL
+            int ((state >>> 33) &&& 0x7FFFFFFFUL)
+
+        [ for i in 1..count ->
+              let len = next () % 24
+
+              let s =
+                  System.String(Array.init len (fun _ -> alphabet.[next () % alphabet.Length]))
+
+              sprintf "soup seed=%d #%d" seed i, s ]
 
 // ---------------------------------------------------------------------------
 //  Phase 145 — the pre-image's two splices, measured against production's encodings
@@ -2836,6 +3156,185 @@ let proofOracleTests =
                           lr
                           "and the model mints that same id from the reversed parent list"
                   | _ -> failtest "two rebuilt nodes are needed to exercise a merge"
+
+          // ---- the PARSER (Phase 146) — the boundary theorem 1 named ----
+
+          testCase "the parser oracle agrees with production over the near-miss table"
+          <| fun _ ->
+              JsonParseDiff.sweep RejectNull 512 JsonParseDiff.nearMisses
+              |> JsonParseDiff.expectAgreement "near misses, strict"
+
+          testCase "… and under the tolerant read policy, where the member-null fork lives"
+          <| fun _ ->
+              JsonParseDiff.sweep EraseMemberNull 512 JsonParseDiff.nearMisses
+              |> JsonParseDiff.expectAgreement "near misses, tolerant"
+
+              // The fork is asserted to have FIRED, because two parsers that never met a member
+              // null agree about a policy neither exercised.
+              Expect.equal
+                  (JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,\"b\":1}")
+                  "ok {b=i:1}"
+                  "the tolerant policy erases a member null"
+
+              Expect.notEqual
+                  (JsonParseDiff.prodAnswer RejectNull 512 "{\"a\":null,\"b\":1}")
+                  (JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,\"b\":1}")
+                  "and the strict policy does not — the two policies were actually distinguished"
+
+          testCase "the parser oracle agrees with production over every corpus nodes/ fixture"
+          <| fun _ ->
+              JsonParseDiff.corpusTexts "nodes"
+              |> JsonParseDiff.sweep RejectNull 512
+              |> fun (bad, accepted, _) ->
+                  if not bad.IsEmpty then
+                      failtestf
+                          "corpus nodes/: the model and production disagree on %d fixture(s). First 5:\n%s"
+                          bad.Length
+                          (bad |> List.truncate 5 |> String.concat "\n")
+
+                  // Every fixture is valid wire JSON, so this pool is the ACCEPT path and has no
+                  // refusals to assert — saying so here rather than letting the shared guard
+                  // demand a refusal that would mean the corpus was broken.
+                  Expect.isGreaterThan accepted 100 "the corpus nodes/ pool is far smaller than expected"
+
+          testCase "… and over every corpus ops/ fixture"
+          <| fun _ ->
+              JsonParseDiff.corpusTexts "ops"
+              |> JsonParseDiff.sweep RejectNull 512
+              |> fun (bad, accepted, _) ->
+                  if not bad.IsEmpty then
+                      failtestf
+                          "corpus ops/: the model and production disagree on %d fixture(s). First 5:\n%s"
+                          bad.Length
+                          (bad |> List.truncate 5 |> String.concat "\n")
+
+                  Expect.isGreaterThan accepted 10 "the corpus ops/ pool is far smaller than expected"
+
+          testCase "the parser oracle agrees with production over generated deep and wide inputs"
+          <| fun _ ->
+              // Both nesting families at every depth from 0 to 8, under caps that straddle each —
+              // so the boundary itself is compared, not merely the interior.
+              let deep =
+                  [ for cap in 0..8 do
+                        for k in 0..8 do
+                            yield sprintf "arr k=%d cap=%d" k cap, (cap, JsonParseDiff.nestArr k)
+                            yield sprintf "obj k=%d cap=%d" k cap, (cap, JsonParseDiff.nestObj k) ]
+
+              let bad =
+                  [ for (name, (cap, input)) in deep do
+                        let p = JsonParseDiff.prodAnswer RejectNull cap input
+
+                        let m =
+                            JsonParseDiff.modelAnswer
+                                JsonParseDiff.toChs
+                                RejectNull
+                                cap
+                                (JsonParseDiff.budget cap)
+                                input
+
+                        if p <> m then
+                            yield sprintf "%s:\n    production %s\n    model      %s" name p m ]
+
+              if not bad.IsEmpty then
+                  failtestf
+                      "deep/wide: %d disagreement(s). First 5:\n%s"
+                      bad.Length
+                      (bad |> List.truncate 5 |> String.concat "\n")
+
+              // The boundary was actually crossed in both directions.
+              Expect.stringStarts
+                  (JsonParseDiff.prodAnswer RejectNull 3 (JsonParseDiff.nestArr 3))
+                  "ok "
+                  "a document nested to the cap is accepted"
+
+              Expect.stringContains
+                  (JsonParseDiff.prodAnswer RejectNull 3 (JsonParseDiff.nestArr 4))
+                  "MaxDepthExceeded"
+                  "and one nested past it is refused by name"
+
+              let wide =
+                  [ for n in [ 0; 1; 2; 10; 64 ] do
+                        yield sprintf "wide array %d" n, "[" + String.concat "," [ for i in 1..n -> string i ] + "]"
+
+                        yield
+                            sprintf "wide object %d" n,
+                            "{" + String.concat "," [ for i in 1..n -> sprintf "\"k%d\":%d" i i ] + "}" ]
+
+              JsonParseDiff.sweep RejectNull 512 (wide @ [ "refusal", "[" ])
+              |> JsonParseDiff.expectAgreement "wide"
+
+          testCase "the parser oracle agrees with production over 4000 generated inputs"
+          <| fun _ ->
+              JsonParseDiff.sweep RejectNull 512 (JsonParseDiff.soup 20260914 2000)
+              |> JsonParseDiff.expectAgreement "soup, strict"
+
+              JsonParseDiff.sweep EraseMemberNull 512 (JsonParseDiff.soup 20260915 2000)
+              |> JsonParseDiff.expectAgreement "soup, tolerant"
+
+          // ---- the teeth: both comparisons can lose ----
+
+          testCase "a model whose DEPTH CHECK is out of step DISAGREES with production"
+          <| fun _ ->
+              // The go-red the phase asks for: the model keeps a cap production has already spent.
+              // Production refuses the input by name; the model, still holding budget, accepts it —
+              // so a green run above is known to be a comparison that can fail on exactly the
+              // guard this phase is about.
+              let input = JsonParseDiff.nestArr 4
+              let p = JsonParseDiff.prodAnswer RejectNull 3 input
+
+              let m =
+                  JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull 3 (JsonParseDiff.budget 8) input
+
+              Expect.stringContains p "MaxDepthExceeded" "production refuses at the cap it was given"
+              Expect.stringStarts m "ok " "and an over-budgeted model does not"
+              Expect.notEqual p m "so the depth comparison can lose"
+
+              // … and it loses on the generated pool too, not only on one hand-made input.
+              let disagreements =
+                  [ for k in 0..8 do
+                        let i = JsonParseDiff.nestArr k
+
+                        if
+                            JsonParseDiff.prodAnswer RejectNull 3 i
+                            <> JsonParseDiff.modelAnswer JsonParseDiff.toChs RejectNull 3 (JsonParseDiff.budget 8) i
+                        then
+                            yield k ]
+
+              Expect.isNonEmpty disagreements "the over-budgeted model must disagree somewhere in the family"
+
+          testCase "a model handed a BLIND bridge DISAGREES with production"
+          <| fun _ ->
+              // The comparison's own go-red, and the parser family's counterpart to the decode
+              // family's blind integer bridge: the two container characters are hidden, so every
+              // structured document reaches the model as something production never saw.
+              let structured = [ "{}"; "[]"; "{\"a\":1}"; "[1,2,3]"; "{\"a\":[1,{\"b\":2}]}" ]
+
+              let disagreements =
+                  [ for input in structured do
+                        let p = JsonParseDiff.prodAnswer RejectNull 512 input
+
+                        let m =
+                            JsonParseDiff.modelAnswer
+                                JsonParseDiff.toChsBlind
+                                RejectNull
+                                512
+                                (JsonParseDiff.budget 512)
+                                input
+
+                        if p <> m then
+                            yield input ]
+
+              Expect.equal
+                  (List.length disagreements)
+                  (List.length structured)
+                  "every structured document must disagree under the blind bridge"
+
+              // And it stays narrow: a scalar is untouched by the blinding, so a green run
+              // elsewhere is not green merely because this instrument is crude.
+              Expect.equal
+                  (JsonParseDiff.prodAnswer RejectNull 512 "42")
+                  (JsonParseDiff.modelAnswer JsonParseDiff.toChsBlind RejectNull 512 (JsonParseDiff.budget 512) "42")
+                  "a scalar still agrees under the blind bridge"
 
           // ---- Phase 145 — the two splices, and the premise each of them actually needs ----
 

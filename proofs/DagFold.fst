@@ -1311,3 +1311,621 @@ let fold_confluence_dag #op #state #rej apply fp s0 d fuel base_id hs1 hs2 p =
   fold_confluence apply fp s0
     (deltas_of d fuel base_id hs1) (deltas_of d fuel base_id hs2)
     (perm_deltas d fuel base_id hs1 hs2 p)
+
+(* ======================================================================================
+   12. The topological order on a spine is FORCED (Phase 142).
+
+   Section 11 computes the whole DAG layer beneath the fold and leaves exactly one step ARGUED
+   rather than proved. Production's `topoOrder` drains a ready frontier smallest-id-first; the
+   model's `topo_of` reverses the parent walk; and "on a spine there is only one topological order
+   anyway, so the two coincide" was a sentence in a comment. This section is that sentence,
+   mechanised — over the same base-plus-N-chains model, with no premise beyond the id distinctness
+   section 11 already names.
+
+   THE TWO LEMMAS.
+     - `spine_order_forced` — a DISTINCT enumeration of a spine's closure in which every node
+       follows its own parent is that spine in append order. A list argument: it mentions no DAG,
+       no hash and no production function. This is the "exactly one topological order exists" half.
+     - `kahn_drain_is_such_an_enumeration` — the frontier drain (F#: the `while` loop of `topoCore`
+       over `indeg` / `ready`) run over a spine's closure produces exactly that enumeration. This
+       is the "and production's algorithm produces it" half.
+
+   HOW THE TIE-BREAK IS TREATED, which is the one modelling decision worth reading twice.
+   Production picks `List.head` of a SORTED ready list — smallest id. The model takes the selector
+   as a PARAMETER `pick`, constrained only to return a member of the frontier it is handed
+   (`picks_from_frontier`), and every result below is stated for EVERY such selector. That is the
+   precise sense in which the tie-break is UNEXERCISED here rather than modelled:
+   `kahn_frontier_singleton` proves the frontier is a ONE-element list at every step of a spine's
+   drain, so every selector returns the same element and the choice cannot be observed — which is
+   also why nothing here says a word about how ids compare. Modelling a smallest-id tie-break over
+   a frontier WIDER than one is the merge-DAG case, and it stays out of scope exactly as Phase 134
+   left it; a frontier wider than one is precisely where it would begin to matter.
+
+   WHAT IT BUYS SECTION 11. `between_chain_any_order` is `between_chain` restated with the
+   topological order UNIVERSALLY QUANTIFIED — any distinct, parent-respecting enumeration of the
+   head's closure — where section 11 fixed it to `topo_of` by definition;
+   `reconcile_many_dag_ordered_eq` and `fold_once_dag_ordered_eq` carry that up to the fold, so
+   `Dag.reconcileMany` FROM the DAG is the deltas-first fold whatever order each head's recovery
+   walked. Section 11's own statements are unchanged and now rest on a proved step rather than an
+   argued one: the order `topo_of` takes is the only order there is.
+
+   WHAT IS STILL NOT CLAIMED. The general topological order over a MERGE DAG, where a node has two
+   parents, the frontier genuinely widens and the choice is genuinely a choice. `Dag.mergeBase`,
+   which is not on this path at all. Both stay where Phase 134's own statement put them.
+   ====================================================================================== *)
+
+(* ---- 12.1 what a topological order IS, as a property of a list ---- *)
+
+(* `x` occurs in `l`, and `y` occurs strictly after it. F#: what "parents before children" means of
+   the list `topoCore` emits — a comparison of positions, spelled without positions so the module
+   stays free of the integer arithmetic the rest of it avoids. *)
+let rec before (x y:string) (l:list string) : Tot bool =
+  match l with
+  | [] -> false
+  | h :: t -> if h = x then mem y t
+              else if h = y then false
+              else before x y t
+
+(* A SPINE hanging off `q`: the nodes in APPEND order, each naming the one before it. F#: exactly
+   what the per-lane `List.fold` over `Dag.append` in `foldOnce` builds, one node at a time, off
+   `baseId` — and, by `parents_chain_lane` below, what `lane_nodes` is. *)
+let rec parents_chain (#op:eqtype) (ns:list (node op)) (q:string) : Tot bool =
+  match ns with
+  | [] -> true
+  | n :: t -> n.nparents = [ q ] && parents_chain t n.nid
+
+(* Every parent of a node precedes it. Stated over the node's whole parent LIST rather than over a
+   single parent, so the property is the general one and single-parenthood comes from
+   `parents_chain` where it is needed. F#: the property `topoCore`'s emitted order has by
+   construction — a node is emitted only once its in-degree over the closure has reached zero, and
+   the in-degree counts precisely the parents inside the closure that are still unemitted. *)
+let rec all_before (ps:list string) (child:string) (ord:list string) : Tot bool =
+  match ps with
+  | [] -> true
+  | p :: t -> before p child ord && all_before t child ord
+
+let rec follows_parents (#op:eqtype) (ns:list (node op)) (ord:list string) : Tot bool =
+  match ns with
+  | [] -> true
+  | n :: t -> all_before n.nparents n.nid ord && follows_parents t ord
+
+(* The same property read off the SPINE rather than off the nodes: `q` before the first id, each id
+   before the next. Equivalent to `follows_parents` on a `parents_chain` (both directions below),
+   and the form the induction is on, because it is the shape of the thing being enumerated. *)
+let rec follows_spine (root:string) (ids:list string) (ord:list string)
+  : Tot bool (decreases ids) =
+  match ids with
+  | [] -> true
+  | x :: t -> before root x ord && follows_spine x t ord
+
+let rec follows_parents_spine (#op:eqtype) (ns:list (node op)) (q:string) (ord:list string)
+  : Lemma (requires parents_chain ns q /\ follows_parents ns ord)
+          (ensures follows_spine q (ids_of ns) ord)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t -> follows_parents_spine t n.nid ord
+
+let rec follows_spine_parents (#op:eqtype) (ns:list (node op)) (q:string) (ord:list string)
+  : Lemma (requires parents_chain ns q /\ follows_spine q (ids_of ns) ord)
+          (ensures follows_parents ns ord)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t -> follows_spine_parents t n.nid ord
+
+(* ---- 12.2 the list argument: such an enumeration is FORCED ---- *)
+
+(* A distinct list whose members are one element is that one element. The base case, and the only
+   place the "distinct" hypothesis does work on its own. *)
+let singleton_enum (q:string) (ord:list string)
+  : Lemma (requires distinct ord /\ (forall (x:string). mem x ord == mem x [ q ]))
+          (ensures ord == [ q ])
+  = match ord with
+    | [] -> assert (mem q [ q ])
+    | h :: t ->
+      assert (mem h ord);
+      assert (h == q);
+      (match t with
+       | [] -> ()
+       | y :: _ ->
+         assert (mem y t);
+         assert (mem y ord);
+         assert (y == q))
+
+(* No spine id can be the HEAD of such an enumeration: every one of them has a parent that must
+   come strictly before it, and nothing comes before the head. This is the whole force of the
+   argument, and the only step where `follows_spine` is consumed rather than carried. *)
+let rec follows_spine_not_head (q:string) (ids:list string) (h:string) (r:list string)
+  : Lemma (requires follows_spine q ids (h :: r) /\ distinct (q :: ids) /\ mem h ids)
+          (ensures False)
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | x :: t ->
+      if x = h then begin
+        assert (not (mem q ids));
+        assert (q =!= h);
+        assert (before q x (h :: r) == false)
+      end
+      else follows_spine_not_head x t h r
+
+(* Dropping a head the spine does not contain leaves the property intact. *)
+let rec follows_spine_tail (h:string) (root:string) (ids:list string) (ord:list string)
+  : Lemma (requires follows_spine root ids (h :: ord) /\ h =!= root /\ not (mem h ids))
+          (ensures follows_spine root ids ord)
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | x :: t -> follows_spine_tail h x t ord
+
+(* … and prefixing one back is the same step read the other way. *)
+let rec follows_spine_cons (h:string) (root:string) (ids:list string) (ord:list string)
+  : Lemma (requires follows_spine root ids ord /\ h =!= root /\ not (mem h ids))
+          (ensures follows_spine root ids (h :: ord))
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | x :: t -> follows_spine_cons h x t ord
+
+(* Membership transfers to the tails once the shared head is known distinct from both. *)
+let members_tail (q:string) (r ids:list string)
+  : Lemma (requires (forall (x:string). mem x (q :: r) == mem x (q :: ids)) /\
+                    not (mem q r) /\ not (mem q ids))
+          (ensures forall (x:string). mem x r == mem x ids)
+  = let aux (x:string) : Lemma (mem x r == mem x ids) =
+      if x = q then () else ()
+    in
+    FStar.Classical.forall_intro aux
+
+(* THE LIST ARGUMENT. A distinct enumeration of a spine's ids plus its root, in which each id
+   follows the one it hangs off, is the root followed by the spine in append order. Nothing about
+   DAGs, hashes or production appears in it. *)
+#push-options "--z3rlimit 100"
+let rec spine_ids_forced (q:string) (ids:list string) (ord:list string)
+  : Lemma (requires distinct (q :: ids) /\ distinct ord /\
+                    (forall (x:string). mem x ord == mem x (q :: ids)) /\
+                    follows_spine q ids ord)
+          (ensures ord == q :: ids)
+          (decreases ids)
+  = match ids with
+    | [] -> singleton_enum q ord
+    | x :: t ->
+      assert (mem q ord);
+      (match ord with
+       | [] -> ()
+       | h :: r ->
+         if mem h ids then follows_spine_not_head q ids h r
+         else begin
+           assert (mem h ord);
+           assert (mem h (q :: ids));
+           assert (h == q);
+           members_tail q r ids;
+           follows_spine_tail q x t r;
+           spine_ids_forced x t r
+         end)
+#pop-options
+
+(* THEOREM (task 1). The same statement over the nodes: a distinct enumeration of a spine's closure
+   respecting each node's single parent is that spine, in append order, with the base first.
+
+   F#: `Dag.between` filters `topoOrder dag head` against the base's closure and looks the ids up,
+   so the ONLY freedom the recovery has is which topological order that first step produced. This
+   says there is none to have. *)
+let spine_order_forced (#op:eqtype) (ns:list (node op)) (q:string) (ord:list string)
+  : Lemma (requires parents_chain ns q /\ distinct (q :: ids_of ns) /\ distinct ord /\
+                    (forall (x:string). mem x ord == mem x (q :: ids_of ns)) /\
+                    follows_parents ns ord)
+          (ensures ord == q :: ids_of ns)
+  = follows_parents_spine ns q ord;
+    spine_ids_forced q (ids_of ns) ord
+
+(* ---- 12.3 … and the append order IS such an enumeration ---- *)
+
+let rec follows_spine_append_order (q:string) (ids:list string)
+  : Lemma (requires distinct (q :: ids))
+          (ensures follows_spine q ids (q :: ids))
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | x :: t ->
+      follows_spine_append_order x t;
+      follows_spine_cons q x t (x :: t)
+
+let follows_parents_append_order (#op:eqtype) (ns:list (node op)) (q:string)
+  : Lemma (requires parents_chain ns q /\ distinct (q :: ids_of ns))
+          (ensures follows_parents ns (q :: ids_of ns))
+  = follows_spine_append_order q (ids_of ns);
+    follows_spine_parents ns q (q :: ids_of ns)
+
+(* ---- 12.4 Kahn's frontier drain (F#: `topoCore`) ---- *)
+
+(* F#: `parentsIn id` — a node's parents that lie INSIDE the closure. Everything outside is
+   invisible to the drain, exactly as `List.filter (fun p -> Set.contains p anc)` makes it. *)
+let rec parents_in (ps:list string) (closure:list string) : Tot (list string) =
+  match ps with
+  | [] -> []
+  | p :: t -> if mem p closure then p :: parents_in t closure else parents_in t closure
+
+(* F#: `indeg.[id] = 0`. Production decrements a counter as each node is emitted; the model asks
+   the equivalent question of the emitted list, which is what that counter counts. *)
+let rec all_emitted (ps:list string) (emitted:list string) : Tot bool =
+  match ps with
+  | [] -> true
+  | p :: t -> mem p emitted && all_emitted t emitted
+
+(* F#: `ready` — the nodes whose every in-closure parent has been emitted. Production maintains it
+   incrementally and keeps it sorted; the model recomputes it, which is the same set. *)
+let rec frontier (#op:eqtype) (rest:list (node op)) (closure:list string) (emitted:list string)
+  : Tot (list string) =
+  match rest with
+  | [] -> []
+  | n :: t ->
+    if all_emitted (parents_in n.nparents closure) emitted
+    then n.nid :: frontier t closure emitted
+    else frontier t closure emitted
+
+(* F#: dropping the emitted id from the work set. *)
+let rec remove_id (#op:eqtype) (ns:list (node op)) (id:string) : Tot (list (node op)) =
+  match ns with
+  | [] -> []
+  | n :: t -> if n.nid = id then t else n :: remove_id t id
+
+(* ALL the model asks of a tie-break: it returns a member of the frontier it is handed. That is
+   what `List.head` of a non-empty sorted list does, and it is deliberately everything — nothing
+   below mentions how ids compare, so `kahn` is quantified over EVERY tie-break rather than
+   modelling production's. On a spine that is not a weakening: the frontier is a one-element list
+   at every step (`kahn_frontier_singleton`), so all of them agree. *)
+let picks_from_frontier (pick:list string -> string) : prop =
+  forall (l:list string). Cons? l ==> mem (pick l) l
+
+(* A witness that `picks_from_frontier` is satisfiable at all, so no theorem below is vacuously
+   true of a hypothesis nothing meets: taking the head, which is exactly what production does once
+   its ready list is sorted. It is not the smallest-id selector and is not meant to be — the point
+   is that the results hold for every selector, and this exhibits one. *)
+let pick_head (l:list string) : Tot string =
+  match l with
+  | [] -> ""
+  | h :: _ -> h
+
+let pick_head_is_a_tie_break () : Lemma (picks_from_frontier pick_head) = ()
+
+(* F#: the `while not (List.isEmpty ready)` loop. Fuel is a list, one step per element, in the
+   idiom `ancestors_of` already uses — production's loop terminates because each iteration emits a
+   node and never re-adds one. *)
+let rec kahn (#op:eqtype) (pick:list string -> string) (fuel:list (node op))
+  (rest:list (node op)) (closure:list string) (emitted:list string)
+  : Tot (list string) (decreases fuel) =
+  match fuel with
+  | [] -> []
+  | _ :: fuel' ->
+    (match frontier rest closure emitted with
+     | [] -> []
+     | f ->
+       let id = pick f in
+       id :: kahn pick fuel' (remove_id rest id) closure (app emitted [ id ]))
+
+(* Nothing in an unemitted spine is ready while its own root is unemitted — the tail of the
+   frontier computation, and what makes the head of it the only entry. *)
+let rec frontier_none (#op:eqtype) (ns:list (node op)) (r:string) (closure emitted:list string)
+  : Lemma (requires parents_chain ns r /\ mem r closure /\ not (mem r emitted) /\
+                    (forall (x:string). mem x (ids_of ns) ==> not (mem x emitted)) /\
+                    (forall (x:string). mem x (ids_of ns) ==> mem x closure))
+          (ensures frontier ns closure emitted == [])
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      assert (parents_in n.nparents closure == [ r ]);
+      assert (all_emitted [ r ] emitted == false);
+      assert (mem n.nid (ids_of ns));
+      frontier_none t n.nid closure emitted
+
+(* THE TIE-BREAK IS UNEXERCISED. At every step of a spine's drain the ready frontier holds exactly
+   one id — so `pick` is applied only to one-element lists, and `picks_from_frontier` pins its
+   answer without anything being said about how ids compare. F#: `ready` is a one-element list on
+   every iteration of `topoCore`'s loop over this closure, so `List.sort` is the identity and
+   `List.head` is forced. *)
+let kahn_frontier_singleton (#op:eqtype) (n:node op) (t:list (node op)) (q:string)
+  (closure emitted:list string)
+  : Lemma (requires parents_chain (n :: t) q /\ mem q closure /\ mem q emitted /\
+                    (forall (x:string). mem x (ids_of (n :: t)) ==> not (mem x emitted)) /\
+                    (forall (x:string). mem x (ids_of (n :: t)) ==> mem x closure))
+          (ensures frontier (n :: t) closure emitted == [ n.nid ])
+  = assert (parents_in n.nparents closure == [ q ]);
+    assert (all_emitted [ q ] emitted);
+    assert (mem n.nid (ids_of (n :: t)));
+    frontier_none t n.nid closure emitted
+
+#push-options "--z3rlimit 100"
+let rec kahn_spine (#op:eqtype) (pick:list string -> string) (fuel:list (node op))
+  (ns:list (node op)) (q:string) (closure emitted:list string)
+  : Lemma (requires picks_from_frontier pick /\ parents_chain ns q /\
+                    mem q closure /\ mem q emitted /\ distinct (ids_of ns) /\
+                    (forall (x:string). mem x (ids_of ns) ==> not (mem x emitted)) /\
+                    (forall (x:string). mem x (ids_of ns) ==> mem x closure) /\
+                    covers fuel (ids_of ns))
+          (ensures kahn pick fuel ns closure emitted == ids_of ns)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      (match fuel with
+       | [] -> ()
+       | _ :: fuel' ->
+         kahn_frontier_singleton n t q closure emitted;
+         assert (mem (pick [ n.nid ]) [ n.nid ]);
+         assert (pick [ n.nid ] == n.nid);
+         assert (remove_id ns n.nid == t);
+         let emitted' = app emitted [ n.nid ] in
+         let aux (x:string) : Lemma (mem x (ids_of t) ==> not (mem x emitted')) =
+           if mem x (ids_of t) then begin
+             assert (mem x (ids_of ns));
+             assert (not (mem n.nid (ids_of t)));
+             assert (x =!= n.nid);
+             mem_app x emitted [ n.nid ]
+           end
+           else ()
+         in
+         FStar.Classical.forall_intro aux;
+         mem_app q emitted [ n.nid ];
+         kahn_spine pick fuel' t n.nid closure emitted')
+#pop-options
+
+(* THEOREM (task 2). Kahn's drain over a spine's closure — base first, then the chain — produces
+   the spine in append order, and that list is a distinct enumeration of the closure in which every
+   node follows its parent. Which is to say: it is an enumeration of the kind `spine_order_forced`
+   proves there is only one of. For EVERY tie-break selector. *)
+#push-options "--z3rlimit 100"
+let kahn_drain_is_such_an_enumeration (#op:eqtype) (pick:list string -> string)
+  (fuel:list (node op)) (bn:node op) (ns:list (node op))
+  : Lemma (requires picks_from_frontier pick /\ bn.nparents == [] /\
+                    parents_chain ns bn.nid /\ distinct (bn.nid :: ids_of ns) /\
+                    covers fuel (bn.nid :: ids_of ns))
+          (ensures (let closure = bn.nid :: ids_of ns in
+                    let ord = kahn pick fuel (bn :: ns) closure [] in
+                    ord == closure /\ distinct ord /\ follows_parents ns ord))
+  = let q = bn.nid in
+    let closure = q :: ids_of ns in
+    (match fuel with
+     | [] -> ()
+     | _ :: fuel' ->
+       assert (parents_in bn.nparents closure == []);
+       frontier_none ns q closure [];
+       assert (frontier (bn :: ns) closure [] == [ q ]);
+       assert (mem (pick [ q ]) [ q ]);
+       assert (pick [ q ] == q);
+       assert (remove_id (bn :: ns) q == ns);
+       kahn_spine pick fuel' ns q closure [ q ];
+       follows_parents_append_order ns q)
+#pop-options
+
+(* ---- 12.5 the bridge to a lane: `lane_nodes` IS a spine off the base ---- *)
+
+(* Appending an op at the OLDEST end re-roots the rest of the chain — the calculation that turns
+   `lane_nodes`, which is built newest-first, into a cons at the front. *)
+let rec chain_head_rev_snoc (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor q:string) (o:op) (rl:list op)
+  : Lemma (ensures chain_head_rev mint actor q (app rl [ o ]) ==
+                   chain_head_rev mint actor (mint q actor o) rl)
+          (decreases rl)
+  = match rl with
+    | [] -> ()
+    | _ :: t -> chain_head_rev_snoc mint actor q o t
+
+let rec chain_rev_snoc (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor q:string) (o:op) (rl:list op)
+  : Lemma (ensures chain_rev mint actor q (app rl [ o ]) ==
+                   app (chain_rev mint actor (mint q actor o) rl)
+                       [ { nid = mint q actor o; nparents = [ q ]; nop = o } ])
+          (decreases rl)
+  = match rl with
+    | [] -> ()
+    | _ :: t ->
+      chain_head_rev_snoc mint actor q o t;
+      chain_rev_snoc mint actor q o t
+
+let lane_nodes_cons (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor q:string) (o:op) (t:list op)
+  : Lemma (ensures lane_nodes mint actor q (o :: t) ==
+                   { nid = mint q actor o; nparents = [ q ]; nop = o }
+                   :: lane_nodes mint actor (mint q actor o) t)
+  = let n0 = { nid = mint q actor o; nparents = [ q ]; nop = o } in
+    chain_rev_snoc mint actor q o (rev t);
+    rev_app (chain_rev mint actor (mint q actor o) (rev t)) [ n0 ]
+
+(* A lane's nodes, in append order, are a spine off the base id. *)
+let rec parents_chain_lane (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor q:string) (l:list op)
+  : Lemma (ensures parents_chain (lane_nodes mint actor q l) q) (decreases l)
+  = match l with
+    | [] -> ()
+    | o :: t ->
+      lane_nodes_cons mint actor q o t;
+      parents_chain_lane mint actor (mint q actor o) t
+
+(* The model's own topological order on a lane head, named: the base, then the lane in append
+   order. Factored out of `between_chain`'s calculation, which computed it inline. *)
+#push-options "--z3rlimit 100"
+let topo_of_chain (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (actor:string) (bn:node op) (l:list op) (fuel:list (node op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    resolves d (chain_rev mint actor bn.nid (rev l)) /\
+                    covers fuel (rev l))
+          (ensures topo_of d fuel (lane_head mint actor bn.nid l)
+                   == bn.nid :: ids_of (lane_nodes mint actor bn.nid l))
+  = let q = bn.nid in
+    let rl = rev l in
+    let c = chain_rev mint actor q rl in
+    covers_drop fuel rl;
+    ancestors_chain d mint actor q rl fuel;
+    base_ancestors d bn (drop_by fuel rl);
+    rev_app (ids_of c) [ q ];
+    ids_of_rev c
+#pop-options
+
+(* ---- 12.6 the restatement: the recovery does not depend on the order ---- *)
+
+(* What the ORDER's uniqueness needs of content addressing, and it is the same premise section 11
+   already names rather than a new one: the lane's ids are distinct from one another and from the
+   base's. `distinct_ids` / `resolves_of_distinct` state it for the whole DAG; this is that premise
+   read at lane granularity, exactly as `lane_recovers`'s `resolves` is. It SUBSUMES
+   `lane_recovers`'s third clause (the base id is not one of the lane's), which is its head. *)
+let lane_ids_distinct (#op:eqtype) (mint:string -> string -> op -> string)
+  (bn:node op) (ln:lane op) : Tot bool =
+  distinct (bn.nid :: ids_of (lane_nodes mint ln.lactor bn.nid ln.lops))
+
+(* F#: `Dag.between` from the point where the topological order has been chosen —
+   `topoOrder dag head |> List.filter … |> List.map …` with the first step's RESULT taken as a
+   parameter. `between d fuel base_id head` is this at `ord = topo_of d fuel head`, definitionally. *)
+let between_ordered (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string)
+  (ord:list string) : Tot (list (node op)) =
+  nodes_for d (diff ord (ancestors_of d fuel base_id))
+
+let between_ops_ordered (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string)
+  (ord:list string) : Tot (list op) =
+  ops_of (between_ordered d fuel base_id ord)
+
+(* THEOREM (task 3). `between_chain`, restated with the topological order UNIVERSALLY QUANTIFIED.
+   Section 11's statement fixes the order to `topo_of` — the reverse of the parent walk — by
+   definition, and the claims ladder carried that choice as an assumption. Here the order is any
+   distinct, parent-respecting enumeration of the head's closure whatsoever, and the recovery comes
+   back the same, because by `spine_order_forced` there is only one such enumeration. Production's
+   frontier drain is one of them (`kahn_drain_is_such_an_enumeration`), so this covers it. *)
+#push-options "--z3rlimit 150"
+let between_chain_any_order (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (actor:string) (bn:node op) (l:list op) (fuel:list (node op)) (ord:list string)
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lane_recovers d mint bn fuel ({ lactor = actor; lops = l }) /\
+                    lane_ids_distinct mint bn ({ lactor = actor; lops = l }) /\
+                    distinct ord /\
+                    (forall (x:string).
+                       mem x ord == mem x (topo_of d fuel (lane_head mint actor bn.nid l))) /\
+                    follows_parents (lane_nodes mint actor bn.nid l) ord)
+          (ensures between_ordered d fuel bn.nid ord == lane_nodes mint actor bn.nid l)
+  = let q = bn.nid in
+    let lns = lane_nodes mint actor q l in
+    topo_of_chain d mint actor bn l fuel;
+    parents_chain_lane mint actor q l;
+    spine_order_forced lns q ord;
+    between_chain d mint actor bn l fuel
+#pop-options
+
+#push-options "--z3rlimit 150"
+let between_ops_chain_any_order (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (actor:string) (bn:node op) (l:list op) (fuel:list (node op)) (ord:list string)
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lane_recovers d mint bn fuel ({ lactor = actor; lops = l }) /\
+                    lane_ids_distinct mint bn ({ lactor = actor; lops = l }) /\
+                    distinct ord /\
+                    (forall (x:string).
+                       mem x ord == mem x (topo_of d fuel (lane_head mint actor bn.nid l))) /\
+                    follows_parents (lane_nodes mint actor bn.nid l) ord)
+          (ensures between_ops_ordered d fuel bn.nid ord == l)
+  = between_chain_any_order d mint actor bn l fuel ord;
+    ops_of_rev (chain_rev mint actor bn.nid (rev l));
+    ops_of_chain_rev mint actor bn.nid (rev l);
+    rev_rev l
+#pop-options
+
+(* THEOREM. Production's frontier drain and the model's parent-walk reversal are the SAME LIST, for
+   every tie-break selector — the two halves joined. This is the sentence Phase 134's section 11
+   argued, and the claims ladder's `topological-order-choice` row, as a theorem. *)
+#push-options "--z3rlimit 150"
+let topo_of_is_the_kahn_drain (#op:eqtype) (pick:list string -> string)
+  (d:dag op) (mint:string -> string -> op -> string) (actor:string) (bn:node op) (l:list op)
+  (fuel kfuel:list (node op))
+  : Lemma (requires picks_from_frontier pick /\
+                    lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lane_recovers d mint bn fuel ({ lactor = actor; lops = l }) /\
+                    lane_ids_distinct mint bn ({ lactor = actor; lops = l }) /\
+                    covers kfuel (bn.nid :: ids_of (lane_nodes mint actor bn.nid l)))
+          (ensures kahn pick kfuel
+                        (bn :: lane_nodes mint actor bn.nid l)
+                        (bn.nid :: ids_of (lane_nodes mint actor bn.nid l))
+                        []
+                   == topo_of d fuel (lane_head mint actor bn.nid l))
+  = parents_chain_lane mint actor bn.nid l;
+    kahn_drain_is_such_an_enumeration pick kfuel bn (lane_nodes mint actor bn.nid l);
+    topo_of_chain d mint actor bn l fuel
+#pop-options
+
+(* ---- and the fold on top of it (F#: `Dag.reconcileMany`, `FoldConfluence.foldOnce`) ---- *)
+
+(* F#: `heads |> List.map (betweenOps dag baseId)`, with each head's topological order supplied
+   rather than computed — one order per head, in the same order as the heads. *)
+let rec deltas_of_ordered (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string)
+  (ords:list (list string)) : Tot (list (list op)) =
+  match ords with
+  | [] -> []
+  | o :: t -> between_ops_ordered d fuel base_id o :: deltas_of_ordered d fuel base_id t
+
+let reconcile_many_dag_ordered (#op:eqtype) (fp:op -> footprint) (d:dag op)
+  (fuel:list (node op)) (base_id:string) (ords:list (list string))
+  : Tot (outcome (list op) (list (conflict op))) =
+  reconcile_many fp (deltas_of_ordered d fuel base_id ords)
+
+let fold_once_dag_ordered (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint)
+  (d:dag op) (fuel:list (node op)) (base_id:string) (s0:state) (ords:list (list string))
+  : Tot (lane_outcome op state rej) =
+  fold_once apply fp s0 (deltas_of_ordered d fuel base_id ords)
+
+(* Every lane recovers, its ids are distinct, and the order its recovery walked is A topological
+   order of its head's closure — whichever one. *)
+let rec lanes_orders_ok (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (bn:node op) (fuel:list (node op)) (lanes:list (lane op)) (ords:list (list string))
+  : Tot prop (decreases lanes) =
+  match lanes with
+  | [] -> (match ords with | [] -> True | _ :: _ -> False)
+  | ln :: lt ->
+    (match ords with
+     | [] -> False
+     | o :: ot ->
+       lane_recovers d mint bn fuel ln /\
+       lane_ids_distinct mint bn ln /\
+       distinct o /\
+       (forall (x:string).
+          mem x o == mem x (topo_of d fuel (lane_head mint ln.lactor bn.nid ln.lops))) /\
+       follows_parents (lane_nodes mint ln.lactor bn.nid ln.lops) o /\
+       lanes_orders_ok d mint bn fuel lt ot)
+
+#push-options "--z3rlimit 100"
+let rec deltas_of_ordered_lanes (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (bn:node op) (fuel:list (node op)) (lanes:list (lane op)) (ords:list (list string))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lanes_orders_ok d mint bn fuel lanes ords)
+          (ensures deltas_of_ordered d fuel bn.nid ords == lane_ops lanes)
+          (decreases lanes)
+  = match lanes with
+    | [] -> ()
+    | ln :: lt ->
+      (match ords with
+       | [] -> ()
+       | o :: ot ->
+         between_ops_chain_any_order d mint ln.lactor bn ln.lops fuel o;
+         deltas_of_ordered_lanes d mint bn fuel lt ot)
+#pop-options
+
+(* THEOREM (task 3, the second half). `Dag.reconcileMany` FROM the DAG equals the deltas-first
+   `reconcile_many` on the lanes that were appended — whatever topological order each head's
+   recovery walked. Section 11's `reconcile_many_dag_eq` is the instance at the model's own order;
+   this is it re-verified on top of a recovery that no longer chooses one. *)
+let reconcile_many_dag_ordered_eq (#op:eqtype) (fp:op -> footprint) (d:dag op)
+  (mint:string -> string -> op -> string) (bn:node op) (fuel:list (node op))
+  (lanes:list (lane op)) (ords:list (list string))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lanes_orders_ok d mint bn fuel lanes ords)
+          (ensures reconcile_many_dag_ordered fp d fuel bn.nid ords
+                   == reconcile_many fp (lane_ops lanes))
+  = deltas_of_ordered_lanes d mint bn fuel lanes ords
+
+let fold_once_dag_ordered_eq (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (s0:state)
+  (d:dag op) (mint:string -> string -> op -> string) (bn:node op) (fuel:list (node op))
+  (lanes:list (lane op)) (ords:list (list string))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lanes_orders_ok d mint bn fuel lanes ords)
+          (ensures fold_once_dag_ordered apply fp d fuel bn.nid s0 ords
+                   == fold_once apply fp s0 (lane_ops lanes))
+  = deltas_of_ordered_lanes d mint bn fuel lanes ords
