@@ -79,7 +79,7 @@
     {
       "id": "independence-diamond",
       "level": "assumed",
-      "claim": "The fold theorem's one domain hypothesis: two operations whose footprints are declared disjoint, and which both apply at a state, each apply after the other and reach the same state. Sampled — never proved — including directly against the extracted model's own independence predicate on the reference witness, with a sample-adequacy guard and its own go-red.",
+      "claim": "The fold theorem's one domain hypothesis: two operations whose footprints are declared disjoint, and which both apply at a state, each apply after the other and reach the same state. Sampled — never proved — including directly against the extracted model's own independence predicate on the reference witness, with a sample-adequacy guard and its own go-red. This row is about a DOMAIN'S OWN witness, which is what the fold theorem is generic over; for the skeleton-op tree algebra specifically it is no longer assumed but proved, at `tree-independence-diamond` below.",
       "phase": "fuaran-core#132",
       "evidence": {
         "assumption": "independence_diamond holds of the domain the fold is run over"
@@ -186,6 +186,66 @@
       "phase": "fuaran-core#134",
       "evidence": {
         "assumption": "a spine admits exactly one topological order, and the frontier drain produces it"
+      }
+    },
+    {
+      "id": "tree-independence-diamond",
+      "level": "proved",
+      "claim": "For the skeleton-op tree algebra, two operations whose footprints are declared disjoint and which both apply at an id-unique tree each apply after the other and reach the same tree — the fold theorem's domain hypothesis, proved rather than sampled, for twelve of the fifteen unordered operation pairs (the three left open are one shape, at `tree-algebra-batch-nesting`). Nine of the twelve are closed by the conservative footprint alone and never look at a tree: a remove or a move writes an unknown parent, independence refuses that against any structural write, and every skeleton operation except a do-nothing batch writes structure — so such a pair is independent only where the other operation does nothing at all.",
+      "phase": "fuaran-core#133",
+      "evidence": {
+        "theorem": "tree_independence_diamond",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "skeleton-fold-confluence",
+      "level": "proved",
+      "claim": "Fold confluence for the skeleton-op tree algebra with NO domain hypothesis remaining, over the non-batch operation alphabet: the same lanes reach the same tree however they arrive, a lane set that cannot fold halts with the same canonical report however it arrives, and none folds under one order and halts under another. The halt half is proved separately under no hypothesis at all — not the diamond, not id uniqueness, nothing about the apply engine.",
+      "phase": "fuaran-core#133",
+      "evidence": {
+        "theorem": "skeleton_fold_confluence",
+        "model": "proofs/Skeleton.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "insert-breaks-id-uniqueness",
+      "level": "proved",
+      "claim": "The unconditional statement 'every accepted skeleton operation preserves id uniqueness' is FALSE of the algebra as it stands, and this is a machine-checked counterexample rather than an assertion: the insert validation tests the inserted node's OWN id against the tree and not its descendants, so a concrete accepted insert leaves the tree carrying an id twice. Proved beside it: the conditional form — an insert whose subtree is internally id-unique and disjoint from the tree preserves the invariant — and its converse, so 'the result is id-unique' and 'the insert was fresh' are the same statement. That pair is the specification the fix has to meet.",
+      "phase": "fuaran-core#133",
+      "evidence": {
+        "theorem": "insert_breaks_wf",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "tree-differential",
+      "level": "tested",
+      "claim": "The extracted tree model agrees with the shipped apply engine and footprint derivation over the generated operation pool and every state a prefix of it reaches — the footprint as four address sets, the verdict, an accepted result through the content hash computed by production's own function on both sides, and a rejection by class. Every rejection class the plain apply can raise is asserted reached BY NAME rather than counted, and a bridge that erases every kind tag is required to make the result comparison fail, so a green report is known to be one that can lose.",
+      "phase": "fuaran-core#133",
+      "evidence": {
+        "family": "Proofs.Oracle"
+      }
+    },
+    {
+      "id": "tree-algebra-well-formed-states",
+      "level": "assumed",
+      "claim": "The tree the algebra runs over carries each id at most once. This is a hypothesis rather than an oversight: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved. Nothing in the estate produces such a tree and the structural diff refuses one outright, but no shipped type carries the invariant.",
+      "phase": "fuaran-core#133",
+      "evidence": {
+        "assumption": "the tree the fold runs over carries each id at most once"
+      }
+    },
+    {
+      "id": "tree-algebra-batch-nesting",
+      "level": "assumed",
+      "claim": "The proved diamond covers twelve of the fifteen operation pairs; the three left open are one shape — either side a batch that neither does nothing nor relocates. A batch is a list of operations written as one operation and the fold already threads a list, so excluding it removes no behaviour: it declines to nest one lane inside another. Lifting the leaf diamond along a batch script is the argument the fold theorem already performs at lane granularity, and it needs the id-uniqueness invariant at each intermediate state of the script, which is what `insert-breaks-id-uniqueness` currently denies.",
+      "phase": "fuaran-core#133",
+      "evidence": {
+        "assumption": "an operation pair in which either side is a non-trivial nested batch"
       }
     }
   ]
