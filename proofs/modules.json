@@ -1,0 +1,55 @@
+{
+  "kind": "proofModules",
+  "subject": "Fuaran-Core",
+  "$comment": "What the proof leg COSTS, declared per module, so that a growth in prover time is named rather than discovered when CI times out. `proofs/check.ps1` reads this file: every green CHECK line prints the module's measured seconds beside its budget, and a run over budget prints a named COST warning — never a failure on its own, because prover time varies by machine and by load and a budget is a smoke detector rather than a gate. `check.ps1 -Strict` promotes the warnings to a red leg for a session that wants one. This is NOT `proofs.json`: that file is the claims ladder — what is proved, tested and assumed, at a closed set of levels, checked row-by-row against the tree by the Proofs.Ladder family — and a wall-clock budget is a claim at none of those levels and is not per-claim but per-module. The ladder's `proof-leg` policy row points here for the cost half. Coverage is checked BOTH ways: a module the leg checks with no entry here, and an entry here for a module the leg does not check, are each a COST warning naming what to do. Hand-authored; the seeding rule below says how a number is arrived at, and bumping one is the recorded act the README's `Running it` section describes.",
+  "seeding": {
+    "rule": "budgetSeconds = max(2 x the slowest observed cold-cache run, 20s), rounded up to the next 10s.",
+    "toleranceFactor": 2,
+    "floorSeconds": 20,
+    "$comment": "The tolerance is applied ONCE, here, when a number is seeded — `check.ps1` multiplies nothing, so the pair it prints is the measurement against the ceiling and there is no second arithmetic to hold in your head. Seeded from the SLOWEST observed cold run rather than the median, deliberately: on the machine these were measured on, six concurrent sessions inflate a cold check by ~1.8x with nothing about the tree changed (TreeOps 45s to 77s, JsonParse 52s to 99s within one three-run leg), so a budget seeded from the median would fire on a busy afternoon and teach a reader to ignore it. The 20s floor is for the sub-5s modules, where 2x is inside ordinary process-start noise. These are figures from a Windows dev machine; CI's windows-latest runner is a different machine and its first runs are what will say whether the tolerance is generous enough there. If it is not, that is a bump, and a bump is recorded."
+  },
+  "modules": [
+    {
+      "module": "DagFold",
+      "budgetSeconds": 100,
+      "measuredSeconds": 48,
+      "phase": "fuaran-core#148",
+      "note": "The first model, and the one section 11's delta recovery lives in. It carries no `--ext context_pruning`; what it carries instead is the SMT-pattern lesson (see the README's per-module costs) — `rev` / `app` / `ids_of` / `ops_of` rewrite into one another and their lemmas deliberately have NO `SMTPat`. Adding one back is the cost cliff here, and it is a cliff rather than a slope: the query stops returning."
+    },
+    {
+      "module": "WireDecode",
+      "budgetSeconds": 70,
+      "measuredSeconds": 33,
+      "phase": "fuaran-core#148",
+      "note": "The decode combinators. Default context, no scoped options; the cost is ordinary and the spread between an idle and a contended machine (15s to 33s) is most of it."
+    },
+    {
+      "module": "TreeOps",
+      "budgetSeconds": 160,
+      "measuredSeconds": 77,
+      "phase": "fuaran-core#148",
+      "note": "Carries `#set-options \"--ext context_pruning\"` at line 62 — 300s with the default context against 56s pruned, measured on the pinned prover. The single most expensive module in the leg even so, because it is an order of magnitude larger than DagFold. If this budget is ever bumped, check first that the pruning option is still in force: losing it is a 5x regression that looks like ordinary growth in the log."
+    },
+    {
+      "module": "Skeleton",
+      "budgetSeconds": 20,
+      "measuredSeconds": 2,
+      "phase": "fuaran-core#148",
+      "note": "The composite, thin on purpose — the argument is in the two halves it joins. At the 20s floor: 2x of a 2s measurement is inside process-start noise, so the floor is what keeps this entry from being a false-alarm generator."
+    },
+    {
+      "module": "Chain",
+      "budgetSeconds": 30,
+      "measuredSeconds": 12,
+      "phase": "fuaran-core#148",
+      "note": "The two integrity walkers. Default context; 2x of 12s rounds to the floor's neighbourhood anyway."
+    },
+    {
+      "module": "JsonParse",
+      "budgetSeconds": 200,
+      "measuredSeconds": 99,
+      "phase": "fuaran-core#148",
+      "note": "Carries `#set-options \"--ext context_pruning\"` at line 98 — 128s default against 72s pruned. The widest spread in the leg (52s to 99s across one three-run pass), because a 45-constructor alphabet in a large mutual group is exactly the shape a loaded machine punishes; the budget is sized for the top of that spread and not its middle."
+    }
+  ]
+}
