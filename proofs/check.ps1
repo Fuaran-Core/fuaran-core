@@ -57,7 +57,10 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 #                no domain hypothesis left. Opens both, so it follows both.
 #   Chain      — Phase 136, the two integrity walkers, with tamper detection proved under a
 #                named injective-hash premise. Opens nothing, so its position is free.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain')
+#   JsonParse  — Phase 146, the recursive-descent JSON parser, with the depth bound, the int53
+#                token guard and the exhaustiveness of the error classification proved. Opens
+#                nothing, so its position is free; it is the boundary WireDecode named.
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 

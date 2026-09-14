@@ -18,3 +18,9 @@ let inline op_Equals (x: 'a) (y: 'a) : bool = (x = y)
 /// `Decode`'s error MESSAGES rather than merely their class, so the differential compares what
 /// a failure says as well as that it failed.
 let inline strcat (x: string) (y: string) : string = x + y
+
+/// F*'s `<>` on an `eqtype` — decidable structural DISequality, the counterpart of `op_Equals`
+/// above. Named by the Phase 146 extraction, whose error-kind confinement predicates are written
+/// as "every kind but this one". Like everything else here it is the F# primitive under an F*
+/// spelling; there is no semantics in this file.
+let inline op_Less_Greater (x: 'a) (y: 'a) : bool = (x <> y)
