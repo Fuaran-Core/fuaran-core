@@ -7460,3 +7460,175 @@ module Conformance =
           { Law = "a literal slot encodes as the bare value it did before slots existed"
             Passed = literalOnly.IsNone
             Counterexample = literalOnly } ]
+
+    /// **Every reason the DAG walker MINTS is a named case** (Phase 147) — the sibling of
+    /// `chainBreakReasonLaws`, and the law that makes `DagBreakReason.Unrecognised` an honest arm
+    /// rather than a hedge.
+    ///
+    /// `DagBreak.Reason` became a closed DU so a consumer stops re-deriving the type by
+    /// string-matching this library's spellings. That only helps if `Dag.firstBreak` actually stays
+    /// inside the named cases: a walker that minted an `Unrecognised` would hand every consumer back
+    /// exactly the untyped string the type exists to remove, and nothing would say so. So this family
+    /// drives the walker into EVERY break it can produce and asserts the reason is named.
+    ///
+    /// The two breaks are BUILT each iteration rather than drawn, so the sample cannot miss one: a
+    /// node's op is tampered while its map KEY is left alone (which is what makes the stored id
+    /// disagree with the recomputed one), and a node another node NAMES is deleted. The deletion has
+    /// to be a deletion rather than a re-pointed parent, because re-pointing changes the pre-image
+    /// and the walker reports the content-id mismatch first — so `MissingParent` is unreachable by
+    /// tampering a node's own fields. The last two laws are the non-vacuity guards — each break kind
+    /// was actually observed — because "no unnamed reason was minted" is trivially true of a walk
+    /// that never broke.
+    ///
+    /// The `toString` / `ofString` pair is certified here too, in both directions: the round trip is
+    /// the identity on the named cases, and an unknown string lands in `Unrecognised` VERBATIM rather
+    /// than being swept into the nearer-looking case. `toString` is also what keeps
+    /// `Dag.fromJsonlVerified`'s error bytes unchanged across this type's introduction, so the round
+    /// trip is a compatibility claim and not only a tidiness one.
+    let dagBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
+        // A self-contained int-op witness: the claim is about THIS library's walker, not about a
+        // host's, so there is no caller witness to take.
+        let sw: StreamWitness<int, int, string> =
+            { Apply = fun op state -> Ok(state + op)
+              Encode = string
+              Decode =
+                fun s ->
+                    match System.Int32.TryParse s with
+                    | true, v -> Ok v
+                    | false, _ -> Error("not an int: " + s) }
+
+        let hashFn = OpStream.defaultHash
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable unnamed = None
+        let mutable roundTrip = None
+        let mutable verbatim = None
+        let mutable seen = Set.empty
+
+        // The reason a break carries, or None when the walk found the DAG intact — which is itself a
+        // defect here, since every input below is deliberately broken.
+        let reasonOf (label: string) (i: int) (b: DagBreak option) : DagBreakReason option =
+            match b with
+            | Some br ->
+                // Qualified: `ChainBreakReason` declares an `Unrecognised` too, and both are in
+                // scope here — the sibling family below is the reason this file sees both.
+                (match br.Reason with
+                 | DagBreakReason.Unrecognised s when unnamed.IsNone ->
+                     unnamed <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: the %s walk minted an unnamed reason %s — the walker inside this library must stay inside the named cases, or DagBreakReason gives a consumer back the untyped string it exists to remove"
+                                 seed
+                                 i
+                                 label
+                                 s
+                         )
+                 | _ -> ())
+
+                Some br.Reason
+            | None ->
+                if unnamed.IsNone then
+                    unnamed <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: the %s walk reported NO break over a deliberately broken DAG, so this family is measuring nothing"
+                                seed
+                                i
+                                label
+                        )
+
+                None
+
+        for i in 0 .. iterations - 1 do
+            // ---- a sound DAG: genesis, two children, a merge — every node shape the walker meets ----
+            let op0, r0 = ConfRng.intBelow 50 rng
+            let opA, r1 = ConfRng.intBelow 50 r0
+            let opB, r2 = ConfRng.intBelow 50 r1
+            let opM, r3 = ConfRng.intBelow 50 r2
+            rng <- r3
+
+            let g, d1 = Dag.append hashFn sw (Human "conf") op0 "" Dag.empty
+            let a, d2 = Dag.append hashFn sw (Human "conf") (opA + 1) g d1
+            let b, d3 = Dag.append hashFn sw (Human "conf") (opB + 1) g d2
+            let _, dag = Dag.merge hashFn sw (Human "conf") (opM + 1) a b d3
+
+            // content id: tamper the OP and leave the map KEY exactly as it was. That is the threat
+            // the content id exists to catch, and it is precisely not a rewrite.
+            let tid, tnode = dag.Nodes |> Map.toList |> List.head
+
+            let tampered =
+                { Dag.T.Nodes = Map.add tid { tnode with Op = tnode.Op + 1000 } dag.Nodes }
+
+            match reasonOf "content-id" i (Dag.firstBreak hashFn sw tampered) with
+            | Some r -> seen <- Set.add (DagBreakReason.toString r) seen
+            | None -> ()
+
+            // missing parent: delete the genesis node that `a` and `b` both name. Every surviving
+            // node's id still recomputes from its own fields, so the content-id check passes and the
+            // parent check is the one that fires — the only way to reach that arm.
+            let orphaned = { Dag.T.Nodes = Map.remove g dag.Nodes }
+
+            match reasonOf "missing-parent" i (Dag.firstBreak hashFn sw orphaned) with
+            | Some r -> seen <- Set.add (DagBreakReason.toString r) seen
+            | None -> ()
+
+            // ---- the string pair, both directions ----
+            for named in [ ContentIdMismatch; MissingParent ] do
+                if
+                    DagBreakReason.ofString (DagBreakReason.toString named) <> named
+                    && roundTrip.IsNone
+                then
+                    roundTrip <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: ofString (toString %A) = %A — the rendering and the parse disagree, so a consumer reading a logged reason back does not recover the case that wrote it"
+                                seed
+                                i
+                                named
+                                (DagBreakReason.ofString (DagBreakReason.toString named))
+                        )
+
+            let alien, rA = ConfRng.intBelow 1000 rng
+            rng <- rA
+            let alienText = "a reason this library does not mint #" + string alien
+
+            match DagBreakReason.ofString alienText with
+            | DagBreakReason.Unrecognised s when s = alienText -> ()
+            | other ->
+                if verbatim.IsNone then
+                    verbatim <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: ofString %s = %A — an unknown reason must land in Unrecognised carrying its own text, never be swept into a named case, which is a claim about which check failed that nothing established"
+                                seed
+                                i
+                                alienText
+                                other
+                        )
+
+        let expected =
+            [ DagBreakReason.toString ContentIdMismatch
+              DagBreakReason.toString MissingParent ]
+            |> Set.ofList
+
+        let missing = Set.difference expected seen
+
+        [ { Law = "every reason the DAG walker mints is a NAMED DagBreakReason case"
+            Passed = unnamed.IsNone
+            Counterexample = unnamed }
+          { Law = "DagBreakReason.ofString (toString r) = r on every named case"
+            Passed = roundTrip.IsNone
+            Counterexample = roundTrip }
+          { Law = "DagBreakReason.ofString carries an unknown reason into Unrecognised verbatim"
+            Passed = verbatim.IsNone
+            Counterexample = verbatim }
+          { Law = "non-vacuity: the DAG walk produced every break kind it can produce"
+            Passed = Set.isEmpty missing
+            Counterexample =
+              if Set.isEmpty missing then
+                  None
+              else
+                  Some(
+                      "the DAG walk never reported: "
+                      + (missing |> Set.toList |> String.concat ", ")
+                      + " — the laws above hold vacuously for the break kinds that were never produced"
+                  ) } ]

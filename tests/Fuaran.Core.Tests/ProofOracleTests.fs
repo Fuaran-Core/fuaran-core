@@ -1464,15 +1464,38 @@ let private toChainEntries (dag: Dag.T<'Op>) : Chain.entry<'Op> list =
               Chain.dactor = Actor.encode n.Actor
               Chain.dop = n.Op } })
 
-let private renderDagVerdict (b: DagBreak option) : string =
-    match b with
-    | None -> "intact"
-    | Some b -> sprintf "break at %s | %s | expected=%s | got=%s" b.NodeId b.Reason b.Expected b.Got
+/// A DAG walker's verdict as a COMPARABLE VALUE (Phase 147). Production's break carries a typed
+/// `DagBreakReason`; the model's carries the string its extraction mints, classified through the
+/// same total `ofString`. Comparing these compares the reason as a CLASS rather than as two
+/// spellings that happen to match — which is the projection Phase 147 deletes, and it is this
+/// differential that asked for it. It also sharpens the failure: a model whose reason string drifted
+/// a character used to fail as an unexplained textual mismatch and now fails as an `Unrecognised`
+/// carrying that text against a named case, which says what went wrong.
+type private DagVerdict =
+    | DagIntact
+    | DagBroke of node: string * reason: DagBreakReason * expected: string * got: string
 
-let private renderModelDagVerdict (b: Chain.found<Chain.dbreak>) : string =
+let private renderDagVerdict (v: DagVerdict) : string =
+    match v with
+    | DagIntact -> "intact"
+    | DagBroke(node, reason, expected, got) ->
+        sprintf "break at %s | %s | expected=%s | got=%s" node (DagBreakReason.toString reason) expected got
+
+/// The reason class a verdict names, for the cases that assert WHICH check fired.
+let private dagVerdictReason (v: DagVerdict) : DagBreakReason option =
+    match v with
+    | DagIntact -> None
+    | DagBroke(_, reason, _, _) -> Some reason
+
+let private prodDagVerdict (b: DagBreak option) : DagVerdict =
     match b with
-    | Chain.Missing -> "intact"
-    | Chain.Found b -> sprintf "break at %s | %s | expected=%s | got=%s" b.bnode b.breason b.bexpected b.bgot
+    | None -> DagIntact
+    | Some b -> DagBroke(b.NodeId, b.Reason, b.Expected, b.Got)
+
+let private modelDagVerdict (b: Chain.found<Chain.dbreak>) : DagVerdict =
+    match b with
+    | Chain.Missing -> DagIntact
+    | Chain.Found b -> DagBroke(b.bnode, DagBreakReason.ofString b.breason, b.bexpected, b.bgot)
 
 /// Both walkers on the same DAG. The two hash functions are separate arguments only so the go-red
 /// case can hand the MODEL one production is not using; every real run passes the same one twice.
@@ -1481,9 +1504,9 @@ let private dagVerdicts
     (modelHash: HashFn)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (dag: Dag.T<'Op>)
-    : string * string =
-    renderDagVerdict (Dag.firstBreak prodHash w dag),
-    renderModelDagVerdict (Chain.first_break modelHash w.Encode ordinalLe (toChainEntries dag))
+    : DagVerdict * DagVerdict =
+    prodDagVerdict (Dag.firstBreak prodHash w dag),
+    modelDagVerdict (Chain.first_break modelHash w.Encode ordinalLe (toChainEntries dag))
 
 /// The DAG `FoldConfluence.foldOnce` builds, under a CHOSEN `HashFn` — one shared base node and
 /// one chain per lane. `productionDag` above pins the default hash; the premise case below needs
@@ -1616,7 +1639,7 @@ let private dagDifferential
         | Some why -> note (sprintf "%s: seed=%d %s" label seed why)
         | None -> ()
 
-        let compare (what: string) (d: Dag.T<'Op>) : string =
+        let compare (what: string) (d: Dag.T<'Op>) : DagVerdict =
             let p, m = dagVerdicts prodHash modelHash w d
 
             if p <> m then
@@ -1627,20 +1650,20 @@ let private dagDifferential
                         seed
                         what
                         (renderLanes w.Encode lanes)
-                        p
-                        m
+                        (renderDagVerdict p)
+                        (renderDagVerdict m)
                 )
 
             p
 
-        if compare "none" dag = "intact" then
+        if compare "none" dag = DagIntact then
             t <- { t with Intact = t.Intact + 1 }
 
         for (what, tampered) in dagTampers otherOp dag do
             let p = compare what tampered
             t <- { t with Tampers = t.Tampers + 1 }
 
-            if p <> "intact" then
+            if p <> DagIntact then
                 t <- { t with Detected = t.Detected + 1 }
 
     t
@@ -1674,26 +1697,43 @@ let private toChainRecords (rs: OpRecord<'Op> list) : Chain.record<'Op> list =
           Chain.rprev = r.PrevHash
           Chain.rhash = r.Hash })
 
-let private renderChainVerdict (b: ChainBreak option) : string =
-    match b with
-    | None -> "intact"
-    | Some b ->
-        sprintf "break at %d | %s | expected=%s | got=%s" b.Index (ChainBreakReason.toString b.Reason) b.Expected b.Got
+/// The linear walker's verdict, on the same footing as `DagVerdict` (Phase 147). `ChainBreak.Reason`
+/// has been a closed DU since Phase 125; this differential was still rendering it to text and
+/// comparing the text, so the same reason-as-a-class argument applies unchanged and the section now
+/// holds no string match on a break reason at all.
+type private ChainVerdict =
+    | ChainIntact
+    | ChainBroke of index: int * reason: ChainBreakReason * expected: string * got: string
 
-let private renderModelChainVerdict (b: Chain.found<Chain.cbreak>) : string =
+let private renderChainVerdict (v: ChainVerdict) : string =
+    match v with
+    | ChainIntact -> "intact"
+    | ChainBroke(index, reason, expected, got) ->
+        sprintf "break at %d | %s | expected=%s | got=%s" index (ChainBreakReason.toString reason) expected got
+
+let private chainVerdictReason (v: ChainVerdict) : ChainBreakReason option =
+    match v with
+    | ChainIntact -> None
+    | ChainBroke(_, reason, _, _) -> Some reason
+
+let private prodChainVerdict (b: ChainBreak option) : ChainVerdict =
     match b with
-    | Chain.Missing -> "intact"
-    | Chain.Found b ->
-        sprintf "break at %d | %s | expected=%s | got=%s" (intOfPos b.cindex) b.creason b.cexpected b.cgot
+    | None -> ChainIntact
+    | Some b -> ChainBroke(b.Index, b.Reason, b.Expected, b.Got)
+
+let private modelChainVerdict (b: Chain.found<Chain.cbreak>) : ChainVerdict =
+    match b with
+    | Chain.Missing -> ChainIntact
+    | Chain.Found b -> ChainBroke(intOfPos b.cindex, ChainBreakReason.ofString b.creason, b.cexpected, b.cgot)
 
 let private chainVerdicts
     (prodHash: HashFn)
     (modelHash: HashFn)
     (w: StreamWitness<'Op, 'State, 'Rej>)
     (rs: OpRecord<'Op> list)
-    : string * string =
-    renderChainVerdict (OpStream.firstChainBreak prodHash w rs),
-    renderModelChainVerdict (Chain.first_chain_break modelHash showPos w.Encode "" (toChainRecords rs))
+    : ChainVerdict * ChainVerdict =
+    prodChainVerdict (OpStream.firstChainBreak prodHash w rs),
+    modelChainVerdict (Chain.first_chain_break modelHash showPos w.Encode "" (toChainRecords rs))
 
 /// A chain production built by `OpStream.append`, skipping the ops the domain reducer rejects —
 /// `append` chains nothing on a rejection, so the chain is the shape of the accepted run.
@@ -1768,7 +1808,7 @@ let private chainDifferential
         let ops = List.concat lanes
         let rs = chainUnder prodHash w gen.State0 (Human "writer") ops
 
-        let compare (what: string) (records: OpRecord<'Op> list) : string =
+        let compare (what: string) (records: OpRecord<'Op> list) : ChainVerdict =
             let p, m = chainVerdicts prodHash modelHash w records
 
             if p <> m then
@@ -1779,21 +1819,21 @@ let private chainDifferential
                         seed
                         what
                         (ops |> List.map w.Encode |> String.concat "; ")
-                        p
-                        m
+                        (renderChainVerdict p)
+                        (renderChainVerdict m)
                 )
 
             p
 
         if not (List.isEmpty rs) then
-            if compare "none" rs = "intact" then
+            if compare "none" rs = ChainIntact then
                 t <- { t with Intact = t.Intact + 1 }
 
             for (what, tampered) in chainTampers otherOp rs do
                 let p = compare what tampered
                 t <- { t with Tampers = t.Tampers + 1 }
 
-                if p <> "intact" then
+                if p <> ChainIntact then
                     t <- { t with Detected = t.Detected + 1 }
 
     t
@@ -2621,9 +2661,13 @@ let proofOracleTests =
               let lanes, _ = planLaneGen.Lanes 3 (ConfRng.ofSeed 3640)
               let dag = dagUnder OpStream.defaultHash planW planLaneGen.BaseOp lanes
               let p, m = dagVerdicts OpStream.defaultHash swappedHash planW dag
-              Expect.equal p "intact" "production built this DAG and sees it intact"
+              Expect.equal p DagIntact "production built this DAG and sees it intact"
               Expect.notEqual m p "a model recomputing ids with a different hash must disagree"
-              Expect.stringContains m "content-id mismatch" "and it disagrees by naming the check that failed"
+
+              Expect.equal
+                  (dagVerdictReason m)
+                  (Some ContentIdMismatch)
+                  "and it disagrees by naming the check that failed"
 
           testCase "a model handed a DIFFERENT hash reports a break on an intact linear chain"
           <| fun _ ->
@@ -2634,9 +2678,10 @@ let proofOracleTests =
 
               Expect.isNonEmpty rs "the generated lane produced a chain"
               let p, m = chainVerdicts OpStream.defaultHash swappedHash planW rs
-              Expect.equal p "intact" "production built this chain and sees it intact"
+              Expect.equal p ChainIntact "production built this chain and sees it intact"
               Expect.notEqual m p "a model recomputing hashes with a different function must disagree"
-              Expect.stringContains m "hash mismatch" "and it disagrees by naming the check that failed"
+
+              Expect.equal (chainVerdictReason m) (Some HashMismatch) "and it disagrees by naming the check that failed"
 
           // ---- what the theorem's one premise buys, measured in BOTH directions ----
 
@@ -2672,11 +2717,12 @@ let proofOracleTests =
               let rp, rm =
                   dagVerdicts OpStream.defaultHash OpStream.defaultHash planW (tamper real)
 
-              Expect.stringContains rp "content-id mismatch" "under an injective hash the tamper is found"
+              Expect.equal (dagVerdictReason rp) (Some ContentIdMismatch) "under an injective hash the tamper is found"
+
               Expect.equal rm rp "and the model finds it identically"
 
               let wp, wm = dagVerdicts opBlindHash opBlindHash planW (tamper weak)
-              Expect.equal wp "intact" "a hash that drops the op cannot see an op tamper — this is the premise"
+              Expect.equal wp DagIntact "a hash that drops the op cannot see an op tamper — this is the premise"
               Expect.equal wm wp "and neither can the model, under the same hash"
 
           // ---- the corpus dag/ family: its SHAPES, not its addresses ----
@@ -2747,7 +2793,7 @@ let proofOracleTests =
                   | None -> ()
 
                   let p, m = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW dag
-                  Expect.equal p "intact" "the rebuilt DAG is intact"
+                  Expect.equal p DagIntact "the rebuilt DAG is intact"
                   Expect.equal m p "and the model agrees"
 
                   let mutable detected = 0
@@ -2756,7 +2802,7 @@ let proofOracleTests =
                       let tp, tm = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW tampered
                       Expect.equal tm tp (sprintf "tamper %s: the two walkers disagree" what)
 
-                      if tp <> "intact" then
+                      if tp <> DagIntact then
                           detected <- detected + 1
 
                   Expect.isGreaterThan detected 0 "the tampers were found, so the agreement is not vacuous"
