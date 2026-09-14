@@ -3,11 +3,12 @@
 **Status: GO** (Phase 131, 2026-09-12; the header last brought level with the body 2026-09-14).
 Phase 131's three exit criteria were met and remain met — the confluence proof is reproducible on
 the pinned prover, the extracted model agrees with production over every lane set the differential
-host draws, and the model reads beside the F# in one sitting — and four theorems have shipped
-beside it since. **Shipped: fold confluence (131, with its hypothesis corrected by 132 and the DAG
-beneath it proved by 134), decoder totality (135), independence soundness for the tree algebra
-(133), and chain integrity (136).** Each carries its own claims ladder in its own section below;
-the "Next" section at the foot is the live list.
+host draws, and the model reads beside the F# in one sitting — and four further theorems have
+shipped beside it since. **Shipped, five in all: fold confluence (131, with its hypothesis
+corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
+totality (135), independence soundness for the tree algebra (133), chain integrity (136), and
+`Json.parse` totality, bounded (146).** Each carries its own claims ladder in its own section
+below; the "Next" section at the foot is the live list.
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -33,6 +34,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
 | `check.ps1` | The proof leg: check with the pin, re-extract and diff against the committed oracle, run the host. |
+| `modules.json` | What the leg COSTS: one entry per checked module — its `budgetSeconds`, the measurement that budget was seeded from, and the phase that set it. `check.ps1` reads it and prints measured-against-budget on every green line. See "What the leg costs" below. |
 | `../tests/Fuaran.Core.Tests/ProofOracleTests.fs` | The differential host (`Proofs.Oracle`), and the family that measures the theorem's hypothesis on the reference witness. |
 
 ## The theorem
@@ -376,11 +378,13 @@ backend's edges (findings 2–4), each closed in a few lines, not on the modelli
 pwsh ./proofs/check.ps1            # check (once), re-extract + diff, run the oracle host
 pwsh ./proofs/check.ps1 -Runs 3    # what CI runs
 pwsh ./proofs/check.ps1 -Extract   # after editing a model: rewrite its oracle/*.fs, then commit it
+pwsh ./proofs/check.ps1 -Strict    # turn a cost finding (below) from a warning into a red leg
 pwsh ./verify.ps1 -Proofs          # the whole repo gate plus the proof leg
 ```
 
 Every model in the script's `$modules` list goes through all three steps, and `-Runs N` means N
-cold-cache verifications of all of them; adding a model is adding its name to that list. The first
+cold-cache verifications of all of them; adding a model is adding its name to that list and a
+budget entry to `modules.json` beside it. The first
 run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`; `FSTAR_HOME`
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
@@ -401,6 +405,73 @@ that could have failed.
 What it does **not** check is this prose. Row-to-README agreement stays a human act; what is
 mechanical is row-to-tree agreement, which is the half a check can settle. Editing a ladder still
 means editing both.
+
+### What the leg costs — the budget, and the two cliffs (Phase 148)
+
+Prover time is this leg's real cost, and it moves for reasons the author of a model does not see, so
+it is **declared**: `modules.json` beside this file carries one entry per checked module — a
+`budgetSeconds`, the `measuredSeconds` that budget was seeded from, the `phase` that set it, and a
+note. Every green CHECK line prints the pair, so the trend is legible in the log with no arithmetic:
+
+```
+==== proofs: TreeOps.fst verified — run 1 of 3, 70s/160s, every query 3/3 under --quake
+```
+
+A run over budget prints a named finding — this one is from the phase's own halved-budget probe —
+and the leg is **still green**:
+
+```
+==== proofs: COST — TreeOps.fst took 64s against its 25s budget on run 1 of 1 — 39s over, 256% of budget
+```
+
+That is deliberate, and it is the whole posture. Prover time varies by machine and by load: on the
+machine these budgets were measured on, concurrent work inflates a cold check by around 1.8× with
+nothing about the tree changed (`TreeOps` 45s → 77s, `JsonParse` 52s → 99s, inside one three-run
+pass). So a single overshoot is noise and only a persistent one is a regression, and the budgets are
+seeded from the SLOWEST observed cold run rather than a median for exactly that reason — a budget
+that fires on a busy afternoon teaches a reader to ignore it. **A budget is a smoke detector, not a
+gate.** `check.ps1 -Strict` promotes every cost finding to a red leg for a session that wants one;
+CI deliberately does not pass it. It is also not a job timeout: a timeout says a run died and
+nothing about which module, where an overshoot is attributable.
+
+Coverage is checked both ways, and both are findings rather than failures: a module in `$modules`
+with no entry is named — so adding a model tells you to budget it, without reddening the leg of
+whoever added it — and an entry for a module the leg does not check is named too, so a removed model
+cannot leave a budget behind pretending to measure something. The entry's SHAPE is the one thing
+here that IS a failure: a missing or duplicate module name, or a `budgetSeconds` that is not a
+positive number, fails the leg with the entry named, because a file in that state cannot be read as
+a budget at all.
+
+**Bumping a budget is a deliberate, recorded act.** Time the module on a cold, otherwise-quiet run,
+then edit that module's entry: the new `budgetSeconds`, the `measuredSeconds` it was seeded from,
+**your phase**, and a note saying what grew and why the cost is worth paying. The seeding rule lives
+in the file's own `seeding` block — `max(2 × the slowest observed cold run, 20s)`, rounded up to the
+next 10s, the floor being for the sub-5s modules where 2× is inside process-start noise. Editing the
+number alone is how a budget stops meaning anything: the point of the entry is that a later reader
+can tell a cost someone decided to pay from a drift nobody noticed.
+
+**Why `modules.json` and not `../proofs.json`.** The ladder is a claim about CORRECTNESS, at a closed
+set of four levels, checked row by row against the tree by `Proofs.Ladder`; a wall-clock budget is a
+claim at none of those levels, and it is per MODULE where a ladder row is per CLAIM. One home, and
+this is it — the ladder's `proof-leg` policy row points here for the cost half rather than carrying
+numbers the family beside it would not be checking.
+
+**The two cost cliffs, to be read before the next model is written.** Both have been paid for once:
+
+- **Context pruning is the difference between minutes and tens of minutes.** `TreeOps.fst` checks in
+  300s under the default SMT context and 56s under `--ext context_pruning`; `JsonParse.fst`, 128s
+  against 72s. Both set it with `#set-options` INSIDE the module rather than in `check.ps1`'s flags,
+  and that placement is load-bearing rather than tidy: pruning changes which facts a query can see,
+  so a module that has not been checked under it must not be switched to it as a side effect of
+  another module's cost. If either budget ever needs bumping by a large factor, check first that the
+  option is still in force — losing it reads in the log exactly like ordinary growth.
+- **An SMT pattern on a rewriting lemma is a cliff, not a slope** (Phase 134's lesson, at
+  `DagFold.fst` section 11). `rev`, `app`, `ids_of` and `ops_of` rewrite into one another, and their
+  lemmas deliberately carry NO `SMTPat`: left to fire on their own they turn the delta-recovery
+  query into one Z3 does not return from, where the module checks in seconds without them. Each is
+  called by name at the point it is needed, which is also what makes the proof read as the
+  calculation it is. A pattern added to a lemma of that shape does not make a module slower — it
+  makes it not finish, and no budget catches that, because there is no measurement to compare.
 
 ## Theorem 1 — decoder totality (Phase 135)
 

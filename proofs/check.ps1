@@ -1,14 +1,22 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131, 135 and 136).
+# fuaran-core — the proof leg (Phases 131, 135, 136 and 148).
 #
 # EVERY MODULE in $modules below goes through the same three steps, and each step can fail on its
-# own. Adding a model is adding its name to that list: nothing else here is per-module.
+# own. Adding a model is adding its name to that list AND a budget entry to modules.json: nothing
+# else here is per-module.
 #   1. CHECK  — proofs/<Module>.fst is verified by the PINNED F*/Z3 (proofs/fstar-pin.json) with
 #               every SMT query proved three times over varying seeds (--quake 3) and every escape
 #               hatch (assume / admit) reported as an error. -Runs N repeats the whole check N
 #               times from a cold cache — CI asks for 3, which is exit criterion 1 made literal.
 #               A run checks EVERY module before the next run starts, so -Runs still means "N
 #               cold-cache verifications of everything", as it did when there was one model.
+#               Each module's wall clock is MEASURED AGAINST A DECLARED BUDGET (Phase 148):
+#               proofs/modules.json says what each module is expected to cost, every green line
+#               prints the measured seconds beside that budget, and an overshoot is a named COST
+#               warning rather than a failure — prover time varies by machine and by load, so the
+#               budget is a smoke detector and not a gate. -Strict promotes every cost finding to
+#               a red leg, for a session that wants one. A fixed CI job timeout is deliberately
+#               NOT what this is: a timeout says a run died and nothing about which module.
 #   2. EXTRACT — each checked model is extracted to F# and DIFFED against its committed oracle
 #               (proofs/oracle/<Module>.fs). A difference fails: the oracle the suite runs must be
 #               the model the theorem is about, byte for byte. -Extract overwrites the committed
@@ -32,6 +40,7 @@
 param(
     [switch] $Extract,
     [switch] $SkipOracleHost,
+    [switch] $Strict,
     [int]    $Runs = 1
 )
 
@@ -115,7 +124,55 @@ if ($null -eq $z3dir) { Fail "no bundled Z3 under $fstarHome/lib/fstar" }
 if ($z3dir.Name -ne "z3-$($pin.z3)") { Fail "the bundled Z3 is $($z3dir.Name); the pin is z3-$($pin.z3)" }
 Write-Host "==== proofs: $versionLine, bundled $($z3dir.Name), at $fstarHome" -ForegroundColor Cyan
 
-# ---- 2. check, -Runs times from a cold cache -------------------------------------------------------
+# ---- 2. the declared cost budgets ----------------------------------------------------------------
+
+# modules.json says what each module is expected to cost on a cold run. It is a committed declared
+# artefact, so its ABSENCE is a defect and fails here; a mismatch between it and $modules is a cost
+# finding rather than a failure, because a sibling adding a model should not have their leg go red
+# for a budget nobody could have measured yet — the finding names the module and what to do.
+$costFindings = [System.Collections.Generic.List[string]]::new()
+
+function Add-CostFinding([string] $message) {
+    $script:costFindings.Add($message)
+    Write-Host "==== proofs: COST — $message" -ForegroundColor Yellow
+}
+
+$budgetFile = Join-Path $PSScriptRoot 'modules.json'
+if (-not (Test-Path $budgetFile)) {
+    Fail "modules.json is missing — it declares each module's cost budget (see the README's 'Running it')"
+}
+
+# The SHAPE is a failure where a mismatch is a finding, and the difference is whether the file can
+# still be read as a budget at all. An entry with no `budgetSeconds` would otherwise arrive as 0 and
+# every run would be infinitely over it — a flood of findings, and a division by zero rendering the
+# percentage. A declared artefact is held to its shape by the code that consumes it.
+$budgets = @{}
+foreach ($entry in (Get-Content $budgetFile -Raw | ConvertFrom-Json).modules) {
+    $name = $entry.module
+    if ([string]::IsNullOrWhiteSpace($name)) { Fail 'modules.json carries an entry with no module name' }
+    if ($budgets.ContainsKey($name)) { Fail "modules.json declares '$name' twice" }
+
+    $declaredBudget = $entry.budgetSeconds
+    if ($declaredBudget -isnot [int] -and $declaredBudget -isnot [long] -and $declaredBudget -isnot [double]) {
+        Fail "modules.json entry '$name' has no numeric budgetSeconds"
+    }
+    if ([int]$declaredBudget -lt 1) { Fail "modules.json entry '$name' has a budgetSeconds of $declaredBudget — a budget is a positive number of seconds" }
+
+    $budgets[$name] = [int]$declaredBudget
+}
+
+foreach ($module in $modules) {
+    if (-not $budgets.ContainsKey($module)) {
+        Add-CostFinding "$module is checked by the leg and modules.json declares no budget for it — time a cold run, budget it per the file's seeding rule, and cite your phase"
+    }
+}
+foreach ($declared in $budgets.Keys) {
+    if ($modules -notcontains $declared) {
+        Add-CostFinding "modules.json budgets '$declared', which the leg does not check — drop the entry, or add the model to check.ps1's module list"
+    }
+}
+
+# ---- 3. check, -Runs times from a cold cache -------------------------------------------------------
 
 $cache = Join-Path $PSScriptRoot 'obj/cache'
 $out = Join-Path $PSScriptRoot 'obj/out'
@@ -128,11 +185,19 @@ for ($run = 1; $run -le $Runs; $run++) {
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         & $fstar --z3rlimit 40 --quake 3 --report_assumes error --cache_checked_modules --cache_dir $cache "$module.fst"
         if ($LASTEXITCODE -ne 0) { Fail "$module.fst did NOT verify (run $run of $Runs)" $LASTEXITCODE }
-        Write-Host "==== proofs: $module.fst verified — run $run of $Runs, $([int]$sw.Elapsed.TotalSeconds)s, every query 3/3 under --quake" -ForegroundColor Green
+
+        $seconds = [int]$sw.Elapsed.TotalSeconds
+        $budget = if ($budgets.ContainsKey($module)) { $budgets[$module] } else { $null }
+        $cost = if ($null -eq $budget) { "${seconds}s (no budget)" } else { "${seconds}s/${budget}s" }
+        Write-Host "==== proofs: $module.fst verified — run $run of $Runs, $cost, every query 3/3 under --quake" -ForegroundColor Green
+
+        if ($null -ne $budget -and $seconds -gt $budget) {
+            Add-CostFinding "$module.fst took ${seconds}s against its ${budget}s budget on run $run of $Runs — $($seconds - $budget)s over, $([int](100 * $seconds / $budget))% of budget"
+        }
     }
 }
 
-# ---- 3. extract, and hold the committed oracle to the model ---------------------------------------
+# ---- 4. extract, and hold the committed oracle to the model ---------------------------------------
 
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -165,7 +230,7 @@ foreach ($module in $modules) {
     }
 }
 
-# ---- 4. the oracle host --------------------------------------------------------------------------
+# ---- 5. the oracle host --------------------------------------------------------------------------
 
 if (-not $SkipOracleHost) {
     Push-Location (Join-Path $PSScriptRoot '..')
@@ -180,6 +245,22 @@ if (-not $SkipOracleHost) {
         if ($LASTEXITCODE -ne 0) { Fail "the claims ladder (Proofs.Ladder) is RED — ../proofs.json and this tree disagree; the failing row and clause are named above" $LASTEXITCODE }
     }
     finally { Pop-Location }
+}
+
+# ---- 6. the cost verdict ---------------------------------------------------------------------------
+#
+# Last, so that every finding is in hand and none of them can stop the evidence being produced: a
+# leg that went red on the clock before running the differential would hide a real disagreement
+# behind a slow afternoon.
+
+if ($costFindings.Count -gt 0) {
+    Write-Host "==== proofs: $($costFindings.Count) cost finding(s) against the budgets in modules.json:" -ForegroundColor Yellow
+    foreach ($f in $costFindings) { Write-Host "     $f" -ForegroundColor Yellow }
+    Write-Host '     A budget is a smoke detector, not a gate: prover time varies by machine and by load,' -ForegroundColor Yellow
+    Write-Host '     so one overshoot on a busy machine is noise and a persistent one is a regression.' -ForegroundColor Yellow
+    Write-Host '     Bumping a budget is deliberate: new budgetSeconds + measuredSeconds + your phase in' -ForegroundColor Yellow
+    Write-Host '     modules.json, and a note saying what grew. See the README, "Running it".' -ForegroundColor Yellow
+    if ($Strict) { Fail "the cost budget is exceeded and -Strict is on ($($costFindings.Count) finding(s) above)" }
 }
 
 Write-Host '==== proofs: green' -ForegroundColor Green

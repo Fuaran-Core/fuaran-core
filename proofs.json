@@ -152,10 +152,11 @@
     {
       "id": "proof-leg",
       "level": "policy",
-      "claim": "Which prover is pinned, how many cold-cache runs a check is, and that a model edited without re-extracting fails the leg — the reproducibility posture the proved rows above are only as good as. Policy, not algebra: no theorem addresses it.",
+      "claim": "Which prover is pinned, how many cold-cache runs a check is, and that a model edited without re-extracting fails the leg — the reproducibility posture the proved rows above are only as good as. Policy, not algebra: no theorem addresses it. Since Phase 148 the posture also says what the leg COSTS: each module's cold-run budget is declared in proofs/modules.json, measured on every run and printed beside the measurement, with an overshoot named as a warning — prover time varies by machine and by load, so it is a smoke detector rather than a gate — and `check.ps1 -Strict` for a session that wants one red. The numbers live there rather than in a row here, because a wall-clock budget is a claim at none of this ladder's four levels and is per module where a row is per claim.",
       "phase": "fuaran-core#131",
       "evidence": {
-        "document": "proofs/README.md"
+        "document": "proofs/README.md",
+        "budgets": "proofs/modules.json"
       }
     },
     {
