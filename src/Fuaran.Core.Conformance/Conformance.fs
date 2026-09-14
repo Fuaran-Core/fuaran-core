@@ -6893,8 +6893,11 @@ module Conformance =
         let reasonOf (label: string) (i: int) (b: ChainBreak option) : ChainBreakReason option =
             match b with
             | Some br ->
+                // Qualified since Phase 147: `DagBreakReason` declares an `Unrecognised` too, and
+                // both are in scope here. The .NET compiler resolves this from the scrutinee's type;
+                // FABLE does not, and reported it as an error on a tree .NET had built clean.
                 (match br.Reason with
-                 | Unrecognised s when unnamed.IsNone ->
+                 | ChainBreakReason.Unrecognised s when unnamed.IsNone ->
                      unnamed <-
                          Some(
                              sprintf
@@ -7032,7 +7035,7 @@ module Conformance =
             let alienText = "a reason this library does not mint #" + string alien
 
             match ChainBreakReason.ofString alienText with
-            | Unrecognised s when s = alienText -> ()
+            | ChainBreakReason.Unrecognised s when s = alienText -> ()
             | other ->
                 if verbatim.IsNone then
                     verbatim <-
