@@ -247,6 +247,77 @@
       "evidence": {
         "assumption": "an operation pair in which either side is a non-trivial nested batch"
       }
+    },
+    {
+      "id": "chain-intact-verifies",
+      "level": "proved",
+      "claim": "A content-addressed DAG grown from nothing by append and merge alone, each naming parents the DAG already held, has no integrity break; and a linear hash chain grown from genesis by append alone verifies. The id half is free by construction, but the parent half is not: append does not check that the parent it is handed names a node the DAG holds, so every-parent-present is a precondition on how a DAG was grown rather than a property of the constructor, and the theorem carries it as one.",
+      "phase": "fuaran-core#136",
+      "evidence": {
+        "theorem": "intact_verifies",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "chain-tamper-detected",
+      "level": "proved",
+      "claim": "Changing one DAG node's op, actor or parent multiset while leaving its address as it was, in a DAG whose node under that id was intact, is reported as a break; and the same for one linear record's sequence, actor or op with its two hash fields left alone. Both are corollaries of a characterisation of the walker itself: the walk finds nothing exactly when every key is its content hash and every named parent is present, and exactly when every record's sequence, prev-link and recomputed hash agree.",
+      "phase": "fuaran-core#136",
+      "evidence": {
+        "theorem": "tamper_detected",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "chain-unconditional-break-classes",
+      "level": "proved",
+      "claim": "Three break classes are proved under NO hypothesis at all, which is the sharpest thing the mechanisation says: a linear record renumbered, a linear record re-pointed at a different predecessor, and a DAG node another node names being absent. Those three checks compare stored data against the walk's own running values or against the key set, and never consult the hash — so they are detectable independently of the hash's strength. Only the recomputed-hash check spends the cryptographic premise.",
+      "phase": "fuaran-core#136",
+      "evidence": {
+        "theorem": "chain_tamper_prev_detected",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "merge-id-parent-order-independent",
+      "level": "proved",
+      "claim": "merge(A,B) and merge(B,A) converge to one content id, because the parents are sorted before hashing. Needs only that the comparison is a total order and nothing about the hash. Its converse is proved too and is a boundary rather than a result: re-ordering a node's parents is NOT a detectable tamper, and is not meant to be.",
+      "phase": "fuaran-core#136",
+      "evidence": {
+        "theorem": "merge_id_parent_order_independent",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "chain-walker-differential",
+      "level": "tested",
+      "claim": "The extracted model agrees with Dag.firstBreak and OpStream.firstChainBreak over generated DAGs and chains and every single-node tamper of each, comparing the verdict, the location, WHICH check failed and the expected and got values at once — and mints production's own content ids node by node, which is checkable only through append because nodeHash is private. Two go-red cases require a model handed a different hash to disagree, and a third runs one tamper under two hashes: found under the real one, INVISIBLE under a deliberately non-injective one, to production and to the model alike. Every run asserts that detection actually happened, because two walkers that both say intact agree perfectly and certify nothing.",
+      "phase": "fuaran-core#136",
+      "evidence": {
+        "family": "Proofs.Oracle"
+      }
+    },
+    {
+      "id": "content-id-determines-content",
+      "level": "assumed",
+      "claim": "The one cryptographic premise, and the whole of what tamper detection rests on: two contents that hash to one id are the same content. It is an explicit lemma-valued PARAMETER of the theorems that need it rather than an assume, so which results depend on it is visible in their signatures. It is stated MODULO THE PARENT SORT, which is the strongest true form. And it bundles three things the model does not decompose: the hash injective on the pre-images that occur, the two splices in the pre-image unambiguous (no comma inside a parent id, no second place the pipe could split the actor encoding from the op encoding), and the op codec injective.",
+      "phase": "fuaran-core#136",
+      "evidence": {
+        "assumption": "Dag.nodeHash and the chain payload hash are injective on the pre-images that occur"
+      }
+    },
+    {
+      "id": "chain-walk-order-is-productions",
+      "level": "assumed",
+      "claim": "That the order the model walks is the order production walks. Production enumerates Map.toList, which is ascending key order; the model walks the list it is given, and the differential hands it exactly that list. The VERDICT is order-independent by construction — a break exists or it does not — so only which break is reported first depends on this, and nothing here is said about F#'s Map enumeration.",
+      "phase": "fuaran-core#136",
+      "evidence": {
+        "assumption": "the entry list the model is handed is Map.toList's own order"
+      }
     }
   ]
 }

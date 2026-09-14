@@ -1,9 +1,13 @@
-# proofs/ — the F\* model of the DAG fold
+# proofs/ — the F\* models of Fuaran.Core's kernel algebras
 
-**Status: GO** (Phase 131, 2026-09-12). All three exit criteria met — the confluence proof is
-reproducible on the pinned prover, the extracted model agrees with production over every lane set
-the differential host draws, and the model reads beside the F# in one sitting. The decoder-totality
-theorem is the next phase, in F\*.
+**Status: GO** (Phase 131, 2026-09-12; the header last brought level with the body 2026-09-14).
+Phase 131's three exit criteria were met and remain met — the confluence proof is reproducible on
+the pinned prover, the extracted model agrees with production over every lane set the differential
+host draws, and the model reads beside the F# in one sitting — and four theorems have shipped
+beside it since. **Shipped: fold confluence (131, with its hypothesis corrected by 132 and the DAG
+beneath it proved by 134), decoder totality (135), independence soundness for the tree algebra
+(133), and chain integrity (136).** Each carries its own claims ladder in its own section below;
+the "Next" section at the foot is the live list.
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -19,6 +23,8 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. |
 | `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. |
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under one named injective-hash premise. Shares nothing with the models above but `oracle/Prims.fs`. |
+| `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -261,7 +267,9 @@ What may be said, and at what strength, per the attested-stack programme's §6:
 Theorem 1 — decoder totality — carries its own ladder of the same shape, in its own section below;
 what is said at each level there is said about the decode combinators and about nothing else.
 Theorem 2 — independence soundness for the tree algebra — carries a third, in the section after it;
-what is said there is said about `SkeletonOp` and about no other domain's witness.
+what is said there is said about `SkeletonOp` and about no other domain's witness. Theorem 3 —
+chain integrity — carries a fourth, and what is said there is said about the two integrity walkers
+and about nothing else; in particular it says nothing about signatures.
 
 ## Exit criteria, with evidence
 
@@ -444,8 +452,8 @@ reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have c
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** On the model: the four results above, for every input,
-   under no hypothesis at all — unlike the fold theorem, which rests on `independence_sound`, this
-   one assumes nothing about a domain. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   under no hypothesis at all — unlike the fold theorem, which rests on `independence_diamond`,
+   this one assumes nothing about a domain. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Wire.Decode` over the pools above,
    on class, value and message. Agreement is over those pools, never over all inputs.
@@ -626,6 +634,184 @@ before the fourth model is written.
    Nothing about `applyContained`, `invert`, `normalize` or `Diff`. Nothing about a *tighter*
    footprint than the pinned one.
 
+## Theorem 3 — chain integrity (Phase 136)
+
+_(The numbering in these headings is this directory's own running count. The attested-stack
+programme numbers its theorems separately, and its theorem 3 — interpreter budget monotonicity — is
+`fuaran-program`'s, not this one. Only "theorem 1" means the same thing in both.)_
+
+Every ledger in the estate rests on two functions: `Dag.firstBreak` / `verifyDag` over the
+content-addressed DAG, and `OpStream.firstChainBreak` / `verifyChain` over the linear chain. The
+claim they carry — that any tampered node is found — is what the attestation story is built on, and
+until this phase it was certified by go-red tests alone. `Chain.fst` models both walkers clause for
+clause and proves it, and in doing so states in the open the one assumption it rests on.
+
+Four things are proved, two per shape, each a corollary of a **characterisation** of the walker it
+is about (`break_none_iff`, `chain_break_none_iff`: the walk finds nothing exactly when every
+entry's key is its content hash and every named parent is present, and exactly when every record's
+sequence, prev-link and recomputed hash agree). Stating the characterisation first is what keeps the
+theorems statements about the walker rather than about a re-description of it:
+
+- **`intact_verifies`.** A DAG grown from nothing by `append` and `merge` alone has no break. The id
+  half is free — `append` mints the id from the content it is storing — but the PARENT half is not,
+  and that is half the value of the theorem: `Dag.append` does not check that `parentId` names a
+  node the DAG holds, it takes the string and stores it, so "every parent is present" is a
+  precondition on how a DAG was GROWN rather than a property of the constructor. It appears in the
+  theorem as `steps_well_parented`, checked against the DAG as it stood when each step ran.
+- **`intact_chain_verifies`.** A chain grown from genesis by `append` alone verifies.
+- **`tamper_detected`** (with `tamper_op_detected` / `tamper_actor_detected` /
+  `tamper_parents_detected` beside it). Change one node's op, actor or parent multiset while
+  leaving its ADDRESS as it was, in a DAG whose node under that id was intact, and the walk reports
+  a break. `dangling_parent_detected` covers the other break class — a node another node names,
+  deleted — **under no hypothesis at all**, because the parent check never consults the hash.
+- **`chain_tamper_detected`** (and `chain_tamper_detected_verify`, the same statement at the entry
+  point production's callers use). Change one record's sequence, actor or op and leave its two hash
+  fields alone, in a chain that was intact, and the walk reports a break.
+
+### The one assumption, and the three things worth knowing about it
+
+The premise is that **the content id determines the content**: two contents that hash to one id are
+the same content. That is the collision-resistance assumption every content-addressed store makes;
+what is unusual is only that it is written down beside the code that needs it. It is an explicit
+lemma-valued **parameter** of the theorems that use it (`node_injective`, `rec_injective`), never an
+`assume` — `--report_assumes error` is on and the module carries no `assume`, no `admit`, no
+`assume val`.
+
+**1. It is stated MODULO THE PARENT SORT, and that is the strongest form that is true.** Production
+sorts a node's parents (Ordinal) before hashing, so `merge(A,B)` and `merge(B,A)` converge to one
+content id — the Phase 64.1 property without which two hosts reconciling the same pair mint
+different ids. The premise therefore concludes "the same actor, the same op, and the same parents UP
+TO ORDER". The consequence is stated as a theorem rather than left to prose:
+`parent_reorder_undetected` — **re-ordering a node's parents is not a detectable tamper.** It is not
+meant to be. `merge_id_parent_order_independent` proves what the sort buys, and needs only that the
+comparison is a total order (both halves hold of `String.CompareOrdinal(a,b) <= 0`: any two strings
+compare, and two that compare both ways are equal). Production has at most two parents — `append`
+gives none or one, `merge` exactly two — so the two-parent case is the general one.
+
+**2. It bundles more than the hash, and the model says so rather than pretending otherwise.**
+`nodeHash` is `hashFn (String.concat "," sortedParents) (Actor.encode actor + "|" + encode op)`, so
+"the id determines the content" needs three things at once: the hash injective on the pre-images
+that occur, the two SPLICES unambiguous (no comma inside a parent id; no second place the `|` could
+split the actor encoding from the op encoding), and the op codec injective. The model does not
+decompose the premise into them, because string concatenation is opaque to it and an argument it
+cannot check is better stated than half-mechanised — the same posture Phase 134 took with the
+topological order. The splice condition is not academic: the differential's own work-plan codec
+encodes an op as `"A|" + id + "|" + title`, so the composite pre-image contains several `|`
+characters, and what makes it unambiguous is that `Actor.encode` emits a JSON object that never
+contains one. That is a property of the encodings that OCCUR, which is exactly what the premise
+says and exactly what it does not prove.
+
+**3. The chain's SEQUENCE and PREV-LINK breaks need none of it.**
+`chain_tamper_seq_detected` and `chain_tamper_prev_detected` are proved **under no hypothesis at
+all**: those two checks compare stored data against the walk's own running values and never consult
+the hash. Only the third check — the record's recomputed hash — spends the premise. That split is
+the sharpest thing the mechanisation says about the linear walker, and it is why a re-ordered or
+spliced chain is detectable independently of the hash's strength.
+
+### What the corpus covers
+
+The differential host runs the extracted model beside BOTH production walkers, rendering each
+verdict into one string so the outcome class, the node or index it is reported at, WHICH check
+failed, and the expected and got values are compared at once — a model agreeing on
+broken-vs-intact alone would not notice a walker naming the wrong check.
+
+| Pool | What is asked | Both classes exercised |
+|---|---|---|
+| the reference tree witness | the DAG walker on 60 generated 3-lane DAGs and every single-node tamper of each (op, actor, re-parent, dropped parent) | yes (asserted) |
+| the work-plan domain | the same, 60 DAGs | yes (asserted) |
+| the work-plan domain | the LINEAR walker on 80 generated chains and every single-record tamper (op, actor, seq, prevHash, dropped record) | yes (asserted) |
+| the reference tree witness | the same, 60 chains | yes (asserted) |
+| the wire corpus's `dag/` fixtures | their SHAPES — see below — rebuilt through production's own `append`/`merge`, intact and under every tamper | yes (asserted) |
+
+`Dag.nodeHash` is private, so the only way to reach it is through `Dag.append`: the ids the model
+recomputes are the ones production minted, and a model whose `isort` and `join_comma` were not
+`List.sortWith CompareOrdinal` and `String.concat ","` would report a break on an INTACT DAG. That
+is what makes the intact runs evidence rather than a formality, and a further case asserts the same
+thing directly, node by node, so a divergence says which half moved. Every run carries a vacuity
+guard that DETECTION actually happened: two walkers that both say "intact" agree perfectly and
+certify nothing.
+
+**The `dag/` corpus family is a source of SHAPES, not of addresses, and the reason is recorded as an
+assertion rather than a sentence.** That family is the UI host's DAG-RECORD wire format
+(`kind: "dag-record-round-trip"`): its `hash` members are 64 characters, minted by that host's own
+pre-image under SHA-256 over an envelope carrying members Core's `DagNode` does not have, where
+Core's default `HashFn` is FNV-1a and emits 8. Handing those four records to `Dag.firstBreak` would
+report four content-id mismatches — a true answer to the wrong question, and a "differential" that
+agreed with it would certify nothing. What the family DOES supply, and what the generated pools
+cannot, are the shapes: a genesis node, a linear step, both actor kinds, and a **two-parent MERGE**.
+Those are rebuilt through production's own `Dag.append` / `Dag.merge`, so the ids under test are
+Core's; the size fact is asserted, so the boundary goes red if it moves.
+
+The **go-red cases** are three, and the third is the one that earns the premise its place.
+Two are the ordinary teeth: a model handed a DIFFERENT hash (the same function with its arguments
+swapped) must report a break where production sees none, on the DAG and on the chain, so a green
+report is known to be a comparison that can lose. The third runs the SAME tamper under two hashes.
+Under the real one it is found, by both walkers. Under a deliberately non-injective one — a hash
+that folds the parents and the actor and DROPS the op, so two nodes differing only in their op mint
+one id — it is **invisible**, to production and to the model alike. That is the named premise shown
+to be load-bearing rather than decorative, and it is the honest reading of what "tamper detection is
+proved" means here.
+
+The **proof** was falsified the same way before it was trusted, on scratch copies: dropping the
+total-order hypothesis reddens `merge_id_parent_order_independent`; removing the injectivity
+appeal reddens `tamper_changes_the_id`; making the DAG walk skip its content-id check reddens
+`break_none_iff`; dropping "the stored hash is unchanged" from the tamper premise reddens
+`chain_tamper_detected`; and hashing the UNSORTED parents reddens `parent_reorder_undetected`. Each
+landed on the lemma that should have caught it.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** On the model: both walkers characterised; a DAG grown
+   by well-parented `append`/`merge` and a chain grown by `append` have no break; a single-node
+   content tamper that leaves the address alone is found — the DAG's under the injectivity premise,
+   the chain's sequence and prev-link arms under nothing at all, and the DAG's missing-parent class
+   under nothing at all. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
+   `--report_assumes error` on, no `assume`, no `admit`.
+2. **Differentially tested.** The extracted model agrees with `Dag.firstBreak` and
+   `OpStream.firstChainBreak` over the pools above, on the verdict, the location, the check that
+   failed and the expected/got values — and mints production's own content ids node by node.
+   Agreement is over those pools, never over all inputs.
+3. **Assumed, and stated as such.**
+   - **The hash is injective on the pre-images that occur** — the one cryptographic premise, and
+     the whole of what "tamper detection" rests on here. It bundles the hash's own injectivity, the
+     unambiguity of the two splices in the pre-image, and the injectivity of the op codec; the model
+     states the composite and does not decompose it (point 2 above). It is a PARAMETER of the
+     theorems that need it, so which results depend on it is visible in their signatures rather than
+     inferable from prose.
+   - **The comparison is a total order.** `merge_id_parent_order_independent` asks for it and
+     nothing else does; `String.CompareOrdinal(a,b) <= 0` satisfies it.
+   - **The walk order is production's own.** The model walks its entry list in the order it is
+     given, where production walks `Map.toList` (ascending key). The differential hands the model
+     exactly the list `Map.toList` produced, so the order under test is production's — but the model
+     does not derive it, and nothing here says anything about F#'s `Map` enumeration. Note the
+     *verdict* is order-independent by construction (a break exists or it does not); only WHICH
+     break is reported first depends on it.
+   - **A sequence number is a Peano numeral.** F#'s `Seq` is an `int`; the extraction carries no
+     integers (finding 2), so the model spells the walk index and the stored sequence as zero and
+     successor. Every non-negative sequence is representable and a tampered one is representable;
+     a NEGATIVE stored sequence is outside what the bridge can carry, so the generated tampers stay
+     non-negative. The walker's own check is equality, which is what the numeral supports.
+   - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
+     the other three theorems.
+4. **Not claimed.**
+   - **A REWRITE.** A tamper that also re-mints the tampered node's id and then every descendant's
+     produces a structure that is intact by construction, and no walker will ever find it. What
+     catches it is a signed head, which is a composition this theorem says nothing about — it lives
+     with the signing composition, on the coordination plane's own side.
+   - **Anything about signatures.** `Attestation` and `IAttestationSink` are outside the model.
+   - **Re-ordering a node's parents.** Not merely unproved: proved NOT detected
+     (`parent_reorder_undetected`), because the pre-image is sorted. It is the price of the
+     convergence `merge_id_parent_order_independent` buys, and it is stated as a theorem so a reader
+     meets it rather than inferring it.
+   - **Cycles.** A DAG whose ids all recompute cannot carry one — a node's id folds its parents' —
+     but that is an argument, not a theorem here, and `Dag.isAcyclic` remains a separate check on a
+     structurally-loaded DAG.
+   - **The `StreamConfig` migration path.** `legacyActorConfig` and `rehash` are outside the model;
+     the payload's shape is a parameter, so a second config is a second instantiation rather than a
+     second model, and nothing here is said about the migration between them.
+   - **`Json.parse`, `Dag.fromJsonl` and the JSONL scanners.** Loading is not verifying — that is
+     `fromJsonlVerified`'s whole point — and the model begins at a structure that already exists.
+
 ## Next
 
 **`Json.parse` itself** — the boundary theorem 1 names. Totality of the recursive-descent parser
@@ -640,5 +826,13 @@ closure respecting each node's single parent is forced to be that spine, and tha
 drain produces such an enumeration. The first is a list argument and the second is the only place
 production's tie-break would have to be modelled at all.
 
-Theorem 3, interpreter budget monotonicity, is `fuaran-program`'s and follows the same shape now
-that the prover is settled.
+**The signing composition** — the successor Phase 136 names and deliberately does not take.
+Chain integrity says a tampered node is found; it says nothing about a REWRITE, which re-mints
+every descendant's id and produces a structure no walker can fault. What closes that is a signed
+head, and the composition is the coordination plane's own — an attestation over a head, plus this
+theorem, is what makes "the history is the one that was signed" a claim rather than a hope. The
+seam is here (`Attestation` / `IAttestationSink`); the theorem is not.
+
+Interpreter budget monotonicity — the attested-stack programme's theorem 3, which is not this
+directory's numbering — is `fuaran-program`'s and follows the same shape now that the prover is
+settled.

@@ -1410,6 +1410,483 @@ let private modelDiamondBreaks
                     | _ -> ()
 
     breaks, met
+// ---------------------------------------------------------------------------
+//  Phase 136 — the two INTEGRITY WALKERS as a fourth oracle.
+//
+//  `proofs/Chain.fst` models `Dag.firstBreak` over the content-addressed DAG and
+//  `OpStream.firstChainBreak` over the linear chain, clause for clause, and proves that a
+//  single-node tamper is found — under ONE named premise: the content id determines the content.
+//  This section runs the extracted model beside BOTH production walkers, over DAGs and chains
+//  production itself built and over generated single-node tampers, comparing the verdicts as
+//  strings so the outcome class, the node or index it is reported at, WHICH check failed, and the
+//  expected/got values are all compared at once.
+//
+//  `Dag.nodeHash` is private, so the only way to reach it is through `Dag.append` — which is what
+//  makes the intact runs evidence rather than a formality. A model whose `isort` and `join_comma`
+//  were not production's `List.sortWith CompareOrdinal` and `String.concat ","` would recompute a
+//  different id for every node and report a break on an INTACT DAG. `mintsProductionIds` below
+//  asserts the same thing directly, node by node, so a divergence says which half moved.
+//
+//  ON THE CORPUS. The wire corpus's `dag/` family is the UI host's DAG-RECORD WIRE FORMAT
+//  (`kind: "dag-record-round-trip"`), not a pool of Core content ids: its `hash` members are
+//  64 characters, minted by that host's own pre-image under SHA-256 over an envelope carrying
+//  members Core's `DagNode` does not have, where Core's default `HashFn` is FNV-1a and emits 8.
+//  Handing those four records to `Dag.firstBreak` would report four content-id mismatches — a true
+//  answer to the wrong question. What the family DOES supply, and what the generated pools cannot,
+//  are the SHAPES: a genesis node, a linear step, a two-parent MERGE, and both actor kinds. Those
+//  are rebuilt below through production's own `Dag.append` / `Dag.merge`, and the size fact is
+//  asserted so the boundary goes red if it ever moves.
+// ---------------------------------------------------------------------------
+
+/// The model's `le`: F#'s `List.sortWith (fun a b -> String.CompareOrdinal(a, b))` as a predicate.
+let private ordinalLe (a: string) (b: string) : bool = System.String.CompareOrdinal(a, b) <= 0
+
+/// What a tamper puts in a work-plan op's place: a DIFFERENT op, on every case, so no tamper is
+/// silently a no-op. The tampers below skip any that lands back on the op it replaced.
+let private tamperedPlanOp (op: PlanOp) : PlanOp =
+    match op with
+    | AddItem(i, t) -> AddItem(i, t + "!")
+    | Retitle(i, t) -> Retitle(i, t + "!")
+    | SetShipped i -> Retitle(i, "tampered")
+    | AddDep(i, d) -> AddDep(i, d + "!")
+
+/// A production `Dag.T` as the model reads it — `Map.toList`'s own order, which is the order
+/// `Dag.firstBreak` walks; the map KEY beside the node, because production compares the key and
+/// never the node's own `Id` field; and the actor as the string `Actor.encode` produces, which is
+/// the only thing the hash pre-image ever sees of it.
+let private toChainEntries (dag: Dag.T<'Op>) : Chain.entry<'Op> list =
+    dag.Nodes
+    |> Map.toList
+    |> List.map (fun (k, n) ->
+        { Chain.ekey = k
+          Chain.enode =
+            { Chain.dparents = n.Parents
+              Chain.dactor = Actor.encode n.Actor
+              Chain.dop = n.Op } })
+
+let private renderDagVerdict (b: DagBreak option) : string =
+    match b with
+    | None -> "intact"
+    | Some b -> sprintf "break at %s | %s | expected=%s | got=%s" b.NodeId b.Reason b.Expected b.Got
+
+let private renderModelDagVerdict (b: Chain.found<Chain.dbreak>) : string =
+    match b with
+    | Chain.Missing -> "intact"
+    | Chain.Found b -> sprintf "break at %s | %s | expected=%s | got=%s" b.bnode b.breason b.bexpected b.bgot
+
+/// Both walkers on the same DAG. The two hash functions are separate arguments only so the go-red
+/// case can hand the MODEL one production is not using; every real run passes the same one twice.
+let private dagVerdicts
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (dag: Dag.T<'Op>)
+    : string * string =
+    renderDagVerdict (Dag.firstBreak prodHash w dag),
+    renderModelDagVerdict (Chain.first_break modelHash w.Encode ordinalLe (toChainEntries dag))
+
+/// The DAG `FoldConfluence.foldOnce` builds, under a CHOSEN `HashFn` — one shared base node and
+/// one chain per lane. `productionDag` above pins the default hash; the premise case below needs
+/// a deliberately non-injective one, and nothing else about the construction may move with it.
+let private dagUnder
+    (hashFn: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (lanes: 'Op list list)
+    : Dag.T<'Op> =
+    let baseId, d0 = Dag.append hashFn w (Human "base") baseOp "" Dag.empty
+    let mutable d = d0
+
+    for (i, ops) in List.indexed lanes do
+        let actor = Human("lane-" + string i)
+        let mutable h = baseId
+
+        for op in ops do
+            let id, d' = Dag.append hashFn w actor op h d
+            h <- id
+            d <- d'
+
+    d
+
+/// Every node's id, recomputed by the MODEL, against the one production minted — the pre-image
+/// itself, checked directly rather than inferred from the walker's verdict.
+let private mintsProductionIds
+    (hashFn: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (dag: Dag.T<'Op>)
+    : string option =
+    dag.Nodes
+    |> Map.toList
+    |> List.tryPick (fun (k, n) ->
+        let minted =
+            Chain.node_hash hashFn w.Encode ordinalLe n.Parents (Actor.encode n.Actor) n.Op
+
+        if minted <> k then
+            Some(sprintf "the model mints %s where production minted %s (op %s)" minted k (w.Encode n.Op))
+        else
+            None)
+
+/// Every single-node tamper of one DAG, as (what was done, the tampered DAG). A TAMPER moves the
+/// node's content and leaves its ADDRESS — the map key — exactly as it was; that is the threat the
+/// content id exists to catch, and it is precisely not a rewrite.
+///
+/// The fourth class is the other break: a node another node NAMES, deleted. It has to be a
+/// deletion rather than a re-pointed parent, because a re-pointed parent changes the pre-image and
+/// production reports the content-id mismatch first — so "missing parent" is unreachable by
+/// tampering a node's own fields.
+let private dagTampers (otherOp: 'Op -> 'Op) (dag: Dag.T<'Op>) : (string * Dag.T<'Op>) list =
+    let nodes = dag.Nodes |> Map.toList
+
+    [ for (k, n) in nodes do
+          let o' = otherOp n.Op
+
+          if o' <> n.Op then
+              yield
+                  sprintf "op@%s" k,
+                  { dag with
+                      Nodes = Map.add k { n with Op = o' } dag.Nodes }
+
+          let a' = Human "tamperer"
+
+          if a' <> n.Actor then
+              yield
+                  sprintf "actor@%s" k,
+                  { dag with
+                      Nodes = Map.add k { n with Actor = a' } dag.Nodes }
+
+          match
+              nodes
+              |> List.tryPick (fun (p, _) -> if p <> k && n.Parents <> [ p ] then Some p else None)
+          with
+          | Some p ->
+              yield
+                  sprintf "reparent@%s" k,
+                  { dag with
+                      Nodes = Map.add k { n with Parents = [ p ] } dag.Nodes }
+          | None -> ()
+
+          for p in n.Parents do
+              yield
+                  sprintf "drop-parent@%s" p,
+                  { dag with
+                      Nodes = Map.remove p dag.Nodes } ]
+
+type private WalkerTally =
+    {
+        Failure: string option
+        /// Intact structures compared — a run that never met one has not tested the agreeing case.
+        Intact: int
+        /// Tampers compared, and how many production actually DETECTED. A run whose tampers were all
+        /// invisible has compared two walkers that both said "intact" and measured nothing.
+        Tampers: int
+        Detected: int
+    }
+
+let private emptyWalkerTally =
+    { Failure = None
+      Intact = 0
+      Tampers = 0
+      Detected = 0 }
+
+/// Run the DAG walker differential over `iterations` generated lane sets from one pool.
+let private dagDifferential
+    (label: string)
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (otherOp: 'Op -> 'Op)
+    (gen: LaneGen<'Op, 'State>)
+    (laneCount: int)
+    (seed: int)
+    (iterations: int)
+    : WalkerTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable t = emptyWalkerTally
+
+    let note (why: string) =
+        if t.Failure.IsNone then
+            t <- { t with Failure = Some why }
+
+    for _ in 1..iterations do
+        let lanes, r' = gen.Lanes laneCount rng
+        rng <- r'
+        let dag = dagUnder prodHash w gen.BaseOp lanes
+
+        match mintsProductionIds prodHash w dag with
+        | Some why -> note (sprintf "%s: seed=%d %s" label seed why)
+        | None -> ()
+
+        let compare (what: string) (d: Dag.T<'Op>) : string =
+            let p, m = dagVerdicts prodHash modelHash w d
+
+            if p <> m then
+                note (
+                    sprintf
+                        "%s: seed=%d tamper=%s\n%s\n  production: %s\n  model:      %s"
+                        label
+                        seed
+                        what
+                        (renderLanes w.Encode lanes)
+                        p
+                        m
+                )
+
+            p
+
+        if compare "none" dag = "intact" then
+            t <- { t with Intact = t.Intact + 1 }
+
+        for (what, tampered) in dagTampers otherOp dag do
+            let p = compare what tampered
+            t <- { t with Tampers = t.Tampers + 1 }
+
+            if p <> "intact" then
+                t <- { t with Detected = t.Detected + 1 }
+
+    t
+
+// ---- the linear chain ----
+
+let rec private posOfInt (i: int) : Chain.pos =
+    if i <= 0 then
+        Chain.PZero
+    else
+        Chain.PSucc(posOfInt (i - 1))
+
+let rec private intOfPos (p: Chain.pos) : int =
+    match p with
+    | Chain.PZero -> 0
+    | Chain.PSucc m -> 1 + intOfPos m
+
+/// F#'s `string (seq: int)`, which the model takes as a parameter for the same reason it takes the
+/// hash: rendering an integer is not something a model of a hash chain owns.
+let private showPos (p: Chain.pos) : string = string (intOfPos p)
+
+/// Production's records as the model reads them. `Seq` is a Peano numeral here (the extraction
+/// carries no integers — `proofs/README.md`, finding 2), so a tampered NEGATIVE sequence is
+/// outside what this bridge can carry and the tampers below stay non-negative.
+let private toChainRecords (rs: OpRecord<'Op> list) : Chain.record<'Op> list =
+    rs
+    |> List.map (fun r ->
+        { Chain.rseq = posOfInt r.Seq
+          Chain.ractor = Actor.encode r.Actor
+          Chain.rop = r.Op
+          Chain.rprev = r.PrevHash
+          Chain.rhash = r.Hash })
+
+let private renderChainVerdict (b: ChainBreak option) : string =
+    match b with
+    | None -> "intact"
+    | Some b ->
+        sprintf "break at %d | %s | expected=%s | got=%s" b.Index (ChainBreakReason.toString b.Reason) b.Expected b.Got
+
+let private renderModelChainVerdict (b: Chain.found<Chain.cbreak>) : string =
+    match b with
+    | Chain.Missing -> "intact"
+    | Chain.Found b ->
+        sprintf "break at %d | %s | expected=%s | got=%s" (intOfPos b.cindex) b.creason b.cexpected b.cgot
+
+let private chainVerdicts
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (rs: OpRecord<'Op> list)
+    : string * string =
+    renderChainVerdict (OpStream.firstChainBreak prodHash w rs),
+    renderModelChainVerdict (Chain.first_chain_break modelHash showPos w.Encode "" (toChainRecords rs))
+
+/// A chain production built by `OpStream.append`, skipping the ops the domain reducer rejects —
+/// `append` chains nothing on a rejection, so the chain is the shape of the accepted run.
+let private chainUnder
+    (hashFn: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (state0: 'State)
+    (actor: Actor)
+    (ops: 'Op list)
+    : OpRecord<'Op> list =
+    let mutable st = state0
+    let mutable rs: OpRecord<'Op> list = OpStream.empty
+
+    for op in ops do
+        match OpStream.append hashFn w actor op st rs with
+        | Ok(st', rs') ->
+            st <- st'
+            rs <- rs'
+        | Error _ -> ()
+
+    rs
+
+/// Every single-record tamper of one chain, in the four classes the walker's three checks cover:
+/// the op and the actor (found by the recomputed hash), the sequence, the prev-link, and a
+/// DROPPED record — truncation, which the sequence check finds.
+let private chainTampers (otherOp: 'Op -> 'Op) (rs: OpRecord<'Op> list) : (string * OpRecord<'Op> list) list =
+    let n = List.length rs
+
+    [ for i in 0 .. n - 1 do
+          let r = List.item i rs
+
+          let put (r': OpRecord<'Op>) =
+              rs |> List.mapi (fun j x -> if j = i then r' else x)
+
+          let o' = otherOp r.Op
+
+          if o' <> r.Op then
+              yield sprintf "op@%d" i, put { r with Op = o' }
+
+          let a' = Human "tamperer"
+
+          if a' <> r.Actor then
+              yield sprintf "actor@%d" i, put { r with Actor = a' }
+
+          yield sprintf "seq@%d" i, put { r with Seq = r.Seq + 1 }
+          yield sprintf "prev@%d" i, put { r with PrevHash = "deadbeef" }
+
+          if n > 1 then
+              yield sprintf "drop@%d" i, (rs |> List.indexed |> List.filter (fun (j, _) -> j <> i) |> List.map snd) ]
+
+let private chainDifferential
+    (label: string)
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (otherOp: 'Op -> 'Op)
+    (gen: LaneGen<'Op, 'State>)
+    (seed: int)
+    (iterations: int)
+    : WalkerTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable t = emptyWalkerTally
+
+    let note (why: string) =
+        if t.Failure.IsNone then
+            t <- { t with Failure = Some why }
+
+    for _ in 1..iterations do
+        // One lane's ops, appended as one writer's linear stream.
+        let lanes, r' = gen.Lanes 2 rng
+        rng <- r'
+        let ops = List.concat lanes
+        let rs = chainUnder prodHash w gen.State0 (Human "writer") ops
+
+        let compare (what: string) (records: OpRecord<'Op> list) : string =
+            let p, m = chainVerdicts prodHash modelHash w records
+
+            if p <> m then
+                note (
+                    sprintf
+                        "%s: seed=%d tamper=%s ops=[%s]\n  production: %s\n  model:      %s"
+                        label
+                        seed
+                        what
+                        (ops |> List.map w.Encode |> String.concat "; ")
+                        p
+                        m
+                )
+
+            p
+
+        if not (List.isEmpty rs) then
+            if compare "none" rs = "intact" then
+                t <- { t with Intact = t.Intact + 1 }
+
+            for (what, tampered) in chainTampers otherOp rs do
+                let p = compare what tampered
+                t <- { t with Tampers = t.Tampers + 1 }
+
+                if p <> "intact" then
+                    t <- { t with Detected = t.Detected + 1 }
+
+    t
+
+let private expectWalkerAgreement (label: string) (t: WalkerTally) =
+    match t.Failure with
+    | Some why -> failtest why
+    | None ->
+        Expect.isGreaterThan t.Intact 0 (sprintf "%s: no intact structure was compared" label)
+        Expect.isGreaterThan t.Tampers 0 (sprintf "%s: no tamper was compared" label)
+
+        // The teeth's vacuity guard, and the one that matters most here: two walkers that both say
+        // "intact" agree perfectly and certify nothing. Detection has to have HAPPENED.
+        Expect.isGreaterThan
+            t.Detected
+            0
+            (sprintf "%s: every tamper went undetected, so the agreement is vacuous" label)
+
+/// A deliberately NON-INJECTIVE `HashFn`: `nodeHash` hands it the joined parents and
+/// `actorEncoded + "|" + encodedOp`, and this folds only up to the first `|` — so the actor
+/// survives and the OP IS DROPPED, and two nodes differing only in their op mint one id.
+/// `Actor.encode` emits a JSON object with no `|` in it, so the first `|` is the separator.
+let private opBlindHash: HashFn =
+    fun parents rest ->
+        let cut = rest.IndexOf '|'
+        OpStream.defaultHash parents (if cut < 0 then rest else rest.Substring(0, cut))
+
+/// The go-red instrument for the comparison itself: a hash the MODEL uses and production does not
+/// — the same function with its two arguments swapped, so every recomputed id is wrong and an
+/// intact DAG must be reported as broken.
+let private swappedHash: HashFn = fun a b -> OpStream.defaultHash b a
+
+// ---- the corpus dag/ family, as a source of SHAPES ----
+
+/// One `dag/` fixture, read for what Core can use: the parent shape, the typed actor, and the op
+/// payload. Its own `hash` is kept only so the size assertion below can be made about it.
+type private DagShape =
+    { Fixture: string
+      CorpusHash: string
+      CorpusParents: string list
+      Actor: Actor
+      OpJson: string }
+
+let private readDagShapes (root: string) : Result<DagShape list, string> =
+    Directory.GetFiles(Path.Combine(root, "dag"), "*.json")
+    |> Array.sort
+    |> Array.toList
+    |> List.filter (fun p -> Path.GetFileName p <> "manifest.json")
+    |> List.map (fun path ->
+        let name = Path.GetFileNameWithoutExtension path
+
+        match Json.parse (File.ReadAllText path) with
+        | Error e -> Error(sprintf "%s: not JSON (%s)" name e)
+        | Ok(JObj fields) ->
+            let actor =
+                match field fields "actor" with
+                | Some(JObj af) ->
+                    let s k = defaultArg (strField af k) ""
+
+                    match strField af "kind" with
+                    | Some "agent" -> Some(Agent(s "model", s "version", s "id"))
+                    | _ -> Some(Human(s "id"))
+                | _ -> None
+
+            match strField fields "hash", field fields "parents", actor, field fields "op" with
+            | Some h, Some(JArr ps), Some a, Some op ->
+                Ok
+                    { Fixture = name
+                      CorpusHash = h
+                      CorpusParents =
+                        ps
+                        |> List.choose (fun v ->
+                            match v with
+                            | JStr s -> Some s
+                            | _ -> None)
+                      Actor = a
+                      OpJson = Canon.render op }
+            | _ -> Error(sprintf "%s: expected hash / parents / actor / op" name)
+        | Ok _ -> Error(sprintf "%s: not a JSON object" name))
+    |> List.fold
+        (fun acc r ->
+            match acc, r with
+            | Ok xs, Ok x -> Ok(xs @ [ x ])
+            | Error e, _ -> Error e
+            | _, Error e -> Error e)
+        (Ok [])
+
+/// The op payload of a `dag/` fixture is opaque wire JSON, and every walker treats an op that way.
+let private rawW: StreamWitness<string, string, string> =
+    { Apply = fun op st -> Ok(st + "/" + op)
+      Encode = id
+      Decode = Ok }
+
 
 // ---------------------------------------------------------------------------
 
@@ -2076,4 +2553,232 @@ let proofOracleTests =
 
               Expect.isNonEmpty
                   breaks
-                  "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose" ]
+                  "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose"
+
+          // ---- Phase 136 — the two integrity walkers, and the tampers they are for ----
+
+          testCase "the chain oracle agrees with production over the reference witness's DAG and every tamper of it"
+          <| fun _ ->
+              dagDifferential
+                  "reference witness"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  treeW
+                  (fun _ -> RemoveNode "tampered-node")
+                  treeLaneGen
+                  3
+                  3600
+                  60
+              |> expectWalkerAgreement "reference witness DAG"
+
+          testCase "the chain oracle agrees with production over the work-plan DAG and every tamper of it"
+          <| fun _ ->
+              dagDifferential
+                  "work-plan domain"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  planW
+                  tamperedPlanOp
+                  planLaneGen
+                  3
+                  3610
+                  60
+              |> expectWalkerAgreement "work-plan DAG"
+
+          testCase "the chain oracle agrees with production over the linear op-stream and every tamper of it"
+          <| fun _ ->
+              chainDifferential
+                  "work-plan chain"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  planW
+                  tamperedPlanOp
+                  planLaneGen
+                  3620
+                  80
+              |> expectWalkerAgreement "work-plan chain"
+
+          testCase "the chain oracle agrees with production over the reference witness's linear op-stream"
+          <| fun _ ->
+              chainDifferential
+                  "reference chain"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  treeW
+                  (fun _ -> RemoveNode "tampered-node")
+                  treeLaneGen
+                  3630
+                  60
+              |> expectWalkerAgreement "reference chain"
+
+          // ---- the teeth: both comparisons can lose ----
+
+          testCase "a model handed a DIFFERENT hash reports a break where production sees none"
+          <| fun _ ->
+              // The go-red for the DAG comparison. Nothing about the DAG moves; only the function
+              // the model recomputes ids with. If this came back clean the green cases above would
+              // be comparing a walker that cannot notice the pre-image it hashes.
+              let lanes, _ = planLaneGen.Lanes 3 (ConfRng.ofSeed 3640)
+              let dag = dagUnder OpStream.defaultHash planW planLaneGen.BaseOp lanes
+              let p, m = dagVerdicts OpStream.defaultHash swappedHash planW dag
+              Expect.equal p "intact" "production built this DAG and sees it intact"
+              Expect.notEqual m p "a model recomputing ids with a different hash must disagree"
+              Expect.stringContains m "content-id mismatch" "and it disagrees by naming the check that failed"
+
+          testCase "a model handed a DIFFERENT hash reports a break on an intact linear chain"
+          <| fun _ ->
+              let lanes, _ = planLaneGen.Lanes 2 (ConfRng.ofSeed 3650)
+
+              let rs =
+                  chainUnder OpStream.defaultHash planW planLaneGen.State0 (Human "writer") (List.concat lanes)
+
+              Expect.isNonEmpty rs "the generated lane produced a chain"
+              let p, m = chainVerdicts OpStream.defaultHash swappedHash planW rs
+              Expect.equal p "intact" "production built this chain and sees it intact"
+              Expect.notEqual m p "a model recomputing hashes with a different function must disagree"
+              Expect.stringContains m "hash mismatch" "and it disagrees by naming the check that failed"
+
+          // ---- what the theorem's one premise buys, measured in BOTH directions ----
+
+          testCase "under a NON-INJECTIVE hash the tamper is invisible — to production and to the model alike"
+          <| fun _ ->
+              // `tamper_detected` rests on exactly one hypothesis: the content id determines the
+              // content. `opBlindHash` breaks it in the smallest way that is still a hash — it
+              // folds the parents and the actor and drops the op — so two nodes differing only in
+              // their op mint one id. Run the SAME tamper both ways: under the real hash it is
+              // found, under the collapsing one it is not, and the model tracks production in both
+              // directions. That is the premise shown to be load-bearing rather than decorative.
+              let lane = [ AddItem("z1", "one"); AddItem("z2", "two") ]
+
+              let tamper (dag: Dag.T<PlanOp>) : Dag.T<PlanOp> =
+                  let k, n =
+                      dag.Nodes |> Map.toList |> List.find (fun (_, n) -> n.Op = AddItem("z1", "one"))
+
+                  { dag with
+                      Nodes =
+                          Map.add
+                              k
+                              { n with
+                                  Op = AddItem("z1", "TAMPERED") }
+                              dag.Nodes }
+
+              let real = dagUnder OpStream.defaultHash planW planLaneGen.BaseOp [ lane ]
+              let weak = dagUnder opBlindHash planW planLaneGen.BaseOp [ lane ]
+
+              // The probe did the thing it claims to be about: two different hashes, two different
+              // sets of ids. Without this the case could be comparing one DAG with itself.
+              Expect.notEqual (Dag.heads real) (Dag.heads weak) "the two hashes mint different ids"
+
+              let rp, rm =
+                  dagVerdicts OpStream.defaultHash OpStream.defaultHash planW (tamper real)
+
+              Expect.stringContains rp "content-id mismatch" "under an injective hash the tamper is found"
+              Expect.equal rm rp "and the model finds it identically"
+
+              let wp, wm = dagVerdicts opBlindHash opBlindHash planW (tamper weak)
+              Expect.equal wp "intact" "a hash that drops the op cannot see an op tamper — this is the premise"
+              Expect.equal wm wp "and neither can the model, under the same hash"
+
+          // ---- the corpus dag/ family: its SHAPES, not its addresses ----
+
+          testCase "the corpus dag/ family's shapes, rebuilt through production's own append and merge"
+          <| fun _ ->
+              match SiblingCorpus.resolve "dag" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let shapes =
+                      match readDagShapes root with
+                      | Ok s -> s
+                      | Error why -> failtestf "a dag/ fixture could not be read: %s" why
+
+                  Expect.isGreaterThan (List.length shapes) 3 "the dag/ family carries its four shapes"
+
+                  // THE BOUNDARY, as an assertion rather than a sentence, so it goes red if it ever
+                  // moves. This family's addresses belong to the UI host's DAG-record wire format —
+                  // 64 characters, minted by a different pre-image under SHA-256 — where Core's
+                  // default content id is 8. They are not Core content ids and cannot be made into
+                  // one; what is used below is the SHAPES the fixtures carry.
+                  Expect.equal (OpStream.defaultHash "" "").Length 8 "Core's default content id is 8 characters"
+
+                  for s in shapes do
+                      Expect.equal
+                          s.CorpusHash.Length
+                          64
+                          (sprintf "%s: a dag/ address is 64 characters, so it is not a Core content id" s.Fixture)
+
+                  // Rebuild each shape through production: no parents (genesis), one (a linear
+                  // step), two (a MERGE — the shape the generated pools never build, because
+                  // `foldOnce` only ever grows chains off one base).
+                  let mutable dag: Dag.T<string> = Dag.empty
+                  let mutable built: (string * string * string) list = []
+                  let mutable merges = 0
+
+                  let coreIdOf (h: string) =
+                      built |> List.tryPick (fun (_, ch, id) -> if ch = h then Some id else None)
+
+                  let isBuilt (f: string) =
+                      built |> List.exists (fun (bf, _, _) -> bf = f)
+
+                  for want in [ 0; 1; 2 ] do
+                      for s in shapes do
+                          if List.length s.CorpusParents = want && not (isBuilt s.Fixture) then
+                              let id, d =
+                                  match s.CorpusParents |> List.map coreIdOf with
+                                  | [] -> Dag.append OpStream.defaultHash rawW s.Actor s.OpJson "" dag
+                                  | [ Some p ] -> Dag.append OpStream.defaultHash rawW s.Actor s.OpJson p dag
+                                  | [ Some l; Some r ] ->
+                                      merges <- merges + 1
+                                      Dag.merge OpStream.defaultHash rawW s.Actor s.OpJson l r dag
+                                  | _ -> failtestf "%s: it names a parent no earlier fixture built" s.Fixture
+
+                              dag <- d
+                              built <- built @ [ s.Fixture, s.CorpusHash, id ]
+
+                  Expect.equal (List.length built) (List.length shapes) "every shape was rebuilt"
+
+                  Expect.isGreaterThan
+                      merges
+                      0
+                      "the two-parent MERGE shape was exercised — the one the generated pools never build"
+
+                  match mintsProductionIds OpStream.defaultHash rawW dag with
+                  | Some why -> failtest why
+                  | None -> ()
+
+                  let p, m = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW dag
+                  Expect.equal p "intact" "the rebuilt DAG is intact"
+                  Expect.equal m p "and the model agrees"
+
+                  let mutable detected = 0
+
+                  for (what, tampered) in dagTampers (fun (o: string) -> o + " ") dag do
+                      let tp, tm = dagVerdicts OpStream.defaultHash OpStream.defaultHash rawW tampered
+                      Expect.equal tm tp (sprintf "tamper %s: the two walkers disagree" what)
+
+                      if tp <> "intact" then
+                          detected <- detected + 1
+
+                  Expect.isGreaterThan detected 0 "the tampers were found, so the agreement is not vacuous"
+
+                  // Phase 64.1 on the shape only this family supplies: a merge node's id does not
+                  // depend on which head the reconciler called left. This is the production side of
+                  // the model's `merge_id_parent_order_independent`, and the last assertion is the
+                  // model's own pre-image measured against the id production minted.
+                  match built with
+                  | (_, _, a) :: (_, _, b) :: _ ->
+                      let lr, _ = Dag.merge OpStream.defaultHash rawW (Human "m") "{}" a b Dag.empty
+                      let rl, _ = Dag.merge OpStream.defaultHash rawW (Human "m") "{}" b a Dag.empty
+                      Expect.equal lr rl "merge(A,B) and merge(B,A) converge to one content id"
+
+                      Expect.equal
+                          (Chain.node_hash
+                              OpStream.defaultHash
+                              rawW.Encode
+                              ordinalLe
+                              [ b; a ]
+                              (Actor.encode (Human "m"))
+                              "{}")
+                          lr
+                          "and the model mints that same id from the reversed parent list"
+                  | _ -> failtest "two rebuilt nodes are needed to exercise a merge" ]
