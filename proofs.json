@@ -437,7 +437,17 @@
       "claim": "The extracted model agrees with Json.parseDetailedWithPolicy over a 55-input near-miss table under both read policies, every wire-corpus nodes/ and ops/ fixture as raw text, both nesting families at every depth 0-8 under every cap 0-8, arrays and objects up to 64 members, and 4,000 seed-replayable generated inputs — comparing the outcome class, the decoded value, and on a failure the KIND, the POSITION and the MESSAGE at once. Two go-red cases: a model holding a cap production has already spent must accept what production refuses by name, and a blind bridge hiding the two container characters must break every structured document while leaving a scalar in agreement. The member-null fork is asserted to have FIRED, because two parsers that never met a member null agree about a policy neither exercised.",
       "phase": "fuaran-core#146",
       "evidence": {
-        "family": "Proofs.Oracle"
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the parser oracle agrees with production over the near-miss table",
+          "… and under the tolerant read policy, where the member-null fork lives",
+          "the parser oracle agrees with production over every corpus nodes/ fixture",
+          "… and over every corpus ops/ fixture",
+          "the parser oracle agrees with production over generated deep and wide inputs",
+          "the parser oracle agrees with production over 4000 generated inputs",
+          "a model whose DEPTH CHECK is out of step DISAGREES with production",
+          "a model handed a BLIND bridge DISAGREES with production"
+        ]
       }
     },
     {
