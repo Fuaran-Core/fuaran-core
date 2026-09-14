@@ -2136,6 +2136,62 @@ clause), and Phase 145 (a `codecInjectivityLaws` family in the conformance kit).
 its own entry beneath this header as it lands; the version moves only if a later class outranks
 what the draft already carries (the draft-slot rule).
 
+### `InsertChild` refuses a subtree that breaks id uniqueness (`0.24.0`, Phase 137) — a REFUSAL-CLASS WIDENING
+
+`Ops.apply` / `canApply` / `applyContained` / `canApplyContained` now reject `InsertChild(parent, node)`
+with `DuplicateId d` when **any** id in `node`'s subtree is already carried by the tree, or occurs twice
+within `node` itself. `d` is the FIRST offender in `Tree.ids` (preorder) order.
+
+**Read this as a widened refusal surface, not as a bug fix that moved bytes.** Nothing about the accept
+path changes: a script whose inserts were legal before produces the identical tree, byte for byte. What
+changes is that a script a host previously ACCEPTED can now be refused — which is wire-visible to
+anything replaying a stored op-stream, so it is recorded here as a contract change and rides the `0.24.0`
+draft as a minor.
+
+**The check used to read the inserted node's own id alone.** So a subtree whose DESCENDANT id was already
+present, or which repeated an id within itself, was accepted and the tree then carried one id twice.
+Nothing downstream survives that state: `Tree.updateNode` rewrites *every* node matching the repeated id,
+and `Tree.Index.build`'s `Map.ofList` silently keeps the last — so the tree does not fail, it quietly
+answers wrongly. The diff path already refused the same tree outright
+(`Diff.toOps` → `DiffError.DuplicateIdInTree`), and `Ops.footprint` already computed the very id set the
+validator needed; the accept path was the one place the invariant was not enforced.
+
+**Which half is PARITY and which is stricter — stated separately, because they are different claims.**
+
+- *A descendant id already present:* **parity.** The TypeScript, Go and Rust reference implementations of
+  the tree-op engine all refuse this, under the code `DuplicateNodeId`; the UI tier runs its own
+  pre-check ahead of this engine for the same reason. Core was the outlier, and this closes it.
+- *An id repeated WITHIN the inserted subtree, with none of them in the tree:* **stricter than those three
+  reference implementations**, each of which seeds its comparison set from the destination tree alone and
+  therefore accepts this shape. Core refuses it, because the invariant is a property of the tree that
+  RESULTS, and that tree carries the id twice however it got there. Stated plainly rather than folded into
+  the parity sentence: a reader porting between engines needs to know which of the two claims they are
+  relying on.
+
+**The class stays `DuplicateId`.** It is the same failure the envelope already named, reached through more
+of the subtree — a rename would break every consumer matching on it to buy nothing.
+
+**Precedence is unchanged and is now pinned by a test.** The pre-0.24.0 validator checked the inserted
+node's own id BEFORE parent existence, so a duplicate outranked `UnknownNode`. `Tree.ids` is preorder, so
+the widened scan reaches that same id first and the ordering is preserved rather than quietly reordered.
+A consumer that already handled `DuplicateId` ahead of `UnknownNode` sees no change; one that inserts
+under an unknown parent with a colliding subtree still gets `DuplicateId` first. (Some sibling
+implementations report the missing parent first. That divergence predates this change and is not widened
+in kind by it, only in extent.)
+
+**Scope: unique over the WITNESS surface, and that is a deliberate limit.** `Tree.ids`, `Tree.exists` and
+`Tree.updateNode` all walk `NodeWitness.Children`. A node a domain holds in a keyed, non-structural
+position is invisible to them, so the invariant this enforces — and the one the conformance law below
+certifies — reads *each id occurs at most once over the witness's `Children` traversal*. Uniqueness over
+keyed positions is the DOMAIN's obligation, and a domain that has them keeps its own pre-check. Widening
+the witness is not the answer: `Children` is also what the engine rebuilds through, so a widened witness
+would oblige a domain to restructure keyed cases as an ordered list.
+
+**`Conformance.opAlgebra` reports a fourth law**, `"an accepted insert introduces no id already present"`,
+so an adopting domain certifies the property over its own witness rather than trusting this engine.
+`Conformance.certify` therefore returns **14** law results where it returned 13; a consumer asserting the
+count updates it. `witnessLaws` is unchanged.
+
 ## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists
