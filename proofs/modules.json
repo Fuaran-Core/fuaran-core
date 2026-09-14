@@ -53,10 +53,10 @@
     },
     {
       "module": "Preservation",
-      "budgetSeconds": 80,
-      "measuredSeconds": 39,
+      "budgetSeconds": 90,
+      "measuredSeconds": 42,
       "phase": "fuaran-core#138",
-      "note": "The apply engine, seeded by the phase that added the model: 39s, 36s and 27s across the three cold runs of one `-Runs 3` pass on a machine also running four sibling sessions, so 39s is the slowest observed and 2x it rounds to 80s. Carries `#set-options \"--ext context_pruning\"` like the two modules above, and one SCOPED exception beside it that this budget depends on: `invert_applicable` proves 78 goals in a single query and sits under `#push-options \"--z3rlimit 200\"`, because at the leg's default 40 it was close enough to the ceiling that a different `--quake` seed exhausted it — green standalone, red under check.ps1. If this module ever needs a large bump, check that BOTH are still in force before believing the growth is ordinary: losing the scoped rlimit does not read as slowness, it reads as a flake."
+      "note": "The apply engine, seeded by the phase that added the model over SIX cold runs, two `-Runs 3` passes: 39s, 36s, 27s and then 25s, 42s, 32s. The slowest is the 42s, and it is the one the rule takes — it was measured with a sibling session's full repo gate running beside it on the same machine, which is precisely the contention the tolerance exists to absorb rather than a run to discard. 2x42 rounds to 90s. Seeding from the first pass alone would have given 80s, which every run still fits; the number moved because the rule says slowest observed, and a rule applied only to the convenient half of the data is not the rule. Carries `#set-options \"--ext context_pruning\"` like the two modules above, and one SCOPED exception beside it that this budget depends on: `invert_applicable` proves 78 goals in a single query and sits under `#push-options \"--z3rlimit 200\"`, because at the leg's default 40 it was close enough to the ceiling that a different `--quake` seed exhausted it — green standalone, red under check.ps1. If this module ever needs a large bump, check that BOTH are still in force before believing the growth is ordinary: losing the scoped rlimit does not read as slowness, it reads as a flake."
     }
   ]
 }
