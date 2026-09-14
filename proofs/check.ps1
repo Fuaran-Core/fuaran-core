@@ -72,7 +72,11 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 #   Preservation — Phase 138, the apply engine: totality with its rejection characterisation,
 #                all-or-nothing rejection, id uniqueness preserved by every accepted operation,
 #                canApply/apply agreement, and invert's round trip. Opens TreeOps, so it follows it.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation')
+#   TreeDiff   — Phase 141, the apply engine's companion in the other direction: `Diff.toOps`'s
+#                two refusals characterised exactly, the four-pass emission order, what each pass
+#                guarantees about the block it emits, and the container-aware mirror's pre-emptive
+#                refusal. Opens TreeOps (and through it DagFold), so it follows both.
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 

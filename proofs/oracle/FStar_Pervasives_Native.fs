@@ -7,8 +7,9 @@
 // model is faithful to them — makes the backend emit `FStar_Pervasives_Native.option` /
 // `.Some` / `.None`, and the release ships no F# implementation of THAT module either.
 //
-// Two lines close it. Nothing here is semantics: the type is F#'s own option under F*'s spelling,
-// and the constructor names are the ones the extractor writes.
+// Two lines closed it. Nothing here is semantics: the type is F#'s own option under F*'s spelling,
+// and the constructor names are the ones the extractor writes. Phase 141 added two more for the
+// same reason — see the note beside them.
 //
 // It is hand-written and therefore NOT diffed by the proof leg, exactly as `Prims.fs` is not —
 // the leg holds the GENERATED files to a fresh extraction, and these two are the floor they stand
@@ -20,3 +21,12 @@ module FStar_Pervasives_Native
 type option<'a> =
     | None
     | Some of 'a
+
+/// F*'s `fst` / `snd` on a pair, which the F# backend emits fully qualified out of this module.
+/// Named by the Phase 141 extraction, the first model with a function that returns a TUPLE:
+/// `Diff.toOps`' second pass computes the move script AND the list of parents whose order must be
+/// restated later in ONE walk, so a model that split it into two functions would be splitting the
+/// very walk the emission-order theorem is about. Like everything else in this floor these are the
+/// F# primitives under an F* spelling; there is no semantics here.
+let inline fst ((a, _): 'a * 'b) : 'a = a
+let inline snd ((_, b): 'a * 'b) : 'b = b
