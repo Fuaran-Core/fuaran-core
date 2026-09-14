@@ -639,6 +639,87 @@
       "evidence": {
         "assumption": "the domain exposes every node it wants the algebra to see through NodeWitness.Children"
       }
+    },
+    {
+      "id": "contained-clause-for-clause",
+      "level": "proved",
+      "claim": "The container-aware engine is the plain one plus a guard, and the model of it is faithful clause for clause. At `canHold = fun _ -> true` the two are the SAME FUNCTION — which is what `Ops.apply = applyWith (fun _ -> true)` asserts in the code and nothing checked — and proving it discharges the two lookups the model writes as total matches where the engine writes a fall-through: a parent whose id the tree holds is always found, so neither engine can take a branch the other does not.",
+      "phase": "fuaran-core#140",
+      "evidence": {
+        "theorem": "apply_contained_is_apply",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "not-a-container-exact",
+      "level": "proved",
+      "claim": "`NotAContainer` is exactly the container violation's refusal: `apply` never raises it (Phase 138's characterisation), the container-aware engine differs from `apply` ONLY by raising it, and where it raises it the named node is one the tree holds, the reported kind tag is that node's own, and the predicate refuses it. The middle clause is the one with content — it says the capability can never accept what `apply` refuses, never produce a different tree, and never refuse under another class of its own. Note what it deliberately does NOT say, because the differential's first run is what taught it: the capability can PRE-EMPT another refusal rather than only adding one. A self-move into a leaf is `NotAContainer` here and `WouldNestUnderSelf` under `apply`, because the capability test precedes the descendant test in the shipped `MoveNode` arm — so the theorem reads `identical, or NotAContainer`, and a reading of the form `the same class unless the capability adds one` is false.",
+      "phase": "fuaran-core#140",
+      "evidence": {
+        "theorem": "not_a_container_exact",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "contained-preserves",
+      "level": "proved",
+      "claim": "`applyContained` preserves the invariant the capability exists to keep — every node with children satisfies `canHold` — for all five operations including a nested batch, with `MoveNode` covered as well as `InsertChild`. The move clause is the one with content: the moved subtree inherits the invariant from the tree it came out of, the removal preserves both the invariant and the destination's capability, and the graft is then an insert under an admitted parent. Two hypotheses are carried and both are REFUTED without them (`contained-premises`), so the theorem is about the function that ships rather than about a cleaner one.",
+      "phase": "fuaran-core#140",
+      "evidence": {
+        "theorem": "contained_preserves",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "contained-premises",
+      "level": "proved",
+      "claim": "The preservation theorem's two hypotheses are necessary, each by a machine-checked counterexample the module can evaluate — the `insert_breaks_wf_pre137` shape. `contained_needs_child_blind`: `canHold` has type `'Node -> bool`, so it may read the CHILD LIST, and a predicate that does can admit a node at the moment it is checked and refuse it the instant it gains a child — every other hypothesis holds and the invariant breaks anyway. `contained_needs_op_hypothesis`: the engine applies `canHold` to the PARENT and to nothing inside the graft, so inserting a subtree whose own interior node is a non-container carries the violation in with it. Neither is a modelling convenience: each is a property of a real predicate that the engine's type does not demand, and naming them is what makes the theorem about `applyContained` rather than about a function nobody calls.",
+      "phase": "fuaran-core#140",
+      "evidence": {
+        "theorem": "contained_needs_child_blind",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canapply-contained-agrees",
+      "level": "proved",
+      "claim": "The container-aware dry run returns exactly what the container-aware mutating call returns, envelope included — `canApplyContained` is `canApplyWith canHold`, sharing the three validators with `applyWith` and simulating the two order-dependent clauses. Phase 138's corollary carries over unchanged and is what the remove clause needs: the `parentOf` fallback the engine carries is unreachable, so the two surfaces cannot diverge by one taking a branch the other does not.",
+      "phase": "fuaran-core#140",
+      "evidence": {
+        "theorem": "can_apply_contained_agrees",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "container-sequence-gap",
+      "level": "proved",
+      "claim": "A FINDING about the shipped surface, proved rather than asserted: there is no container-aware SEQUENCE surface. `Ops.canApplyAll` and `Ops.applyAll` both thread the plain `apply`, so a script `canApplyAll` certifies can be refused by `applyContained` at its first step — the counterexample is one move of a leaf under a leaf. A caller that pre-flights with `canApplyAll` and executes with `applyContained`, which is the combination the two doc comments invite, has a check that cannot see the refusal its executor will make. Recorded here rather than fixed here: closing it is an API change with a version, and the lemma plus its production-side case are what make the gap visible to whoever takes it.",
+      "phase": "fuaran-core#140",
+      "evidence": {
+        "theorem": "can_apply_all_ignores_containment",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "container-differential",
+      "level": "tested",
+      "claim": "The extracted container model agrees with the shipped `Ops.applyContained` and `Ops.canApplyContained` over a GENERATED `canHold` — a random subset of the pool's kind vocabulary per trial, including the empty predicate (nothing can hold children) and the total one (where the engine is `apply` again), all eight drawn. A differential run against one hand-picked predicate would certify that instance and nothing about the quantifier the theorems carry. Five comparisons per probe: the verdict and the accepted result through production's own `Tree.encodeHash`, the rejection by class, the dry run against the mutating call on each side, `applyContained` against `apply` on production, and the invariant asserted on production wherever its hypotheses are met. Adequacy is counted per capability SITE — insert refusals, move refusals, batch inheritance and pre-emptions separately — because a run that reached only the insert site could not have caught the go-red, which is a move. The go-red is the model's own instrument: an engine checking the capability on insert and not on move, proved in F* to admit a move the real one refuses, required to lose here. Agreement is over the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#140",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the container oracle agrees with Ops.applyContained under a generated canHold",
+          "an engine that checks canHold on insert but NOT on move loses — the measurement can fail",
+          "canHold is consulted on the PARENT and on nothing inside the graft — the shipped engine",
+          "canApplyAll is NOT container-aware — a script it admits, applyContained refuses"
+        ]
+      }
     }
   ]
 }

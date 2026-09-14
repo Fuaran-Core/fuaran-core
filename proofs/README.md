@@ -1341,15 +1341,85 @@ it. It was green run standalone and RED under `check.ps1`. A proof that flakes n
 leg that fails in CI and passes on a desk, which costs more than a slow leg; the budget is raised
 locally with `#push-options` and the reason is in the source beside it.
 
+### The container variant — `applyContained`, and the two premises the sentence needs (Phase 140)
+
+Everything above is about `Ops.apply`, which is `applyWith (fun _ -> true)`. `Ops.applyContained
+canHold` is the variant every domain with a leaf actually runs, and it is the one where the
+`NotAContainer` clause proved unreachable above is live. Section 8 of `Preservation.fst` closes it,
+with `canHold` **abstract in the strongest sense available** — a parameter of every definition and
+every theorem, so each is universally quantified over it. An `assume val` would be the other shape
+and is not available in any case: the leg runs `--report_assumes error`.
+
+**`NotAContainer` is exactly the container violation's refusal**, and that is three statements
+rather than one. `apply` never raises the class (the characterisation above). The container-aware
+engine differs from `apply` **only** by raising it — never accepting what `apply` refuses, never
+producing a different tree, never refusing under some other class of its own. And where it raises
+it, the node named is one the tree holds, the kind tag reported is that node's own, and the
+predicate refuses it.
+
+**What that formulation deliberately does not say is the part the differential taught.** The
+capability can **pre-empt** another refusal rather than only adding one: the shipped `MoveNode` arm
+tests `canHold` on the new parent *before* the descendant test, so a self-move into a leaf is
+`NotAContainer` here and `WouldNestUnderSelf` under `apply`. The first draft of the differential
+asserted that the two engines refuse the same operation with the same class unless the capability
+adds a refusal, and it went red on the first run against a tree the generator had built. The
+theorem reads "identical, **or** `NotAContainer`" because the stronger sentence is false.
+
+**The preservation statement needs two hypotheses, and without either it is false of the shipped
+function.** Both are exhibited as machine-checked counterexamples, in the shape Phase 133's
+`insert_breaks_wf_pre137` established, rather than left to be discovered:
+
+- **`contained_op`** — `canHold` is applied to the PARENT and to nothing inside the graft, so
+  inserting a subtree whose own interior node is a non-container carries the violation in with it.
+  A domain grafting its own validated documents has the hypothesis; one accepting a foreign tree
+  does not.
+- **`child_blind`** — `canHold` has type `'Node -> bool`, so it may read the CHILD LIST, and a
+  predicate that does can admit a node at the moment it is checked and refuse it the instant it
+  gains a child. Every domain writes it as a function of the kind tag — which is also what
+  `NotAContainer` reports back — and this hypothesis is that habit made a premise.
+
+With both, `contained_preserves` holds for all five operations including a nested batch, and
+`MoveNode` is covered as well as `InsertChild`: the moved subtree inherits the invariant from the
+tree it came out of, the removal preserves both the invariant and the destination's capability, and
+the graft is then an insert under an admitted parent.
+
+**The differential draws the predicate**, because the theorems quantify over it and a run against
+one hand-picked `canHold` certifies that instance and nothing about the quantifier. Each trial
+draws a random subset of the pool's kind vocabulary; all eight are drawn at 30 trials, the empty
+predicate (nothing can hold children) and the total one (where the engine is `apply` again)
+included. Adequacy is counted per capability SITE — insert refusals, move refusals, batch
+inheritance and pre-emptions separately — because a run reaching only the insert site could not
+catch the go-red, which is a move. The go-red is the model's own instrument
+(`apply_contained_insert_only`), proved in F\* to admit a move the real one refuses and to break
+the invariant doing it, before the differential is asked to lose against it.
+
+**And one finding about the shipped surface, which is not about the model.** There is **no
+container-aware sequence surface**: `Ops.canApplyAll` and `Ops.applyAll` both thread the plain
+`apply`, so a script `canApplyAll` certifies can be refused by `applyContained` at its first step —
+one move of a leaf under a leaf is the counterexample. A caller that pre-flights with `canApplyAll`
+and executes with `applyContained`, the combination the two doc comments invite, has a check that
+cannot see the refusal its executor will make. It is recorded rather than fixed here: closing it is
+an API change with a version. `can_apply_all_ignores_containment` and its production-side case are
+what make the gap visible to whoever takes it, and the case goes red when it is closed.
+
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** The five lemmas above, over the five skeleton operations
    and any tree, plus the two bridges the lift needed (`first_dup_none_iff`, `wf_iff_no_dups`) and
-   the restated counterexample with its closure. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   the restated counterexample with its closure. **Phase 140 adds six**, over the same operations,
+   any tree and ANY predicate: `apply_contained_is_apply` (the container-aware engine at
+   `fun _ -> true` IS `apply`, which is what makes the clause-for-clause model checkable rather
+   than asserted), `not_a_container_exact`, `contained_preserves`, `can_apply_contained_agrees`, and
+   the two premise refutations `contained_needs_child_blind` / `contained_needs_op_hypothesis` —
+   plus `can_apply_all_ignores_containment`, which proves the sequence-surface gap above.
+   F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply`, `Ops.canApply` and
    `Ops.invert` over the pools above, with the go-red required to lose. Agreement is over those
-   pools, never over all inputs.
+   pools, never over all inputs. The container family is a second pool with its own go-red: the
+   extracted `apply_contained` / `can_apply_contained` beside `Ops.applyContained` /
+   `Ops.canApplyContained` under a drawn predicate, with the invariant asserted on production
+   wherever its hypotheses are met.
 3. **Assumed, and stated as such.**
    - **The witness laws themselves.** `ReplaceChildren` is an abstract function satisfying
      `Conformance.witnessLaws`; a domain's own is that domain's promise, sampled by the pack and
@@ -1369,8 +1439,11 @@ locally with `#push-options` and the reason is in the source beside it.
      batch's inverse is its members' inverses in reverse order, each derived against the state that
      member saw, so the lift is the one `DagFold.replay_diamond` already performs at lane
      granularity — no new idea, and not done here.
-   - **`applyContained`'s container capability** — Phase 140's. `canHold` is `fun _ -> true` under
-     `apply`, which is exactly why `NotAContainer` comes out unreachable above rather than unmet.
+   - **Containment LEGALITY** — which kind may parent which. `canHold` answers only "can this node
+     hold children at all", and Phase 140's theorems are about that predicate alone; a domain's
+     parenting rules are its own, and no theorem here says a contained tree is a legal document.
+     _(The container capability itself was named here as Phase 140's and is DONE — section 8 of
+     `Preservation.fst`, above.)_
    - **`Diff`** — Phase 141's — and **`Ops.normalize`**, which no theorem in this directory reaches.
    - **Vocabulary and schema validity.** Whether a tree is a legal DOCUMENT is the wire boundary's
      question (`decode_node_wf`, theorem 1) and the domain rule families'; nothing here says a
