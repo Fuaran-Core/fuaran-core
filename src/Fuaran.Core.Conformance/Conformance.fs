@@ -4435,6 +4435,115 @@ module Conformance =
             Passed = collision.IsNone
             Counterexample = collision } ]
 
+    // ---- op-codec injectivity (Phase 145) ----
+    // The fourth premise of the content-id theorem, and the one that is a DOMAIN's rather than this
+    // library's. `Dag.nodeHash` hashes `Actor.encode actor + "|" + w.Encode op`, so a node's content
+    // id determines its op only if the codec is injective: two distinct ops that encode alike mint
+    // ONE id, and a tamper between them is invisible to `Dag.firstBreak` and to
+    // `OpStream.verifyChain` alike — the walker is not weak there, the pre-image simply does not
+    // distinguish them. `proofs/Chain.fst` takes `op_codec_injective` as a parameter for exactly that
+    // reason (`Encode` belongs to whoever brings the op type), and this is the law a witness
+    // certifies it with — the same division of labour the fold theorem's `independence_diamond`
+    // already runs on with `FoldConfluence.laneFoldLaws`.
+
+    /// The op-codec injectivity laws (Phase 145). Three laws over one seed-replayable draw of the
+    /// domain's own ops, and the first two are NOT the same claim:
+    ///
+    ///  - **no collision was drawn** — two distinct ops never share an encoding. Sampled evidence,
+    ///    and only as good as the draw: it can report a collision only if it draws the pair.
+    ///  - **the codec has a left inverse** — `Decode (Encode op) = Ok op` on every drawn op. This is
+    ///    the arm that carries the weight, because a codec with a total left inverse *is* injective;
+    ///    one drawn op exercises it, where the first arm needs a colliding PAIR to come up.
+    ///  - **the draw searched more than one encoding** — a generator that mints one op makes the
+    ///    first law pass having compared nothing.
+    ///
+    /// Deliberately NOT folded into `certify` / `certifyStream`, on the same reasoning as the
+    /// snapshot and DAG surfaces above: the second law demands a working `Decode`, and a witness that
+    /// legitimately stubs it (a domain that never reads a stream back) would go red for something
+    /// that is not about its op algebra. A domain calls this beside its base certification. `'Op`
+    /// needs equality.
+    let codecInjectivityLaws
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable seen = Map.empty<string, 'Op>
+        let mutable collision = None
+        let mutable inverse = None
+        let mutable distinct = 0
+
+        for i in 0 .. iterations - 1 do
+            let op, r = gen.Op rng
+            rng <- r
+            let enc = w.Encode op
+
+            if collision.IsNone then
+                match Map.tryFind enc seen with
+                | Some prior when prior <> op ->
+                    collision <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: two DISTINCT ops encode alike — %A and %A both encode to %s, so a DAG node carrying either mints one content id"
+                                seed
+                                i
+                                prior
+                                op
+                                enc
+                        )
+                | Some _ -> () // the same op re-drawn — not a collision
+                | None ->
+                    distinct <- distinct + 1
+                    seen <- Map.add enc op seen
+
+            if inverse.IsNone then
+                match w.Decode enc with
+                | Ok back when back = op -> ()
+                | Ok back ->
+                    inverse <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: Decode (Encode %A) = Ok %A — the codec's own decoder is not a left inverse of its encoder, so nothing here bounds what else the encoder aliases"
+                                seed
+                                i
+                                op
+                                back
+                        )
+                | Error e ->
+                    inverse <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: Decode refused the encoding this witness's own Encode produced for %A: %s"
+                                seed
+                                i
+                                op
+                                e
+                        )
+
+        let narrow =
+            if distinct >= 2 then
+                None
+            else
+                Some(
+                    sprintf
+                        "seed=%d: the draw produced %d distinct encoding(s) over %d iterations — a collision search over one value compares nothing; widen the generator"
+                        seed
+                        distinct
+                        iterations
+                )
+
+        [ { Law = "the op codec is collision-free over the drawn population (distinct ops ⇒ distinct encodings)"
+            Passed = collision.IsNone
+            Counterexample = collision }
+          { Law =
+              "the op codec has a left inverse (Decode ∘ Encode = Ok) — which makes it injective, not merely un-collided"
+            Passed = inverse.IsNone
+            Counterexample = inverse }
+          { Law = "the draw searched more than one encoding, so the collision law compared something"
+            Passed = narrow.IsNone
+            Counterexample = narrow } ]
+
     // ---- projection laws (Phase 58) ----
     // The teeth on `Fuaran.Core.Projection` — the read-token-lever seam. A domain supplies its
     // `ProjectionWitness`, its re-import (`applyOps` — the ops→tree half of the round trip), its

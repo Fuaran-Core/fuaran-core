@@ -2192,6 +2192,36 @@ so an adopting domain certifies the property over its own witness rather than tr
 `Conformance.certify` therefore returns **14** law results where it returned 13; a consumer asserting the
 count updates it. `witnessLaws` is unchanged.
 
+### `Conformance.codecInjectivityLaws` — the op codec's own contract, certifiable (`0.24.0`, Phase 145) — ADDITIVE
+
+A new opt-in law family:
+
+```fsharp
+val codecInjectivityLaws:
+    StreamWitness<'Op, 'State, 'Rej> -> StreamGen<'Op, 'State> -> int -> int -> LawResult list
+```
+
+Three laws over one seed-replayable draw of the domain's own ops: **no collision was drawn** (two
+distinct ops never share an encoding), **the codec has a left inverse** (`Decode (Encode op) = Ok op`,
+which makes the codec injective rather than merely un-collided — one drawn op exercises it, where a
+collision search needs the pair to come up), and **the draw compared more than one encoding**.
+
+**Why a domain should run it.** `Dag.nodeHash` hashes `Actor.encode actor + "|" + w.Encode op`, so a
+node's content id determines its op only if the codec is injective. Two distinct ops that encode alike
+mint ONE content id, and a tamper between them is invisible to `Dag.firstBreak` and to
+`OpStream.verifyChain` alike — the walker is not weak there, the pre-image simply does not distinguish
+them. That is the fourth premise of the chain-integrity theorem (`proofs/Chain.fst`'s
+`op_codec_injective`), and it is the domain's rather than this library's, because `Encode` belongs to
+whoever brings the op type. Same division of labour as the fold theorem's `independence_diamond` and
+`FoldConfluence.laneFoldLaws`.
+
+**Deliberately NOT folded into `certify` / `certifyStream`, and the reason is a contract one.** The
+left-inverse law demands a working `Decode`. A witness that legitimately stubs it — a domain that never
+reads a stream back — would go red inside an aggregate it passes today, for something that is not about
+its op algebra. So this joins the snapshot and DAG surfaces as a family a domain calls beside its base
+certification, and the `certify` count above stays at 14. A domain whose `Decode` is real should run it:
+nothing else in the kit certifies this premise. `'Op` needs equality.
+
 ## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists

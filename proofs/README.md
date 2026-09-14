@@ -23,7 +23,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. |
 | `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. |
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under one named injective-hash premise. Shares nothing with the models above but `oracle/Prims.fs`. |
+| `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
@@ -685,13 +685,13 @@ theorems statements about the walker rather than about a re-description of it:
   point production's callers use). Change one record's sequence, actor or op and leave its two hash
   fields alone, in a chain that was intact, and the walk reports a break.
 
-### The one assumption, and the three things worth knowing about it
+### The assumptions, and the three things worth knowing about them
 
 The premise is that **the content id determines the content**: two contents that hash to one id are
 the same content. That is the collision-resistance assumption every content-addressed store makes;
 what is unusual is only that it is written down beside the code that needs it. It is an explicit
-lemma-valued **parameter** of the theorems that use it (`node_injective`, `rec_injective`), never an
-`assume` — `--report_assumes error` is on and the module carries no `assume`, no `admit`, no
+lemma-valued **parameter** of the theorems that use it (`node_injective_on`, `rec_injective`), never
+an `assume` — `--report_assumes error` is on and the module carries no `assume`, no `admit`, no
 `assume val`.
 
 **1. It is stated MODULO THE PARENT SORT, and that is the strongest form that is true.** Production
@@ -705,18 +705,48 @@ comparison is a total order (both halves hold of `String.CompareOrdinal(a,b) <= 
 compare, and two that compare both ways are equal). Production has at most two parents — `append`
 gives none or one, `merge` exactly two — so the two-parent case is the general one.
 
-**2. It bundles more than the hash, and the model says so rather than pretending otherwise.**
-`nodeHash` is `hashFn (String.concat "," sortedParents) (Actor.encode actor + "|" + encode op)`, so
-"the id determines the content" needs three things at once: the hash injective on the pre-images
-that occur, the two SPLICES unambiguous (no comma inside a parent id; no second place the `|` could
-split the actor encoding from the op encoding), and the op codec injective. The model does not
-decompose the premise into them, because string concatenation is opaque to it and an argument it
-cannot check is better stated than half-mechanised — the same posture Phase 134 took with the
-topological order. The splice condition is not academic: the differential's own work-plan codec
-encodes an op as `"A|" + id + "|" + title`, so the composite pre-image contains several `|`
-characters, and what makes it unambiguous is that `Actor.encode` emits a JSON object that never
-contains one. That is a property of the encodings that OCCUR, which is exactly what the premise
-says and exactly what it does not prove.
+**2. It bundled more than the hash, and Phase 145 unbundled it.** `nodeHash` is
+`hashFn (String.concat "," sortedParents) (Actor.encode actor + "|" + encode op)`, so "the id
+determines the content" needs four things at once: the hash injective on the pairs it is handed, the
+two SPLICES unambiguous, and the op codec injective. Phase 136 declined to decompose the premise,
+because string concatenation is opaque to F\* and an argument the model cannot check is better
+stated than half-mechanised. That was the right call for a phase whose subject was the walkers, and
+it left three claims resting on a sentence. Phase 145 separated them, and none of the three landed
+where the sentence said it would:
+
+- **The parent splice is PROVED** (`parent_splice_unambiguous`): `String.concat ","` is injective on
+  lists of parent ids given that an id carries no comma **and is not empty**. Both conditions are
+  load-bearing and only the first was named — without the second, `[]` and `[""]` join to the same
+  string. Production supplies both: a content id under the default `HashFn` is eight hex characters,
+  and a parent that is neither is not a key of the map, so the walk's second clause reports it.
+- **The actor/op splice is PROVED** (`actor_op_splice_unambiguous`) — but not for the reason this
+  document gave. It said the splice is unambiguous because "`Actor.encode` emits a JSON object that
+  never contains one". **It can contain one.** `Actor.encode`'s escaper handles `"`, `\` and the C0
+  controls; `|` is `0x7C` and is none of those, so `Human "a|b"` encodes to
+  `{"kind":"human","id":"a|b"}`. Separator freedom is FALSE of production, and the splice condition
+  is not academic — the differential's own work-plan codec encodes an op as
+  `"A|" + id + "|" + title`, so the composite pre-image really does carry several `|` characters.
+  What saves it is stronger than what was claimed: a JSON object whose string literals are
+  self-delimiting is a **prefix-free code**, so no encoding is a proper prefix of another and the
+  split point is forced wherever the separators fall. That is the condition the lemma takes, and
+  both halves — the refutation and the property — are measured over an adversarial actor population
+  in the differential rather than argued here.
+- **The op codec's injectivity is the DOMAIN'S** (`op_codec_injective`), so it stays a parameter and
+  gains a conformance law: `Conformance.codecInjectivityLaws`, which a witness certifies by
+  sampling. Same division of labour as the fold theorem's `independence_diamond`.
+
+`node_injective_derived` composes the four back into the premise the tamper theorems take, so the
+composite is a theorem now rather than an assumption. Two things about the decomposition are worth
+knowing. It costs a **hypothesis about `string` itself** — `symbols_faithful reveal`: concatenation
+is symbol-list append, and two strings with the same symbols are the same string. Both are true of
+`System.String` by construction; F\*'s own `FStar.String` states them as `val`s under the comment
+"admitted for now as we don't have a model", so naming them in the module says the same thing with
+the assumption visible in a signature rather than inherited from a library `--report_assumes` does
+not quantify over. And it costs a **restriction**: `node_injective_on` concludes only for pre-images
+whose parents are ids and whose actor string is one the actor code emits, which is what the splice
+lemmas need and what production supplies. The LINEAR side is deliberately untouched — `rec_injective`
+splices a four-way JSON envelope rather than `nodeHash`'s two, and decomposing it is separate work,
+named in the ladder rather than quietly implied by this one.
 
 **3. The chain's SEQUENCE and PREV-LINK breaks need none of it.**
 `chain_tamper_seq_detected` and `chain_tamper_prev_detected` are proved **under no hypothesis at
@@ -739,6 +769,8 @@ broken-vs-intact alone would not notice a walker naming the wrong check.
 | the work-plan domain | the LINEAR walker on 80 generated chains and every single-record tamper (op, actor, seq, prevHash, dropped record) | yes (asserted) |
 | the reference tree witness | the same, 60 chains | yes (asserted) |
 | the wire corpus's `dag/` fixtures | their SHAPES — see below — rebuilt through production's own `append`/`merge`, intact and under every tamper | yes (asserted) |
+| an adversarial ACTOR population (Phase 145) | the two alphabet conditions the splice lemmas ask of production: that `Actor.encode`'s image is prefix-free, and that the splice recovers both halves over every (actor, op-encoding) pair | yes — a bare-id encoder is prefix-comparable and collides on the same population |
+| the work-plan witness (Phase 145) | its op codec, through `Conformance.codecInjectivityLaws` — the model's fourth premise certified for the domain whose ids the cases above compare | yes — a codec that erases its op fails the law, and the tamper it hides is then invisible to production's own walker |
 
 `Dag.nodeHash` is private, so the only way to reach it is through `Dag.append`: the ids the model
 recomputes are the ones production minted, and a model whose `isort` and `join_comma` were not
@@ -776,25 +808,52 @@ appeal reddens `tamper_changes_the_id`; making the DAG walk skip its content-id 
 `chain_tamper_detected`; and hashing the UNSORTED parents reddens `parent_reorder_undetected`. Each
 landed on the lemma that should have caught it.
 
+Phase 145's own lemmas were falsified the same way before they were trusted, and each of those
+landed where it should too: dropping the **non-empty** condition on a parent id reddens
+`joined_injective`, and so does dropping the **comma-free** one — two conditions, two independent
+failures, which is what says both are load-bearing rather than one carrying the other; dropping the
+prefix-free hypothesis reddens `splice_split`; dropping the appeal to the op codec reddens
+`node_injective_derived`; and hashing the unsorted parents reddens it too, through
+`hash_injective`'s own use site.
+
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** On the model: both walkers characterised; a DAG grown
    by well-parented `append`/`merge` and a chain grown by `append` have no break; a single-node
    content tamper that leaves the address alone is found — the DAG's under the injectivity premise,
    the chain's sequence and prev-link arms under nothing at all, and the DAG's missing-parent class
-   under nothing at all. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
+   under nothing at all. Since Phase 145, also: the two SPLICES in `nodeHash`'s pre-image are
+   unambiguous for the alphabets production uses (`parent_splice_unambiguous`,
+   `actor_op_splice_unambiguous`), and the composite premise the tamper theorems take is DERIVED
+   from the hash's injectivity and the op codec's rather than assumed alongside them
+   (`node_injective_derived`). F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
    `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Dag.firstBreak` and
    `OpStream.firstChainBreak` over the pools above, on the verdict, the location, the check that
    failed and the expected/got values — and mints production's own content ids node by node.
-   Agreement is over those pools, never over all inputs.
+   Agreement is over those pools, never over all inputs. Since Phase 145 the two alphabet conditions
+   the splice lemmas ask of production are measured here too — `Actor.encode`'s image is prefix-free
+   over an adversarial population, a content id carries no comma and is not empty, and a parent id
+   that would is caught as a missing parent — and the op codec's injectivity is certified for the
+   work-plan witness through `Conformance.codecInjectivityLaws`. Sampled, over those populations,
+   never over all inputs.
 3. **Assumed, and stated as such.**
-   - **The hash is injective on the pre-images that occur** — the one cryptographic premise, and
-     the whole of what "tamper detection" rests on here. It bundles the hash's own injectivity, the
-     unambiguity of the two splices in the pre-image, and the injectivity of the op codec; the model
-     states the composite and does not decompose it (point 2 above). It is a PARAMETER of the
-     theorems that need it, so which results depend on it is visible in their signatures rather than
-     inferable from prose.
+   - **The hash is injective on the pairs it is handed** — the cryptographic premise, and since
+     Phase 145 the only claim about the DAG's content id that is assumed rather than proved or
+     certified. It is a PARAMETER of the theorems that need it, so which results depend on it is
+     visible in their signatures rather than inferable from prose. Phase 136 stated it in a bundled
+     form that also carried the two splices and the op codec; point 2 above is what became of those.
+   - **The op codec is injective** — the domain's promise, not this library's, and a parameter for
+     that reason. Certified by sampling rather than proved (`Conformance.codecInjectivityLaws`), on
+     the same footing as the fold theorem's `independence_diamond`.
+   - **A string is its symbols** — `symbols_faithful`: concatenation is symbol-list append and two
+     strings with the same symbols are the same string. Both are true of `System.String` by
+     construction and are what makes any splice argument possible at all; F\*'s own `FStar.String`
+     admits them. A stated hypothesis, in the same style as the total order below, rather than a
+     parameter.
+   - **The LINEAR side's premise is still bundled.** `rec_injective` splices a four-way JSON
+     envelope, and Phase 145 decomposed `nodeHash`'s two splices only. Nothing about the chain
+     payload's splices is proved; the row above is the whole of what is claimed there.
    - **The comparison is a total order.** `merge_id_parent_order_independent` asks for it and
      nothing else does; `String.CompareOrdinal(a,b) <= 0` satisfies it.
    - **The walk order is production's own.** The model walks its entry list in the order it is
@@ -836,6 +895,15 @@ over bytes: the depth bound that makes deep input a named `Error` rather than an
 overflow, the escape and `\uXXXX` paths, the int53 token guard, and the exhaustiveness of the
 `JsonErrorKind` classification. It is the one piece of this stack where an EverParse-shaped
 approach is worth pricing rather than assuming away.
+
+**The LINEAR chain payload's splices** — the half Phase 145 deliberately did not take. `rec_hash`
+hashes `{"seq":<n>,"actor":<a>,"op":<o>}`, a four-way splice through a JSON envelope rather than
+`nodeHash`'s two, so `rec_injective` is still the bundled premise Phase 136 wrote. The symbol-level
+machinery it would need is already there (`app_sep_split`, `splice_split`, `symbols_faithful`); what
+is new is that the envelope's separators are `":` and `,"` digraphs inside a literal skeleton rather
+than single characters, so the argument is a parse rather than a split, and the actor field's
+self-delimitation has to be composed with the sequence numeral's. It is the smallest of the three
+items here and the one with a worked precedent beside it.
 
 **The topological order's uniqueness on a spine** — the one step Phase 134 argues rather than
 proves, and the smaller of the two. It is two lemmas: that a distinct enumeration of a spine's

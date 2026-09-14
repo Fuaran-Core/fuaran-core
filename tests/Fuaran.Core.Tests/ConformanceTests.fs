@@ -256,6 +256,75 @@ let tests =
                   // algebra gained the insert-uniqueness law in Phase 137.
                   "witness (4) + algebra (4) + diff (3) + stream (3) laws reported"
 
+          // ---- Phase 145: the op codec's own injectivity, the content-id theorem's fourth premise ----
+
+          testCase "the reference stream witness certifies its op codec injective (Phase 145)"
+          <| fun _ ->
+              let results = Conformance.codecInjectivityLaws sw streamGen 1450 200
+              Expect.equal (List.length results) 3 "collision-free + left-inverse + the draw was wide enough"
+
+              if results |> List.exists (fun r -> not r.Passed) then
+                  let fails =
+                      results
+                      |> List.filter (fun r -> not r.Passed)
+                      |> List.map (fun r -> sprintf "%s — %A" r.Law r.Counterexample)
+
+                  failtestf "the reference stream witness failed codec injectivity:\n%s" (String.concat "\n" fails)
+
+              // determinism: the same seed reproduces the identical verdict (seed-replay)
+              Expect.equal
+                  (Conformance.codecInjectivityLaws sw streamGen 1450 200)
+                  results
+                  "same seed ⇒ identical report"
+
+          testCase "a codec that drops a field is caught, in both of the two ways it can be"
+          <| fun _ ->
+              // The teeth, and they are two DIFFERENT teeth. `Inc n` and `Dec n` encode alike here,
+              // so a colliding pair is drawn within a couple of hundred iterations — that is the
+              // first law. The left-inverse law does not have to wait for the pair: the very first
+              // op it draws either comes back as itself or does not.
+              let lossy =
+                  { sw with
+                      Encode =
+                          fun op ->
+                              match op with
+                              | Inc n
+                              | Dec n -> Json.render (Json.kindObj "op" [ "n", JInt n ]) }
+
+              let results = Conformance.codecInjectivityLaws lossy streamGen 1451 200
+              let failed = results |> List.filter (fun r -> not r.Passed)
+
+              Expect.isGreaterThan
+                  (List.length failed)
+                  1
+                  "a codec that erases the case fails BOTH the collision law and the left-inverse law"
+
+              Expect.isTrue
+                  (failed |> List.forall (fun r -> r.Counterexample.IsSome))
+                  "every failure carries a seeded counterexample"
+
+              Expect.isTrue
+                  (failed
+                   |> List.exists (fun r -> r.Law.StartsWith "the op codec is collision-free"))
+                  "the collision law is one of them"
+
+              Expect.isTrue
+                  (failed
+                   |> List.exists (fun r -> r.Law.StartsWith "the op codec has a left inverse"))
+                  "and so is the left-inverse law"
+
+          testCase "a generator that mints one op fails the family's own narrowness law"
+          <| fun _ ->
+              // Without this the collision law passes over a draw that compared nothing — the
+              // vacuity a sampled injectivity search is exactly prone to.
+              let oneOp: StreamGen<CounterOp, int> = { State0 = 0; Op = fun r -> Inc 1, r }
+              let results = Conformance.codecInjectivityLaws sw oneOp 1452 200
+
+              Expect.isTrue
+                  (results
+                   |> List.exists (fun r -> not r.Passed && r.Law.StartsWith "the draw searched more than one"))
+                  "one drawn encoding is reported as a search that compared nothing"
+
           testCase "op-algebra laws run standalone (no stream)"
           <| fun _ ->
               let results = Conformance.opAlgebra nodew idw opGen 999 200

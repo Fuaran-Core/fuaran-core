@@ -254,6 +254,9 @@ module SampleAdequacy =
           "Conformance.canonicalFloatLaws",
           Unconditional "each iteration renders a drawn float and the three non-finite tokens"
           "Conformance.encoderInjectivityLaws", Unconditional "each iteration hashes a drawn pair of trees"
+          "Conformance.codecInjectivityLaws",
+          Unconditional
+              "the left-inverse law is BUILT by every iteration — one drawn op round-tripped through the domain's own Decode, and a codec with a total left inverse is injective — so the family's weight does not rest on the collision search beside it, whose own third law fails when the draw was too narrow to compare anything"
           "Conformance.projectionLaws", Unconditional "each iteration projects, re-imports and scopes the same tree"
           "Conformance.aiSurfaceLaws",
           Unconditional "each iteration walks the catalogue and exercises approved, denied and unknown"
