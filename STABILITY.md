@@ -2217,12 +2217,13 @@ named cases, and that is a law too.
 
 **The rendered bytes are UNCHANGED, and that is the load-bearing half of this entry.**
 `Dag.fromJsonlVerified`'s error still reads `Dag.fromJsonlVerified: <reason> at node <id>` with
-`<reason>` one of the two pre-release spellings, because it renders `DagBreakReason.toString`. A
-downstream consumer matching that error text exists — a sweep for the two spellings across every
-repository available when this was written found one, and it asserts on the string
-`fromJsonlVerified` returns rather than on the `Reason` field, so it is unaffected without doing
-anything. `DagTests` pins both spellings by exact comparison rather than by substring, so a later
-reword goes red here instead of downstream.
+`<reason>` one of the two pre-release spellings, because it renders `DagBreakReason.toString`.
+Downstream consumers matching that error text exist. A sweep for the two spellings across every
+repository available when this was written found **two**, both asserting by substring on the string a
+verified load returns — one on a DAG store's own load wrapper, one on a session history's — and
+neither reads the `Reason` field, so both are unaffected without doing anything. `DagTests` pins both
+spellings by exact comparison rather than by substring, so a later reword goes red here instead of
+downstream.
 
 **The consumer that deletes its projection is this repo's own proof differential.** Phase 136's
 `Chain.fst` model carries the walker's two break classes as a closed set, and its differential
