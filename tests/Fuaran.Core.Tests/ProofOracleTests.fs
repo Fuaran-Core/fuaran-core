@@ -3012,6 +3012,306 @@ let private contDifferential
     tally
 
 
+// ---------------------------------------------------------------------------
+//  Phase 160 — the SEQUENCE surface as a third oracle family.
+//
+//  `Ops.applyAllWith` / `Ops.canApplyAllWith` are the container-aware script pair that closes the
+//  gap Phase 140 recorded, and `proofs/Preservation.fst` section 9 models them clause for clause:
+//  `apply_all_with` / `can_apply_all_with`, with the failure payload MODELLED rather than dropped
+//  (section 8's `can_apply_all` drops the index because nothing there turned on it; here
+//  everything does).
+//
+//  What runs here is the extracted pair beside the shipped pair, over generated scripts and a
+//  drawn `canHold` — drawn for the reason the per-op container family draws one, because the
+//  theorems quantify over the predicate. Four things are compared, and the last two are the whole
+//  of what the sequence surface adds over the per-op one:
+//
+//    1. the verdict, and the accepted tree through production's own `Tree.encodeHash`
+//    2. the rejection CLASS
+//    3. the refusal INDEX — which step was refused, not merely that one was
+//    4. the PARTIAL TREE the refusal hands back — the state the accepted prefix reached
+//
+//  A refusal at index 0 returns the caller's own input, so it says nothing about (4). The
+//  adequacy guard therefore counts MID-SCRIPT refusals separately and asserts them, exactly as the
+//  Phase 140 family counts capability sites separately: a run that met only step-0 refusals would
+//  compare the partial tree against the input and certify nothing.
+// ---------------------------------------------------------------------------
+
+/// The extracted sequence dry run, as the differential calls it — a seam so the go-red can be
+/// substituted for it. The go-red is the model's own `can_apply_all`: section 8's plain sequence
+/// check, which is what the shipped `canApplyAll` threaded before this phase.
+type private ScriptCan =
+    (TreeOps.tree -> bool)
+        -> Prims.nat
+        -> Prims.list<TreeOps.op>
+        -> TreeOps.tree
+        -> DagFold.outcome<unit, Prims.nat * TreeOps.rejection>
+
+/// The go-red: the capability-free sequence dry run, lifted into the container-aware signature by
+/// discarding the predicate. `can_apply_all_ignores_containment` proves in F\* that it admits a
+/// script the container-aware call refuses, so it is a proved weakening before it is measured.
+let private scriptGoRedCan: ScriptCan =
+    fun _ i os t ->
+        match Preservation.can_apply_all os t with
+        | DagFold.Ok() -> DagFold.Ok()
+        | DagFold.Error e -> DagFold.Error(i, e)
+
+type private ScriptTally =
+    {
+        Diffs: string list
+        Accepted: int
+        Refused: int
+        /// refusals at an index > 0 — the only probes where the partial tree is something other
+        /// than the caller's own input
+        MidScript: int
+        /// refusals whose class is `NotAContainer` — the class the whole phase exists to make
+        /// reachable from a script
+        ContainerRefusals: int
+        Predicates: Set<string>
+    }
+
+let private emptyScriptTally =
+    { Diffs = []
+      Accepted = 0
+      Refused = 0
+      MidScript = 0
+      ContainerRefusals = 0
+      Predicates = Set.empty }
+
+let private renderDiffs (diffs: string list) =
+    diffs |> List.truncate 5 |> String.concat "\n"
+
+let private scriptProbe
+    (modelCanApply: ScriptCan)
+    (kinds: Set<string>)
+    (script: SkeletonOp<RNode, string> list)
+    (st: RNode)
+    (acc: ScriptTally)
+    : ScriptTally =
+    let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
+    let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
+    let mscript = script |> List.map (toModelOpWith toModelTree)
+    let mst = toModelTree st
+    let zero = Prims.parse_int "0"
+
+    let where =
+        sprintf
+            "script [%s] at tree %s under canHold={%s}"
+            (script |> List.map renderProdOp |> String.concat "; ")
+            (prodTreeHash st)
+            (showKinds kinds)
+
+    let prod = Ops.applyAllWith canHold nodew idw script st
+    let model = Preservation.apply_all_with mCanHold zero mscript mst
+    let prodCan = Ops.canApplyAllWith canHold nodew idw script st
+    let modelCan = modelCanApply mCanHold zero mscript mst
+
+    // 1-4. applyAllWith: verdict, tree, class, index, partial tree
+    let applyDiff, accepted, refused, midScript, containerRef =
+        match prod, model with
+        | Ok pt, DagFold.Ok mt ->
+            let ph = prodTreeHash pt
+            let mh = modelTreeHash mt
+
+            (if ph <> mh then
+                 [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
+             else
+                 []),
+            1,
+            0,
+            0,
+            0
+        | Error(pi, pe, ppartial), DagFold.Error(mi, me, mpartial) ->
+            let pc = prodRejClass pe
+            let mc = modelRejClass me
+
+            let classDiff =
+                if pc <> mc then
+                    [ sprintf "rejection class differs — %s\n  production: %s\n  oracle:     %s" where pc mc ]
+                else
+                    []
+
+            // The index is the sequence surface's own contribution — which step, not merely that
+            // one failed. Compared as a number on both sides; the model's is an unbounded `nat`.
+            let indexDiff =
+                if System.Numerics.BigInteger(pi) <> mi then
+                    [ sprintf "refusal INDEX differs — %s\n  production: %d\n  oracle:     %O" where pi mi ]
+                else
+                    []
+
+            // And the partial tree: first-refusal-wins keeps the accepted prefix, so this is the
+            // state the caller is left holding and the model has to reproduce it exactly.
+            let partialDiff =
+                let ph = prodTreeHash ppartial
+                let mh = modelTreeHash mpartial
+
+                if ph <> mh then
+                    [ sprintf "PARTIAL tree differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
+                else
+                    []
+
+            (classDiff @ indexDiff @ partialDiff),
+            0,
+            1,
+            (if pi > 0 then 1 else 0),
+            (if pc = "NotAContainer" then 1 else 0)
+        | Ok _, DagFold.Error(_, me, _) ->
+            [ sprintf "production ACCEPTED the script but the oracle rejected (%s) — %s" (modelRejClass me) where ],
+            0,
+            0,
+            0,
+            0
+        | Error(pi, pe, _), DagFold.Ok _ ->
+            [ sprintf
+                  "production REJECTED the script at %d (%s) but the oracle accepted — %s"
+                  pi
+                  (prodRejClass pe)
+                  where ],
+            0,
+            1,
+            (if pi > 0 then 1 else 0),
+            (if prodRejClass pe = "NotAContainer" then 1 else 0)
+
+    // 5. the dry run, against the model's and against production's own mutating call
+    let canDiff =
+        let render v =
+            match v with
+            | Choice1Of2() -> "ok"
+            | Choice2Of2(i: string, c: string) -> sprintf "%s@%s" c i
+
+        let pv =
+            match prodCan with
+            | Ok() -> Choice1Of2()
+            | Error(i, e) -> Choice2Of2(string i, prodRejClass e)
+
+        let mv =
+            match modelCan with
+            | DagFold.Ok() -> Choice1Of2()
+            | DagFold.Error(i, e) -> Choice2Of2(string i, modelRejClass e)
+
+        let differs =
+            if render pv <> render mv then
+                [ sprintf
+                      "canApplyAllWith differs — %s\n  production: %s\n  oracle:     %s"
+                      where
+                      (render pv)
+                      (render mv) ]
+            else
+                []
+
+        // production's own two surfaces, which section 9's `can_apply_all_with_agrees` says agree
+        // on the index and the envelope as well as on the verdict
+        let prodSelf =
+            let fromApply =
+                match prod with
+                | Ok _ -> Choice1Of2()
+                | Error(i, e, _) -> Choice2Of2(string i, prodRejClass e)
+
+            if render pv <> render fromApply then
+                [ sprintf
+                      "production's canApplyAllWith and applyAllWith DISAGREE — %s\n  dry run: %s\n  apply:   %s"
+                      where
+                      (render pv)
+                      (render fromApply) ]
+            else
+                []
+
+        differs @ prodSelf
+
+    // 6. and the total instance: `Ops.applyAll` / `Ops.canApplyAll` ARE the `fun _ -> true`
+    //    instances, which is the claim that no existing caller moved. Asserted here as well as in
+    //    `OpsTests` because this pool is the generated one.
+    let instanceDiff =
+        let plainApply = Ops.applyAll nodew idw script st
+        let totalApply = Ops.applyAllWith (fun _ -> true) nodew idw script st
+
+        let render r =
+            match r with
+            | Ok t -> "ok:" + prodTreeHash t
+            | Error(i, e, t) -> sprintf "%d:%s:%s" i (prodRejClass e) (prodTreeHash t)
+
+        let applySide =
+            if render plainApply <> render totalApply then
+                [ sprintf
+                      "applyAll is NOT applyAllWith (fun _ -> true) — %s\n  applyAll:     %s\n  applyAllWith: %s"
+                      where
+                      (render plainApply)
+                      (render totalApply) ]
+            else
+                []
+
+        let renderCan r =
+            match r with
+            | Ok() -> "ok"
+            | Error(i, e) -> sprintf "%d:%s" i (prodRejClass e)
+
+        let canSide =
+            if
+                renderCan (Ops.canApplyAll nodew idw script st)
+                <> renderCan (Ops.canApplyAllWith (fun _ -> true) nodew idw script st)
+            then
+                [ sprintf "canApplyAll is NOT canApplyAllWith (fun _ -> true) — %s" where ]
+            else
+                []
+
+        applySide @ canSide
+
+    { Diffs = acc.Diffs @ applyDiff @ canDiff @ instanceDiff
+      Accepted = acc.Accepted + accepted
+      Refused = acc.Refused + refused
+      MidScript = acc.MidScript + midScript
+      ContainerRefusals = acc.ContainerRefusals + containerRef
+      Predicates = Set.add (showKinds kinds) acc.Predicates }
+
+/// The generated pool, plus scripts MINTED to place a container refusal at a chosen POSITION.
+/// The generated lanes alone reach a mid-script refusal by luck; a script whose second step is a
+/// move into a leaf reaches one by construction, which is what the Phase 138 family's lesson says
+/// to do and what the partial-tree comparison needs.
+let private scriptDifferential' (modelCanApply: ScriptCan) (seed: int) (trials: int) : ScriptTally =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable tally = emptyScriptTally
+    let mutable n = 0
+
+    for _ in 1..trials do
+        let lanes, r1 = treeLaneGen.Lanes 3 r
+        let kinds, r2 = drawCanHold r1
+        r <- r2
+        n <- n + 1
+        let generated = List.concat lanes
+
+        let leaves =
+            Tree.preorder nodew treeBase
+            |> List.filter (fun c -> List.isEmpty (nodew.Children c))
+            |> List.map nodew.Id
+            |> List.truncate 2
+
+        // a step that lands under a leaf — refused by every predicate that does not admit "para",
+        // and accepted (as `apply` accepts it) by one that does
+        let intoLeaf =
+            match leaves with
+            | l :: _ ->
+                [ MoveNode("b", l)
+                  InsertChild(l, RNode.leaf (sprintf "p160-%d" n) "para" "v") ]
+            | [] -> []
+
+        let prefix = generated |> List.truncate 2
+
+        let scripts =
+            [ generated ]
+            @ (intoLeaf |> List.map (fun probe -> [ probe ])) // refusal at index 0
+            @ (intoLeaf |> List.map (fun probe -> prefix @ [ probe ])) // refusal MID-script
+            @ (intoLeaf |> List.map (fun probe -> prefix @ [ probe ] @ generated)) // and work after it
+
+        for script in scripts do
+            tally <- scriptProbe modelCanApply kinds script treeBase tally
+
+    tally
+
+/// The differential proper — the extracted `can_apply_all_with` in the dry-run slot.
+let private scriptDifferential (seed: int) (trials: int) : ScriptTally =
+    scriptDifferential' Preservation.can_apply_all_with seed trials
+
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -4642,18 +4942,26 @@ let proofOracleTests =
                       (prodContained canHold result)
                       "the invariant broke, which is what `contained_op` is a hypothesis about"
 
-          testCase "canApplyAll is NOT container-aware — a script it admits, applyContained refuses"
+          testCase "the sequence surface sees containment and the plain pair still does not — both halves"
           <| fun _ ->
-              // `can_apply_all_ignores_containment`, on production, and a FINDING rather than a
-              // model artefact: `Ops.canApplyAll` and `Ops.applyAll` both thread the plain `apply`
-              // (Ops.fs), so there is no container-aware sequence surface at all. A caller that
-              // pre-flights a script with `canApplyAll` and executes it with `applyContained` —
-              // the combination the two doc comments invite — has a check that cannot see the
-              // refusal its executor will make.
+              // `can_apply_all_ignores_containment` AND `can_apply_all_with_sees_containment`, on
+              // production, at the same tree and the same script. This case was Phase 140's, where
+              // it recorded a FINDING — `Ops.canApplyAll` and `Ops.applyAll` both threaded the
+              // plain `apply`, so there was no container-aware sequence surface at all and a
+              // caller pre-flighting with `canApplyAll` and executing with `applyContained` had a
+              // check that could not see the refusal its executor would make.
               //
-              // This case goes RED if that gap is ever closed, which is the point: closing it is a
-              // deliberate act, and whoever takes it should be made to retire this assertion by
-              // hand rather than discover the surface had quietly changed.
+              // Phase 160 closed that by ADDING `applyAllWith` / `canApplyAllWith` beside the pair,
+              // and 140's own note — "this case goes RED if that gap is ever closed" — turned out
+              // to be a go-red by intention rather than by construction: every assertion it made
+              // was about `canApplyAll` and `applyContained`, and 160 deliberately moved neither.
+              // The plain pair is the `fun _ -> true` instance BY CONSTRUCTION, so it is blind to
+              // containment now and always will be; a phase that changed that would have moved
+              // every existing caller.
+              //
+              // So the case is restated to carry both halves, which is what gives it teeth in both
+              // directions: it goes RED if the new pair ever stops consulting the capability, and
+              // RED if the plain pair ever gains one.
               let canHold (n: RNode) = n.Kind = "box"
 
               let tree =
@@ -4663,12 +4971,101 @@ let proofOracleTests =
 
               Expect.isTrue (prodContained canHold tree) "the tree satisfies the invariant to begin with"
 
+              // ---- half one: the plain pair has not moved, and is still blind ----
               Expect.isOk
                   (Ops.canApplyAll nodew idw script tree
                    |> Result.mapError (fun (i, e) -> sprintf "%d:%A" i e))
-                  "canApplyAll certifies the script — it consults no capability"
+                  "canApplyAll certifies the script — it consults no capability, and must not start"
 
               match Ops.applyContained canHold nodew idw (Batch script) tree with
               | Error(NotAContainer("leaf", "para")) -> ()
               | other ->
-                  failtestf "applyContained was expected to refuse the very script canApplyAll certified, got %A" other ]
+                  failtestf "applyContained was expected to refuse the very script canApplyAll certified, got %A" other
+
+              // ---- half two: the sequence surface that DOES see it (Phase 160) ----
+              match Ops.canApplyAllWith canHold nodew idw script tree with
+              | Error(0, NotAContainer("leaf", "para")) -> ()
+              | other ->
+                  failtestf "canApplyAllWith must refuse at step 0 with the envelope applyAllWith raises, got %A" other
+
+              match Ops.applyAllWith canHold nodew idw script tree with
+              | Error(0, NotAContainer("leaf", "para"), partial) ->
+                  // the refusal is at the first step, so the accepted prefix is empty and the
+                  // partial tree is the caller's own — first-refusal-wins, not all-or-nothing
+                  Expect.equal
+                      (Tree.encodeHash nodew encNode partial)
+                      (Tree.encodeHash nodew encNode tree)
+                      "a script refused at step 0 hands back the tree it was given"
+              | other -> failtestf "applyAllWith must refuse at step 0 and return the partial tree, got %A" other
+
+          testCase "the script oracle agrees with Ops.applyAllWith / canApplyAllWith under a generated canHold"
+          <| fun _ ->
+              // The Phase 160 differential: the extracted `apply_all_with` / `can_apply_all_with`
+              // beside the shipped pair, over generated scripts and a DRAWN predicate — drawn for
+              // the same reason the per-op container family draws one, because the theorems
+              // quantify over `canHold` and a run against one hand-picked predicate certifies that
+              // instance and nothing about the quantifier.
+              //
+              // What is compared is the whole failure payload and not merely the verdict: the
+              // INDEX and the partial TREE are the sequence surface's entire contribution over the
+              // per-op one, so a differential that compared accept-vs-refuse alone would certify
+              // nothing this phase added.
+              let t = scriptDifferential 1600 24
+
+              Expect.isEmpty t.Diffs (sprintf "the script oracle disagreed with production:\n%s" (renderDiffs t.Diffs))
+
+              // adequacy, per the shape this phase is about — measured at 24 trials (seed 1600):
+              // 45 scripts accepted, 123 refused, 60 of those refusals MID-script, 103 of them
+              // NotAContainer, and all 8 predicates drawn.
+              Expect.isGreaterThan t.Accepted 30 (sprintf "the run accepted scripts at all (accepted=%d)" t.Accepted)
+
+              Expect.isGreaterThan t.Refused 30 (sprintf "the run refused scripts at all (refused=%d)" t.Refused)
+
+              // The one that matters most: a refusal at index > 0 is the only probe that exercises
+              // the partial tree as something other than the caller's own input, and it is the
+              // state the non-atomic surface exists to produce.
+              Expect.isGreaterThan
+                  t.MidScript
+                  20
+                  (sprintf
+                      "the run refused scripts MID-WAY (midScript=%d) — otherwise the partial tree is never compared against anything but the input"
+                      t.MidScript)
+
+              Expect.isGreaterThan
+                  t.ContainerRefusals
+                  20
+                  (sprintf
+                      "the run reached NotAContainer refusals on the SEQUENCE surface (container=%d) — the refusal class this phase exists to make visible to a script"
+                      t.ContainerRefusals)
+
+              Expect.isGreaterThan
+                  (Set.count t.Predicates)
+                  5
+                  (sprintf "several DIFFERENT canHold predicates were drawn (%A)" t.Predicates)
+
+          testCase "an engine whose sequence dry run drops the capability loses — the measurement can fail"
+          <| fun _ ->
+              // The teeth. The go-red is the model's own `can_apply_all`, section 8's plain
+              // sequence dry run — the very function that was the shipped `canApplyAll` before this
+              // phase, and which `can_apply_all_ignores_containment` proves admits a script the
+              // container-aware call refuses. Handing it to the same differential in the dry-run
+              // slot is the measurement, and it must lose: if this ever passes, the new surface has
+              // stopped consulting the capability and the green run above means nothing.
+              let t = scriptDifferential' scriptGoRedCan 1600 24
+
+              Expect.isGreaterThan
+                  t.ContainerRefusals
+                  20
+                  (sprintf
+                      "the go-red run reached a container refusal at all (container=%d) — otherwise it proves nothing"
+                      t.ContainerRefusals)
+
+              Expect.isNonEmpty
+                  t.Diffs
+                  "a sequence dry run that drops the capability MUST disagree with Ops.canApplyAllWith"
+
+              Expect.isTrue
+                  (t.Diffs |> List.exists (fun d -> d.Contains "canApplyAllWith differs"))
+                  (sprintf
+                      "the disagreement is the one this phase is about — production's dry run sees the container refusal, the capability-free one does not. Got:\n%s"
+                      (List.head t.Diffs)) ]

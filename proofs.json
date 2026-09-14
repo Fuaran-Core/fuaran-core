@@ -698,7 +698,7 @@
     {
       "id": "container-sequence-gap",
       "level": "proved",
-      "claim": "A FINDING about the shipped surface, proved rather than asserted: there is no container-aware SEQUENCE surface. `Ops.canApplyAll` and `Ops.applyAll` both thread the plain `apply`, so a script `canApplyAll` certifies can be refused by `applyContained` at its first step — the counterexample is one move of a leaf under a leaf. A caller that pre-flights with `canApplyAll` and executes with `applyContained`, which is the combination the two doc comments invite, has a check that cannot see the refusal its executor will make. Recorded here rather than fixed here: closing it is an API change with a version, and the lemma plus its production-side case are what make the gap visible to whoever takes it.",
+      "claim": "A FINDING about the shipped surface when Phase 140 ran, proved rather than asserted: there was no container-aware SEQUENCE surface. `Ops.canApplyAll` and `Ops.applyAll` both threaded the plain `apply`, so a script `canApplyAll` certified could be refused by `applyContained` at its first step — the counterexample is one move of a leaf under a leaf. A caller that pre-flights with `canApplyAll` and executes with `applyContained`, which is the combination the two doc comments invite, had a check that could not see the refusal its executor would make. Recorded rather than fixed there, because closing it is an API change with a version; the lemma plus its production-side case are what made the gap visible to whoever took it. CLOSED by Phase 160 (`container-sequence-gap-closed`), which added `applyAllWith` / `canApplyAllWith` beside the plain pair. This row is KEPT and its lemma is still true, because its meaning changed rather than expiring: the plain pair is the `fun _ -> true` instance and is therefore blind to containment by construction, so what this now pins is that Phase 160 moved no existing caller.",
       "phase": "fuaran-core#140",
       "evidence": {
         "theorem": "can_apply_all_ignores_containment",
@@ -717,7 +717,65 @@
           "the container oracle agrees with Ops.applyContained under a generated canHold",
           "an engine that checks canHold on insert but NOT on move loses — the measurement can fail",
           "canHold is consulted on the PARENT and on nothing inside the graft — the shipped engine",
-          "canApplyAll is NOT container-aware — a script it admits, applyContained refuses"
+          "the sequence surface sees containment and the plain pair still does not — both halves"
+        ]
+      }
+    },
+    {
+      "id": "contained-preserves-script",
+      "level": "proved",
+      "claim": "The container invariant survives a SCRIPT under `Ops.applyAllWith`, and survives it on BOTH arms — the accepted tree and the partial tree a refusal hands back. The second arm is what a per-operation theorem structurally cannot state: a refused `applyContained` returns no tree at all, while a refused script keeps the accepted prefix and hands it to the caller, so a preservation statement covering only the accepted case would be silent about precisely the state a non-atomic surface exists to produce. Same two hypotheses as `contained-preserves` (`child_blind` and `contained_op`, both refuted without them by `contained-premises`), over any predicate, any script and any well-formed tree carrying the invariant.",
+      "phase": "fuaran-core#160",
+      "evidence": {
+        "theorem": "contained_preserves_all_with",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canapply-all-with-agrees",
+      "level": "proved",
+      "claim": "The container-aware sequence dry run returns exactly what the container-aware sequence apply returns — same verdict, same refusal INDEX, same envelope. The index is the half that makes the statement worth having for a script: a pre-flight that agreed on accept-vs-refuse while disagreeing about WHICH step failed would be useless to a caller deciding what to do next. Note what this needs and `canapply-contained-agrees` does: nothing. That one requires `wf t` because the per-operation dry run reaches the three validators directly and must be shown not to take a branch the mutating call does not; the sequence pair cannot diverge that way by construction, since both fold the SAME per-operation call — which is also the honest reading of why the shipped `canApplyAll` threads `apply` rather than `canApply`.",
+      "phase": "fuaran-core#160",
+      "evidence": {
+        "theorem": "can_apply_all_with_agrees",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "sequence-surface-total-instance",
+      "level": "proved",
+      "claim": "`Ops.applyAll` and `Ops.canApplyAll` ARE the `fun _ -> true` instances of the new pair, so no existing caller's behaviour moved when the capability arrived — the claim an additive API change has to earn, proved rather than asserted. Discharged against `TreeOps.apply_all` and section 8's `can_apply_all`, the two folds as they stood BEFORE Phase 160, so what is proved is agreement with the shipped behaviour rather than with a restatement of itself. The corollary is worth reading as a property rather than as an omission: the plain pair is blind to containment now and always will be, that being what the total instance means, so a caller that pre-flights with `canApplyAll` and executes with `applyContained` still has the Phase 140 gap and now has a surface that closes it.",
+      "phase": "fuaran-core#160",
+      "evidence": {
+        "theorem": "all_with_at_total_is_plain",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "container-sequence-gap-closed",
+      "level": "proved",
+      "claim": "`container-sequence-gap`'s counterexample, answered. The same script at the same tree: the plain sequence dry run certifies it, and the container-aware one refuses it at index 0 with `NotAContainer(\"leaf\", \"para\")` — the envelope `applyAllWith` raises — while the mutating call hands the tree back untouched, because the refusal is at the first step and the accepted prefix is empty. The two lemmas are read TOGETHER and the older one is kept rather than retired, because its meaning changed: it was a finding about a missing surface, and it is now the pin that the plain pair's behaviour did not move. What Phase 160 closed is the absence of ANY container-aware sequence surface, not the plain pair's blindness — the plain pair is blind by construction, and a phase that changed that would have moved every existing caller.",
+      "phase": "fuaran-core#160",
+      "evidence": {
+        "theorem": "can_apply_all_with_sees_containment",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "script-differential",
+      "level": "tested",
+      "claim": "The extracted sequence model agrees with the shipped `Ops.applyAllWith` and `Ops.canApplyAllWith` over generated scripts and a DRAWN `canHold`, drawn for the reason the per-operation container family draws one — the theorems quantify over the predicate, and a run against one hand-picked instance certifies that instance and nothing about the quantifier. Four things are compared and the last two are the sequence surface's entire contribution over the per-operation one: the verdict and the accepted tree through production's own `Tree.encodeHash`, the rejection class, the refusal INDEX, and the PARTIAL TREE the refusal hands back. Adequacy counts MID-script refusals separately and asserts them, because a refusal at index 0 returns the caller's own input and so compares the partial tree against nothing — measured at 24 trials, seed 1600: 45 scripts accepted, 123 refused, 60 of those mid-script, 103 of them NotAContainer, all 8 predicates drawn. The go-red is the model's own capability-free sequence check, which `container-sequence-gap` already proves to be a weakening, substituted into the dry-run slot and required to lose. Agreement is over the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#160",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the script oracle agrees with Ops.applyAllWith / canApplyAllWith under a generated canHold",
+          "an engine whose sequence dry run drops the capability loses — the measurement can fail",
+          "the sequence surface sees containment and the plain pair still does not — both halves"
         ]
       }
     }

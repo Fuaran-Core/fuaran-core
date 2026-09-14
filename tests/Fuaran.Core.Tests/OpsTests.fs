@@ -9,6 +9,36 @@ let private childIds (w: NodeWitness<RNode, string>) (parentId: string) (root: R
     |> Option.map (fun p -> p.Children |> List.map (fun c -> c.Id))
     |> Option.defaultValue []
 
+/// One random (possibly-invalid) skeleton op against `tree` — test-local, as every law-test file
+/// in this suite carries its own. It is the shape Phase 80's lane construction threads, which is
+/// what the `fun _ -> true`-instance case below wants: a pool mixing acceptances and refusals, so
+/// the two sequence functions are compared on both arms of the fold rather than on one.
+let private genScriptOp (tree: RNode) (rng: ConfRng.T) : SkeletonOp<RNode, string> * ConfRng.T =
+    let ids = Tree.preorder nodew tree |> List.map nodew.Id
+    let kind, r1 = ConfRng.intBelow 4 rng
+
+    match kind with
+    | 0 ->
+        let parent, r2 = ConfRng.choose ids r1
+        let n, r3 = ConfRng.next r2
+        InsertChild(parent, RNode.leaf (sprintf "g%d" (abs n)) "para" "v"), r3
+    | 1 ->
+        let target, r2 = ConfRng.choose ids r1
+        RemoveNode target, r2
+    | 2 ->
+        let target, r2 = ConfRng.choose ids r1
+        let np, r3 = ConfRng.choose ids r2
+        MoveNode(target, np), r3
+    | _ ->
+        let parent, r2 = ConfRng.choose ids r1
+
+        match Tree.tryFind nodew idw parent tree with
+        | Some p ->
+            let kids = nodew.Children p |> List.map nodew.Id
+            let shuffled, r3 = ConfRng.shuffle kids r2
+            ReorderChildren(parent, shuffled), r3
+        | None -> ReorderChildren(parent, []), r2
+
 [<Tests>]
 let tests =
     testList
@@ -340,4 +370,126 @@ let insertIdUniquenessTests =
               match law with
               | None ->
                   failtestf "opAlgebra no longer reports the insert-uniqueness law: %A" (results |> List.map _.Law)
-              | Some r -> Expect.isTrue r.Passed (sprintf "the law must hold on the reference witness: %A" r) ]
+              | Some r -> Expect.isTrue r.Passed (sprintf "the law must hold on the reference witness: %A" r)
+
+
+          // ---- the container-aware sequence surface (Phase 160) ----
+
+          testCase "a script refused mid-way returns the tree after the last accepted step"
+          <| fun _ ->
+              // First refusal wins, and a script is NOT a `Batch`. A `Batch` is all-or-nothing
+              // inside one op — it aborts and the caller's original tree survives. A script keeps
+              // the accepted prefix: `applyAllWith` stops at the first refusal and hands back the
+              // tree that prefix reached, with the 0-based index of the step that failed.
+              //
+              // The predicate here admits `doc` and `section` and refuses `para`, so step 2 —
+              // a move under the leaf `a1` — is a `NotAContainer`, while steps 0 and 1 land.
+              let canHold (n: RNode) = n.Kind = "doc" || n.Kind = "section"
+
+              let script =
+                  [ InsertChild("a", RNode.leaf "a3" "para" "first")
+                    RemoveNode "b1"
+                    MoveNode("a2", "a1")
+                    InsertChild("a", RNode.leaf "a4" "para" "never") ]
+
+              match Ops.applyAllWith canHold nodew idw script (sample ()) with
+              | Error(i, NotAContainer("a1", "para"), partial) ->
+                  Expect.equal i 2 "the index is the position of the REFUSED step, not the count that succeeded"
+
+                  // the partial tree carries both accepted steps and neither of the two that were
+                  // never offered — this is the state the caller is left holding
+                  Expect.equal (childIds nodew "a" partial) [ "a1"; "a2"; "a3" ] "step 0's insert survived"
+                  Expect.isNone (Tree.tryFind nodew idw "b1" partial) "step 1's remove survived"
+                  Expect.isNone (Tree.tryFind nodew idw "a4" partial) "step 3 was never offered"
+
+                  // and the refused step itself left nothing behind
+                  Expect.equal (childIds nodew "a1" partial) [] "the refused move did not half-land"
+              | other -> failtestf "expected a NotAContainer at step 2 with the partial tree, got %A" other
+
+          testCase "canApplyAllWith reports the same step and the same envelope applyAllWith raises"
+          <| fun _ ->
+              // Section 9's `can_apply_all_with_agrees`, on production. The pre-flight is worth
+              // having only if it answers the question the executor will answer, and for a script
+              // that means the INDEX as well as the class.
+              let canHold (n: RNode) = n.Kind = "doc" || n.Kind = "section"
+
+              let script =
+                  [ InsertChild("a", RNode.leaf "a3" "para" "first"); MoveNode("a2", "a1") ]
+
+              let dry = Ops.canApplyAllWith canHold nodew idw script (sample ())
+
+              match dry, Ops.applyAllWith canHold nodew idw script (sample ()) with
+              | Error(di, de), Error(ai, ae, _) ->
+                  Expect.equal di ai "the dry run and the mutating call name the same step"
+                  Expect.equal (sprintf "%A" de) (sprintf "%A" ae) "…and the same envelope"
+                  Expect.equal di 1 "which is step 1 here"
+              | d, a -> failtestf "both surfaces must refuse this script — dry run %A, apply %A" d a
+
+          testCase "applyAll and canApplyAll ARE the `fun _ -> true` instances, over the generator"
+          <| fun _ ->
+              // Phase 160 is additive: the plain pair is RESTATED as the total instance of the new
+              // pair, so no existing caller's behaviour moves. That is proved in
+              // `Preservation.fst` (`all_with_at_total_is_plain`); this is the same claim measured
+              // on the shipped functions, over the generated script pool rather than over a
+              // hand-picked example — the pool Phase 80's lane construction threads, whose op
+              // generator this file carries its own copy of as every law-test file here does.
+              //
+              // The comparison is of the WHOLE payload — verdict, tree, index, partial tree —
+              // because two functions agreeing on accept-vs-refuse while disagreeing about which
+              // step failed would be a moved contract reported as an unmoved one.
+              let render (r: Result<RNode, int * Rejection<string> * RNode>) =
+                  match r with
+                  | Ok t -> "ok:" + Tree.encodeHash nodew encNode t
+                  | Error(i, e, t) -> sprintf "%d:%A:%s" i e (Tree.encodeHash nodew encNode t)
+
+              let renderCan (r: Result<unit, int * Rejection<string>>) =
+                  match r with
+                  | Ok() -> "ok"
+                  | Error(i, e) -> sprintf "%d:%A" i e
+
+              let mutable rng = ConfRng.ofSeed 160
+              let mutable checkedScripts = 0
+              let mutable refusals = 0
+
+              for _ in 1..120 do
+                  let len, r1 = ConfRng.intBelow 5 rng
+                  let mutable r = r1
+                  let mutable script = []
+
+                  for _ in 1 .. (len + 1) do
+                      let op, r' = genScriptOp (sample ()) r
+                      r <- r'
+                      script <- script @ [ op ]
+
+                  rng <- r
+                  checkedScripts <- checkedScripts + 1
+
+                  let plain = Ops.applyAll nodew idw script (sample ())
+                  let total = Ops.applyAllWith (fun _ -> true) nodew idw script (sample ())
+
+                  if Result.isError plain then
+                      refusals <- refusals + 1
+
+                  Expect.equal
+                      (render plain)
+                      (render total)
+                      (sprintf "applyAll must be applyAllWith (fun _ -> true) on %A" script)
+
+                  Expect.equal
+                      (renderCan (Ops.canApplyAll nodew idw script (sample ())))
+                      (renderCan (Ops.canApplyAllWith (fun _ -> true) nodew idw script (sample ())))
+                      (sprintf "canApplyAll must be canApplyAllWith (fun _ -> true) on %A" script)
+
+              // the pool was not vacuous in either direction — an all-accepting or all-refusing run
+              // would compare the two functions on one arm of the fold only
+              Expect.equal checkedScripts 120 "every drawn script was compared"
+
+              Expect.isGreaterThan
+                  refusals
+                  10
+                  (sprintf "the pool reached REFUSALS as well as acceptances (%d)" refusals)
+
+              Expect.isLessThan
+                  refusals
+                  110
+                  (sprintf "…and acceptances as well as refusals (%d refused of 120)" refusals) ]

@@ -1393,14 +1393,63 @@ catch the go-red, which is a move. The go-red is the model's own instrument
 (`apply_contained_insert_only`), proved in F\* to admit a move the real one refuses and to break
 the invariant doing it, before the differential is asked to lose against it.
 
-**And one finding about the shipped surface, which is not about the model.** There is **no
-container-aware sequence surface**: `Ops.canApplyAll` and `Ops.applyAll` both thread the plain
-`apply`, so a script `canApplyAll` certifies can be refused by `applyContained` at its first step —
-one move of a leaf under a leaf is the counterexample. A caller that pre-flights with `canApplyAll`
-and executes with `applyContained`, the combination the two doc comments invite, has a check that
-cannot see the refusal its executor will make. It is recorded rather than fixed here: closing it is
-an API change with a version. `can_apply_all_ignores_containment` and its production-side case are
-what make the gap visible to whoever takes it, and the case goes red when it is closed.
+**And one finding about the shipped surface, which is not about the model.** When Phase 140 ran
+there was **no container-aware sequence surface**: `Ops.canApplyAll` and `Ops.applyAll` both
+threaded the plain `apply`, so a script `canApplyAll` certified could be refused by
+`applyContained` at its first step — one move of a leaf under a leaf is the counterexample. A
+caller that pre-flights with `canApplyAll` and executes with `applyContained`, the combination the
+two doc comments invite, had a check that could not see the refusal its executor would make. 140
+recorded it rather than fixing it, because closing it is an API change with a version;
+`can_apply_all_ignores_containment` and its production-side case are what made the gap visible to
+whoever took it. **Phase 160 took it — the next subsection.**
+
+### The sequence surface — `applyAllWith` / `canApplyAllWith`, and what the plain pair is now (Phase 160)
+
+Section 9 of `Preservation.fst` is the surface that closes the finding above, modelled clause for
+clause with the same `canHold` parameter section 8 carries. `Ops.applyAllWith` and
+`Ops.canApplyAllWith` are `applyAll` / `canApplyAll` with the capability threaded — the relation
+`applyContained` has to `apply`, at the sequence level — and the plain pair is RESTATED as their
+`fun _ -> true` instances, so no existing caller moved.
+
+**The failure payload is modelled here and was dropped in section 8, and that is the whole
+difference.** `can_apply_all` drops the refusal INDEX because nothing in 140 turned on it. Here
+everything does: the index says which step was refused, and the partial tree is what the caller is
+left holding. A `Batch` is all-or-nothing inside one operation — it aborts and the original tree
+survives — while a SCRIPT keeps the accepted prefix. The two folds are structurally the same walk;
+they differ in what the failure carries, and that difference is the semantics.
+
+**So the preservation statement is stronger here than per operation.** A per-op theorem may say
+nothing about a refusal, because a refused `applyContained` hands back nothing at all. A refused
+script hands back a tree the caller keeps, so `contained_preserves_all_with` covers **both** arms —
+the accepted tree and the partial tree — under the same two hypotheses section 8.5 carries. That is
+the statement that makes a non-atomic container-aware surface safe to use rather than merely
+available.
+
+**`can_apply_all_with_agrees` needs no hypothesis, and 8.5's per-op `can_apply_contained_agrees`
+needs `wf t`.** The per-op dry run reaches the three validators directly and has to be shown not to
+take a branch the mutating call does not. The sequence pair cannot diverge that way by
+construction — both fold the same per-op call — which is the honest reading of why the shipped
+`canApplyAll` threads `apply` rather than `canApply`: a sequence is order-dependent, so each step's
+check must see the prior step's tree and there is nothing to gain by checking without building.
+
+**The plain pair does not move, and it is proved rather than asserted.**
+`all_with_at_total_is_plain` discharges the restatement against `TreeOps.apply_all` and section 8's
+`can_apply_all` — the two folds as they stood BEFORE this phase — so what is proved is agreement
+with the shipped behaviour rather than with a restatement of itself. A consequence worth stating,
+because it reads like an omission: the plain pair remains BLIND to containment and always will be,
+that being what the total instance means. `can_apply_all_ignores_containment` is therefore KEPT
+rather than retired, and its meaning has changed — it was a finding and is now the pin that the
+plain pair's behaviour did not move. It is read beside `can_apply_all_with_sees_containment`: the
+same script, at the same tree, certified by the plain dry run and refused at index 0 by the
+container-aware one with the envelope `applyAllWith` raises.
+
+**The differential's go-red is the model's own capability-free sequence check.** The extracted
+`apply_all_with` / `can_apply_all_with` run beside the shipped pair over generated scripts and a
+drawn predicate, comparing the verdict, the accepted tree, the rejection class, the refusal INDEX
+and the PARTIAL TREE. Adequacy counts MID-script refusals separately, because a refusal at index 0
+returns the caller's own input and so compares the partial tree against nothing. Substituting
+section 8's `can_apply_all` into the dry-run slot — a weakening `can_apply_all_ignores_containment`
+already proves — must make the run lose, and it does.
 
 ### The claims ladder, for this theorem
 
@@ -1412,6 +1461,12 @@ what make the gap visible to whoever takes it, and the case goes red when it is 
    than asserted), `not_a_container_exact`, `contained_preserves`, `can_apply_contained_agrees`, and
    the two premise refutations `contained_needs_child_blind` / `contained_needs_op_hypothesis` —
    plus `can_apply_all_ignores_containment`, which proves the sequence-surface gap above.
+   **Phase 160 adds four**, over the sequence surface that closes that gap, any script, any tree
+   and ANY predicate: `contained_preserves_all_with` (the invariant survives a script including the
+   partial tree a refusal returns), `can_apply_all_with_agrees` (the dry run reaches the same
+   verdict, index and envelope as the mutating call), `all_with_at_total_is_plain` (the plain pair
+   IS the `fun _ -> true` instance, discharged against the pre-160 folds) and
+   `can_apply_all_with_sees_containment` (140's counterexample, answered at the same tree).
    F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply`, `Ops.canApply` and
@@ -1419,7 +1474,10 @@ what make the gap visible to whoever takes it, and the case goes red when it is 
    pools, never over all inputs. The container family is a second pool with its own go-red: the
    extracted `apply_contained` / `can_apply_contained` beside `Ops.applyContained` /
    `Ops.canApplyContained` under a drawn predicate, with the invariant asserted on production
-   wherever its hypotheses are met.
+   wherever its hypotheses are met. The SCRIPT family (Phase 160) is a third: the extracted
+   `apply_all_with` / `can_apply_all_with` beside `Ops.applyAllWith` / `Ops.canApplyAllWith` over
+   generated scripts and a drawn predicate, comparing the refusal index and the partial tree as
+   well as the verdict and the class, with the capability-free sequence check as its go-red.
 3. **Assumed, and stated as such.**
    - **The witness laws themselves.** `ReplaceChildren` is an abstract function satisfying
      `Conformance.witnessLaws`; a domain's own is that domain's promise, sampled by the pack and

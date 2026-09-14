@@ -544,5 +544,35 @@ let cx_box_tree : TreeOps.tree = TreeOps.TNode ("root", "box", (TreeOps.TNode ("
 let cx_move_into_leaf : TreeOps.op = TreeOps.MoveNode ("x", "leaf")
 
 
+let rec apply_all_with : (TreeOps.tree  ->  Prims.bool)  ->  Prims.nat  ->  Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, (Prims.nat * TreeOps.rejection * TreeOps.tree)> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( i  :  Prims.nat ) ( os  :  Prims.list<TreeOps.op> ) ( t  :  TreeOps.tree ) -> (match (os) with
+| [] -> begin
+     DagFold.Ok (t)
+     end
+| (o)::r -> begin
+     (match ((apply_contained ch o t)) with
+| DagFold.Ok (t') -> begin
+     (apply_all_with ch (i + (Prims.parse_int "1")) r t')
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (((i), (e), (t)))
+     end)
+     end))
+
+
+let rec can_apply_all_with : (TreeOps.tree  ->  Prims.bool)  ->  Prims.nat  ->  Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<unit, (Prims.nat * TreeOps.rejection)> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( i  :  Prims.nat ) ( os  :  Prims.list<TreeOps.op> ) ( t  :  TreeOps.tree ) -> (match (os) with
+| [] -> begin
+     DagFold.Ok (())
+     end
+| (o)::r -> begin
+     (match ((apply_contained ch o t)) with
+| DagFold.Ok (t') -> begin
+     (can_apply_all_with ch (i + (Prims.parse_int "1")) r t')
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (((i), (e)))
+     end)
+     end))
+
+
 
 

@@ -24,3 +24,20 @@ let inline strcat (x: string) (y: string) : string = x + y
 /// as "every kind but this one". Like everything else here it is the F# primitive under an F*
 /// spelling; there is no semantics in this file.
 let inline op_Less_Greater (x: 'a) (y: 'a) : bool = (x <> y)
+
+/// F*'s `nat` — an UNBOUNDED integer, refined to be non-negative. Named by the Phase 160
+/// extraction, the first model to carry a numeric index (the step index `Ops.applyAllWith`
+/// reports). `bigint` rather than `int` because F*'s integers are unbounded and this file's rule
+/// is the F# primitive under an F* spelling, not the F# primitive that happened to be convenient;
+/// a host that reads one of these back against a production `int` converts at the boundary, and
+/// the conversion is where the width assumption belongs.
+///
+/// The non-negativity is a REFINEMENT, and extraction erases every refinement — so this alias
+/// cannot carry it and does not pretend to. What holds the property is the proof: the index is a
+/// `nat` in `Preservation.fst`, where the prover checks it.
+type nat = System.Numerics.BigInteger
+
+/// F*'s integer literals, which the F# backend emits as a parse of their decimal text rather than
+/// as a literal (the same second-class-backend finding the header records). Invariant by
+/// construction — `BigInteger.Parse` of a decimal digit string reads no culture.
+let parse_int (s: string) : nat = System.Numerics.BigInteger.Parse s
