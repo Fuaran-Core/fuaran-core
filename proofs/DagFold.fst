@@ -788,3 +788,526 @@ let fold_confluence #op #state #rej apply fp s0 ls1 ls2 p =
     replay_perm apply fp ls1 ls2 p s0
   | _ ->
     fold_confluence_halt apply fp s0 ls1 ls2 p
+
+(* ======================================================================================
+   11. The DAG beneath the fold (Phase 134).
+
+   Sections 0–10 start where the lane deltas are already known. Production does not: it holds a
+   content-addressed DAG and rebuilds each lane's delta from it — `Dag.ancestorsOf`, the
+   topological order `Dag.between` walks, `Dag.betweenOps` — and only then hands the deltas to
+   the pairwise sweep. This section models that step for the shape `FoldConfluence.foldOnce`
+   builds and every local-first deployment has: ONE shared base node and N linear chains, one
+   per writer.
+
+   WHAT STANDS IN FOR WHAT:
+     - `node` / `dag`   — F#: `DagNode<'Op>` / `Dag.T<'Op>`. Production keys nodes by a
+                          `Map<string, _>`; the model carries the same nodes as a list and
+                          `lookup` is `Map.tryFind`. Membership is the meaning, as in section 0.
+     - `mint`           — F#: `Dag.nodeHash`. ABSTRACTED, deliberately: nothing here hashes.
+                          What content addressing buys the recovery is that the ids come out
+                          DISTINCT, and that is a PREMISE (`distinct_ids`, and `resolves` below)
+                          rather than something derived — the hash-collision assumption the
+                          README names as exactly that.
+     - `chain_rev` / `lane_nodes` — F#: the per-lane fold in `foldOnce`, `ops |> List.fold
+                          (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (baseId, d)`.
+                          The chain is defined HEAD-FIRST because that is how a DAG is read: a
+                          node names its parent, so the recovery walks down and the induction
+                          aligns with the walk rather than against it.
+     - `ancestors_of`   — F#: `Dag.ancestorsOf`, the transitive parent closure. Production drains
+                          an explicit work-list against an already-seen `Set`; the model walks
+                          with a LIST as fuel — one step per node, the same bound that makes the
+                          work-list terminate. Fuel is a list rather than a number so that the
+                          extracted oracle stays free of integer arithmetic, as the rest of the
+                          module is.
+     - `between` / `between_ops` — F#: `Dag.between` / `Dag.betweenOps`, clause for clause: the
+                          head's closure in topological order, minus the base's closure, looked
+                          up, then projected to ops.
+
+   WHAT IS NOT MODELLED, and the one boundary worth reading twice. Hashing itself (above).
+   `Dag.mergeBase`, which is not on this path at all — `foldOnce` hands `reconcileMany` the base
+   node's id directly. And **how the topological order is CHOSEN**: production's `topoOrder` is
+   Kahn's algorithm draining a ready frontier smallest-id-first, and `topo_of` below is the
+   reverse of the parent walk. On the base-plus-N-chains shape the head's closure is a spine,
+   every pair of its members is comparable under the ancestor relation, and a spine therefore
+   admits exactly ONE topological order — so the two coincide. That last sentence is ARGUED here
+   and measured by the differential host against the real `Dag.betweenOps`; it is not mechanised.
+   Mechanising it means proving that a distinct enumeration of a spine's closure respecting each
+   node's one parent is forced, and then that Kahn's drain produces such an enumeration — a
+   separate piece of work, and the honest successor to this one. Everything downstream of the
+   order — the closure, the difference against the base's closure, the lookup, and the fold built
+   on them — is proved.
+   ====================================================================================== *)
+
+(* ---- list helpers the recovery needs, in the module's own Prims-only idiom ---- *)
+
+let rec rev (#a:Type) (l:list a) : Tot (list a) =
+  match l with
+  | [] -> []
+  | x :: t -> app (rev t) [x]
+
+let rec distinct (#a:eqtype) (l:list a) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: t -> not (mem x t) && distinct t
+
+let rec rev_app (#a:Type) (l m:list a)
+  : Lemma (ensures rev (app l m) == app (rev m) (rev l))
+  = match l with
+    | [] -> ()
+    | _ :: t -> rev_app t m
+
+let rec rev_rev (#a:Type) (l:list a)
+  : Lemma (ensures rev (rev l) == l)
+  = match l with
+    | [] -> ()
+    | x :: t ->
+      rev_rev t;
+      rev_app (rev t) [x]
+
+let rec mem_rev (#a:eqtype) (x:a) (l:list a)
+  : Lemma (ensures mem x (rev l) == mem x l) [SMTPat (mem x (rev l))]
+  = match l with
+    | [] -> ()
+    | y :: t ->
+      mem_rev x t;
+      mem_app x (rev t) [ y ]
+
+(* `diff l [e]` drops nothing when `e` is not there. F#: the `List.filter` in `Dag.between`. *)
+let rec diff_no_mem (#a:eqtype) (l:list a) (e:a)
+  : Lemma (requires not (mem e l)) (ensures diff l [e] == l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> diff_no_mem t e
+
+(* ---- the DAG (F#: `DagNode<'Op>` and `Dag.T<'Op>` in DagOpStream.fs) ---- *)
+
+type node (op:eqtype) = {
+  nid      : string;
+  nparents : list string;
+  nop      : op
+}
+
+type dag (op:eqtype) = { nodes : list (node op) }
+
+(* F#: `'a option`, as `Map.tryFind` returns it. Spelled LOCALLY rather than taken from
+   `FStar.Pervasives.Native`: F*'s F# backend extracts that one as `FStar_Pervasives_Native.Some`
+   and the release ships no F# runtime for it, so the oracle would not compile. The same finding
+   the list helpers in section 0 are self-contained for — README, finding 2. *)
+type found (a:Type) =
+  | Missing : found a
+  | Found   : a -> found a
+
+(* F#: `Map.tryFind id dag.Nodes`. *)
+let rec lookup (#op:eqtype) (ns:list (node op)) (id:string) : Tot (found (node op)) =
+  match ns with
+  | [] -> Missing
+  | n :: t -> if n.nid = id then Found n else lookup t id
+
+let rec ids_of (#op:eqtype) (ns:list (node op)) : Tot (list string) =
+  match ns with
+  | [] -> []
+  | n :: t -> n.nid :: ids_of t
+
+(* F#: the `List.map (fun n -> n.Op)` that makes `betweenOps` out of `between`. *)
+let rec ops_of (#op:eqtype) (ns:list (node op)) : Tot (list op) =
+  match ns with
+  | [] -> []
+  | n :: t -> n.nop :: ops_of t
+
+(* THE PREMISE, in the form the recovery actually consumes: every node of `ns` is the node the
+   DAG holds under its own id. Content addressing is what gives production this — `nodeHash` is
+   injective on (sorted parents, actor, encoded op) unless the hash collides — and
+   `resolves_of_distinct` below derives it from plain id distinctness. *)
+let distinct_ids (#op:eqtype) (d:dag op) : Tot bool = distinct (ids_of d.nodes)
+
+let resolves (#op:eqtype) (d:dag op) (ns:list (node op)) : prop =
+  forall (n:node op). mem n ns ==> lookup d.nodes n.nid == Found n
+
+let rec mem_ids_of (#op:eqtype) (n:node op) (ns:list (node op))
+  : Lemma (ensures mem n ns ==> mem n.nid (ids_of ns))
+  = match ns with
+    | [] -> ()
+    | _ :: t -> mem_ids_of n t
+
+let rec lookup_mem_distinct (#op:eqtype) (ns:list (node op)) (n:node op)
+  : Lemma (requires distinct (ids_of ns) /\ mem n ns) (ensures lookup ns n.nid == Found n)
+  = match ns with
+    | [] -> ()
+    | m :: t ->
+      if m.nid = n.nid then begin
+        (* `n` cannot be in the tail: its id is `m`'s, and distinctness forbids that. *)
+        mem_ids_of n t;
+        assert (not (mem n t));
+        assert (n == m)
+      end
+      else lookup_mem_distinct t n
+
+(* Distinct ids in the DAG make every node it holds resolve — the bridge from the premise as
+   stated to the premise as used. *)
+let resolves_of_distinct (#op:eqtype) (d:dag op) (ns:list (node op))
+  : Lemma (requires distinct_ids d /\ (forall (n:node op). mem n ns ==> mem n d.nodes))
+          (ensures resolves d ns)
+  = let aux (n:node op) : Lemma (mem n ns ==> lookup d.nodes n.nid == Found n) =
+      if mem n ns then lookup_mem_distinct d.nodes n else ()
+    in
+    FStar.Classical.forall_intro aux
+
+(* ---- the shape (F#: what `FoldConfluence.foldOnce` builds) ---- *)
+
+(* A lane's head, from its ops in REVERSE — newest first. F#: the `h` the per-lane `List.fold`
+   ends with. An EMPTY lane leaves its head AT the base id, which is exactly what production
+   does: no node is appended, so `betweenOps base base` is `[]`. *)
+let rec chain_head_rev (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor:string) (q:string) (rl:list op) : Tot string (decreases rl) =
+  match rl with
+  | [] -> q
+  | o :: t -> mint (chain_head_rev mint actor q t) actor o
+
+(* The lane's nodes, newest first. F#: the nodes `Dag.append` adds, each naming its parent. *)
+let rec chain_rev (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor:string) (q:string) (rl:list op) : Tot (list (node op)) (decreases rl) =
+  match rl with
+  | [] -> []
+  | o :: t ->
+    let p = chain_head_rev mint actor q t in
+    { nid = mint p actor o; nparents = [ p ]; nop = o } :: chain_rev mint actor q t
+
+(* … and in append order, which is the order `between` returns them in. *)
+let lane_nodes (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor:string) (q:string) (l:list op) : Tot (list (node op)) =
+  rev (chain_rev mint actor q (rev l))
+
+let lane_head (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor:string) (q:string) (l:list op) : Tot string =
+  chain_head_rev mint actor q (rev l)
+
+(* F#: the `List.fold` over `lanes |> List.indexed`. A lane is (actor, ops): `foldOnce` names its
+   actors `lane-<i>` and folds the actor into every node id, which is what keeps two lanes
+   carrying the SAME op sequence from converging to one chain. The model takes the actors as
+   given — what the actor is FOR is distinctness, and distinctness is the premise. *)
+(* One lane as `foldOnce` sees it: the actor its nodes are minted under, and its ops. A record
+   rather than a pair, so the extracted oracle names no tuple type the `Prims` shim would have to
+   supply. *)
+type lane (op:eqtype) = { lactor : string; lops : list op }
+
+let rec lanes_nodes (#op:eqtype) (mint:string -> string -> op -> string)
+  (q:string) (lanes:list (lane op)) : Tot (list (node op)) =
+  match lanes with
+  | [] -> []
+  | ln :: t -> app (lane_nodes mint ln.lactor q ln.lops) (lanes_nodes mint q t)
+
+let rec lane_heads (#op:eqtype) (mint:string -> string -> op -> string)
+  (q:string) (lanes:list (lane op)) : Tot (list string) =
+  match lanes with
+  | [] -> []
+  | ln :: t -> lane_head mint ln.lactor q ln.lops :: lane_heads mint q t
+
+let rec lane_ops (#op:eqtype) (lanes:list (lane op)) : Tot (list (list op)) =
+  match lanes with
+  | [] -> []
+  | ln :: t -> ln.lops :: lane_ops t
+
+(* The whole DAG: one base node with no parents, and one chain per lane. F#: `Dag.append hashFn w
+   (Human "base") baseOp "" Dag.empty` followed by the per-lane fold. *)
+let build_dag (#op:eqtype) (mint:string -> string -> op -> string)
+  (base_id:string) (base_op:op) (lanes:list (lane op)) : Tot (dag op) =
+  { nodes = { nid = base_id; nparents = []; nop = base_op } :: lanes_nodes mint base_id lanes }
+
+(* ---- the closure and the delta (F#: `Dag.ancestorsOf`, `Dag.between`, `Dag.betweenOps`) ---- *)
+
+let rec ancestors_of (#op:eqtype) (d:dag op) (fuel:list (node op)) (id:string)
+  : Tot (list string) (decreases %[fuel; (0 <: nat); ([] <: list string)]) =
+  match fuel with
+  | [] -> []
+  | _ :: fuel' ->
+    (match lookup d.nodes id with
+     | Missing -> []
+     | Found n -> id :: ancestors_all d fuel' n.nparents)
+
+and ancestors_all (#op:eqtype) (d:dag op) (fuel:list (node op)) (ids:list string)
+  : Tot (list string) (decreases %[fuel; (1 <: nat); ids]) =
+  match ids with
+  | [] -> []
+  | p :: t -> app (ancestors_of d fuel p) (ancestors_all d fuel t)
+
+(* `fuel` allows one walk step per element of `l`, PLUS one for the node the walk ends at. *)
+let rec covers (#a #b:Type) (fuel:list a) (l:list b) : Tot bool (decreases l) =
+  match l with
+  | [] -> Cons? fuel
+  | _ :: t -> (match fuel with | [] -> false | _ :: f -> covers f t)
+
+let rec drop_by (#a #b:Type) (fuel:list a) (l:list b) : Tot (list a) (decreases l) =
+  match l with
+  | [] -> fuel
+  | _ :: t -> (match fuel with | [] -> [] | _ :: f -> drop_by f t)
+
+let rec covers_drop (#a #b:Type) (fuel:list a) (l:list b)
+  : Lemma (requires covers fuel l) (ensures Cons? (drop_by fuel l) /\ Cons? fuel) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> (match fuel with | [] -> () | _ :: f -> covers_drop f t)
+
+(* F#: `topoOrder dag head`. On this shape the head's closure is a spine, so its topological
+   order is the parent walk reversed. `topo_forced` below is why that is not a shortcut. *)
+let topo_of (#op:eqtype) (d:dag op) (fuel:list (node op)) (head:string) : Tot (list string) =
+  rev (ancestors_of d fuel head)
+
+(* F#: the `List.map (fun id -> dag.Nodes.[id])` that ends `Dag.between`. *)
+let rec nodes_for (#op:eqtype) (d:dag op) (l:list string) : Tot (list (node op)) =
+  match l with
+  | [] -> []
+  | id :: t ->
+    (match lookup d.nodes id with
+     | Missing -> nodes_for d t
+     | Found n -> n :: nodes_for d t)
+
+(* F#: `Dag.between` — `topoOrder head |> List.filter (fun id -> not (Set.contains id
+   baseClosure)) |> List.map (fun id -> dag.Nodes.[id])`. *)
+let between (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string) (head:string)
+  : Tot (list (node op)) =
+  nodes_for d (diff (topo_of d fuel head) (ancestors_of d fuel base_id))
+
+(* F#: `Dag.betweenOps`. *)
+let between_ops (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string) (head:string)
+  : Tot (list op) =
+  ops_of (between d fuel base_id head)
+
+(* ---- the algebra the recovery runs on ----
+
+   These carry no SMT pattern, and that is deliberate rather than an omission: `rev`, `app`,
+   `ids_of` and `ops_of` all rewrite into one another, and left to fire on their own they turn
+   the delta-recovery query into one Z3 does not return from. Each is called by name where it is
+   needed, which is also how the proof below reads as the calculation it is. *)
+
+let rec ids_of_app (#op:eqtype) (l m:list (node op))
+  : Lemma (ensures ids_of (app l m) == app (ids_of l) (ids_of m))
+  = match l with
+    | [] -> ()
+    | _ :: t -> ids_of_app t m
+
+let rec ids_of_rev (#op:eqtype) (ns:list (node op))
+  : Lemma (ensures ids_of (rev ns) == rev (ids_of ns))
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      ids_of_rev t;
+      ids_of_app (rev t) [ n ]
+
+let rec ops_of_app (#op:eqtype) (l m:list (node op))
+  : Lemma (ensures ops_of (app l m) == app (ops_of l) (ops_of m))
+  = match l with
+    | [] -> ()
+    | _ :: t -> ops_of_app t m
+
+let rec ops_of_rev (#op:eqtype) (ns:list (node op))
+  : Lemma (ensures ops_of (rev ns) == rev (ops_of ns))
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      ops_of_rev t;
+      ops_of_app (rev t) [ n ]
+
+(* A chain carries its lane's ops and nothing else — newest first, as it is built. *)
+let rec ops_of_chain_rev (#op:eqtype) (mint:string -> string -> op -> string)
+  (actor:string) (q:string) (rl:list op)
+  : Lemma (ensures ops_of (chain_rev mint actor q rl) == rl) (decreases rl)
+  = match rl with
+    | [] -> ()
+    | _ :: t -> ops_of_chain_rev mint actor q t
+
+(* F#: `List.map (fun id -> dag.Nodes.[id])` over the ids of nodes the DAG holds is those nodes. *)
+let rec nodes_for_ids (#op:eqtype) (d:dag op) (ns:list (node op))
+  : Lemma (requires resolves d ns) (ensures nodes_for d (ids_of ns) == ns)
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      assert (mem n ns);
+      assert (resolves d t);
+      nodes_for_ids d t
+
+(* ---- the closure of a chain (F#: `Dag.ancestorsOf` on a lane head) ---- *)
+
+(* The closure of a chain's head is the chain's ids, newest first, then the closure of the node
+   the chain hangs off. The induction is structural in the lane's ops BECAUSE the chain is
+   defined head-first: the walk and the construction run the same way. *)
+let rec ancestors_chain (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (actor:string) (q:string) (rl:list op) (fuel:list (node op))
+  : Lemma (requires resolves d (chain_rev mint actor q rl) /\ covers fuel rl)
+          (ensures ancestors_of d fuel (chain_head_rev mint actor q rl)
+                   == app (ids_of (chain_rev mint actor q rl))
+                          (ancestors_of d (drop_by fuel rl) q))
+          (decreases rl)
+  = match rl with
+    | [] -> ()
+    | o :: t ->
+      (match fuel with
+       | [] -> ()
+       | _ :: fuel' ->
+         let p = chain_head_rev mint actor q t in
+         let n = { nid = mint p actor o; nparents = [ p ]; nop = o } in
+         assert (mem n (chain_rev mint actor q rl));
+         assert (lookup d.nodes n.nid == Found n);
+         assert (resolves d (chain_rev mint actor q t));
+         ancestors_chain d mint actor q t fuel')
+
+(* The base node's closure is itself: it has no parent. F#: `ancestorsOf` of the genesis node,
+   whose `Parents` is `[]` because `Dag.append` was given `""`. *)
+let base_ancestors (#op:eqtype) (d:dag op) (bn:node op) (fuel:list (node op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\ Cons? fuel)
+          (ensures ancestors_of d fuel bn.nid == [ bn.nid ])
+  = ()
+
+(* ---- THE THEOREM (delta recovery): `between_chain` ---- *)
+
+(* What the recovery needs of content addressing, per lane, and nothing more: every node of the
+   lane's chain is the node the DAG holds under its own id (`resolves` — see
+   `resolves_of_distinct`), the walk has fuel for the lane, and the base's id is not one of the
+   lane's. All three are consequences of `Dag.nodeHash` being injective on
+   (sorted parents, actor, encoded op) — the hash-collision assumption, taken as a premise. *)
+let lane_recovers (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (bn:node op) (fuel:list (node op)) (ln:lane op) : prop =
+  resolves d (chain_rev mint ln.lactor bn.nid (rev ln.lops)) /\
+  covers fuel (rev ln.lops) /\
+  not (mem bn.nid (ids_of (lane_nodes mint ln.lactor bn.nid ln.lops)))
+
+(* THEOREM. `Dag.between` over a linear lane off the base returns the lane's nodes, in order.
+   The whole of the DAG layer beneath the fold — the ancestor closure of the head, the closure of
+   the base, the topological order, the difference and the lookup — computed, and equal to the
+   chain that was appended.
+
+   Read the proof as a calculation, since that is what it is: the head's closure is the chain
+   newest-first followed by the base (`ancestors_chain` + `base_ancestors`); reversing it puts
+   the base first and the chain in append order (`rev_app`); the base's own closure is just
+   itself, so the difference drops the base and nothing else (`diff_no_mem`, on the premise that
+   no chain id IS the base id); and looking those ids back up returns the very nodes they name
+   (`nodes_for_ids`, on the `resolves` premise). *)
+#push-options "--z3rlimit 100"
+let between_chain (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (actor:string) (bn:node op) (l:list op) (fuel:list (node op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lane_recovers d mint bn fuel ({ lactor = actor; lops = l }))
+          (ensures between d fuel bn.nid (lane_head mint actor bn.nid l)
+                   == lane_nodes mint actor bn.nid l)
+  = let q = bn.nid in
+    let rl = rev l in
+    let c = chain_rev mint actor q rl in
+    covers_drop fuel rl;
+    ancestors_chain d mint actor q rl fuel;
+    base_ancestors d bn (drop_by fuel rl);
+    base_ancestors d bn fuel;
+    rev_app (ids_of c) [ q ];
+    ids_of_rev c;
+    mem_rev q (ids_of c);
+    diff_no_mem (rev (ids_of c)) q;
+    nodes_for_ids d (rev c)
+#pop-options
+
+(* … and therefore `Dag.betweenOps` returns the lane's ops. This is the claim the README's ladder
+   moves from level 2 to level 1 for the linear-lane shape. *)
+#push-options "--z3rlimit 100"
+let between_ops_chain (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (actor:string) (bn:node op) (l:list op) (fuel:list (node op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lane_recovers d mint bn fuel ({ lactor = actor; lops = l }))
+          (ensures between_ops d fuel bn.nid (lane_head mint actor bn.nid l) == l)
+  = between_chain d mint actor bn l fuel;
+    ops_of_rev (chain_rev mint actor bn.nid (rev l));
+    ops_of_chain_rev mint actor bn.nid (rev l);
+    rev_rev l
+#pop-options
+
+(* ---- the fold, stated from the DAG (F#: `Dag.reconcileMany`, `FoldConfluence.foldOnce`) ---- *)
+
+(* F#: `heads |> List.map (betweenOps dag baseId)` — the first line of `Dag.reconcileMany`. *)
+let rec deltas_of (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string)
+  (heads:list string) : Tot (list (list op)) =
+  match heads with
+  | [] -> []
+  | h :: t -> between_ops d fuel base_id h :: deltas_of d fuel base_id t
+
+(* F#: `Dag.reconcileMany` in full. Section 3's `reconcile_many` is this function from the point
+   where the deltas are known; this is the same function from the point where the DAG is. *)
+let reconcile_many_dag (#op:eqtype) (fp:op -> footprint) (d:dag op) (fuel:list (node op))
+  (base_id:string) (heads:list string) : Tot (outcome (list op) (list (conflict op))) =
+  reconcile_many fp (deltas_of d fuel base_id heads)
+
+(* F#: `FoldConfluence.foldOnce` in full — from the DAG, not from the deltas. *)
+let fold_once_dag (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint)
+  (d:dag op) (fuel:list (node op)) (base_id:string) (s0:state) (heads:list string)
+  : Tot (lane_outcome op state rej) =
+  fold_once apply fp s0 (deltas_of d fuel base_id heads)
+
+let rec lanes_recover (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (bn:node op) (fuel:list (node op)) (lanes:list (lane op)) : Tot prop (decreases lanes) =
+  match lanes with
+  | [] -> True
+  | ln :: t -> lane_recovers d mint bn fuel ln /\ lanes_recover d mint bn fuel t
+
+(* Every lane's delta comes back, so the DAG's delta list IS the lane list. *)
+let rec deltas_of_lanes (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (bn:node op) (fuel:list (node op)) (lanes:list (lane op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lanes_recover d mint bn fuel lanes)
+          (ensures deltas_of d fuel bn.nid (lane_heads mint bn.nid lanes) == lane_ops lanes)
+          (decreases lanes)
+  = match lanes with
+    | [] -> ()
+    | ln :: t ->
+      between_ops_chain d mint ln.lactor bn ln.lops fuel;
+      deltas_of_lanes d mint bn fuel t
+
+(* THEOREM. The fold over the DAG is the fold over the lane lists — `Dag.reconcileMany` from the
+   DAG equals section 3's `reconcile_many` on the lanes that were appended. This is what lets the
+   confluence theorem be stated from the DAG rather than from the deltas. *)
+let reconcile_many_dag_eq (#op:eqtype) (fp:op -> footprint) (d:dag op)
+  (mint:string -> string -> op -> string) (bn:node op) (fuel:list (node op))
+  (lanes:list (lane op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lanes_recover d mint bn fuel lanes)
+          (ensures reconcile_many_dag fp d fuel bn.nid (lane_heads mint bn.nid lanes)
+                   == reconcile_many fp (lane_ops lanes))
+  = deltas_of_lanes d mint bn fuel lanes
+
+let fold_once_dag_eq (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (s0:state)
+  (d:dag op) (mint:string -> string -> op -> string) (bn:node op) (fuel:list (node op))
+  (lanes:list (lane op))
+  : Lemma (requires lookup d.nodes bn.nid == Found bn /\ bn.nparents == [] /\
+                    lanes_recover d mint bn fuel lanes)
+          (ensures fold_once_dag apply fp d fuel bn.nid s0 (lane_heads mint bn.nid lanes)
+                   == fold_once apply fp s0 (lane_ops lanes))
+  = deltas_of_lanes d mint bn fuel lanes
+
+(* An arrival order of the HEADS is an arrival order of the deltas they recover. *)
+[@@ noextract_to "FSharp"]  (* proof-only: the oracle never needs a permutation witness *)
+let rec perm_deltas (#op:eqtype) (d:dag op) (fuel:list (node op)) (base_id:string)
+  (hs1 hs2:list string) (p:perm string hs1 hs2)
+  : Tot (perm (list op) (deltas_of d fuel base_id hs1) (deltas_of d fuel base_id hs2))
+        (decreases p) =
+  match p with
+  | PNil -> PNil
+  | PSkip x m1 m2 p' ->
+    PSkip (between_ops d fuel base_id x) _ _ (perm_deltas d fuel base_id m1 m2 p')
+  | PSwap x y l ->
+    PSwap (between_ops d fuel base_id x) (between_ops d fuel base_id y) (deltas_of d fuel base_id l)
+  | PTrans m1 m2 m3 p12 p23 ->
+    PTrans _ _ _ (perm_deltas d fuel base_id m1 m2 p12) (perm_deltas d fuel base_id m2 m3 p23)
+
+(* THEOREM. Fold confluence, stated from the DAG: the same heads over the same base fold to the
+   same state — or halt with the same canonical report — however the heads arrive. Section 10's
+   theorem is about lane deltas someone had already recovered; this one starts where production
+   starts, at the content-addressed DAG, and recovers them. *)
+val fold_confluence_dag (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (s0:state)
+  (d:dag op) (fuel:list (node op)) (base_id:string)
+  (hs1 hs2:list string) (p:perm string hs1 hs2)
+  : Lemma (requires independence_diamond fp apply /\
+                    lanes_apply apply (deltas_of d fuel base_id hs1) s0)
+          (ensures outcome_equiv (fold_once_dag apply fp d fuel base_id s0 hs1)
+                                 (fold_once_dag apply fp d fuel base_id s0 hs2))
+
+let fold_confluence_dag #op #state #rej apply fp s0 d fuel base_id hs1 hs2 p =
+  fold_confluence apply fp s0
+    (deltas_of d fuel base_id hs1) (deltas_of d fuel base_id hs2)
+    (perm_deltas d fuel base_id hs1 hs2 p)

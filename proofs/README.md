@@ -12,7 +12,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved. Every definition names its F# counterpart. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved. Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -60,6 +60,48 @@ taken. **The halt half asks for neither** — `fold_confluence_halt` is stated a
 hypothesis about `apply` at all, because whether a lane set halts and what it halts with are
 properties of the footprints alone.
 
+### The DAG beneath it (Phase 134)
+
+`fold_confluence` is stated from the lane deltas. Production does not have them: it has a
+content-addressed DAG and rebuilds each lane's delta from it. Section 11 of `DagFold.fst` models
+that step for the shape `foldOnce` builds and every local-first deployment has — **one shared base
+node and N linear chains, one per writer** — as `DagNode` / `Dag.T` / `Map.tryFind` /
+`Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps`, clause for clause.
+
+Three results, all with no admits:
+
+- **`between_chain`** — `Dag.between` over a linear lane off the base returns that lane's nodes,
+  in order (`between_ops_chain` is its op projection). The whole layer computed: the head's
+  ancestor closure, the base's, the topological order, the difference and the lookup.
+- **`reconcile_many_dag_eq`** — `Dag.reconcileMany` FROM the DAG equals the deltas-first
+  `reconcile_many` on the lanes that were appended.
+- **`fold_confluence_dag`** — the confluence theorem restated from the DAG: the same heads over
+  the same base fold to the same state, or halt with the same canonical report, however the heads
+  arrive.
+
+**Hashing is abstracted, and what replaces it is a named premise.** Node ids come from an opaque
+`mint` standing for `Dag.nodeHash`. What content addressing buys the recovery is that the ids come
+out DISTINCT, so that is what the model assumes — `resolves`, with `resolves_of_distinct` the
+bridge from plain id distinctness to the form the recovery consumes. **The hash-collision
+assumption is exactly that assumption and no other**: two nodes sharing a content id is the only
+way `lookup` returns a node other than the one a chain named, and it is the only way this proof
+says nothing.
+
+**And one step is deliberately NOT mechanised, which is where the honest reading of "proved" stops
+here.** Production chooses its topological order with Kahn's algorithm, draining a ready frontier
+smallest-id-first; the model takes the reverse of the parent walk. On a spine every pair of the
+closure is comparable under the ancestor relation, so exactly one topological order exists and the
+two must coincide — but that sentence is argued, not proved. Mechanising it means showing that a
+distinct enumeration of a spine respecting each node's single parent is forced, and then that
+Kahn's drain produces such an enumeration; that is the honest successor to this phase. Everything
+downstream of the order is proved, and the differential below measures the order itself against
+the real `Dag.betweenOps`.
+
+Also outside the model, and named so it is not assumed in: **`Dag.mergeBase`**. It is not on this
+path at all — `foldOnce` hands `reconcileMany` the base node's id directly — so nothing here says
+anything about locating a divergence point, and the general topological order over an arbitrary
+MERGE DAG stays where Phase 134's own statement put it, out of scope.
+
 _(Phase 131 stated the hypothesis as `independence_sound`: independent ops commute at every state,
 **rejections included**. That premise is false of the reference witness — `Rejection.UnknownNode`
 carries `addressable`, the whole id set of the tree it was raised against — so the theorem was
@@ -86,6 +128,25 @@ oracle's own outcomes across all sampled orders are one outcome. The go-red case
 a blind footprint and requires the comparison to fail and shrink to two lanes of one op, so a green
 report is known to be a comparison that can lose.
 
+**Since Phase 134 the DELTA RECOVERY is measured too, over the same three pools.** Production's own
+`Dag.ancestorsOf` / `topoOrder` / `Dag.between` / `Dag.betweenOps`, on the DAG `foldOnce` actually
+builds, against the model's recovery over the **same nodes** — the ids the model walks are the
+content hashes production minted, so a disagreement can only be about the recovery and never about
+the hash. A sixth case runs `fold_once_dag`, the model's DAG-shaped entry point, end to end against
+production and against the deltas-first oracle beside it, so a divergence says which half moved.
+
+| Pool | Lanes | What is compared |
+|---|---|---|
+| the reference tree witness | 3 and 4 | per-lane `betweenOps` against `between_ops`, 120 + 60 trials |
+| the work-plan domain | 3 and 5 | the same, 150 + 40 trials; and `fold_once_dag` end to end, 120 trials |
+| the wire corpus's `ops/` fixtures | every pair and triple, plus two-op lanes | the same |
+
+Its **go-red** re-parents each lane's first node onto the previous lane's head. Ids are untouched,
+so every lookup still succeeds and the only thing that has moved is the shape the recovery walks —
+which is the thing under test — and the comparison is required to fail. Two vacuity guards ride
+with it, in the pack's posture: a run that recovered no ops compared two empty lists, and a run
+whose every lane was one op walked no chain at all. Both are asserted.
+
 **And the theorem's HYPOTHESIS is measured, not only stated.** Over the same generator, for every
 op pair the model's own `independent` declares disjoint and every state where both ops apply, the
 host checks the diamond directly on the tree `apply`: each applies after the other, and the two
@@ -102,9 +163,12 @@ What may be said, and at what strength, per the attested-stack programme's §6:
 
 1. **Proved (machine-checked, no admits).** On the model, for every N and every permutation:
    the fold-confluence law above — the fold half under `independence_diamond` for a lane set whose
-   lanes all apply from the base state, the halt half under nothing at all. F\* 2026.09.06,
-   Z3 4.13.3, every query 3/3 under `--quake 3`, cold-cache checks on three seeds and at a quarter
-   of the rlimit the leg runs with.
+   lanes all apply from the base state, the halt half under nothing at all. **And, for the
+   base-plus-N-chains shape, the DELTA RECOVERY beneath it**: `between_chain` (the delta of a
+   linear lane off the base is that lane's ops, in order), `reconcile_many_dag_eq` and
+   `fold_confluence_dag`, under the id-distinctness premise named at level 3 and with the CHOICE
+   of topological order named there too. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `--quake 3`, cold-cache checks on three seeds and at a quarter of the rlimit the leg runs with.
 
    **And, since Phase 133, the tree algebra's own diamond** — `TreeOps.tree_independence_diamond`,
    which discharges that hypothesis for `SkeletonOp` rather than sampling it, and
@@ -113,8 +177,9 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    unchanged, because the theorem is still generic over a domain and still carries the hypothesis
    for any other one.
 2. **Differentially tested.** Production's `betweenOps` recovery of each lane's delta from a
-   content-addressed DAG, its pairwise `conflicts` sweep, `reconcileMany`'s composition and
-   `foldOnce`'s replay and rendering together agree with the extracted model, over the pools
+   content-addressed DAG — now against the model's own recovery on the same nodes, not only
+   against a model that was handed the answer — its pairwise `conflicts` sweep, `reconcileMany`'s
+   composition and `foldOnce`'s replay and rendering, together and separately, over the pools
    above. Agreement is over sampled lane sets and the `arrivalOrders` sample (exhaustive to 4
    lanes, 24 orders above), never over all inputs. Since Phase 133 the same level also carries
    the tree algebra's own differential — `Ops.apply` and `Ops.footprint` against the extracted
@@ -139,9 +204,20 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      applies cleanly from the base state (`lanes_apply`), which is what `foldOnce`'s generators
      produce and what the differential host draws. Nothing is proved about a lane set one of whose
      lanes rejects; the halt half still covers it whenever it halts.
-   - **The DAG is outside the model.** Node ids, hashing, `mergeBase`, the topological order that
-     recovers a delta — the model starts where the lane deltas are known. Level 2 is the only
-     evidence about them.
+   - **Node ids are distinct** — the hash-collision assumption, and since Phase 134 the ONLY thing
+     the delta recovery assumes about content addressing. `Dag.nodeHash` is injective on
+     (sorted parents, actor, encoded op) unless the hash collides; two nodes sharing a content id
+     is the only way `lookup` returns a node other than the one a chain named. The model states it
+     as `distinct_ids` and consumes it as `resolves`, with `resolves_of_distinct` between them.
+   - **How the topological order is CHOSEN.** Production runs Kahn's algorithm, draining a ready
+     frontier smallest-id-first; the model reverses the parent walk. A spine admits exactly one
+     topological order, so on this shape they coincide — argued here, measured by the differential
+     against the real `Dag.betweenOps`, and not mechanised. Everything downstream of the order is
+     proved.
+   - **`Dag.mergeBase` is outside the model**, because it is outside this path: `foldOnce` hands
+     `reconcileMany` the base node's id directly and never locates a divergence point. Level 2 is
+     the only evidence about it, and the general topological order over an arbitrary MERGE DAG is
+     not claimed at any level.
    - **The extractor and the F# compiler are trusted.** The proof leg holds the committed oracle
      to a fresh extraction byte for byte, which makes "the oracle is the model" a checked claim;
      it does not make the F# backend correct. The backend is second-class upstream (findings
@@ -153,9 +229,10 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      diamond is FALSE without it, because `Tree.tryFind` returns the first match in document order
      and a reorder moves document order. Nothing in the estate produces such a tree, but no
      shipped type carries the invariant. "Theorem 2" below has the argument.
-   - **The composite's op alphabet excludes a nested `Batch`** (Phase 133). One pair shape, and
-     `Ops.apply` threads a `Batch` exactly as the fold threads a lane, so it removes no behaviour
-     — it declines to nest one lane inside another. Sized in "Theorem 2" below.
+   - **The composite's op alphabet excludes a nested `Batch`** (Phase 133). Three of the fifteen
+     pairs, all the same shape, and `Ops.apply` threads a `Batch` exactly as the fold threads a
+     lane, so it removes no behaviour — it declines to nest one lane inside another. Counted in
+     "Theorem 2" below.
 4. **Not claimed.**
    - **Rejection identity.** That two independent ops, one of which rejects, reject *identically*
      whichever ran first. The reference algebra cannot keep it and the theorem no longer asks for
@@ -166,6 +243,12 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      clause, which made the theorem sound about a domain no shipped witness is; Phase 132 dropped
      it, and a `Proofs.Oracle` case holds the refuting witness so the sentence goes red if the
      algebra ever changes back.
+
+   - **Delta recovery over a MERGE DAG.** `between_chain` is stated for the base-plus-N-chains
+     shape, which is what `foldOnce` builds and what the fold-confluence pack certifies. A DAG
+     whose heads have already been merged has nodes with two parents, `mergeBase` on its path, and
+     a topological order that is genuinely a choice rather than a forced one; none of that is
+     modelled, and a consumer folding over already-merged heads is outside every level here.
 
    Also not claimed: anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over
@@ -192,11 +275,14 @@ what is said there is said about `SkeletonOp` and about no other domain's witnes
    three outcome classes exercised (folded and halted asserted non-vacuous; rejected covered by
    `LaneFoldOutcome` equality), and the merge script equal, not merely its hash. Since Phase 132
    the same family also measures the theorem's hypothesis on the reference witness, with its own
-   adequacy guard and its own go-red.
-3. **Readable — met.** `DagFold.fst` is ~790 lines with its commentary; the model half (sections
-   0–4, everything the oracle is extracted from) is under 300 of them, and every definition is
-   captioned with its F# counterpart. The one structural difference a reviewer meets is
-   lists-for-sets, stated once at the top.
+   adequacy guard and its own go-red; since Phase 134 it also measures the delta recovery against
+   production's own DAG, with its own go-red and two vacuity guards.
+3. **Readable — met.** `DagFold.fst` is ~1,300 lines with its commentary, of which sections 0–4
+   and 11 — everything the oracle is extracted from — are under 500, and every definition is
+   captioned with its F# counterpart. The structural differences a reviewer meets are stated
+   where they are made: lists-for-sets at the top, and in section 11 a LIST as the walk's fuel
+   (one step per node) and a locally-spelled `found` where F# has `option`, both so that the
+   extracted oracle needs nothing of `Prims` beyond what section 0 already needed.
 
 ## Findings — the F\* bet, measured
 
@@ -541,6 +627,12 @@ over bytes: the depth bound that makes deep input a named `Error` rather than an
 overflow, the escape and `\uXXXX` paths, the int53 token guard, and the exhaustiveness of the
 `JsonErrorKind` classification. It is the one piece of this stack where an EverParse-shaped
 approach is worth pricing rather than assuming away.
+
+**The topological order's uniqueness on a spine** — the one step Phase 134 argues rather than
+proves, and the smaller of the two. It is two lemmas: that a distinct enumeration of a spine's
+closure respecting each node's single parent is forced to be that spine, and that Kahn's frontier
+drain produces such an enumeration. The first is a list argument and the second is the only place
+production's tie-break would have to be modelled at all.
 
 Theorem 3, interpreter budget monotonicity, is `fuaran-program`'s and follows the same shape now
 that the prover is settled.

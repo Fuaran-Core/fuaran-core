@@ -97,10 +97,10 @@
     {
       "id": "dag-outside-the-model",
       "level": "assumed",
-      "claim": "Node identity, hashing, the merge base and the topological order that recovers a lane's delta are outside the model entirely, which starts where the deltas are known. The differential level is the only evidence about them.",
-      "phase": "fuaran-core#131",
+      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it'. `Dag.mergeBase` is outside this path entirely — `foldOnce` hands `reconcileMany` the base node's id directly and no divergence point is ever located — so nothing is claimed about it at any level. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are no longer assumed: see `dag-delta-recovery` and `fold-from-the-dag`.",
+      "phase": "fuaran-core#134",
       "evidence": {
-        "assumption": "the content-addressed DAG layer beneath the fold is correct"
+        "assumption": "Dag.mergeBase, and the hash function itself, are correct"
       }
     },
     {
@@ -140,9 +140,58 @@
       }
     },
     {
+      "id": "dag-delta-recovery",
+      "level": "proved",
+      "claim": "For the base-plus-N-chains shape — one shared base node and one linear chain per writer, which is what the fold's own generator builds and what a local-first deployment has — the delta of a lane off the base is that lane's nodes, and its ops, in append order. The whole layer computed rather than assumed: the head's ancestor closure, the base's, the topological order, the difference and the lookup. Under the id-distinctness premise, and with the CHOICE of topological order named separately as an assumption.",
+      "phase": "fuaran-core#134",
+      "evidence": {
+        "theorem": "between_chain",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "fold-from-the-dag",
+      "level": "proved",
+      "claim": "The fold over the DAG is the fold over the lane lists, and the confluence law therefore holds stated from the content-addressed DAG rather than from deltas someone had already recovered: the same heads over the same base fold to the same state, or halt with the same canonical report, however the heads arrive.",
+      "phase": "fuaran-core#134",
+      "evidence": {
+        "theorem": "fold_confluence_dag",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "delta-recovery-differential",
+      "level": "tested",
+      "claim": "Production's own ancestor closure, topological order and delta recovery, on the DAG the fold's generator actually builds, agree per lane with the extracted model's recovery over the SAME nodes across three lane pools — the ids the model walks are the content hashes production minted, so a disagreement can only be about the recovery and never about the hash. A DAG whose lanes hang off the wrong parent is required to make the comparison fail, and two vacuity guards refuse a run that recovered no ops or walked no chain longer than one node.",
+      "phase": "fuaran-core#134",
+      "evidence": {
+        "family": "Proofs.Oracle"
+      }
+    },
+    {
+      "id": "node-ids-distinct",
+      "level": "assumed",
+      "claim": "The hash-collision assumption, and since Phase 134 the only thing the delta recovery assumes about content addressing. Node ids are distinct, so the node a chain named is the node the DAG returns for it; two nodes sharing a content id is the only way that fails.",
+      "phase": "fuaran-core#134",
+      "evidence": {
+        "assumption": "Dag.nodeHash is injective on (sorted parents, actor, encoded op)"
+      }
+    },
+    {
+      "id": "topological-order-choice",
+      "level": "assumed",
+      "claim": "That the order production picks and the order the model computes are the same order. Production drains a ready frontier smallest-id-first; the model reverses the parent walk. On a spine every pair of the closure is comparable, so exactly one topological order exists and the two must coincide — argued, and measured by the differential against the real recovery, but not mechanised. Everything downstream of the order is proved.",
+      "phase": "fuaran-core#134",
+      "evidence": {
+        "assumption": "a spine admits exactly one topological order, and the frontier drain produces it"
+      }
+    },
+    {
       "id": "tree-independence-diamond",
       "level": "proved",
-      "claim": "For the skeleton-op tree algebra, two operations whose footprints are declared disjoint and which both apply at an id-unique tree each apply after the other and reach the same tree — the fold theorem's domain hypothesis, proved rather than sampled, for every operation pair except one shape (see `tree-algebra-batch-nesting`). Nine of the fifteen unordered pairs are closed by the conservative footprint alone and never look at a tree: a remove or a move writes an unknown parent, independence refuses that against any structural write, and every skeleton operation except a do-nothing batch writes structure — so such a pair is independent only where the other operation does nothing at all.",
+      "claim": "For the skeleton-op tree algebra, two operations whose footprints are declared disjoint and which both apply at an id-unique tree each apply after the other and reach the same tree — the fold theorem's domain hypothesis, proved rather than sampled, for twelve of the fifteen unordered operation pairs (the three left open are one shape, at `tree-algebra-batch-nesting`). Nine of the twelve are closed by the conservative footprint alone and never look at a tree: a remove or a move writes an unknown parent, independence refuses that against any structural write, and every skeleton operation except a do-nothing batch writes structure — so such a pair is independent only where the other operation does nothing at all.",
       "phase": "fuaran-core#133",
       "evidence": {
         "theorem": "tree_independence_diamond",
@@ -193,10 +242,10 @@
     {
       "id": "tree-algebra-batch-nesting",
       "level": "assumed",
-      "claim": "The proved diamond covers every operation pair except one shape: both sides a batch that neither does nothing nor relocates. A batch is a list of operations written as one operation and the fold already threads a list, so excluding it removes no behaviour — it declines to nest one lane inside another. Lifting the leaf diamond along a batch script is the argument the fold theorem already performs at lane granularity, and it needs the id-uniqueness invariant at each intermediate state of the script, which is what `insert-breaks-id-uniqueness` currently denies.",
+      "claim": "The proved diamond covers twelve of the fifteen operation pairs; the three left open are one shape — either side a batch that neither does nothing nor relocates. A batch is a list of operations written as one operation and the fold already threads a list, so excluding it removes no behaviour: it declines to nest one lane inside another. Lifting the leaf diamond along a batch script is the argument the fold theorem already performs at lane granularity, and it needs the id-uniqueness invariant at each intermediate state of the script, which is what `insert-breaks-id-uniqueness` currently denies.",
       "phase": "fuaran-core#133",
       "evidence": {
-        "assumption": "an operation pair in which both sides are non-trivial nested batches"
+        "assumption": "an operation pair in which either side is a non-trivial nested batch"
       }
     }
   ]
