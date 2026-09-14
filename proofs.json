@@ -161,7 +161,7 @@
     {
       "id": "dag-delta-recovery",
       "level": "proved",
-      "claim": "For the base-plus-N-chains shape — one shared base node and one linear chain per writer, which is what the fold's own generator builds and what a local-first deployment has — the delta of a lane off the base is that lane's nodes, and its ops, in append order. The whole layer computed rather than assumed: the head's ancestor closure, the base's, the topological order, the difference and the lookup. Under the id-distinctness premise, and with the CHOICE of topological order named separately as an assumption.",
+      "claim": "For the base-plus-N-chains shape — one shared base node and one linear chain per writer, which is what the fold's own generator builds and what a local-first deployment has — the delta of a lane off the base is that lane's nodes, and its ops, in append order. The whole layer computed rather than assumed: the head's ancestor closure, the base's, the topological order, the difference and the lookup. Under the id-distinctness premise; the CHOICE of topological order was named separately as an assumption here and is PROVED since Phase 142, at `topological-order-choice`.",
       "phase": "fuaran-core#134",
       "evidence": {
         "theorem": "between_chain",
@@ -209,11 +209,13 @@
     },
     {
       "id": "topological-order-choice",
-      "level": "assumed",
-      "claim": "That the order production picks and the order the model computes are the same order. Production drains a ready frontier smallest-id-first; the model reverses the parent walk. On a spine every pair of the closure is comparable, so exactly one topological order exists and the two must coincide — argued, and measured by the differential against the real recovery, but not mechanised. Everything downstream of the order is proved.",
-      "phase": "fuaran-core#134",
+      "level": "proved",
+      "claim": "That the order production picks and the order the model computes are the same order, on the base-plus-N-chains shape. Two lemmas: a distinct enumeration of a spine's closure in which every node follows its single parent is that spine in append order (`spine_order_forced`, a list argument naming no DAG and no hash), and the frontier drain over that closure produces such an enumeration (`kahn_drain_is_such_an_enumeration`). The recovery is therefore restated with the order universally quantified rather than fixed to the parent-walk reversal (`between_chain_any_order`), and the fold above it with it (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`). The smallest-id tie-break is NOT modelled and does not need to be: the selector is a parameter constrained only to return a member of the frontier it is handed, and on a spine that frontier is one element wide at every step (`kahn_frontier_singleton`), so every selector agrees and nothing here says how ids compare. The order over a MERGE DAG, where the frontier genuinely widens, remains unclaimed at any level.",
+      "phase": "fuaran-core#142",
       "evidence": {
-        "assumption": "a spine admits exactly one topological order, and the frontier drain produces it"
+        "theorem": "topo_of_is_the_kahn_drain",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
       }
     },
     {
@@ -361,6 +363,109 @@
       "phase": "fuaran-core#136",
       "evidence": {
         "assumption": "the entry list the model is handed is Map.toList's own order"
+      }
+    },
+    {
+      "id": "parse-total",
+      "level": "proved",
+      "claim": "The recursive-descent JSON parser reaches exactly one outcome on every input — an accepted value or a CLASSIFIED refusal, never both and never neither. That it is Tot at all is the content rather than a formality: F* admits the mutual group only after showing it terminates on every input, and a recursive-descent parser over a mutable index has no syntactic reason to. Every consuming sub-parser carries the remaining input's strict decrease in its RETURN TYPE, and that refinement is the whole termination argument.",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "theorem": "parse_total",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "depth-bound-exact",
+      "level": "proved",
+      "claim": "On the canonical nesting family the depth bound is EXACT at every depth and for every suffix: the parse succeeds iff the cap is at least the nesting, and refuses by name when it is not. Stated this way because the obvious form is false — the parser is left to right and the first failure wins, so a document that is both too deep and malformed earlier fails with the earlier kind. The other two halves are depth_error_only_at_a_container (the kind is confined to a container position, carried in every signature's return type so it is re-checked at every call site) and depth_bound_scalars_unaffected (a scalar parses at a cap of zero, where every container is refused).",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "theorem": "depth_bound_exact",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "int53-guard-exact",
+      "level": "proved",
+      "claim": "Every integer token the parser ACCEPTS denotes an int53-safe value, whichever branch produced it — JInt by the Int32 range, JFloat by the guard. Note where the guard is NOT: the Int32 branch runs no int53 test and needs none, because the Int32 range is a strict subset (int32_within_int53 proves it).",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "theorem": "int53_guard_exact",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "int53-guard-sound",
+      "level": "proved",
+      "claim": "The int53 guard as production spells it — a lexical comparison against the range's own digits — never admits an integer whose VALUE is outside the range. This is the half that matters: over-refusing costs a user an error message, under-refusing costs a corrupted identifier.",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "theorem": "int53_guard_sound",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "int53-guard-conservative",
+      "level": "proved",
+      "claim": "The int53 guard is NOT exact, and cannot be as written: Wire.fs justifies its lexical comparison with 'JSON forbids leading zeros', which this parser's digit loop does not enforce, so 0009007199254740992 — exactly 2^53, the largest int53-safe integer there is — is refused as MalformedNumber because its STRING is 19 characters. Proved as a witness rather than described, so that anyone who 'fixes' the guard to match its own comment reddens a lemma and is told the parser's behaviour changed. The error only ever runs this way; soundness above is the other half.",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "theorem": "int53_guard_conservative",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "error-kind-exhaustive",
+      "level": "proved",
+      "claim": "Every one of the twelve JsonErrorKind cases is REACHABLE, by a named witness input — a classification whose cases are unreachable is closed but not exhaustive, and the difference is what makes the differential's coverage mean anything. The confinement half is carried in the parsers' return types rather than asserted once, so it is re-checked at every call site: parse_string cannot report a number failure, the descent cannot report TrailingCharacters (which the entry point constructs from the leftover-input test rather than raising), and MaxDepthExceeded cannot arise anywhere but at a container.",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "theorem": "error_kind_exhaustive",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "parser-differential",
+      "level": "tested",
+      "claim": "The extracted model agrees with Json.parseDetailedWithPolicy over a 55-input near-miss table under both read policies, every wire-corpus nodes/ and ops/ fixture as raw text, both nesting families at every depth 0-8 under every cap 0-8, arrays and objects up to 64 members, and 4,000 seed-replayable generated inputs — comparing the outcome class, the decoded value, and on a failure the KIND, the POSITION and the MESSAGE at once. Two go-red cases: a model holding a cap production has already spent must accept what production refuses by name, and a blind bridge hiding the two container characters must break every structured document while leaving a scalar in agreement. The member-null fork is asserted to have FIRED, because two parsers that never met a member null agree about a policy neither exercised.",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the parser oracle agrees with production over the near-miss table",
+          "… and under the tolerant read policy, where the member-null fork lives",
+          "the parser oracle agrees with production over every corpus nodes/ fixture",
+          "… and over every corpus ops/ fixture",
+          "the parser oracle agrees with production over generated deep and wide inputs",
+          "the parser oracle agrees with production over 4000 generated inputs",
+          "a model whose DEPTH CHECK is out of step DISAGREES with production",
+          "a model handed a BLIND bridge DISAGREES with production"
+        ]
+      }
+    },
+    {
+      "id": "parser-float-readback-opaque",
+      "level": "assumed",
+      "claim": "System.Double.TryParse's three-valued verdict on a number token — parses finitely, parses to a non-finite, does not parse — is a PARAMETER of the model, instantiated by the differential host with the call production makes. What the model decides is which verdict leads where, which is the parser's own logic; nothing here is said about float precision, about which tokens .NET accepts, or about the shortest-round-trip layout. System.Int32.TryParse is likewise modelled lexically, as a comparison against the range's own digits after stripping leading zeros, which is argued rather than mechanised and measured by the differential's boundary cases from both sides.",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "assumption": "the float readback and the Int32 range test are the host's, not the model's"
+      }
+    },
+    {
+      "id": "parser-alphabet-bridge",
+      "level": "assumed",
+      "claim": "That the model's character list IS the production string. A character is a constructor of the model's alphabet — one per character the parser distinguishes, plus a catch-all carrying the character verbatim, so two different characters are never identified — and the host's one-line-per-character bridge is what makes the correspondence. The bridge is not itself proved. The value of a \\uXXXX escape is on the same footing: the model carries the four hex digits symbolically because the extraction carries no integers, and the host resolves the code point, so the decoded character is compared but the transliteration is sampled rather than proved.",
+      "phase": "fuaran-core#146",
+      "evidence": {
+        "assumption": "the host's toCh bridge maps each production character to the model's alphabet faithfully"
       }
     },
     {

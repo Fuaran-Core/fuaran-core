@@ -657,5 +657,162 @@ let reconcile_many_dag = (fun ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) (
 let fold_once_dag = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( s0  :  'state ) ( heads  :  Prims.list<Prims.string> ) -> (fold_once apply fp s0 (deltas_of d fuel base_id heads)))
 
 
+let rec before : Prims.string  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( x  :  Prims.string ) ( y  :  Prims.string ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     false
+     end
+| (h)::t -> begin
+      
+if (Prims.op_Equals h x) then begin
+     (mem y t)
+     end else begin
+      
+if (Prims.op_Equals h y) then begin
+     false
+     end else begin
+     (before x y t)
+     end
+     end
+     end))
+
+
+let rec parents_chain = (fun ( ns  :  Prims.list<node<'op>> ) ( q  :  Prims.string ) -> (match (ns) with
+| [] -> begin
+     true
+     end
+| (n)::t -> begin
+     ((Prims.op_Equals n.nparents ((q)::[])) && (parents_chain t n.nid))
+     end))
+
+
+let rec all_before : Prims.list<Prims.string>  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( ps  :  Prims.list<Prims.string> ) ( child  :  Prims.string ) ( ord  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     ((before p child ord) && (all_before t child ord))
+     end))
+
+
+let rec follows_parents = (fun ( ns  :  Prims.list<node<'op>> ) ( ord  :  Prims.list<Prims.string> ) -> (match (ns) with
+| [] -> begin
+     true
+     end
+| (n)::t -> begin
+     ((all_before n.nparents n.nid ord) && (follows_parents t ord))
+     end))
+
+
+let rec follows_spine : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( root  :  Prims.string ) ( ids  :  Prims.list<Prims.string> ) ( ord  :  Prims.list<Prims.string> ) -> (match (ids) with
+| [] -> begin
+     true
+     end
+| (x)::t -> begin
+     ((before root x ord) && (follows_spine x t ord))
+     end))
+
+
+let rec parents_in : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( ps  :  Prims.list<Prims.string> ) ( closure  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+      
+if (mem p closure) then begin
+     (p)::(parents_in t closure)
+     end else begin
+     (parents_in t closure)
+     end
+     end))
+
+
+let rec all_emitted : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( ps  :  Prims.list<Prims.string> ) ( emitted  :  Prims.list<Prims.string> ) -> (match (ps) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     ((mem p emitted) && (all_emitted t emitted))
+     end))
+
+
+let rec frontier = (fun ( rest  :  Prims.list<node<'op>> ) ( closure  :  Prims.list<Prims.string> ) ( emitted  :  Prims.list<Prims.string> ) -> (match (rest) with
+| [] -> begin
+     []
+     end
+| (n)::t -> begin
+      
+if (all_emitted (parents_in n.nparents closure) emitted) then begin
+     (n.nid)::(frontier t closure emitted)
+     end else begin
+     (frontier t closure emitted)
+     end
+     end))
+
+
+let rec remove_id = (fun ( ns  :  Prims.list<node<'op>> ) ( id  :  Prims.string ) -> (match (ns) with
+| [] -> begin
+     []
+     end
+| (n)::t -> begin
+      
+if (Prims.op_Equals n.nid id) then begin
+     t
+     end else begin
+     (n)::(remove_id t id)
+     end
+     end))
+
+
+let pick_head : Prims.list<Prims.string>  ->  Prims.string = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     ""
+     end
+| (h)::uu___ -> begin
+     h
+     end))
+
+
+let rec kahn = (fun ( pick  :  Prims.list<Prims.string>  ->  Prims.string ) ( fuel  :  Prims.list<node<'op>> ) ( rest  :  Prims.list<node<'op>> ) ( closure  :  Prims.list<Prims.string> ) ( emitted  :  Prims.list<Prims.string> ) -> (match (fuel) with
+| [] -> begin
+     []
+     end
+| (uu___)::fuel' -> begin
+     (match ((frontier rest closure emitted)) with
+| [] -> begin
+     []
+     end
+| f -> begin
+     (
+
+let id = (pick f)
+in (id)::(kahn pick fuel' (remove_id rest id) closure (app emitted ((id)::[]))))
+     end)
+     end))
+
+
+let lane_ids_distinct = (fun ( mint  :  Prims.string  ->  Prims.string  ->  'op  ->  Prims.string ) ( bn  :  node<'op> ) ( ln  :  lane<'op> ) -> (distinct ((bn.nid)::(ids_of (lane_nodes mint ln.lactor bn.nid ln.lops)))))
+
+
+let between_ordered = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( ord  :  Prims.list<Prims.string> ) -> (nodes_for d (diff ord (ancestors_of d fuel base_id))))
+
+
+let between_ops_ordered = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( ord  :  Prims.list<Prims.string> ) -> (ops_of (between_ordered d fuel base_id ord)))
+
+
+let rec deltas_of_ordered = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( ords  :  Prims.list<Prims.list<Prims.string>> ) -> (match (ords) with
+| [] -> begin
+     []
+     end
+| (o)::t -> begin
+     ((between_ops_ordered d fuel base_id o))::(deltas_of_ordered d fuel base_id t)
+     end))
+
+
+let reconcile_many_dag_ordered = (fun ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( ords  :  Prims.list<Prims.list<Prims.string>> ) -> (reconcile_many fp (deltas_of_ordered d fuel base_id ords)))
+
+
+let fold_once_dag_ordered = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( fp  :  'op  ->  footprint ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( s0  :  'state ) ( ords  :  Prims.list<Prims.list<Prims.string>> ) -> (fold_once apply fp s0 (deltas_of_ordered d fuel base_id ords)))
+
+
 
 

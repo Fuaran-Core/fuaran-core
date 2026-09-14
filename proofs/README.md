@@ -16,7 +16,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved. Every definition names its F# counterpart. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`). Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -25,7 +25,9 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under one named injective-hash premise. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `Preservation.fst` | The fifth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. |
+| `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact` and `error_kind_exhaustive` proved. This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
+| `oracle/JsonParse.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Preservation.fst` | The sixth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. |
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
@@ -95,15 +97,41 @@ assumption is exactly that assumption and no other**: two nodes sharing a conten
 way `lookup` returns a node other than the one a chain named, and it is the only way this proof
 says nothing.
 
-**And one step is deliberately NOT mechanised, which is where the honest reading of "proved" stops
-here.** Production chooses its topological order with Kahn's algorithm, draining a ready frontier
-smallest-id-first; the model takes the reverse of the parent walk. On a spine every pair of the
-closure is comparable under the ancestor relation, so exactly one topological order exists and the
-two must coincide — but that sentence is argued, not proved. Mechanising it means showing that a
-distinct enumeration of a spine respecting each node's single parent is forced, and then that
-Kahn's drain produces such an enumeration; that is the honest successor to this phase. Everything
-downstream of the order is proved, and the differential below measures the order itself against
-the real `Dag.betweenOps`.
+**One step Phase 134 left ARGUED is now proved too (Phase 142).** Production chooses its
+topological order with Kahn's algorithm, draining a ready frontier smallest-id-first; the model
+takes the reverse of the parent walk. That "on a spine there is only one topological order anyway,
+so the two coincide" was a sentence in a comment and a row at level 3 of the ladder. Section 12 is
+that sentence, mechanised, in two lemmas over the same model:
+
+- **`spine_order_forced`** — a DISTINCT enumeration of a spine's closure in which every node
+  follows its own parent is that spine in append order, base first. A list argument: it names no
+  DAG, no hash and no production function.
+- **`kahn_drain_is_such_an_enumeration`** — the frontier drain, modelled as `topoCore`'s loop over
+  `parentsIn` / `indeg` / `ready`, produces exactly such an enumeration over a spine's closure.
+
+From the two, **`between_chain_any_order`** is `between_chain` restated with the order UNIVERSALLY
+QUANTIFIED where section 11 fixed it to the parent-walk reversal by definition, and
+`reconcile_many_dag_ordered_eq` / `fold_once_dag_ordered_eq` carry that up to the fold:
+`Dag.reconcileMany` from the DAG is the deltas-first fold whatever order each head's recovery
+walked. **`topo_of_is_the_kahn_drain`** joins the halves and is the row itself — production's drain
+and the model's reversal are the same list.
+
+**The smallest-id tie-break is not modelled, and the theorems say why it does not need to be.** The
+selector is a PARAMETER, constrained only to return a member of the frontier it is handed
+(`picks_from_frontier`, with `pick_head` exhibited so the hypothesis is not vacuous), and every
+result is stated for every such selector. `kahn_frontier_singleton` proves the frontier is a
+ONE-element list at every step of a spine's drain, so all selectors agree and nothing anywhere says
+a word about how ids compare. A frontier wider than one is exactly where the tie-break would begin
+to matter, and that is the MERGE-DAG case, which stays unclaimed.
+
+**Neither universally quantified statement is vacuous, and both witnesses are in the module rather
+than in this paragraph.** A theorem quantified over every enumeration says nothing if no
+enumeration meets its hypotheses, and one quantified over every selector says nothing if none does:
+`pick_head` is exhibited as a selector that does, and `kahn_drain_is_such_an_enumeration` concludes
+`distinct ord /\ follows_parents ns ord` of an enumeration it produces — which
+`topo_of_is_the_kahn_drain` then identifies with the model's own order. So the enumeration
+`between_chain_any_order` is quantified over exists, is production's, and is `topo_of`; that they
+are one list is the point of the phase.
 
 Also outside the model, and named so it is not assumed in: **`Dag.mergeBase`**. It is not on this
 path at all — `foldOnce` hands `reconcileMany` the base node's id directly — so nothing here says
@@ -174,9 +202,20 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    lanes all apply from the base state, the halt half under nothing at all. **And, for the
    base-plus-N-chains shape, the DELTA RECOVERY beneath it**: `between_chain` (the delta of a
    linear lane off the base is that lane's ops, in order), `reconcile_many_dag_eq` and
-   `fold_confluence_dag`, under the id-distinctness premise named at level 3 and with the CHOICE
-   of topological order named there too. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `fold_confluence_dag`, under the id-distinctness premise named at level 3. F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under
    `--quake 3`, cold-cache checks on three seeds and at a quarter of the rlimit the leg runs with.
+
+   **And, since Phase 142, the CHOICE of topological order — which was level 3 until this phase.**
+   A spine's closure admits exactly one topological order (`spine_order_forced`), production's
+   frontier drain produces it (`kahn_drain_is_such_an_enumeration`), and the two are therefore the
+   same list (`topo_of_is_the_kahn_drain`). The recovery is restated with the order universally
+   quantified (`between_chain_any_order`), and the fold above it with it
+   (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`), so no result here depends on
+   which topological order was walked. The tie-break is a parameter constrained only to select from
+   the frontier, and the frontier on a spine is one element wide at every step
+   (`kahn_frontier_singleton`) — so this says nothing about how ids compare, and nothing about a
+   MERGE DAG, where the frontier genuinely widens. That case stays unclaimed, below.
 
    **And, since Phase 133, the tree algebra's own diamond** — `TreeOps.tree_independence_diamond`,
    which discharges that hypothesis for `SkeletonOp` rather than sampling it, and
@@ -217,11 +256,9 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      (sorted parents, actor, encoded op) unless the hash collides; two nodes sharing a content id
      is the only way `lookup` returns a node other than the one a chain named. The model states it
      as `distinct_ids` and consumes it as `resolves`, with `resolves_of_distinct` between them.
-   - **How the topological order is CHOSEN.** Production runs Kahn's algorithm, draining a ready
-     frontier smallest-id-first; the model reverses the parent walk. A spine admits exactly one
-     topological order, so on this shape they coincide — argued here, measured by the differential
-     against the real `Dag.betweenOps`, and not mechanised. Everything downstream of the order is
-     proved.
+   - _(**How the topological order is CHOSEN** left this level at Phase 142 and is now at level 1
+     above. What remains assumed about the order is nothing on this shape; over a MERGE DAG it is
+     not claimed at any level, below.)_
    - **`Dag.mergeBase` is outside the model**, because it is outside this path: `foldOnce` hands
      `reconcileMany` the base node's id directly and never locates a divergence point. Level 2 is
      the only evidence about it, and the general topological order over an arbitrary MERGE DAG is
@@ -271,7 +308,10 @@ what is said at each level there is said about the decode combinators and about 
 Theorem 2 — independence soundness for the tree algebra — carries a third, in the section after it;
 what is said there is said about `SkeletonOp` and about no other domain's witness. Theorem 3 —
 chain integrity — carries a fourth, and what is said there is said about the two integrity walkers
-and about nothing else; in particular it says nothing about signatures.
+and about nothing else; in particular it says nothing about signatures. Theorem 4 — `Json.parse`
+totality, bounded — carries a fifth, and what is said there is said about the recursive-descent
+parser's two guards and its error classification; in particular it is not a grammar-conformance
+claim, and its section says exactly which grammar paths remain sampled.
 
 ## Exit criteria, with evidence
 
@@ -410,6 +450,14 @@ So **the programme's §6 wording "the decoder is total" is spent on the combinat
 says: given a parsed value, no combinator and no decoder built from them can diverge, throw, or
 reach a state that is neither an accept nor a named refusal. It says nothing about what happens to
 the bytes before that value exists.
+
+**Since Phase 146 the parser has its own theorem, and this boundary has moved rather than
+vanished.** "Theorem 4" below proves the parser TOTAL, proves its two guards, and proves its
+failure classification exhaustive — so the sentence above is now the boundary of *this* theorem
+rather than of the directory. What is still not claimed anywhere is grammar conformance: that the
+parser accepts exactly RFC 8259. Read the two together as "no input can make the parser fail to
+answer, and every answer is a value or a named refusal", with which inputs get which answer settled
+by the corpus at level 2.
 
 One further exclusion, named rather than silent: `Versioning.decodeTolerant` is the shipped
 **generic** instance of the kind-dispatch pattern, and it is not modelled — its `requiredProfile`
@@ -592,8 +640,8 @@ than it looks: `Ops.apply` threads a `Batch` exactly as the fold threads a lane,
 removes no behaviour from the fold — it declines to nest one lane inside another.
 
 `applyContained`'s container capability is out of scope and is Phase 140's; `Diff` is Phase 141's.
-`Ops.invert` was named here as Phase 141's too and is theorem 4's — see
-[Theorem 4](#theorem-4--apply-engine-preservation-phase-138). `NotAContainer` and
+`Ops.invert` was named here as Phase 141's too and is theorem 5's — see
+[Theorem 5](#theorem-5--apply-engine-preservation-phase-138). `NotAContainer` and
 `Rejected` are carried in the model's envelope vocabulary and are unreachable from `apply` —
 `canHold` is `fun _ -> true` there, and `Rejected` is the domain-side extension point Core never
 raises.
@@ -839,9 +887,167 @@ landed on the lemma that should have caught it.
    - **`Json.parse`, `Dag.fromJsonl` and the JSONL scanners.** Loading is not verifying — that is
      `fromJsonlVerified`'s whole point — and the model begins at a structure that already exists.
 
-## Theorem 4 — apply-engine preservation (Phase 138)
+## Theorem 4 — `Json.parse` totality, bounded (Phase 146)
 
-_(This directory's fourth; the attested-stack programme's SECOND. The heading numbers here are the
+`JsonParse.fst` is this directory's fifth model, and the boundary theorem 1 named. It models
+`Json.parseDetailedWithPolicy` — the core parser every other entry point is a one-line wrapper over
+— clause for clause: `skipWs`, `expect`, `parseString` with its eight short escapes and the
+`\uXXXX` path, `parseNumber` with the Int32 and int53 token guards, the two literals, and the mutual
+`parseValue` / `parseObject` / `parseArray` with the explicit depth counter, including the
+`EraseMemberNull` fork that lives in the member loop and nowhere else.
+
+The claim worth having here is not a byte-level grammar proof. It is that **the parser cannot fail
+to answer, and cannot answer with an unclassified failure** — which is what the two guards are for.
+
+Four things are proved:
+
+- **`parse_total`.** The parser reaches exactly one outcome on every input: a value or a classified
+  refusal, never both and never neither. That it is `Tot` at all is the content rather than a
+  formality — F\* admits the mutual group only after showing it terminates on every input, and a
+  recursive-descent parser over a mutable index has no syntactic reason to. Every consuming
+  sub-parser carries `llen rest < llen input` in its RETURN TYPE, and that refinement is the whole
+  termination argument, exactly as `get_prop`'s `jsize` refinement was theorem 1's.
+- **`depth_bound_exact`.** Three statements, because the obvious one-line form is false. The naive
+  reading — "input nested past the bound fails with `MaxDepthExceeded` and never otherwise" —
+  ignores that the parser is left to right and the first failure wins: `[bad, [[[…]]]]` is an
+  `UnexpectedChar` however deep it goes. What is true and proved: the kind is CONFINED to a
+  container position (`depth_confined`, carried in every signature so it is re-checked at every call
+  site rather than asserted once); on the canonical nesting family the boundary is EXACT, at every
+  depth and for every suffix (`nest_accepts` / `nest_refuses`); and the bound touches nothing that
+  is not nested (`depth_bound_scalars_unaffected` — a scalar parses at a cap of zero, where every
+  container is refused).
+- **`int53_guard_exact`.** Every integer token the parser ACCEPTS denotes an int53-safe value,
+  whichever branch produced it. See the finding below: "exact" is not available, and the two halves
+  that are — soundness and conservatism — are proved separately and both.
+- **`error_kind_exhaustive`.** The twelve `JsonErrorKind` cases are confined to the layers that
+  raise them, and every one of the twelve is REACHABLE, by a named witness input. A classification
+  whose cases are unreachable is closed but not exhaustive, and the difference is exactly what makes
+  the differential's coverage mean anything.
+
+### The finding: the int53 guard is SOUND and CONSERVATIVE, not exact
+
+`Wire.fs` justifies comparing the digit string lexically with "JSON forbids leading zeros, so for
+equal length that IS the numeric order". **This parser does not enforce that.** `parseNumber`'s
+digit loop accepts `007`, and for a token `Int32.TryParse` refuses, leading zeros lengthen the
+string without changing the value — so `0009007199254740992`, which is exactly 2^53 and therefore
+the largest int53-safe integer there is, is refused as `MalformedNumber` because its *string* is 19
+characters.
+
+The error only ever runs that way. A padded reading is numerically smaller than an unpadded one of
+the same length, so no amount of padding can make an unsafe integer look safe. So:
+
+- `int53_guard_sound` — the guard as production spells it never admits an integer outside the range.
+  This is the half that matters: over-refusing costs a user an error message, under-refusing costs a
+  corrupted identifier.
+- `int53_guard_conservative` — a witness it refuses and should not, exhibited rather than described,
+  so that anyone who "fixes" the guard to match its own comment reddens a lemma and is told the
+  parser's behaviour changed.
+
+A second correction to how the guard is usually described, worth stating because the model had to
+get it right to prove anything: **the int53 test does not guard `JInt`.** An integer token is
+offered to `Int32.TryParse` first, and a success yields `JInt` with no int53 test at all — the Int32
+range is a strict subset, so a test there would be vacuous (`int32_within_int53` proves it). The
+int53 test governs only the tokens Int32 refused, and decides `JFloat` against a named refusal.
+
+### The boundary — what is modelled at what fidelity
+
+- **The value of a `\uXXXX` escape is not computed in the model.** Its two GUARDS are — a truncated
+  escape is `TruncatedUnicodeEscape`, a bad hex digit is `BadHexDigit`, and each reports
+  production's own position — but the code point the four digits denote is carried symbolically,
+  because computing it needs integers and the extraction deliberately carries none (finding 2).
+  The differential resolves it host-side from the digits the model carried, so the decoded character
+  is still compared; what is not proved is the transliteration. This is the grammar path the phase's
+  time box named, and it is the one that remains at level 2.
+- **The float readback is opaque.** `Double.TryParse`'s verdict — parses finitely, parses to a
+  non-finite, does not parse — is a PARAMETER, as `float i` was theorem 1's and the hash was theorem
+  3's. What the model decides is which of the three verdicts leads where, which is the parser's own
+  logic rather than .NET's.
+- **The depth cap is a list and the rendered cap a string parameter**, for the same reason
+  `Chain.fst` spells a sequence number as a Peano numeral: the extraction carries no integers. Every
+  non-negative cap is representable, and the shipped `defaultMaxDepth = 512` is one of them.
+- **A character is a constructor.** The alphabet has one constructor per character the parser
+  distinguishes plus `COther`, which carries the character verbatim — so two different characters
+  are never identified and the bridge loses nothing. What the model reads is a `list ch` where
+  production reads a .NET string, and the differential's bridge is what says those are the same
+  sequence.
+- **A number carries its TOKEN, not its value.** Which constructor the parser chose is the guard
+  under test and is modelled exactly; the numeral is .NET's to compute, and the host reads the
+  model's token back with the same call production made — so a model that scanned one character more
+  or less renders a different value and the differential sees it.
+
+### What the corpus covers
+
+The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs the
+extracted model beside `Json.parseDetailedWithPolicy` over the same TEXT. Every probe renders both
+answers into one string carrying the outcome class, the decoded value and — on a failure — the
+KIND, the POSITION and the MESSAGE. The position is the half most likely to drift silently, which is
+why it is compared rather than described.
+
+| Pool | What is asked | Both classes exercised |
+|---|---|---|
+| a hand-written near-miss table | 55 inputs reaching every classified failure, the two `null` near misses (`nul`, `nullish`), every escape, and both numeric boundaries from both sides | yes (asserted) |
+| the same, under the tolerant policy | the whole table again under `EraseMemberNull`, with the member-null fork asserted to have FIRED | yes (asserted) |
+| the wire corpus's `nodes/` fixtures | every fixture as raw text — the accept path, asserted non-trivial in size | accept path |
+| the wire corpus's `ops/` fixtures | the same | accept path |
+| generated deep and wide inputs | both nesting families at every depth 0–8 under every cap 0–8, so the BOUNDARY is compared and not merely the interior; arrays and objects of 0, 1, 2, 10 and 64 members | yes (asserted) |
+| 4,000 generated inputs | seed-replayable character soup over the parser's own alphabet, under both policies — the only pool that reaches failure positions nobody thought to write down | yes (asserted) |
+
+Two **go-red** cases, because the two things this family could get wrong are different. The first is
+the one the phase asks for: a model holding a cap production has already spent accepts a document
+production refuses by name, so the depth comparison is known to be one that can lose on exactly the
+guard the phase is about. The second is a *blind bridge* that hides the two container characters —
+this family's counterpart to the decode family's blind integer bridge — under which every structured
+document must disagree while a scalar still agrees, so the instrument is known to be narrow as well
+as effective.
+
+The **proof** was falsified the same way before it was trusted, on scratch copies: removing the
+depth check from `parse_array` reddens `nest_refuses`; making the int53 guard exact (stripping
+leading zeros, as production's own comment claims it may) reddens `int53_guard_conservative`; and
+dropping the entry point's trailing-input test reddens `error_kind_exhaustive`. Each landed on the
+lemma that should have caught it. The differential's own position comparison was falsified too — an
+off-by-one in the recovered index reddens three legs — because a comparison that agrees on the first
+run is the least-examined kind of evidence.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** On the model: the four results above, for every input,
+   under no hypothesis about a domain. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
+   `--report_assumes error` on, no `assume`, no `admit`. The module carries a scoped
+   `--ext context_pruning` (72s against 128s) for the reason `TreeOps.fst` gives at the same line.
+2. **Differentially tested.** The extracted model agrees with `Json.parseDetailedWithPolicy` over
+   the pools above, on class, value, kind, position and message, under both policies. Agreement is
+   over those pools, never over all inputs.
+3. **Assumed, and stated as such.**
+   - **The float readback.** `Double.TryParse`'s three-valued verdict is a parameter, instantiated by
+     the host with the call production makes. Nothing here is said about float precision, about
+     which tokens .NET accepts, or about the shortest-round-trip layout — that is the wire corpus's.
+   - **`Int32.TryParse` is modelled lexically.** The model reads the Int32 range as a comparison
+     against the range's own digits, after stripping leading zeros — which is what `Int32.TryParse`
+     does to a digit string, argued rather than mechanised, and measured by the differential's
+     numeric-boundary cases from both sides.
+   - **A character is a constructor, and the bridge is the correspondence.** The model's `list ch`
+     is the production string only because the host's `toCh` says so. That mapping is one line per
+     character and is not itself proved.
+   - **The `\uXXXX` code point.** Sampled, per the boundary above.
+   - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
+     the other four theorems.
+4. **Not claimed.**
+   - **Grammar conformance.** That the parser accepts exactly RFC 8259. It is not proved and is not
+     the point: what the theorem adds is that the parser cannot fail to answer and cannot answer
+     with an unclassified failure. Which inputs get which answer stays with the corpus and the
+     near-miss fixtures.
+   - **Anything about the `\uXXXX` transliteration**, per the boundary above.
+   - **That the depth bound prevents a stack overflow ON .NET.** The model proves the bound is
+     reached and named; that 512 frames of `parseValue` fit in a .NET thread's stack is an
+     engineering judgement about a runtime, and no model here says anything about it.
+   - **Theorem 1's policy assumption is not discharged.** `WireDecode.fst` assumes, at level 3, that
+     the parser's member-null absorption is equivalent to erasing member nulls from the strict tree.
+     This model puts the fork where production puts it and the differential exercises both policies,
+     which is better evidence than that assumption had — but relating two models is its own phase and
+     was not taken. The assumption stands where it is.
+## Theorem 5 — apply-engine preservation (Phase 138)
+
+_(This directory's fifth; the attested-stack programme's SECOND. The heading numbers here are the
 running count, per the note under theorem 3 — the programme's numbering is separate, and this is the
 one place the two are far apart.)_
 
@@ -962,7 +1168,7 @@ locally with `#push-options` and the reason is in the source beside it.
      one: the algebra can no longer break the invariant on a tree that has it, so what remains
      unenforced is the entry point and only the entry point. No shipped type carries it.
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
-     the other three theorems.
+     the other four theorems.
 4. **Not claimed.**
    - **A `Batch`'s inverse.** `invert_applicable` is stated over the four non-`Batch` operations. A
      batch's inverse is its members' inverses in reverse order, each derived against the state that
@@ -984,17 +1190,23 @@ locally with `#push-options` and the reason is in the source beside it.
 
 ## Next
 
-**`Json.parse` itself** — the boundary theorem 1 names. Totality of the recursive-descent parser
-over bytes: the depth bound that makes deep input a named `Error` rather than an uncatchable stack
-overflow, the escape and `\uXXXX` paths, the int53 token guard, and the exhaustiveness of the
-`JsonErrorKind` classification. It is the one piece of this stack where an EverParse-shaped
-approach is worth pricing rather than assuming away.
+**Discharging theorem 1's policy assumption** — the smallest of what is left, and now reachable.
+`WireDecode.fst` assumes the parser's member-null absorption is equivalent to erasing member nulls
+from the tree the strict grammar would produce; both sides of that equation are now modelled, in
+`JsonParse.fst` and in `WireDecode.fst`'s section 7, so what remains is a lemma relating the two
+rather than a new model. The near-miss tokens that motivated the assumption (`nul`, `nullish`) are
+grammar and are now inside a modelled parser rather than outside every model.
 
-**The topological order's uniqueness on a spine** — the one step Phase 134 argues rather than
-proves, and the smaller of the two. It is two lemmas: that a distinct enumeration of a spine's
-closure respecting each node's single parent is forced to be that spine, and that Kahn's frontier
-drain produces such an enumeration. The first is a list argument and the second is the only place
-production's tie-break would have to be modelled at all.
+**The `\uXXXX` transliteration** — the one grammar path Phase 146's time box left at level 2. It
+needs the model to compute a code point from four hex digits, which needs integers in extracted
+code, which is finding 2's cost rather than a proof difficulty. Whether it is worth paying is a
+question about the extraction's runtime floor, not about the parser.
+
+_(**The topological order's uniqueness on a spine** was named here and is DONE — Phase 142,
+`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. What it
+deliberately did not take is the general order over a MERGE DAG, where the frontier widens past one
+and the tie-break would have to be modelled for real; that is the larger successor, and it travels
+with `Dag.mergeBase`.)_
 
 **The signing composition** — the successor Phase 136 names and deliberately does not take.
 Chain integrity says a tampered node is found; it says nothing about a REWRITE, which re-mints
