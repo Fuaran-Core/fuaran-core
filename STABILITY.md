@@ -2431,6 +2431,41 @@ mapping and what the family deliberately does not pin. Emitted by
 `dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>`; nothing in this repository's
 public package surface changes.
 
+### `Conformance.diffContainedLaws` — a contained diff certified by the engine that runs it (`0.24.0`, Phase 141) — ADDITIVE
+
+One new public function in `Fuaran.Core.Conformance`, and nothing existing changes shape:
+
+```fsharp
+Conformance.diffContainedLaws : NodeWitness<'Node,'Id> -> IdWitness<'Id> -> OpGen<'Node,'Id>
+                                    -> int -> int -> LawResult list
+```
+
+The twin of `diffLaws` for `Diff.toOpsContained`, certified through `Ops.applyAllWith` /
+`Ops.canApplyAllWith` — the container-aware sequence pair Phase 160 added two entries above — under
+the witness's own `CanHold`.
+
+**What this closes.** `diffLaws` certifies a diff script with the PLAIN sequence pair, which Phase
+160 proved is blind to containment by construction (`all_with_at_total_is_plain`). So a script
+emitted for a container-aware witness was never shown applyable under the engine that witness
+actually runs: the pre-flight and the executor disagreed about what a refusal is. Three laws, the
+shape of `diffLaws`' three — reconstruction, applyability, and refusal exactness (`toOpsContained`
+refuses with `TargetNotAContainer` exactly when `after` nests children under a node the predicate
+rejects, and the plain `toOps` accepts the same pair, so the refusal is the container check's
+contribution and nothing else's).
+
+**Opt-in, like the snapshot and DAG families, and deliberately not folded into `Conformance.certify`.**
+`certify`'s report is a pinned length and its witness may carry no container capability at all; a
+domain with one runs this beside it. Nothing to adopt: a domain that does not call it is unaffected,
+and `diffLaws` is unchanged.
+
+**And a new model in `proofs/`, which changes no package surface at all.** `proofs/TreeDiff.fst`
+proves `Diff.toOps`' two refusals exactly (so a refused pair is one no skeleton script could
+express), its four-pass emission order, what each pass guarantees about the block it emits —
+including survivor preservation, which was a sampled law and is now a theorem — and that a contained
+script cannot be refused for containment at any step. Reconstruction itself stays differentially
+tested; `proofs/README.md`'s theorem 6 says why, and says it plainly rather than leaving a reader to
+infer that "the diff is proved" covers it.
+
 ## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists

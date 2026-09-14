@@ -778,6 +778,75 @@
           "the sequence surface sees containment and the plain pair still does not — both halves"
         ]
       }
+    },
+    {
+      "id": "diff-refusals-exact",
+      "level": "proved",
+      "claim": "`Diff.toOps` reaches exactly one outcome on every input, and WHICH is characterised: it refuses precisely when the two roots carry different ids or either tree repeats one, in that precedence, with the class each raises — and, the half that makes it a characterisation rather than a list, it refuses on NOTHING else. The converse is the sentence the phase exists for and is a lemma of its own (`diff_ok_on_any_wf_pair`): for ANY two well-formed trees sharing a root id a script is produced, where `Conformance.diffLaws` has only ever sampled pairs one of which was derived from the other by applying operations. Termination is discharged by the `Tot` annotation rather than argued — every pass recurses on a list derived from one of the two trees by the preorder walk.",
+      "phase": "fuaran-core#141",
+      "evidence": {
+        "theorem": "diff_refusals_exact",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "diff-emission-order",
+      "level": "proved",
+      "claim": "The emitted script IS `inserts ++ moves ++ removes ++ reorders` — four homogeneous blocks in that order, each exactly one pass's output. This is the argument `Ops.fs`' own doc comment carries in PROSE (\"added nodes go in as leaf shells (top-down), every survivor is then reattached, and removed regions are deleted last, so a surviving child is pulled out before its old container is removed\"), mechanised, and every applicability claim about a diff script rests on it. It is also what licenses the differential's order go-red: a stable partition by operation kind recovers the four blocks exactly, so reassembling them with the removes first is the same four passes permuted rather than a different algorithm.",
+      "phase": "fuaran-core#141",
+      "evidence": {
+        "theorem": "diff_emission_order",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "diff-block-shape",
+      "level": "proved",
+      "claim": "What each of the four passes GUARANTEES about the block it emits, which is the emission argument's four clauses: an insert carries a CHILDLESS graft whose id `before` does not carry, under that node's after-parent; a move names a survivor whose before-parent is not the destination, and the destination HOLDS it in `after`; a removal targets a node `after` does not carry whose before-parent survives — SURVIVOR PRESERVATION, which `Conformance.diffLaws` samples and this proves, so a relocated survivor diffs to a `MoveNode` and never to a remove-and-reinsert; and a reorder states the after-order of a parent with more than one child. The four predicates are written to hold vacuously on the operations the other passes emit, so they compose over the whole script and a reader holding one operation gets the fact belonging to it without knowing which block it came from. The differential evaluates this same conjunction over PRODUCTION's emitted script, so the theorem is held to the engine and not only to the model of it.",
+      "phase": "fuaran-core#141",
+      "evidence": {
+        "theorem": "diff_script_shape",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "diff-contained-total-instance",
+      "level": "proved",
+      "claim": "`Diff.toOps` IS `Diff.toOpsContained` at a predicate that refuses nothing — the relation `apply`/`applyContained` have, in the diff direction, and what makes the clause-for-clause model of the pair checkable rather than asserted. Read beside `diff-contained-exact`: the container-aware diff is the plain diff unless it is a `TargetNotAContainer`, stated as the DIFFERENCE rather than as \"the same unless the capability adds a refusal\", which is the shape Phase 140's differential went red on and corrected for the apply side.",
+      "phase": "fuaran-core#141",
+      "evidence": {
+        "theorem": "diff_contained_at_total_is_plain",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "diff-applicable-contained",
+      "level": "proved",
+      "claim": "Every parent address an operation of a contained script carries resolves, in `after`, to a node that HOLDS the addressed child and that `canHold` accepts — so a script `Diff.toOpsContained` returns cannot be refused for containment at any step, and the typed `TargetNotAContainer` is the exact price of that guarantee. Note what it does not say and could not: `canHold` may read a node's CHILD LIST (Phase 140's `child_blind` counterexample), so the node the engine resolves at apply time is the same node only up to the children the script has already moved; the statement is about the parents the diff ADDRESSES, which is the half the diff can be responsible for. The same boundary is why a `toOps`-emitted insert is safe under an INTERIOR containment check too: the graft is childless, so a validator that walks it for non-containers finds nothing to walk.",
+      "phase": "fuaran-core#141",
+      "evidence": {
+        "theorem": "diff_applicable_contained",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "diff-differential",
+      "level": "tested",
+      "claim": "The extracted diff model agrees with the shipped `Diff.toOps` and `Diff.toOpsContained` over pairs drawn INDEPENDENTLY from a shared id space — the widening this phase is about, since `Conformance.diffLaws` derives `after` by applying operations to `before` and so has only ever diffed pairs the algebra could already reach. Six comparisons per pair: the verdict, the error class, the SCRIPT operation for operation, RECONSTRUCTION through production's own `Tree.encodeHash`, APPLICABILITY through `canApplyAll`, and the PROVED block shape evaluated over production's own script. Reconstruction and applicability are at THIS level rather than level 1 deliberately, and the boundary is stated in the README: proving them needs a positional lemma about intermediate trees that this phase's time box did not contain. One constraint on the pair is a property of the problem rather than of the generator — a node's content is a function of its id, because skeleton operations cannot edit a node and a pair whose shared id carries different content in each tree is unreconstructible by any skeleton script; measured, not assumed, when a first generator that redrew content reconstructed 1,738 of 4,000 pairs and the corrected one 20,000 of 20,000. Measured at 240 pairs, seed 1410: 179 scripts insert, 146 remove, 140 move, 168 reorder, 80 contained diffs produced a script and 160 were refused for containment, all 8 predicates drawn. TWO go-reds, each required to lose: the same four blocks reassembled with the REMOVES FIRST fails to reconstruct on 52 of the 240 pairs, and the model's own plain diff substituted into the contained slot — an engine that emits an insert under a non-container because it never looked — disagrees with the shipped `toOpsContained`. Agreement is over the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#141",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the diff oracle agrees with Diff.toOps over INDEPENDENTLY generated pairs",
+          "the four-pass ORDER is load-bearing — removes before inserts loses",
+          "a contained diff that never checks the after tree loses — the measurement can fail"
+        ]
+      }
     }
   ]
 }

@@ -3,13 +3,14 @@
 **Status: GO** (Phase 131, 2026-09-12; the header last brought level with the body 2026-09-14).
 Phase 131's three exit criteria were met and remain met — the confluence proof is reproducible on
 the pinned prover, the extracted model agrees with production over every lane set the differential
-host draws, and the model reads beside the F# in one sitting — and five further theorems have
-shipped beside it since. **Shipped, six in all: fold confluence (131, with its hypothesis
+host draws, and the model reads beside the F# in one sitting — and six further theorems have
+shipped beside it since. **Shipped, seven in all: fold confluence (131, with its hypothesis
 corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
 totality (135), independence soundness for the tree algebra (133), chain integrity (136, its
 content-id premise decomposed by 145),
-`Json.parse` totality, bounded (146), and apply-engine preservation (138, which also lifts 133's
-model to the validator 137 fixed).** Each carries its own claims ladder in its own section
+`Json.parse` totality, bounded (146), apply-engine preservation (138, which also lifts 133's
+model to the validator 137 fixed), and the diff's refusal characterisation and emission order
+(141).** Each carries its own claims ladder in its own section
 below; the "Next" section at the foot is the live list.
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -32,6 +33,8 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/JsonParse.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Preservation.fst` | The sixth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. |
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `TreeDiff.fst` | The seventh model (Phase 141): the DIFF — `Diff.toOps`'s two refusals characterised exactly, its four passes clause for clause, what each pass guarantees about the block it emits, and `Diff.toOpsContained`'s pre-emptive container refusal. Named `TreeDiff` and not `Diff` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`. It `open`s `TreeOps` (and through it `DagFold`); it is independent of `Preservation.fst`. |
+| `oracle/TreeDiff.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -1502,7 +1505,9 @@ already proves — must make the run lose, and it does.
      parenting rules are its own, and no theorem here says a contained tree is a legal document.
      _(The container capability itself was named here as Phase 140's and is DONE — section 8 of
      `Preservation.fst`, above.)_
-   - **`Diff`** — Phase 141's — and **`Ops.normalize`**, which no theorem in this directory reaches.
+   - **`Ops.normalize`**, which no theorem in this directory reaches. _(`Diff` was named here as
+     Phase 141's and is DONE — theorem 6, below. What that theorem does NOT reach is stated in its
+     own ladder rather than here.)_
    - **Vocabulary and schema validity.** Whether a tree is a legal DOCUMENT is the wire boundary's
      question (`decode_node_wf`, theorem 1) and the domain rule families'; nothing here says a
      preserved tree is a meaningful one.
@@ -1514,7 +1519,154 @@ already proves — must make the run lose, and it does.
      induction. A boundary waiting on a theorem and a boundary waiting on labour are different
      things, and the distinction is recorded rather than smoothed over.
 
+## Theorem 6 — the diff's refusals and its emission order (Phase 141)
+
+`Diff.toOps` is the apply engine's companion in the other direction: given two trees, derive a
+script that turns one into the other. Its law was already sampled — `Conformance.diffLaws` has
+asserted reconstruction, applicability and survivor preservation since Phase 03 — and **the sample
+was narrower than the claim in a way the law could not see.** `diffLaws` builds `before`, then
+derives `after` by APPLYING random operations to it. So every pair it has ever diffed is one the
+algebra could already reach, and the interesting half — that a script exists between two trees
+nobody built from one another — was never asked.
+
+`TreeDiff.fst` models the function clause for clause and proves what the four passes guarantee.
+Read the ladder below before the summary, because the boundary is unusually large for this
+directory and it is deliberate.
+
+### What is proved
+
+**The refusals, exactly.** `diff_refusals_exact` says `toOps` refuses precisely when the two roots
+carry different ids or either tree repeats one, in that precedence, with the class each raises —
+and, the half that makes it a characterisation rather than a list, **on nothing else**. The
+contrapositive is the sentence the phase exists for and is stated as its own lemma:
+`diff_ok_on_any_wf_pair` — for ANY two well-formed trees sharing a root id, a script is produced.
+`diff_never_target_not_a_container` closes the envelope the way `apply_total` closes `apply`'s: the
+third error class is `toOpsContained`'s alone and the plain diff cannot reach it.
+
+**The emission order.** `Ops.fs`'s doc comment argues, in prose, that the emitted order is always
+applyable: added nodes go in as leaf shells top-down, every survivor is then reattached, and removed
+regions are deleted **last**, so a surviving child is pulled out before its old container goes.
+`diff_emission_order` is that argument as a property of the emitted list — the script IS
+`inserts ++ moves ++ removes ++ reorders`, four homogeneous blocks, each exactly one pass's output.
+
+**What each block guarantees**, which is the argument's four clauses:
+`diff_inserts_are_new_leaf_shells` (a graft is CHILDLESS, its id is one `before` does not carry, and
+the parent named is that node's after-parent); `diff_moves_are_survivor_reattachments` (a move names
+a survivor whose before-parent is not the destination, and the destination HOLDS it in `after`);
+`diff_removes_only_dead` — **survivor preservation, which `diffLaws` samples and this proves**, so a
+relocated survivor diffs to a `MoveNode` and never to a remove-and-reinsert; and
+`diff_reorders_state_the_after_order`.
+
+**The container mirror.** `diff_contained_at_total_is_plain` (at a predicate that refuses nothing,
+`toOpsContained` IS `toOps` — the relation `applyContained` has to `apply`, in the diff direction),
+`diff_contained_diff` (it is the plain diff unless it is a `TargetNotAContainer`, in the DIFFERENCE
+shape Phase 140 found was the honest one), `diff_contained_locates` (the offender it names is a real
+node of `after` that really carries children and really is refused), and the phase's fourth task:
+`diff_applicable_contained` — **every parent address an emitted operation carries resolves, in
+`after`, to a node that holds the addressed child and that `canHold` accepts.** So a script
+`toOpsContained` returns cannot be refused for containment at any step, and the typed refusal is the
+exact price of that guarantee.
+
+### What is NOT proved, and why the boundary is where it is
+
+`diff_reconstructs` (`applyAll (toOps b a) b = a`) and the OPERATIONAL `diff_applicable` (every
+emitted step is ACCEPTED in sequence) are **differentially tested here and not proved**. Both need
+the same missing piece: a positional argument relating a preorder walk of `after` to the
+intermediate trees the script builds. Informally it is short — a parent precedes its children in
+preorder, so by the time `MoveNode(c, p)` is emitted while processing `p`, every after-ancestor of
+`p` has already been placed and `p` cannot be inside `c`'s subtree — and mechanising it means
+reasoning about `ins` and `rem_at` over intermediate trees, in the cost class `Preservation.fst`
+occupies rather than the one this module does. This phase was time-boxed and did not take it. The
+boundary is stated rather than smoothed over because a reader who sees "the diff is proved" and
+assumes reconstruction is proved would be wrong about the one thing they most likely care about.
+
+### The differential, and the two go-reds
+
+The pool is the widening. Two trees are drawn INDEPENDENTLY over a shared id space and share only
+what the draw gave them; nothing derives one from the other.
+
+**One constraint on the pair, and it is a property of the problem rather than of the generator.** A
+node's content is a function of its id, so the two trees agree on the content of every id they
+share. Skeleton operations relocate and delete nodes; they cannot edit one — per-kind property edits
+are out of `Core.Ops`' remit, which `toOps`' own doc comment says — so a pair whose shared id carries
+a different kind in each tree is unreconstructible by ANY skeleton script, and asking for one is
+asking the wrong question. This was measured before it was believed: a first generator that redrew
+each tree's kinds independently reconstructed 1,738 of 4,000 pairs; with content keyed to the id,
+20,000 of 20,000, with no applicability refusal and no survivor removed. **The shard's own sentence
+("for any two well-formed trees with the same root id") is therefore slightly too strong as written,
+and the sharpened form is what the theorem and the sample both use.**
+
+Six comparisons per pair, and the fourth is worth naming: the extracted `script_shape` — the
+conjunction of the four block characterisations — is evaluated over PRODUCTION's own emitted script,
+so the theorem is held to the engine and not only to the model of it.
+
+**Go-red 1, the order.** `diff_emission_order` proves the script is four homogeneous blocks, so a
+stable partition by operation kind recovers those blocks exactly and reassembling them with the
+removes FIRST is the same four passes, permuted. It must lose, and it does: 52 of 240 pairs fail to
+reconstruct. Not all of them, and that is the honest shape of the claim — the permutation is
+harmless on a pair whose removals happen to hold no survivor, which is most of them; what the order
+buys is correctness on the rest.
+
+**Go-red 2, the container check.** The model's own plain `to_ops` in the contained slot is exactly
+"an oracle that emits an insert under a non-container", because it never looked —
+`diff_contained_at_total_is_plain` proves it is the refuses-nothing instance, so handing it a
+predicate that refuses something is a proved weakening before it is a measured one. It must
+disagree, and it does.
+
+`Conformance.diffContainedLaws` is the kit-side half: `toOpsContained`'s scripts certified through
+`applyAllWith` / `canApplyAllWith` under the witness's own predicate, which is the executor such a
+script belongs to — `diffLaws` certifies them with the PLAIN pair, which Phase 160 proved is blind
+to containment by construction. Its third law is refusal exactness, and its demanding direction was
+measured rather than assumed: 100 of 200 iterations mint a violating probe, all 100 are refused with
+the offender named by id and kind, and all 100 are ACCEPTED by the plain `toOps` — so the refusal is
+the container check's contribution and nothing else's.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The thirteen lemmas above, over any two trees and any
+   predicate: `diff_total`, `diff_refusals_exact`, `diff_ok_on_any_wf_pair`,
+   `diff_never_target_not_a_container`, `diff_emission_order`, `diff_script_shape` and the four
+   block theorems it discharges, `diff_contained_diff`, `diff_contained_locates`,
+   `diff_contained_at_total_is_plain` and `diff_applicable_contained`. F\* 2026.09.06, Z3 4.13.3,
+   every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
+2. **Differentially tested.** The extracted `to_ops` / `to_ops_contained` agree with
+   `Diff.toOps` / `Diff.toOpsContained` over independently generated pairs and a drawn predicate —
+   verdict, error class and the script operation for operation — and over that same pool
+   RECONSTRUCTION and APPLICABILITY are checked on production, through `Tree.encodeHash` and
+   through `canApplyAll` / `canApplyAllWith`. Agreement is over the pool drawn, never over all
+   inputs, and reconstruction is at THIS level rather than level 1 for the reason stated above.
+   Two go-reds, each required to lose.
+3. **Assumed, and stated as such.**
+   - **The witness laws**, **the witness surface is the whole tree**, and **the extractor and the F#
+     compiler are trusted** — the same three, in the same words, as theorem 5's.
+   - **The two trees agree on the content of every shared id.** Not an assumption the model can
+     discharge, because the model's tree carries a kind and the theorem is about structure: it is
+     the precondition under which asking for a skeleton script is a well-formed question at all.
+4. **Not claimed.**
+   - **Reconstruction and operational applicability**, at level 1 — see the boundary above. They are
+     the natural successor and they are one positional lemma away.
+   - **`Diff.toOpsMoved`** (fuaran-core#63, the move-aware diff) — not shipped, so not modelled and
+     not claimed. When it lands it is a second emission strategy over the same two trees, and every
+     theorem here is about `toOps`' four passes specifically rather than about diffing in general.
+   - **`Ops.normalize`**, which no theorem in this directory reaches.
+   - **Containment LEGALITY** — which kind may parent which. As for theorem 5: `canHold` answers
+     only "can this node hold children at all", and no theorem here says a contained tree is a legal
+     document.
+   - **Rejection PAYLOADS.** The differential compares a refusal by class and by the offender a
+     `TargetNotAContainer` names; `UnknownNode`'s `addressable` list is outside the comparison.
+
 ## Next
+
+**The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
+shortest informal argument and the longest mechanisation. What it needs is one positional lemma: a
+parent precedes its children in a preorder walk, so by the time the second pass emits
+`MoveNode(c, p)` while processing `p`, every after-ancestor of `p` has already been placed and `p`
+cannot be inside `c`'s subtree. Everything else follows from the four block characterisations
+theorem 6 already proves. The cost is that the lemma is about `ins` and `rem_at` over the
+INTERMEDIATE trees the script builds, which is `Preservation.fst`'s cost class rather than
+`TreeDiff.fst`'s — so the module that checks in ten seconds today would not afterwards, and that is
+the honest price rather than a reason not to pay it. `Diff.toOpsMoved` (fuaran-core#63) travels
+beside it: a second emission strategy over the same two trees, which would want the same lemma.
 
 **Discharging theorem 1's policy assumption** — the smallest of what is left, and now reachable.
 `WireDecode.fst` assumes the parser's member-null absorption is equivalent to erasing member nulls
