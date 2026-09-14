@@ -16,7 +16,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved. Every definition names its F# counterpart. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`). Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -93,15 +93,41 @@ assumption is exactly that assumption and no other**: two nodes sharing a conten
 way `lookup` returns a node other than the one a chain named, and it is the only way this proof
 says nothing.
 
-**And one step is deliberately NOT mechanised, which is where the honest reading of "proved" stops
-here.** Production chooses its topological order with Kahn's algorithm, draining a ready frontier
-smallest-id-first; the model takes the reverse of the parent walk. On a spine every pair of the
-closure is comparable under the ancestor relation, so exactly one topological order exists and the
-two must coincide — but that sentence is argued, not proved. Mechanising it means showing that a
-distinct enumeration of a spine respecting each node's single parent is forced, and then that
-Kahn's drain produces such an enumeration; that is the honest successor to this phase. Everything
-downstream of the order is proved, and the differential below measures the order itself against
-the real `Dag.betweenOps`.
+**One step Phase 134 left ARGUED is now proved too (Phase 142).** Production chooses its
+topological order with Kahn's algorithm, draining a ready frontier smallest-id-first; the model
+takes the reverse of the parent walk. That "on a spine there is only one topological order anyway,
+so the two coincide" was a sentence in a comment and a row at level 3 of the ladder. Section 12 is
+that sentence, mechanised, in two lemmas over the same model:
+
+- **`spine_order_forced`** — a DISTINCT enumeration of a spine's closure in which every node
+  follows its own parent is that spine in append order, base first. A list argument: it names no
+  DAG, no hash and no production function.
+- **`kahn_drain_is_such_an_enumeration`** — the frontier drain, modelled as `topoCore`'s loop over
+  `parentsIn` / `indeg` / `ready`, produces exactly such an enumeration over a spine's closure.
+
+From the two, **`between_chain_any_order`** is `between_chain` restated with the order UNIVERSALLY
+QUANTIFIED where section 11 fixed it to the parent-walk reversal by definition, and
+`reconcile_many_dag_ordered_eq` / `fold_once_dag_ordered_eq` carry that up to the fold:
+`Dag.reconcileMany` from the DAG is the deltas-first fold whatever order each head's recovery
+walked. **`topo_of_is_the_kahn_drain`** joins the halves and is the row itself — production's drain
+and the model's reversal are the same list.
+
+**The smallest-id tie-break is not modelled, and the theorems say why it does not need to be.** The
+selector is a PARAMETER, constrained only to return a member of the frontier it is handed
+(`picks_from_frontier`, with `pick_head` exhibited so the hypothesis is not vacuous), and every
+result is stated for every such selector. `kahn_frontier_singleton` proves the frontier is a
+ONE-element list at every step of a spine's drain, so all selectors agree and nothing anywhere says
+a word about how ids compare. A frontier wider than one is exactly where the tie-break would begin
+to matter, and that is the MERGE-DAG case, which stays unclaimed.
+
+**Neither universally quantified statement is vacuous, and both witnesses are in the module rather
+than in this paragraph.** A theorem quantified over every enumeration says nothing if no
+enumeration meets its hypotheses, and one quantified over every selector says nothing if none does:
+`pick_head` is exhibited as a selector that does, and `kahn_drain_is_such_an_enumeration` concludes
+`distinct ord /\ follows_parents ns ord` of an enumeration it produces — which
+`topo_of_is_the_kahn_drain` then identifies with the model's own order. So the enumeration
+`between_chain_any_order` is quantified over exists, is production's, and is `topo_of`; that they
+are one list is the point of the phase.
 
 Also outside the model, and named so it is not assumed in: **`Dag.mergeBase`**. It is not on this
 path at all — `foldOnce` hands `reconcileMany` the base node's id directly — so nothing here says
@@ -172,9 +198,20 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    lanes all apply from the base state, the halt half under nothing at all. **And, for the
    base-plus-N-chains shape, the DELTA RECOVERY beneath it**: `between_chain` (the delta of a
    linear lane off the base is that lane's ops, in order), `reconcile_many_dag_eq` and
-   `fold_confluence_dag`, under the id-distinctness premise named at level 3 and with the CHOICE
-   of topological order named there too. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `fold_confluence_dag`, under the id-distinctness premise named at level 3. F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under
    `--quake 3`, cold-cache checks on three seeds and at a quarter of the rlimit the leg runs with.
+
+   **And, since Phase 142, the CHOICE of topological order — which was level 3 until this phase.**
+   A spine's closure admits exactly one topological order (`spine_order_forced`), production's
+   frontier drain produces it (`kahn_drain_is_such_an_enumeration`), and the two are therefore the
+   same list (`topo_of_is_the_kahn_drain`). The recovery is restated with the order universally
+   quantified (`between_chain_any_order`), and the fold above it with it
+   (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`), so no result here depends on
+   which topological order was walked. The tie-break is a parameter constrained only to select from
+   the frontier, and the frontier on a spine is one element wide at every step
+   (`kahn_frontier_singleton`) — so this says nothing about how ids compare, and nothing about a
+   MERGE DAG, where the frontier genuinely widens. That case stays unclaimed, below.
 
    **And, since Phase 133, the tree algebra's own diamond** — `TreeOps.tree_independence_diamond`,
    which discharges that hypothesis for `SkeletonOp` rather than sampling it, and
@@ -215,11 +252,9 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      (sorted parents, actor, encoded op) unless the hash collides; two nodes sharing a content id
      is the only way `lookup` returns a node other than the one a chain named. The model states it
      as `distinct_ids` and consumes it as `resolves`, with `resolves_of_distinct` between them.
-   - **How the topological order is CHOSEN.** Production runs Kahn's algorithm, draining a ready
-     frontier smallest-id-first; the model reverses the parent walk. A spine admits exactly one
-     topological order, so on this shape they coincide — argued here, measured by the differential
-     against the real `Dag.betweenOps`, and not mechanised. Everything downstream of the order is
-     proved.
+   - _(**How the topological order is CHOSEN** left this level at Phase 142 and is now at level 1
+     above. What remains assumed about the order is nothing on this shape; over a MERGE DAG it is
+     not claimed at any level, below.)_
    - **`Dag.mergeBase` is outside the model**, because it is outside this path: `foldOnce` hands
      `reconcileMany` the base node's id directly and never locates a divergence point. Level 2 is
      the only evidence about it, and the general topological order over an arbitrary MERGE DAG is
@@ -820,11 +855,11 @@ overflow, the escape and `\uXXXX` paths, the int53 token guard, and the exhausti
 `JsonErrorKind` classification. It is the one piece of this stack where an EverParse-shaped
 approach is worth pricing rather than assuming away.
 
-**The topological order's uniqueness on a spine** — the one step Phase 134 argues rather than
-proves, and the smaller of the two. It is two lemmas: that a distinct enumeration of a spine's
-closure respecting each node's single parent is forced to be that spine, and that Kahn's frontier
-drain produces such an enumeration. The first is a list argument and the second is the only place
-production's tie-break would have to be modelled at all.
+_(**The topological order's uniqueness on a spine** was named here and is DONE — Phase 142,
+`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. What it
+deliberately did not take is the general order over a MERGE DAG, where the frontier widens past one
+and the tie-break would have to be modelled for real; that is the larger successor, and it travels
+with `Dag.mergeBase`.)_
 
 **The signing composition** — the successor Phase 136 names and deliberately does not take.
 Chain integrity says a tampered node is found; it says nothing about a REWRITE, which re-mints

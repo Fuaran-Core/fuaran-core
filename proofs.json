@@ -142,7 +142,7 @@
     {
       "id": "dag-delta-recovery",
       "level": "proved",
-      "claim": "For the base-plus-N-chains shape — one shared base node and one linear chain per writer, which is what the fold's own generator builds and what a local-first deployment has — the delta of a lane off the base is that lane's nodes, and its ops, in append order. The whole layer computed rather than assumed: the head's ancestor closure, the base's, the topological order, the difference and the lookup. Under the id-distinctness premise, and with the CHOICE of topological order named separately as an assumption.",
+      "claim": "For the base-plus-N-chains shape — one shared base node and one linear chain per writer, which is what the fold's own generator builds and what a local-first deployment has — the delta of a lane off the base is that lane's nodes, and its ops, in append order. The whole layer computed rather than assumed: the head's ancestor closure, the base's, the topological order, the difference and the lookup. Under the id-distinctness premise; the CHOICE of topological order was named separately as an assumption here and is PROVED since Phase 142, at `topological-order-choice`.",
       "phase": "fuaran-core#134",
       "evidence": {
         "theorem": "between_chain",
@@ -181,11 +181,13 @@
     },
     {
       "id": "topological-order-choice",
-      "level": "assumed",
-      "claim": "That the order production picks and the order the model computes are the same order. Production drains a ready frontier smallest-id-first; the model reverses the parent walk. On a spine every pair of the closure is comparable, so exactly one topological order exists and the two must coincide — argued, and measured by the differential against the real recovery, but not mechanised. Everything downstream of the order is proved.",
-      "phase": "fuaran-core#134",
+      "level": "proved",
+      "claim": "That the order production picks and the order the model computes are the same order, on the base-plus-N-chains shape. Two lemmas: a distinct enumeration of a spine's closure in which every node follows its single parent is that spine in append order (`spine_order_forced`, a list argument naming no DAG and no hash), and the frontier drain over that closure produces such an enumeration (`kahn_drain_is_such_an_enumeration`). The recovery is therefore restated with the order universally quantified rather than fixed to the parent-walk reversal (`between_chain_any_order`), and the fold above it with it (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`). The smallest-id tie-break is NOT modelled and does not need to be: the selector is a parameter constrained only to return a member of the frontier it is handed, and on a spine that frontier is one element wide at every step (`kahn_frontier_singleton`), so every selector agrees and nothing here says how ids compare. The order over a MERGE DAG, where the frontier genuinely widens, remains unclaimed at any level.",
+      "phase": "fuaran-core#142",
       "evidence": {
-        "assumption": "a spine admits exactly one topological order, and the frontier drain produces it"
+        "theorem": "topo_of_is_the_kahn_drain",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
       }
     },
     {
