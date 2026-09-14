@@ -514,6 +514,8 @@ pwsh ./proofs/check.ps1            # check (once), re-extract + diff, run the or
 pwsh ./proofs/check.ps1 -Runs 3    # what CI runs
 pwsh ./proofs/check.ps1 -Extract   # after editing a model: rewrite its oracle/*.fs, then commit it
 pwsh ./proofs/check.ps1 -Strict    # turn a cost finding (below) from a warning into a red leg
+pwsh ./proofs/check.ps1 -NoFloor   # do not enforce the per-module time floors (below)
+pwsh ./proofs/check.ps1 -CacheDir <dir>   # put the checked-module cache somewhere you name
 pwsh ./verify.ps1 -Proofs          # the whole repo gate plus the proof leg
 ```
 
@@ -523,6 +525,44 @@ budget entry to `modules.json` beside it. The first
 run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`; `FSTAR_HOME`
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
+
+### "Cold cache" means it, and "verified" has a floor (Phase 164)
+
+On 2026-09-14 a background `check.ps1` was orphaned at a turn boundary and went on writing the
+then-shared `proofs/obj/cache` while a replacement run started in the same worktree; the
+replacement found the orphan's `.checked` files, reported `TreeOps 0s`, `Skeleton 0s`, `Chain 0s`
+and printed `==== proofs: green`, and it was caught only because a human read the timings rather
+than the verdict. Two mechanisms come from that, one closing the cause and one closing the class.
+
+**The cache is per invocation.** Each run uses `proofs/obj/cache-<pid>`, created at its head and
+removed when it exits, so two invocations in one worktree cannot share checked files and the
+`-Runs` loop's cache-clear means what it says. Before Phase 164 the directory was a constant, and
+clearing it only made a run cold if nothing else was writing there — which the script cannot see,
+because a second writer arrives *after* the clear. A run that is killed outright cannot remove its
+own directory, so the next run sweeps any `cache-<pid>` whose process is gone; a live invocation's
+cache is never touched, which is the point of naming it after the process. `-CacheDir <dir>` puts
+the cache somewhere you name instead: it is still cleared before every run — otherwise the flag
+would quietly mean "warm" — so the script refuses a directory holding anything but `*.checked`
+files, and leaves it in place at exit, because you named it.
+
+**Each module declares a floor as well as a budget**, `floorSeconds` beside `budgetSeconds` in
+`modules.json`, and a module that verifies in **less** than its floor **fails** the leg on the
+spot, naming the module and the time. The asymmetry with the ceiling is deliberate. An overshoot
+is a true measurement of a true cost, so it warns and the leg stays green; an undershoot says the
+apparatus is broken rather than the module fast, and every module measured after it shares that
+apparatus — implausibly fast is the one direction in which a lie looks like good news. The seeding
+rule is the budget's mirror, in the file's own `floorSeeding` block: **the fastest genuine cold run
+ever observed, halved**, rounded down, and **0** for a module whose fastest cold run is under 5s,
+where halving lands inside process-start noise. `Skeleton` is that case at about one second, so its
+floor is 0 and the file says so — which makes it the one module a shared cache could still speed up
+unnoticed, and the per-invocation directory rather than the floor is what covers it. Halving on top
+of the fastest-ever run leaves an enormous margin, and it costs nothing in detection because the
+failure this catches lands at or near zero seconds. A module with **no** `floorSeconds` is a cost
+finding, not a failure — a sibling adding a model should no more go red for a floor nobody has
+measured than for a budget nobody has measured — and re-seeding a floor downwards is the same
+recorded act as bumping a budget upwards: the new number, the `fastestSeconds` it came from, and
+your phase. `-NoFloor` is the deliberate opt-out for a machine genuinely that fast, and the log
+says when it was passed.
 
 **The host step runs two families, and the second is about this document.** `../proofs.json`
 declares the claims ladders below as data — what is proved, what is only tested, what is assumed —
