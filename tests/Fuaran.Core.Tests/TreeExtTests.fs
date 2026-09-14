@@ -107,7 +107,38 @@ let transformTests =
 
               match Ops.apply nodew idw (InsertChild("b", sub)) (sample ()) with
               | Error(DuplicateId "a") -> ()
-              | other -> failtestf "expected DuplicateId for the un-remapped copy, got %A" other ]
+              | other -> failtestf "expected DuplicateId for the un-remapped copy, got %A" other
+
+          // Phase 137 — the case a root-id-only check could not see. `remapIds` is what makes a
+          // copied subtree insertable, so a remap that misses part of the subtree is exactly the
+          // shape a caller produces by accident.
+          testCase "a PARTIALLY remapped copy is refused — the root id is fresh, a descendant is not"
+          <| fun _ ->
+              let sub = (Tree.subtree nodew idw "a" (sample ())).Value
+
+              // rename the subtree root alone, leaving a1 / a2 as they are
+              let partial =
+                  Tree.remapIds nodew setId (fun oldId -> if oldId = "a" then "copy-a" else oldId) sub
+
+              Expect.equal (ids (Tree.preorder nodew partial)) [ "copy-a"; "a1"; "a2" ] "only the root was renamed"
+
+              match Ops.apply nodew idw (InsertChild("b", partial)) (sample ()) with
+              | Error(DuplicateId "a1") -> ()
+              | other -> failtestf "expected DuplicateId \"a1\" for the partially remapped copy, got %A" other
+
+          testCase "a remap that collapses two ids into one is refused (Phase 137)"
+          <| fun _ ->
+              // Every id is renamed away from the tree, so no id collides with the ROOT — but the
+              // remap is not injective, so the copy carries "flat" twice and the resulting tree
+              // would silently alias two nodes under `Tree.updateNode` / `Tree.Index.build`.
+              let sub = (Tree.subtree nodew idw "a" (sample ())).Value
+              let collapsed = Tree.remapIds nodew setId (fun _ -> "flat") sub
+
+              Expect.equal (ids (Tree.preorder nodew collapsed)) [ "flat"; "flat"; "flat" ] "all three collapsed"
+
+              match Ops.apply nodew idw (InsertChild("b", collapsed)) (sample ()) with
+              | Error(DuplicateId "flat") -> ()
+              | other -> failtestf "expected DuplicateId \"flat\" for the non-injective remap, got %A" other ]
 
 // Phase 05 — build-once index: O(log n)/O(depth) navigators that agree with the combinators.
 [<Tests>]

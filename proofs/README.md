@@ -378,6 +378,23 @@ run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`;
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
 
+**The host step runs two families, and the second is about this document.** `../proofs.json`
+declares the claims ladders below as data — what is proved, what is only tested, what is assumed —
+and since Phase 144 the leg CHECKS it rather than trusting it: the `Proofs.Ladder` family
+(`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`) holds every row to this tree. A `proved` row's
+`evidence.theorem` must be a top-level `val` / `let` / `let rec` of that name in the model it
+names; that model must be one `$modules` actually checks, and must be there; a `tested` row must
+name `Proofs.Oracle` cases that exist; every module in `$modules` must have at least one `proved`
+row; and every row's `phase` and `level` must be the closed forms. So renaming a theorem without
+touching the file, or adding a model with no claim written down, fails the leg with the row named
+— the same posture as oracle drift, applied to the ladder. Each clause has a go-red fixture beside
+it (`../tests/Fuaran.Core.Tests/fixtures/proofs-ladder/`), so a green ladder is known to be one
+that could have failed.
+
+What it does **not** check is this prose. Row-to-README agreement stays a human act; what is
+mechanical is row-to-tree agreement, which is the half a check can settle. Editing a ladder still
+means editing both.
+
 ## Theorem 1 — decoder totality (Phase 135)
 
 `WireDecode.fst` is this directory's second model, and the programme's WS6.1 **theorem 1**. The

@@ -1,0 +1,6 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: no `claims` ARRAY at all — a truncated or half-edited file. Reported as a shape finding and nothing else, because every clause below quantifies over the rows and a file with no rows would otherwise read as a ladder that merely covers no module.",
+  "claims": {}
+}

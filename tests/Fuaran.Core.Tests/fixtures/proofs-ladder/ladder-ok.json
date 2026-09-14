@@ -1,0 +1,48 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE ladder for the Phase 144 Proofs.Ladder family, NOT this repository's claims ladder — that is /proofs.json. This one is clean: it is the baseline the go-red fixtures beside it each mutate in exactly one place, and the family asserts it produces no finding, so a go-red that fires is known to be firing on the mutation.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A proved row whose theorem is a top-level declaration of the model it names.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-differential",
+      "level": "tested",
+      "claim": "A tested row naming a case that exists.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "a fixture case"
+        ]
+      }
+    },
+    {
+      "id": "fixture-premise",
+      "level": "assumed",
+      "claim": "An assumed row.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "assumption": "the fixture assumes nothing that matters"
+      }
+    },
+    {
+      "id": "fixture-policy",
+      "level": "policy",
+      "claim": "A policy row.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "document": "fixture"
+      }
+    }
+  ]
+}

@@ -252,8 +252,9 @@ let tests =
 
               Expect.equal
                   (report.Results |> List.length)
-                  13
-                  "witness (4) + algebra (3) + diff (3) + stream (3) laws reported"
+                  14
+                  // algebra gained the insert-uniqueness law in Phase 137.
+                  "witness (4) + algebra (4) + diff (3) + stream (3) laws reported"
 
           testCase "op-algebra laws run standalone (no stream)"
           <| fun _ ->

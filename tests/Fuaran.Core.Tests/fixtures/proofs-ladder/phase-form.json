@@ -1,0 +1,18 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 144 Proofs.Ladder family (see ladder-ok.json). ONE defect: the row's phase is not the `fuaran-core#NNN` form, so it does not resolve to a phase on this side.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A proved row whose phase citation is malformed.",
+      "phase": "fuaran-core-144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    }
+  ]
+}
