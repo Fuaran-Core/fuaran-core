@@ -58,6 +58,24 @@ type CodegenError =
     /// target's own kind partition consumes this case: a kind whose closure raises it is named
     /// in the emitted header, with this description as its reason, instead of being absent.
     | UnmodellableInFStar of construct: string * where: string
+    /// Phase 178 — the hardening boundary's refusal: a [[HardenPolicy]] member the run
+    /// NEEDS is undeclared (empty). Names the member and what needed it.
+    ///
+    /// **It names the member and the NEED rather than the vocabulary**, which is what
+    /// Phase 178's shard asked for, because an `Idl` carries no identity to name: it has
+    /// `Kinds`, `Unions`, `Wire`, `Harden` and no name, description or version. Adding
+    /// one to say "vocabulary X" in a refusal would be a breaking widening of the
+    /// central published record to improve a message — the exact trade this phase
+    /// stopped a flip over. The need is the more useful half anyway: `"the gate"`,
+    /// `"a declared URL field"` and `"a declared markdown field"` tell an author which
+    /// of their own decisions made the member necessary, which the vocabulary's name
+    /// would not.
+    ///
+    /// Reached only from `Trust.hardenOrRefuse` / `Trust.checkHardenPolicy` — the
+    /// opt-in entry points. `Trust.harden` cannot raise it: its signature returns a
+    /// value, and changing that would break every caller of a published function to
+    /// deliver a refusal only an undeclared policy can trigger.
+    | UndeclaredHardenToken of member_: string * needed: string
 
 /// Rendering for [[CodegenError]] — the one place a codegen refusal becomes prose.
 [<RequireQualifiedAccess>]
@@ -74,6 +92,8 @@ module CodegenError =
             sprintf "kind '%s' mixes a 'Node list' field with other node-bearing fields" kindTag
         | UnmodellableInFStar(construct, where) ->
             sprintf "the F* proof model cannot express %s (at %s)" construct where
+        | UndeclaredHardenToken(member_, needed) ->
+            sprintf "the vocabulary's HardenPolicy leaves '%s' undeclared, and %s needs it" member_ needed
 
 /// The type-generation leg: emit illustrative F# type source from the IDL — the
 /// "generate Types.fs" half of the inversion. Spike-grade (a source string, not a

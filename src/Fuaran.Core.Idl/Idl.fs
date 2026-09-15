@@ -257,6 +257,43 @@ type HardenPolicy =
           ValueLiteralField = "value"
           TransparentUnions = [ "TextSource", "Literal" ] }
 
+    /// A policy that declares NO token — every name empty (Phase 178). A vocabulary
+    /// carrying this has said "I have not named these", which is a different claim
+    /// from [[Default]]'s "I am spelled the way the engine used to hard-code", and
+    /// `Trust.hardenOrRefuse` turns the difference into a typed refusal naming the
+    /// token it needed.
+    ///
+    /// **It is an OPT-IN beside [[Default]], not a replacement for it, and the
+    /// measurement is why (D40).** Phase 178 was written to make this the default —
+    /// flipping "declared nothing" from "hardened as the UI" to "say so" — on the
+    /// premise that every vocabulary in the estate already declares its own tokens.
+    /// Measured before the flip, that premise is false in the two places that decide
+    /// it: `Fuaran.UI.Idl/Vocabulary.fs` writes `Harden = HardenPolicy.Default`, so
+    /// the UI tier declares the FIELD and not the TOKENS; and both published
+    /// `idl.json` artifacts — including the shared cross-host corpus — carry no
+    /// `harden` block at all, which `Artifact.readHarden` resolves through [[Default]]
+    /// by a promise stated in its own doc comment. Emptying or removing [[Default]]
+    /// would therefore change what an already-published artifact MEANS, silently, for
+    /// every host that reads it.
+    ///
+    /// **Empty strings rather than `string option` fields, deliberately.** Widening
+    /// the members to `option` is a retype of a published record — it is met by every
+    /// consumer whether or not it wants the refusal, which is the opposite of an
+    /// opt-in — and the absence of a name in a record whose members ARE names is
+    /// exactly what an empty one says. What makes the absence non-silent is the
+    /// refusal, not the representation: an undeclared [[GatedKind]] matches no node
+    /// tag, so a hardening run over this policy would otherwise gate NOTHING and say
+    /// nothing about it, which is the Phase 96 fail-open lesson in its purest form.
+    static member Undeclared =
+        { GatedKind = ""
+          PlaceholderKind = ""
+          PlaceholderField = ""
+          TextLiteralCase = ""
+          TextLiteralField = ""
+          ValueLiteralCase = ""
+          ValueLiteralField = ""
+          TransparentUnions = [] }
+
 /// A DEPRECATION note (Phase 113) — the retirement half of the annotation set.
 ///
 /// Both slots are optional, and `Replacement = None` is the ordinary case rather

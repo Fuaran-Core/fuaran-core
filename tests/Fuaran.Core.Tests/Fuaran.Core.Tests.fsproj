@@ -193,6 +193,11 @@
          repository root, so after both; Program.fs calls its `emit` for the `emit-fstar`
          mode, so before that. Appended (append-only registration). -->
     <Compile Include="IdlFStarTargetTests.fs" />
+    <!-- Phase 178 - the hardening policy's UNDECLARED half: the per-member refusal, and the
+         guard over the compat promise the flip this phase STOPPED would have broken (an
+         artifact with no `harden` block reads back as the default). Reads ReferenceIdl.fs
+         for the fully-declared fixture, so after it. Appended (append-only registration). -->
+    <Compile Include="IdlTrustTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -1,5 +1,78 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-15 — D40: the hardening default is NOT flipped — it is what two published artifacts MEAN, and the refusal ships opt-in beside it
+
+**Decided (Phase 178).** `HardenPolicy.Default` keeps the four tokens the engine used to
+hard-code, and keeps being what an artifact with no `harden` block reads back as. The refusal the
+phase was written to install ships anyway, **reachable and opt-in**: `HardenPolicy.Undeclared`
+beside `Default`, and `Trust.checkHardenPolicy` / `Trust.hardenOrRefuse` beside `Trust.harden`. A
+vocabulary that wants "declared nothing, so say so" declares `Undeclared` (or leaves any member
+empty) and calls the checked entry point; every existing caller is untouched, and `Trust.harden`'s
+signature and behaviour are unchanged.
+
+**Why the flip was stopped: the measurement refuted the premise that licensed it.** The phase's
+shard stated it plainly — "every vocabulary author in the estate that calls the hardener declares
+`Harden` explicitly — the UI tier does since 116 — so the change is breaking on paper and lands on
+no consumer". Measured first, as the shard's own first task required, that is false in the two
+places that decide it.
+
+**The estate measurement** (`grep -rn "Trust.harden\|Harden = \|HardenPolicy"` over `Fuaran/`,
+`*.fs`, excluding `bin/`, `obj/` and worktrees; 2026-09-15, `Fuaran.Core` at `<Version>` 0.24.0):
+
+| Repo | Site | Policy declared |
+|---|---|---|
+| `fuaran-dotnet` | `src/Fuaran.UI.Idl/Vocabulary.fs:3482` | **`HardenPolicy.Default`** — the field, not the tokens |
+| `Fuaran-Core` | `src/Fuaran.Core.Idl.Spike/Spike.fs:385` | **`HardenPolicy.Default`** — and it is in `src/` |
+| `Fuaran-Core` | `tests/fable-smoke/Program.fs:324` | **`HardenPolicy.Default`** |
+| `Fuaran-Core` | 9 test vocabularies — `IdlAnnotationTests:71`, `IdlCertificationTests:253`, `IdlDiffTests:45`, `IdlEnumWireTests:56`, `IdlKindAnnotationTests:86`, `IdlStabilityClassTests:82`, `IdlWireShapeTests:44`, `ScoreDomainSpike:304`, `SecondDomainSpike:199` | **`HardenPolicy.Default`** |
+| `Fuaran-Core` | `tests/Fuaran.Core.Tests/IdlFStarTargetTests.fs:58` | `{ HardenPolicy.Default with TransparentUnions = [] }` — seven of eight members from the default |
+| `Fuaran-Core` | `tests/Fuaran.Core.Tests/ReferenceIdl.fs:202` | **its own, every member** — the only site in the estate that declares the tokens |
+
+Thirteen declaration sites take their tokens from the default; one declares its own. `Trust.harden`
+itself has exactly one caller in the estate — `IdlCertificationTests`, over `refIdl`, the one
+vocabulary that would have survived the flip — which is precisely why a caller census alone reads
+as "lands on no consumer" and is the wrong census to take.
+
+**And the finding the shard's grep could not reach: the default is a WIRE fact, not only a source
+one.** `Artifact.render` omits the `harden` block exactly when `idl.Harden = HardenPolicy.Default`
+(`Artifact.fs:497`), and `Artifact.readHarden` resolves an absent block through `Default`
+(`Artifact.fs:971`, under a doc comment promising exactly that to every artifact written before the
+tokens were declarable). Both published `idl.json` artifacts in the estate —
+`fuaran-dotnet/src/Fuaran.UI.Idl/idl.json` and the **shared cross-host corpus**
+`wire-format-fixtures/idl.json` — carry no `harden` key. Emptying or removing `Default` therefore
+does not merely break a compile that could be fixed: it changes what already-published bytes MEAN,
+for every host that reads them, silently and with a green build. The phase's own acceptance
+("`fuaran-dotnet` regenerates byte-identically … with no change on its side") cannot hold across
+the flip, because the flip is the change on its side.
+
+**What is deliberately NOT done, and what it would cost.** The four tokens stay in `src/` as
+`HardenPolicy.Default`'s literals, so the acceptance criterion "a search of `src/` for `Custom`,
+`Markdown`, `Static` and `TextSource` returns only doc comments" is not met — it is not meetable
+without the flip. Widening the members to `string option` is likewise not done: a retype of a
+published record is met by every consumer whether or not it wants the refusal, which is the
+opposite of an opt-in, and it would have to be justified by the same false premise. `Undeclared`
+uses empty strings instead, which is the absence of a name in a record whose members are names.
+
+**What makes the refusal per-member and the finding durable.** `checkHardenPolicy` is static in
+`(idl, policy)` rather than in the value: the gate runs over every harden, so the gated kind and the
+four members its inert placeholder is built from are always needed, and the value-literal pair is
+needed exactly when the caller declared a URL field. A value-dependent answer would pass today on a
+tree with no gated node and refuse tomorrow on a document nobody changed.
+`HardenPolicy.TransparentUnions` is never refused — an empty list is the honest declaration of a
+vocabulary no case of which encodes bare, and `ReferenceIdl` says exactly that on purpose.
+`IdlTrustTests` pins each member's refusal as its own case, and both directions of the conditional
+pair; each was confirmed to go red with the refusal removed. Its last two cases are the guard over
+the compat promise above — an artifact at the default omits the block and reads back as `Default`,
+never as `Undeclared` — and that pair was confirmed to go red, alone, when `readHarden`'s absent-block
+answer was flipped. A later session that reaches for the flip anyway meets a red test naming this
+entry rather than a silent change to what published bytes mean.
+
+**The route if the flip is still wanted.** It is a migration, not a default change: `fuaran-dotnet`
+spells its own four tokens at `Vocabulary.fs:3482`, its `idl.json` and the shared corpus are
+regenerated to carry an explicit `harden` block, every host reading that corpus is confirmed to
+tolerate the new key, and only then does `Default` empty. Each step is separately shippable and
+none of them is this phase.
+
 ## 2026-09-15 — D39: the producer owns its conformance vectors; the shared corpus is the distribution point
 
 **Decided (Phase 172).** The two conformance families this repository EMITS — `laws/transform-laws.json`
