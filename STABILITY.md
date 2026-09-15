@@ -2124,7 +2124,7 @@ disagree.
 
 Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).
 
-## 0.24.0 — DRAFT: the apply-engine correctness campaign and the proof programme's contract changes
+## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.24.0` and no `v0.24.0` tag exists
 yet. Cut 2026-09-14 by the campaign driver so the phases below can ride one slot rather than each
