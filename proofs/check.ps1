@@ -17,6 +17,17 @@
 #               budget is a smoke detector and not a gate. -Strict promotes every cost finding to
 #               a red leg, for a session that wants one. A fixed CI job timeout is deliberately
 #               NOT what this is: a timeout says a run died and nothing about which module.
+#               The clock is also measured against a declared FLOOR (Phase 164), and that one
+#               IS a gate: a module that verifies in less than its floorSeconds FAILS the leg on
+#               the spot, naming the module and the time. The two directions are not symmetric.
+#               An overshoot is a real measurement of a real cost; an undershoot means the
+#               measuring apparatus is broken — almost always a second writer in the cache — so
+#               everything after it would be measured with the same broken apparatus. -NoFloor
+#               is the deliberate opt-out for a machine genuinely that fast.
+#               The cache the cold runs use is PER INVOCATION (obj/cache-<pid>, or -CacheDir),
+#               created and removed by this script, so that "cold cache" cannot be quietly
+#               falsified by another run in the same worktree. See "Running it" in the README
+#               for the 2026-09-14 incident that bought both of these.
 #   2. EXTRACT — each checked model is extracted to F# and DIFFED against its committed oracle
 #               (proofs/oracle/<Module>.fs). A difference fails: the oracle the suite runs must be
 #               the model the theorem is about, byte for byte. -Extract overwrites the committed
@@ -46,6 +57,8 @@ param(
     [switch] $Extract,
     [switch] $SkipOracleHost,
     [switch] $Strict,
+    [switch] $NoFloor,
+    [string] $CacheDir,
     [int]    $Runs = 1
 )
 
@@ -53,10 +66,29 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $LASTEXITCODE = 0
 
+# The per-invocation cache this run owns, once section 3 has resolved one. Named here, above
+# Fail, so that EVERY exit path removes it: PowerShell resolves a function body at call time, so
+# Fail can call Remove-InvocationCache from before its definition. A run killed outright (a turn
+# boundary, Ctrl-C) still leaves its directory behind — nothing inside a process can promise
+# otherwise, which is why section 3 sweeps dead runs' directories at startup instead of trusting
+# this. Leaving one behind is harmless in any case: it belongs to a pid, so it poisons nobody.
+$script:invocationCache = $null
+$script:invocationCacheIsOurs = $false
+
+function Remove-InvocationCache {
+    if ($script:invocationCacheIsOurs -and $script:invocationCache -and (Test-Path $script:invocationCache)) {
+        Remove-Item $script:invocationCache -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Fail([string] $message, [int] $code = 1) {
+    Remove-InvocationCache
     Write-Host "==== proofs: $message" -ForegroundColor Red
     exit $code
 }
+
+# A terminating error under $ErrorActionPreference = 'Stop' bypasses Fail; this does not.
+trap { Remove-InvocationCache; break }
 
 $pin = Get-Content ./fstar-pin.json -Raw | ConvertFrom-Json
 $pinnedVersion = $pin.fstar.TrimStart('v')
@@ -164,7 +196,14 @@ if (-not (Test-Path $budgetFile)) {
 # still be read as a budget at all. An entry with no `budgetSeconds` would otherwise arrive as 0 and
 # every run would be infinitely over it — a flood of findings, and a division by zero rendering the
 # percentage. A declared artefact is held to its shape by the code that consumes it.
+# The FLOOR beside it (Phase 164) is held to its shape the same way WHEN IT IS THERE, and is a
+# cost finding when it is ABSENT — a sibling adding a model should no more go red for a floor
+# nobody has measured than for a budget nobody has measured. An absent floor degrades to exactly
+# the pre-164 behaviour for that module, which is the safe direction; a floor of 0 is legal and
+# means "this module genuinely checks in about a second" (see Skeleton), which is NOT the same
+# statement as an absent one and reads differently in the file.
 $budgets = @{}
+$floors = @{}
 foreach ($entry in (Get-Content $budgetFile -Raw | ConvertFrom-Json).modules) {
     $name = $entry.module
     if ([string]::IsNullOrWhiteSpace($name)) { Fail 'modules.json carries an entry with no module name' }
@@ -177,11 +216,26 @@ foreach ($entry in (Get-Content $budgetFile -Raw | ConvertFrom-Json).modules) {
     if ([int]$declaredBudget -lt 1) { Fail "modules.json entry '$name' has a budgetSeconds of $declaredBudget — a budget is a positive number of seconds" }
 
     $budgets[$name] = [int]$declaredBudget
+
+    $declaredFloor = $entry.floorSeconds
+    if ($null -ne $declaredFloor) {
+        if ($declaredFloor -isnot [int] -and $declaredFloor -isnot [long] -and $declaredFloor -isnot [double]) {
+            Fail "modules.json entry '$name' has a non-numeric floorSeconds"
+        }
+        if ([int]$declaredFloor -lt 0) { Fail "modules.json entry '$name' has a floorSeconds of $declaredFloor — a floor is a non-negative number of seconds" }
+        if ([int]$declaredFloor -ge [int]$declaredBudget) {
+            Fail "modules.json entry '$name' has a floorSeconds of $declaredFloor at or above its budgetSeconds of $([int]$declaredBudget) — no run could satisfy both"
+        }
+        $floors[$name] = [int]$declaredFloor
+    }
 }
 
 foreach ($module in $modules) {
     if (-not $budgets.ContainsKey($module)) {
         Add-CostFinding "$module is checked by the leg and modules.json declares no budget for it — time a cold run, budget it per the file's seeding rule, and cite your phase"
+    }
+    elseif (-not $floors.ContainsKey($module)) {
+        Add-CostFinding "$module is checked by the leg and modules.json declares no floorSeconds for it — nothing can tell an implausibly fast run of it from a real one; seed one per the file's floorSeeding rule and cite your phase"
     }
 }
 foreach ($declared in $budgets.Keys) {
@@ -191,9 +245,58 @@ foreach ($declared in $budgets.Keys) {
 }
 
 # ---- 3. check, -Runs times from a cold cache -------------------------------------------------------
+#
+# THE CACHE IS PER INVOCATION (Phase 164). Until then it was one constant directory, obj/cache,
+# and clearing it at the head of a run only makes that run cold if nothing else is writing there.
+# On 2026-09-14 something was: an orphaned background check.ps1 in the same worktree kept writing
+# .checked files, and the replacement run reported TreeOps 0s, Skeleton 0s, Chain 0s and printed
+# `==== proofs: green`. Nothing in the script could see it — it cleared the directory it was about
+# to use, which a second writer defeats a moment later. A directory named for this process cannot
+# be written into by another invocation at all, so the property the -Runs loop needs holds by
+# construction rather than by nobody else running.
 
-$cache = Join-Path $PSScriptRoot 'obj/cache'
 $out = Join-Path $PSScriptRoot 'obj/out'
+$cacheRoot = Join-Path $PSScriptRoot 'obj'
+
+if ($CacheDir) {
+    # A caller-named directory is CLEARED at each run head, exactly as the default one is —
+    # otherwise -CacheDir would silently mean "warm", which is the opposite of what this section
+    # is for. So refuse one holding anything that is not a checked-module file: the flag is for
+    # naming where the cache goes, and pointing it at a directory with other contents in it would
+    # delete them. It is not removed at exit; the caller named it, so the caller keeps it.
+    $cache = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $CacheDir))
+    if (Test-Path $cache) {
+        $foreign = Get-ChildItem $cache -Force | Where-Object { $_.PSIsContainer -or $_.Name -notlike '*.checked*' }
+        if ($foreign) {
+            Fail "-CacheDir '$cache' holds $($foreign.Count) entry/entries that are not checked-module files (first: $($foreign[0].Name)) — this script CLEARS its cache directory before every run, so it will only use one that is empty or holds nothing but *.checked files"
+        }
+    }
+    $script:invocationCacheIsOurs = $false
+}
+else {
+    # Sweep the directories left by runs that were killed before they could remove their own. Only
+    # ones whose pid is gone, so a concurrent invocation's cache is never touched — which is the
+    # whole point of the naming. A pid that has since been reused just leaves a directory behind;
+    # that costs nothing, where deleting a live run's cache would cost the exact incident above.
+    if (Test-Path $cacheRoot) {
+        foreach ($stale in (Get-ChildItem $cacheRoot -Directory -Filter 'cache-*' -ErrorAction SilentlyContinue)) {
+            $stalePid = 0
+            if (-not [int]::TryParse($stale.Name.Substring('cache-'.Length), [ref] $stalePid)) { continue }
+            if ($stalePid -eq $PID) { continue }
+            if (Get-Process -Id $stalePid -ErrorAction SilentlyContinue) { continue }
+            Write-Host "==== proofs: sweeping $($stale.Name), left by a run that did not finish" -ForegroundColor DarkGray
+            Remove-Item $stale.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $cache = Join-Path $cacheRoot "cache-$PID"
+    $script:invocationCacheIsOurs = $true
+}
+$script:invocationCache = $cache
+Write-Host "==== proofs: cache $cache$(if (-not $script:invocationCacheIsOurs) { ' (-CacheDir; left in place at exit)' })" -ForegroundColor Cyan
+
+if ($NoFloor) {
+    Write-Host '==== proofs: -NoFloor — the per-module time floors in modules.json are NOT enforced on this run' -ForegroundColor Yellow
+}
 
 for ($run = 1; $run -le $Runs; $run++) {
     if (Test-Path $cache) { Remove-Item $cache -Recurse -Force }
@@ -209,8 +312,16 @@ for ($run = 1; $run -le $Runs; $run++) {
         $cost = if ($null -eq $budget) { "${seconds}s (no budget)" } else { "${seconds}s/${budget}s" }
         Write-Host "==== proofs: $module.fst verified — run $run of $Runs, $cost, every query 3/3 under --quake" -ForegroundColor Green
 
-        if ($null -ne $budget -and $seconds -gt $budget) {
-            Add-CostFinding "$module.fst took ${seconds}s against its ${budget}s budget on run $run of $Runs — $($seconds - $budget)s over, $([int](100 * $seconds / $budget))% of budget"
+        # The floor fails HERE rather than joining the cost findings at the end, and the asymmetry
+        # with the ceiling three lines up is deliberate. An overshoot is a true measurement of a
+        # true cost, so the run should continue and produce the rest of the evidence. An
+        # undershoot says the measurement itself is not to be believed — the cache was not cold —
+        # and every module after it is measured by the same apparatus, so carrying on would print
+        # more green lines that a reader is entitled to read as evidence and that are not.
+        if (-not $NoFloor -and $floors.ContainsKey($module) -and $seconds -lt $floors[$module]) {
+            Fail ("$module.fst verified in ${seconds}s on run $run of $Runs, under its $($floors[$module])s floor — that is not a cold verification. " +
+                'Almost always a second writer in the cache directory (see section 3). Check for another check.ps1 or fstar process against this worktree; ' +
+                'if this machine really is that fast, re-seed the floor per modules.json floorSeeding and cite your phase, or pass -NoFloor for this run.')
         }
     }
 }
@@ -318,5 +429,6 @@ if ($costFindings.Count -gt 0) {
     if ($Strict) { Fail "the cost budget is exceeded and -Strict is on ($($costFindings.Count) finding(s) above)" }
 }
 
+Remove-InvocationCache
 Write-Host '==== proofs: green' -ForegroundColor Green
 exit 0

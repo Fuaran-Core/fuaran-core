@@ -28,5 +28,10 @@ tests/fable-smoke/parity-*.txt
 
 # Phase 131 — the proof leg (proofs/check.ps1) installs the pinned F* release beside the model and
 # keeps its checked-module cache and fresh extraction under obj/; neither is source.
+# Since Phase 164 the cache is PER INVOCATION — proofs/obj/cache-<pid>, one per running check.ps1,
+# created and removed by the script — so obj/ now holds a varying set of directories rather than a
+# fixed two. The prefix below already covers every one of them; this note is here so that nobody
+# adds a second, narrower pattern for them, and so that a stray cache-<pid> left by a killed run
+# reads as expected rather than as something that escaped the ignore.
 proofs/.fstar/
 proofs/obj/
