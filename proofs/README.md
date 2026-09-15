@@ -2389,7 +2389,164 @@ fixture it would have dropped first is the deepest one.
    - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
      measures — that is theorem 4's, and the boundary between the two is deliberate.
 
+## Theorem 8 — evolution-policy soundness (Phase 151)
+
+WIRE_FORMAT §15.4 classifies a vocabulary change by an IDL diff — no removed tags means additive,
+any removal or rename means breaking — and §15.3 promises that a `Behind` consumer **preserves**
+what it does not understand. Since Phase 127 the classification is computed rather than
+hand-applied: `Versioning.classify` and `Versioning.bump` in `src/Fuaran.Core.Wire/Wire.fs`, driven
+by the kind-tag delta an `idl.json` pair yields. It is exercised by tests that perturb the real
+vocabulary, and those tests answer a different question from the one the table raises. A test says
+the classifier returned `Additive` for this pair. The table says an `Additive` step is one every
+old document survives — and no sample establishes that, because the claim is universally quantified
+over documents nobody wrote.
+
+`WireVersioning.fst` models `classify`, `bump`, `negotiate`, `decodeTolerant` and `reencode` clause
+for clause and closes the gap. It is the first model here that is about a POLICY rather than about
+an algorithm's output, which changes what "sound" means: there is nothing to compare the classifier
+against except the sentence the specification writes, so the theorems are that sentence,
+mechanised.
+
+**The module is `WireVersioning` and not `Versioning`**, for the reason `WireCanon.fst` is not
+called `Canon`: the extracted oracle is a top-level F# module and the differential host opens
+`Fuaran.Core`, which already carries a `Versioning`. Here the collision is unavoidable rather than
+merely likely — the host step is `classify` beside `classify`, in one expression.
+
+### What is proved
+
+The order matters — the first is what the other three stand on.
+
+- **`classify_sound`.** `classify` answers `Additive` only when every tag of the before-vocabulary
+  survives into the after-vocabulary. The function computes a LIST (a difference) and the table
+  talks about a SUBSET, and the two are the same statement only through an induction; that
+  induction is the module's whole substance. `classify_additive_is_sub` packages the quantified
+  form for a reader who wants the table's sentence literally.
+- **`rename_is_breaking`.** A tag present before and absent after forces `Breaking`, whatever else
+  the change added. §15.4 calls this row out by name because it is the one an author gets wrong — a
+  rename LOOKS additive from the new vocabulary's side, since a new tag appeared. Nothing about the
+  addition enters the proof, which is the point.
+- **`additive_monotone`.** Given an `Additive` verdict, a document whose tag the OLD vocabulary
+  already carried decodes under the NEW vocabulary to exactly what it decoded to before — the same
+  `Known`, the same payload, the same error if the domain decoder errors. Not "still works" but
+  `==`: nothing about the widening is observable to a document that predates it. Quantified over
+  every discriminator reader, every known-decoder and every required-profile reader, so it is a
+  fact about the seam rather than about one domain's codec.
+- **`preserve_exact`.** §15.3's must-ignore-but-preserve, **at the bytes**. A producer authors a
+  value under the new vocabulary and renders it; an old consumer parses those bytes, meets a tag it
+  does not know, tolerantly decodes, re-encodes and renders — and what comes out is what went in.
+  This is why the module opens `WireCanon`: the claim is about bytes, theorem 7 already modelled
+  the renderer that produces them, and re-deriving it here would be a second renderer to keep in
+  step with the first. Two of theorem 7's lemmas discharge it (`read_render`,
+  `render_ignores_key_order`), and the proof needs nothing about the payload beyond its identity —
+  which is the shape of a preservation claim that holds by construction.
+- **`unknown_transport_only`.** No value an ENCODER produces decodes to `Unknown`, for a consumer
+  that knows the vocabulary the encoder authors against. The shipped source says this in a comment —
+  "transport-only: it is reachable here and nowhere on the authoring/encode path" — and a comment is
+  what this directory exists to replace. `reencode_known_is_encode` closes the other direction:
+  `reencode` is the only function that consumes a `decoded`, and on a `Known` it is exactly the
+  encoder, so no round trip through the seam can introduce one either.
+- **`breaking_bump_is_foreign` / `additive_bump_is_behind`.** The table's two rows as the two
+  outcomes they produce: a breaking verdict mints a new major and the old consumer is `Foreign` (it
+  refuses rather than mis-decoding); an additive verdict keeps the major and the same consumer is
+  `Behind` (it tolerates). A soundness claim about `classify` that stopped short of `bump` would
+  leave the consequence a reader acts on unproved.
+
+### The finding: §15.4's optional-field row is satisfied VACUOUSLY
+
+The table has a row for an added optional field, and it is additive. **Nothing in this module sees
+it, and nothing in this module can.** `classify` ranges over KIND TAGS; an optional field added to
+an existing kind changes no tag, so the delta is empty and the verdict is `Additive []` — the no-op
+arm. The row comes out right for a reason unrelated to what it is about.
+
+This is recorded rather than repaired, per the phase's own rule that a row the theorem cannot
+support is raised to the specification's owners and not made true by rewriting `classify`. Two
+things are worth knowing about it before anyone takes it.
+
+**It is not an oversight in the classifier.** It is a consequence of rule 2's unknown-key tolerance:
+an added optional field is invisible to the CLASSIFIER because it is invisible to the DECODER, and
+both facts have the same cause. A consumer that meets a member it does not recognise ignores it and
+preserves it, so the document decodes the same either way — which is exactly the property the
+additive row promises, arrived at by a route the tag delta does not describe. The policy's verdict
+is correct; its stated reason is not the one that makes it correct.
+
+**Widening `classify` here would model a function this repository does not ship.** `Diff.classify`
+in `Fuaran.Core.Idl.Codegen` DOES see field-level changes and classifies them (`classifyFieldAdd`
+reads the four-way optionality), and it is a different function with a different signature serving a
+different caller — an advisory host-strand report rather than a profile bump. A model that merged
+the two would be about neither. What the module states instead is the vacuity made explicit
+(`optional_field_addition_is_a_no_op`): a change that adds and removes no tag classifies as the
+empty additive, bumps nothing, and leaves a consumer at the base profile `Current`. That is the
+row's observable content on the tag delta, and it is all of it.
+
+The differential carries the same row as a perturbation of the real `idl.json`, with an assertion
+that the verdict IS `Additive []` and a failure message saying what a non-empty verdict would mean.
+So the finding goes red if the classifier ever grows field awareness, rather than quietly becoming
+stale prose.
+
+### What the differential measures
+
+`Proofs.Oracle` runs the extracted model beside production over the two inputs the policy has:
+
+- **The corpus's `envelope/` family**, for the decode half. Each fixture carries a `$profile` and a
+  `$payload`; the consumer is `core@1.0`. Four things are compared per fixture — the negotiation and
+  the authored profile it carries, whether the tolerant decode found a known kind or preserved an
+  unknown one, the `requiredProfile` an unknown carries, and the BYTES out of `reencode` +
+  `Canon.render`. The adequacy assertions require all three negotiation outcomes to have been
+  reached and at least two fixtures to carry a tag the consumer does not know: a family that only
+  ever produced `Current` would exercise neither tolerance nor preservation and would be green
+  having tested nothing §15.3 is about.
+- **Pairs of `idl.json` revisions**, for the classify half, produced by PERTURBING the pinned
+  artifact and re-reading it through `Diff.parse` — add a kind, add an optional field, remove a tag,
+  rename. Going through the artifact reader rather than writing two tag sets by hand is deliberate:
+  the row is about the classifier applied to an IDL diff, and a hand-written pair would establish
+  that the classifier agrees with itself over two lists somebody chose. Each of the four verdicts is
+  asserted to land where §15.4 puts it, so a pass in which every pair classified alike is a failure
+  rather than a green.
+
+The **go-red** is the model's own `classify_ignoring_removals` — a classifier that computes the
+additions and never looks for removals. It is not a strawman: it is what an author writes who reads
+the additive row and stops there, and it agrees with production on every purely additive change,
+which is most of them. F* refutes it in the same file (`classify_ignoring_removals_is_unsound`), and
+the differential asserts it disagrees with production on the removal and the rename and on NOTHING
+ELSE — which is what says the comparison is narrow to the rule it is about rather than merely
+capable of failing.
+
+### The boundary
+
+1. **Level 1, over the shipped functions.** `classify`, `bump`, `negotiate`, `decodeTolerant` and
+   `reencode` are modelled clause for clause and the extraction is run beside production, so the
+   theorems are about the functions that ship and the differential says so over real inputs.
+2. **Level 3 premises, all `WireCanon`'s.** `preserve_exact` carries `tok_read_ok` and
+   `key_order_ok` — theorem 7's two assumptions about the host's numeral reader and its key
+   comparator — and rule 5's canonical-subset predicate. It inherits theorem 7's boundary exactly
+   and adds none of its own.
+3. **Not claimed.**
+   - **That §15.4's table is COMPLETE.** Four rows are covered — add a kind, remove a tag, rename,
+     and the optional field (vacuously, see the finding). A row the table may grow is a row this
+     module does not have.
+   - **Anything about the ENVELOPE's own parsing.** `Versioning.parse` / `decode` and
+     `Profile.tryParse` are not modelled; the differential drives production's own parser and
+     compares what happens after it. A malformed `$profile` is theorem 4's boundary, not this one.
+   - **That a consumer ACTS on the negotiation.** `negotiate` returns a verdict; whether a host
+     refuses a `Foreign` artifact is host code this module does not describe, in the same sense that
+     `Limits.fst` models no enforcement.
+   - **The nested case.** An unknown kind inside a known tree is preserved by the same clause, and
+     production has a corpus case for it, but the model's `decode_tolerant` is applied to ONE
+     artifact object — recursion through a domain tree is the domain codec's, which is a parameter
+     here.
+
 ## Next
+
+**§15.4's optional-field row, raised to the specification's owners** — theorem 8's finding, and the
+one item on this list that is not work for this repository. The row says an added optional field is
+additive, and it is; what the theorem cannot support is the row's stated REASON. `classify` decides
+by the kind-tag delta, an optional field moves no tag, and the verdict is the no-op `Additive []` —
+so the row is satisfied vacuously and would stay satisfied if the field had been added as REQUIRED,
+which `Diff.classifyFieldAdd` separately and correctly calls breaking for emitters. The two
+classifiers see different things and neither is wrong; what is missing is a sentence in §15.4 saying
+which decides the profile bump. Nothing here should be changed to close it: widening
+`Versioning.classify` would model a function this repository does not ship, and the differential
+already asserts the vacuity, so the day the answer changes this goes red rather than stale.
 
 **A guarded `Canon.tryRender`** — theorem 7's finding, and the smallest item on this list. `Json`
 has the pair: `render` formats a non-finite float into a token that is not valid JSON, and

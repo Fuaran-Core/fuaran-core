@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 164 and 155).
+# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164 and 155).
 #
 # THE ENGINE IS `kit/check-proof-leg.ps1` (Phase 155) and this file is the caller: it declares
 # what THIS repository has — the models, which of them are checked but not extracted, where the
@@ -62,6 +62,14 @@ $ErrorActionPreference = 'Stop'
 #                emit, and the canonical form proved in both directions: equal bytes imply equal
 #                normal forms, equal normal forms imply equal bytes. It `open`s Limits, so it
 #                follows it.
+#   WireVersioning — Phase 151, WIRE_FORMAT §15.4's evolution-policy table as a theorem about the
+#                IDL diff: `Versioning.classify` / `bump` / `negotiate` / `decodeTolerant` /
+#                `reencode` clause for clause, with the classifier proved SOUND (an `Additive`
+#                verdict IS the subset claim), an additive step proved unobservable to a document
+#                that predates it, must-ignore-but-preserve proved AT THE BYTES, and the
+#                transport-only `Unknown` proved un-constructible from an encoder. It `open`s
+#                `WireCanon` — the byte claim is stated against Phase 149's renderer rather than
+#                a second one — so it follows it.
 #   Vocabulary — Phase 150, and the only GENERATED model here: the wire-format IDL's own
 #                vocabulary — its types, its discriminated encoder and its tag-dispatch decoder —
 #                emitted from `idl.json` by `Fuaran.Core.Idl.Codegen`'s F* target. Opens
@@ -73,7 +81,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'Vocabulary')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary')
 
 # Phase 150 — why there is a generated MODEL here and no generated THEOREMS beside it (yet).
 #

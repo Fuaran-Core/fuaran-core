@@ -1127,6 +1127,73 @@
         "theorem": "dec_node",
         "model": "proofs/Vocabulary.fst",
         "prover": "proofs/fstar-pin.json"
-      }    }
+      }    },
+    {
+      "id": "evolution-classify-sound",
+      "level": "proved",
+      "claim": "WIRE_FORMAT section 15.4's classifier is SOUND, and the three theorems beside it stand on that. `proofs/WireVersioning.fst` models `Versioning.classify` / `bump` / `negotiate` clause for clause and proves `classify_sound`: `classify` answers `Additive` ONLY when every tag of the before-vocabulary survives into the after-vocabulary. The function computes a LIST — a difference — where the table talks about a SUBSET, and the two are the same statement only through an induction, which is the module's whole substance; `classify_additive_is_sub` packages the quantified form. `rename_is_breaking` is the row section 15.4 calls out by name, because a rename LOOKS additive from the new vocabulary's side: a tag present before and absent after forces `Breaking` whatever else the change added, and nothing about the addition enters the proof. `breaking_bump_is_foreign` and `additive_bump_is_behind` carry the verdict through to the consequence a reader acts on — a breaking verdict mints a new major and the old consumer is `Foreign` and refuses; an additive verdict keeps the major and that consumer is `Behind` and tolerates. Proved with no assume and no admit under --report_assumes error. WHAT IS NOT CLAIMED: that the table is COMPLETE. Section 15.4's optional-field row is satisfied VACUOUSLY and the module says so — `classify` ranges over kind tags, so a field added to an existing kind moves no tag and the verdict is the no-op `Additive []`. `optional_field_addition_is_a_no_op` states exactly that observable content and no more; the finding is recorded in `proofs/README.md`'s theorem 8 section for the specification's owners rather than repaired by widening a function this repository does not ship.",
+      "phase": "fuaran-core#151",
+      "evidence": {
+        "theorem": "classify_sound",
+        "model": "proofs/WireVersioning.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "evolution-additive-monotone",
+      "level": "proved",
+      "claim": "An ADDITIVE step is unobservable to a document that predates it. `additive_monotone`: given that `classify` returned `Additive`, a document whose tag the OLD vocabulary already carried decodes under the NEW vocabulary to exactly what it decoded to before — the same `Known`, the same preserved payload, the same error if the domain decoder errors. Not 'still works' but `==`. This is what section 15.4's additive row promises and what no test can establish, the claim being universally quantified over documents nobody wrote. It is quantified here over every discriminator reader, every known-decoder and every required-profile reader, so it is a fact about the tolerance SEAM rather than about one domain's codec — which is what makes it usable by a domain this repository does not contain. It rests on `classify_sound` and on nothing else. Proved with no assume and no admit under --report_assumes error.",
+      "phase": "fuaran-core#151",
+      "evidence": {
+        "theorem": "additive_monotone",
+        "model": "proofs/WireVersioning.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "evolution-preserve-exact",
+      "level": "proved",
+      "claim": "Section 15.3's must-ignore-but-preserve, AT THE BYTES. `preserve_exact`: a producer authors a value under the new vocabulary and renders it; an old consumer parses those bytes, meets a tag it does not know, tolerantly decodes through `decodeTolerant`, re-encodes through `reencode` and renders — and what comes out is what went in, byte for byte. The byte level is the one that matters, because preservation is what makes an unknown artifact survive a hash chain, and a claim at the value level would not say that. This is why the module opens `WireCanon`: the renderer is already modelled and already proved by theorem 7, and a second renderer here would be one to keep in step with the first. Two of that module's lemmas discharge it — `read_render` and `render_ignores_key_order` — and the proof needs nothing about the payload beyond its identity, which is the shape of a claim that holds by construction rather than by care. It carries theorem 7's two premises (`tok_read_ok`, `key_order_ok`) and rule 5's canonical-subset predicate, and adds none of its own. Proved with no assume and no admit under --report_assumes error.",
+      "phase": "fuaran-core#151",
+      "evidence": {
+        "theorem": "preserve_exact",
+        "model": "proofs/WireVersioning.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "evolution-unknown-transport-only",
+      "level": "proved",
+      "claim": "The transport-only `Unknown` is un-constructible from an encoder — section 15.3's by-construction claim, which the shipped source states as a COMMENT ('it is reachable here and nowhere on the authoring/encode path') and which this row replaces with a theorem. `unknown_transport_only`: take any value the encoder produces, decode it tolerantly with the vocabulary the encoder authors against, and the result is never an `Unknown`. The one hypothesis is what 'the vocabulary the encoder authors against' MEANS — the encoder's own tag is in the consumer's vocabulary — and where it fails the two are at different profiles, which is `Behind` and is `evolution-preserve-exact`'s case rather than this one. `reencode_known_is_encode` closes the other direction: `reencode` is the only function consuming a `decoded`, and on a `Known` it is exactly the encoder, so no round trip through the seam can introduce one either. Proved with no assume and no admit under --report_assumes error.",
+      "phase": "fuaran-core#151",
+      "evidence": {
+        "theorem": "unknown_transport_only",
+        "model": "proofs/WireVersioning.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "evolution-differential",
+      "level": "tested",
+      "claim": "The extracted evolution-policy model agrees with the shipped `Versioning` over both inputs the policy has. Over the corpus's `envelope/` family, four things per fixture: the negotiation and the authored profile it carries, whether the tolerant decode found a known kind or preserved an unknown one, the `requiredProfile` an unknown carries, and the BYTES out of `reencode` + `Canon.render`. Over pairs of `idl.json` revisions — the pinned artifact PERTURBED four ways and re-read through `Diff.parse`, which is the path a migration author walks rather than two tag sets somebody chose — the whole verdict, both lists and not merely the discriminator, since a classifier naming the right class and the wrong tags leaves an author with the wrong shim. Each of the four verdicts is asserted to land where section 15.4 puts it, so a pass in which every pair classified alike FAILS rather than passing. The adequacy assertions on the envelope half require all three negotiation outcomes reached and at least two fixtures carrying a tag the consumer does not know: a family producing only `Current` would exercise neither tolerance nor preservation and would be green having tested nothing section 15.3 is about. The go-red is the model's OWN `classify_ignoring_removals`, which F* refutes in the same file — a classifier computing the additions and never looking for removals, which is what an author writes who reads the additive row and stops, and which agrees with production on every purely additive change; the case asserts it disagrees on the removal and the rename and on NOTHING ELSE. Agreement is over the corpus and the four pairs, never over all inputs.",
+      "phase": "fuaran-core#151",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the versioning oracle agrees with Versioning.classify over perturbed idl.json pairs",
+          "the versioning oracle agrees with production over every envelope/ fixture",
+          "a model whose classify IGNORES REMOVALS loses — the comparison can fail"
+        ]
+      }
+    },
+    {
+      "id": "evolution-table-coverage",
+      "level": "assumed",
+      "claim": "Section 15.4's table is assumed to be the four rows the model covers, and one of the four is covered VACUOUSLY. Add a kind, remove a tag and rename are decided by the tag delta and are proved. The optional-field row is not: `classify` ranges over kind tags, an optional field added to an existing kind moves no tag, and the verdict is the no-op `Additive []` — the row comes out right for a reason unrelated to what it is about. That is a consequence of rule 2's unknown-key tolerance rather than a defect in the classifier (the field is invisible to the classifier because it is invisible to the decoder, one cause for both), and it is recorded rather than repaired: widening `classify` to see field sets would model a function this repository does not ship, `Diff.classify` in Fuaran.Core.Idl.Codegen being a different function with a different signature serving an advisory host-strand report rather than a profile bump. A row the table may GROW is a row this module does not have. `proofs/README.md`'s theorem 8 section carries the finding for the specification's owners, and the differential asserts the vacuity explicitly, so it goes red if the classifier ever grows field awareness rather than quietly becoming stale prose.",
+      "phase": "fuaran-core#151",
+      "evidence": {
+        "assumption": "section 15.4's table is the four rows modelled, with the optional-field row satisfied vacuously by the tag delta"
+      }
+    }
   ]
 }

@@ -4562,6 +4562,324 @@ let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundT
 let private renderCanonDiffs (diffs: string list) : string =
     diffs |> List.rev |> List.truncate 5 |> String.concat "\n"
 
+// ---------------------------------------------------------------------------
+//  Phase 151 — the EVOLUTION POLICY: `WireVersioning` beside `Versioning`.
+// ---------------------------------------------------------------------------
+//
+// `proofs/WireVersioning.fst` models WIRE_FORMAT §15.4's table — `Versioning.classify` / `bump` /
+// `negotiate` / `decodeTolerant` / `reencode` — and proves the four soundness statements the
+// table's prose asserts. This section runs the extraction beside production over the two inputs
+// the shard names: the corpus's `envelope/` family for the DECODE half, and pairs of `idl.json`
+// revisions for the CLASSIFY half.
+//
+// The model's tag type is `WireCanon.ch list`, which is why the bridges above are reused rather
+// than a second set written: a tag is a string read out of a `jval`, and Phase 149 already has
+// the string bridge that matches the model's own character alphabet.
+
+/// A production `Versioning.Profile` as the model reads it. The two counters cross a width
+/// boundary — production holds `int`, the model's `nat` extracts to `BigInteger` per
+/// `oracle/Prims.fs` — so the conversion is here and not hidden inside a comparison.
+let private toModelProfile (p: Versioning.Profile) : WireVersioning.profile =
+    { WireVersioning.name = canonToChs p.Name
+      WireVersioning.major = bigint p.Major
+      WireVersioning.minor = bigint p.Minor }
+
+/// A vocabulary — production's `Set<string>` as the model's list of tags. `Set.toList` hands back
+/// a sorted duplicate-free list, which is the only shape `classify`'s list-valued result can be
+/// compared against element for element rather than as a set.
+let private toModelVocab (v: Set<string>) : WireCanon.ch list list = v |> Set.toList |> List.map canonToChs
+
+/// The model's `evolution` rendered as production's `Versioning.Evolution`, so the comparison is
+/// one equality over the shipped type rather than a pair of shape tests.
+let private ofModelEvolution (e: WireVersioning.evolution) : Versioning.Evolution =
+    match e with
+    | WireVersioning.Additive added -> Versioning.Additive(added |> List.map canonFromChs)
+    | WireVersioning.Breaking(removed, added) ->
+        Versioning.Breaking(removed |> List.map canonFromChs, added |> List.map canonFromChs)
+
+/// One classification, asked of production and of the model. The comparison is the WHOLE verdict
+/// — both lists, not merely the `Additive`/`Breaking` discriminator — because a classifier that
+/// named the right class and the wrong tags would leave a migration author with the wrong shim.
+let private versionProbe (label: string) (before: Set<string>) (after: Set<string>) (diffs: string list) =
+    let expected = Versioning.classify before after
+
+    let got =
+        ofModelEvolution (WireVersioning.classify (toModelVocab before) (toModelVocab after))
+
+    if expected = got then
+        diffs
+    else
+        sprintf "%s: production classified\n  %A\nthe model classified\n  %A" label expected got
+        :: diffs
+
+/// The GO-RED instrument, and this family's counterpart to the canon family's reversed comparator:
+/// the model's OWN `classify_ignoring_removals`, a classifier that computes the additions and
+/// never looks for removals. It is not a strawman — it is what an author writes who reads §15.4's
+/// additive row and stops there, and it agrees with production on every purely additive change.
+/// A comparison that cannot separate it from the real thing is measuring nothing.
+let private versionProbeGoRed (label: string) (before: Set<string>) (after: Set<string>) (diffs: string list) =
+    let expected = Versioning.classify before after
+
+    let got =
+        ofModelEvolution (WireVersioning.classify_ignoring_removals (toModelVocab before) (toModelVocab after))
+
+    if expected = got then
+        diffs
+    else
+        sprintf "%s: production classified\n  %A\nthe broken model classified\n  %A" label expected got
+        :: diffs
+
+// ---- the IDL pairs ----------------------------------------------------------------------
+//
+// The pairs are produced by PERTURBING the pinned `idl.json` and re-reading it through
+// `Diff.snapshot`, rather than by writing two tag sets by hand. That matters: the claim the row
+// carries is about the classifier applied to an IDL DIFF, and a hand-written pair would prove the
+// classifier agrees with itself over two lists somebody chose. Going through the artifact reader
+// exercises the path a migration author actually walks.
+
+/// The pinned corpus's `idl.json`, parsed. Resolved through the same sibling-corpus seam every
+/// other corpus-reading family here uses.
+let private pinnedIdlText () =
+    match SiblingCorpus.resolve "nodes" with
+    | SiblingCorpus.Found root -> System.IO.File.ReadAllText(System.IO.Path.Combine(root, "idl.json"))
+    | SiblingCorpus.SkippedByRequest why -> failtest why
+    | SiblingCorpus.Absent why -> failtest why
+
+/// The kind tags an `idl.json` text declares, read through the production artifact differ rather
+/// than by picking the JSON apart here.
+let private kindTagsOf (label: string) (text: string) : Set<string> =
+    match Fuaran.Core.Idl.Diff.parse text with
+    | Result.Error m -> failtestf "the %s idl.json did not snapshot: %s" label m
+    | Result.Ok(snap: Fuaran.Core.Idl.Diff.Snapshot) -> snap.Kinds |> Map.toList |> List.map fst |> Set.ofList
+
+/// Rewrite the `kinds` array of an `idl.json` JVal. Every perturbation below is one of these.
+let private mapKinds (f: JVal list -> JVal list) (idl: JVal) : JVal =
+    match idl with
+    | JObj fields ->
+        JObj(
+            fields
+            |> List.map (fun (k, v) ->
+                match k, v with
+                | "kinds", JArr xs -> k, JArr(f xs)
+                | _ -> k, v)
+        )
+    | other -> other
+
+let private kindTag (k: JVal) : string =
+    match k with
+    | JObj fields ->
+        match fields |> List.tryPick (fun (n, v) -> if n = "tag" then Some v else None) with
+        | Some(JStr s) -> s
+        | _ -> failtest "a kind in idl.json carries no string `tag`"
+    | _ -> failtest "a kind in idl.json is not an object"
+
+let private withTag (tag: string) (k: JVal) : JVal =
+    match k with
+    | JObj fields -> JObj(fields |> List.map (fun (n, v) -> if n = "tag" then n, JStr tag else n, v))
+    | other -> other
+
+/// Give a kind one more field, declared `optional`. This is §15.4's optional-field row, and the
+/// perturbation is deliberately one that changes NO tag — which is the whole point of including
+/// it, per the model's section 6.
+let private withAnExtraOptionalField (k: JVal) : JVal =
+    match k with
+    | JObj fields ->
+        let extra =
+            JObj
+                [ "name", JStr "phase151ProbeField"
+                  "optionality", JObj [ "$type", JStr "optional" ]
+                  "type", JObj [ "$type", JStr "prim"; "name", JStr "String" ] ]
+
+        JObj(
+            fields
+            |> List.map (fun (n, v) ->
+                match n, v with
+                | "fields", JArr xs -> n, JArr(xs @ [ extra ])
+                | _ -> n, v)
+        )
+    | other -> other
+
+/// The four perturbations §15.4's table distinguishes, each as `(label, before-text, after-text)`.
+/// `Canon.render` is what writes them back, so the perturbed artifact is canonical bytes and the
+/// snapshot reader meets exactly what it would meet in a repository.
+let private idlPairs () : (string * Set<string> * Set<string>) list =
+    let text = pinnedIdlText ()
+
+    let idl =
+        match Json.parse text with
+        | Result.Error m -> failtestf "the pinned idl.json did not parse: %s" m
+        | Result.Ok v -> v
+
+    let before = kindTagsOf "pinned" text
+    let firstTag = before |> Set.toList |> List.head
+
+    let render (v: JVal) = Canon.render v
+
+    let added =
+        idl
+        |> mapKinds (fun xs ->
+            match xs with
+            | first :: _ -> xs @ [ withTag "Phase151ProbeKind" first ]
+            | [] -> xs)
+        |> render
+
+    let optionalField =
+        idl
+        |> mapKinds (
+            List.map (fun k ->
+                if kindTag k = firstTag then
+                    withAnExtraOptionalField k
+                else
+                    k)
+        )
+        |> render
+
+    let removed =
+        idl |> mapKinds (List.filter (fun k -> kindTag k <> firstTag)) |> render
+
+    let renamed =
+        idl
+        |> mapKinds (
+            List.map (fun k ->
+                if kindTag k = firstTag then
+                    withTag (firstTag + "Renamed") k
+                else
+                    k)
+        )
+        |> render
+
+    [ "add a kind", before, kindTagsOf "kind-added" added
+      "add an optional field", before, kindTagsOf "optional-field-added" optionalField
+      "remove a tag", before, kindTagsOf "tag-removed" removed
+      "rename", before, kindTagsOf "renamed" renamed ]
+
+// ---- the envelope family ----------------------------------------------------------------
+//
+// The corpus's six `envelope/` fixtures are the DECODE half. Each carries a `$profile` and a
+// `$payload`; the consumer is `core@1.0` and its vocabulary is the one the fixtures were built
+// against — `Markdown` known, `hologram` not. The discriminator is the payload's `kind.$type`,
+// and `requiredProfile` sits beside `kind` on the payload object, which is exactly where
+// production's own `readRequiredProfile` looks.
+
+/// The consumer's vocabulary for the envelope family, as the fixtures declare it by construction.
+let private envelopeVocab: Set<string> = Set.ofList [ "Markdown" ]
+
+let private envelopeTagOf (el: JVal) : Result<string, string> =
+    Decode.getProp "kind" el
+    |> Result.bind (Decode.getProp "$type")
+    |> Result.bind Decode.asString
+
+let private envelopeRequiredProfile (el: JVal) : Versioning.Profile option =
+    match Decode.getProp "requiredProfile" el with
+    | Result.Ok(JStr s) ->
+        match Versioning.Profile.tryParse s with
+        | Result.Ok p -> Some p
+        | Result.Error _ -> None
+    | _ -> None
+
+/// The model's counterparts, over the bridged value. `decode_known` is the identity on the parsed
+/// object on BOTH sides: this family is about the tolerance boundary, not about a domain codec,
+/// and handing the two sides different known-decoders would compare the decoders instead.
+let private envelopeTagOfModel (el: WireCanon.jval<int, float>) : WireCanon.outcome<WireCanon.ch list> =
+    match envelopeTagOf (canonOfModel el) with
+    | Result.Ok s -> WireCanon.Ok(canonToChs s)
+    | Result.Error m -> WireCanon.Error m
+
+let private envelopeRequiredProfileModel (el: WireCanon.jval<int, float>) =
+    match envelopeRequiredProfile (canonOfModel el) with
+    | Some p -> FStar_Pervasives_Native.Some(toModelProfile p)
+    | None -> FStar_Pervasives_Native.None
+
+/// One envelope fixture, asked of production and of the model. Four things are compared, and the
+/// last is the one §15.3 is about:
+///   1. the NEGOTIATION — `Current` / `Behind` / `Foreign`, and the authored profile each carries;
+///   2. whether the tolerant decode found a KNOWN kind or preserved an UNKNOWN one;
+///   3. the `requiredProfile` the unknown carries, which is what a degraded placeholder names;
+///   4. the BYTES out of `reencode` + `Canon.render` — which for a `Foreign` fixture is not asked,
+///      because a `Foreign` artifact is refused before any payload is decoded.
+let private envelopeProbe (label: string) (text: string) (diffs: string list) =
+    match Versioning.parse text with
+    | Result.Error m -> failtestf "the envelope fixture %s did not parse: %s" label m
+    | Result.Ok env ->
+        let consumer = Versioning.Profile.coreV1
+        let expectedNeg = Versioning.negotiate consumer env.Profile
+
+        let gotNeg =
+            WireVersioning.negotiate (toModelProfile consumer) (toModelProfile env.Profile)
+
+        let negAgrees =
+            match expectedNeg, gotNeg with
+            | Versioning.Current, WireVersioning.Current -> true
+            | Versioning.Behind a, WireVersioning.Behind b
+            | Versioning.Foreign a, WireVersioning.Foreign b -> toModelProfile a = b
+            | _ -> false
+
+        let diffs =
+            if negAgrees then
+                diffs
+            else
+                sprintf "%s: production negotiated %A, the model negotiated %A" label expectedNeg gotNeg
+                :: diffs
+
+        match expectedNeg with
+        | Versioning.Foreign _ ->
+            // A Foreign profile is refused at the envelope, so there is no tolerant decode to
+            // compare. Recording that here rather than skipping the fixture is what keeps the
+            // reject half of the family inside the comparison.
+            diffs
+        | _ ->
+            let expected =
+                Versioning.decodeTolerant envelopeTagOf (fun t -> envelopeVocab.Contains t) Result.Ok env.Payload
+
+            let got =
+                WireVersioning.decode_tolerant
+                    envelopeTagOfModel
+                    (WireVersioning.known_in (toModelVocab envelopeVocab))
+                    WireCanon.Ok
+                    envelopeRequiredProfileModel
+                    (canonToModel env.Payload)
+
+            match expected, got with
+            | Result.Error m, WireCanon.Error m' when m = m' -> diffs
+            | Result.Ok d, WireCanon.Ok d' ->
+                let shapeAgrees =
+                    match d, d' with
+                    | Versioning.Known _, WireVersioning.Known _ -> true
+                    | Versioning.Unknown u, WireVersioning.Unknown u' ->
+                        canonFromChs u'.kind = u.Kind
+                        && (match u.RequiredProfile, u'.required_profile with
+                            | Some p, FStar_Pervasives_Native.Some p' -> toModelProfile p = p'
+                            | None, FStar_Pervasives_Native.None -> true
+                            | _ -> false)
+                    | _ -> false
+
+                let diffs =
+                    if shapeAgrees then
+                        diffs
+                    else
+                        sprintf "%s: production decoded %A, the model decoded a different shape" label d
+                        :: diffs
+
+                // §15.3 at the bytes. Production's own `Canon.render` on both sides — the model's
+                // renderer is Phase 149's family's subject, and re-testing it here would be
+                // measuring that rather than preservation.
+                let expectedBytes = Canon.render (Versioning.reencode id d)
+                let gotBytes = Canon.render (canonOfModel (WireVersioning.reencode id d'))
+
+                if expectedBytes = gotBytes && expectedBytes = Canon.render env.Payload then
+                    diffs
+                else
+                    sprintf
+                        "%s: preservation — production re-rendered\n  %s\nthe model re-rendered\n  %s\nthe payload was\n  %s"
+                        label
+                        expectedBytes
+                        gotBytes
+                        (Canon.render env.Payload)
+                    :: diffs
+            | _ ->
+                sprintf "%s: production and the model disagreed on whether the decode succeeded" label
+                :: diffs
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -7208,4 +7526,152 @@ let proofOracleTests =
                   t.Diffs
                   (sprintf
                       "the canon oracle disagreed with production off the canonical subset:\n%s"
-                      (renderCanonDiffs t.Diffs)) ]
+                      (renderCanonDiffs t.Diffs))
+
+          // ---- the evolution policy, over the envelope family and perturbed IDL pairs (Phase 151) ----
+
+          testCase "the versioning oracle agrees with Versioning.classify over perturbed idl.json pairs"
+          <| fun _ ->
+              let pairs = idlPairs ()
+
+              let diffs =
+                  pairs
+                  |> List.fold (fun acc (label, before, after) -> versionProbe label before after acc) []
+
+              Expect.isEmpty
+                  diffs
+                  (sprintf "the versioning oracle disagreed with production:\n%s" (renderCanonDiffs diffs))
+
+              // adequacy — the four rows §15.4 distinguishes must actually have been REACHED, and
+              // each must land where the table says. A pass over four pairs that all classified
+              // the same way would measure one row four times.
+              let verdicts =
+                  pairs |> List.map (fun (label, b, a) -> label, Versioning.classify b a)
+
+              let verdictOf name =
+                  verdicts |> List.find (fun (l, _) -> l = name) |> snd
+
+              match verdictOf "add a kind" with
+              | Versioning.Additive [ one ] -> Expect.equal one "Phase151ProbeKind" "the added tag is the one added"
+              | other -> failtestf "adding a kind classified as %A" other
+
+              match verdictOf "add an optional field" with
+              | Versioning.Additive [] -> ()
+              | other ->
+                  failtestf
+                      "adding an OPTIONAL FIELD moved the kind-tag set (%A) — §15.4's optional-field row is invisible to this classifier by construction, and a verdict here means the perturbation changed a tag"
+                      other
+
+              match verdictOf "remove a tag" with
+              | Versioning.Breaking(removed, added) ->
+                  Expect.equal (List.length removed) 1 "exactly the removed tag"
+                  Expect.isEmpty added "removing a tag adds none"
+              | other -> failtestf "removing a tag classified as %A" other
+
+              match verdictOf "rename" with
+              | Versioning.Breaking(removed, added) ->
+                  Expect.equal (List.length removed) 1 "a rename removes exactly the old tag"
+                  Expect.equal (List.length added) 1 "and adds exactly the new one"
+              | other ->
+                  failtestf
+                      "a RENAME classified as %A — §15.4 calls it breaking, and it is the row an author gets wrong"
+                      other
+
+          testCase "the versioning oracle agrees with production over every envelope/ fixture"
+          <| fun _ ->
+              let fixtures = JsonParseDiff.corpusTexts "envelope"
+
+              let diffs =
+                  fixtures
+                  |> List.fold (fun acc (name, text) -> envelopeProbe (sprintf "envelope/%s" name) text acc) []
+
+              Expect.isEmpty
+                  diffs
+                  (sprintf "the versioning oracle disagreed with production:\n%s" (renderCanonDiffs diffs))
+
+              Expect.isGreaterThan
+                  (List.length fixtures)
+                  4
+                  (sprintf "the envelope/ family was read at all (%d fixtures)" (List.length fixtures))
+
+              // adequacy — all three negotiation outcomes must have been reached, and at least one
+              // fixture must have carried a tag the consumer does NOT know. A family that only ever
+              // produced `Current` would exercise neither tolerance nor preservation, and the run
+              // would be green having tested nothing §15.3 is about.
+              let outcomes =
+                  fixtures
+                  |> List.choose (fun (_, text) ->
+                      match Versioning.parse text with
+                      | Result.Ok env -> Some(Versioning.negotiate Versioning.Profile.coreV1 env.Profile)
+                      | Result.Error _ -> None)
+
+              Expect.isTrue
+                  (outcomes
+                   |> List.exists (function
+                       | Versioning.Current -> true
+                       | _ -> false))
+                  "a Current fixture was reached"
+
+              Expect.isTrue
+                  (outcomes
+                   |> List.exists (function
+                       | Versioning.Behind _ -> true
+                       | _ -> false))
+                  "a Behind fixture was reached — otherwise tolerance is untested"
+
+              Expect.isTrue
+                  (outcomes
+                   |> List.exists (function
+                       | Versioning.Foreign _ -> true
+                       | _ -> false))
+                  "a Foreign fixture was reached — otherwise the refusal half is untested"
+
+              let unknowns =
+                  fixtures
+                  |> List.filter (fun (_, text) ->
+                      match Versioning.parse text with
+                      | Result.Ok env ->
+                          match envelopeTagOf env.Payload with
+                          | Result.Ok t -> not (envelopeVocab.Contains t)
+                          | Result.Error _ -> false
+                      | Result.Error _ -> false)
+
+              Expect.isGreaterThan
+                  (List.length unknowns)
+                  1
+                  (sprintf
+                      "fixtures carrying a tag the consumer does NOT know (%d) — preservation is unobservable without one"
+                      (List.length unknowns))
+
+          testCase "a model whose classify IGNORES REMOVALS loses — the comparison can fail"
+          <| fun _ ->
+              // The go-red. `classify_sound` turns entirely on removals being looked for, so the
+              // instrument that must lose is one that does not look — the model's own
+              // `classify_ignoring_removals`, which F* refutes in the same file. Every pair with a
+              // removal must disagree with production; every purely additive pair must still agree,
+              // which is what says the instrument is narrow to the rule rather than broken.
+              let pairs = idlPairs ()
+
+              let diffs =
+                  pairs
+                  |> List.fold (fun acc (label, before, after) -> versionProbeGoRed label before after acc) []
+
+              Expect.isNonEmpty
+                  diffs
+                  "a classifier that never looks for removals MUST disagree with Versioning.classify"
+
+              Expect.isLessThan
+                  (List.length diffs)
+                  (List.length pairs)
+                  (sprintf
+                      "the removal-blind classifier disagreed on %d of %d pairs — it must leave the purely additive ones alone"
+                      (List.length diffs)
+                      (List.length pairs))
+
+              // and precisely which two: the removal and the rename, which is the whole of §15.4's
+              // breaking column. Naming them is what separates "it went red" from "it went red for
+              // the reason the theorem is about".
+              let failedLabels =
+                  diffs |> List.map (fun d -> d.Substring(0, d.IndexOf ':')) |> List.sort
+
+              Expect.equal failedLabels [ "remove a tag"; "rename" ] "exactly the two breaking rows are where it loses" ]
