@@ -2,6 +2,13 @@
 
 open Expecto
 
+/// Where an exporter writes: the directory named after the flag, else this repository's
+/// committed `conformance/` (Phase 172). A following flag is not a directory.
+let private emitTarget (rest: string list) : string =
+    match rest with
+    | dir :: _ when not (dir.StartsWith "--") -> dir
+    | _ -> OwnedConformance.root ()
+
 [<EntryPoint>]
 let main argv =
     match List.ofArray argv with
@@ -18,25 +25,31 @@ let main argv =
     // third argument is the corpus manifest, read solely for the §11.0 host
     // roster once it carries one — until then the declared roster is used and the
     // report says so.
-    // Write the transform-parity family's reference vectors into the shared
-    // conformance corpus, for the hosts that ship their own dataframe evaluator:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <corpus dir>
-    // Deliberately a flag rather than a test side-effect. The corpus is a separate
-    // repository, and a suite that wrote into it on every run would dirty a shared
-    // clone; the suite COMPARES against it and names this command.
-    | "--emit-laws" :: dir :: _ ->
+    // Write the transform-parity family's reference vectors, for the hosts that
+    // ship their own dataframe evaluator:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws [<dir>]
+    // With no argument (Phase 172) the target is THIS repository's committed
+    // `conformance/` — the source of truth the default suite certifies against.
+    // With a directory it writes there instead, which is how the shared corpus's
+    // declared copy is refreshed (`copies.json` quotes that form). Deliberately a
+    // flag rather than a test side-effect: the corpus is a separate repository,
+    // and a suite that wrote into it on every run would dirty a shared clone; the
+    // suite COMPARES and names this command.
+    | "--emit-laws" :: rest ->
+        let dir = emitTarget rest
         LawVectorExport.write dir
         printfn "Wrote %s" (LawVectorExport.transformPath dir)
         0
     // Phase 139 — write the `apply/` family (the skeleton-op apply contract: one
     // vector per validator clause per op, Batch atomicity, the id-collision
-    // shapes) into the shared conformance corpus:
-    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>
+    // shapes); same target rule as `--emit-laws`:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply [<dir>]
     // A flag rather than a test side-effect, for the reason `--emit-laws` above
     // is one. Note the name: the UI language repo's `--emit-corpus` renders THAT
     // domain's node vectors and knows nothing about this engine; the apply
     // semantics are Core's, so Core emits them.
-    | "--emit-apply" :: dir :: _ ->
+    | "--emit-apply" :: rest ->
+        let dir = emitTarget rest
         ApplyVectorExport.write dir
         printfn "Wrote %s" (ApplyVectorExport.vectorsPath dir)
         printfn "Wrote %s" (ApplyVectorExport.manifestPath dir)

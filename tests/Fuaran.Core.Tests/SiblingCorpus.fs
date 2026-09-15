@@ -33,6 +33,20 @@ open Fuaran.Core
 // repository and a contributor on a bare clone may legitimately not have it —
 // but only by ASKING for it, and the skip then prints the variable by name and
 // says that nothing was compared.
+//
+// Phase 172 inverted which side is asked for. The families Core itself EMITS —
+// `laws/transform-laws.json` and `apply/` — are committed in this repository
+// (`conformance/`, see OwnedConformance) and the default suite reads them from
+// there, so the suite is self-contained and a machine holding only this
+// repository is green. What still wants the LIVE corpus is a different question
+// — are the corpus's copies of those files fresh, and does the model still agree
+// with production over the domain's own fixture pools (`nodes/`, `ops/`, `dag/`,
+// `idl.json`) — and that leg is OPT-IN: `FUARAN_CORE_CORPUS_FRESHNESS=1` asks for
+// it (CI does), and once asked for, an absent corpus FAILS exactly as Phase 130
+// decided. D31 is preserved on the leg it was written for rather than imposed on
+// a suite that no longer needs the corpus to certify Core's own contracts. The
+// old blanket opt-out `FUARAN_CORE_SKIP_CORPUS` is retired: with nothing left to
+// skip by default there is nothing for it to say.
 // ---------------------------------------------------------------------------
 
 /// Names an existing corpus checkout explicitly — the form CI uses, and the one the
@@ -40,9 +54,12 @@ open Fuaran.Core
 [<Literal>]
 let dirVariable = "FUARAN_CORE_CORPUS_DIR"
 
-/// The documented opt-out, and the ONLY way the corpus legs skip.
+/// The documented opt-IN, and the ONLY way the live-corpus legs run. Set (to anything
+/// non-blank) it asks for the comparison; unset, every leg that reads the shared corpus
+/// reports itself NOT ASKED FOR, by this name, and the suite certifies Core's own committed
+/// vectors alone. CI sets it, so every push still compares against the corpus at its `main`.
 [<Literal>]
-let skipVariable = "FUARAN_CORE_SKIP_CORPUS"
+let askVariable = "FUARAN_CORE_CORPUS_FRESHNESS"
 
 /// The corpus's own public repository — quoted in the remedy so the reader of a failing
 /// gate is told the command rather than sent looking for it.
@@ -62,15 +79,19 @@ let remedy =
         [ sprintf "  Clone the corpus beside this checkout:  git clone %s %s" cloneUrl directoryName
           "  (run in the parent of the repository root, or inside the repository root — both are found),"
           sprintf "  or point %s at an existing clone." dirVariable
-          sprintf "  To run WITHOUT the corpus, set %s=1: the corpus legs then skip and say so by name." skipVariable ]
+          sprintf
+              "  This leg runs only when %s is set; unset it to run the self-contained suite, which reads Core's own committed conformance/ vectors and needs no corpus."
+              askVariable ]
 
 /// The three outcomes, with no fourth in which a leg quietly does nothing.
 type Resolution =
     /// The corpus root — the directory holding `manifest.json` and the family directories.
     | Found of root: string
-    /// The opt-out was asked for; the reason names the variable and what did not happen.
-    | SkippedByRequest of why: string
-    /// No corpus. The reason names the paths tried and the remedy; consumers FAIL on this.
+    /// The live-corpus leg was not asked for (`askVariable` unset); the reason names the
+    /// variable and says that nothing was compared. Consumers SKIP on this, by name.
+    | NotAsked of why: string
+    /// Asked for, and no corpus. The reason names the paths tried and the remedy; consumers
+    /// FAIL on this.
     | Absent of why: string
 
 /// Why `root` is not the wire-format conformance corpus carrying `family`, or `None` when it
@@ -257,38 +278,63 @@ let anchoredFrom (family: string) (from: string) : Result<string, string> =
 
     underAnchor family anchor how
 
-/// The corpus this run certifies `family` against, or the reason there is none.
-let resolveFrom (family: string) (from: string) : Resolution =
-    match Environment.GetEnvironmentVariable skipVariable with
-    | requested when not (String.IsNullOrWhiteSpace requested) ->
-        SkippedByRequest(
-            sprintf
-                "%s is set to '%s' — the %s/ corpus comparison was SKIPPED BY REQUEST and nothing was compared against the shared corpus. Unset it to run the comparison."
-                skipVariable
-                requested
-                family
-        )
+/// The lookup itself, with the ask IMPLIED: the explicit directory when one is named, else the
+/// anchored search. This is what a COMMAND uses — `--emit-fstar` reads the pinned corpus because
+/// the operator ran it, and an invocation is its own ask — and what `resolveWith` puts the
+/// opt-in gate in front of for the test legs.
+let locateWith (dirValue: string option) (family: string) (from: string) : Result<string, string> =
+    match dirValue with
+    | Some ovr when not (String.IsNullOrWhiteSpace ovr) ->
+        match fault family ovr with
+        | None -> Ok ovr
+        | Some why ->
+            Error(
+                sprintf
+                    "%s is set to '%s', which is not the conformance corpus: %s.\nUnset it to anchor at the repository's main working tree instead.\n%s"
+                    dirVariable
+                    ovr
+                    why
+                    remedy
+            )
+    | _ -> anchoredFrom family from
+
+/// The corpus this run certifies `family` against, or the reason there is none — decided from
+/// the two variables' VALUES rather than the process environment, so the gate can be proved in
+/// both directions without a test mutating the environment beside its neighbours.
+///
+/// The order is the point: the ask is read FIRST, and a leg that was not asked for consults
+/// nothing — not the override, not git, not the filesystem — so a checkout with no corpus
+/// anywhere is green by construction rather than by every candidate path happening to miss.
+let resolveWith (askValue: string option) (dirValue: string option) (family: string) (from: string) : Resolution =
+    match askValue with
+    | Some asked when not (String.IsNullOrWhiteSpace asked) ->
+        match locateWith dirValue family from with
+        | Ok root -> Found root
+        | Error why -> Absent why
     | _ ->
-        match Environment.GetEnvironmentVariable dirVariable with
-        | ovr when not (String.IsNullOrWhiteSpace ovr) ->
-            match fault family ovr with
-            | None -> Found ovr
-            | Some why ->
-                Absent(
-                    sprintf
-                        "%s is set to '%s', which is not the conformance corpus: %s.\nUnset it to anchor at the repository's main working tree instead.\n%s"
-                        dirVariable
-                        ovr
-                        why
-                        remedy
-                )
-        | _ ->
-            match anchoredFrom family from with
-            | Ok root -> Found root
-            | Error why -> Absent why
+        NotAsked(
+            sprintf
+                "%s is not set — the live-corpus %s/ leg was NOT ASKED FOR and nothing was compared against the shared corpus; Core's own committed conformance/ vectors were certified by the default suite. Set %s=1 to run this leg (CI does)."
+                askVariable
+                family
+                askVariable
+        )
+
+let private env (name: string) : string option =
+    match Environment.GetEnvironmentVariable name with
+    | null -> None
+    | v -> Some v
+
+/// `resolveWith` over the process environment.
+let resolveFrom (family: string) (from: string) : Resolution =
+    resolveWith (env askVariable) (env dirVariable) family from
 
 /// Resolved with git asked from the test binary's own directory — the place the QUESTION is
 /// asked from, never the place the search starts. `AppContext.BaseDirectory` sits inside
 /// whichever worktree is running, which is exactly why it cannot be the anchor.
 let resolve (family: string) : Resolution =
     resolveFrom family AppContext.BaseDirectory
+
+/// The lookup with the ask implied, from the test binary's own directory — for commands.
+let locate (family: string) : Result<string, string> =
+    locateWith (env dirVariable) family AppContext.BaseDirectory

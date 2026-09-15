@@ -10,11 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The wire-format conformance corpus is a BUILD INPUT, not an optional extra
-      # (Phase 130). Two suites certify against it — the laws/ transform vectors and the
-      # nodes/ drift guard — and an absent corpus now FAILS rather than skipping, because a
-      # skip is how four consecutive gates reported green over a corpus none of them had
-      # read. So the corpus is checked out here and named explicitly below.
+      # The wire-format conformance corpus is a BUILD INPUT to the live-corpus leg, not an
+      # optional extra (Phase 130): once that leg is asked for, an absent corpus FAILS
+      # rather than skipping, because a skip is how four consecutive gates reported green
+      # over a corpus none of them had read. Since Phase 172 the default suite is
+      # self-contained — Core's own vectors are committed under conformance/ and certified
+      # from there — and the leg that reads the corpus (copy freshness, the proof-oracle
+      # pools over the domain's fixtures, the drift guards) is opt-in by name. CI asks for
+      # it on every push, so the corpus is checked out here and named explicitly below.
       #
       # Checked out INSIDE the workspace because actions/checkout refuses a path outside it;
       # .gitignore carries the directory so the tree stays clean either way.
@@ -30,6 +33,9 @@ jobs:
       # local never diverge: tool restore + fantomas --check + build + the Fable-compile
       # gate (the "Fable-clean on encode AND decode" claim) + tests + the adoption sample.
       #
+      # FUARAN_CORE_CORPUS_FRESHNESS asks for the live-corpus leg (Phase 172); without it
+      # every corpus-reading leg reports itself not asked for and CI would stop comparing
+      # against the corpus while staying green — the Phase 130 defect in a new coat.
       # FUARAN_CORE_CORPUS_DIR names the checkout above rather than leaving the suite to
       # anchor and climb. The climb would find it here too, so this is not load-bearing for
       # the run — it is load-bearing for the failure: if the checkout step is ever removed or
@@ -39,6 +45,7 @@ jobs:
       - name: Verify (./verify.ps1)
         shell: pwsh
         env:
+          FUARAN_CORE_CORPUS_FRESHNESS: '1'
           FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
         run: ./verify.ps1
 
@@ -68,5 +75,8 @@ jobs:
       - name: Proof leg (./proofs/check.ps1 -Runs 3)
         shell: pwsh
         env:
+          # The host step's Proofs.Vocabulary generation diff and the Proofs.Oracle pools over
+          # the corpus's ops/ and nodes/ are live-corpus legs (Phase 172): asked for by name.
+          FUARAN_CORE_CORPUS_FRESHNESS: '1'
           FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
         run: ./proofs/check.ps1 -Runs 3

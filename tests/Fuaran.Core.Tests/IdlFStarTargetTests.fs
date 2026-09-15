@@ -59,13 +59,12 @@ let private tinyIdl (fieldType: IdlType) (opt: Optionality) : Idl =
         { HardenPolicy.Default with
             TransparentUnions = [] } }
 
-/// The pinned corpus's IDL, or the reason there is none — shared by the regeneration
-/// command and the generation diff, so the two cannot read different vocabularies.
+/// The pinned corpus's IDL, or the reason there is none — read for the regeneration COMMAND,
+/// whose invocation is its own ask (Phase 172: the test legs below go through `resolve`, which
+/// is gated on `FUARAN_CORE_CORPUS_FRESHNESS`; a command the operator ran is not).
 let private pinnedIdl () : Result<Idl, string> =
-    match SiblingCorpus.resolve corpusFamily with
-    | SiblingCorpus.SkippedByRequest why -> Error why
-    | SiblingCorpus.Absent why -> Error why
-    | SiblingCorpus.Found root -> Artifact.parse (File.ReadAllText(Path.Combine(root, "idl.json")))
+    SiblingCorpus.locate corpusFamily
+    |> Result.bind (fun root -> Artifact.parse (File.ReadAllText(Path.Combine(root, "idl.json"))))
 
 /// `--emit-fstar` — rewrite the committed model from the pinned corpus. The command the generation
 /// diff names when it fails, and the only sanctioned way that file changes.
@@ -166,7 +165,7 @@ let idlFStarTargetTests =
           testCase "every kind of the pinned corpus is either modelled or refused BY NAME"
           <| fun _ ->
               match SiblingCorpus.resolve corpusFamily with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let idl =
@@ -220,7 +219,7 @@ let idlFStarTargetTests =
           testCase "the committed proofs/Vocabulary.fst IS a fresh generation from the pinned IDL"
           <| fun _ ->
               match SiblingCorpus.resolve corpusFamily with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let idl =

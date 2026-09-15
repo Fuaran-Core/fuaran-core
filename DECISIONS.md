@@ -1,5 +1,65 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-15 — D39: the producer owns its conformance vectors; the shared corpus is the distribution point
+
+**Decided (Phase 172).** The two conformance families this repository EMITS — `laws/transform-laws.json`
+and the `apply/` pair — are committed HERE, under `conformance/` at the repository root, and the
+default suite certifies the committed files: the oracle question (is every vector still true of this
+evaluator / engine?) and the freshness question (is the file what this kit renders?) are both asked
+of this checkout and no other. The shared wire-format corpus carries a **declared copy** of each,
+named in this repository's `copies.json` on the estate's copy registry (`roadmapctl copies`,
+`check: fingerprint`, `regen:` the exporter pointed at the corpus). The exporters default to
+`conformance/` and take a directory only to refresh the copy. Nothing moved OUT of the corpus: the
+hosts read `laws/` and `apply/` at the same paths with the same bytes — a copy is what they were
+always reading, and this names it.
+
+**Why.** Since D31 an absent corpus fails, so `pwsh ./verify.ps1` on a machine holding only this
+repository was red: "Core is generic" was true of the packages and false of the gate. Eighteen
+`SiblingCorpus.resolve` sites across five test files read that corpus, and three of the reads were
+Core's own generic contracts stored in a domain's specification — emitted here, committed there, and
+read back from there by the suite that emitted them. The producer of a contract is the one party that
+cannot need a copy of it to know what it says.
+
+**Every corpus read is now one of two things, and the classification is the decision.** A read is
+either of a file Core AUTHORS — moved to `conformance/`, default suite — or of the DOMAIN's own
+fixtures used as input (`nodes/` 230 files, `ops/` 24, `dag/` 5, `envelope/`, the pinned `idl.json`),
+which are not Core's to vendor and are behind the opt-in **live-corpus leg**,
+`FUARAN_CORE_CORPUS_FRESHNESS=1`: the two copy-freshness legs, the proof-oracle differentials over
+the domain's pools (beside their generative legs, which run regardless), the IDL spike's drift guard,
+and the F\* target's partition and `Vocabulary.fst` generation diff. Unset, each of those legs reports
+itself NOT ASKED FOR, by name, and says nothing was compared; the gate reads the ask before it
+consults anything, so a checkout with no corpus anywhere is green by construction rather than by
+every candidate path missing. Set, an absent corpus FAILS exactly as D31 decided — D31 is amended in
+scope, not reversed: it now binds the leg it was written for rather than a suite that no longer
+needs the corpus to certify Core's own contracts. CI sets the variable in both jobs, so every push
+still compares against the corpus at its `main`; the variable is what stops CI from silently going
+self-contained, which would be the Phase 130 defect in a new coat. `--emit-fstar` is a command, not a
+leg — an invocation is its own ask — and reads the locator ungated. `FUARAN_CORE_SKIP_CORPUS` is
+retired: with nothing left to skip by default, there was nothing for it to say.
+
+**The `kitVersion` stamp stays in the file, and what moves is where a version cut goes red.** Two
+hosts read the stamp, so the bytes are fixed. The stamp now lives in Core's own committed file, so a
+`<Version>` move re-emits it in the same commit and Core's gate never crosses a repository boundary
+to fail; the corpus copy is then reported **stale by fingerprint** — warn-first on the sweep from
+every checkout, and as a failure of the opt-in leg where the corpus is present (CI) — until the copy
+is refreshed. That narrows Phase 139's finding rather than dissolving it: the redness is confined to
+the copy's own freshness question, named with its one-line remedy, instead of reaching an unrelated
+phase's gate days later. A leg that compared the copy modulo the stamp would be a fuzzy match, which
+the registry's own definition refuses; the honest report is "the copy is stale", because it is.
+
+**Why the registry rather than a bespoke freshness test.** The estate already has one answer to
+"has a generated cross-repo copy drifted from its source" — `copies.json` and the `copies` sweep,
+warn-first, offline, quoting the regenerating command verbatim — and the corpus's own `copies.json`
+already declares the ts/py bundled snapshots on it. A second mechanism would be the reinvention the
+rule of three exists to refuse. The in-suite opt-in leg reuses the registry's `fingerprint` equality
+(restated in `OwnedConformance.fingerprint`) so the two never disagree about what "fresh" means.
+
+**Proved.** The gate both ways as unit tests in `SiblingCorpusTests.fs` (not asked ⇒ `NotAsked`
+naming the variable, the override never consulted; asked and pointed at a non-existent directory ⇒
+`Absent` naming the path); the default suite green with `FUARAN_CORE_CORPUS_DIR` pointed at a
+directory that does not exist; the three emitted files byte-identical to the corpus copies; the
+registry reporting the three records `ok`, and `stale` when the source is perturbed.
+
 ## 2026-09-14 — D38: a graft's INTERIOR is inspected — `applyContained` walks the inserted subtree
 
 **Decided (Phase 161), by the operator, between two options the phase was chartered to put rather
@@ -489,6 +549,14 @@ check optional and hope the machine that skips it is not the only machine that r
 
 _(Numbered D30 in the commit that landed it, and renumbered here on integration: the D30 below
 reached `main` the same day. Commit messages are not rewritten, so that one still says D30.)_
+
+**Amended 2026-09-15 (D39, Phase 172) — in scope, not reversed.** The families Core itself emits are
+committed in this repository and certified from there, so the default suite no longer reads the
+corpus at all. This decision now binds the **opt-in live-corpus leg** (`FUARAN_CORE_CORPUS_FRESHNESS=1`,
+set by CI): once that leg is asked for, an absent corpus still FAILS, naming every path tried and the
+remedy, for exactly the reason above. The opt-out `FUARAN_CORE_SKIP_CORPUS` named here is retired —
+the default suite skips nothing, because it needs nothing; a leg that is not asked for says so by
+name, and that is a different fact from "the check ran and passed", rendered differently.
 
 ## 2026-09-12 — D30: a committed generated artefact is pinned BYTE-FOR-BYTE, not modulo whitespace
 

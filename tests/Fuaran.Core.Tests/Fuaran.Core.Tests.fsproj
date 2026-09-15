@@ -52,11 +52,20 @@
          suites below do not depend on the console code page the runner inherited.
          Before its first consumer; it references nothing here. -->
     <Compile Include="ChildProcess.fs" />
+    <!-- Phase 172 — where the conformance families THIS repository emits live (the committed
+         conformance/ directory) and the registry's fingerprint equality their published copies
+         are held to. Reads Snapshots.fs above for the repo-root marker and nothing else here.
+         Before SiblingCorpus.fs, which is its counterpart for the corpus another repository
+         owns, and before every exporter and suite that reads the owned files. -->
+    <Compile Include="OwnedConformance.fs" />
     <!-- Phase 130 — the one lookup for the shared conformance corpus, anchored at the
          repository's MAIN working tree (git's own common-dir question) so a linked worktree
          resolves what the main tree resolves, and loud rather than silent when the corpus
-         is absent. Before its two consumers (the nodes/ drift guard below and the laws/
-         vectors further down); it reads ChildProcess.fs above and nothing else here. -->
+         is absent. Phase 172 put the opt-in gate (FUARAN_CORE_CORPUS_FRESHNESS) in front of
+         it: the live-corpus legs run only when asked for, and fail as before once they are.
+         Before its consumers (the nodes/ drift guard below, the proof-oracle pools, the laws/
+         and apply/ copy-freshness legs further down); reads ChildProcess.fs above and nothing
+         else here. -->
     <Compile Include="SiblingCorpus.fs" />
     <Compile Include="IdlSpikeTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />

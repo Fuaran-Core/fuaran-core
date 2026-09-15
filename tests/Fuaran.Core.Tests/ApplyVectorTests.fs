@@ -194,42 +194,80 @@ let tests =
                       (once.Contains "\r")
                       "the corpus is byte-compared across three operating systems — no CR may reach it"
 
-          testCase "the committed corpus artefacts are the ones this kit renders"
+          testCase
+              "the committed conformance/apply artefacts are the ones this kit renders, and each vector is true of this engine"
           <| fun _ ->
+              // Phase 172: the family is AUTHORED here — `conformance/apply/` at this repository's
+              // root — and the shared corpus carries a declared copy of both files. Oracle and
+              // freshness are asked of the committed files in this checkout; no corpus needed.
+              let root = OwnedConformance.root ()
+
+              let pairs =
+                  [ ApplyVectorExport.vectorsPath root, ApplyVectorExport.renderVectors
+                    ApplyVectorExport.manifestPath root, ApplyVectorExport.renderManifest ]
+
+              for path, _ in pairs do
+                  if not (File.Exists path) then
+                      failtestf
+                          "this repository carries no %s at '%s' — re-run `--emit-apply` (no argument writes into conformance/) and commit the result"
+                          (Path.GetFileName path)
+                          path
+
+              // First the ORACLE question — is what the file records still true of this
+              // engine? — because that is the failure a host would suffer.
+              let committed = File.ReadAllText(ApplyVectorExport.vectorsPath root)
+
+              match ApplyVectorExport.parseVectors committed with
+              | Error m -> failtest ("the committed vectors did not read: " + m)
+              | Ok vectors ->
+                  let failures = vectors |> List.choose ApplyVectorExport.checkVector
+
+                  Expect.isEmpty failures (sprintf "the committed vectors disagree with this engine: %A" failures)
+
+              // Then the FRESHNESS question. Distinct from the above: a rendering change (a new
+              // vector, a reworded description) leaves every vector true and the file stale.
+              for path, render in pairs do
+                  Expect.equal
+                      (File.ReadAllText path)
+                      (render ())
+                      (sprintf
+                          "the committed conformance/apply/%s is not what this kit renders — re-run `--emit-apply` (no argument) and commit conformance/"
+                          (Path.GetFileName path))
+
+          testCase "the corpus copy of apply/ is fresh (opt-in: FUARAN_CORE_CORPUS_FRESHNESS)"
+          <| fun _ ->
+              // The copy-freshness leg, on the same terms as the laws/ one: Phase 130's absent-
+              // corpus failure preserved on the leg it was written for, the registry's
+              // `fingerprint` equality so this leg and `roadmapctl copies` agree, asked for by
+              // name (CI does) and skipped by name otherwise.
               match SiblingCorpus.resolve ApplyVectorExport.familyDirName with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
-                  let pairs =
-                      [ ApplyVectorExport.vectorsPath root, ApplyVectorExport.renderVectors
-                        ApplyVectorExport.manifestPath root, ApplyVectorExport.renderManifest ]
+                  let owned = OwnedConformance.root ()
 
-                  for path, render in pairs do
-                      if not (File.Exists path) then
+                  let pairs =
+                      [ ApplyVectorExport.vectorsPath root, ApplyVectorExport.vectorsPath owned
+                        ApplyVectorExport.manifestPath root, ApplyVectorExport.manifestPath owned ]
+
+                  for copy, source in pairs do
+                      if not (File.Exists copy) then
                           failtestf
                               "the corpus at '%s' carries no %s — re-run `--emit-apply <corpus dir>` and commit the corpus"
                               root
-                              (Path.GetFileName path)
+                              (Path.GetFileName copy)
 
-                  // First the ORACLE question — is what the corpus records still true of this
-                  // engine? — because that is the failure a host would suffer.
-                  let committed = File.ReadAllText(ApplyVectorExport.vectorsPath root)
+                      if not (File.Exists source) then
+                          failtestf
+                              "this repository carries no %s at '%s' — nothing to compare the copy against"
+                              (Path.GetFileName source)
+                              source
 
-                  match ApplyVectorExport.parseVectors committed with
-                  | Error m -> failtest ("the committed vectors did not read: " + m)
-                  | Ok vectors ->
-                      let failures = vectors |> List.choose ApplyVectorExport.checkVector
-
-                      Expect.isEmpty
-                          failures
-                          (sprintf "the committed corpus vectors disagree with this engine: %A" failures)
-
-                  // Then the FRESHNESS question. Distinct from the above: a rendering change (a new
-                  // vector, a reworded description) leaves every vector true and the file stale.
-                  for path, render in pairs do
                       Expect.equal
-                          (File.ReadAllText path)
-                          (render ())
+                          (OwnedConformance.fingerprint (File.ReadAllText copy))
+                          (OwnedConformance.fingerprint (File.ReadAllText source))
                           (sprintf
-                              "the committed %s is not what this kit renders — re-run `--emit-apply <corpus dir>`"
-                              (Path.GetFileName path)) ]
+                              "the corpus copy '%s' is STALE against this repository's conformance/%s/%s — re-run `--emit-apply <corpus dir>` and commit the corpus (copies.json names the same command)"
+                              copy
+                              ApplyVectorExport.familyDirName
+                              (Path.GetFileName source)) ]

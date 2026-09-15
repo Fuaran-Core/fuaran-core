@@ -20,11 +20,17 @@ open Expecto
 // the tree would buy the proof nothing and cost every run a checkout.
 //
 // The legs deliberately call `anchoredFrom` rather than `resolve`, so the
-// environment cannot decide the answer. `resolve` puts the explicit-directory
-// override and the documented opt-out in front of the anchoring; either would
-// make both sides of the comparison trivially equal and prove nothing about
-// where the lookup anchors — which is precisely what the CI configuration
-// sets.
+// environment cannot decide the answer. `resolve` puts the opt-in gate and the
+// explicit-directory override in front of the anchoring; either would make
+// both sides of the comparison trivially equal and prove nothing about where
+// the lookup anchors — which is precisely what the CI configuration sets.
+//
+// Phase 172 — the gate itself is proved at the bottom, in both directions and
+// from VALUES rather than the process environment: not asked ⇒ nothing is
+// consulted and the leg says so by name; asked and absent ⇒ the Phase 130
+// failure, naming the path. Those two are the phase's acceptance ("green with
+// no corpus reachable", "fails loudly when asked for and absent") as unit
+// tests, so they cannot regress without a red line here.
 // ---------------------------------------------------------------------------
 
 /// The climb Phase 130 replaced, verbatim. It lives here rather than in the seam because it
@@ -209,7 +215,10 @@ let tests =
                           SiblingCorpus.dirVariable
                           "the failure names the variable that points at an existing clone"
 
-                      Expect.stringContains why SiblingCorpus.skipVariable "the failure names the documented opt-out"
+                      Expect.stringContains
+                          why
+                          SiblingCorpus.askVariable
+                          "the failure names the variable that asks for this leg"
               finally
                   try
                       Directory.Delete(anchor, true)
@@ -257,4 +266,42 @@ let tests =
                   try
                       Directory.Delete(root, true)
                   with _ ->
-                      () ]
+                      ()
+
+          // ---- Phase 172: the opt-in gate, both directions -------------------------------
+
+          testCase "a leg that was NOT asked for consults nothing and says so by name"
+          <| fun _ ->
+              // The directory override names a path that does not exist. Were the override
+              // consulted at all, the answer would be Absent; the gate reads the ask FIRST, so
+              // a checkout with no corpus anywhere is green by construction.
+              let nowhere =
+                  Path.Combine(Path.GetTempPath(), "fuaran-core-nowhere-" + Guid.NewGuid().ToString("N"))
+
+              for ask in [ None; Some ""; Some "   " ] do
+                  match SiblingCorpus.resolveWith ask (Some nowhere) "laws" repoRoot with
+                  | SiblingCorpus.NotAsked why ->
+                      Expect.stringContains why SiblingCorpus.askVariable "the skip names the variable that asks"
+                      Expect.stringContains why "NOT ASKED FOR" "and says the leg was not asked for"
+                      Expect.stringContains why "nothing was compared" "and that nothing was compared"
+                      Expect.stringContains why "laws/" "and which family's leg it was"
+                  | SiblingCorpus.Found root ->
+                      failtestf "resolved a corpus at '%s' although the leg was not asked for" root
+                  | SiblingCorpus.Absent why ->
+                      failtestf "the override was consulted although the leg was not asked for: %s" why
+
+          testCase "a leg that WAS asked for fails when the corpus is absent, naming the path"
+          <| fun _ ->
+              // The go-red for the acceptance clause "fails loudly when asked for and absent":
+              // asked by value, pointed at a directory that does not exist, and the answer is
+              // the Phase 130 failure carrying that path and the remedy — never a skip.
+              let nowhere =
+                  Path.Combine(Path.GetTempPath(), "fuaran-core-nowhere-" + Guid.NewGuid().ToString("N"))
+
+              match SiblingCorpus.resolveWith (Some "1") (Some nowhere) "laws" repoRoot with
+              | SiblingCorpus.Absent why ->
+                  Expect.stringContains why nowhere "the failure names the directory it was pointed at"
+                  Expect.stringContains why SiblingCorpus.dirVariable "and the variable that pointed there"
+                  Expect.stringContains why SiblingCorpus.cloneUrl "and carries the clone command"
+              | SiblingCorpus.NotAsked why -> failtestf "asked for by value, yet reported not asked: %s" why
+              | SiblingCorpus.Found root -> failtestf "a corpus resolved at '%s' from a non-existent override" root ]

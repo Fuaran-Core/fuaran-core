@@ -2269,7 +2269,7 @@ module private JsonParseDiff =
             |> Array.sort
             |> Array.toList
             |> List.map (fun p -> Path.GetFileNameWithoutExtension p, File.ReadAllText p)
-        | SiblingCorpus.SkippedByRequest why -> failtest why
+        | SiblingCorpus.NotAsked why -> skiptest why
         | SiblingCorpus.Absent why -> failtest why
 
     /// The near misses, hand-written so every classified failure is REACHED rather than hoped for —
@@ -4642,7 +4642,7 @@ let private versionProbeGoRed (label: string) (before: Set<string>) (after: Set<
 let private pinnedIdlText () =
     match SiblingCorpus.resolve "nodes" with
     | SiblingCorpus.Found root -> System.IO.File.ReadAllText(System.IO.Path.Combine(root, "idl.json"))
-    | SiblingCorpus.SkippedByRequest why -> failtest why
+    | SiblingCorpus.NotAsked why -> skiptest why
     | SiblingCorpus.Absent why -> failtest why
 
 /// The kind tags an `idl.json` text declares, read through the production artifact differ rather
@@ -4941,7 +4941,7 @@ let proofOracleTests =
           testCase "the oracle agrees with production over every pair and triple of corpus ops"
           <| fun _ ->
               match SiblingCorpus.resolve "ops" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let ops =
@@ -5106,7 +5106,7 @@ let proofOracleTests =
           testCase "the decode oracle agrees with Wire.Decode over every nodes/ fixture"
           <| fun _ ->
               match SiblingCorpus.resolve "nodes" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let files = Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort
@@ -5126,7 +5126,7 @@ let proofOracleTests =
           testCase "the decode oracle agrees with Wire.Decode over every ops/ fixture"
           <| fun _ ->
               match SiblingCorpus.resolve "ops" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let files = Directory.GetFiles(Path.Combine(root, "ops"), "*.json") |> Array.sort
@@ -5195,7 +5195,7 @@ let proofOracleTests =
                       | Ok _ -> ()
 
               match SiblingCorpus.resolve "nodes" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   for path in Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort do
@@ -5306,7 +5306,7 @@ let proofOracleTests =
           testCase "production's betweenOps recovers the model's delta over the corpus ops pool"
           <| fun _ ->
               match SiblingCorpus.resolve "ops" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let ops =
@@ -6179,7 +6179,7 @@ let proofOracleTests =
           testCase "the corpus dag/ family's shapes, rebuilt through production's own append and merge"
           <| fun _ ->
               match SiblingCorpus.resolve "dag" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let shapes =
@@ -6676,66 +6676,68 @@ let proofOracleTests =
                           (Set.contains cls t.Classes)
                           (sprintf "the sample reached a %s rejection (reached: %A)" cls t.Classes)
 
-          // ---- Phase 139 — the same differential, over the corpus `apply/` family ----
+          // ---- Phase 139 — the same differential, over the committed `apply/` family ----
+          //
+          // Phase 172: read from THIS repository's `conformance/apply/`, which is where the
+          // family is authored; the corpus carries a declared copy of it. This leg is about the
+          // model agreeing with production over Core's own vectors, so it needs no corpus and
+          // runs in the default suite.
 
-          testCase "the preservation oracle agrees with Ops.apply over the corpus `apply/` fixtures"
+          testCase "the preservation oracle agrees with Ops.apply over the committed `apply/` fixtures"
           <| fun _ ->
-              match SiblingCorpus.resolve ApplyVectorExport.familyDirName with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
-              | SiblingCorpus.Absent why -> failtest why
-              | SiblingCorpus.Found root ->
-                  let path = ApplyVectorExport.vectorsPath root
+              let root = OwnedConformance.root ()
+              let path = ApplyVectorExport.vectorsPath root
 
-                  if not (System.IO.File.Exists path) then
-                      failtestf
-                          "the corpus at '%s' carries no %s — the differential's second host is not published there"
-                          root
-                          ApplyVectorExport.vectorsFileName
+              if not (System.IO.File.Exists path) then
+                  failtestf
+                      "this repository carries no %s at '%s' — the differential's second host is not committed; re-run `--emit-apply` (no argument) and commit conformance/"
+                      ApplyVectorExport.vectorsFileName
+                      path
 
-                  match ApplyVectorExport.parseVectors (System.IO.File.ReadAllText path) with
-                  | Error m -> failtest ("the committed apply vectors did not read: " + m)
-                  | Ok vectors ->
-                      let t = presCorpusDifferential TreeOps.apply vectors
+              match ApplyVectorExport.parseVectors (System.IO.File.ReadAllText path) with
+              | Error m -> failtest ("the committed apply vectors did not read: " + m)
+              | Ok vectors ->
+                  let t = presCorpusDifferential TreeOps.apply vectors
 
-                      match t.Diffs with
-                      | d :: _ -> failtestf "the preservation oracle and production DISAGREE on a corpus fixture\n%s" d
-                      | [] ->
-                          // Adequacy over the committed sample, so a corpus that quietly stopped
-                          // carrying a clause cannot read as agreement about it. The bounds are the
-                          // family's own claim about itself, not a count of this run.
-                          Expect.isGreaterThan
-                              t.Accepted
-                              0
-                              (sprintf "the corpus sample carries accepted ops (accepted=%d)" t.Accepted)
+                  match t.Diffs with
+                  | d :: _ -> failtestf "the preservation oracle and production DISAGREE on a corpus fixture\n%s" d
+                  | [] ->
+                      // Adequacy over the committed sample, so a corpus that quietly stopped
+                      // carrying a clause cannot read as agreement about it. The bounds are the
+                      // family's own claim about itself, not a count of this run.
+                      Expect.isGreaterThan
+                          t.Accepted
+                          0
+                          (sprintf "the corpus sample carries accepted ops (accepted=%d)" t.Accepted)
 
-                          Expect.isGreaterThan
-                              t.Rejected
-                              0
-                              (sprintf "the corpus sample carries refused ops (rejected=%d)" t.Rejected)
+                      Expect.isGreaterThan
+                          t.Rejected
+                          0
+                          (sprintf "the corpus sample carries refused ops (rejected=%d)" t.Rejected)
 
-                          Expect.isGreaterThan
-                              t.Collided
-                              0
-                              (sprintf
-                                  "the corpus sample carries a graft whose id the tree already holds (collided=%d)"
-                                  t.Collided)
+                      Expect.isGreaterThan
+                          t.Collided
+                          0
+                          (sprintf
+                              "the corpus sample carries a graft whose id the tree already holds (collided=%d)"
+                              t.Collided)
 
-                          Expect.isGreaterThan
-                              t.Duplicated
-                              0
-                              (sprintf
-                                  "the corpus sample carries a graft repeating an id WITHIN itself (duplicated=%d)"
-                                  t.Duplicated)
+                      Expect.isGreaterThan
+                          t.Duplicated
+                          0
+                          (sprintf
+                              "the corpus sample carries a graft repeating an id WITHIN itself (duplicated=%d)"
+                              t.Duplicated)
 
-                          for cls in
-                              [ "UnknownNode"
-                                "DuplicateId"
-                                "CannotRemoveRoot"
-                                "WouldNestUnderSelf"
-                                "ReorderMismatch" ] do
-                              Expect.isTrue
-                                  (Set.contains cls t.Classes)
-                                  (sprintf "the corpus sample reached a %s rejection (reached: %A)" cls t.Classes)
+                      for cls in
+                          [ "UnknownNode"
+                            "DuplicateId"
+                            "CannotRemoveRoot"
+                            "WouldNestUnderSelf"
+                            "ReorderMismatch" ] do
+                          Expect.isTrue
+                              (Set.contains cls t.Classes)
+                              (sprintf "the corpus sample reached a %s rejection (reached: %A)" cls t.Classes)
 
           testCase "a validator that SKIPS the subtree check loses against production — the measurement can fail"
           <| fun _ ->
@@ -7202,7 +7204,7 @@ let proofOracleTests =
               // — the case the corpus itself cannot present, because every fixture in it is
               // canonically ordered.
               match SiblingCorpus.resolve "nodes" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let files = Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort
@@ -7249,7 +7251,7 @@ let proofOracleTests =
           testCase "every combinator answers the same on every shuffle of every ops/ fixture"
           <| fun _ ->
               match SiblingCorpus.resolve "ops" with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let files = Directory.GetFiles(Path.Combine(root, "ops"), "*.json") |> Array.sort

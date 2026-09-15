@@ -1,20 +1,102 @@
-# The shared wire-format conformance corpus
+# Core's conformance vectors, and the shared corpus that carries a copy
 
-Three suites in this repository certify against a corpus that lives in **another repository**:
+Three questions are asked about the conformance vectors this repository publishes, and they have
+three different answerers. Keeping them apart is the whole of Phase 172; until then all three were
+answered by one mechanism, which is why "Core is generic" was true of the packages and false of the
+gate.
 
-| Family | What it certifies | Suite |
+| Question | Who answers it | Where |
 |---|---|---|
-| `laws/transform-laws.json` | the transform-law reference vectors this kit publishes are the vectors the corpus carries, and each one is still true of this evaluator | `tests/Fuaran.Core.Tests/LawVectorTests.fs` |
-| `nodes/*.json` | the vendored wire snapshots the IDL inversion gate asserts against have not drifted from the live corpus | `tests/Fuaran.Core.Tests/IdlSpikeTests.fs` |
-| `apply/` | the apply engine answers what the published apply contract says it answers, and the F\* preservation model agrees with it over those same fixtures | `tests/Fuaran.Core.Tests/ApplyVectorTests.fs`, `ProofOracleTests.fs` |
+| **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read | `tests/Fuaran.Core.Tests/LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracleTests.fs` |
+| **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (`roadmapctl copies <workspace-root>`, warn-first, on every estate sweep); and an opt-in in-suite leg that FAILS on it where the corpus is present and asked for — CI, on every push | `copies.json`; the two `… is fresh (opt-in: FUARAN_CORE_CORPUS_FRESHNESS)` legs |
+| **Are the hosts certified?** | each host's own certification kit, run in that host's repository against the corpus at the paths it has always read; `apply/manifest.json` records per-host adoption | not this repository's question — see [Adoption](#adoption) |
 
-The corpus is <https://github.com/fuaran-ui/fuaran-ui-specification>, resolved on disk under the
-directory name `wire-format-fixtures`. The directory name is the interface; the repository name is
-not.
+## What this repository owns
 
-## Getting it
+```
+conformance/
+  laws/transform-laws.json     the transform-law reference vectors (`--emit-laws`)
+  apply/skeleton-apply.json    the skeleton-op apply contract (`--emit-apply`)
+  apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
+```
 
-Either of these is found with no further configuration:
+Every file is EMITTED, never hand-edited: each expectation is computed by calling the reference
+evaluator or `Ops.apply`, and the suite holds the committed bytes to a fresh render on every run.
+The corpus — <https://github.com/fuaran-ui/fuaran-ui-specification>, resolved on disk under the
+directory name `wire-format-fixtures` — carries the same three files at `laws/` and `apply/`, and
+those are **declared copies**: `copies.json` names each source, its copy's workspace path, the
+`fingerprint` equality it is held to, and the command that refreshes it. The hosts keep reading the
+corpus at the same paths with the same bytes; a copy is what they were always reading, and this
+names it. Nothing moved OUT of the corpus.
+
+### Emitting
+
+```powershell
+# the source of truth — this repository's conformance/ (what the default suite certifies)
+dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws
+dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply
+
+# the corpus copy — the same exporter, pointed at a corpus checkout
+dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <corpus dir>
+dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>
+```
+
+A flag rather than a test side-effect: the corpus is a separate repository, and a suite that wrote
+into it on every run would dirty a shared clone. Note the name — the UI language repository's
+`--emit-corpus` renders THAT domain's node vectors and knows nothing about this engine; the apply
+semantics and the transform laws are Core's, so Core emits them.
+
+A change to what this kit renders is not finished until BOTH have been written and committed: the
+in-repo file in the same commit as the change (the default suite is red otherwise), and the corpus
+copy in the corpus repository. The two repositories are one change-set; the registry names the copy
+as stale, with that exact command, for as long as the second half is outstanding.
+
+### The `kitVersion` stamp
+
+`transform-laws.json` carries the producing kit's version, and two hosts read it, so the stamp
+stays in the file and the file's bytes are what the copy must match. What Phase 172 changes is
+WHERE a `<Version>` move goes red: the stamp lives in this repository's committed file, so a version
+cut re-emits it in the same commit and Core's own gate never crosses a repository boundary to fail.
+The corpus copy is then reported **stale by fingerprint** — on the sweep from every checkout, and by
+the opt-in leg where the corpus is present — until the copy is refreshed; that is the copy being
+stale, named, with its remedy, rather than an unrelated phase's gate going red days later (the
+Phase 139 finding). The `apply/` family carries no stamp at all, for the reason its exporter's
+header gives: a specification whose every expectation is recomputed on each run cannot go stale for
+a reason unrelated to its content.
+
+## The opt-in live-corpus leg
+
+```powershell
+$env:FUARAN_CORE_CORPUS_FRESHNESS = '1'
+```
+
+Set, the suite runs every leg that needs the LIVE shared corpus; unset (the default), each of those
+legs reports itself **not asked for**, by that name, and says that nothing was compared against the
+shared corpus. What the leg covers — everything in this suite that reads `wire-format-fixtures/`,
+which is exactly the set of reads that is NOT about Core's own vectors:
+
+- the two copy-freshness legs above (`laws/`, `apply/`), the registry's `fingerprint` equality;
+- the proof-oracle differentials that use the domain's fixture pools as real-document input —
+  `nodes/`, `ops/`, `dag/`, `envelope/` and the pinned `idl.json` — beside their generative legs,
+  which run regardless;
+- the IDL spike's drift guard (its vendored `snapshots/` against the live `nodes/`);
+- the F\* target's partition over the pinned vocabulary and the generation diff that holds the
+  committed `proofs/Vocabulary.fst` to a fresh generation from the pinned `idl.json` (the
+  `Proofs.Vocabulary` step of `proofs/check.ps1`).
+
+**Once asked for, an absent corpus FAILS. It does not skip.** That is Phase 130's decision (D31),
+kept on the leg it was written for: a skip nobody asked for is indistinguishable in a green report
+from a comparison that ran, and four consecutive worktree gates once certified against a corpus
+none of them had read. The failure names every path it tried and the remedy. The old blanket
+opt-out `FUARAN_CORE_SKIP_CORPUS` is retired — with nothing left to skip by default, there was
+nothing for it to say.
+
+`--emit-fstar` is a command, not a leg: it reads the pinned `idl.json` because you ran it, and an
+invocation is its own ask. It uses the corpus locator directly and is not gated.
+
+### Getting the corpus
+
+Either of these is found with no further configuration once the leg is asked for:
 
 ```powershell
 # beside this checkout
@@ -30,51 +112,27 @@ A clone anywhere else is named explicitly:
 $env:FUARAN_CORE_CORPUS_DIR = 'C:\somewhere\wire-format-fixtures'
 ```
 
-`FUARAN_CORE_CORPUS_DIR` must point at the corpus **root** — the directory holding `manifest.json`
-and the family directories — not at a family. A directory that is not the corpus is refused by name
-rather than searched past: acceptance reads the `schema` and `idl` documents the corpus's own
-manifest declares, so an index that merely *mentions* those families cannot pass for one.
+`FUARAN_CORE_CORPUS_DIR` is a LOCATOR, not an ask: it says where the corpus is, and only
+`FUARAN_CORE_CORPUS_FRESHNESS` says whether this run reads it. It must point at the corpus **root** —
+the directory holding `manifest.json` and the family directories — not at a family. A directory that
+is not the corpus is refused by name rather than searched past: acceptance reads the `schema` and
+`idl` documents the corpus's own manifest declares, so an index that merely *mentions* those
+families cannot pass for one.
 
-## An absent corpus FAILS. It does not skip
+The lookup is anchored at the repository's **main working tree**, which git answers identically
+from every worktree of a repository (`git rev-parse --git-common-dir`, whose parent is the main
+tree) — the Phase 130 correction to a climb that started from wherever the binary was running and
+therefore never reached the corpus from a linked worktree.
 
-This is the decision worth stating plainly, because the opposite was true until Phase 130 and it
-cost a day.
+### What CI does
 
-Both suites used to locate the corpus by climbing upwards from wherever the test binary was running,
-and to `skiptest` by name when the climb found nothing. From the repository's main working tree the
-climb reached a corpus checked out alongside; from a **linked git worktree** of the same repository
-it never did, because a worktree sits somewhere else entirely. So four consecutive green gate runs
-had certified against a corpus none of them had read, and the first run that actually compared —
-one in the main tree — failed on drift that had been accumulating invisibly.
-
-A skip that means "this check did not run" is indistinguishable, in a green report, from a check
-that ran and passed. So:
-
-- the corpus is resolved from the repository's **main working tree**, which git answers identically
-  from every worktree of a repository (`git rev-parse --git-common-dir`, whose parent is the main
-  tree);
-- an absent corpus **fails**, naming every path it tried and the remedy;
-- the only way to skip is to ask for it.
-
-## Asking to skip
-
-```powershell
-$env:FUARAN_CORE_SKIP_CORPUS = '1'
-```
-
-The corpus legs then skip, and each printed skip names the variable and says that nothing was
-compared against the shared corpus. Use it when you are working on something unrelated and do not
-want a second clone; do not propose a change whose only green run was made with it set.
-
-## What CI does
-
-`.github/workflows/ci.yml` checks the corpus out beside the repository checkout and sets
-`FUARAN_CORE_CORPUS_DIR` to it. That is deliberate rather than incidental: it means every push
-compares against the corpus at its own `main`, so drift between this kit and the published corpus
-surfaces on the change that caused it instead of on somebody else's change days later.
-
-It also means a change to what this kit renders into the corpus is not finished until the corpus
-commit is pushed too. The two repositories are one change-set.
+`.github/workflows/ci.yml` checks the corpus out beside the repository checkout, names it in
+`FUARAN_CORE_CORPUS_DIR`, and sets `FUARAN_CORE_CORPUS_FRESHNESS`, in both the `verify` and the
+`proofs` jobs. So every push still compares against the corpus at its own `main`, and drift between
+this kit and the published corpus — a stale copy, a model that no longer agrees with production over
+the domain's documents, a vocabulary that moved under the committed F\* model — surfaces on the
+change that caused it instead of on somebody else's change days later. A machine holding only this
+repository runs the default suite and is green; that is the acceptance the phase was cut for.
 
 ## The `apply/` family
 
@@ -138,22 +196,3 @@ shape that does not break a host on arrival: at least one host's certification k
 manifest's fixture list as a whole and asserts that its per-kind leg tallies account for exactly the
 manifest's fixture count, so a new kind there is a red build in a repository that has adopted
 nothing.
-
-### Emitting it
-
-```powershell
-dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>
-```
-
-A flag rather than a test side-effect, for the reason `--emit-laws` is one: the corpus is a separate
-repository and a suite that wrote into it on every run would dirty a shared clone. Note the name —
-the UI language repository's `--emit-corpus` renders THAT domain's node vectors and knows nothing
-about this engine; the apply semantics are Core's, so Core emits them.
-
-**There is no `kitVersion` stamp in either file, and that is deliberate.** `laws/transform-laws.json`
-carries one and is then byte-compared whole, so any `<Version>` move reddens its freshness leg until
-the corpus is re-emitted — including a draft-slot cut, which is made once and ridden by several
-phases landing days apart. This family is not a sample of one kit's answers; it is a specification
-of apply semantics whose every expectation is RECOMPUTED on each run, which is a stronger guarantee
-than a stamp. An artefact that cannot go stale for a reason unrelated to its content does not need
-one.

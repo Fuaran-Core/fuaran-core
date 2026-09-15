@@ -137,7 +137,7 @@ let tests =
               // Phase 130: an absent corpus FAILS with the paths tried and the remedy. It used to
               // skip by name, which is what every linked worktree of this repository got.
               match SiblingCorpus.resolve corpusFamily with
-              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.NotAsked why -> skiptest why
               | SiblingCorpus.Absent why -> failtest why
               | SiblingCorpus.Found root ->
                   let dir = Path.Combine(root, corpusFamily)
