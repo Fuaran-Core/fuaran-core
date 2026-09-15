@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164 and 155).
+# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164, 155 and 173).
 #
 # THE ENGINE IS `kit/check-proof-leg.ps1` (Phase 155) and this file is the caller: it declares
 # what THIS repository has — the models, which of them are checked but not extracted, where the
@@ -8,11 +8,12 @@
 # read `kit/README.md` for what the kit is and how another repository adopts it. Nothing about the
 # mechanism lives here any more, and nothing about this repository lives in the kit.
 #
-# Step 2b (Phase 150) is this repository's own and sits in the host step below rather than in the
-# engine: the one GENERATED model is held to a fresh generation from the pinned `idl.json` by the
-# Proofs.Vocabulary family — the same discipline as the engine's extraction diff, one level
-# further up. Step 2 says the oracle is the model; this says the model is the vocabulary the
-# specification declares.
+# Step 2b (Phase 150; re-sourced by Phase 173) is this repository's own and sits in the host step
+# below rather than in the engine: the GENERATED models and their proof scripts are held to a fresh
+# generation from the certification vocabularies in `tests/Fuaran.Core.Tests` by the
+# Proofs.Vocabulary family — the same discipline as the engine's extraction diff, one level further
+# up. Step 2 says the oracle is the model; this says the model is the vocabulary the engine is
+# certified on. Nothing in this leg reads the shared corpus for the generated files any more.
 #
 # The flags are unchanged and are forwarded verbatim:
 #   -Runs N          N cold-cache verifications of every model (CI asks for 3)
@@ -70,62 +71,78 @@ $ErrorActionPreference = 'Stop'
 #                transport-only `Unknown` proved un-constructible from an encoder. It `open`s
 #                `WireCanon` — the byte claim is stated against Phase 149's renderer rather than
 #                a second one — so it follows it.
-#   Vocabulary — Phase 150, and the only GENERATED model here: the wire-format IDL's own
-#                vocabulary — its types, its discriminated encoder and its tag-dispatch decoder —
-#                emitted from `idl.json` by `Fuaran.Core.Idl.Codegen`'s F* target. Opens
-#                WireDecode, so it follows it. See the note below the list for the theorems that
-#                the same target emits and that are NOT committed beside it.
+#   Vocabulary — Phase 150, re-sourced by Phase 173: the GENERATED model of the engine's own
+#                REFERENCE vocabulary (`tests/Fuaran.Core.Tests/ReferenceIdl.fs`) — its types, its
+#                discriminated encoder and its tag-dispatch decoder — emitted by
+#                `Fuaran.Core.Idl.Codegen`'s F* target. Opens WireDecode, so it follows it.
+#   VocabularyProofs — Phase 173: the ROUND TRIP over `Vocabulary`, emitted by the same target from
+#                the same walk (`dec_node (enc_node x) == Ok x`, plus totality's exclusivity). Opens
+#                `Vocabulary`, so it follows it. See the note below the list for why this was not
+#                committed by Phase 150 and is now.
+#   DocVocabulary / DocVocabularyProofs — Phase 173: the same pair over the vendored second-domain
+#                sample (`SecondDomainSpike.fs`), which is on the DECLARED non-default wire shape —
+#                bare-string discriminator, flat node envelope, declaration key order — that the
+#                reference vocabulary does not reach. Each opens its predecessor.
+#   ScoreVocabulary / ScoreVocabularyProofs — Phase 173: the same pair over the vendored
+#                third-domain sample (`ScoreDomainSpike.fs`): records and omit-at-default at scale,
+#                on the same non-default shape. Each opens its predecessor.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs')
 
-# Phase 150 — why there is a generated MODEL here and no generated THEOREMS beside it (yet).
+# Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
+# are committed now when Phase 150 could not commit them.
 #
-# `Fuaran.Core.Idl.Codegen`'s F* target emits both: `FStarTarget.vocabularyModule` for the model
-# below, and `FStarTarget.proofsModule` for the round trip over it. The emitted proof script
-# DISCHARGES on the pinned prover for a small vocabulary — it was checked green at one kind and at
-# eight — and at the twenty this corpus's proof vocabulary selects it does not: the widest kind's
-# arm (`FileUpload`, eleven members, five of them conditional) is not proved even at
-# `--z3rlimit 200`, because a decoder reading eleven members off an object with five conditional
-# cells puts thirty-two object shapes into one query. So no theorems module is committed, rather
-# than one committed that does not verify.
-#
-# The cause is understood and named in `proofs/README.md`'s theorem 1 section, along with the three
-# remedies already measured, so that whoever takes it does not start from scratch. What IS here is
-# the model, checked below like every other module — and the totality it carries is not nothing:
-# every generated decoder is `Tot` on an arbitrary `jval`, which F* admits only after proving it.
+# `Fuaran.Core.Idl.Codegen`'s F* target emits both: `FStarTarget.vocabularyModuleFrom` for a model
+# and `FStarTarget.proofsModuleFrom` for the round trip over it. Phase 150 generated the one model
+# from the shared corpus's `idl.json` — the UI vocabulary, twenty selected kinds over a node
+# envelope with five optional members — and measured the emitted proof script NOT discharging at
+# that scale (one 65-goal node query failing a `--quake` seed; a 2^k blow-up in the widest kind's
+# arm), so it committed the model alone, at 322–398s a check. That was a domain's proof running in
+# the substrate's CI, which D14 had already ruled out for `tests/` (Phase 114). Phase 173 applies
+# the same rule to `proofs/`: the generation source is the set the engine is CERTIFIED on — the
+# reference vocabulary and the two vendored non-UI samples, the same set the F# and TypeScript
+# backends are certified over in `IdlCertificationTests` — so what this leg proves is the F*
+# BACKEND. Over that set the round trip discharges under the leg's own flags in seconds (the six
+# budgets in modules.json), so the proof scripts are committed and checked like every other module.
+# The UI vocabulary's model, proofs, cost and exhaustive-coverage decision are the adopter's —
+# `fuaran#1754`, the kit's first adopter — where the cost is charged to the commits that change UI
+# kinds. The per-kind lemma shape that reaches that scale is Phase 168's, and the measurement that
+# motivates it is kept in `proofs/README.md`'s theorem 1 section under its own heading.
 
-# Phase 150 — the model that is CHECKED but not EXTRACTED, and why an exemption exists at all.
+# Phase 150 — the generated modules are CHECKED but not EXTRACTED, and why an exemption exists at all.
 #
 # An oracle is here so the Expecto differential can run the extracted model beside the production
-# code over the same inputs. `Vocabulary` has no production code on this side to run beside: it
-# models the vocabulary an `idl.json` DECLARES, and the decoder it models is one a GENERATOR emits
-# into a consuming host rather than one this repository ships. Extracting it anyway would commit
-# ~400 KB of generated F# that nothing compiles, calls or compares — which is what an oracle is
-# supposed to be the opposite of. (The extractor also emits its mutual TYPE group with the `and`
-# indented one space, which F# 10's parser rejects outright even under the oracle project's
-# `--strict-indentation-`; that is a real finding about the F# backend — this is the first model
-# here with a mutual type group — and it is NOT the reason for this exemption. An oracle nothing
-# runs would not be worth committing even if it compiled.)
+# code over the same inputs. The generated modules have no production code on this side to run
+# beside: they model the vocabulary an `Idl` DECLARES, and the decoder they model is one a
+# GENERATOR emits into a consuming host rather than one this repository ships. Extracting them
+# anyway would commit generated F# that nothing compiles, calls or compares — which is what an
+# oracle is supposed to be the opposite of. (At the UI vocabulary's scale that was ~400 KB; the
+# extractor also emits a mutual TYPE group with the `and` indented one space, which F# 10's parser
+# rejects outright even under the oracle project's `--strict-indentation-` — a real finding about
+# the F# backend, and NOT the reason for this exemption. An oracle nothing runs would not be worth
+# committing even if it compiled.) A proof script extracts to nothing at all.
 #
 # The exemption is NARROW and it is not a hole in the discipline: what step 2 buys for the other
-# models — "the artefact is the model, byte for byte" — this one gets from the GENERATION diff in
-# the host step instead, one level further up, against the `idl.json` it is generated from.
-$proofOnly = @('Vocabulary')
+# models — "the artefact is the model, byte for byte" — these get from the GENERATION diff in the
+# host step instead, one level further up, against the vocabularies they are generated from.
+$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs')
 
 # The host step, in this order. Separate invocations rather than one prefix filter, so each failure
 # reads as what it is rather than as one red suite.
 #   Proofs.Vocabulary — Phase 150's GENERATION diff, beside the engine's extraction diff and for
-#                       the same reason one step further up: it holds the committed
-#                       `Vocabulary.fst` to a fresh generation from the pinned `idl.json`, so the
-#                       vocabulary the model is about is the vocabulary the specification declares.
-#                       An IDL that moves without a regeneration is VOCABULARY DRIFT, and this is
-#                       where it is named. It runs here rather than ahead of the prover because
-#                       the generator is F# and the host step is the first thing with a built test
+#                       the same reason one step further up: it holds each committed model and
+#                       proof script to a fresh generation from the certification vocabulary it
+#                       is generated from (Phase 173: `ReferenceIdl.refIdl` and the two vendored
+#                       samples, in the test project — no corpus read), so the vocabulary the
+#                       theorem is about is the vocabulary the engine is certified on. A vocabulary
+#                       that moves without a regeneration is VOCABULARY DRIFT, and this is where it
+#                       is named. It runs here rather than ahead of the prover because the
+#                       generator is F# and the host step is the first thing with a built test
 #                       project to hand — and because the leg fails either way: a stale model still
 #                       verifies, and then this step reports what it is stale against.
 #   Proofs.Oracle     — the differential: each extracted model beside the production code.
@@ -133,7 +150,7 @@ $proofOnly = @('Vocabulary')
 $hostFilters = @(
     @{
         Filter  = 'Proofs.Vocabulary'
-        Failure = 'the generated vocabulary (Proofs.Vocabulary) is RED — the committed F* model and the pinned idl.json disagree, or the target refused a construct'
+        Failure = 'the generated vocabulary (Proofs.Vocabulary) is RED — a committed F* model or proof script and its certification vocabulary disagree, or the target refused a construct'
     }
     @{
         Filter  = 'Proofs.Oracle'

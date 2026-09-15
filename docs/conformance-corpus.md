@@ -91,8 +91,9 @@ none of them had read. The failure names every path it tried and the remedy. The
 opt-out `FUARAN_CORE_SKIP_CORPUS` is retired — with nothing left to skip by default, there was
 nothing for it to say.
 
-`--emit-fstar` is a command, not a leg: it reads the pinned `idl.json` because you ran it, and an
-invocation is its own ask. It uses the corpus locator directly and is not gated.
+`--emit-fstar` no longer reads the corpus at all (Phase 173): the generated F\* models and proof
+scripts under `proofs/` are emitted from the certification vocabularies in the test project, and
+the `Proofs.Vocabulary` generation diff is not a corpus leg and is not gated on the ask.
 
 ### Getting the corpus
 

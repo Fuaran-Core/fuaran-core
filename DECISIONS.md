@@ -1,5 +1,83 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-15 — D41: D14 governs `proofs/` as it governs `tests/` — the proof leg certifies the backend over the certification set, and a domain proves its own vocabulary
+
+**Decided (Phase 173).** The generated F\* files under `proofs/` are emitted from the vocabularies
+the engine is CERTIFIED on — `ReferenceIdl.refIdl` and the two vendored non-UI samples, the same set
+`IdlCertificationTests` holds the F# and TypeScript backends to — and never from a domain's
+vocabulary. What the proof leg proves is therefore the F\* BACKEND (`FStarTarget`): that the
+decoders it emits are total and that the round trip it emits discharges, over both declared wire
+shapes and every type case the reference vocabulary was authored to reach. A domain runs the same
+generator over its own `Idl` in its own repository, where the cost is charged to the commits that
+change its kinds; the UI vocabulary's model, proofs, cost and exhaustive-coverage decision are
+`fuaran#1754`'s, the proof kit's first adopter. `--emit-fstar` takes its vocabularies from the test
+project, the `Proofs.Vocabulary` generation diff reads no corpus, and nothing under `proofs/` names
+a UI kind.
+
+**Why this is D14 and not a new rule.** D14 said a vocabulary is the domain's contract, moves at the
+domain's cadence, and does not live in the substrate; Phase 114 completed it for `tests/` by cutting
+a neutral reference vocabulary so the engine's certification no longer rested on the UI one. Phase
+150 then brought the UI vocabulary back through `proofs/` — `Vocabulary.fst` regenerated from the
+corpus's `idl.json`, a 322–398s budget row in Core's cost ledger, and the round-trip theorems held
+out of the leg because at that vocabulary's scale they did not discharge. Every one of those facts
+was a fact about the UI vocabulary presented as a fact about the leg. The placement was a default —
+the leg existed nowhere else — and this entry makes it a decision the other way: the rule that
+governs which vocabulary `tests/` certifies against governs which vocabulary `proofs/` proves over,
+for the same reason. A proof running in the substrate's CI over a domain's kinds is that domain's
+cost imposed on every other commit, and its result is a theorem about one adopter that the substrate
+cannot honestly cite as a property of the engine.
+
+**Two premises the shard carried were checked against the tree and one was false.** (1) "The
+reference vocabulary reaches every backend refusal class by construction, because it was authored
+to reach every `IdlType`." Reaching every type case is not reaching every refusal class: most of the
+backend's refusals are about an ILL-FORMED IDL — an undeclared record, a union arity mismatch, an
+unresolved type parameter, a transparent case that is not one scalar, a default omitting a required
+member — which no well-formed certification vocabulary carries. The one refusal a well-formed
+vocabulary CAN reach at kind level is the numeric default, and the reference vocabulary reaches it
+(`Measure.value`'s `Fixed { value = 0.0 }`; the score sample's `Note.voice` / `Chord.voice` reach it
+too). `IdlFStarTargetTests` pins the corrected form: the three boundary kinds as exactly that set,
+and every other refusal class to a hand-written case. (2) "`FStarTarget.proofKinds` is the selection
+rule." It is a cost control sized against a vocabulary whose node envelope carries dozens of declared
+types; over the reference vocabulary, whose envelope is two scalars, it keeps ONE kind of five and
+drops the four the vocabulary exists for. The committed models cover every expressible kind, the
+rule is left unchanged as the adopter's instrument, and the one-of-five result is pinned so nobody
+re-takes the measurement.
+
+**What the measurement changed about Phase 150's conclusion.** Phase 150 committed the model alone:
+the emitted round trip did not discharge at twenty UI kinds — a 65-goal node query failing a
+`--quake` seed, a 2^k blow-up in the widest kind's arm — and a `.fst` that does not verify is worse
+than none. Phase 150 also recorded WHY: the cost is the node envelope's closure, not the kinds. Over
+the certification set that envelope is two scalars and k = 2, and all six generated modules check
+cold under the leg's own flags in seconds (`proofs/modules.json`; the reference pair in ten or under).
+So the proof scripts are committed, registered in `$modules`, budgeted, and carried as `proved` rows
+— the ladder's every-module-has-a-row clause requires the claim to be written down once the leg
+checks the module, which is what decided that those rows are this phase's rather than Phase 168's.
+Phase 168 keeps what it was cut for: the per-kind lemma shape that reaches UI scale, and the `wf`
+characterisation over a generated acceptance predicate. The UI measurement stays in
+`proofs/README.md`'s theorem 1 section as history under a heading that says whose problem it is now.
+
+**The generator learned to say where a model came from, and that is the one surface change.**
+`FStarTarget.vocabularyModuleFrom` / `proofsModuleFrom` take a `Provenance` — pre-wrapped header
+lines naming the source, the regeneration command and what the theorem is a property of — because
+the same emitter now serves this repository's certification set and a domain's vocabulary in the
+domain's repository, and one hard-coded header cannot tell both stories. The un-suffixed
+`vocabularyModule` / `proofsModule` keep their signatures and emit a provenance honest about the one
+thing the generator knows (an IDL was supplied); until this phase they named this repository's
+corpus and its check script in a package a domain generates from. Additive, riding the 0.25.0 draft
+slot.
+
+**Rejected: one merged `Idl` for the whole certification set.** The three vocabularies declare
+different wire shapes (`WireShape.Default` against the samples' bare-string discriminator and flat
+envelope) and different node envelopes, and the emitted model is parameterised by both — a union
+would have to pick one shape and would certify the backend's other branches by nothing. Three pairs,
+each from its own walk, is the faithful form and is what `IdlCertificationTests` already means by
+"the union of the three": a set, not a merge.
+
+**Rejected: keeping the UI model beside the certification set "for coverage".** It would keep every
+one of the costs above for a claim the substrate cannot cite, and it would keep the corpus read in
+the leg. The adopter runs the same emitter over the same `idl.json` and gets the same model; nothing
+is lost but the misplacement.
+
 ## 2026-09-15 — D40: the hardening default is NOT flipped — it is what two published artifacts MEAN, and the refusal ships opt-in beside it
 
 **Decided (Phase 178).** `HardenPolicy.Default` keeps the four tokens the engine used to

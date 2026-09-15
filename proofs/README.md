@@ -40,6 +40,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `Limits.fst` | The WIRE_FORMAT §21 resource limits as NAMED PREMISES and nothing else (Phase 149): eight constants with their captions, and the two relations the section's own argument uses. It models no enforcement — §21.2's host obligations are about code it does not describe — and it exists so that a changed limit moves one constant rather than a paragraph of prose, and so the ladder can say which theorem depends on which bound. `WireCanon.fst` is the first consumer and takes one of the eight. |
 | `WireCanon.fst` | The eighth model (Phase 149): the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and `Canon.render` clause for clause, a READER for exactly the grammar they emit, and the canonical form proved in BOTH directions. Named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`, which already carries a `Canon`. It `open`s `Limits`; otherwise it shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Limits.fs`, `oracle/WireCanon.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Vocabulary.fst`, `DocVocabulary.fst`, `ScoreVocabulary.fst` and their `…Proofs.fst` | **Generated** — the other way round: not extracted FROM a model but emitted AS one, by `Fuaran.Core.Idl.Codegen`'s F\* target (Phase 150) from the three vocabularies the engine is certified on (Phase 173: `tests/Fuaran.Core.Tests/ReferenceIdl.fs`, `SecondDomainSpike.fs`, `ScoreDomainSpike.fs`). Each model carries a vocabulary's types, encoder and tag-dispatch decoder over `WireDecode`; each `…Proofs` carries the round trip `dec_node (enc_node x) == Ok x` over it. Held to a fresh generation by the `Proofs.Vocabulary` family; checked, not extracted. See theorem 1's generated-vocabulary section. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -804,8 +805,9 @@ the sources being the live files under this directory, so there is no second cop
 A domain instantiates fold confluence at its own witness by copying `DagFold.fst`, filling the
 template's fourteen holes — one of which, `{{DIAMOND}}`, is the obligation it proves — and adding the
 instance to its own `$modules`; the contract is stated under Theorem 2 and the procedure in
-`kit/README.md`. Not in the set: `Vocabulary.fst`, generated from this repository's `idl.json`, and
-`WireVersioning.fst`, Theorem 8 about this repository's IDL diff.
+`kit/README.md`. Not in the set: the six generated modules (`Vocabulary`, `DocVocabulary`,
+`ScoreVocabulary` and their `…Proofs`), which a domain does not copy but REGENERATES from its own
+`Idl` with the same backend, and `WireVersioning.fst`, Theorem 8 about this repository's IDL diff.
 
 ## Theorem 1 — decoder totality (Phase 135)
 
@@ -846,71 +848,143 @@ Five things are proved:
   — see the section below, which is also where the duplicate-key premise is argued and proved
   necessary.
 
-### The vocabulary is GENERATED now, and the round trip is a theorem about `idl.json` (Phase 150)
+### The vocabulary is GENERATED now, and the round trip is a theorem about the certification set (Phase 150; re-sourced by Phase 173)
 
 Everything above is about a **reference** vocabulary: four cases, written by hand beside the
 combinators, chosen to exercise one combinator each. That was the honest scope of Phase 135 and it
-said so — but it leaves theorem 1 saying nothing about the kind that landed last week, because the
-real vocabulary is the wire-format specification's `idl.json`, it carries 43 kinds, 28 records, 22
-unions and 46 enums, and it grows.
+said so — but it leaves theorem 1 saying nothing about the vocabulary an IDL actually declares, or
+about the backend that turns one into a decoder.
 
-`Vocabulary.fst` closes most of that gap, and it is **generated** — from `idl.json`, by a fourth
-backend of the IDL's own code generator (`FStarTarget`, beside the F# structural layer, the
-TypeScript encoder and the JSON schema). The same backend emits the proof script over it, from the
-same walk; how far that got, and why it is not committed here, is the cost note below:
+The generated modules close that gap, and they are **generated** — by a fourth backend of the IDL's
+own code generator (`FStarTarget`, beside the F# structural layer, the TypeScript encoder and the
+JSON schema) from the vocabularies this repository certifies the engine on. There are three pairs,
+one per certification vocabulary, and each pair is emitted from ONE walk:
 
-- **`Vocabulary.fst`** — the vocabulary's types, its `$type`-discriminated encoder and its
-  tag-dispatch decoder, over the `jval` value model and the combinators above. Generic unions are
-  monomorphised at the arguments the vocabulary reaches (`Binding<string>`, `Binding<bool>`,
-  `Binding<SelectOption list>`, …), which is what keeps every definition and every lemma
-  first-order: a parametric `Binding` would have to take its element codec as a value, and the
-  round-trip lemma would then need a higher-order hypothesis relating an encoder to a decoder it
-  cannot see.
-- **the proof script** — `rt_node` and the mutual family beside it: **`dec_node (enc_node x) == Ok
-  x`, for every value of every modelled type**, at every depth, through every list, map, optional
-  member and omit-default, plus `dec_node_total` for the outcome's exclusivity. `proofsModule`
-  emits it and the suite exercises it, but **no proof script is COMMITTED beside the model, and
-  that is a measurement rather than a plan** — see the cost note below.
+- **`Vocabulary.fst` / `VocabularyProofs.fst`** — the engine's own REFERENCE vocabulary
+  (`tests/Fuaran.Core.Tests/ReferenceIdl.fs`; Phase 114, completing D14 for the F# backend): the
+  part of the type model neither vendored sample uses — a hosted slot, an opaque sentinel, a
+  closure on the wire, a `TMap`, a `TJson`, a generic union at two arguments, a wire-mapped enum, a
+  host-only member — on the DEFAULT wire shape.
+- **`DocVocabulary.fst` / `DocVocabularyProofs.fst`** — the vendored second-domain sample
+  (`SecondDomainSpike.fs`), on the DECLARED non-default wire shape: bare-string discriminator,
+  flat node envelope, declaration key order.
+- **`ScoreVocabulary.fst` / `ScoreVocabularyProofs.fst`** — the vendored third-domain sample
+  (`ScoreDomainSpike.fs`): records and omit-at-default at scale, on the same non-default shape.
 
-**Why the proof script is generated and not written.** A hand-written proof over the real
-vocabulary would be a theorem about the vocabulary as it stood on the day it was written — the same
-defect as the reference vocabulary, one release later and harder to see. Generated, a kind added to
-the IDL enters the model at the next regeneration and **re-proves itself**, and a kind whose
-encoder and decoder disagree fails the leg.
+The model half carries the vocabulary's types, its discriminated encoder and its tag-dispatch
+decoder over the `jval` value model and the combinators above; generic unions are monomorphised
+at the arguments the vocabulary reaches, which is what keeps every definition and every lemma
+first-order. The proofs half is `rt_node` and the mutual family beside it — **`dec_node (enc_node
+x) == Ok x`, for every value of every modelled type**, at every depth, through every list, map,
+optional member and omit-default — plus `dec_node_total` for the outcome's exclusivity.
+
+**What is proved is the F\* BACKEND, and that sentence is the whole of Phase 173.** Phase 150
+generated the one model from the shared corpus's `idl.json` — the UI vocabulary — which put a
+domain's proof in the substrate's CI, the placement D14 had already ruled out for `tests/`
+(Phase 114 moved the UI vocabulary out of the engine's certification; Phase 123 deleted its byte
+pin). It was a default rather than a decision: the leg existed nowhere else. The generation source
+is now the certification set — the same set `IdlCertificationTests` certifies the F# and
+TypeScript backends over — so the theorem the leg carries on every push is about the generator,
+and it is exercised over both wire shapes, every type case the reference vocabulary was authored
+to reach, and the one boundary the backend has (below). A domain proves its OWN vocabulary in its
+own repository with the same generator, and the cost is charged to the commits that change its
+kinds: the UI vocabulary's model, its proofs, its cost and its exhaustive-coverage decision are
+`fuaran#1754`'s, the proof kit's first adopter. Nothing under `proofs/` names a UI kind, and the
+corpus read has left the leg — `--emit-fstar` takes its vocabularies from the test project, so the
+generation diff is not gated on a sibling clone.
+
+**Why the proof script is generated and not written.** A hand-written proof over a real vocabulary
+would be a theorem about the vocabulary as it stood on the day it was written — the same defect as
+the reference vocabulary, one release later and harder to see. Generated, a kind added to the IDL
+enters the model at the next regeneration and **re-proves itself**, and a kind whose encoder and
+decoder disagree fails the leg.
 
 **Two diffs hold it, and they are one level apart.** Step 2 of `check.ps1` holds each committed
 oracle to a fresh EXTRACTION, so the artefact the suite runs is the model. The `Proofs.Vocabulary`
-family holds the committed `Vocabulary.fst` to a fresh GENERATION from the pinned corpus, so the
-model is the vocabulary the specification declares — an IDL that moves without a regeneration is
-**vocabulary drift** and the leg names it, with
-`dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. The model is CHECKED
-but not EXTRACTED (`$proofOnly` in `check.ps1`): nothing here runs it beside production, because
-the decoder it models is one a generator emits into a consuming host and not one this repository
-ships, so an oracle for it would be several hundred kilobytes of generated F# that nothing
-compiles, calls or compares.
+family holds each committed model AND its proof script to a fresh GENERATION from the vocabulary
+in the test project, so the model is the vocabulary the engine is certified on — a vocabulary that
+moves without a regeneration is **vocabulary drift** and the leg names it, with
+`dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. The models are
+CHECKED but not EXTRACTED (`$proofOnly` in `check.ps1`): nothing here runs them beside production,
+because the decoder they model is one a generator emits into a consuming host and not one this
+repository ships. A proof script extracts to nothing at all.
 
-**What the model covers, and the two different reasons it does not cover the rest.** The emitted
-header carries the live list; the shapes are:
+**What the models cover, and the one reason a kind is outside them.** The emitted headers carry
+the live lists; the shape is:
 
 - **A construct with no wire-level meaning in the model is a BOUNDARY**, and a typed refusal
   (`CodegenError.UnmodellableInFStar`) rather than a dropped member — a silently-dropped member
-  would make the round trip a theorem about a document nobody sends. One kind of this corpus is
-  refused outright: `Tabs.activeIndex` declares the default `Binding.Static 0`, and the model's
-  numeric carriers are opaque type parameters, so there is no F* literal for it.
-- **A kind held out of the proof vocabulary is a COST CONTROL**, which a measurement could lift.
-  The rule is `FStarTarget.proofKinds`: every expressible kind that introduces no declared type
-  beyond the node envelope's own closure. It selects 20 of this corpus's 43 kinds, and the reason
-  it is drawn there rather than anywhere else is measured below.
+  would make the round trip a theorem about a document nobody sends. The one boundary a
+  well-formed vocabulary reaches is the NUMERIC DEFAULT: the model's numeric carriers are opaque
+  type parameters, so there is no F\* literal for `Measure.value`'s `Fixed { value = 0.0 }` in the
+  reference vocabulary or for `Note.voice` / `Chord.voice`'s `1` in the score sample, and those
+  three kinds are named in their headers rather than modelled. `IdlFStarTargetTests` pins the set
+  as exactly those three, so a fourth reads as the coverage change it is — and it pins that every
+  OTHER refusal class of the backend (an undeclared record, a union arity mismatch, an unresolved
+  type parameter, a host codec with no host type, a transparent case that is not one scalar, a
+  default omitting a required member, a bare-kind or tree-op slot) is reached by a hand-written
+  case, because those are refusals of an ILL-FORMED IDL that no certification vocabulary carries
+  by construction. Phase 173's shard assumed the reference vocabulary reaches every refusal class
+  "by construction"; checked against the backend, that premise was false — reaching every type
+  case is not reaching every refusal class — and the test above is the corrected form.
+- **`FStarTarget.proofKinds` is NOT what selects here, and the difference is asserted.** That
+  rule — every expressible kind introducing no declared type beyond the node envelope's closure —
+  is a cost control sized against a vocabulary whose envelope already carries dozens of declared
+  types. Over the reference vocabulary, whose envelope is two scalars, it keeps ONE kind of five
+  and drops the four that carry the type-model remainder the vocabulary exists to reach; measured
+  before it was replaced, and pinned (`proofKinds refIdl = ["Group"]`). The committed models
+  cover EVERY expressible kind, because the whole set costs seconds and there is nothing for a
+  cost control to control. The rule is unchanged: it is the adopter's instrument at the scale it
+  was measured at.
 
 Three things are deliberately NOT claimed here. The `wf` characterisation — `Ok? (dec el) == wf
-el`, which the reference vocabulary carries above — is not restated over the generated vocabulary:
-it needs a second generated predicate mirroring the decoder's accept set, a model-sized artefact of
-its own, so the round trip covers everything the encoder can produce and the characterisation of
-what ELSE is accepted is open. A **host-only** member is absent from the model entirely, because it
-is never on the wire. And a **wire-visible closure** is modelled as `unit` encoding to the fixed
-`"<closure>"` sentinel — not a weakening but the precise statement that the member carries no
-information, and the difference between a model of 67% of the vocabulary and one of 16%, since the
-node envelope reaches `Binding.Computed` and every kind reaches the envelope.
+el`, which the reference vocabulary carries above — is not restated over the generated
+vocabularies: it needs a second generated predicate mirroring the decoder's accept set, a
+model-sized artefact of its own, so the round trip covers everything the encoder can produce and
+the characterisation of what ELSE is accepted is open (Phase 168 carries it). A **host-only**
+member is absent from the model entirely, because it is never on the wire. And a **wire-visible
+closure** is modelled as `unit` encoding to the fixed `"<closure>"` sentinel — not a weakening but
+the precise statement that the member carries no information.
+
+**The cost, measured (Phase 173) — and why the theorems are committed now when Phase 150 could
+not commit them.** On the pinned prover, cold, with the leg's own flags (`--z3rlimit 40 --quake
+3`; `--ext context_pruning` emitted inside every generated module, `--z3rlimit 200` inside the
+proof scripts — the remedy Phase 150 measured at UI scale, which a small envelope never needs and
+pays nothing for). `WireDecode` measured 9s here against the 12s `modules.json` records as its
+fastest, which is what says the measurement is of this leg rather than of something adjacent to
+it. Seeded from `check.ps1 -Runs 3`; the six entries in `modules.json` carry the numbers.
+
+| module | what it is | cold, quaked (fastest–slowest of thirteen runs) | budget / floor |
+|---|---|---|---|
+| `Vocabulary` | reference model, 4 of 5 kinds | 3–10s | 20s / 0 |
+| `VocabularyProofs` | its round trip | 5–17s | 40s / 2s |
+| `DocVocabulary` | second-domain model, 11 of 11 kinds | 3–11s | 30s / 0 |
+| `DocVocabularyProofs` | its round trip | 5–9s | 20s / 2s |
+| `ScoreVocabulary` | third-domain model, 19 of 21 kinds | 8–16s | 40s / 4s |
+| `ScoreVocabularyProofs` | its round trip | 12–42s | 90s / 6s |
+
+The same legs re-seeded the FLOORS of eight hand-written modules downward (`modules.json`, each
+entry's note): this machine, idle, verified every one of them faster than the six-session machine
+their floors were seeded on, and two floors fired on the way — Chain at 4s against a 5s floor,
+WireCanon at 13s against 20s — which is the gate doing exactly what Phase 164 built it to do, and
+the recorded remedy (re-seed from the fastest genuine cold run, cite the phase) is what was done.
+
+Against the 322–398s the UI model alone cost, the whole set is an order of magnitude cheaper and
+the round trip discharges where at UI scale it did not — which is not a different prover or a
+different emitter but the finding Phase 150 itself recorded: **the cost is the node ENVELOPE's
+closure, not the kinds.** The UI vocabulary's envelope carried five optional members and
+fourteen declared types before any kind was reached; the reference vocabulary's carries two
+scalars. The 2^k object-shape blow-up that stopped `rt_node` at twenty UI kinds has k = 2 here.
+The CI proofs-job wall clock before and after is recorded in Phase 173's outcome.
+
+#### History — the UI vocabulary's measurements (Phase 150), now `fuaran#1754`'s problem
+
+What follows is Phase 150's measurement over the UI vocabulary, kept verbatim because it is the
+motivation for the per-kind lemma shape (Phase 168) and the test that shape has to pass where the
+UI vocabulary now lives. None of it describes a module in this directory any more: the numbers
+are the adopter's to reproduce, and the remedies are the adopter's to spend. "This corpus" below
+is the wire-format corpus's `idl.json`, 43 kinds, of which the cost rule selected 20.
+
 
 **The cost, measured — and the reason the theorems are OPT-IN.** On the pinned prover, cold, with
 the leg's own flags (`--z3rlimit 40 --quake 3`; `--ext context_pruning` emitted inside both
@@ -1131,19 +1205,19 @@ reddens `perm_as_int`. Each landed on the lemma that should have caught it.
    are certified by the wire-format corpus, not by this theorem; and transitivity or symmetry of
    `member_perm`, which nothing here needs and nothing here asserts.
 
-**Phase 150 amends clause 4's middle third, and it is worth saying which third.** The third is
-"anything about a domain's own decoder beyond the reference vocabulary modelled here", and it is no
-longer the boundary: `Vocabulary.fst` is the wire-format specification's OWN vocabulary, generated
-from `idl.json`, and the model covers 20 of its 43 kinds — so what carries to a
-domain is now the combinator layer **and** a machine-checked MODEL of a substantial slice of the
-vocabulary the specification declares, with every generated decoder total on every input. (The
-ROUND TRIP over it is emitted and not committed, for the measured reason in the cost note above,
-and `proofs.json` carries no `proved` row for it while that is true.) What the amendment does NOT
-buy, and must not be read as buying: this
-is a theorem about the vocabulary, not about any HOST's decoder. The six conformant hosts keep
-their own hand-written decoders and are certified against the fixture corpus; no host's build
-generates this model, and nothing here says a host implements it. The per-kind coverage, the two
-reasons a kind is outside it, and the cost that decided them are in the Phase 150 section above.
+**Phase 150 amended clause 4's middle third, and Phase 173 re-aimed the amendment.** The third
+is "anything about a domain's own decoder beyond the reference vocabulary modelled here". Phase
+150 replaced that boundary with a generated model of the UI vocabulary's `idl.json`; Phase 173
+replaces it with generated models — and committed, checked round trips — of the three
+vocabularies the engine is certified on. So what carries to a domain is the combinator layer
+**and** a machine-checked demonstration that the BACKEND which would generate that domain's
+model emits total decoders and a discharging round trip over both wire shapes and every type
+case the reference vocabulary reaches. What the amendment does NOT buy, and must not be read as
+buying: this is a theorem about the generator over the certification set, not about any
+domain's vocabulary and not about any HOST's decoder. A domain runs the same generator over its
+own `Idl` in its own repository (`fuaran#1754` for the UI one); a host keeps its own hand-written
+decoder and is certified against its corpus. The per-kind coverage, the one reason a kind is
+outside it, and the cost are in the section above.
 ## Theorem 2 — independence soundness for the tree algebra (Phase 133)
 
 Phase 131 proved fold confluence under one domain hypothesis, and Phase 132 established what that

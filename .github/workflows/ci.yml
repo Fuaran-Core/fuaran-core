@@ -75,8 +75,9 @@ jobs:
       - name: Proof leg (./proofs/check.ps1 -Runs 3)
         shell: pwsh
         env:
-          # The host step's Proofs.Vocabulary generation diff and the Proofs.Oracle pools over
-          # the corpus's ops/ and nodes/ are live-corpus legs (Phase 172): asked for by name.
+          # The host step's Proofs.Oracle pools over the corpus's ops/ and nodes/ are live-corpus
+          # legs (Phase 172): asked for by name. (The Proofs.Vocabulary generation diff reads the
+          # test project's own vocabularies since Phase 173 and needs no corpus.)
           FUARAN_CORE_CORPUS_FRESHNESS: '1'
           FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
         run: ./proofs/check.ps1 -Runs 3
