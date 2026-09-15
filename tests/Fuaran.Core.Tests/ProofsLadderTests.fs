@@ -55,6 +55,7 @@ module Fuaran.Core.Tests.ProofsLadderTests
 // and the module list is read from `check.ps1`'s own text rather than restated here — a second
 // copy of that list is precisely the drift this family exists to catch.
 
+open System
 open System.IO
 open System.Text.Json
 open System.Text.RegularExpressions
@@ -881,3 +882,233 @@ let proofsLadderTests =
               Expect.equal (List.length findings) 1 (sprintf "one finding — got:\n%s" (String.concat "\n" findings))
 
               Expect.stringContains (List.head findings) "[shape]" "the finding names the shape clause" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 175 — the kit's instantiation template, and `Skeleton.fst` as its first instance
+// ---------------------------------------------------------------------------
+//
+// `proofs/kit/templates/Instance.fst.template` is `Skeleton.fst` with holes: the fold-confluence
+// theorem instantiated at a domain by filling fourteen `{{HOLE}}`s. A template whose instance can
+// drift from it is two files that USED to agree, so this family holds the two together — the
+// committed `Skeleton.fst` is reproduced from the template, byte for byte, and a wrong value or an
+// unfilled hole is shown NOT to reproduce it. The substitution itself is the contract the template's
+// preamble states (drop through the marker line; replace every hole; refuse a `{{` that remains),
+// implemented here once so an adopter reading the test reads the rule.
+//
+// Two of the holes are prose — the header comment's interior and everything after the theorem —
+// and their values for `Skeleton.fst` are recovered FROM `Skeleton.fst` by matching the template's
+// fixed text around them, rather than restated here: a second copy of forty lines of prose would be
+// the drift this file exists to catch. The identifier holes are the map below, which is the map an
+// adopter writes.
+
+/// The line that ends the template's preamble; the instance is everything after it.
+let templateMarker = "(* ==== END OF PREAMBLE ==== *)"
+
+let private holeForm = Regex(@"\{\{([A-Z_]+)\}\}", RegexOptions.Compiled)
+
+/// The holes a template body carries, in first-occurrence order, each once.
+let templateHoles (body: string) : string list =
+    holeForm.Matches body
+    |> Seq.map (fun m -> m.Groups[1].Value)
+    |> Seq.distinct
+    |> List.ofSeq
+
+/// The template's body — everything after the marker line, which must occur exactly once.
+let templateBody (template: string) : Result<string, string> =
+    let lines = template.Split '\n'
+
+    match lines |> Array.indexed |> Array.filter (fun (_, l) -> l = templateMarker) with
+    | [| (i, _) |] -> Ok(String.Join("\n", lines[i + 1 ..]))
+    | hits ->
+        Error(sprintf "the marker line `%s` occurs %d times; the contract needs exactly one" templateMarker hits.Length)
+
+let private fill (values: (string * string) list) (body: string) : string =
+    values
+    |> List.fold (fun (acc: string) (k, v) -> acc.Replace("{{" + k + "}}", v)) body
+
+/// The instantiation contract: drop the preamble, fill every hole, refuse any that remains.
+let instantiate (template: string) (values: (string * string) list) : Result<string, string> =
+    templateBody template
+    |> Result.bind (fun body ->
+        let filled = fill values body
+
+        match templateHoles filled with
+        | [] -> Ok filled
+        | left -> Error(sprintf "unfilled holes: %s" (String.concat ", " left)))
+
+/// The identifier holes at the skeleton-op tree algebra — the map that makes `Skeleton.fst`.
+let skeletonHoles =
+    [ "MODULE", "Skeleton"
+      "DOMAIN", "TreeOps"
+      "OP", "op"
+      "STATE", "tree"
+      "REJ", "rejection"
+      "APPLY", "wapply"
+      "FOOTPRINT", "op_fp"
+      "FOLD", "skeleton_fold"
+      "DIAMOND", "op_independence_diamond"
+      "PROD_APPLY", "Ops.apply"
+      "PROD_FOOTPRINT", "Ops.footprint"
+      "PROD_FOLD", "FoldConfluence.foldOnce" ]
+
+let private proseHoles = [ "HEADER"; "TRAILER" ]
+
+/// Recover the two prose holes' values from an instance, by matching the template's fixed text
+/// around them: with the identifiers filled the body is `pre {{HEADER}} mid {{TRAILER}} post`, and
+/// an instance of it is `pre` + header + `mid` + trailer + `post`.
+let recoverProse
+    (template: string)
+    (identifiers: (string * string) list)
+    (instance: string)
+    : Result<(string * string) list, string> =
+    templateBody template
+    |> Result.map (fill identifiers)
+    |> Result.bind (fun filled ->
+        let ih = filled.IndexOf("{{HEADER}}", StringComparison.Ordinal)
+        let it = filled.IndexOf("{{TRAILER}}", StringComparison.Ordinal)
+
+        if ih < 0 || it < ih then
+            Error "the template must carry {{HEADER}} before {{TRAILER}}"
+        else
+            let pre = filled.Substring(0, ih)
+            let mid = filled.Substring(ih + "{{HEADER}}".Length, it - ih - "{{HEADER}}".Length)
+            let post = filled.Substring(it + "{{TRAILER}}".Length)
+
+            if not (instance.StartsWith(pre, StringComparison.Ordinal)) then
+                Error "the instance does not begin as the template does"
+            elif not (instance.EndsWith(post, StringComparison.Ordinal)) then
+                Error "the instance does not end as the template does"
+            else
+                let inner =
+                    instance.Substring(pre.Length, instance.Length - pre.Length - post.Length)
+
+                let j = inner.IndexOf(mid, StringComparison.Ordinal)
+
+                if j < 0 then
+                    // Name the first fixed line the instance has lost, so a drift reads as a diff.
+                    let lost =
+                        mid.Split '\n'
+                        |> Array.tryFind (fun l -> l <> "" && not (inner.Contains l))
+                        |> Option.defaultValue "(every line is present; their order or spacing differs)"
+
+                    Error(sprintf "the template's fixed text is not in the instance; first line missing: %s" lost)
+                else
+                    Ok [ "HEADER", inner.Substring(0, j); "TRAILER", inner.Substring(j + mid.Length) ])
+
+let private templatePath =
+    Path.Combine(repoRoot, "proofs", "kit", "templates", "Instance.fst.template")
+
+let private skeletonPath = Path.Combine(repoRoot, "proofs", "Skeleton.fst")
+let private treeOpsPath = Path.Combine(repoRoot, "proofs", "TreeOps.fst")
+
+let private expectOk (r: Result<'a, string>) (what: string) : 'a =
+    match r with
+    | Ok v -> v
+    | Error e -> failtestf "%s: %s" what e
+
+[<Tests>]
+let proofsKitTemplateTests =
+    testList
+        "Proofs.Kit"
+        [
+
+          testCase "the template's body carries exactly the holes the Skeleton map and the two prose holes fill"
+          <| fun _ ->
+              let body = expectOk (templateBody (File.ReadAllText templatePath)) "template"
+              let declared = (List.map fst skeletonHoles) @ proseHoles |> Set.ofList
+              let carried = templateHoles body |> Set.ofList
+
+              Expect.equal
+                  carried
+                  declared
+                  "a hole the map does not fill would be refused at instantiation; a map key the template lacks is a stale map"
+
+              // and the fixed text is a theorem, not a frame around two prose holes
+              Expect.stringContains
+                  body
+                  "fold_confluence {{APPLY}} {{FOOTPRINT}} s0 ls1 ls2 p"
+                  "the theorem's discharge line is fixed text"
+
+              Expect.stringContains body "{{DIAMOND}} ();" "the obligation's discharge is fixed text"
+
+              Expect.stringContains
+                  body
+                  "requires lanes_apply {{APPLY}} ls1 s0"
+                  "what remains in the requires is fixed text"
+
+          testCase "Skeleton.fst is the template's first instance — reproduced byte for byte after hole substitution"
+          <| fun _ ->
+              let template = File.ReadAllText templatePath
+              let skeleton = File.ReadAllText skeletonPath
+
+              Expect.isFalse
+                  (skeleton.Contains "{{")
+                  "the instance carries no hole, so 'no {{ remains' is measuring something"
+
+              let prose =
+                  expectOk (recoverProse template skeletonHoles skeleton) "recovering Skeleton.fst's prose holes"
+
+              let reproduced =
+                  expectOk (instantiate template (skeletonHoles @ prose)) "instantiating"
+
+              Expect.equal reproduced skeleton "the template, holes filled at TreeOps, IS the committed Skeleton.fst"
+
+              // the recovered prose is prose: the header is the comment interior, and the trailer
+              // carries the non-vacuity witness the preamble asks every instance for
+              let header = prose |> List.find (fun (k, _) -> k = "HEADER") |> snd
+              let trailer = prose |> List.find (fun (k, _) -> k = "TRAILER") |> snd
+              Expect.isFalse (header.Contains "*)") "the header hole is the interior of one comment"
+              Expect.stringContains trailer "batch_lanes_fold" "Skeleton.fst's trailer is its widening witness"
+
+          testCase "the Skeleton map names what the tree carries — the obligation is a declaration of the domain module"
+          <| fun _ ->
+              let treeOps = File.ReadAllText treeOpsPath
+
+              for name in [ "op_independence_diamond"; "wapply"; "op_fp" ] do
+                  Expect.isTrue
+                      (declaresTopLevel treeOps name)
+                      (sprintf
+                          "`%s` is a top-level declaration of TreeOps.fst, as the template's DIAMOND / APPLY / FOOTPRINT holes require"
+                          name)
+
+              Expect.contains (realModules ()) "Skeleton" "the instance is a module the proof leg checks"
+
+          testCase "go-red: a wrong obligation name does not reproduce the instance"
+          <| fun _ ->
+              let template = File.ReadAllText templatePath
+              let skeleton = File.ReadAllText skeletonPath
+
+              let wrong =
+                  skeletonHoles
+                  |> List.map (fun (k, v) ->
+                      if k = "DIAMOND" then
+                          k, "tree_independence_diamond"
+                      else
+                          k, v)
+
+              match recoverProse template wrong skeleton with
+              | Error _ -> ()
+              | Ok prose ->
+                  let reproduced = expectOk (instantiate template (wrong @ prose)) "instantiating"
+                  Expect.notEqual reproduced skeleton "a different discharge lemma is a different instance"
+
+          testCase "go-red: an unfilled hole is refused, never defaulted"
+          <| fun _ ->
+              let template = File.ReadAllText templatePath
+              let partial = skeletonHoles |> List.filter (fun (k, _) -> k <> "FOLD")
+
+              match instantiate template (partial @ [ "HEADER", "x"; "TRAILER", "" ]) with
+              | Ok _ -> failtest "an instance with {{FOLD}} unfilled was accepted"
+              | Error e -> Expect.stringContains e "FOLD" "the refusal names the hole"
+
+          testCase "go-red: a template with no marker line, or two, is refused"
+          <| fun _ ->
+              let template = File.ReadAllText templatePath
+
+              match templateBody (template.Replace(templateMarker, "(* not the marker *)")) with
+              | Ok _ -> failtest "a template with no marker was accepted"
+              | Error e -> Expect.stringContains e "0 times" "the refusal counts the marker"
+
+              match templateBody (template + "\n" + templateMarker + "\n") with
+              | Ok _ -> failtest "a template with two markers was accepted"
+              | Error e -> Expect.stringContains e "2 times" "the refusal counts the marker" ]

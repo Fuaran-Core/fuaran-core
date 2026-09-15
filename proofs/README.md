@@ -27,7 +27,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. Phase 162 added the preorder-position lemma (section 19) and the batch lift (section 20), which retired `covered` and made that diamond unconditional. |
-| `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. Since Phase 162 the op alphabet is the WHOLE of `SkeletonOp`, `Batch` included and nested to any depth; it was the four non-`Batch` ops until then. |
+| `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. Since Phase 162 the op alphabet is the WHOLE of `SkeletonOp`, `Batch` included and nested to any depth; it was the four non-`Batch` ops until then. Since Phase 175 it is also the first INSTANCE of the kit's `kit/templates/Instance.fst.template`, reproduced from it byte for byte by the `Proofs.Kit` family — see the instantiation contract under Theorem 2. |
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -796,6 +796,17 @@ nothing here will do it for them. Until an adopter appends its record, the regis
 that repository — which is honest, and is the reason the empty array is a measurement rather than a
 gap.
 
+**Importing a theorem, not only a leg (Phase 175).** `$sources` also names the models: the generic
+theorems (`DagFold`, `Chain`, `WireCanon`, `WireDecode`, `JsonParse`, `Limits`), the reference
+instance (`TreeOps`, `Skeleton`, `Preservation`, `TreeDiff`) and `kit/templates/Instance.fst.template`
+— each entry saying which theorem the file carries and which obligations it asks a domain for, and
+the sources being the live files under this directory, so there is no second copy of any model here.
+A domain instantiates fold confluence at its own witness by copying `DagFold.fst`, filling the
+template's fourteen holes — one of which, `{{DIAMOND}}`, is the obligation it proves — and adding the
+instance to its own `$modules`; the contract is stated under Theorem 2 and the procedure in
+`kit/README.md`. Not in the set: `Vocabulary.fst`, generated from this repository's `idl.json`, and
+`WireVersioning.fst`, Theorem 8 about this repository's IDL diff.
+
 ## Theorem 1 — decoder totality (Phase 135)
 
 `WireDecode.fst` is this directory's second model, and the programme's WS6.1 **theorem 1**. The
@@ -1154,6 +1165,26 @@ child list, and nothing else is visible to `Ops`. On top of that sit the five sk
 `Ops.footprint` clause for clause. It shares `DagFold.fst`'s list-as-set algebra, its `footprint`,
 its `independent` and its `diamond` rather than restating them, which is what makes the composition
 an instantiation instead of a second model that has to be argued equal to the first.
+
+**The instantiation contract (Phase 175).** That composition is now a TEMPLATE a domain fills rather
+than a shape it re-derives. `kit/templates/Instance.fst.template` is `Skeleton.fst` with fourteen
+named holes, and the `Proofs.Kit` family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`)
+reproduces the committed `Skeleton.fst` from it byte for byte — the identifier holes from a
+twelve-entry map, the two prose holes recovered from the instance itself — so the template and its
+first instance cannot drift apart silently, and a wrong value or an unfilled hole is shown not to
+reproduce it. The contract is the preamble's three rules — drop the preamble, fill every hole, leave
+no `{{` — and its content is which holes are obligations: **exactly one**. `{{DIAMOND}}` is a lemma
+in the domain's own module proving `independence_diamond` for its footprint and its apply, which is
+the `independence-diamond` row of the contract table PROVED at that domain rather than sampled by
+`Conformance.footprintLaws`; here it is `TreeOps.op_independence_diamond`. What remains in the
+theorem's `requires`, `lanes_apply`, is the `lanes-apply` row and stays sampled, because it is a
+statement about the lane set in hand and not about the domain. What the template does NOT give is
+Theorem 5's preservation clauses, Theorem 6's diff clauses and this algebra's own diamond: those are
+stated about `TreeOps`'s algebra, so a domain whose state is the skeleton tree inherits them by
+copying the files, and a domain with its own apply models its own. The ten models and the template
+are the kit's declared copy set — `copies.json` `$sources`, one entry per file saying which theorem
+it carries and which obligations it asks for — and `kit/README.md` "Importing a theorem" is the
+procedure.
 
 ### The proof is three facts, not fifteen cases
 
