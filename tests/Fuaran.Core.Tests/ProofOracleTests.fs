@@ -22,6 +22,14 @@ module Fuaran.Core.Tests.ProofOracleTests
 
 open System.IO
 open Expecto
+
+// Phase 176 — the extracted COLUMNAR model, bound BEFORE `open Fuaran.Core` puts the production
+// `ColumnOps` module in front of it: the two share a name on purpose, and this is the one file
+// where both are in scope. (Bound here rather than as `global.ColumnOps` beside its family:
+// Fantomas rewrites a `global.`-qualified module abbreviation into invalid F#, and a `///` doc
+// comment on any module abbreviation is FS0535.)
+module ModelCol = ColumnOps
+
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
@@ -4880,6 +4888,671 @@ let private envelopeProbe (label: string) (text: string) (diffs: string list) =
                 sprintf "%s: production and the model disagreed on whether the decode succeeded" label
                 :: diffs
 
+// ---------------------------------------------------------------------------
+//  Phase 176 — the COLUMNAR op algebra: `ColumnOps.apply` / `canApply` / `invert` / `toOps` /
+//  `applyAll` beside the extracted model (`proofs/ColumnOps.fst`), over generated tables and op
+//  scripts.
+//
+//  WHAT THE BRIDGE SAYS. The model reads a cell as its type and an OPAQUE CARRIER — `Present ty
+//  carrier` — and nothing in the algebra looks inside one. The bridge renders each production
+//  value to its carrier (`Int 5` to `"5"`, a float through the round-trip `"R"` format, a bool to
+//  its lower-case word, the three string-carried kinds verbatim) and parses it back, so a
+//  production table and its model image are the same table under either reading. Where the two
+//  DISAGREE by construction is a NaN float — `Float nan <> Float nan` in production, `"NaN" =
+//  "NaN"` in the model — and that is the `column-cell-carrier-opaque` row; the generator does not
+//  draw one, and says so.
+//
+//  The pipeline evaluator is a PARAMETER of the model (`ev`), as `canHold` is of the container
+//  model. Here it is production's own `DataFrame.evalPipeline`, reached through the bridge: the
+//  model hands the evaluator a token, the token indexes a fixed pool of pipelines, and the answer
+//  comes back through the same bridge. So the `ApplyTransform` arm compares the model's
+//  ENVELOPE — replace wholesale, or `TransformRejected` carrying the rendered error — and nothing
+//  about the pipeline, which is exactly what the model claims.
+//
+//  FIVE COMPARISONS, per (op, state):
+//    1. `ColumnOps.apply` vs the model's `apply` — verdict, accepted result through the bridge,
+//       rejection by class AND payload (name, row, count, tag).
+//    2. `ColumnOps.canApply` vs `can_apply`, and the dry run against the mutating call on each side
+//       separately (`canapply_agrees` instantiated).
+//    3. `ColumnOps.invert` vs `invert` — verdict and the derived inverse as an operation; and,
+//       where the pre-state is WELL-FORMED and the op accepted and invertible, the round trip
+//       asserted EXACTLY on production and on the model (`invert_roundtrip` instantiated). Where
+//       the pre-state is not well-formed the round trip is only counted, because the theorem
+//       does not claim it there — and the count of failures is the evidence the hypothesis earns
+//       its place.
+//    4. THE INVARIANT: a well-formed pre-state and an accepted structural op give a well-formed
+//       result (`apply_preserves_wf` instantiated), judged by the MODEL's `wf` on the bridged
+//       production result.
+//    5. Every script as a whole: `ColumnOps.applyAll` vs `apply_all` — the short-circuit and the
+//       all-or-nothing discipline (`reject_identity`) as one comparison.
+//  And a sixth over PAIRS of tables: `ColumnOps.toOps` vs `to_ops` as scripts, and where both
+//  tables are well-formed, `applyAll (toOps before after) before = Ok after` asserted on both
+//  sides (`diff_applicable` instantiated), with both branches of the diff counted.
+//
+//  The tables are GENERATED with the invariant deliberately broken some of the time — a repeated
+//  name, a schema entry with no column, a column a row short, a cell of the wrong type — because
+//  `apply` is total over all of them and the model must agree there too; the theorems that need
+//  well-formedness are asserted only where the generator produced it, and the tally says how
+//  often that was.
+// ---------------------------------------------------------------------------
+
+let private colTypeToModel (t: ColumnType) : ModelCol.coltype =
+    match t with
+    | IntType -> ModelCol.IntType
+    | FloatType -> ModelCol.FloatType
+    | BoolType -> ModelCol.BoolType
+    | StringType -> ModelCol.StringType
+    | DateType -> ModelCol.DateType
+    | TimestampType -> ModelCol.TimestampType
+
+let private colTypeOfModel (t: ModelCol.coltype) : ColumnType =
+    match t with
+    | ModelCol.IntType -> IntType
+    | ModelCol.FloatType -> FloatType
+    | ModelCol.BoolType -> BoolType
+    | ModelCol.StringType -> StringType
+    | ModelCol.DateType -> DateType
+    | ModelCol.TimestampType -> TimestampType
+
+/// The honest cell bridge: type + carrier, the carrier a rendering that parses back exactly.
+let private cellToModel (c: Cell) : ModelCol.cell =
+    match c with
+    | Null -> ModelCol.Null
+    | Int i -> ModelCol.Present(ModelCol.IntType, i.ToString(inv))
+    | Float f -> ModelCol.Present(ModelCol.FloatType, f.ToString("R", inv))
+    | Bool b -> ModelCol.Present(ModelCol.BoolType, (if b then "true" else "false"))
+    | Str s -> ModelCol.Present(ModelCol.StringType, s)
+    | Date s -> ModelCol.Present(ModelCol.DateType, s)
+    | Timestamp s -> ModelCol.Present(ModelCol.TimestampType, s)
+
+/// The BLIND cell bridge — the go-red's instrument: every present cell is read as a string, so
+/// the model's type check sees a `Str` where production sees an `Int`, and the two must part.
+let private blindCellToModel (c: Cell) : ModelCol.cell =
+    match cellToModel c with
+    | ModelCol.Present(_, carrier) -> ModelCol.Present(ModelCol.StringType, carrier)
+    | ModelCol.Null -> ModelCol.Null
+
+let private cellOfModel (c: ModelCol.cell) : Cell =
+    match c with
+    | ModelCol.Null -> Null
+    | ModelCol.Present(ModelCol.IntType, s) -> Int(System.Int32.Parse(s, inv))
+    | ModelCol.Present(ModelCol.FloatType, s) -> Float(System.Double.Parse(s, inv))
+    | ModelCol.Present(ModelCol.BoolType, s) -> Bool(s = "true")
+    | ModelCol.Present(ModelCol.StringType, s) -> Str s
+    | ModelCol.Present(ModelCol.DateType, s) -> Date s
+    | ModelCol.Present(ModelCol.TimestampType, s) -> Timestamp s
+
+let private columnToModelWith (bridge: Cell -> ModelCol.cell) (c: Column) : ModelCol.column =
+    { ModelCol.column.name = c.Name
+      ModelCol.column.ty = colTypeToModel c.Type
+      ModelCol.column.cells = c.Cells |> List.map bridge }
+
+let private columnOfModel (c: ModelCol.column) : Column =
+    Column.create c.name (colTypeOfModel c.ty) (c.cells |> List.map cellOfModel)
+
+let private tableToModelWith (bridge: Cell -> ModelCol.cell) (t: Table) : ModelCol.table =
+    { ModelCol.table.schema = t.Schema |> List.map (fun (n, ty) -> n, colTypeToModel ty)
+      ModelCol.table.columns = t.Columns |> List.map (columnToModelWith bridge) }
+
+let private tableToModel = tableToModelWith cellToModel
+
+let private tableOfModel (t: ModelCol.table) : Table =
+    { Schema = t.schema |> List.map (fun (n, ty) -> n, colTypeOfModel ty)
+      Columns = t.columns |> List.map columnOfModel }
+
+/// The pipelines `ApplyTransform` draws from; the model sees each as its index. Two accept on
+/// most tables, two reject on most, one is the identity, one rejects on an empty one.
+let private pipelinePool: Transform list list =
+    [ [ Distinct ]
+      [ Limit(Slot.Lit 2, Slot.Lit 0) ]
+      [ Project [ "a", "a" ] ]
+      [ Filter(Col "nope") ]
+      [ Derive("d", Lit(Int 1)) ]
+      [] ]
+
+let private pipelineToken (p: Transform list) : string =
+    match pipelinePool |> List.tryFindIndex (fun q -> q = p) with
+    | Some i -> string i
+    | None -> "?"
+
+/// The model's evaluator parameter, instantiated at production's own `DataFrame.evalPipeline`.
+let private modelEvaluator (token: string) (mt: ModelCol.table) : ModelCol.outcome<ModelCol.table, string> =
+    match System.Int32.TryParse token with
+    | true, i when i >= 0 && i < List.length pipelinePool ->
+        (match DataFrame.evalPipeline (List.item i pipelinePool) (tableOfModel mt) with
+         | Ok t -> ModelCol.Ok(tableToModel t)
+         | Error e -> ModelCol.Error(DataFrame.errorString e))
+    | _ -> ModelCol.Error("no such pipeline token: " + token)
+
+let private colOpToModelWith (bridge: Cell -> ModelCol.cell) (op: ColumnOp) : ModelCol.op =
+    match op with
+    | SetCell(n, row, v) -> ModelCol.SetCell(n, bigint row, bridge v)
+    | SetColumn c -> ModelCol.SetColumn(columnToModelWith bridge c)
+    | InsertColumn(i, c) -> ModelCol.InsertColumn(bigint i, columnToModelWith bridge c)
+    | RemoveColumn n -> ModelCol.RemoveColumn n
+    | AppendRows rows -> ModelCol.AppendRows(rows |> List.map (List.map (fun (n, v) -> n, bridge v)))
+    | ApplyTransform p -> ModelCol.ApplyTransform(pipelineToken p)
+
+let private modelCellRender (c: ModelCol.cell) : string =
+    match c with
+    | ModelCol.Null -> "null"
+    | ModelCol.Present(ty, carrier) -> ModelCol.tag ty + ":" + carrier
+
+let private modelColumnRender (c: ModelCol.column) : string =
+    sprintf "%s:%s[%s]" c.name (ModelCol.tag c.ty) (c.cells |> List.map modelCellRender |> String.concat ",")
+
+/// The two renderings agree by construction — production renders THROUGH the honest bridge —
+/// so a differing rendering is a differing value.
+let private modelColOpRender (op: ModelCol.op) : string =
+    match op with
+    | ModelCol.SetCell(n, row, v) -> sprintf "SetCell(%s;%s;%s)" n (string row) (modelCellRender v)
+    | ModelCol.SetColumn c -> sprintf "SetColumn(%s)" (modelColumnRender c)
+    | ModelCol.InsertColumn(i, c) -> sprintf "InsertColumn(%s;%s)" (string i) (modelColumnRender c)
+    | ModelCol.RemoveColumn n -> sprintf "RemoveColumn(%s)" n
+    | ModelCol.AppendRows rows -> sprintf "AppendRows(%d)" (List.length rows)
+    | ModelCol.ApplyTransform p -> sprintf "ApplyTransform(%s)" p
+
+let private prodColOpRender (op: ColumnOp) : string =
+    modelColOpRender (colOpToModelWith cellToModel op)
+
+let private modelColRejRender (r: ModelCol.rejection) : string =
+    match r with
+    | ModelCol.NoSuchColumn(n, avail) -> sprintf "NoSuchColumn(%s;%s)" n (String.concat "," avail)
+    | ModelCol.DuplicateColumn n -> sprintf "DuplicateColumn(%s)" n
+    | ModelCol.RowOutOfRange(row, rc) -> sprintf "RowOutOfRange(%s;%s)" (string row) (string rc)
+    | ModelCol.CellTypeMismatch(c, e, g) -> sprintf "CellTypeMismatch(%s;%s;%s)" c e g
+    | ModelCol.ColumnLengthMismatch(c, e, g) -> sprintf "ColumnLengthMismatch(%s;%s;%s)" c (string e) (string g)
+    | ModelCol.RowShapeUnknownColumn(n, avail) -> sprintf "RowShapeUnknownColumn(%s;%s)" n (String.concat "," avail)
+    | ModelCol.TransformRejected d -> sprintf "TransformRejected(%s)" d
+    | ModelCol.NotInvertible o -> sprintf "NotInvertible(%s)" o
+
+let private prodColRejRender (r: ColumnRejection) : string =
+    match r with
+    | NoSuchColumn(n, avail) -> sprintf "NoSuchColumn(%s;%s)" n (String.concat "," avail)
+    | DuplicateColumn n -> sprintf "DuplicateColumn(%s)" n
+    | RowOutOfRange(row, rc) -> sprintf "RowOutOfRange(%d;%d)" row rc
+    | CellTypeMismatch(c, e, g) -> sprintf "CellTypeMismatch(%s;%s;%s)" c e g
+    | ColumnLengthMismatch(c, e, g) -> sprintf "ColumnLengthMismatch(%s;%d;%d)" c e g
+    | RowShapeUnknownColumn(n, avail) -> sprintf "RowShapeUnknownColumn(%s;%s)" n (String.concat "," avail)
+    | TransformRejected d -> sprintf "TransformRejected(%s)" d
+    | NotInvertible o -> sprintf "NotInvertible(%s)" o
+
+let private colRejClass (r: ColumnRejection) : string =
+    let s = prodColRejRender r
+    s.Substring(0, s.IndexOf '(')
+
+// ---- the generator ----
+
+let private colNamePool = [ "a"; "b"; "c"; "d" ]
+
+let private colTypePool =
+    [ IntType; FloatType; BoolType; StringType; DateType; TimestampType ]
+
+/// A cell for a column of type `ty`: mostly fitting, sometimes `Null`, sometimes of another type.
+let private genColCell (ty: ColumnType) (r: ConfRng.T) : Cell * ConfRng.T =
+    let roll, r1 = ConfRng.intBelow 10 r
+    let v, r2 = ConfRng.intBelow 100 r1
+
+    let ofType t =
+        match t with
+        | IntType -> Int v
+        | FloatType -> Float(float v / 4.0)
+        | BoolType -> Bool(v % 2 = 0)
+        | StringType -> Str(sprintf "s%d" v)
+        | DateType -> Date(sprintf "2026-01-%02d" (1 + v % 28))
+        | TimestampType -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (v % 60))
+
+    if roll < 7 then
+        ofType ty, r2
+    elif roll < 9 then
+        Null, r2
+    else
+        let other, r3 = ConfRng.choose colTypePool r2
+        ofType other, r3
+
+let private genColCells (ty: ColumnType) (n: int) (r: ConfRng.T) : Cell list * ConfRng.T =
+    let mutable rng = r
+    let cells = System.Collections.Generic.List<Cell>()
+
+    for _ in 1..n do
+        let c, r' = genColCell ty rng
+        rng <- r'
+        cells.Add c
+
+    List.ofSeq cells, rng
+
+let private genColumn (name: string) (rows: int) (r: ConfRng.T) : Column * ConfRng.T =
+    let ty, r1 = ConfRng.choose colTypePool r
+    let cells, r2 = genColCells ty rows r1
+    Column.create name ty cells, r2
+
+/// A table: up to three columns over a four-name pool, up to three rows — and, one draw in ten
+/// each, a repeated name, a column a row long or short, or a schema that is not the columns'
+/// projection. `ModelCol.wf` on the bridged table says which it was.
+let private genColTable (r: ConfRng.T) : Table * ConfRng.T =
+    let ncols, r1 = ConfRng.intBelow 4 r
+    let rows, r2 = ConfRng.intBelow 4 r1
+    let names, r3 = ConfRng.shuffle colNamePool r2
+    let mutable rng = r3
+    let cols = System.Collections.Generic.List<Column>()
+
+    for i in 0 .. ncols - 1 do
+        let dupRoll, r4 = ConfRng.intBelow 10 rng
+        let lenRoll, r5 = ConfRng.intBelow 10 r4
+        rng <- r5
+
+        let name =
+            if dupRoll = 0 && i > 0 then
+                cols.[0].Name
+            else
+                List.item i names
+
+        let n = if lenRoll = 0 then rows + 1 else rows
+        let c, r6 = genColumn name n rng
+        rng <- r6
+        cols.Add c
+
+    let columns = List.ofSeq cols
+    let schemaRoll, r7 = ConfRng.intBelow 10 rng
+    rng <- r7
+
+    let schema =
+        columns
+        |> List.map (fun c -> c.Name, c.Type)
+        |> fun s ->
+            if schemaRoll = 0 then
+                List.truncate (List.length s - 1) s
+            else
+                s
+
+    { Schema = schema; Columns = columns }, rng
+
+/// An op against `t`, drawn so that every rejection class is reachable and acceptance is common.
+let private genColOp (t: Table) (r: ConfRng.T) : ColumnOp * ConfRng.T =
+    let rc = Table.rowCount t
+    let names = Table.columnNames t
+    let nameOrStranger, r1 = ConfRng.choose (names @ [ "zz" ]) r
+    let kind, r2 = ConfRng.intBelow 6 r1
+
+    match kind with
+    | 0 ->
+        let row, r3 = ConfRng.intBelow (rc + 2) r2
+        let ty, r4 = ConfRng.choose colTypePool r3
+        let v, r5 = genColCell ty r4
+        SetCell(nameOrStranger, row - 1, v), r5
+    | 1 ->
+        let lenRoll, r3 = ConfRng.intBelow 5 r2
+        let n = if lenRoll = 0 then rc + 1 else rc
+        let c, r4 = genColumn nameOrStranger n r3
+        SetColumn c, r4
+    | 2 ->
+        let idx, r3 = ConfRng.intBelow (List.length t.Columns + 3) r2
+        let name, r4 = ConfRng.choose colNamePool r3
+        let lenRoll, r5 = ConfRng.intBelow 5 r4
+
+        let n =
+            if List.isEmpty t.Columns then 2
+            elif lenRoll = 0 then rc + 1
+            else rc
+
+        let c, r6 = genColumn name n r5
+        InsertColumn(idx - 1, c), r6
+    | 3 -> RemoveColumn nameOrStranger, r2
+    | 4 ->
+        let nrows, r3 = ConfRng.intBelow 2 r2
+        let mutable rng = r3
+        let rows = System.Collections.Generic.List<(string * Cell) list>()
+
+        for _ in 0..nrows do
+            let subset, r4 = ConfRng.shuffle (names @ [ "zz" ]) rng
+            let take, r5 = ConfRng.intBelow (List.length subset + 1) r4
+            rng <- r5
+            let row = System.Collections.Generic.List<string * Cell>()
+
+            for n in List.truncate take subset do
+                let ty =
+                    match Table.tryColumn n t with
+                    | Some c -> c.Type
+                    | None -> IntType
+
+                let v, r6 = genColCell ty rng
+                rng <- r6
+                row.Add((n, v))
+
+            rows.Add(List.ofSeq row)
+
+        AppendRows(List.ofSeq rows), rng
+    | _ ->
+        let p, r3 = ConfRng.choose pipelinePool r2
+        ApplyTransform p, r3
+
+let private colStructural (op: ColumnOp) =
+    match op with
+    | ApplyTransform _ -> false
+    | _ -> true
+
+let private colInvertible (op: ColumnOp) =
+    match op with
+    | SetCell _
+    | SetColumn _
+    | InsertColumn _
+    | RemoveColumn _ -> true
+    | _ -> false
+
+type private ColTally =
+    {
+        Diffs: string list
+        Accepted: int
+        Rejected: int
+        Classes: Set<string>
+        Inverted: int
+        RoundTripped: int
+        /// round trips ATTEMPTED on a pre-state the theorem does not cover, and how many failed
+        RoundTripsOutsideWf: int
+        RoundTripFailuresOutsideWf: int
+        WfPre: int
+        WfPreserved: int
+        Scripts: int
+    }
+
+let private emptyColTally =
+    { Diffs = []
+      Accepted = 0
+      Rejected = 0
+      Classes = Set.empty
+      Inverted = 0
+      RoundTripped = 0
+      RoundTripsOutsideWf = 0
+      RoundTripFailuresOutsideWf = 0
+      WfPre = 0
+      WfPreserved = 0
+      Scripts = 0 }
+
+/// One (op, state) asked of both sides, across the first four comparisons.
+let private colProbe (bridge: Cell -> ModelCol.cell) (op: ColumnOp) (st: Table) (acc: ColTally) : ColTally =
+    let mop = colOpToModelWith bridge op
+    let mst = tableToModelWith bridge st
+
+    let where =
+        sprintf
+            "op %s at table %s"
+            (prodColOpRender op)
+            (modelColumnRender |> fun f -> mst.columns |> List.map f |> String.concat "|")
+
+    let prod = ColumnOps.apply op st
+    let model = ModelCol.apply modelEvaluator mop mst
+    let wfPre = ModelCol.wf mst
+
+    // 1. apply
+    let applyDiff, accepted, rejected, cls =
+        match prod, model with
+        | Ok pt, ModelCol.Ok mt ->
+            (if tableToModelWith bridge pt <> mt then
+                 [ sprintf "accepted result differs — %s" where ]
+             else
+                 []),
+            1,
+            0,
+            None
+        | Error pe, ModelCol.Error me ->
+            let pr = prodColRejRender pe
+            let mr = modelColRejRender me
+
+            (if pr <> mr then
+                 [ sprintf "rejection differs — %s\n  production: %s\n  oracle:     %s" where pr mr ]
+             else
+                 []),
+            0,
+            1,
+            Some(colRejClass pe)
+        | Ok _, ModelCol.Error me ->
+            [ sprintf "production ACCEPTED but the oracle rejected (%s) — %s" (modelColRejRender me) where ], 0, 0, None
+        | Error pe, ModelCol.Ok _ ->
+            [ sprintf "production REJECTED (%s) but the oracle accepted — %s" (prodColRejRender pe) where ], 0, 0, None
+
+    // 2. canApply, each side against the other and against its own apply
+    let canDiff =
+        let pv =
+            match ColumnOps.canApply op st with
+            | Ok() -> "ok"
+            | Error e -> prodColRejRender e
+
+        let mv =
+            match ModelCol.can_apply modelEvaluator mop mst with
+            | ModelCol.Ok() -> "ok"
+            | ModelCol.Error e -> modelColRejRender e
+
+        let pa =
+            match prod with
+            | Ok _ -> "ok"
+            | Error e -> prodColRejRender e
+
+        let ma =
+            match model with
+            | ModelCol.Ok _ -> "ok"
+            | ModelCol.Error e -> modelColRejRender e
+
+        (if pv <> mv then
+             [ sprintf "canApply differs — %s\n  production: %s\n  oracle:     %s" where pv mv ]
+         else
+             [])
+        @ (if pv <> pa then
+               [ sprintf "production's canApply and apply DISAGREE — %s" where ]
+           else
+               [])
+        @ (if mv <> ma then
+               [ sprintf "the oracle's can_apply and apply DISAGREE — %s" where ]
+           else
+               [])
+
+    // 3. invert — the derived inverse, and the round trip where the theorem claims it
+    let pInv = ColumnOps.invert op st
+    let mInv = ModelCol.invert mop mst
+
+    let invDiff =
+        match pInv, mInv with
+        | Ok pi, ModelCol.Ok mi ->
+            if prodColOpRender pi <> modelColOpRender mi then
+                [ sprintf
+                      "the derived INVERSE differs — %s\n  production: %s\n  oracle:     %s"
+                      where
+                      (prodColOpRender pi)
+                      (modelColOpRender mi) ]
+            else
+                []
+        | Error pe, ModelCol.Error me ->
+            if prodColRejRender pe <> modelColRejRender me then
+                [ sprintf "invert's rejection differs — %s" where ]
+            else
+                []
+        | _ -> [ sprintf "invert's verdict differs — %s" where ]
+
+    let inverted, roundTripped, outsideWf, outsideWfFailed, roundTripDiff =
+        match prod, pInv with
+        | Ok pt, Ok pi when colInvertible op ->
+            let back = ColumnOps.apply pi pt
+
+            let mBack =
+                match model, mInv with
+                | ModelCol.Ok mt, ModelCol.Ok mi -> Some(ModelCol.apply modelEvaluator mi mt)
+                | _ -> None
+
+            let restored = (back = Ok st)
+            let mRestored = (mBack = Some(ModelCol.Ok mst))
+
+            if wfPre then
+                1,
+                1,
+                0,
+                0,
+                (if not restored then
+                     [ sprintf "the inverse did NOT restore a WELL-FORMED input on production — %s (got %A)" where back ]
+                 else
+                     [])
+                @ (if not mRestored then
+                       [ sprintf "the ORACLE's inverse did not restore a well-formed input — %s" where ]
+                   else
+                       [])
+            else
+                1, 0, 1, (if restored then 0 else 1), []
+        | _ -> 0, 0, 0, 0, []
+
+    // 4. the invariant, on production's result, judged by the model's `wf`
+    let wfPreserved, wfDiff =
+        match prod with
+        | Ok pt when wfPre && colStructural op ->
+            if ModelCol.wf (tableToModelWith bridge pt) then
+                1, []
+            else
+                0, [ sprintf "a well-formed table and an accepted structural op gave a MALFORMED result — %s" where ]
+        | _ -> 0, []
+
+    { Diffs = acc.Diffs @ applyDiff @ canDiff @ invDiff @ roundTripDiff @ wfDiff
+      Accepted = acc.Accepted + accepted
+      Rejected = acc.Rejected + rejected
+      Classes =
+        (match cls with
+         | Some c -> Set.add c acc.Classes
+         | None -> acc.Classes)
+        |> fun s ->
+            match pInv with
+            | Error(NotInvertible _) -> Set.add "NotInvertible" s
+            | _ -> s
+      Inverted = acc.Inverted + inverted
+      RoundTripped = acc.RoundTripped + roundTripped
+      RoundTripsOutsideWf = acc.RoundTripsOutsideWf + outsideWf
+      RoundTripFailuresOutsideWf = acc.RoundTripFailuresOutsideWf + outsideWfFailed
+      WfPre = acc.WfPre + (if wfPre then 1 else 0)
+      WfPreserved = acc.WfPreserved + wfPreserved
+      Scripts = acc.Scripts }
+
+/// Every op of every generated script at every state the script reaches, plus the script whole.
+let private colDifferential (bridge: Cell -> ModelCol.cell) (seed: int) (trials: int) : ColTally =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable tally = emptyColTally
+
+    for _ in 1..trials do
+        let start, r1 = genColTable r
+        r <- r1
+        let mutable st = start
+        let ops = System.Collections.Generic.List<ColumnOp>()
+
+        for _ in 1..6 do
+            let op, r2 = genColOp st r
+            r <- r2
+            ops.Add op
+            tally <- colProbe bridge op st tally
+
+            match ColumnOps.apply op st with
+            | Ok t -> st <- t
+            | Error _ -> ()
+
+        // 5. the script whole — short-circuit and all-or-nothing as one comparison
+        let script = List.ofSeq ops
+        let prod = ColumnOps.applyAll script start
+
+        let model =
+            ModelCol.apply_all
+                modelEvaluator
+                (script |> List.map (colOpToModelWith bridge))
+                (tableToModelWith bridge start)
+
+        let scriptDiff =
+            match prod, model with
+            | Ok pt, ModelCol.Ok mt when tableToModelWith bridge pt = mt -> []
+            | Error pe, ModelCol.Error me when prodColRejRender pe = modelColRejRender me -> []
+            | _ -> [ sprintf "applyAll differs on a %d-op script (seed %d)" (List.length script) seed ]
+
+        tally <-
+            { tally with
+                Diffs = tally.Diffs @ scriptDiff
+                Scripts = tally.Scripts + 1 }
+
+    tally
+
+type private ColDiffTally =
+    { DDiffs: string list
+      Pairs: int
+      BothWf: int
+      Granular: int
+      Rebuild: int }
+
+/// Pairs of tables: `toOps` as a script compared, and where both are well-formed the
+/// reconstruction asserted on both sides. Half the pairs share a schema (the column-granular
+/// branch); half are independent draws (the rebuild branch, almost always).
+let private colDiffDifferential (seed: int) (trials: int) : ColDiffTally =
+    let mutable r = ConfRng.ofSeed seed
+
+    let mutable tally =
+        { DDiffs = []
+          Pairs = 0
+          BothWf = 0
+          Granular = 0
+          Rebuild = 0 }
+
+    for i in 1..trials do
+        let before, r1 = genColTable r
+        r <- r1
+
+        let after, r2 =
+            if i % 2 = 0 then
+                genColTable r
+            else
+                // same schema, one column's cells redrawn — the granular branch's home
+                match before.Columns with
+                | [] -> before, r
+                | cols ->
+                    let idx, r3 = ConfRng.intBelow (List.length cols) r
+                    let target = List.item idx cols
+                    let cells, r4 = genColCells target.Type (List.length target.Cells) r3
+
+                    { before with
+                        Columns = cols |> List.mapi (fun j c -> if j = idx then { c with Cells = cells } else c) },
+                    r4
+
+        r <- r2
+        let mb = tableToModel before
+        let ma = tableToModel after
+        let pScript = ColumnOps.toOps before after
+        let mScript = ModelCol.to_ops mb ma
+
+        let granular =
+            (before.Schema = after.Schema && Table.rowCount before = Table.rowCount after)
+
+        let scriptDiff =
+            if (pScript |> List.map prodColOpRender) <> (mScript |> List.map modelColOpRender) then
+                [ sprintf "toOps emits a different script (pair %d)" i ]
+            else
+                []
+
+        let bothWf = ModelCol.wf mb && ModelCol.wf ma
+
+        let reconDiff =
+            if bothWf then
+                (if ColumnOps.applyAll pScript before <> Ok after then
+                     [ sprintf
+                           "applyAll (toOps before after) before is NOT after on production (pair %d, %s)"
+                           i
+                           (if granular then "granular" else "rebuild") ]
+                 else
+                     [])
+                @ (if ModelCol.apply_all modelEvaluator mScript mb <> ModelCol.Ok ma then
+                       [ sprintf "the ORACLE's diff does not reconstruct (pair %d)" i ]
+                   else
+                       [])
+            else
+                []
+
+        tally <-
+            { DDiffs = tally.DDiffs @ scriptDiff @ reconDiff
+              Pairs = tally.Pairs + 1
+              BothWf = tally.BothWf + (if bothWf then 1 else 0)
+              Granular = tally.Granular + (if bothWf && granular then 1 else 0)
+              Rebuild = tally.Rebuild + (if bothWf && not granular then 1 else 0) }
+
+    tally
+
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -7676,4 +8349,155 @@ let proofOracleTests =
               let failedLabels =
                   diffs |> List.map (fun d -> d.Substring(0, d.IndexOf ':')) |> List.sort
 
-              Expect.equal failedLabels [ "remove a tag"; "rename" ] "exactly the two breaking rows are where it loses" ]
+              Expect.equal failedLabels [ "remove a tag"; "rename" ] "exactly the two breaking rows are where it loses"
+
+          // ---- Phase 176 — the COLUMNAR op algebra: apply, canApply, invert, applyAll and toOps
+          //      against the model ----
+
+          testCase
+              "the columnar oracle agrees with ColumnOps.apply, canApply and invert over generated tables and scripts"
+          <| fun _ ->
+              let t = colDifferential cellToModel 1760 60
+
+              match t.Diffs with
+              | d :: _ -> failtestf "the columnar oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Adequacy, per shape. Measured at 60 trials (360 probes): accepted 154,
+                  // rejected 206, inverted 88, roundTripped 71, wfPre 278, wfPreserved 85, and 8
+                  // of 17 round trips outside well-formedness failed. Each threshold sits below
+                  // its measurement with room; they catch a generator that stops reaching a
+                  // shape, not pin the numbers.
+                  Expect.isGreaterThan t.Accepted 100 (sprintf "ops were accepted (accepted=%d)" t.Accepted)
+                  Expect.isGreaterThan t.Rejected 100 (sprintf "ops were refused (rejected=%d)" t.Rejected)
+
+                  Expect.isGreaterThan
+                      t.Inverted
+                      40
+                      (sprintf "accepted invertible ops were inverted (inverted=%d)" t.Inverted)
+
+                  Expect.isGreaterThan
+                      t.RoundTripped
+                      20
+                      (sprintf "round trips were ASSERTED on well-formed pre-states (roundTripped=%d)" t.RoundTripped)
+
+                  Expect.isGreaterThan
+                      t.WfPre
+                      60
+                      (sprintf "the generator produced well-formed pre-states (wfPre=%d)" t.WfPre)
+
+                  Expect.isGreaterThan
+                      t.WfPreserved
+                      20
+                      (sprintf "the invariant was asserted on accepted structural ops (wfPreserved=%d)" t.WfPreserved)
+
+                  Expect.equal t.Scripts 60 "every script was compared whole"
+
+                  for cls in
+                      [ "NoSuchColumn"
+                        "DuplicateColumn"
+                        "RowOutOfRange"
+                        "CellTypeMismatch"
+                        "ColumnLengthMismatch"
+                        "RowShapeUnknownColumn"
+                        "TransformRejected"
+                        "NotInvertible" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.Classes)
+                          (sprintf "the sample reached a %s rejection (reached: %A)" cls t.Classes)
+
+                  // The hypothesis earns its place: outside well-formedness the round trip is
+                  // only counted, and the count of failures there must be NON-ZERO — otherwise
+                  // `wf` is a hypothesis the theorem does not need and the ladder overstates.
+                  Expect.isGreaterThan
+                      t.RoundTripsOutsideWf
+                      0
+                      (sprintf "round trips were attempted outside wf (%d)" t.RoundTripsOutsideWf)
+
+                  Expect.isGreaterThan
+                      t.RoundTripFailuresOutsideWf
+                      0
+                      (sprintf
+                          "some round trip FAILED on a malformed pre-state (%d of %d) — the well-formedness hypothesis is load-bearing"
+                          t.RoundTripFailuresOutsideWf
+                          t.RoundTripsOutsideWf)
+
+                  // seeded, replayable
+                  Expect.equal (colDifferential cellToModel 1760 60) t "same seed => identical tally"
+
+          testCase
+              "the columnar oracle agrees with ColumnOps.toOps and applyAll, and the diff reconstructs on well-formed pairs"
+          <| fun _ ->
+              let t = colDiffDifferential 1761 120
+
+              match t.DDiffs with
+              | d :: _ -> failtestf "the columnar diff oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Measured at 120 pairs: bothWf 67, granular 44, rebuild 23.
+                  Expect.equal t.Pairs 120 "every pair was compared"
+                  Expect.isGreaterThan t.BothWf 40 (sprintf "well-formed pairs were reached (bothWf=%d)" t.BothWf)
+
+                  Expect.isGreaterThan
+                      t.Granular
+                      10
+                      (sprintf "the column-granular branch was asserted (granular=%d)" t.Granular)
+
+                  Expect.isGreaterThan t.Rebuild 10 (sprintf "the rebuild branch was asserted (rebuild=%d)" t.Rebuild)
+
+          testCase
+              "a columnar oracle handed a BLIND cell bridge DISAGREES with ColumnOps.apply — the measurement can fail"
+          <| fun _ ->
+              // The teeth. Under the blind bridge every present cell reaches the model as a
+              // string, so the model's type check refuses what production accepts (an `Int` into
+              // an int column) and accepts what production refuses (a `Str` into one). If this
+              // ever passes, the type clauses have stopped reaching the comparison and the green
+              // run above certifies nothing about them.
+              let t = colDifferential blindCellToModel 1760 20
+
+              Expect.isNonEmpty t.Diffs "a blind cell bridge MUST disagree with production"
+
+              Expect.isTrue
+                  (t.Diffs |> List.exists (fun d -> d.Contains "CellTypeMismatch"))
+                  "and the disagreement is about the TYPE check, which is what the bridge blinded"
+
+          testCase
+              "the inverse of a REFUSED insert is a live remove — `invert_insert_reads_nothing`, on the shipped engine"
+          <| fun _ ->
+              // The finding, asserted on production so it goes red the day `ColumnOps.invert`
+              // starts reading the pre-state on `InsertColumn`. A refused duplicate insert's
+              // "inverse" removes the column that was already there.
+              let t: Table =
+                  { Schema = [ "a", IntType; "b", IntType ]
+                    Columns =
+                      [ Column.create "a" IntType [ Int 1; Int 2 ]
+                        Column.create "b" IntType [ Int 3; Int 4 ] ] }
+
+              let op = InsertColumn(0, Column.create "a" IntType [ Int 9; Int 9 ])
+              Expect.equal (ColumnOps.apply op t) (Error(DuplicateColumn "a")) "the insert is refused as a duplicate"
+
+              match ColumnOps.invert op t with
+              | Error e ->
+                  failtestf "invert refused the refused insert (%s) — the finding no longer holds" (prodColRejRender e)
+              | Ok inv ->
+                  Expect.equal inv (RemoveColumn "a") "the inverse is derived without reading the pre-state"
+
+                  match ColumnOps.apply inv t with
+                  | Error e -> failtestf "the live remove was refused (%s)" (prodColRejRender e)
+                  | Ok after ->
+                      Expect.equal
+                          (Table.columnNames after)
+                          [ "b" ]
+                          "the pre-existing column `a` is GONE — the refused insert's inverse is destructive"
+
+              // and the model says the same, through the same theorem's hypotheses
+              let mt = tableToModel t
+              let mop = colOpToModelWith cellToModel op
+
+              Expect.equal
+                  (ModelCol.apply modelEvaluator mop mt)
+                  (ModelCol.Error(ModelCol.DuplicateColumn "a"))
+                  "the model refuses the same insert"
+
+              Expect.equal
+                  (ModelCol.invert mop mt)
+                  (ModelCol.Ok(ModelCol.RemoveColumn "a"))
+                  "and derives the same inverse" ]

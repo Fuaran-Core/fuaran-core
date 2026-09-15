@@ -460,7 +460,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 18 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 20 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -476,7 +476,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, a specification row the model
   covers vacuously. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 10 rows.
+  `unscheduled` where something could and nobody has. 12 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -507,8 +507,10 @@ over-read.
 | `canon-key-comparator` | `model-bridge` | `permanent` |
 | `canon-character-bridge` | `model-bridge` | `permanent` |
 | `evolution-table-coverage` | `model-bridge` | `permanent` |
+| `column-cell-carrier-opaque` | `model-bridge` | `permanent` |
+| `column-transform-evaluator-abstract` | `model-bridge` | `unscheduled` |
 
-**Why `unscheduled` is a value rather than a rounding to `permanent`.** Two of the bridges can be
+**Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
 of what this document already says. Theorem 4's ladder says of `parser-null-absorption` that
 "relating two models is its own phase and was not taken. The assumption stands where it is";
@@ -2825,6 +2827,160 @@ capable of failing.
      production has a corpus case for it, but the model's `decode_tolerant` is applied to ONE
      artifact object — recursion through a domain tree is the domain codec's, which is a parameter
      here.
+
+## Theorem 9 — columnar op preservation (Phase 176)
+
+_(This directory's ninth. The compute strand is a first-class, stability-critical member of the
+substrate, and every domain's table edits replay through `Column.Ops`; until this phase it had no
+model. What `Preservation.fst` proved for trees — totality with rejection characterisation,
+all-or-nothing rejection, the dry run's agreement, the invariant preserved, `invert`'s round trip —
+`ColumnOps.fst` proves for a table with a validity mask, and adds the one clause the tree side
+left open at level 1, the diff's reconstruction, because on columns it is an induction over two
+list walks rather than over intermediate trees.)_
+
+The doc comments of `ColumnOps.fs` state four promises and one of them is the theorem's name:
+
+> **`apply` — total (a typed `ColumnRejection`, never a throw). `canApply` — "they can never
+> disagree". `invert` — `apply (invert op t) (apply op t) = t`. `toOps` — "`apply`-ing it in order
+> yields `after`".**
+
+`Conformance.columnarOpLaws` samples the first three at one seed over one shape of table. Nothing
+sampled the fourth, and nothing said WHICH tables any of the four hold on. `ColumnOps.fst` models
+`Column.Ops` clause for clause — the six-case op DU, the eight-case rejection, `apply`, `canApply`,
+`invert`, `applyAll` and `Diff.toOps` — over a table read exactly as the algebra reads it: a schema
+(an ordered `(name, type)` list), the columns (name, type, cells), `Null` as the validity mask's
+absent marker, and a present cell as its type and an **opaque carrier**. `ApplyTransform` runs a
+`DataFrame` pipeline the algebra never interprets, so the evaluator is a **parameter** of every
+function in the model, as `float i` is in theorem 1 and `ReplaceChildren` in theorem 5.
+
+### What is proved
+
+Six lemmas, over the six operations, any table and any evaluator:
+
+1. **`apply_total`** — one outcome on every input, and WHICH rejection each clause can raise is a
+   predicate (`raisable`) rather than a list. `NotInvertible` — the eighth class — is proved
+   unreachable from `apply`; it is `invert`'s alone.
+2. **`reject_identity`** — a refused step leaves the caller holding the input, and for a script the
+   all-or-nothing discipline at an arbitrary failure position. A rejected `ApplyTransform` is
+   stated on its own (`reject_identity_transform`): `apply` builds nothing before the evaluator
+   answers, so there is no partial table to escape.
+3. **`canapply_agrees`** — the dry run's verdict and rejection are the mutating call's.
+4. **`apply_preserves_wf`** — every accepted structural operation preserves well-formedness. The
+   predicate is this phase's, not production's: the schema is the columns' `(name, type)`
+   projection, no two columns share a name, every column is the row count long, every cell fits
+   its column's type. `Table`'s doc comment states the first three and `Column.create` deliberately
+   checks none of them ("no validation — the codec validates the wire"), so a table the F# `apply`
+   accepts can break every one, and the two theorems below say exactly which conclusions such a
+   table forfeits. `ApplyTransform` preserves it under the evaluator premise (`ev_preserves_wf`),
+   and so does every accepted script.
+5. **`invert_roundtrip`** — on a well-formed table, the inverse of an accepted `SetCell`,
+   `SetColumn`, `InsertColumn` or `RemoveColumn` is accepted at the result and restores the input
+   EXACTLY. The partial cases are characterised beside it: `AppendRows` and `ApplyTransform` are
+   `NotInvertible` unconditionally; on the three operations that read the pre-state, `invert`
+   refuses exactly the pre-states `apply` refuses for the column and row it reads, with the same
+   rejection, and where `apply` goes on to refuse the VALUE `invert` has already answered.
+6. **`diff_applicable`** — `applyAll (toOps before after) before = Ok after` on well-formed tables,
+   both branches. The column-granular branch is a walk over `after`'s columns replacing each changed
+   one in place, with the invariant that what the walk has passed is already `after`'s and what it
+   has not reached is still `before`'s (`changed_apply`); the rebuild branch empties the table
+   (`removes_apply` — in any order, since the names are distinct) and refills it in order with the
+   invariant that the table so far is a prefix of `after` (`inserts_apply`).
+
+### The finding: `invert` on `InsertColumn` reads nothing
+
+The F# clause is `InsertColumn(_, col) -> Ok(RemoveColumn col.Name)`, unconditionally. Every other
+invertible clause reads the pre-state — the cell it will restore, the column it will put back — and
+refuses when the pre-state does not hold it; this one answers the same for a REFUSED insert as for
+an accepted one. `invert_insert_reads_nothing` states it, and `refused_insert_inverse_is_live`
+states the consequence: the "inverse" of an insert refused as a `DuplicateColumn` is a remove that
+SUCCEEDS at the pre-state and takes the column that was already there. A caller that derives the
+inverse without first checking acceptance — the natural shape of an undo stack that records
+`invert op pre` beside every op it attempts — loses a column the refused operation never touched.
+
+The contract is not violated: the doc comment defines `invert op t` for "`op` applied to the
+PRE-state `t`", which presumes acceptance. But the tree engine keeps that presumption HONEST and
+this one does not. `Ops.invert` on the tree side runs `canApply` first and refuses when the forward
+step would be refused — theorem 5's `invert_leaf` models that guard as its first line — so a
+refused `InsertChild` has no inverse to misapply. The columnar `invert` guards three of its four
+clauses by reading the pre-state and the fourth not at all, and the model made the asymmetry
+visible. Reported here, asserted on the shipped engine by the differential's fourth case, and NOT
+fixed in this phase: `Column.Ops` is unchanged, per the shard's own rule that a gap the theorem
+finds is fixed by its own phase, as Phase 137 preceded Phase 138. The fix shape, if taken, is the
+tree engine's — `invert` refusing an insert the pre-state already holds a column for, with
+`DuplicateColumn` as the refusal — which makes `invert_refuses_as_apply` true of a fourth
+operation and is a behaviour change to a public function.
+
+### The differential
+
+`Proofs.Oracle`'s columnar family runs the extracted model beside production over GENERATED tables
+and scripts — sixty scripts of six ops at seed 1760, every op asked at every state its script
+reaches (360 probes), and 120 pairs of tables at seed 1761 for the diff. The tables are drawn with
+the invariant deliberately broken one draw in ten — a repeated name, a column a row long or short,
+a schema that is not the columns' projection, a cell of the wrong type — because `apply` is total
+over all of them and the model must agree there too; the model's own `wf` on the bridged table says
+which population a probe fell in (278 of 360 well-formed). Compared per probe: the verdict, an
+accepted result through the bridge, a rejection by class AND payload, the dry run against the
+mutating call on each side separately, the derived inverse as an operation, the round trip asserted
+exactly where the pre-state is well-formed (71 asserted) and only COUNTED where it is not (17
+attempted, 8 failed — the well-formedness hypothesis is load-bearing, and the case asserts that
+count non-zero so the hypothesis cannot quietly become decoration), the invariant on production's
+result judged by the model's `wf` (85), and every script whole. Over the pairs: the emitted script
+compared, and the reconstruction asserted on both sides where both tables are well-formed (67
+pairs: 44 through the column-granular branch, 23 through the rebuild). Every one of the eight
+rejection classes is reached.
+
+The bridge is the carrier premise made concrete: `Int 5` crosses as `Present(IntType, "5")`, a
+float through the round-trip `R` format, a bool as its word, the three string-carried kinds
+verbatim, and parses back exactly; the pipeline evaluator is production's own
+`DataFrame.evalPipeline` reached through the bridge, so the `ApplyTransform` arm compares the
+model's envelope and nothing about the pipeline. The go-red hands the differential a BLIND cell
+bridge — every present cell read as a string — and requires it to lose on the type check, which it
+does. Seeded and replayable: the same seed reproduces the same tally, asserted.
+
+### What it cost
+
+Cheap, and self-contained. Three cold runs through the kit on this machine under `--quake 3` at
+the leg's rlimit of 40: **47s, 31s, 22s** — the first carrying the prover's first-run cost beside
+concurrent sessions; the prover invoked directly on the same file with the same flags during
+authoring, a fresh verification each time, 9–20s. Budget **100s** (2 × 47, rounded up to the next
+10s), floor **4s** (half of 9, rounded down), seeded per Phase 148/164's rules and recorded in
+`modules.json`. No `--ext context_pruning`: the module opens nothing, so there is nothing to prune,
+and the whole of it — 1,700 lines, six theorems, a hundred-odd list lemmas — discharges in the time
+`TreeOps.fst` spends on its context alone. The proof shapes that cost anything are the
+well-formedness preservation for `AppendRows` (a `forall` over the columns, threaded through
+`typed_append_aux`) and the diff's two walks (`changed_apply`, `inserts_apply`), each an induction
+carrying an invariant about the prefix already processed. The extraction is byte-identical to a
+fresh one on the first leg run, and the oracle compiles against `Prims.fs` with one new alias.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The six lemmas above plus the characterisations
+   (`apply_never_not_invertible`, `reject_identity_transform`, `invert_not_invertible`,
+   `invert_refuses_as_apply`, `invert_insert_reads_nothing`, `refused_insert_inverse_is_live`,
+   `apply_preserves_wf_ev`, `apply_all_preserves_wf`), over the six operations, any table and any
+   evaluator. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes
+   error` on, no `assume`, no `admit`. The module is self-contained — it opens nothing, restates
+   `outcome` and its list helpers as `Chain.fst` and `JsonParse.fst` do — and the first to need a
+   SIGNED integer in the extraction: `Prims.fs` gains an `int` alias beside Phase 160's `nat`, so
+   the `row < 0` clause is a modelled refusal rather than a bridge-side convention.
+2. **Differentially tested.** The extracted model agrees with `ColumnOps.apply`, `canApply`,
+   `invert`, `applyAll` and `toOps` over the pools above, with the blind bridge required to lose.
+   Agreement is over those pools, never over all inputs.
+3. **Assumed, and stated as such.**
+   - **The carrier premise** (`column-cell-carrier-opaque`, a `model-bridge`, permanent). A present
+     cell is its type and an opaque carrier compared as a string. Production's structural equality
+     on the six value constructors agrees on every finite value and disagrees at a NaN float —
+     `Float nan <> Float nan` there, `"NaN" = "NaN"` here — so a table holding one is a table the
+     model and production can diff differently at `toOps`'s changed-column test. The generator
+     draws no NaN. The model cannot represent IEEE equality without modelling the float, which is
+     finding 2's cost and not this theorem's.
+   - **The evaluator is abstract** (`column-transform-evaluator-abstract`, a `model-bridge`,
+     unscheduled). Every theorem about `ApplyTransform` is about its envelope — replace wholesale
+     on `Ok`, `TransformRejected` carrying the evaluator's words on `Error`, nothing built before it
+     answers — and the one place the abstraction has content, that `DataFrame.evalPipeline` returns
+     well-formed tables, is the hypothesis `ev_preserves_wf` and is discharged nowhere. Modelling the
+     evaluator is its own phase and nobody has taken it.
+   - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
 ## Next
 

@@ -1282,6 +1282,120 @@
       "evidence": {
         "assumption": "section 15.4's table is the four rows modelled, with the optional-field row satisfied vacuously by the tag delta"
       }
+    },
+    {
+      "id": "column-apply-total",
+      "level": "proved",
+      "claim": "The columnar apply engine reaches exactly one outcome on every operation, every table and every evaluator — the type of the function in the model, discharged by construction — and WHICH rejection each of the six clauses can raise is characterised per clause (`raisable`), not listed. The corollary read off it, `apply_never_not_invertible`: the eighth rejection class is `invert`'s alone and `apply` cannot produce it. The `ApplyTransform` clause raises exactly `TransformRejected`, carrying whatever the evaluator said, because the pipeline is a parameter the algebra never interprets.",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "theorem": "apply_total",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-reject-identity",
+      "level": "proved",
+      "claim": "A refused columnar step leaves the caller holding the input table; for a script (`applyAll`) it is the all-or-nothing discipline stated at an arbitrary failure position in an arbitrary script, so however many intermediate tables the prefix built, none escapes. A rejected `ApplyTransform` — the one operation whose acceptance replaces the table wholesale — is inside that quantifier and is stated on its own as `reject_identity_transform`: `apply` builds nothing before the evaluator answers, so there is no partial table to escape.",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "theorem": "reject_identity",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-canapply-agrees",
+      "level": "proved",
+      "claim": "The dry run answers exactly what the mutating call answers — the same verdict and, on a refusal, the same rejection. The F# says this in a comment (\"they can never disagree\"); here it is the theorem, and the differential asserts it on each side separately as well as across them.",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "theorem": "canapply_agrees",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-apply-preserves-wf",
+      "level": "proved",
+      "claim": "Every accepted STRUCTURAL operation preserves table well-formedness — the schema is the columns' (name, type) projection, no two columns share a name, every column is the row count long, every cell fits its column's type — unconditionally, for the five operations the algebra itself computes. Nothing in production computes this predicate; it is what `Table`'s doc comment states and `Column.create` deliberately does not check, written down so that the round trip and the diff have a hypothesis to stand on. `ApplyTransform` preserves it under the one premise the evaluator is asked for (`apply_preserves_wf_ev`), and so does every accepted script (`apply_all_preserves_wf`).",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "theorem": "apply_preserves_wf",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-invert-round-trip",
+      "level": "proved",
+      "claim": "On a well-formed table, the inverse of an accepted `SetCell`, `SetColumn`, `InsertColumn` or `RemoveColumn` is itself accepted at the result and restores the input EXACTLY — the doc comment's defining law `apply (invert op t) (apply op t) = t`, sampled by `Conformance.columnarOpLaws`, as a theorem. Well-formedness is load-bearing and the differential shows it: on a table with a repeated name or an ill-typed cell the round trip fails on production, and the count of those failures is asserted non-zero so the hypothesis cannot quietly become decoration.",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "theorem": "invert_roundtrip",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-invert-partial-characterised",
+      "level": "proved",
+      "claim": "The partial cases of `invert`, characterised. `AppendRows` and `ApplyTransform` are `NotInvertible` on every table (`invert_not_invertible`). On `SetCell`, `SetColumn` and `RemoveColumn`, `invert` refuses EXACTLY the pre-states `apply` refuses for the column and row it reads, with the same rejection; where `apply` goes on to refuse the VALUE — a cell of the wrong type, a column of the wrong length — `invert` has already answered, and `RemoveColumn` has no value to refuse so there the verdicts coincide outright. And THE FINDING: `invert` on `InsertColumn` reads nothing from the pre-state (`invert_insert_reads_nothing`), so the inverse it derives for an insert REFUSED as a duplicate is a remove that succeeds at the pre-state and takes the column that was already there (`refused_insert_inverse_is_live`). A caller that inverts without first checking acceptance loses a column the refused operation never touched. Reported, asserted on the shipped engine by the differential, and not fixed here: a gap the theorem finds is fixed by its own phase, as Phase 137 preceded Phase 138.",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "theorem": "invert_refuses_as_apply",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-diff-applicable",
+      "level": "proved",
+      "claim": "Every script `Diff.toOps` emits applies to the table it was computed against and yields the other table, on well-formed tables — the doc comment's promise (\"apply-ing it in order yields after\") as a theorem over both branches. The column-granular branch walks `after`'s columns replacing each changed one in place, with the invariant that what the walk has passed is already `after`'s and what it has not reached is still `before`'s; the rebuild branch removes every column (in any order, since the names are distinct) and refills in order, with the invariant that the table so far is a prefix of `after`. Both branches are reached by the differential and asserted on production and on the model.",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "theorem": "diff_applicable",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "columnar-differential",
+      "level": "tested",
+      "claim": "The extracted columnar model agrees with the shipped `ColumnOps.apply`, `canApply`, `invert`, `applyAll` and `toOps` over generated tables and op scripts — tables drawn with the well-formedness invariant deliberately broken one draw in ten (a repeated name, a column a row long or short, a schema that is not the columns' projection, a cell of the wrong type), because `apply` is total over all of them and the model must agree there too. Compared per probe: the verdict, an accepted result through the bridge, a rejection by class AND payload, the dry run against the mutating call on each side, the derived inverse as an operation, the round trip asserted exactly where the pre-state is well-formed and only counted where it is not, the invariant on production's result judged by the model's own `wf`, and every script whole. Over pairs: the emitted diff script, and the reconstruction asserted on both sides where both tables are well-formed, both branches counted. The go-red hands the differential a BLIND cell bridge — every present cell read as a string — and requires it to lose on the type check. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#176",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the columnar oracle agrees with ColumnOps.apply, canApply and invert over generated tables and scripts",
+          "the columnar oracle agrees with ColumnOps.toOps and applyAll, and the diff reconstructs on well-formed pairs",
+          "a columnar oracle handed a BLIND cell bridge DISAGREES with ColumnOps.apply — the measurement can fail",
+          "the inverse of a REFUSED insert is a live remove — `invert_insert_reads_nothing`, on the shipped engine"
+        ]
+      }
+    },
+    {
+      "id": "column-cell-carrier-opaque",
+      "level": "assumed",
+      "claim": "THE CARRIER PREMISE. The model reads a present cell as its type and an OPAQUE carrier, and two cells are equal exactly when their types and carriers are; production compares the six value constructors structurally. The bridge renders each value to a carrier that parses back exactly (an int in decimal, a float through the round-trip `R` format, a bool as its word, the three string-carried kinds verbatim), so on every finite value the two readings agree — and on a NaN float they do not: `Float nan <> Float nan` in production, `\"NaN\" = \"NaN\"` in the model. Where the algebra compares cells (`Diff.toOps`'s changed-column test) a table holding a NaN is therefore one the model and production can diff differently. Nothing in the algebra looks inside a carrier, which is why the abstraction is right; the generator draws no NaN and says so. Permanent: the model cannot represent IEEE equality without modelling the float, which is finding 2's cost and not this theorem's.",
+      "phase": "fuaran-core#176",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "a present cell is its type and an opaque carrier compared as a string; production's structural cell equality agrees except at a NaN float"
+      }
+    },
+    {
+      "id": "column-transform-evaluator-abstract",
+      "level": "assumed",
+      "claim": "`ApplyTransform` runs a `DataFrame` pipeline the algebra does not interpret, and the model takes the evaluator as a PARAMETER — exactly as Phase 135 made `float i` a parameter and Phase 138 made `ReplaceChildren` one. Every theorem about `apply` is therefore about the ENVELOPE of that clause — replace the table wholesale on `Ok`, `TransformRejected` carrying the evaluator's words on `Error`, nothing built before it answers — and nothing about what the pipeline computes. The one place the abstraction has content is well-formedness: that `DataFrame.evalPipeline` returns coherent, name-distinct, uniform, typed tables is stated as the hypothesis `ev_preserves_wf` and discharged nowhere. The differential instantiates the parameter at production's own evaluator through the bridge, so the envelope is compared; the pipeline is not. Unscheduled: modelling `DataFrame.evalPipeline` is its own phase and nobody has taken it.",
+      "phase": "fuaran-core#176",
+      "class": "model-bridge",
+      "closes": "unscheduled",
+      "evidence": {
+        "assumption": "the pipeline evaluator is a parameter; that it returns well-formed tables is a hypothesis this repository does not discharge"
+      }
     }
   ]
 }

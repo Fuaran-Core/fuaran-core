@@ -185,6 +185,16 @@
       "floorPhase": "fuaran-core#173",
       "phase": "fuaran-core#168",
       "note": "The generated ROUND TRIP over `ScoreVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total`. Emitted by the same target from the same walk as the model, ONE LEMMA PER CONSTRUCTOR and one per PRESENCE PATTERN (Phase 168): `rt_<T>` is a case split whose arms cite `rt_<T>__<Ctor>`, one constructor's arm alone, and a constructor with `presenceSplitAt` (2) or more conditional members is split further into `…__p<bits>` lemmas whose `requires` pins every conditional member present or absent — so no query carries more than one constructor's object shapes, which is the structural fix Phase 150 named for the 2^k failure it measured at twenty UI kinds. The family is one mutual induction on the lexicographic measure `%[x; tier]`. The in-file `--z3rlimit 200` precedent is RETIRED with the shape that needed it: every query here discharges at the leg's own rlimit of 40, under `--quake 3`, cold. Sixty-two lemmas — the largest proof script in the leg: nineteen kind arms, and `Measure` and `Score` reach the presence split (omit-at-default members, so the pattern lemmas pin equality with the default the encoder tests, not `Some?`). MEASURED (Phase 168) as for `VocabularyProofs`: 58s (direct), 46s, 108s, 47s — the 108s leg ran the whole leg 37% slower than the other two, so it is load, and it is kept because the rule seeds from the slowest. Slowest 108s, so the budget is RAISED from 90s to 220s by the seeding rule — the price of forty-four more lemmas, each its own query, against Phase 173's 42s slowest for the one-lemma shape (the BEFORE). Floor kept at 6s for the reason `VocabularyProofs` gives."
+    },
+    {
+      "module": "ColumnOps",
+      "budgetSeconds": 100,
+      "measuredSeconds": 47,
+      "floorSeconds": 4,
+      "fastestSeconds": 9,
+      "floorPhase": "fuaran-core#176",
+      "phase": "fuaran-core#176",
+      "note": "The compute strand's op algebra — `ColumnOps.apply` / `canApply` / `invert` / `Diff.toOps` clause for clause, the five Preservation clauses proved for columns, and `Diff.toOps`'s reconstruction. Self-contained (opens nothing) and cheap: default context, no scoped options, the whole module discharges at the leg's own rlimit of 40 under `--quake 3`. SEEDED BY PHASE 176: three cold runs through the kit on this machine, 47s, 31s, 22s (the first carrying the prover's first-run cost, beside concurrent sessions), and the prover invoked directly on the same file with the same flags during authoring, fresh verification each time, 9-20s — so the budget is 2x the slowest kit run rounded up to the next 10s (100s) and the floor is half the fastest genuine run rounded down (4s from 9s), per the two rules above. The two proof shapes that cost anything are the well-formedness preservation for `AppendRows` (a forall over the columns, threaded through `typed_append_aux`) and the diff's two walks (`changed_apply`, `inserts_apply`), each an induction carrying an invariant about the prefix already processed."
     }
   ]
 }
