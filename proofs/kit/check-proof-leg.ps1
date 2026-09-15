@@ -320,8 +320,18 @@ for ($run = 1; $run -le $Runs; $run++) {
         $cost = if ($null -eq $budget) { "${seconds}s (no budget)" } else { "${seconds}s/${budget}s" }
         Write-Host "==== proofs: $module.fst verified — run $run of $Runs, $cost, every query $Quake/$Quake under --quake" -ForegroundColor Green
 
+        # The CEILING. Restored by Phase 155: Phase 164 deleted this block when it added the floor
+        # gate below, so from a27afbc until now an overshoot printed nothing, `$costFindings` was
+        # never populated from a measured time, and `-Strict` had nothing to promote — while the
+        # budget file's comments and the README both went on describing a ceiling that fired. A
+        # measured 32s against a 30s budget said nothing at all. It is a WARNING and the run
+        # continues, which is the half the floor below is deliberately not.
+        if ($null -ne $budget -and $seconds -gt $budget) {
+            Add-CostFinding "$module.fst took ${seconds}s against its ${budget}s budget on run $run of $Runs — $($seconds - $budget)s over, $([int](100 * $seconds / $budget))% of budget"
+        }
+
         # The floor fails HERE rather than joining the cost findings at the end, and the asymmetry
-        # with the ceiling three lines up is deliberate. An overshoot is a true measurement of a
+        # with the ceiling just above it is deliberate. An overshoot is a true measurement of a
         # true cost, so the run should continue and produce the rest of the evidence. An
         # undershoot says the measurement itself is not to be believed — the cache was not cold —
         # and every module after it is measured by the same apparatus, so carrying on would print
