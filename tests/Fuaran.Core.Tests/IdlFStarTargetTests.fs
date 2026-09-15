@@ -6,8 +6,8 @@ open Fuaran.Core
 open Fuaran.Core.Idl
 
 // ---------------------------------------------------------------------------
-// Phase 150 — the F* PROOF-MODEL target, and the GENERATION DIFF that holds the two
-// committed `.fst` artefacts to a fresh generation from the pinned corpus.
+// Phase 150 — the F* PROOF-MODEL target, and the GENERATION DIFF that holds the committed
+// `proofs/Vocabulary.fst` to a fresh generation from the pinned corpus.
 //
 // The diff is the same discipline the proof leg already applies to the extracted oracle —
 // `proofs/oracle/<M>.fs` must be byte-identical to a fresh extraction of `<M>.fst`, or the
@@ -29,7 +29,6 @@ open Fuaran.Core.Idl
 
 let private repoRoot = Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
 let private modelPath = Path.Combine(repoRoot, "proofs", "Vocabulary.fst")
-let private proofsPath = Path.Combine(repoRoot, "proofs", "VocabularyProofs.fst")
 
 /// The corpus family the resolver anchors on; `idl.json` sits at the corpus ROOT beside it.
 let private corpusFamily = "nodes"
@@ -68,8 +67,8 @@ let private pinnedIdl () : Result<Idl, string> =
     | SiblingCorpus.Absent why -> Error why
     | SiblingCorpus.Found root -> Artifact.parse (File.ReadAllText(Path.Combine(root, "idl.json")))
 
-/// `--emit-fstar` — rewrite both committed artefacts from the pinned corpus. The command the
-/// generation diff names when it fails, and the only sanctioned way either file changes.
+/// `--emit-fstar` — rewrite the committed model from the pinned corpus. The command the generation
+/// diff names when it fails, and the only sanctioned way that file changes.
 let emit () : int =
     match pinnedIdl () with
     | Error why ->
@@ -88,17 +87,15 @@ let emit () : int =
                 printfn "regenerated %s" path
                 0
 
-        let a = write modelPath (FStarTarget.vocabularyModule "Vocabulary" idl selection)
-
-        let b =
-            write proofsPath (FStarTarget.proofsModule "VocabularyProofs" "Vocabulary" idl selection)
+        let written =
+            write modelPath (FStarTarget.vocabularyModule "Vocabulary" idl selection)
 
         printfn
             "%d of %d kinds modelled; the rest are named in the emitted header"
             (List.length selection)
             (List.length idl.Kinds)
 
-        max a b
+        written
 
 let private refusalOf (t: IdlType) =
     match FStarTarget.vocabularyModule "M" (tinyIdl t Required) [ "Only" ] with
@@ -233,25 +230,48 @@ let idlFStarTargetTests =
 
                   let selection = FStarTarget.proofKinds idl
 
-                  let fresh which =
-                      match which with
-                      | Choice1Of2() -> FStarTarget.vocabularyModule "Vocabulary" idl selection
-                      | Choice2Of2() -> FStarTarget.proofsModule "VocabularyProofs" "Vocabulary" idl selection
-
                   let remedy =
                       "VOCABULARY DRIFT — the IDL has moved and the committed F* model has not.\n"
-                      + "Regenerate both files with `dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar`,\n"
-                      + "commit them, and re-run the proof leg: the theorems must still hold over the new vocabulary."
+                      + "Regenerate it with `dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar`,\n"
+                      + "commit it, and re-run the proof leg: the model must still check over the new vocabulary."
 
-                  for name, path, which in
-                      [ "Vocabulary.fst", modelPath, Choice1Of2()
-                        "VocabularyProofs.fst", proofsPath, Choice2Of2() ] do
-                      match fresh which with
-                      | Error e -> failtestf "the F* target refused the pinned corpus: %s" (CodegenError.describe e)
-                      | Ok text ->
-                          Expect.isTrue (File.Exists path) (sprintf "proofs/%s is committed" name)
+                  match FStarTarget.vocabularyModule "Vocabulary" idl selection with
+                  | Error e -> failtestf "the F* target refused the pinned corpus: %s" (CodegenError.describe e)
+                  | Ok text ->
+                      Expect.isTrue (File.Exists modelPath) "proofs/Vocabulary.fst is committed"
 
-                          Expect.equal
-                              (lf text)
-                              (lf (File.ReadAllText path))
-                              (sprintf "proofs/%s has drifted from a fresh generation.\n%s" name remedy) ]
+                      Expect.equal
+                          (lf text)
+                          (lf (File.ReadAllText modelPath))
+                          (sprintf "proofs/Vocabulary.fst has drifted from a fresh generation.\n%s" remedy)
+
+          // ---- the theorems emitter, which emits and is NOT committed ---------
+
+          testCase "the theorems emitter produces a proof script over the same walk"
+          <| fun _ ->
+              // `proofsModule` is a shipped part of the target and is exercised here, but its output
+              // is not committed beside the model. Measured on the pinned prover, the emitted round
+              // trip discharges for a SMALL vocabulary — green at one kind and at eight — and does
+              // NOT at the twenty this corpus's proof vocabulary selects: the widest kind's arm
+              // (`FileUpload`, eleven members, five of them conditional) is not proved even at
+              // `--z3rlimit 200`, because a decoder reading eleven members off an object with five
+              // conditional cells puts thirty-two object shapes into one query. Committing a `.fst`
+              // that does not verify would be worse than committing none, so there is none, and
+              // `proofs/README.md`'s theorem 1 section carries the measurement and the remedies
+              // already tried. What this case pins is the property a committed pair would have
+              // needed, and the one a later phase builds on: the two emitters agree about WHICH
+              // vocabulary they are talking about.
+              match
+                  FStarTarget.vocabularyModule "M" (tinyIdl TStr Required) [ "Only" ],
+                  FStarTarget.proofsModule "MP" "M" (tinyIdl TStr Required) [ "Only" ]
+              with
+              | Error e, _
+              | _, Error e -> failtestf "the target refused a one-scalar vocabulary: %s" (CodegenError.describe e)
+              | Ok model, Ok proofs ->
+                  Expect.stringContains model "let rec dec_node" "the model declares the node decoder"
+                  Expect.stringContains proofs "open M" "the proof script opens the model it is about"
+
+                  Expect.stringContains
+                      proofs
+                      "dec_node (enc_node #num #flt x) == Ok x"
+                      "and states the round trip over the generated definitions" ]

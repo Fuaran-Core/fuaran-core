@@ -2162,6 +2162,9 @@ decoder as an F\* module over the wire decode model; `proofsModule` emits the ro
 totality THEOREMS over exactly those definitions, from the same walk. Generating the proof script
 as well as the model is the point rather than a convenience: a hand-written proof over a vocabulary
 is a theorem about the day it was written, and a generated one re-proves itself when a kind lands.
+The emitted proof discharges for a small vocabulary and not yet for this corpus's own — measured,
+with the reason and the structural fix in `proofs/README.md` — so this release ships the emitter
+and the generated MODEL, and commits no proof script.
 
 **The `CodegenError` addition is a DU case on a published closed union** —
 `UnmodellableInFStar of construct: string * where: string` — so a consumer matching

@@ -34,9 +34,9 @@
 #               files with the fresh extractions instead (then commit them). A model listed in
 #               $proofOnly below is EXEMPT and says so on its own line — see that list.
 #   2b. GENERATE — the one GENERATED model (Phase 150) is held to a fresh generation from the
-#               pinned `idl.json` by the Proofs.Vocabulary family in step 3, which is the same
-#               discipline as step 2 one level further up: step 2 says the oracle is the model,
-#               and that says the model is the vocabulary the specification declares.
+#               pinned `idl.json` by the Proofs.Vocabulary family in step 3 — the same discipline
+#               as step 2, one level further up: step 2 says the oracle is the model, and this says
+#               the model is the vocabulary the specification declares.
 #   3. HOST   — two Expecto families. Proofs.Oracle runs the extracted models beside the production
 #               code (the differential tests); Proofs.Ladder holds ../proofs.json — the claims
 #               ladder declared as data — to this tree, so a row naming a theorem no model
@@ -58,10 +58,6 @@ param(
     [switch] $SkipOracleHost,
     [switch] $Strict,
     [switch] $NoFloor,
-    # Phase 150 — also check `VocabularyProofs.fst`, the theorems over the generated vocabulary.
-    # Opt-in because it is measured in tens of minutes under `--quake 3` and CI runs the leg three
-    # times; see the note beside $modules below.
-    [switch] $Theorems,
     [string] $CacheDir,
     [int]    $Runs = 1
 )
@@ -120,33 +116,26 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 #   Vocabulary — Phase 150, and the only GENERATED model here: the wire-format IDL's own
 #                vocabulary — its types, its discriminated encoder and its tag-dispatch decoder —
 #                emitted from `idl.json` by `Fuaran.Core.Idl.Codegen`'s F* target. Opens
-#                WireDecode, so it follows it.
-#   VocabularyProofs — Phase 150, the theorems over that model, emitted by the same walk: the
-#                round trip `dec_node (enc_node x) == Ok x` over EVERY value of every modelled
-#                type, and the decoder's totality. Generated for the reason the model is: a
-#                hand-written proof over a vocabulary is a theorem about the day it was written.
-#                Opens Vocabulary, so it follows it.
+#                WireDecode, so it follows it. See the note below the list for the theorems that
+#                the same target emits and that are NOT committed beside it.
 $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Vocabulary')
 
-# Phase 150 — the one module the leg does NOT check by default, and why that is a measurement
-# rather than a preference.
+# Phase 150 — why there is a generated MODEL here and no generated THEOREMS beside it (yet).
 #
-# `VocabularyProofs.fst` carries the THEOREMS over the generated vocabulary — the round trip
-# `dec_node (enc_node x) == Ok x` over every value of every modelled type. It verifies on the
-# pinned prover. What it does not do is verify in a time this leg can spend three times over on
-# every push: measured, its node lemma alone runs for tens of minutes under `--quake 3`, because
-# the node's five OPTIONAL envelope members put thirty-two object shapes into a single query and
-# one goal of the sixty-five is hard. Registering it unconditionally would take the CI proofs job
-# from minutes to hours for every commit in this repository, which is not a cost this phase is
-# entitled to impose on everyone else's pushes.
+# `Fuaran.Core.Idl.Codegen`'s F* target emits both: `FStarTarget.vocabularyModule` for the model
+# below, and `FStarTarget.proofsModule` for the round trip over it. The emitted proof script
+# DISCHARGES on the pinned prover for a small vocabulary — it was checked green at one kind and at
+# eight — and at the twenty this corpus's proof vocabulary selects it does not: the widest kind's
+# arm (`FileUpload`, eleven members, five of them conditional) is not proved even at
+# `--z3rlimit 200`, because a decoder reading eleven members off an object with five conditional
+# cells puts thirty-two object shapes into one query. So no theorems module is committed, rather
+# than one committed that does not verify.
 #
-# So it is OPT-IN, and the opt-in is real rather than decorative: `-Theorems` checks it here, with
-# the same flags and the same cold cache as everything else, and `proofs/README.md`'s theorem 1
-# section carries the measurement and what widening it would take. The artefact is NOT unguarded
-# in the meantime — the generation diff in step 3 holds it to a fresh generation from `idl.json`
-# on EVERY run, so it cannot drift from the vocabulary it is about; what a default run does not do
-# is re-prove it.
-if ($Theorems) { $modules += 'VocabularyProofs' }
+# The cause is understood and named in `proofs/README.md`'s theorem 1 section, along with the three
+# remedies already measured, so that whoever takes it does not start from scratch. What IS here is
+# the model, checked below like every other module — and the totality it carries is not nothing:
+# every generated decoder is `Tot` on an arbitrary `jval`, which F* admits only after proving it.
+
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
@@ -352,22 +341,23 @@ for ($run = 1; $run -le $Runs; $run++) {
 
 # ---- 4. extract, and hold the committed oracle to the model ---------------------------------------
 
-# Phase 150 — the models that are CHECKED but not EXTRACTED, and why an exemption exists at all.
+# Phase 150 — the model that is CHECKED but not EXTRACTED, and why an exemption exists at all.
 #
 # An oracle is here so the Expecto differential can run the extracted model beside the production
-# code over the same inputs. Two of the models have no production code on this side to run beside:
-# `Vocabulary` models the vocabulary an `idl.json` DECLARES, and the decoder it models is one a
-# GENERATOR emits into a consuming host, not one this repository ships; `VocabularyProofs` is
-# lemmas, which erase. Extracting them anyway would commit ~400 KB of generated F# that nothing
-# compiles, calls or compares — which is what an oracle is supposed to be the opposite of. (The
-# extractor also emits a mutual TYPE group with the `and` indented one space, which F# 10's parser
-# rejects outright; that is a real finding about the F# backend, and it is not the reason for this
-# exemption — an oracle nothing runs would not be worth committing even if it compiled.)
+# code over the same inputs. `Vocabulary` has no production code on this side to run beside: it
+# models the vocabulary an `idl.json` DECLARES, and the decoder it models is one a GENERATOR emits
+# into a consuming host rather than one this repository ships. Extracting it anyway would commit
+# ~400 KB of generated F# that nothing compiles, calls or compares — which is what an oracle is
+# supposed to be the opposite of. (The extractor also emits its mutual TYPE group with the `and`
+# indented one space, which F# 10's parser rejects outright even under the oracle project's
+# `--strict-indentation-`; that is a real finding about the F# backend — this is the first model
+# here with a mutual type group — and it is NOT the reason for this exemption. An oracle nothing
+# runs would not be worth committing even if it compiled.)
 #
 # The exemption is NARROW and it is not a hole in the discipline: what step 2 buys for the other
-# models — "the artefact is the model, byte for byte" — these two get from the GENERATION diff in
-# step 3 instead, one level further up, against the `idl.json` they are generated from.
-$proofOnly = @('Vocabulary', 'VocabularyProofs')
+# models — "the artefact is the model, byte for byte" — this one gets from the GENERATION diff in
+# step 3 instead, one level further up, against the `idl.json` it is generated from.
+$proofOnly = @('Vocabulary')
 
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -416,10 +406,9 @@ if (-not $SkipOracleHost) {
         # Phase 150 — the GENERATION diff, beside the extraction diff above and for the same
         # reason one step further up. Step 4 holds each committed oracle to a fresh EXTRACTION of
         # its model, so the oracle the suite runs is the model the theorem is about; this holds
-        # the committed `Vocabulary.fst` / `VocabularyProofs.fst` to a fresh GENERATION from the
-        # pinned `idl.json`, so the vocabulary the theorem is about is the vocabulary the
-        # specification declares. An IDL that moves without a regeneration is VOCABULARY DRIFT,
-        # and this is where it is named.
+        # the committed `Vocabulary.fst` to a fresh GENERATION from the pinned `idl.json`, so the
+        # vocabulary the model is about is the vocabulary the specification declares. An IDL that
+        # moves without a regeneration is VOCABULARY DRIFT, and this is where it is named.
         #
         # It runs HERE rather than ahead of the prover because the generator is F# and the check
         # above is the first thing in this script that has a built test project to hand — and

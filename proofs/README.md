@@ -696,10 +696,10 @@ said so — but it leaves theorem 1 saying nothing about the kind that landed la
 real vocabulary is the wire-format specification's `idl.json`, it carries 43 kinds, 28 records, 22
 unions and 46 enums, and it grows.
 
-`Vocabulary.fst` and `VocabularyProofs.fst` close that gap for most of it. Both are **generated**,
-from `idl.json`, by a fourth backend of the IDL's own code generator (`FStarTarget`, beside the F#
-structural layer, the TypeScript encoder and the JSON schema) — the model AND its proof script,
-from the same walk:
+`Vocabulary.fst` closes most of that gap, and it is **generated** — from `idl.json`, by a fourth
+backend of the IDL's own code generator (`FStarTarget`, beside the F# structural layer, the
+TypeScript encoder and the JSON schema). The same backend emits the proof script over it, from the
+same walk; how far that got, and why it is not committed here, is the cost note below:
 
 - **`Vocabulary.fst`** — the vocabulary's types, its `$type`-discriminated encoder and its
   tag-dispatch decoder, over the `jval` value model and the combinators above. Generic unions are
@@ -708,11 +708,11 @@ from the same walk:
   first-order: a parametric `Binding` would have to take its element codec as a value, and the
   round-trip lemma would then need a higher-order hypothesis relating an encoder to a decoder it
   cannot see.
-- **`VocabularyProofs.fst`** — `rt_node` and the mutual family beside it: **`dec_node (enc_node x)
-  == Ok x`, for every value of every modelled type**, at every depth, through every list, map,
-  optional member and omit-default. Plus `dec_node_total`, the outcome's exclusivity. It verifies
-  on the pinned prover and is **checked by `check.ps1 -Theorems` rather than by a default run** —
-  see the cost note below, which is a measurement and not a preference.
+- **the proof script** — `rt_node` and the mutual family beside it: **`dec_node (enc_node x) == Ok
+  x`, for every value of every modelled type**, at every depth, through every list, map, optional
+  member and omit-default, plus `dec_node_total` for the outcome's exclusivity. `proofsModule`
+  emits it and the suite exercises it, but **no proof script is COMMITTED beside the model, and
+  that is a measurement rather than a plan** — see the cost note below.
 
 **Why the proof script is generated and not written.** A hand-written proof over the real
 vocabulary would be a theorem about the vocabulary as it stood on the day it was written — the same
@@ -721,15 +721,15 @@ the IDL enters the model at the next regeneration and **re-proves itself**, and 
 encoder and decoder disagree fails the leg.
 
 **Two diffs hold it, and they are one level apart.** Step 2 of `check.ps1` holds each committed
-oracle to a fresh EXTRACTION, so the artefact the suite runs is the model. The
-`Proofs.Vocabulary` family holds these two committed `.fst` files to a fresh GENERATION from the
-pinned corpus, so the model is the vocabulary the specification declares — an IDL that moves
-without a regeneration is **vocabulary drift** and the leg names it, with
-`dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. These two models are
-CHECKED but not EXTRACTED (`$proofOnly` in `check.ps1`): nothing here runs the model beside
-production, because the decoder it models is one a generator emits into a consuming host and not
-one this repository ships, so an oracle for it would be several hundred kilobytes of generated F#
-that nothing compiles, calls or compares.
+oracle to a fresh EXTRACTION, so the artefact the suite runs is the model. The `Proofs.Vocabulary`
+family holds the committed `Vocabulary.fst` to a fresh GENERATION from the pinned corpus, so the
+model is the vocabulary the specification declares — an IDL that moves without a regeneration is
+**vocabulary drift** and the leg names it, with
+`dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. The model is CHECKED
+but not EXTRACTED (`$proofOnly` in `check.ps1`): nothing here runs it beside production, because
+the decoder it models is one a generator emits into a consuming host and not one this repository
+ships, so an oracle for it would be several hundred kilobytes of generated F# that nothing
+compiles, calls or compares.
 
 **What the model covers, and the two different reasons it does not cover the rest.** The emitted
 header carries the live list; the shapes are:
@@ -761,18 +761,19 @@ what says the measurement is of this leg rather than of something adjacent to it
 
 - **`Vocabulary` — 322s and 398s across two runs.** Budgeted in `modules.json` like every other
   module, and checked on every run.
-- **`VocabularyProofs` — tens of minutes, and not registered by default.** Its node lemma is a
-  single query of 65 goals, because the node's five OPTIONAL envelope members put 32 object shapes
-  into it; one of those goals is hard. At the leg's default rlimit it proved 64 of 65 and FAILED
-  the third `--quake` seed — green standalone, red under `check.ps1`, the shape `Preservation`'s
-  `invert_applicable` entry warns about. At `--z3rlimit 200` (the remedy that precedent took, and
-  what the generated module now carries) the goal stops failing and starts grinding: no run of it
-  under `--quake 3` has been observed to finish inside half an hour on this machine. Registering it
-  unconditionally would take the CI proofs job from minutes to hours on every push, so it is
-  behind `check.ps1 -Theorems`, and `proofs.json` carries no `proved` row for the round trip —
-  a claim the leg does not reproduce is not a claim the ladder will carry. **It is not unguarded
-  in the meantime**: the generation diff holds it to a fresh generation on every run, so it cannot
-  drift from the vocabulary it is about; what a default run does not do is re-prove it.
+- **the proof script — NOT COMMITTED, and here is exactly how far it got.** The emitted round trip
+  verifies for a SMALL vocabulary: green at one kind and at eight, on the pinned prover, with no
+  admits. At the twenty kinds this corpus's proof vocabulary selects it does not, and it fails
+  twice over, in this order. First `rt_node`, a single query of 65 goals — the node's five OPTIONAL
+  envelope members put 32 object shapes into it — proved 64 of 65 at the leg's default rlimit and
+  FAILED the third `--quake` seed: green standalone, red under `check.ps1`, the shape
+  `Preservation`'s `invert_applicable` entry warns about. Raising to `--z3rlimit 200`, the remedy
+  that precedent took, stops that goal failing and starts it grinding, with no run under
+  `--quake 3` observed to finish inside half an hour. And at that rlimit WITHOUT quake the run
+  completes in 442s and reports a different failure: `rt_vkind`'s `FileUpload` arm — eleven
+  members, five of them conditional, so the same 2^k explosion one kind wider. **A `.fst` that does
+  not verify is worse than no `.fst`**, so none is committed, and `proofs.json` carries no `proved`
+  row for the round trip: a claim the leg does not reproduce is not a claim the ladder will carry.
 
 **Where the cost is, which is the finding worth carrying forward: the node ENVELOPE's closure, not
 the kinds.** One kind and eight kinds measured the same, because `Accessibility`, `SemanticStyle`,
@@ -782,15 +783,19 @@ vocabulary — 42 kinds, ~30 more declared types — did not finish a single che
 minutes. So narrowing the selection further buys almost nothing, and widening it is not a matter of
 patience.
 
-**What would make the theorems affordable, for whoever takes it.** The hard goal is hard for a
-structural reason, and the fix is structural. `--split_queries always` would isolate it and leave
-the other 64 as the trivialities they are, but it is not settable as a `#set-options` pragma on the
-pinned prover — so the equivalent is to emit the node's proof as SEVERAL smaller lemmas rather than
-one, which is generator work rather than a flag. A second lever was tried and measured WORSE, which
-is worth recording so it is not tried again blind: routing conditional members through an
-`opt_cons` helper with an SMT-patterned lookup law (to stop the prover splitting 2^k ways past k
-optional members) made `Vocabulary` itself several times slower, because the helper's pattern then
-fires throughout the encoder as well.
+**What would make the theorems land, for whoever takes it — and the two levers already spent.** Both
+failures are the same shape: one lemma, one query, 2^k object shapes for k conditional members. The
+fix is therefore structural, and it is to emit each kind's round trip as its OWN lemma rather than
+as one arm of `rt_vkind`, and to break the node's five envelope members across several lemmas
+rather than one. That is generator work, and the emitter is where it belongs.
+
+Two levers were tried first, and are recorded so they are not tried again blind. `--split_queries
+always` is the option actually designed for one hard goal inside a large query — it is **not
+settable as a `#set-options` pragma on the pinned prover** ("unrecognized option"), so it would
+have to be passed by the leg. And routing conditional members through an `opt_cons` helper with an
+SMT-patterned lookup law — sound, and it removes an exponential duplication in the emitted text as
+well — **measured WORSE**: `Vocabulary` itself, 322-398s before, had not finished in over twenty
+minutes after, because the helper's pattern then fires throughout the encoder too.
 
 ### The boundary — `Json.parse` is excluded, and why
 
@@ -971,11 +976,12 @@ reddens `perm_as_int`. Each landed on the lemma that should have caught it.
 **Phase 150 amends clause 4's middle third, and it is worth saying which third.** The third is
 "anything about a domain's own decoder beyond the reference vocabulary modelled here", and it is no
 longer the boundary: `Vocabulary.fst` is the wire-format specification's OWN vocabulary, generated
-from `idl.json`, and `rt_node` proves the round trip over 20 of its 43 kinds — so what carries to a
-domain is now the combinator layer **and** a machine-checked round trip over a substantial slice of
-the vocabulary the specification declares. (That theorem is checked by `check.ps1 -Theorems` rather
-than on every run, for the measured reason in the cost note above, and `proofs.json` carries no
-`proved` row for it while that is true.) What the amendment does NOT buy, and must not be read as buying: this
+from `idl.json`, and the model covers 20 of its 43 kinds — so what carries to a
+domain is now the combinator layer **and** a machine-checked MODEL of a substantial slice of the
+vocabulary the specification declares, with every generated decoder total on every input. (The
+ROUND TRIP over it is emitted and not committed, for the measured reason in the cost note above,
+and `proofs.json` carries no `proved` row for it while that is true.) What the amendment does NOT
+buy, and must not be read as buying: this
 is a theorem about the vocabulary, not about any HOST's decoder. The six conformant hosts keep
 their own hand-written decoders and are certified against the fixture corpus; no host's build
 generates this model, and nothing here says a host implements it. The per-kind coverage, the two
