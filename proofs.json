@@ -59,6 +59,65 @@
       }
     },
     {
+      "id": "decode-perm-invariant",
+      "level": "proved",
+      "claim": "WIRE_FORMAT §2 rule 2's obligation on the decoder, as a theorem: on two documents that differ only by the ORDER of object members, at any depth, every decode combinator answers the same. The scalar readers, kindOf, strField, intField and mapList return EQUAL outcomes, message included; getProp, whose result is itself a reordered subtree, returns a related one. Duplicate-free member lists only — see duplicate-keys-break-order-invariance for why that premise cannot be dropped.",
+      "phase": "fuaran-core#152",
+      "evidence": {
+        "theorem": "decode_perm_invariant",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decode-node-order-invariant",
+      "level": "proved",
+      "claim": "WIRE_FORMAT §20's one-answer rule at this layer: the kind-dispatch node decoder returns the SAME TREE on a document whose object members have been reordered at any depth — literally equal, since a decoded node carries no members of its own — or the same named refusal.",
+      "phase": "fuaran-core#152",
+      "evidence": {
+        "theorem": "decode_node_perm_invariant",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "perm-covers-reorder",
+      "level": "proved",
+      "claim": "The converse direction, which is what keeps the invariance above from being vacuous: the relation CONTAINS every reordering of a duplicate-free member list whose values are themselves related — one level of a deep reordering, with the scalar arms as the base cases. A relation nothing is related by would satisfy every invariance lemma and say nothing.",
+      "phase": "fuaran-core#152",
+      "evidence": {
+        "theorem": "perm_covers_reorder",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "duplicate-keys-break-order-invariance",
+      "level": "proved",
+      "claim": "The premise is NECESSARY, not convenient: two documents that are the same members in a different order, whose keys repeat, and getProp answers differently. Nothing upstream excludes them — the parser appends every member with no key check, and Phase 146's model says so — so the duplicate-free premise is carried by this theorem rather than inherited, and a session weakening the relation to a plain list permutation reddens this lemma first.",
+      "phase": "fuaran-core#152",
+      "evidence": {
+        "theorem": "duplicate_keys_break_order_invariance",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decode-order-differential",
+      "level": "tested",
+      "claim": "Every corpus fixture and every generated document, with the members of every object reordered at every depth, seeded and replayable: production's answers on the shuffle are compared against its own answers on the original — equality for every combinator whose result carries no members, the extracted outcome_perm for getProp, whose result is itself reordered — and the oracle is compared against production on the shuffled document. This is the case the corpus structurally cannot present, every fixture in it being canonically ordered. Each pair is checked to be an instance of the extracted member_perm, duplicate-keyed documents are filtered by the extracted keys_unique_deep, and a getProp that reads the FIRST member rather than the named one is required to lose.",
+      "phase": "fuaran-core#152",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "every combinator answers the same on every shuffle of every nodes/ fixture",
+          "every combinator answers the same on every shuffle of every ops/ fixture",
+          "the node decoder returns the SAME TREE on every shuffle — §20's one answer",
+          "a decoder that reads the FIRST member rather than the named one LOSES on a shuffle"
+        ]
+      }
+    },
+    {
       "id": "fold-differential",
       "level": "tested",
       "claim": "Production's delta recovery from a content-addressed DAG, its pairwise conflict sweep, the composition and the replay together agree with the extracted model over three lane pools, per lane set and per sampled arrival order — outcome and composed merge script, not merely a hash. Agreement is over the sets drawn and the orders enumerated, never over all inputs.",

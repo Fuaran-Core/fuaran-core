@@ -722,5 +722,201 @@ if ((match (p) with
      end))
 
 
+let rec extract_field = (fun ( name  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k, v))::t -> begin
+      
+if (Prims.op_Equals k name) then begin
+     FStar_Pervasives_Native.Some (((v), (t)))
+     end else begin
+     (match ((extract_field name t)) with
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end
+| FStar_Pervasives_Native.Some (w, rest) -> begin
+     FStar_Pervasives_Native.Some (((w), ((((k), (v)))::rest)))
+     end)
+     end
+     end))
+
+
+let rec member_perm = (fun ( a  :  jval<'num, 'flt> ) ( b  :  jval<'num, 'flt> ) -> (match (((a), (b))) with
+| (JStr (x), JStr (y)) -> begin
+     (Prims.op_Equals x y)
+     end
+| (JInt (x), JInt (y)) -> begin
+     (Prims.op_Equals x y)
+     end
+| (JBool (x), JBool (y)) -> begin
+     (Prims.op_Equals x y)
+     end
+| (JFloat (x), JFloat (y)) -> begin
+     (Prims.op_Equals x y)
+     end
+| (JArr (xs), JArr (ys)) -> begin
+     (items_perm xs ys)
+     end
+| (JObj (fs), JObj (gs)) -> begin
+     (fields_perm fs gs)
+     end
+| (uu___, uu___1) -> begin
+     false
+     end))
+and items_perm = (fun ( xs  :  Prims.list<jval<'num, 'flt>> ) ( ys  :  Prims.list<jval<'num, 'flt>> ) -> (match (((xs), (ys))) with
+| ([], []) -> begin
+     true
+     end
+| ((x)::xt, (y)::yt) -> begin
+     ((member_perm x y) && (items_perm xt yt))
+     end
+| (uu___, uu___1) -> begin
+     false
+     end))
+and fields_perm = (fun ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) ( gs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     (match (gs) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| ((k, v))::t -> begin
+     (match ((extract_field k gs)) with
+| FStar_Pervasives_Native.None -> begin
+     false
+     end
+| FStar_Pervasives_Native.Some (w, rest) -> begin
+     ((member_perm v w) && (fields_perm t rest))
+     end)
+     end))
+
+
+let outcome_perm = (fun ( r1  :  outcome<jval<'num, 'flt>> ) ( r2  :  outcome<jval<'num, 'flt>> ) -> (match (((r1), (r2))) with
+| (Ok (v1), Ok (v2)) -> begin
+     (member_perm v1 v2)
+     end
+| (Error (m1), Error (m2)) -> begin
+     (Prims.op_Equals m1 m2)
+     end
+| (uu___, uu___1) -> begin
+     false
+     end))
+
+
+let rec has_key = (fun ( name  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     false
+     end
+| ((k, uu___))::t -> begin
+     ((Prims.op_Equals k name) || (has_key name t))
+     end))
+
+
+let rec keys_unique = (fun ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     true
+     end
+| ((k, uu___))::t -> begin
+     ((not ((has_key k t))) && (keys_unique t))
+     end))
+
+
+let rec keys_unique_deep = (fun ( a  :  jval<'num, 'flt> ) -> (match (a) with
+| JArr (xs) -> begin
+     (keys_unique_deep_items xs)
+     end
+| JObj (fs) -> begin
+     ((keys_unique fs) && (keys_unique_deep_fields fs))
+     end
+| uu___ -> begin
+     true
+     end))
+and keys_unique_deep_items = (fun ( xs  :  Prims.list<jval<'num, 'flt>> ) -> (match (xs) with
+| [] -> begin
+     true
+     end
+| (x)::t -> begin
+     ((keys_unique_deep x) && (keys_unique_deep_items t))
+     end))
+and keys_unique_deep_fields = (fun ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     true
+     end
+| ((uu___, v))::t -> begin
+     ((keys_unique_deep v) && (keys_unique_deep_fields t))
+     end))
+
+
+let rec remove_member = (fun ( m  :  (Prims.string * jval<'num, 'flt>) ) ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (x)::t -> begin
+      
+if (Prims.op_Equals x m) then begin
+     FStar_Pervasives_Native.Some (t)
+     end else begin
+     (match ((remove_member m t)) with
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end
+| FStar_Pervasives_Native.Some (r) -> begin
+     FStar_Pervasives_Native.Some ((x)::r)
+     end)
+     end
+     end))
+
+
+let rec list_perm = (fun ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) ( gs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     (match (gs) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| (x)::t -> begin
+     (match ((remove_member x gs)) with
+| FStar_Pervasives_Native.None -> begin
+     false
+     end
+| FStar_Pervasives_Native.Some (r) -> begin
+     (list_perm t r)
+     end)
+     end))
+
+
+let rec key_count = (fun ( name  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     (Prims.parse_int "0")
+     end
+| ((k, uu___))::t -> begin
+     (( 
+if (Prims.op_Equals k name) then begin
+     (Prims.parse_int "1")
+     end else begin
+     (Prims.parse_int "0")
+     end) + (key_count name t))
+     end))
+
+
+let rec fields_pointwise = (fun ( hs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) ( gs  :  Prims.list<(Prims.string * jval<'num, 'flt>)> ) -> (match (((hs), (gs))) with
+| ([], []) -> begin
+     true
+     end
+| (((k1, v1))::t1, ((k2, v2))::t2) -> begin
+     (((Prims.op_Equals k1 k2) && (member_perm v1 v2)) && (fields_pointwise t1 t2))
+     end
+| (uu___, uu___1) -> begin
+     false
+     end))
+
+
 
 
