@@ -1,0 +1,29 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 174 classification clauses (see ladder-ok.json). ONE defect: a `model-bridge`'s `closes` is neither a `fuaran-core#NNN` phase nor one of the two literals — prose in a field a tool reads.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-bridge",
+      "level": "assumed",
+      "claim": "A model bridge whose closes is prose.",
+      "phase": "fuaran-core#174",
+      "class": "model-bridge",
+      "closes": "soon, probably",
+      "evidence": {
+        "assumption": "the fixture model reads a carrier the extraction cannot represent"
+      }
+    }
+  ]
+}

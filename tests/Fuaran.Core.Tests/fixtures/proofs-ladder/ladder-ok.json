@@ -1,12 +1,12 @@
 {
   "kind": "proofs",
   "subject": "fixture",
-  "$comment": "A FIXTURE ladder for the Phase 144 Proofs.Ladder family, NOT this repository's claims ladder — that is /proofs.json. This one is clean: it is the baseline the go-red fixtures beside it each mutate in exactly one place, and the family asserts it produces no finding, so a go-red that fires is known to be firing on the mutation.",
+  "$comment": "A FIXTURE ladder for the Phase 144 Proofs.Ladder family, NOT this repository's claims ladder — that is /proofs.json. This one is clean: it is the baseline the go-red fixtures beside it each mutate in exactly one place, and the family asserts it produces no finding, so a go-red that fires is known to be firing on the mutation. Since Phase 174 it carries one assumed row per CLASS — premise, domain-obligation, model-bridge — so the three classification clauses are non-vacuous on the baseline, and `contract-ok.md` beside it is the contract table these three rows must agree with.",
   "claims": [
     {
       "id": "fixture-theorem",
       "level": "proved",
-      "claim": "A proved row whose theorem is a top-level declaration of the model it names.",
+      "claim": "A clean proved row, so the every-module clause stays quiet.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -29,10 +29,33 @@
     {
       "id": "fixture-premise",
       "level": "assumed",
-      "claim": "An assumed row.",
+      "claim": "An assumed row that nothing discharges and no phase closes.",
       "phase": "fuaran-core#144",
+      "class": "premise",
       "evidence": {
         "assumption": "the fixture assumes nothing that matters"
+      }
+    },
+    {
+      "id": "fixture-obligation",
+      "level": "assumed",
+      "claim": "An assumed row a domain discharges by running a law of the kit at its own witness.",
+      "phase": "fuaran-core#174",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.fixtureLaws",
+      "evidence": {
+        "assumption": "the fixture domain's witness is lawful"
+      }
+    },
+    {
+      "id": "fixture-bridge",
+      "level": "assumed",
+      "claim": "An assumed row that is this repository's own model-to-production gap.",
+      "phase": "fuaran-core#174",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the fixture model reads a carrier the extraction cannot represent"
       }
     },
     {

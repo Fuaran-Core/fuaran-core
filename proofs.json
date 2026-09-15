@@ -1,7 +1,7 @@
 {
   "kind": "proofs",
   "subject": "Fuaran-Core",
-  "$comment": "This repository's claims ladder, declared as data. It is `proofs/README.md`'s own ladder — what is PROVED, what is only TESTED, what is ASSUMED — in a schema a tool can read, so the question does not have to be answered by reading prose and hoping two documents use the same words. A `not claimed` item is the ABSENCE of a row, never a row: the README enumerates those, and enumerating them here would turn a disclaimer into a claim. Levels are the closed set proved | tested | assumed | policy. Authored by hand, never generated — editing the ladder means editing this file and the README together. Since Phase 144 it is CHECKED rather than trusted: the proof leg's host step runs the `Proofs.Ladder` family (tests/Fuaran.Core.Tests/ProofsLadderTests.fs), which holds every row to the tree — a proved row's theorem is a top-level declaration of the model it names, that model is one `proofs/check.ps1` actually checks, a tested row's named cases exist in the `Proofs.Oracle` family, every checked module has a proved row, and the phase citations and levels are the closed forms. Row-to-tree agreement only: whether a row says the same thing as the README's prose stays a human act.",
+  "$comment": "This repository's claims ladder, declared as data. It is `proofs/README.md`'s own ladder — what is PROVED, what is only TESTED, what is ASSUMED — in a schema a tool can read, so the question does not have to be answered by reading prose and hoping two documents use the same words. A `not claimed` item is the ABSENCE of a row, never a row: the README enumerates those, and enumerating them here would turn a disclaimer into a claim. Levels are the closed set proved | tested | assumed | policy. Authored by hand, never generated — editing the ladder means editing this file and the README together. Since Phase 144 it is CHECKED rather than trusted: the proof leg's host step runs the `Proofs.Ladder` family (tests/Fuaran.Core.Tests/ProofsLadderTests.fs), which holds every row to the tree — a proved row's theorem is a top-level declaration of the model it names, that model is one `proofs/check.ps1` actually checks, a tested row's named cases exist in the `Proofs.Oracle` family, every checked module has a proved row, and the phase citations and levels are the closed forms. Since Phase 174 an `assumed` row also carries a `class`, from the closed set domain-obligation | model-bridge | premise, saying WHICH KIND of assumed it is: a `domain-obligation` is what a domain owes when it instantiates this substrate and carries `dischargedBy`, the `Conformance` law whose green run at that domain's own witness is the sampled discharge; a `model-bridge` is what this repository's own model has not bridged and carries `closes` — a `fuaran-core#NNN` phase, `permanent` where nothing could close it, or `unscheduled` where something could and nobody has taken it; a `premise` is what is permanently assumed and what no run of anything discharges. The same family holds every class, every law name (by reflection over the shipped `Conformance` module) and every `closes` form to the tree. Row-to-tree agreement only, with ONE prose exception: the `Core-to-domain proof contract` table in `proofs/README.md` is PARSED and held to this file row for row, because a contract a domain reads and a ladder a tool reads that disagree are worse than either alone. Whether a row says the same thing as the README's surrounding prose is still a human act.",
   "claims": [
     {
       "id": "fold-confluence",
@@ -159,6 +159,8 @@
       "level": "assumed",
       "claim": "The fold theorem's one domain hypothesis: two operations whose footprints are declared disjoint, and which both apply at a state, each apply after the other and reach the same state. Sampled — never proved — including directly against the extracted model's own independence predicate on the reference witness, with a sample-adequacy guard and its own go-red. This row is about a DOMAIN'S OWN witness, which is what the fold theorem is generic over; for the skeleton-op tree algebra specifically it is no longer assumed but proved, at `tree-independence-diamond` below.",
       "phase": "fuaran-core#132",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.footprintLaws",
       "evidence": {
         "assumption": "independence_diamond holds of the domain the fold is run over"
       }
@@ -168,6 +170,8 @@
       "level": "assumed",
       "claim": "The fold half is stated for a lane set whose every lane applies cleanly from the base state. Nothing is proved about a lane set one of whose lanes rejects; the halt half still covers it whenever it halts.",
       "phase": "fuaran-core#132",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.concurrencyLaws",
       "evidence": {
         "assumption": "lanes_apply — every lane of the set applies from the base state"
       }
@@ -177,6 +181,8 @@
       "level": "assumed",
       "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it'. `Dag.mergeBase` is outside this path entirely — `foldOnce` hands `reconcileMany` the base node's id directly and no divergence point is ever located — so nothing is claimed about it at any level. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are no longer assumed: see `dag-delta-recovery` and `fold-from-the-dag`.",
       "phase": "fuaran-core#134",
+      "class": "model-bridge",
+      "closes": "unscheduled",
       "evidence": {
         "assumption": "Dag.mergeBase, and the hash function itself, are correct"
       }
@@ -186,6 +192,7 @@
       "level": "assumed",
       "claim": "The proof leg holds the committed oracle to a fresh extraction byte for byte, which makes 'the oracle is the model' a checked claim; it does not make the F# backend correct. The least-examined link in the chain, and named as such.",
       "phase": "fuaran-core#131",
+      "class": "premise",
       "evidence": {
         "assumption": "the F* extractor and the F# compiler are correct"
       }
@@ -195,6 +202,8 @@
       "level": "assumed",
       "claim": "The model reads sets as lists under membership and the host compares canonical (deduplicated, sorted) reports, so multiplicity and order inside a report are unobserved by construction.",
       "phase": "fuaran-core#131",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "the list-for-set reading loses nothing the comparison observes"
       }
@@ -204,6 +213,8 @@
       "level": "assumed",
       "claim": "That the parser's absorption of object-member nulls is equivalent to erasing member nulls from the document tree the strict grammar would otherwise produce. The near-miss tokens that make this an assumption rather than a theorem are grammar, and stay with the parser; the differential is the evidence for it, not a proof of it.",
       "phase": "fuaran-core#135",
+      "class": "model-bridge",
+      "closes": "unscheduled",
       "evidence": {
         "assumption": "the parser's member-null fork equals erasing member nulls from the strict tree"
       }
@@ -263,6 +274,7 @@
       "level": "assumed",
       "claim": "The hash-collision assumption, and since Phase 134 the only thing the delta recovery assumes about content addressing. Node ids are distinct, so the node a chain named is the node the DAG returns for it; two nodes sharing a content id is the only way that fails.",
       "phase": "fuaran-core#134",
+      "class": "premise",
       "evidence": {
         "assumption": "Dag.nodeHash is injective on (sorted parents, actor, encoded op)"
       }
@@ -405,6 +417,8 @@
       "level": "assumed",
       "claim": "The tree the algebra runs over carries each id at most once. This is a hypothesis rather than an oversight: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved. Nothing in the estate produces such a tree and the structural diff refuses one outright, but no shipped type carries the invariant. NARROWED BY PHASE 138 to what it now is — a hypothesis about the INPUT alone. Until Phase 137 the algebra could also break the invariant on a tree that had it (`insert-breaks-id-uniqueness`); since Phase 138 that half is a theorem, `apply-preserves-wf`, so a tree that starts id-unique stays id-unique under every accepted operation. What remains unenforced is the entry point, and only the entry point.",
       "phase": "fuaran-core#133",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.opAlgebra",
       "evidence": {
         "assumption": "the tree the fold runs over carries each id at most once"
       }
@@ -510,6 +524,7 @@
       "level": "assumed",
       "claim": "The cryptographic premise, and since Phase 145 the only claim about the DAG's content id that is assumed rather than proved or certified: two (key, value) pairs that mint one digest are the same pair. It is an explicit lemma-valued PARAMETER (`hash_injective`) of the theorems that need it rather than an assume, so which results depend on it is visible in their signatures. Phase 136 stated it in a bundled form that also carried the two splices and the op codec; those are now `preimage-splices-unambiguous` and `op-codec-injective-certified` below, and this row is what is left. It is still stated MODULO THE PARENT SORT, which is the strongest true form. The LINEAR side's `rec_injective` is NOT decomposed and remains bundled — its pre-image is a four-way JSON envelope rather than nodeHash's two splices, and decomposing it is separate work, named here rather than implied.",
       "phase": "fuaran-core#145",
+      "class": "premise",
       "evidence": {
         "assumption": "the HashFn is injective on the (key, value) pairs it is handed; and, on the linear side only, the chain payload hash is injective on the pre-images that occur"
       }
@@ -546,6 +561,8 @@
       "level": "assumed",
       "claim": "That the order the model walks is the order production walks. Production enumerates Map.toList, which is ascending key order; the model walks the list it is given, and the differential hands it exactly that list. The VERDICT is order-independent by construction — a break exists or it does not — so only which break is reported first depends on this, and nothing here is said about F#'s Map enumeration.",
       "phase": "fuaran-core#136",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "the entry list the model is handed is Map.toList's own order"
       }
@@ -640,6 +657,8 @@
       "level": "assumed",
       "claim": "System.Double.TryParse's three-valued verdict on a number token — parses finitely, parses to a non-finite, does not parse — is a PARAMETER of the model, instantiated by the differential host with the call production makes. What the model decides is which verdict leads where, which is the parser's own logic; nothing here is said about float precision, about which tokens .NET accepts, or about the shortest-round-trip layout. System.Int32.TryParse is likewise modelled lexically, as a comparison against the range's own digits after stripping leading zeros, which is argued rather than mechanised and measured by the differential's boundary cases from both sides.",
       "phase": "fuaran-core#146",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "the float readback and the Int32 range test are the host's, not the model's"
       }
@@ -649,6 +668,8 @@
       "level": "assumed",
       "claim": "That the model's character list IS the production string. A character is a constructor of the model's alphabet — one per character the parser distinguishes, plus a catch-all carrying the character verbatim, so two different characters are never identified — and the host's one-line-per-character bridge is what makes the correspondence. The bridge is not itself proved. The value of a \\uXXXX escape is on the same footing: the model carries the four hex digits symbolically because the extraction carries no integers, and the host resolves the code point, so the decoded character is compared but the transliteration is sampled rather than proved.",
       "phase": "fuaran-core#146",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "the host's toCh bridge maps each production character to the model's alphabet faithfully"
       }
@@ -749,6 +770,8 @@
       "level": "assumed",
       "claim": "The witness laws themselves. The model reads a node as an id, a kind tag and an ordered child list, and treats `ReplaceChildren` as an abstract function satisfying `Conformance.witnessLaws` — exactly as the fold theorem takes the independence diamond abstractly. A domain's own `ReplaceChildren` is that domain's promise, sampled by the conformance pack and proved by nothing; where it does not hold, every theorem above is about a different function from the one that runs. Note the pack's own boundary here: `witnessLaws` exempts a leaf from the round trip, so a witness whose `ReplaceChildren` is partial on leaves is lawful.",
       "phase": "fuaran-core#138",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.witnessLaws",
       "evidence": {
         "assumption": "the domain's ReplaceChildren satisfies Conformance.witnessLaws"
       }
@@ -758,6 +781,7 @@
       "level": "assumed",
       "claim": "That the witness surface is the whole of the tree. `Tree.ids` walks `NodeWitness.Children`, so a node a domain holds in a keyed, non-structural position is invisible to the uniqueness scan, to every theorem above, and to the differential. Uniqueness over those positions is the domain's own obligation. Stated as an assumption rather than a limitation because it is what the theorems quantify over: they are true of the witness view, and the witness view is what `Ops` can see.",
       "phase": "fuaran-core#138",
+      "class": "premise",
       "evidence": {
         "assumption": "the domain exposes every node it wants the algebra to see through NodeWitness.Children"
       }
@@ -1096,6 +1120,8 @@
       "level": "assumed",
       "claim": "The numerals are OPAQUE, as they are for the decode combinators and for the parser, and for the same reason: the F# extraction carries no floats and F*'s integers are unbounded where `JInt` is Int32. The two layouts and the numeral read-back are parameters, and the ONE premise the theorems carry about them is that the read-back inverts the layouts — which is the property `Double.ToString(\"R\")` is DEFINED by, since rule 5 pins the float layout as the shortest digit sequence that round-trips. Rule 5's injectivity lemmas are DERIVED from that premise rather than assumed beside it, because a read-back that is a function cannot return two different values for one token. What is therefore not said here is anything about the digits themselves: which decimal .NET produces for a given double is measured by the differential and by the cross-host parity vectors, not proved.",
       "phase": "fuaran-core#149",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "tok_read_ok — the numeral read-back inverts the integer and float layouts, which is rule 5's own definition of the float layout"
       }
@@ -1105,6 +1131,8 @@
       "level": "assumed",
       "claim": "Rule 2's comparator is a PARAMETER, constrained to be a total order: reflexive, total, transitive and antisymmetric on keys. What is proved is that a canonical form follows FROM a total order — which is the half a model can settle. What is NOT proved is that `System.String.CompareOrdinal` is one, or that it is UTF-16 code-unit order rather than code-point or UTF-8-byte order; those are facts about .NET, and the distinction is observable exactly where the rule's own note says it is, above the BMP. The corpus fixture that pins it and the differential's astral keys are the evidence, not this theorem.",
       "phase": "fuaran-core#149",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "key_order_ok — the ordinal comparator is a total order on keys, and it is UTF-16 code-unit order"
       }
@@ -1114,6 +1142,8 @@
       "level": "assumed",
       "claim": "A character is a CONSTRUCTOR, exactly as in the parser model and for the same reason. The model distinguishes the three classes rule 6 names and the characters a numeric or literal token can carry, and carries every other character verbatim, so two ordinary characters are never identified. What is assumed is the BRIDGE: that the host's mapping never puts a character into the verbatim constructor when another constructor already denotes it. The model writes that condition down as `bridged` rather than leaving it in prose, and the host's mapping is total and classifies before it falls through, so it holds by construction — but the correspondence between a `ch` and a .NET `char` is one line per class and is not itself proved.",
       "phase": "fuaran-core#149",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "the character bridge is faithful — a verbatim character never aliases a constructor's own spelling"
       }
@@ -1191,6 +1221,8 @@
       "level": "assumed",
       "claim": "Section 15.4's table is assumed to be the four rows the model covers, and one of the four is covered VACUOUSLY. Add a kind, remove a tag and rename are decided by the tag delta and are proved. The optional-field row is not: `classify` ranges over kind tags, an optional field added to an existing kind moves no tag, and the verdict is the no-op `Additive []` — the row comes out right for a reason unrelated to what it is about. That is a consequence of rule 2's unknown-key tolerance rather than a defect in the classifier (the field is invisible to the classifier because it is invisible to the decoder, one cause for both), and it is recorded rather than repaired: widening `classify` to see field sets would model a function this repository does not ship, `Diff.classify` in Fuaran.Core.Idl.Codegen being a different function with a different signature serving an advisory host-strand report rather than a profile bump. A row the table may GROW is a row this module does not have. `proofs/README.md`'s theorem 8 section carries the finding for the specification's owners, and the differential asserts the vacuity explicitly, so it goes red if the classifier ever grows field awareness rather than quietly becoming stale prose.",
       "phase": "fuaran-core#151",
+      "class": "model-bridge",
+      "closes": "permanent",
       "evidence": {
         "assumption": "section 15.4's table is the four rows modelled, with the optional-field row satisfied vacuously by the tag delta"
       }

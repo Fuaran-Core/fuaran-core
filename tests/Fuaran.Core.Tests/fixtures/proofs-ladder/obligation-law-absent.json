@@ -1,0 +1,28 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 174 classification clauses (see ladder-ok.json). ONE defect: a `domain-obligation` names no law at all. An obligation with no discharging law is one a domain has no way to discharge, which is the whole content of the class.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-obligation",
+      "level": "assumed",
+      "claim": "A domain obligation carrying no dischargedBy.",
+      "phase": "fuaran-core#174",
+      "class": "domain-obligation",
+      "evidence": {
+        "assumption": "the fixture domain's witness is lawful"
+      }
+    }
+  ]
+}

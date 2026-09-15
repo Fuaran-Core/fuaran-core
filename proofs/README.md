@@ -455,6 +455,82 @@ and `Ops.invert` over the tree as the `NodeWitness` shows it; in particular the 
 assumed lawful there rather than proved so, and the invariant preserved is id uniqueness and not
 any domain's rule family.
 
+## The Core-to-domain proof contract
+
+Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
+Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
+is not enough, because the 18 assumed rows across these ladders are three different kinds of thing
+and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
+every `assumed` row, from a closed set of three, and this section is that classification in one
+place together with the contract it implies.
+
+- **`domain-obligation` — what YOU owe, and what a green kit run discharges.** The hypotheses
+  the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
+  law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
+  witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 4 rows.
+- **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
+  you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
+  the extraction cannot represent, a host-side mapping that is one line per case and is not itself
+  proved, a walk order the model is handed rather than derives, a specification row the model
+  covers vacuously. Nothing a domain does closes one. Each names a **`closes`**: a
+  `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
+  `unscheduled` where something could and nobody has. 10 rows.
+- **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
+  an extractor and a compiler that are correct, a witness surface that reports every node it holds.
+  No kit run touches these and no phase closes them; they are what the rest of the ladder stands
+  on. 4 rows.
+
+**The contract line, stated once:** a domain running the conformance kit discharges the first class
+and **can never discharge the other two**. A green kit run is evidence about your witness and about
+nothing else in this table — which is what makes it worth having, and what a reader must not
+over-read.
+
+| Row | Class | Discharged by / closes |
+|---|---|---|
+| `independence-diamond` | `domain-obligation` | `Conformance.footprintLaws` |
+| `lanes-apply` | `domain-obligation` | `Conformance.concurrencyLaws` |
+| `dag-outside-the-model` | `model-bridge` | `unscheduled` |
+| `extractor-and-compiler-trusted` | `premise` | — |
+| `sets-are-lists` | `model-bridge` | `permanent` |
+| `parser-null-absorption` | `model-bridge` | `unscheduled` |
+| `node-ids-distinct` | `premise` | — |
+| `tree-algebra-well-formed-states` | `domain-obligation` | `Conformance.opAlgebra` |
+| `content-id-determines-content` | `premise` | — |
+| `chain-walk-order-is-productions` | `model-bridge` | `permanent` |
+| `parser-float-readback-opaque` | `model-bridge` | `permanent` |
+| `parser-alphabet-bridge` | `model-bridge` | `permanent` |
+| `lawful-abstract-witness` | `domain-obligation` | `Conformance.witnessLaws` |
+| `witness-surface-scope` | `premise` | — |
+| `canon-numeral-layouts` | `model-bridge` | `permanent` |
+| `canon-key-comparator` | `model-bridge` | `permanent` |
+| `canon-character-bridge` | `model-bridge` | `permanent` |
+| `evolution-table-coverage` | `model-bridge` | `permanent` |
+
+**Why `unscheduled` is a value rather than a rounding to `permanent`.** Two of the bridges can be
+closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
+of what this document already says. Theorem 4's ladder says of `parser-null-absorption` that
+"relating two models is its own phase and was not taken. The assumption stands where it is";
+`dag-outside-the-model` has been narrowed once already, by Phase 134, from "all of it". A closed
+set of two values would have forced both into a claim of impossibility, which is a worse error than
+a third token.
+
+**Why `witness-surface-scope` is a `premise` though a domain is what owes it.** It is the one row
+whose obligation is the domain's and whose discharge no run can perform. A node a domain holds in a
+keyed, non-structural position is invisible to `Tree.ids`, to every theorem in this directory and
+to every law in the kit — so there is no green run to cite for it, and a `dischargedBy` naming
+one would be a citation to a run that does not look. The root [`README.md`](../README.md) states
+the same boundary from the domain's own side, "this engine cannot see those nodes and will not
+pretend to", and calls it deliberate rather than a gap waiting to be closed. The class says what
+discharges a row, which here is nothing; it does not say whose obligation it is.
+
+**This table is CHECKED against `../proofs.json`, row for row** — same rows, same order, same
+class, same third column — by the `contract-agrees` clause of the `Proofs.Ladder` family in
+`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, with its own go-red fixtures. It is the ONE
+piece of prose in this directory that the ladder family parses; everything else here stays a human
+act, per that file's own note. A domain reads this table and a tool reads that file, and two of
+them disagreeing is worse than either alone.
+
 ## Exit criteria, with evidence
 
 1. **Reproducible — met.** `check.ps1 -Runs 3` verifies the module three times from a cold

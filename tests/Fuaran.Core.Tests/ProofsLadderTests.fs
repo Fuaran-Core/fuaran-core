@@ -11,7 +11,7 @@ module Fuaran.Core.Tests.ProofsLadderTests
 // own rule (D30) is that a committed declared-or-generated artefact is pinned by a check; this
 // family is that check.
 //
-// SIX CLAUSES, each with a go-red fixture beside it:
+// TEN CLAUSES, each with a go-red fixture beside it — six from Phase 144, four from Phase 174:
 //
 //   theorem-exists          a `proved` row's `evidence.theorem` is a TOP-LEVEL `val` / `let` /
 //                           `let rec` of that name in the model it names.
@@ -25,11 +25,28 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //   phase-form              every row's `phase` is the `fuaran-core#NNN` form.
 //   closed-level-set        every row's `level` is one of the closed four.
 //
-// WHAT IT DELIBERATELY IS NOT: a README parser. Prose-to-row agreement stays a human act; what is
-// pinned here is ROW-TO-TREE agreement, which is the half that can be mechanical.
+//   assumed-class           (174) every `assumed` row carries a `class` from the closed three, and
+//                           no other row carries one — `level` says how strong a claim is, `class`
+//                           says which KIND of assumed an assumed row is.
+//   obligation-law          (174) a `domain-obligation` names `dischargedBy: Conformance.<law>`,
+//                           and `<law>` is one the shipped kit actually exports — an obligation
+//                           citing a law nobody can run is one a domain cannot discharge.
+//   bridge-closes           (174) a `model-bridge` names `closes`: a `fuaran-core#NNN` phase,
+//                           `permanent`, or `unscheduled`. A `premise` names neither field.
+//   contract-agrees         (174) `proofs/README.md`'s "Core-to-domain proof contract" table is
+//                           the ladder's assumed rows, in order, with the same class and the same
+//                           third column.
 //
-// The check is parametrised over its three inputs — the root a model path resolves against, the
-// module list, and the case names — so the real file is ONE input and each fixture is another.
+// WHAT IT DELIBERATELY IS NOT: a README parser — with ONE exception, taken at `contract-agrees`
+// and nowhere else, for the reason stated at that clause: the contract table is the same question
+// the ladder answers, asked in the document a DOMAIN reads, and two answers that can silently
+// disagree are worse than either alone. Everything else about the prose — whether a row's
+// surrounding paragraph says what its `claim` says — stays a human act; what is pinned here is
+// ROW-TO-TREE agreement, which is the half that can be mechanical.
+//
+// The check is parametrised over its four inputs — the root a model path resolves against, the
+// module list, the case names and the kit's law names — so the real file is ONE input and each
+// fixture is another.
 // That is not decoration: a fixture ladder measured against the REAL module list would go red the
 // moment a sibling appended a model to `$modules`, and one measured against the REAL case names
 // would go red on a renamed case. A go-red family has to stay green while the subject it is about
@@ -55,6 +72,11 @@ type LadderInputs =
         Modules: string list
         /// The case names a `tested` row may name.
         Cases: Set<string>
+        /// The law names a `domain-obligation` row's `dischargedBy` may name — the public surface
+        /// of the shipped `Fuaran.Core.Conformance` module, for the real file. Read from the
+        /// ASSEMBLY for the same reason `Cases` is read from the test tree: a second copy of that
+        /// list, restated here, is precisely the drift this family exists to catch.
+        Laws: Set<string>
     }
 
 /// The closed level set, in ladder order (a message renders them in this order, not sorted).
@@ -65,6 +87,32 @@ let private levels = Set.ofList levelOrder
 /// `fuaran-core#NNN` and nothing else — not a bare number, not another side's prefix, not a
 /// leading zero.
 let private phaseForm = Regex(@"^fuaran-core#[1-9][0-9]*$", RegexOptions.Compiled)
+
+/// The closed CLASS set an `assumed` row is drawn from (Phase 174), in contract order — a message
+/// renders them in this order, not sorted. `level` says how strong a claim is; `class` says which
+/// kind of ASSUMED an assumed row is, which is the question a domain instantiating this substrate
+/// actually has: `domain-obligation` is what it owes and what a green kit run at its own witness
+/// discharges, `model-bridge` is this repository's own model-to-production gap and is inherited,
+/// `premise` is what nothing discharges at all.
+let classOrder = [ "domain-obligation"; "model-bridge"; "premise" ]
+
+let private classes = Set.ofList classOrder
+
+/// `Conformance.<law>`, where `<law>` is a name the shipped kit exports. The prefix is required
+/// rather than inferred: a bare `witnessLaws` would read as a law of some unnamed kit, and the
+/// contract's whole content is WHICH kit's green run discharges the row.
+let private lawForm =
+    Regex(@"^Conformance\.([A-Za-z][A-Za-z0-9_']*)$", RegexOptions.Compiled)
+
+/// The two literals a `model-bridge`'s `closes` may carry beside a `fuaran-core#NNN` phase.
+/// `unscheduled` is a value rather than a rounding to `permanent` on purpose: two of this
+/// repository's bridges CAN be closed and nobody has taken the work, and recording those as
+/// `permanent` would assert an impossibility the README's own prose contradicts.
+let closesLiterals = [ "permanent"; "unscheduled" ]
+
+/// The em dash a `premise` row carries in the contract table's third column — it has neither a
+/// discharging law nor a closing phase, and an empty cell would not say which.
+let private noThirdColumn = "—"
 
 // ---------------------------------------------------------------------------
 //  The clauses
@@ -224,7 +272,119 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                     "tested-case-exists"
                                     (sprintf "`evidence.tests` names '%s', which is not a case in the test tree" n))
 
-                levelFindings @ phaseFindings @ provedFindings @ testedFindings)
+                // ---- Phase 174: which KIND of assumed an `assumed` row is ----
+                let cls = strMember row "class"
+                let dischargedBy = strMember row "dischargedBy"
+                let closes = strMember row "closes"
+
+                let misplaced (clause: string) (name: string) (value: string option) (why: string) =
+                    match value with
+                    | Some v -> [ finding id clause (sprintf "carries `%s`: \"%s\" — %s" name v why) ]
+                    | None -> []
+
+                let renderedClasses = String.concat " | " classOrder
+                let renderedCloses = String.concat " | " closesLiterals
+
+                let classFindings =
+                    if level <> Some "assumed" then
+                        // The classification is about the assumed rows and only those: a `class` on
+                        // a proved row would be answering a question that row does not raise.
+                        misplaced
+                            "assumed-class"
+                            "class"
+                            cls
+                            (sprintf
+                                "`class` says which kind of ASSUMED a row is, and this row is at level %s"
+                                (Option.defaultValue "<none>" level))
+                        @ misplaced
+                            "assumed-class"
+                            "dischargedBy"
+                            dischargedBy
+                            "only a `domain-obligation` names a discharging law"
+                        @ misplaced "assumed-class" "closes" closes "only a `model-bridge` names a closing phase"
+                    else
+                        match cls with
+                        | None ->
+                            [ finding
+                                  id
+                                  "assumed-class"
+                                  (sprintf
+                                      "an `assumed` row carries no `class` (one of %s) — a domain cannot tell what it owes from what it inherits"
+                                      renderedClasses) ]
+                        | Some c when not (Set.contains c classes) ->
+                            [ finding
+                                  id
+                                  "assumed-class"
+                                  (sprintf "class '%s' is outside the closed set %s" c renderedClasses) ]
+                        | Some "domain-obligation" ->
+                            let lawFindings =
+                                match dischargedBy with
+                                | None ->
+                                    [ finding
+                                          id
+                                          "obligation-law"
+                                          "a `domain-obligation` carries no `dischargedBy` — an obligation with no named law is one a domain has no way to discharge" ]
+                                | Some d ->
+                                    let m = lawForm.Match d
+
+                                    if not m.Success then
+                                        [ finding
+                                              id
+                                              "obligation-law"
+                                              (sprintf "`dischargedBy` '%s' is not the `Conformance.<law>` form" d) ]
+                                    elif not (Set.contains m.Groups[1].Value inputs.Laws) then
+                                        [ finding
+                                              id
+                                              "obligation-law"
+                                              (sprintf
+                                                  "`dischargedBy` names '%s', which the shipped `Conformance` kit does not export — the row cites a run a domain cannot make"
+                                                  d) ]
+                                    else
+                                        []
+
+                            lawFindings
+                            @ misplaced
+                                "obligation-law"
+                                "closes"
+                                closes
+                                "a domain obligation is discharged by a law, not closed by a phase"
+                        | Some "model-bridge" ->
+                            let closesFindings =
+                                match closes with
+                                | None ->
+                                    [ finding
+                                          id
+                                          "bridge-closes"
+                                          (sprintf
+                                              "a `model-bridge` carries no `closes` (a `fuaran-core#NNN` phase, or one of %s)"
+                                              renderedCloses) ]
+                                | Some cl when List.contains cl closesLiterals || phaseForm.IsMatch cl -> []
+                                | Some cl ->
+                                    [ finding
+                                          id
+                                          "bridge-closes"
+                                          (sprintf
+                                              "`closes` '%s' is neither a `fuaran-core#NNN` phase nor one of %s"
+                                              cl
+                                              renderedCloses) ]
+
+                            closesFindings
+                            @ misplaced
+                                "bridge-closes"
+                                "dischargedBy"
+                                dischargedBy
+                                "no law a domain runs closes a gap between this repository's model and its own production code"
+                        | Some _ ->
+                            // `premise`: nothing discharges it and no phase closes it, so either
+                            // field on such a row is a citation to something that does not exist.
+                            misplaced
+                                "assumed-class"
+                                "dischargedBy"
+                                dischargedBy
+                                "a `premise` is discharged by nothing"
+                            @ misplaced "assumed-class" "closes" closes "a `premise` is closed by nothing"
+
+                levelFindings @ phaseFindings @ provedFindings @ testedFindings @ classFindings)
             |> List.concat
 
         let covered =
@@ -243,6 +403,140 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                     m)
 
         perRow @ uncovered
+
+// ---------------------------------------------------------------------------
+//  The contract clause — the ONE piece of prose this family parses (Phase 174)
+// ---------------------------------------------------------------------------
+//
+// The note at the head of this file says what it deliberately is not: a README parser. That stands
+// with exactly one exception, taken here and nowhere else. `proofs/README.md`'s "Core-to-domain
+// proof contract" section is the table a DOMAIN reads to learn what it owes; `proofs.json` is the
+// table a TOOL reads for the same question. Two answers to one question that can silently disagree
+// are worse than either alone, so this one table is held to the ladder row for row. Everything else
+// in that document — including whether a row's prose says what its `claim` says — stays a human
+// act, which is the half a check cannot settle.
+
+let contractHeading = "## The Core-to-domain proof contract"
+
+/// A row of the contract table: `` | `id` | `class` | third | ``, where the third cell is a
+/// backticked law or `closes` value, or the em dash a `premise` carries.
+let private contractRowForm =
+    Regex(@"^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|\s*(.+?)\s*\|\s*$", RegexOptions.Compiled)
+
+/// The contract table's rows, in document order. `None` means the section is not there at all,
+/// which is a different finding from a section whose table disagrees.
+let contractRows (readmeText: string) : (string * string * string) list option =
+    let lines = readmeText.Replace("\r\n", "\n").Split('\n')
+
+    match lines |> Array.tryFindIndex (fun l -> l.TrimEnd() = contractHeading) with
+    | None -> None
+    | Some start ->
+        let body =
+            lines
+            |> Array.skip (start + 1)
+            |> Array.takeWhile (fun l -> not (l.StartsWith "## "))
+
+        body
+        |> Array.choose (fun l ->
+            let m = contractRowForm.Match(l.Trim())
+
+            if m.Success && Set.contains m.Groups[2].Value classes then
+                Some(m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value)
+            else
+                None)
+        |> List.ofArray
+        |> Some
+
+/// What the contract table must say, derived from the ladder: one entry per `assumed` row, in the
+/// ladder's own order, third column being the discharging law, the closing phase, or the em dash.
+let contractFromLadder (ladderText: string) : (string * string * string) list =
+    use doc = JsonDocument.Parse ladderText
+
+    match doc.RootElement.TryGetProperty "claims" with
+    | true, c when c.ValueKind = JsonValueKind.Array ->
+        c.EnumerateArray()
+        |> Seq.filter (fun r -> strMember r "level" = Some "assumed")
+        |> Seq.map (fun r ->
+            let id = strMember r "id" |> Option.defaultValue "<no id>"
+
+            let third =
+                match strMember r "dischargedBy", strMember r "closes" with
+                | Some d, _ -> sprintf "`%s`" d
+                | _, Some cl -> sprintf "`%s`" cl
+                | None, None -> noThirdColumn
+
+            id, (strMember r "class" |> Option.defaultValue "<no class>"), third)
+        |> List.ofSeq
+    | _ -> []
+
+/// Every disagreement between the ladder and the contract table. Empty is clean.
+let checkContract (ladderText: string) (readmeText: string) : string list =
+    let clause = "contract-agrees"
+    let expected = contractFromLadder ladderText
+
+    match contractRows readmeText with
+    | None ->
+        [ sprintf
+              "[%s]: the README carries no `%s` section — the ladder's %d assumed rows are classified in a file no domain reads"
+              clause
+              contractHeading
+              (List.length expected) ]
+    | Some actual ->
+        let key (id, _, _) = id
+        let byId = actual |> List.map (fun r -> key r, r) |> Map.ofList
+
+        let missing =
+            expected
+            |> List.filter (fun r -> not (Map.containsKey (key r) byId))
+            |> List.map (fun (id, cls, _) ->
+                sprintf
+                    "[%s]: the ladder classifies '%s' as `%s` and the contract table has no row for it"
+                    clause
+                    id
+                    cls)
+
+        let expectedIds = expected |> List.map key |> Set.ofList
+
+        let extra =
+            actual
+            |> List.filter (fun r -> not (Set.contains (key r) expectedIds))
+            |> List.map (fun (id, _, _) ->
+                sprintf
+                    "[%s]: the contract table carries a row for '%s', which is not an `assumed` row of the ladder"
+                    clause
+                    id)
+
+        let mismatched =
+            expected
+            |> List.choose (fun (id, cls, third) ->
+                match Map.tryFind id byId with
+                | Some(_, aCls, aThird) when aCls <> cls || aThird <> third ->
+                    Some(
+                        sprintf
+                            "[%s]: '%s' is `%s` / %s in the ladder and `%s` / %s in the contract table"
+                            clause
+                            id
+                            cls
+                            third
+                            aCls
+                            aThird
+                    )
+                | _ -> None)
+
+        let disagreements = missing @ extra @ mismatched
+
+        if not (List.isEmpty disagreements) then
+            disagreements
+        elif List.map key expected <> List.map key actual then
+            // Same rows, different order. Reported once and last: an order finding on top of a
+            // missing-row finding would be one defect rendered twice.
+            [ sprintf
+                  "[%s]: the contract table carries the ladder's rows in a different order — ladder: %s; table: %s"
+                  clause
+                  (String.concat ", " (List.map key expected))
+                  (String.concat ", " (List.map key actual)) ]
+        else
+            []
 
 // ---------------------------------------------------------------------------
 //  Reading the two inputs out of the tree
@@ -276,6 +570,7 @@ let rec caseNames (t: Test) : string list =
 let private repoRoot = Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
 let private ladderPath = Path.Combine(repoRoot, "proofs.json")
 let private checkScriptPath = Path.Combine(repoRoot, "proofs", "check.ps1")
+let private proofsReadmePath = Path.Combine(repoRoot, "proofs", "README.md")
 
 let private fixtureDir =
     Path.Combine(repoRoot, "tests", "Fuaran.Core.Tests", "fixtures", "proofs-ladder")
@@ -299,12 +594,29 @@ let private realCases () =
         (caseNames ProofOracleTests.proofOracleTests |> Set.ofList)
         (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
 
-/// A fixture ladder is measured against a FIXTURE module list and a FIXTURE case set, so nothing a
-/// sibling adds to `$modules` or to `Proofs.Oracle` can move a go-red in either direction.
+/// The law names a `domain-obligation` row may cite — the public surface of the shipped
+/// `Fuaran.Core.Conformance` module, read from the ASSEMBLY rather than restated here. An F#
+/// module compiles to a static class, so its public let-bound functions are that type's public
+/// static methods; a law renamed in the kit therefore stops answering for a row with no edit in
+/// this file, which is the drift the clause is for.
+let private realLaws () =
+    let asm = typeof<Fuaran.Core.LawResult>.Assembly
+
+    match asm.GetType "Fuaran.Core.Conformance" with
+    | null -> Set.empty
+    | t ->
+        t.GetMethods(System.Reflection.BindingFlags.Public ||| System.Reflection.BindingFlags.Static)
+        |> Seq.map (fun m -> m.Name)
+        |> Set.ofSeq
+
+/// A fixture ladder is measured against a FIXTURE module list, a FIXTURE case set and a FIXTURE law
+/// set, so nothing a sibling adds to `$modules`, to `Proofs.Oracle` or to the conformance kit can
+/// move a go-red in either direction.
 let private fixtureInputs (modules: string list) =
     { Root = fixtureDir
       Modules = modules
-      Cases = Set.ofList [ "a fixture case" ] }
+      Cases = Set.ofList [ "a fixture case" ]
+      Laws = Set.ofList [ "fixtureLaws" ] }
 
 let private fixture (name: string) =
     File.ReadAllText(Path.Combine(fixtureDir, name))
@@ -367,6 +679,23 @@ let proofsLadderTests =
                   (caseNames ContainedOpsTests.containerLawTests)
                   "the containerLaws conformance suite contributes cases"
 
+          testCase "the law names a domain-obligation row may cite are readable from the assembly"
+          <| fun _ ->
+              let laws = realLaws ()
+
+              // A reflection lookup that found the wrong type, or no type, returns an EMPTY set —
+              // under which obligation-law would report every row as dangling rather than going
+              // quietly vacuous. It is asserted anyway: a clause whose input silently collapsed is
+              // the failure this family was cut to catch, in whichever direction it points.
+              Expect.isGreaterThan
+                  (Set.count laws)
+                  20
+                  "the shipped `Conformance` module's public static surface is readable, and is the kit's law set"
+
+              Expect.isTrue
+                  (Set.contains "witnessLaws" laws)
+                  "`witnessLaws` is in it — the one law `proofs.json`'s own claim text names in prose"
+
           // ---- the subject ----
 
           testCase "the committed proofs.json satisfies every clause"
@@ -376,7 +705,8 @@ let proofsLadderTests =
               let inputs =
                   { Root = repoRoot
                     Modules = realModules ()
-                    Cases = realCases () }
+                    Cases = realCases ()
+                    Laws = realLaws () }
 
               let findings = checkLadder inputs text
 
@@ -399,6 +729,40 @@ let proofsLadderTests =
                   (atLevel "tested")
                   0
                   "the ladder carries tested rows, so tested-case-exists is not vacuous"
+
+              Expect.isGreaterThan
+                  (atLevel "assumed")
+                  0
+                  "the ladder carries assumed rows, so assumed-class is not vacuous"
+
+              // and all three classes are used — a ladder that had quietly become one class would
+              // leave two clauses measuring nothing while reporting clean.
+              let classesUsed = rows |> List.choose (fun r -> strMember r "class") |> Set.ofList
+
+              Expect.equal
+                  classesUsed
+                  (Set.ofList classOrder)
+                  "every class in the closed set is carried by at least one row, so obligation-law and bridge-closes both bite"
+
+          testCase "the committed proofs.json and proofs/README.md's contract table agree, row for row"
+          <| fun _ ->
+              let disagreements =
+                  checkContract (File.ReadAllText ladderPath) (File.ReadAllText proofsReadmePath)
+
+              if not (List.isEmpty disagreements) then
+                  failtestf
+                      "the contract a domain READS and the ladder a tool READS disagree — fix whichever of the two is wrong:\n%s"
+                      (String.concat "\n" disagreements)
+
+              // A clean verdict over an empty table would be worth nothing: the section could have
+              // been renamed, or its table replaced by prose, and the comparison would be vacuous.
+              let parsed =
+                  contractRows (File.ReadAllText proofsReadmePath) |> Option.defaultValue []
+
+              Expect.isGreaterThan
+                  (List.length parsed)
+                  10
+                  "the contract table parses, and carries the ladder's assumed rows rather than a handful"
 
           testCase "the baseline fixture is clean, so a go-red below is firing on its own mutation"
           <| fun _ ->
@@ -440,6 +804,75 @@ let proofsLadderTests =
 
           testCase "go-red: closed-level-set — a row at a level outside the four"
           <| fun _ -> expectOneFinding [ "Model" ] "level-unknown.json" "closed-level-set" "fixture-invented"
+
+          testCase "go-red: assumed-class — an assumed row carrying no class at all"
+          <| fun _ -> expectOneFinding [ "Model" ] "class-absent.json" "assumed-class" "fixture-premise"
+
+          testCase "go-red: assumed-class — an assumed row at a class outside the closed three"
+          <| fun _ -> expectOneFinding [ "Model" ] "class-unknown.json" "assumed-class" "fixture-premise"
+
+          testCase "go-red: obligation-law — a domain obligation naming a law the kit does not export"
+          <| fun _ -> expectOneFinding [ "Model" ] "obligation-law-dangling.json" "obligation-law" "fixture-obligation"
+
+          testCase "go-red: obligation-law — a domain obligation naming no law at all"
+          <| fun _ -> expectOneFinding [ "Model" ] "obligation-law-absent.json" "obligation-law" "fixture-obligation"
+
+          testCase "go-red: bridge-closes — a model bridge whose closes is neither a phase nor a literal"
+          <| fun _ -> expectOneFinding [ "Model" ] "bridge-closes-form.json" "bridge-closes" "fixture-bridge"
+
+          testCase "go-red: bridge-closes — a model bridge carrying no closes at all"
+          <| fun _ -> expectOneFinding [ "Model" ] "bridge-closes-absent.json" "bridge-closes" "fixture-bridge"
+
+          // ---- the contract clause: the README table and the ladder, row for row ----
+
+          testCase "the contract fixture is clean, so the two go-reds below fire on their own mutation"
+          <| fun _ ->
+              let findings = checkContract (fixture "ladder-ok.json") (fixture "contract-ok.md")
+
+              Expect.isEmpty
+                  findings
+                  (sprintf
+                      "contract-ok.md is the unmutated baseline for ladder-ok.json:\n%s"
+                      (String.concat "\n" findings))
+
+              // and it is measuring something: the baseline ladder carries all three classes.
+              Expect.equal
+                  (List.length (contractFromLadder (fixture "ladder-ok.json")))
+                  3
+                  "the fixture ladder's three assumed rows are what the fixture table is compared against"
+
+          testCase "go-red: contract-agrees — the table drops a row the ladder classifies"
+          <| fun _ ->
+              let findings =
+                  checkContract (fixture "ladder-ok.json") (fixture "contract-row-missing.md")
+
+              Expect.equal (List.length findings) 1 (sprintf "one finding — got:\n%s" (String.concat "\n" findings))
+
+              Expect.stringContains (List.head findings) "[contract-agrees]" "the finding names the clause"
+              Expect.stringContains (List.head findings) "fixture-bridge" "the finding names the dropped row"
+
+          testCase "go-red: contract-agrees — the table and the ladder disagree about a row's class"
+          <| fun _ ->
+              let findings =
+                  checkContract (fixture "ladder-ok.json") (fixture "contract-class-differs.md")
+
+              Expect.equal (List.length findings) 1 (sprintf "one finding — got:\n%s" (String.concat "\n" findings))
+
+              Expect.stringContains (List.head findings) "[contract-agrees]" "the finding names the clause"
+              Expect.stringContains (List.head findings) "fixture-premise" "the finding names the row"
+
+          testCase "go-red: contract-agrees — a README with no contract section at all"
+          <| fun _ ->
+              let findings =
+                  checkContract (fixture "ladder-ok.json") "# a README that never wrote one\n"
+
+              Expect.equal (List.length findings) 1 (sprintf "one finding — got:\n%s" (String.concat "\n" findings))
+              Expect.stringContains (List.head findings) "[contract-agrees]" "the finding names the clause"
+
+              Expect.stringContains
+                  (List.head findings)
+                  contractHeading
+                  "the finding names the section that is not there"
 
           testCase "go-red: shape — a ladder with no claims array is reported as that, and nothing else"
           <| fun _ ->
