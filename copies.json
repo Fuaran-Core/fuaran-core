@@ -1,7 +1,7 @@
 {
   "kind": "copies",
   "producer": "fuaran-core",
-  "note": "Two kinds of copy are declared here, on the estate's copy registry (`roadmapctl copies <workspace-root>`), so that a copy that has drifted from its source is named on the sweep before anyone meets a red gate they did not cause. (1) `records` — the conformance families this repository EMITS and the shared wire-format corpus carries a declared copy of (Phase 172): `conformance/laws/transform-laws.json` and the `conformance/apply/` pair are authored HERE, the default suite certifies the committed files, and the corpus copies are what the five hosts read at the same paths with the same bytes. `check` is `fingerprint` because the two repositories may legitimately differ in end-of-line policy and nothing else; the `regen` writes the copy with the same exporter that writes the source, from the workspace root. The corpus's own `copies.json` is generated and co-owned by the ts/py bundlers and is not edited: the registry walks ANY `copies.json`, so the producer declares in its own file. (2) `$sources` — the proof-leg kit (proofs/kit/, Phase 155), a scaffold other repositories adopt BY COPY; no adopter exists yet, see `$adoptionStatus`. `$sources` is inert data the registry ignores; an adopter's record is that shape with one path filled in, and it moves into `records` the moment a real copy exists.",
+  "note": "Two kinds of copy are declared here, on the estate's copy registry (`roadmapctl copies <workspace-root>`), so that a copy that has drifted from its source is named on the sweep before anyone meets a red gate they did not cause. (1) `records` — the conformance families this repository EMITS and the shared wire-format corpus carries a declared copy of (Phase 172): `conformance/laws/transform-laws.json` and the `conformance/apply/` pair are authored HERE, the default suite certifies the committed files, and the corpus copies are what the five hosts read at the same paths with the same bytes. `check` is `fingerprint` because the two repositories may legitimately differ in end-of-line policy and nothing else; the `regen` writes the copy with the same exporter that writes the source, from the workspace root. The corpus's own `copies.json` is generated and co-owned by the ts/py bundlers and is not edited: the registry walks ANY `copies.json`, so the producer declares in its own file. (2) `$sources` — the proof-leg kit (proofs/kit/, Phase 155), a scaffold other repositories adopt BY COPY; no adopter exists yet, see `$adoptionStatus`. Since Phase 175 the set also carries the MODELS under `proofs/` — the generic theorems (`DagFold`, `Chain`, `WireCanon`, `WireDecode`, `JsonParse`, `Limits`), the reference instance a domain instantiates against (`TreeOps`, `Skeleton`, `Preservation`, `TreeDiff`) and the instantiation template — each entry saying which theorem it carries and which obligations it asks a domain for; the sources ARE the live files, so there is no second copy of any model in this repository. Not in the set: `Vocabulary.fst`, generated from THIS repository's `idl.json`, and `WireVersioning.fst`, a theorem about this repository's IDL diff (Phase 151) — an adopter with an IDL of its own takes that up when its shape is measured. `$sources` is inert data the registry ignores; an adopter's record is that shape with one path filled in, and it moves into `records` the moment a real copy exists.",
   "$adoptionStatus": "Measured 2026-09-15, across the whole workspace: exactly ONE proof leg exists — this repository's. No other repository holds a `check.ps1`, an `fstar-pin.json`, a `proofs/` directory or a `.fst` model. The phase that cut this kit was written against the expectation that three consumers (the program tier, the app-composition tier, the remoting decoder) had already copied the leg by hand and that the pin was therefore four numbers; they had not and it was not. The kit is still the right artefact — a scaffold shipped once is worth the same before the first adopter as after — but the drift half has nothing to check yet, and declaring records for copies that do not exist would put a permanent finding on every workspace sweep about an adoption nobody has scheduled. Each adopter appends its own record, from `$sources`, in the change-set that adopts.",
   "$sources": [
     {
@@ -33,6 +33,72 @@
       "check": "fingerprint",
       "regen": "copy proofs/oracle/FStar_Pervasives_Native.fs from the fuaran-core repository",
       "$note": "The second half of the same floor."
+    },
+    {
+      "source": "proofs/kit/templates/Instance.fst.template",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/templates/Instance.fst.template from the fuaran-core repository",
+      "$note": "THE INSTANTIATION TEMPLATE (Phase 175). `Skeleton.fst` with fourteen named holes: drop the preamble, fill the holes, and the result is a domain's fold-confluence composite. Copied and instantiated, never edited — the kit's `Proofs.Kit` family reproduces `Skeleton.fst` from it byte for byte, so an adopter that finds a fixed line it must change has found a template defect to send back, not a fork to keep. The one obligation it asks for is the `{{DIAMOND}}` hole: a proof of `independence_diamond` at the domain's own footprint and apply."
+    },
+    {
+      "source": "proofs/DagFold.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/DagFold.fst from the fuaran-core repository",
+      "$note": "GENERIC — the fold theorem. Carries `fold_confluence` and `fold_confluence_halt` (and the DAG lift `fold_confluence_dag`), parametric over the operation, state and rejection types and over `apply` and `fp`. Asks the domain for `independence_diamond fp apply` (the `independence-diamond` row; the template's `{{DIAMOND}}` discharges it by proof, `Conformance.footprintLaws` samples it otherwise) and states `lanes_apply` in the `requires` (the `lanes-apply` row, sampled by `Conformance.concurrencyLaws`). The halt half asks for nothing. Opens nothing; the one file every instance needs."
+    },
+    {
+      "source": "proofs/TreeOps.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/TreeOps.fst from the fuaran-core repository",
+      "$note": "REFERENCE INSTANCE — the skeleton-op tree algebra, and the diamond PROVED for it (`op_independence_diamond`, the `tree-independence-diamond` row). Not generic: it is what a domain's `{{DOMAIN}}` module looks like once the obligation is discharged, and the worked example the template's hole table cites. Asks for id-unique input trees (`tree-algebra-well-formed-states`, `Conformance.opAlgebra`), which `wapply` guards rather than assumes. A domain whose state IS this tree copies it and instantiates nothing; a domain with its own algebra reads it and writes its own."
+    },
+    {
+      "source": "proofs/Skeleton.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/Skeleton.fst from the fuaran-core repository",
+      "$note": "REFERENCE INSTANCE — the template's first instance: `DagFold.fold_confluence` at `TreeOps`, no domain hypothesis left (`skeleton_fold_confluence`, `skeleton_fold_confluence_halt`), plus the widening witness `batch_lanes_fold`. Asks for nothing a domain owes; what remains in its `requires` is `lanes_apply`, about the lane set in hand. Copied as the worked example beside the template, or as the theorem itself by a domain on the skeleton tree."
+    },
+    {
+      "source": "proofs/Preservation.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/Preservation.fst from the fuaran-core repository",
+      "$note": "REFERENCE INSTANCE — the apply engine's preservation theorems (`apply_total`, `reject_identity`, `apply_preserves_wf`, `canapply_preserves`, `invert_applicable`), stated ABOUT `TreeOps`'s algebra and not generically. Asks for a lawful abstract witness (`lawful-abstract-witness`, `Conformance.witnessLaws`) and id-unique input trees. The template does not yield these at another algebra: a domain on the skeleton tree inherits them by copy; a domain with its own apply models its own, and this file is the shape to model against."
+    },
+    {
+      "source": "proofs/TreeDiff.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/TreeDiff.fst from the fuaran-core repository",
+      "$note": "REFERENCE INSTANCE — the diff's refusals and emission order (`diff_total`, `diff_refusals_exact`, `diff_emission_order`, the four block characterisations and the contained mirror), about `TreeOps`'s tree. Asks for id-unique inputs with a shared root id (`diff_ok_on_any_wf_pair`); the container capability `ch` is its one parameter. Inherited by copy on the skeleton tree; a model to write against otherwise."
+    },
+    {
+      "source": "proofs/Chain.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/Chain.fst from the fuaran-core repository",
+      "$note": "GENERIC — chain integrity for the content-addressed DAG and the linear op stream (`intact_verifies` / `tamper_detected`, `intact_chain_verifies` / `chain_tamper_detected_verify`), parametric over the operation type, the hash `h`, the op codec `enc_op`, the parent comparator and `show`. Asks the domain for `op_codec_injective` (sampled by `Conformance.codecInjectivityLaws`) and takes `hash_injective` as the named premise (`content-id-determines-content`); `intact_verifies` also needs `steps_well_parented`. Opens nothing."
+    },
+    {
+      "source": "proofs/WireDecode.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/WireDecode.fst from the fuaran-core repository",
+      "$note": "GENERIC in its carriers — decoder totality and the Phase 102 read policy (`decode_total`, `decode_node_wf`, `decode_encode_roundtrip`, `lenient_agrees_off_policy`), parametric over the numeric carriers and the int-to-float coercion `to_flt`; the node decoder is at a REFERENCE vocabulary, so a domain with its own kinds re-states that half. Asks for nothing a kit law samples; its boundary assumption is `parser-null-absorption`, a model bridge. Opens nothing."
+    },
+    {
+      "source": "proofs/Limits.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/Limits.fst from the fuaran-core repository",
+      "$note": "PREMISES ONLY — WIRE_FORMAT section 21's eight resource limits as named constants, with `limits_positive` and `depth_bounds_do_not_alias`. Parametric in nothing, asks for nothing; copied because `WireCanon.fst` opens it, and so that a changed limit moves one constant everywhere the registry can see."
+    },
+    {
+      "source": "proofs/WireCanon.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/WireCanon.fst from the fuaran-core repository",
+      "$note": "GENERIC — the canonical form in both directions (`canonical_form_iff`, `read_render_roundtrip`, `render_injective_up_to_key_order`, and the section 11 refutations of unconditional injectivity), parametric over a `wire` record of layout callbacks: integer and float rendering, float classification, the key comparator, the numeral read-back. Asks the domain for `tok_read_ok` (the read-back inverts the layout), `key_order_ok` (the comparator is a total order) and the `float_round_trips` premise; `read_render_roundtrip_within_limits` also needs `jdepth v <= max_json_depth`. Opens `Limits`."
+    },
+    {
+      "source": "proofs/JsonParse.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/JsonParse.fst from the fuaran-core repository",
+      "$note": "GENERIC in one thing — parser totality, the exact depth bound, the int53 guard and error-kind exhaustiveness (`parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive`), parametric only in the float read-back `float_read`. Asks the domain for nothing beyond supplying that function; the `\\uXXXX` escape's value is symbolic by design. Opens nothing."
     }
   ],
   "records": [
