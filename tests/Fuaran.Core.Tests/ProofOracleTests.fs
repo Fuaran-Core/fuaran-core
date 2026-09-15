@@ -30,6 +30,10 @@ open Expecto
 // comment on any module abbreviation is FS0535.)
 module ModelCol = ColumnOps
 
+// Phase 177 — the extracted FUNCTION-SEAM model, bound the same way and for the same reason:
+// production's `Fuaran.Core.Capability` module shares the model's name once `Fuaran.Core` is open.
+module ModelCap = Capability
+
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
@@ -5553,6 +5557,777 @@ let private colDiffDifferential (seed: int) (trials: int) : ColDiffTally =
     tally
 
 
+// ---------------------------------------------------------------------------
+//  Phase 177 — the FUNCTION SEAM: the extracted model of `Fuaran.Core.Function`'s effect
+//  lattice, value spaces, function algebra and capability registry, beside production.
+// ---------------------------------------------------------------------------
+//
+// The model's node type is a PARAMETER, so it is instantiated at the reference domain's `RNode`
+// directly: the witness the model reads is `Reference.artw` bridged field for field, and a tree
+// crosses without translation. Two records the host supplies close the model's two premises —
+// the witness (`modelWitness`), and the three scalar readers (`readers`), which are production's
+// own `Int32.TryParse`, `Double.TryParse`-against-a-float-range and `String.Length`. The go-red
+// blinds the int reader.
+
+let private toMOpt (o: 'a option) : FStar_Pervasives_Native.option<'a> =
+    match o with
+    | Some x -> FStar_Pervasives_Native.Some x
+    | None -> FStar_Pervasives_Native.None
+
+let private ofMOpt (o: FStar_Pervasives_Native.option<'a>) : 'a option =
+    match o with
+    | FStar_Pervasives_Native.Some x -> Some x
+    | FStar_Pervasives_Native.None -> None
+
+let private hostToModel (h: HostEffect) : ModelCap.host_effect =
+    match h with
+    | Pure -> ModelCap.Pure
+    | ReadsHost -> ModelCap.ReadsHost
+    | WritesHost -> ModelCap.WritesHost
+
+let private hostOfModel (h: ModelCap.host_effect) : HostEffect =
+    match h with
+    | ModelCap.Pure -> Pure
+    | ModelCap.ReadsHost -> ReadsHost
+    | ModelCap.WritesHost -> WritesHost
+
+let private detToModel (d: DeterminismSource) : ModelCap.determinism_source =
+    match d with
+    | Deterministic -> ModelCap.Deterministic
+    | Clock -> ModelCap.Clock
+    | Random -> ModelCap.Random
+    | Network -> ModelCap.Network
+
+let private detOfModel (d: ModelCap.determinism_source) : DeterminismSource =
+    match d with
+    | ModelCap.Deterministic -> Deterministic
+    | ModelCap.Clock -> Clock
+    | ModelCap.Random -> Random
+    | ModelCap.Network -> Network
+
+let private effToModel (e: EffectClass) : ModelCap.effect_class =
+    { ModelCap.effect_class.host = hostToModel e.Host
+      ModelCap.effect_class.determinism = detToModel e.Determinism }
+
+let private effOfModel (e: ModelCap.effect_class) : EffectClass =
+    { Host = hostOfModel e.host
+      Determinism = detOfModel e.determinism }
+
+/// A float range's bounds cross as opaque carriers (the readers premise): the round-trip `R`
+/// format, which parses back to the same double.
+let private spaceToModel (s: ValueSpace) : ModelCap.value_space =
+    match s with
+    | IntRange(lo, hi) -> ModelCap.IntRange(bigint lo, bigint hi)
+    | FloatRange(lo, hi) -> ModelCap.FloatRange(lo.ToString("R", inv), hi.ToString("R", inv))
+    | StringLen(lo, hi) -> ModelCap.StringLen(bigint lo, bigint hi)
+    | Enum xs -> ModelCap.Enum xs
+    | AnyString -> ModelCap.AnyString
+
+let private spaceOfModel (s: ModelCap.value_space) : ValueSpace =
+    match s with
+    | ModelCap.IntRange(lo, hi) -> IntRange(int lo, int hi)
+    | ModelCap.FloatRange(lo, hi) -> FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))
+    | ModelCap.StringLen(lo, hi) -> StringLen(int lo, int hi)
+    | ModelCap.Enum xs -> Enum xs
+    | ModelCap.AnyString -> AnyString
+
+let private modelSpaceRender (s: ModelCap.value_space) : string =
+    match s with
+    | ModelCap.IntRange(lo, hi) -> sprintf "int[%s..%s]" (string lo) (string hi)
+    | ModelCap.FloatRange(lo, hi) -> sprintf "float[%s..%s]" lo hi
+    | ModelCap.StringLen(lo, hi) -> sprintf "len[%s..%s]" (string lo) (string hi)
+    | ModelCap.Enum xs -> sprintf "enum{%s}" (String.concat "," xs)
+    | ModelCap.AnyString -> "any"
+
+/// The readers premise made concrete: the three host functions `Space.validate` reaches for,
+/// exactly as production calls them.
+let private readers: ModelCap.readers =
+    { ModelCap.readers.int_of =
+        fun s ->
+            match System.Int32.TryParse s with
+            | true, v -> FStar_Pervasives_Native.Some(bigint v)
+            | _ -> FStar_Pervasives_Native.None
+      ModelCap.readers.float_in =
+        fun lo hi s -> Space.validate (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) s
+      ModelCap.readers.str_len = fun s -> bigint s.Length }
+
+/// The go-red: an int reader that reads nothing, so every int-ranged value is out of space to
+/// the model and in space to production.
+let private blindReaders: ModelCap.readers =
+    { readers with
+        ModelCap.readers.int_of = fun _ -> FStar_Pervasives_Native.None }
+
+let private holeKindToModel (k: HoleKind) : ModelCap.hole_kind =
+    match k with
+    | ValueHole s -> ModelCap.ValueHole(spaceToModel s)
+    | SlotHole c -> ModelCap.SlotHole(toMOpt c)
+    | RepeatHole s -> ModelCap.RepeatHole(spaceToModel s)
+    | ActionHole e -> ModelCap.ActionHole(effToModel e)
+
+let private holeDeclToModel (h: HoleDecl) : ModelCap.hole_decl =
+    { ModelCap.hole_decl.h_addr = h.Addr
+      ModelCap.hole_decl.h_name = h.Name
+      ModelCap.hole_decl.h_kind = holeKindToModel h.Kind }
+
+let private sigEntryToModel (e: SigEntry) : ModelCap.sig_entry =
+    { ModelCap.sig_entry.s_addr = e.Addr
+      ModelCap.sig_entry.s_name = e.Name
+      ModelCap.sig_entry.s_kind = e.Kind
+      ModelCap.sig_entry.s_space = toMOpt (Option.map spaceToModel e.Space)
+      ModelCap.sig_entry.s_slot = toMOpt e.Slot
+      ModelCap.sig_entry.s_action = toMOpt (Option.map effToModel e.Action)
+      ModelCap.sig_entry.s_required = e.Required }
+
+let private sigToModel (sg: Signature) : ModelCap.signature =
+    { ModelCap.signature.sg_name = sg.Name
+      ModelCap.signature.sg_holes = sg.Holes |> List.map sigEntryToModel
+      ModelCap.signature.sg_effect = effToModel sg.Effect }
+
+let private argToModel (a: Arg<RNode>) : ModelCap.arg<RNode> =
+    match a with
+    | ValueArg s -> ModelCap.ValueArg s
+    | SlotArg n -> ModelCap.SlotArg n
+
+let private argOfModel (a: ModelCap.arg<RNode>) : Arg<RNode> =
+    match a with
+    | ModelCap.ValueArg s -> ValueArg s
+    | ModelCap.SlotArg n -> SlotArg n
+
+/// `Reference.artw`, as the model reads it — the five functions the algebra consults, and no
+/// others. The tree is the same `RNode` on both sides.
+let private modelWitness: ModelCap.witness<RNode> =
+    { ModelCap.witness.holes = fun n -> artw.Holes n |> List.map holeDeclToModel
+      ModelCap.witness.eff = fun n -> effToModel (artw.Effect n)
+      ModelCap.witness.bind_hole =
+        fun addr a n ->
+            match artw.Bind addr (argOfModel a) n with
+            | Ok r -> ModelCap.Ok r
+            | Error m -> ModelCap.Error m
+      ModelCap.witness.kind_tag = artw.Tree.KindTag
+      ModelCap.witness.preorder = fun n -> Tree.preorder artw.Tree n }
+
+let private prodApplyErrRender (e: ApplyError) : string =
+    match e with
+    | UnknownHoleAddr(a, d) -> sprintf "UnknownHoleAddr(%s;%s)" a (String.concat "," d)
+    | ValueOutOfSpace(a, s, g) -> sprintf "ValueOutOfSpace(%s;%s;%s)" a (modelSpaceRender (spaceToModel s)) g
+    | RequiredHolesUnbound xs -> sprintf "RequiredHolesUnbound(%s)" (String.concat "," xs)
+    | NotASlot a -> sprintf "NotASlot(%s)" a
+    | SlotKindMismatch(a, e, g) -> sprintf "SlotKindMismatch(%s;%s;%s)" a e g
+    | NonTotal a -> sprintf "NonTotal(%s)" a
+    | BindFailed(a, m) -> sprintf "BindFailed(%s;%s)" a m
+
+let private modelApplyErrRender (e: ModelCap.apply_error) : string =
+    match e with
+    | ModelCap.UnknownHoleAddr(a, d) -> sprintf "UnknownHoleAddr(%s;%s)" a (String.concat "," d)
+    | ModelCap.ValueOutOfSpace(a, s, g) -> sprintf "ValueOutOfSpace(%s;%s;%s)" a (modelSpaceRender s) g
+    | ModelCap.RequiredHolesUnbound xs -> sprintf "RequiredHolesUnbound(%s)" (String.concat "," xs)
+    | ModelCap.NotASlot a -> sprintf "NotASlot(%s)" a
+    | ModelCap.SlotKindMismatch(a, e, g) -> sprintf "SlotKindMismatch(%s;%s;%s)" a e g
+    | ModelCap.NonTotal a -> sprintf "NonTotal(%s)" a
+    | ModelCap.BindFailed(a, m) -> sprintf "BindFailed(%s;%s)" a m
+
+let private applyErrClass (e: ApplyError) : string =
+    (prodApplyErrRender e).Substring(0, (prodApplyErrRender e).IndexOf '(')
+
+/// `NoSuchCapability`'s `known` list is production's sorted map keys and the model's list in
+/// registration order — the ONE ordering the model does not carry; both render sorted.
+let private prodInvokeErrRender (e: InvokeError) : string =
+    match e with
+    | NoSuchCapability(id, known) -> sprintf "NoSuchCapability(%s;%s)" id (String.concat "," (List.sort known))
+    | DuplicateCapability id -> sprintf "DuplicateCapability(%s)" id
+    | UnknownArg(a, d) -> sprintf "UnknownArg(%s;%s)" a (String.concat "," d)
+    | ArgOutOfSpace(a, s, g) -> sprintf "ArgOutOfSpace(%s;%s;%s)" a (modelSpaceRender (spaceToModel s)) g
+    | RequiredArgsUnbound xs -> sprintf "RequiredArgsUnbound(%s)" (String.concat "," xs)
+    | UninvocableArg a -> sprintf "UninvocableArg(%s)" a
+    | BodyFailed m -> sprintf "BodyFailed(%s)" m
+
+let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
+    match e with
+    | ModelCap.NoSuchCapability(id, known) -> sprintf "NoSuchCapability(%s;%s)" id (String.concat "," (List.sort known))
+    | ModelCap.DuplicateCapability id -> sprintf "DuplicateCapability(%s)" id
+    | ModelCap.UnknownArg(a, d) -> sprintf "UnknownArg(%s;%s)" a (String.concat "," d)
+    | ModelCap.ArgOutOfSpace(a, s, g) -> sprintf "ArgOutOfSpace(%s;%s;%s)" a (modelSpaceRender s) g
+    | ModelCap.RequiredArgsUnbound xs -> sprintf "RequiredArgsUnbound(%s)" (String.concat "," xs)
+    | ModelCap.UninvocableArg a -> sprintf "UninvocableArg(%s)" a
+    | ModelCap.BodyFailed m -> sprintf "BodyFailed(%s)" m
+
+let private invokeErrClass (e: InvokeError) : string =
+    (prodInvokeErrRender e).Substring(0, (prodInvokeErrRender e).IndexOf '(')
+
+let private placementToModel (p: Placement) : ModelCap.placement =
+    match p with
+    | BuildTime -> ModelCap.BuildTime
+    | Server -> ModelCap.Server
+    | ClientDeclarative -> ModelCap.ClientDeclarative
+    | ClientIsland Pyodide -> ModelCap.ClientIsland ModelCap.Pyodide
+    | ClientIsland Fable -> ModelCap.ClientIsland ModelCap.Fable
+    | ClientIsland Js -> ModelCap.ClientIsland ModelCap.Js
+    | Precomputed -> ModelCap.Precomputed
+
+let private capToModel (c: Capability) : ModelCap.capability =
+    { ModelCap.capability.c_id = c.Id
+      ModelCap.capability.c_signature = sigToModel c.Signature
+      ModelCap.capability.c_determinism = detToModel c.Determinism
+      ModelCap.capability.c_placement = placementToModel c.Placement }
+
+// ---- generators ----
+
+let private effPool =
+    [ Effect.pureDeterministic
+      { Host = ReadsHost
+        Determinism = Deterministic }
+      { Host = Pure; Determinism = Clock }
+      { Host = WritesHost
+        Determinism = Random }
+      { Host = ReadsHost
+        Determinism = Network } ]
+
+let private genSpace (r: ConfRng.T) : ValueSpace * ConfRng.T =
+    let roll, r1 = ConfRng.intBelow 5 r
+    let lo, r2 = ConfRng.intBelow 5 r1
+    let span, r3 = ConfRng.intBelow 5 r2
+
+    match roll with
+    | 0 -> IntRange(lo, lo + span), r3
+    | 1 -> FloatRange(float lo / 2.0, float (lo + span) / 2.0 + 0.5), r3
+    | 2 -> StringLen(lo, lo + span), r3
+    | 3 -> Enum [ "a"; "b" ], r3
+    | _ -> AnyString, r3
+
+/// A value for a space — in space more often than not, and out of it (or unparseable) the rest.
+let private genValueFor (s: ValueSpace) (r: ConfRng.T) : string * ConfRng.T =
+    let roll, r1 = ConfRng.intBelow 10 r
+    let k, r2 = ConfRng.intBelow 8 r1
+
+    match s with
+    | IntRange(lo, hi) ->
+        (if roll < 6 then string (lo + k % (hi - lo + 1))
+         elif roll < 8 then string (hi + 1 + k)
+         else "x"),
+        r2
+    | FloatRange(lo, hi) ->
+        (if roll < 6 then
+             (lo + (hi - lo) * float (k % 4) / 4.0).ToString("R", inv)
+         elif roll < 8 then
+             (hi + 1.0).ToString("R", inv)
+         else
+             "nan?"),
+        r2
+    | StringLen(lo, hi) -> String.replicate (if roll < 6 then lo + k % (hi - lo + 1) else hi + 1 + k) "s", r2
+    | Enum xs -> (if roll < 7 then List.item (k % List.length xs) xs else "zz"), r2
+    | AnyString -> sprintf "v%d" k, r2
+
+let private genHoleKind (r: ConfRng.T) : HoleKind * ConfRng.T =
+    let roll, r1 = ConfRng.intBelow 10 r
+    let s, r2 = genSpace r1
+    let e, r3 = ConfRng.choose effPool r2
+
+    if roll < 4 then
+        ValueHole s, r3
+    elif roll < 6 then
+        SlotHole(if roll = 4 then Some "para" else None), r3
+    elif roll < 8 then
+        RepeatHole s, r3 // AnyString one draw in five — the unbounded repeat
+    else
+        ActionHole e, r3
+
+/// An artifact: a root over up to four children, each a hole (`h1`..`h4`), a leaf, or a group
+/// holding a hole that REUSES an earlier hole's name (the hygiene case), every node with its
+/// own effect so the observed effect and the audit vary.
+let private genArtifact (r: ConfRng.T) : RNode * ConfRng.T =
+    let n, r1 = ConfRng.intBelow 5 r
+    let mutable rng = r1
+    let children = System.Collections.Generic.List<RNode>()
+
+    for i in 1..n do
+        let roll, r2 = ConfRng.intBelow 10 rng
+        let hk, r3 = genHoleKind r2
+        let e, r4 = ConfRng.choose effPool r3
+        rng <- r4
+        let name = sprintf "x%d" (i % 2 + 1)
+
+        if roll < 6 then
+            children.Add
+                { RNode.hole (sprintf "h%d" i) "field" name hk with
+                    Eff = e }
+        elif roll < 8 then
+            children.Add
+                { RNode.leaf (sprintf "l%d" i) "para" "v" with
+                    Eff = e }
+        else
+            children.Add(
+                { RNode.node (sprintf "g%d" i) "group" [ RNode.hole (sprintf "gh%d" i) "field" name hk ] with
+                    Eff = e }
+            )
+
+    let rootEff, r5 = ConfRng.choose effPool rng
+
+    { RNode.node "root" "doc" (List.ofSeq children) with
+        Eff = rootEff },
+    r5
+
+/// An argument set for an artifact's holes: three draws in four bind a hole (with a value for
+/// its space, or — one draw in eight — an arg of the wrong axis), and one draw in six adds an
+/// arg at an address no hole declares.
+let private genArgs (t: RNode) (r: ConfRng.T) : Map<string, Arg<RNode>> * ConfRng.T =
+    let mutable rng = r
+    let mutable args = Map.empty
+
+    for h in artw.Holes t do
+        let roll, r1 = ConfRng.intBelow 8 rng
+        rng <- r1
+
+        if roll < 6 then
+            let a, r2 =
+                match h.Kind with
+                | ValueHole s
+                | RepeatHole s ->
+                    if roll = 5 then
+                        SlotArg(RNode.leaf "in" "para" "z"), rng
+                    else
+                        let v, r' = genValueFor s rng
+                        ValueArg v, r'
+                | SlotHole _ ->
+                    if roll = 5 then ValueArg "s", rng
+                    elif roll = 4 then SlotArg(RNode.leaf "in" "field" "z"), rng
+                    else SlotArg(RNode.leaf "in" "para" "z"), rng
+                | ActionHole _ -> ValueArg "act", rng
+
+            rng <- r2
+            args <- Map.add h.Addr a args
+
+    let extra, r3 = ConfRng.intBelow 6 rng
+    rng <- r3
+
+    if extra = 0 then
+        args <- Map.add "root/zz" (ValueArg "1") args
+
+    args, rng
+
+type private FnTally =
+    { FDiffs: string list
+      Artifacts: int
+      Applied: int
+      ApplyRefused: int
+      Curried: int
+      CurryRefused: int
+      Composed: int
+      ComposeRefused: int
+      NonTotal: int
+      AuditErrors: int
+      FClasses: Set<string> }
+
+let private fnProbe
+    (rd: ModelCap.readers)
+    (t: RNode)
+    (args: Map<string, Arg<RNode>>)
+    (inner: RNode)
+    (slot: string)
+    (acc: FnTally)
+    : FnTally =
+    let mw = modelWitness
+    let margs = args |> Map.toList |> List.map (fun (k, v) -> k, argToModel v)
+    let diffs = System.Collections.Generic.List<string>()
+
+    let label =
+        sprintf "artifact %A args %A" (artw.Holes t |> List.map (fun h -> h.Addr, h.Kind)) (Map.keys args |> List.ofSeq)
+
+    // signature, isTotal, signatureExcluding
+    let psg = Function.signature artw "f" t
+    let msg = ModelCap.signature_of mw "f" t
+
+    if sigToModel psg <> msg then
+        diffs.Add(sprintf "%s: signature differs\n  prod %A\n  model %A" label (sigToModel psg) msg)
+
+    if Function.isTotal psg <> ModelCap.is_total msg then
+        diffs.Add(
+            sprintf "%s: isTotal differs (prod %b, model %b)" label (Function.isTotal psg) (ModelCap.is_total msg)
+        )
+
+    let bound = args |> Map.keys |> List.ofSeq
+
+    if
+        sigToModel (Function.signatureExcluding (Set.ofList bound) psg)
+        <> ModelCap.signature_excluding bound msg
+    then
+        diffs.Add(sprintf "%s: signatureExcluding differs" label)
+
+    // apply / curry — verdict, result tree, rejection class and payload
+    let compare (what: string) (p: Result<RNode, ApplyError>) (m: ModelCap.outcome<RNode, ModelCap.apply_error>) =
+        match p, m with
+        | Ok pn, ModelCap.Ok mn ->
+            if pn <> mn then
+                diffs.Add(sprintf "%s: %s accepted on both sides with DIFFERENT trees" label what)
+        | Error pe, ModelCap.Error me ->
+            if prodApplyErrRender pe <> modelApplyErrRender me then
+                diffs.Add(
+                    sprintf
+                        "%s: %s refused differently\n  prod %s\n  model %s"
+                        label
+                        what
+                        (prodApplyErrRender pe)
+                        (modelApplyErrRender me)
+                )
+        | Ok _, ModelCap.Error me ->
+            diffs.Add(
+                sprintf "%s: %s accepted by production, refused by the model (%s)" label what (modelApplyErrRender me)
+            )
+        | Error pe, ModelCap.Ok _ ->
+            diffs.Add(
+                sprintf "%s: %s refused by production (%s), accepted by the model" label what (prodApplyErrRender pe)
+            )
+
+    let pApply = Function.apply artw args t
+    compare "apply" pApply (ModelCap.apply rd mw margs t)
+    let pCurry = Function.curry artw args t
+    compare "curry" pCurry (ModelCap.curry rd mw margs t)
+    let pComp = Function.compose artw slot inner t
+    compare "compose" pComp (ModelCap.compose mw slot inner t)
+
+    // the effect surfaces
+    if
+        effToModel (Function.composedEffect artw inner t)
+        <> ModelCap.composed_effect mw inner t
+    then
+        diffs.Add(sprintf "%s: composedEffect differs" label)
+
+    if effToModel (Function.observedEffect artw t) <> ModelCap.observed_effect mw t then
+        diffs.Add(sprintf "%s: observedEffect differs" label)
+
+    let pAudit = Function.auditEffect artw t
+    let mAudit = ModelCap.audit_effect mw t
+
+    (match pAudit, mAudit with
+     | Ok(), ModelCap.Ok() -> ()
+     | Error(d, a), ModelCap.Error(md, ma) ->
+         if effToModel d <> md || effToModel a <> ma then
+             diffs.Add(sprintf "%s: auditEffect error payload differs" label)
+     | _ -> diffs.Add(sprintf "%s: auditEffect verdict differs" label))
+
+    let cls (r: Result<RNode, ApplyError>) =
+        match r with
+        | Ok _ -> None
+        | Error e -> Some(applyErrClass e)
+
+    { FDiffs = acc.FDiffs @ List.ofSeq diffs
+      Artifacts = acc.Artifacts + 1
+      Applied = acc.Applied + (if Result.isOk pApply then 1 else 0)
+      ApplyRefused = acc.ApplyRefused + (if Result.isError pApply then 1 else 0)
+      Curried = acc.Curried + (if Result.isOk pCurry then 1 else 0)
+      CurryRefused = acc.CurryRefused + (if Result.isError pCurry then 1 else 0)
+      Composed = acc.Composed + (if Result.isOk pComp then 1 else 0)
+      ComposeRefused = acc.ComposeRefused + (if Result.isError pComp then 1 else 0)
+      NonTotal = acc.NonTotal + (if Function.isTotal psg then 0 else 1)
+      AuditErrors = acc.AuditErrors + (if Result.isError pAudit then 1 else 0)
+      FClasses =
+        [ cls pApply; cls pCurry; cls pComp ]
+        |> List.choose id
+        |> List.fold (fun s c -> Set.add c s) acc.FClasses }
+
+let private fnDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : FnTally =
+    let mutable rng = ConfRng.ofSeed seed
+
+    let mutable tally =
+        { FDiffs = []
+          Artifacts = 0
+          Applied = 0
+          ApplyRefused = 0
+          Curried = 0
+          CurryRefused = 0
+          Composed = 0
+          ComposeRefused = 0
+          NonTotal = 0
+          AuditErrors = 0
+          FClasses = Set.empty }
+
+    for _ in 1..trials do
+        let t, r1 = genArtifact rng
+        let args, r2 = genArgs t r1
+        let innerKind, r3 = ConfRng.choose [ "para"; "field" ] r2
+        let holes = artw.Holes t
+        let slotRoll, r4 = ConfRng.intBelow 4 r3
+
+        let slots =
+            holes
+            |> List.filter (fun h ->
+                match h.Kind with
+                | SlotHole _ -> true
+                | _ -> false)
+
+        let slot =
+            if slotRoll = 0 || List.isEmpty holes then
+                "root/nope"
+            elif slotRoll < 3 && not (List.isEmpty slots) then
+                (List.item (slotRoll % List.length slots) slots).Addr
+            else
+                (List.item (slotRoll % List.length holes) holes).Addr
+
+        rng <- r4
+        tally <- fnProbe rd t args (RNode.leaf "in" innerKind "z") slot tally
+
+    tally
+
+type private CapTally =
+    { CDiffs: string list
+      Registered: int
+      DupRefused: int
+      Dispatched: int
+      NoSuch: int
+      Validated: int
+      Refused: int
+      BodyRan: int
+      BodyFailed: int
+      RefusedWithoutBody: int
+      CClasses: Set<string> }
+
+/// A signature for a capability: up to three entries drawn through `Function.signature` of a
+/// generated artifact, so the entry vocabulary is production's own.
+let private genCapSignature (name: string) (r: ConfRng.T) : Signature * ConfRng.T =
+    let t, r1 = genArtifact r
+    let e, r2 = ConfRng.choose effPool r1
+
+    { Function.signature artw name t with
+        Effect = e },
+    r2
+
+let private capIdPool = [ "cap-a"; "cap-b"; "cap-c" ]
+
+/// A typed invocation: for each entry, three draws in four an arg (a value for its space, or
+/// — for a slot entry — a value it cannot take), plus one draw in five an unknown address.
+let private genInvocation (sg: Signature) (r: ConfRng.T) : (string * string) list * ConfRng.T =
+    let mutable rng = r
+    let args = System.Collections.Generic.List<string * string>()
+
+    for e in sg.Holes do
+        let roll, r1 = ConfRng.intBelow 4 rng
+        rng <- r1
+
+        if roll < 3 then
+            match e.Space with
+            | Some s ->
+                let v, r2 = genValueFor s rng
+                rng <- r2
+                args.Add(e.Addr, v)
+            | None -> args.Add(e.Addr, "s")
+
+    let extra, r3 = ConfRng.intBelow 5 rng
+    rng <- r3
+
+    if extra = 0 then
+        args.Add("root/zz", "1")
+
+    List.ofSeq args, rng
+
+let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: ConfRng.T) : CapTally * ConfRng.T =
+    let diffs = System.Collections.Generic.List<string>()
+    let mutable rng = r
+
+    // build a registry on both sides, in the same order, with duplicates possible
+    let n, r1 = ConfRng.intBelow 4 rng
+    rng <- r1
+    let mutable preg = Registry.empty
+    let mutable mreg = ModelCap.empty
+    let mutable registered = 0
+    let mutable dupRefused = 0
+
+    for i in 1..n do
+        let id, r2 = ConfRng.choose capIdPool rng
+        let sg, r3 = genCapSignature (sprintf "f%d" i) r2
+        let placement, r4 = ConfRng.choose [ BuildTime; Server; ClientIsland Pyodide ] r3
+        rng <- r4
+        let cap = Capability.create id sg placement
+
+        match Registry.register cap preg, ModelCap.register (capToModel cap) mreg with
+        | Ok p', ModelCap.Ok m' ->
+            preg <- p'
+            mreg <- m'
+            registered <- registered + 1
+        | Error pe, ModelCap.Error me ->
+            dupRefused <- dupRefused + 1
+
+            if prodInvokeErrRender pe <> modelInvokeErrRender me then
+                diffs.Add(
+                    sprintf
+                        "seed %d: register refused differently (%s vs %s)"
+                        seedTag
+                        (prodInvokeErrRender pe)
+                        (modelInvokeErrRender me)
+                )
+        | _ -> diffs.Add(sprintf "seed %d: register verdict differs on %s" seedTag id)
+
+    // enumerate + tryFind agree (membership, and the entries themselves, sorted by id)
+    let penum = Registry.enumerate preg |> List.map capToModel
+    let menum = ModelCap.enumerate mreg |> List.sortBy (fun c -> c.c_id)
+
+    if penum <> menum then
+        diffs.Add(sprintf "seed %d: enumerate differs" seedTag)
+
+    for id in "cap-x" :: capIdPool do
+        let p = Registry.tryFind id preg |> Option.map capToModel
+        let m = ofMOpt (ModelCap.try_find_cap id mreg)
+
+        if p <> m then
+            diffs.Add(sprintf "seed %d: tryFind %s differs" seedTag id)
+
+    // invocations: an id from the pool or an unregistered one, args drawn against the
+    // resolved capability's signature when there is one
+    let mutable dispatched = 0
+    let mutable noSuch = 0
+    let mutable validated = 0
+    let mutable refused = 0
+    let mutable bodyRan = 0
+    let mutable bodyFailed = 0
+    let mutable refusedWithoutBody = 0
+    let mutable classes = acc.CClasses
+    let k, r5 = ConfRng.intBelow 4 rng
+    rng <- r5
+
+    for _ in 0..k do
+        let id, r6 = ConfRng.choose ("cap-x" :: capIdPool) rng
+        rng <- r6
+
+        let args, r7 =
+            match Registry.tryFind id preg with
+            | Some c -> genInvocation c.Signature rng
+            | None -> [ "h1", "1" ], rng
+
+        let failBody, r8 = ConfRng.intBelow 4 r7
+        rng <- r8
+        let pRan = ref false
+        let mRan = ref false
+
+        let pBody (_: Capability) () =
+            pRan.Value <- true
+            if failBody = 0 then Error "boom" else Ok 42
+
+        let mBody (_: ModelCap.capability) () =
+            mRan.Value <- true
+
+            if failBody = 0 then
+                ModelCap.Error "boom"
+            else
+                ModelCap.Ok 42
+
+        let p = Registry.dispatch preg id args pBody
+        let m = ModelCap.dispatch rd mreg id args mBody
+
+        (match p, m with
+         | Ok pv, ModelCap.Ok mv ->
+             dispatched <- dispatched + 1
+
+             if pv <> mv then
+                 diffs.Add(sprintf "seed %d: dispatch %s accepted with different values" seedTag id)
+         | Error pe, ModelCap.Error me ->
+             classes <- Set.add (invokeErrClass pe) classes
+
+             if prodInvokeErrRender pe <> modelInvokeErrRender me then
+                 diffs.Add(
+                     sprintf
+                         "seed %d: dispatch %s refused differently\n  prod %s\n  model %s"
+                         seedTag
+                         id
+                         (prodInvokeErrRender pe)
+                         (modelInvokeErrRender me)
+                 )
+
+             match pe with
+             | NoSuchCapability _ -> noSuch <- noSuch + 1
+             | BodyFailed _ -> bodyFailed <- bodyFailed + 1
+             | _ -> refused <- refused + 1
+         | Ok _, ModelCap.Error me ->
+             diffs.Add(
+                 sprintf
+                     "seed %d: dispatch %s accepted by production, refused by the model (%s)"
+                     seedTag
+                     id
+                     (modelInvokeErrRender me)
+             )
+         | Error pe, ModelCap.Ok _ ->
+             diffs.Add(
+                 sprintf
+                     "seed %d: dispatch %s refused by production (%s), accepted by the model"
+                     seedTag
+                     id
+                     (prodInvokeErrRender pe)
+             ))
+
+        // the body ran on both sides or on neither — and never past a refusal that is not the body's
+        if pRan.Value <> mRan.Value then
+            diffs.Add(
+                sprintf
+                    "seed %d: dispatch %s ran the body on one side only (prod %b, model %b)"
+                    seedTag
+                    id
+                    pRan.Value
+                    mRan.Value
+            )
+
+        if pRan.Value then
+            bodyRan <- bodyRan + 1
+
+        (match p with
+         | Error(BodyFailed _)
+         | Ok _ -> ()
+         | Error _ ->
+             refusedWithoutBody <- refusedWithoutBody + 1
+
+             if pRan.Value then
+                 diffs.Add(sprintf "seed %d: dispatch %s was REFUSED and the body still ran" seedTag id))
+
+        // validateArgs on its own, on the resolved capability
+        match Registry.tryFind id preg with
+        | Some c ->
+            match Capability.validateArgs c args, ModelCap.validate_args rd (capToModel c) args with
+            | Ok(), ModelCap.Ok() -> validated <- validated + 1
+            | Error pe, ModelCap.Error me ->
+                if prodInvokeErrRender pe <> modelInvokeErrRender me then
+                    diffs.Add(
+                        sprintf
+                            "seed %d: validateArgs refused differently\n  prod %s\n  model %s"
+                            seedTag
+                            (prodInvokeErrRender pe)
+                            (modelInvokeErrRender me)
+                    )
+            | _ -> diffs.Add(sprintf "seed %d: validateArgs verdict differs on %s" seedTag id)
+        | None -> ()
+
+    { CDiffs = acc.CDiffs @ List.ofSeq diffs
+      Registered = acc.Registered + registered
+      DupRefused = acc.DupRefused + dupRefused
+      Dispatched = acc.Dispatched + dispatched
+      NoSuch = acc.NoSuch + noSuch
+      Validated = acc.Validated + validated
+      Refused = acc.Refused + refused
+      BodyRan = acc.BodyRan + bodyRan
+      BodyFailed = acc.BodyFailed + bodyFailed
+      RefusedWithoutBody = acc.RefusedWithoutBody + refusedWithoutBody
+      CClasses = classes },
+    rng
+
+let private capDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : CapTally =
+    let mutable rng = ConfRng.ofSeed seed
+
+    let mutable tally =
+        { CDiffs = []
+          Registered = 0
+          DupRefused = 0
+          Dispatched = 0
+          NoSuch = 0
+          Validated = 0
+          Refused = 0
+          BodyRan = 0
+          BodyFailed = 0
+          RefusedWithoutBody = 0
+          CClasses = Set.empty }
+
+    for i in 1..trials do
+        let t, r' = capProbe rd i tally rng
+        tally <- t
+        rng <- r'
+
+    tally
+
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -8500,4 +9275,257 @@ let proofOracleTests =
               Expect.equal
                   (ModelCol.invert mop mt)
                   (ModelCol.Ok(ModelCol.RemoveColumn "a"))
-                  "and derives the same inverse" ]
+                  "and derives the same inverse"
+
+          // ---- Phase 177 — the FUNCTION SEAM: the effect lattice, the function algebra and the
+          //      capability registry against the model ----
+
+          testCase
+              "the function oracle agrees with Function.signature, apply, curry, compose and auditEffect over generated artifacts and argument sets"
+          <| fun _ ->
+              let t = fnDifferential readers 1770 200
+
+              match t.FDiffs with
+              | d :: _ -> failtestf "the function oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Adequacy, per shape. Measured at 200 artifacts: applied 73, applyRefused 127,
+                  // curried 96, curryRefused 104, composed 17, composeRefused 183, nonTotal 11,
+                  // auditErrors 92. Each threshold sits below its measurement with room; they
+                  // catch a generator that stops reaching a shape, not pin the numbers.
+                  Expect.equal t.Artifacts 200 "every artifact was compared"
+                  Expect.isGreaterThan t.Applied 40 (sprintf "full applications were accepted (applied=%d)" t.Applied)
+
+                  Expect.isGreaterThan
+                      t.ApplyRefused
+                      80
+                      (sprintf "full applications were refused (applyRefused=%d)" t.ApplyRefused)
+
+                  Expect.isGreaterThan
+                      t.Curried
+                      60
+                      (sprintf "partial applications were accepted (curried=%d)" t.Curried)
+
+                  Expect.isGreaterThan
+                      t.CurryRefused
+                      60
+                      (sprintf "partial applications were refused (curryRefused=%d)" t.CurryRefused)
+
+                  Expect.isGreaterThan t.Composed 8 (sprintf "compositions were accepted (composed=%d)" t.Composed)
+
+                  Expect.isGreaterThan
+                      t.ComposeRefused
+                      100
+                      (sprintf "compositions were refused (composeRefused=%d)" t.ComposeRefused)
+
+                  Expect.isGreaterThan
+                      t.NonTotal
+                      5
+                      (sprintf "non-total artifacts were reached (nonTotal=%d)" t.NonTotal)
+
+                  Expect.isGreaterThan
+                      t.AuditErrors
+                      50
+                      (sprintf "under-declared roots were reached (auditErrors=%d)" t.AuditErrors)
+
+                  for cls in
+                      [ "UnknownHoleAddr"
+                        "ValueOutOfSpace"
+                        "RequiredHolesUnbound"
+                        "NotASlot"
+                        "SlotKindMismatch"
+                        "NonTotal" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.FClasses)
+                          (sprintf "the sample reached a %s refusal (reached: %A)" cls t.FClasses)
+
+                  // seeded, replayable
+                  Expect.equal (fnDifferential readers 1770 200) t "same seed => identical tally"
+
+          testCase
+              "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations"
+          <| fun _ ->
+              let t = capDifferential readers 1771 150
+
+              match t.CDiffs with
+              | d :: _ -> failtestf "the capability oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Measured at 150 registries: registered 172, dupRefused 51, dispatched 33,
+                  // noSuch 270, validated 45, refused 71, bodyFailed 12, refusedWithoutBody 341.
+                  Expect.isGreaterThan
+                      t.Registered
+                      100
+                      (sprintf "capabilities were registered (registered=%d)" t.Registered)
+
+                  Expect.isGreaterThan
+                      t.DupRefused
+                      20
+                      (sprintf "duplicate registrations were refused (dupRefused=%d)" t.DupRefused)
+
+                  Expect.isGreaterThan
+                      t.Dispatched
+                      15
+                      (sprintf "invocations were dispatched and ran (dispatched=%d)" t.Dispatched)
+
+                  Expect.isGreaterThan t.NoSuch 150 (sprintf "unregistered ids were refused (noSuch=%d)" t.NoSuch)
+                  Expect.isGreaterThan t.Validated 20 (sprintf "argument sets were accepted (validated=%d)" t.Validated)
+                  Expect.isGreaterThan t.Refused 40 (sprintf "argument sets were refused (refused=%d)" t.Refused)
+
+                  Expect.isGreaterThan
+                      t.BodyFailed
+                      5
+                      (sprintf "bodies failed and were named (bodyFailed=%d)" t.BodyFailed)
+
+                  Expect.equal
+                      t.BodyRan
+                      (t.Dispatched + t.BodyFailed)
+                      "the body ran exactly on the invocations validation passed"
+
+                  Expect.isGreaterThan
+                      t.RefusedWithoutBody
+                      200
+                      (sprintf
+                          "refusals were checked for a body that did not run (refusedWithoutBody=%d)"
+                          t.RefusedWithoutBody)
+
+                  for cls in
+                      [ "NoSuchCapability"
+                        "UnknownArg"
+                        "ArgOutOfSpace"
+                        "RequiredArgsUnbound"
+                        "UninvocableArg"
+                        "BodyFailed" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.CClasses)
+                          (sprintf "the sample reached a %s refusal (reached: %A)" cls t.CClasses)
+
+                  Expect.equal (capDifferential readers 1771 150) t "same seed => identical tally"
+
+          testCase
+              "a capability oracle handed a BLIND int reader DISAGREES with Capability.validateArgs and Function.apply — the measurement can fail"
+          <| fun _ ->
+              // The teeth. Under the blind reader every int-ranged value is out of space to the
+              // model, so it refuses what production accepts. If this ever passes, the space
+              // check has stopped reaching the comparison and the green runs above certify
+              // nothing about it.
+              let c = capDifferential blindReaders 1771 60
+              Expect.isNonEmpty c.CDiffs "a blind int reader MUST disagree with production on the seam"
+
+              Expect.isTrue
+                  (c.CDiffs |> List.exists (fun d -> d.Contains "ArgOutOfSpace"))
+                  "and the disagreement is about the SPACE check, which is what the reader blinded"
+
+              let f = fnDifferential blindReaders 1770 60
+              Expect.isNonEmpty f.FDiffs "a blind int reader MUST disagree with production on the algebra"
+
+              Expect.isTrue
+                  (f.FDiffs |> List.exists (fun d -> d.Contains "ValueOutOfSpace"))
+                  "and the disagreement is about the value-space check"
+
+          testCase
+              "no handler runs on a refused dispatch — `unregistered_refused` and `validate_before_invoke`, on the shipped seam"
+          <| fun _ ->
+              // The two theorems' statements instantiated on production: an unregistered id and
+              // a rejected argument set each return the typed refusal with the body untouched,
+              // and the result is the same under a body that would have failed.
+              // The template's slot hole is dropped from the invocable signature: a required
+              // slot entry refuses every argument list (`slot_hole_uninvocable`, asserted below).
+              let full =
+                  { Function.signature artw "f" (template ()) with
+                      Effect = Effect.pureDeterministic }
+
+              let sg =
+                  { full with
+                      Holes = full.Holes |> List.filter (fun e -> e.Kind <> "slot") }
+
+              let cap = Capability.create "cap-t" sg Server
+
+              let reg =
+                  match Registry.register cap Registry.empty with
+                  | Ok r -> r
+                  | Error e -> failtestf "register refused: %A" e
+
+              let ran = ref 0
+
+              let body (_: Capability) () =
+                  ran.Value <- ran.Value + 1
+                  Ok "ran"
+
+              let failing (_: Capability) () =
+                  ran.Value <- ran.Value + 1
+                  Error "boom"
+
+              // unregistered_refused
+              Expect.equal
+                  (Registry.dispatch reg "cap-u" [ "tpl/t", "x" ] body)
+                  (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
+                  "an unregistered id is the typed refusal, naming what IS registered"
+
+              Expect.equal
+                  (Registry.dispatch reg "cap-u" [ "tpl/t", "x" ] failing)
+                  (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
+                  "and the same refusal under a failing body"
+
+              // validate_before_invoke — out of space, unknown, slot-targeted, required-unbound
+              for args in
+                  [ [ "tpl/t", "x"; "tpl/c", "99" ]
+                    [ "tpl/t", "x"; "tpl/c", "1"; "tpl/zz", "1" ]
+                    [ "tpl/t", "x"; "tpl/c", "1"; "tpl/s", "para" ]
+                    [ "tpl/t", "x" ] ] do
+                  let a = Registry.dispatch reg "cap-t" args body
+                  let b = Registry.dispatch reg "cap-t" args failing
+                  Expect.isTrue (Result.isError a) (sprintf "the set %A is refused" args)
+                  Expect.equal a b "and the refusal is the same under a failing body"
+
+                  Expect.equal
+                      a
+                      (Capability.validateArgs cap args |> Result.map (fun () -> "unreachable"))
+                      "and it IS the validation's refusal"
+
+              Expect.equal ran.Value 0 "no body ran on any refusal"
+
+              // slot_hole_uninvocable — the finding, on the shipped seam: the capability declared
+              // over the WHOLE template (its slot hole required and spaceless) is registered,
+              // enumerated, and refused on every argument list, the body never running.
+              let slotCap = Capability.create "cap-slot" full Server
+
+              let reg2 =
+                  match Registry.register slotCap reg with
+                  | Ok r -> r
+                  | Error e -> failtestf "register refused: %A" e
+
+              Expect.equal
+                  (Registry.enumerate reg2 |> List.map (fun c -> c.Id))
+                  [ "cap-slot"; "cap-t" ]
+                  "the slot-bearing capability enumerates like any other"
+
+              for args in
+                  [ []
+                    [ "tpl/t", "x"; "tpl/c", "3" ]
+                    [ "tpl/t", "x"; "tpl/c", "3"; "tpl/s", "para" ]
+                    [ "tpl/s", "" ] ] do
+                  Expect.isTrue
+                      (Result.isError (Registry.dispatch reg2 "cap-slot" args body))
+                      (sprintf "the slot-bearing capability refuses %A" args)
+
+              Expect.equal ran.Value 0 "and no body ran on any of those either"
+
+              // and the accepted set runs it, once
+              Expect.equal
+                  (Registry.dispatch reg "cap-t" [ "tpl/t", "x"; "tpl/c", "3" ] body)
+                  (Ok "ran")
+                  "an accepted set runs the body"
+
+              Expect.equal ran.Value 1 "exactly once"
+
+              // and the model says the same through the same theorems' clauses
+              let mreg =
+                  match ModelCap.register (capToModel cap) ModelCap.empty with
+                  | ModelCap.Ok r -> r
+                  | ModelCap.Error _ -> failtest "the model refused the registration"
+
+              Expect.equal
+                  (ModelCap.dispatch readers mreg "cap-u" [ "tpl/t", "x" ] (fun _ () -> ModelCap.Ok "ran"))
+                  (ModelCap.Error(ModelCap.NoSuchCapability("cap-u", [ "cap-t" ])))
+                  "the model refuses the unregistered id the same way"
+
+              Expect.equal (ModelCap.ids (ModelCap.enumerate mreg)) [ "cap-t" ] "and enumerates the registered one" ]

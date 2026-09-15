@@ -509,6 +509,7 @@ over-read.
 | `evolution-table-coverage` | `model-bridge` | `permanent` |
 | `column-cell-carrier-opaque` | `model-bridge` | `permanent` |
 | `column-transform-evaluator-abstract` | `model-bridge` | `unscheduled` |
+| `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -2980,6 +2981,171 @@ fresh one on the first leg run, and the oracle compiles against `Prims.fs` with 
      answers — and the one place the abstraction has content, that `DataFrame.evalPipeline` returns
      well-formed tables, is the hypothesis `ev_preserves_wf` and is discharged nowhere. Modelling the
      evaluator is its own phase and nobody has taken it.
+   - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
+
+## Theorem 10 — default-deny dispatch and the three function laws (Phase 177)
+
+_(This directory's tenth, and the first about the seam an AI-driven edit crosses rather than about
+the data it edits. `Fuaran.Core.Function` is the artifact-function protocol under its three laws
+and the invocable `Capability` registry with default-deny dispatch and arg-validated invocation.
+Its guarantees are the ones an assurance reader asks about first, and until this phase they were
+property-tested — `capabilityLaws`, `compositionLaws`, `functionVerifyLaws` — and proved nowhere.
+Phase 153 is chartered to prove the WIRE cannot carry an invokable; this proves the SEAM cannot
+invoke what was not registered.)_
+
+The doc comments of `Function.fs` state the contract in four places and the theorems are their
+names:
+
+> **`Registry.dispatch` — "default-deny — an unregistered id is `NoSuchCapability`".
+> `Capability.invoke` — "validate the args, then run the host `body`". `Registry.enumerate` — "the
+> discovery surface … what compute may I invoke". The three laws — totality ("bounded iteration
+> only"), hygiene ("bound by their absolute lexical address, never a bare name, so composition
+> cannot capture"), effect signature ("joined componentwise through composition").**
+
+`Capability.fst` models the file clause for clause — the effect lattice through its two rank tables,
+the five-constructor value-space vocabulary and `Space.validate`, `signature` / `signatureExcluding`
+/ `isTotal` / `guardTotal` / `validateArg` / `bindArgs` and the `apply` / `curry` that are its two
+faces, `compose` / `composedEffect` / `observedEffect` / `auditEffect`, and `Capability.create` /
+`validateArgs` / `invoke` with `Registry.register` / `tryFind` / `enumerate` / `dispatch` — over
+two **parameters**. The witness (`Holes`, `Effect`, `Bind`, the tree witness's `KindTag`, and
+`Tree.preorder` over it) is a record of functions over an abstract node type, exactly as theorem 5
+takes `ReplaceChildren` abstractly; and the three scalar readers `Space.validate` reaches for —
+`Int32.TryParse`, `Double.TryParse` against a float range, `String.Length` — are a `readers` record,
+exactly as theorem 9 takes the pipeline evaluator. Neither is a hole in the argument: nothing any
+theorem below says depends on what a domain's `Bind` does or on whether `"12"` is in `[0, 10]`.
+
+### What is proved
+
+Six theorems, over any witness, any readers, any registry and any host body:
+
+1. **`unregistered_refused`** — `dispatch` of an id the registry does not hold is the typed
+   `NoSuchCapability id known`, and the result is the SAME under every host body. That second
+   clause is the whole content: "runs no handler" is not a thing a pure function can be
+   instrumented for, and body-independence is what it means. `invoke` can never raise the
+   registry's two refusals, so the classes stay disjoint.
+2. **`validate_before_invoke`** — an argument set `validateArgs` rejects makes `invoke` return that
+   rejection, for every body alike; at the registry, a resolved id still runs nothing on a set
+   validation rejects. The converse holds (`body_runs_only_validated`), the refusal is one of
+   validation's own four (`validate_args_shape`), an accepted set addresses declared holes only
+   and binds every required one (`validate_args_sound`), and a refusal is truthful — an
+   `ArgOutOfSpace` names a value the space really refuses (`refusal_is_truthful`).
+3. **`enumerate_is_registry`** — an id is enumerable exactly when `tryFind` resolves it, and
+   `dispatch` raises `NoSuchCapability` exactly off the enumeration. `register` refuses a held id
+   and extends by exactly one entry otherwise; a registry built by it holds distinct ids.
+   Membership, not order: production's `Map` sorts the enumeration and the model holds the map as
+   a list, so the id order is `capabilityLaws`'s to certify.
+4. **`totality_law`** — `isTotal` over the derived signature answers exactly the guard `apply` and
+   `curry` run first; when the guard fires both refuse with `NonTotal` at the first unbounded
+   repeat, and the refusal is the same under ANY `Bind` (`rejected_never_bound`) — "rejected,
+   never run", stated as bind-independence the way theorem 1 states body-independence.
+5. **`hygiene_law`** — hole NAMES are inert: renaming every hole leaves `apply`, `curry` and
+   `compose` unchanged, because the walk keys on the absolute address and reads nothing else. An
+   argument at an undeclared address is refused by name before any binding
+   (`undeclared_address_refused`). And no capture: a single binding at `k` lands at the hole
+   declared at `k` and nowhere else (`walk_single`), so binding one of two same-named holes is the
+   same on a witness that declares the other and on one that does not (`same_name_no_capture`).
+6. **`effect_law`** — `composedEffect` is `Effect.join`, and the join is the least class covering
+   both parts (`join_least`): any class assigned to a composition that is below either part fails
+   `covers`. Commutative, associative, idempotent, `pureDeterministic` the identity — a bounded
+   join-semilattice with `covers` its order, resting on the two rank tables being inverse on the
+   ranks they produce. **`audit_effect_join`** carries it to the walk: the observed effect is the
+   least class covering every node (`observed_least`), an `Ok` audit says the root covers every
+   descendant, and an `Error` audit exhibits a descendant it does not.
+
+### The finding: a slot hole makes a capability un-invocable
+
+`Function.signature` enters a `SlotHole` as `Required = true, Space = None` — required on the data
+axis, because `apply` must bind it, and spaceless, because a tree is not a scalar. `validateArgs`
+reads the same entries: an argument at a spaceless address is `UninvocableArg`, and a required
+address with no argument is `RequiredArgsUnbound`. `slot_hole_uninvocable` states what follows —
+every argument list is refused — and `slot_entry_shape` states that `signature` is where such an
+entry comes from. So a capability declared over an artifact with a tree-typed slot can be
+registered, enumerated and advertised through `toJsonSchema`, and never dispatched.
+
+The contract is not violated: a slot is not scalar-invocable by design, and `validateArgs`'s doc
+comment says exactly that of the ARGUMENT. What nothing said is that the entry makes the whole
+capability un-invocable, and the differential found it before the model did — the first draft of
+the seam case lifted `Reference.template`'s signature straight into `Capability.create`, which is
+the natural shape of a host publishing a template as a capability, and the accepted-set assertion
+came back `RequiredArgsUnbound ["tpl/s"]`. Asserted on the shipped seam by the differential's fourth
+case, and NOT fixed in this phase, per the standing rule that a gap the theorem finds is fixed by
+its own phase. The fix shape, if taken: `signature` marking a slot entry non-required on the
+invocation axis, as it already does for action holes — or `Capability.create` refusing a spaceless
+required entry so the un-invocable capability is refused at registration rather than at every
+dispatch. Both change a public function's behaviour.
+
+### The differential
+
+`Proofs.Oracle`'s seam family runs the extracted model beside production with the model's node type
+instantiated at the reference domain's `RNode`, so the witness is `Reference.artw` bridged field for
+field and a tree crosses untranslated. Over 200 generated artifacts at seed 1770 — up to four
+children, each a hole of a random kind (one repeat in five unbounded), a leaf, or a group holding a
+hole that REUSES an earlier hole's name, every node with its own effect — and an argument set per
+artifact (three holes in four bound, one arg in eight on the wrong axis, one set in six with an
+undeclared address): `signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`
+against a slot chosen to be a real slot hole three draws in four, `composedEffect`,
+`observedEffect` and `auditEffect`, compared as verdict, result tree, refusal class AND payload,
+and effect class. Measured: applied 73, refused 127; curried 96, refused 104; composed 17, refused
+183; 11 non-total artifacts; 92 under-declared roots; all six `ApplyError` classes reached.
+
+Over 150 generated registries at seed 1771 — up to three capabilities from a three-id pool, so a
+duplicate registration is drawn one time in four, each signature production's own `signature` of a
+generated artifact — and up to four invocations each, one id in four unregistered: `register`,
+`enumerate` (sorted on both sides — the one ordering the model does not carry), `tryFind`,
+`validateArgs` and `dispatch`, with an INSTRUMENTED body on each side that must have run on both or
+on neither, and never past a refusal that is not the body's own. Measured: registered 172, refused
+51; dispatched 33, `NoSuchCapability` 270, validated 45, refused 71, `BodyFailed` 12; 341 refusals
+checked for a body that did not run; all six reachable `InvokeError` classes reached. The body-ran
+count equals dispatched plus body-failed, asserted — which is theorems 1 and 2 as a tally.
+
+The go-red hands the model a BLIND int reader — `Int32.TryParse` that reads nothing — and requires
+the differential to lose on the space check, on the seam (`ArgOutOfSpace`) and on the algebra
+(`ValueOutOfSpace`), which it does. Seeded and replayable; the same seed reproduces the same tally,
+asserted.
+
+### What it cost
+
+The cheapest module in the leg by some distance, and the largest theorem count. Cold runs through
+the kit on this machine at the leg's rlimit of 40 under `--quake 3`: **7s** (a `-Runs 1` leg beside
+concurrent sessions; the gate's `-Runs 3` is the citable three); the prover
+invoked directly on the file with the same flags during authoring, a fresh verification each time,
+6–8s. Budget **20s** (the minimum — 2 × 7 is under it) and floor **3s** (half of 6, rounded down),
+seeded per Phase 148/164's rules and recorded
+in `modules.json`. No `--ext context_pruning`: the module opens nothing. Nothing in it needed a
+scoped rlimit; the one lesson worth recording is about CLOSURES rather than cost. The first draft
+wrote `List.tryFind (fun h -> h.Addr = addr)` as the F# does, in the model and again in the lemma
+about it, and the prover could not connect the two — a closure and a second closure with the same
+body are two terms to the encoding, and `check_args_shape` failed on every arm with the context
+knowing only `matches Error _`. Every such walk is a NAMED function now (`find_entry`, `find_hole`,
+`first_unknown`, `excluding`, `others`, `none_keyed`, `all_declared`, `all_covered`), each naming
+the F# lambda it stands for, and the module discharged on the next run. The extraction is
+byte-identical to a fresh one on the first leg run; the oracle compiles against `Prims.fs` and the
+`option` shim with nothing added.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The six theorems above plus the characterisations
+   (`invoke_never_registry_refusal`, `dispatch_validates_first`, `body_runs_only_validated`,
+   `validate_args_shape`, `validate_args_sound`, `refusal_is_truthful`, `no_such_iff_unregistered`,
+   `registered_dispatches`, `register_refuses_duplicate`, `register_extends`,
+   `register_keeps_distinct`, `rejected_never_bound`, `undeclared_address_refused`,
+   `same_name_no_capture`, `signature_excluding_exact`, `data_holes_all_data`, `observed_least`,
+   `audit_effect_join`) and the finding (`slot_hole_uninvocable`, `slot_entry_shape`), over any
+   witness, any readers, any registry and any host body. F\* 2026.09.06, Z3 4.13.3, every query
+   3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it
+   opens nothing and restates `outcome` and its list helpers as `ColumnOps.fst` does.
+2. **Differentially tested.** The extracted model agrees with the algebra and the seam over the
+   pools above, with the blind reader required to lose. Agreement is over those pools, never over
+   all inputs.
+3. **Assumed, and stated as such.**
+   - **The readers premise** (`capability-scalar-readers-abstract`, a `model-bridge`, permanent).
+     The three host functions behind `Space.validate` are parameters; a float range's bounds cross
+     as opaque carriers. Every validation theorem is about the envelope — which entry a value is
+     checked against, which refusal names it, that the body waits on the answer — and nothing
+     about the two numeral grammars, which is theorem 4's cost and not this theorem's.
+   - **The witness**, which is the standing `lawful-abstract-witness` obligation and not a second
+     row: nothing here says what a domain's `Bind` does, and `compositionLaws` /
+     `functionVerifyLaws` are where a domain's `Bind` is sampled.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
 ## Next

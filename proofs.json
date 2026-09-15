@@ -1396,6 +1396,120 @@
       "evidence": {
         "assumption": "the pipeline evaluator is a parameter; that it returns well-formed tables is a hypothesis this repository does not discharge"
       }
+    },
+    {
+      "id": "capability-unregistered-refused",
+      "level": "proved",
+      "claim": "`Registry.dispatch` of an id the registry does not hold is the typed refusal `NoSuchCapability id known`, naming the id and every id the registry does hold — and the result is the SAME under every host body, which is what \"runs no handler\" means for a pure function without instrumenting one. `invoke` can never produce the registry's two refusals (`invoke_never_registry_refusal`), so the classes stay disjoint: a `NoSuchCapability` is always the registry's answer and never a body's.",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "unregistered_refused",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "capability-validate-before-invoke",
+      "level": "proved",
+      "claim": "An argument set `validateArgs` rejects makes `invoke` return that rejection, for every body alike — no body ran — and, at the registry, a dispatch that resolved its id still runs nothing on a set validation rejects (`dispatch_validates_first`). The converse holds too: an accepted result or a `BodyFailed` is reachable only past an accepted validation (`body_runs_only_validated`). What validation says is characterised beside it — the refusal is one of its own four classes (`validate_args_shape`), an accepted set addresses declared holes only and binds every required one (`validate_args_sound`), and a refusal is truthful: an `ArgOutOfSpace` names a value the named space really refuses, an `UnknownArg` an address no entry declares, an `UninvocableArg` an entry with no value space (`refusal_is_truthful`).",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "validate_before_invoke",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "capability-enumerate-is-registry",
+      "level": "proved",
+      "claim": "An id is in `Registry.enumerate`'s output exactly when `Registry.tryFind` resolves it, and `dispatch` raises `NoSuchCapability` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS capability's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends by exactly one entry otherwise (`register_extends`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`). Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `capabilityLaws`'s to certify and is outside the theorem.",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "enumerate_is_registry",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "capability-slot-hole-uninvocable",
+      "level": "proved",
+      "claim": "THE FINDING. A signature entry that is REQUIRED and has NO value space refuses every argument list: an argument at its address is `UninvocableArg`, and no argument there is `RequiredArgsUnbound`. `Function.signature` enters every `SlotHole` exactly so — required, spaceless (`slot_entry_shape`) — which means a capability declared over an artifact with a tree-typed slot can be registered, enumerated and advertised, and never dispatched. Not a contract violation: a slot is not scalar-invocable by design, and `validateArgs`'s doc comment says so of the argument; what nothing said is that the ENTRY makes the whole capability un-invocable, so a host that lifts a template's signature straight into `Capability.create` has published a capability no invocation reaches. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: the fix shape, if taken, is either `signature` marking a slot entry non-required on the invocation axis (as it already does for action holes) or `create` refusing a spaceless required entry, and both are behaviour changes to a public function.",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "slot_hole_uninvocable",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "function-totality-law",
+      "level": "proved",
+      "claim": "Law 1, totality. `isTotal` over the derived signature answers exactly the guard `apply` and `curry` run first: when some data hole is an unbounded repeat both refuse with `NonTotal` at the FIRST such hole's address (`guard_total_shape`), and the refusal is the same under ANY `Bind` whatsoever (`rejected_never_bound`) — the witness was never asked to bind, which is \"rejected, never run\" made precise. Action holes are total and their filtering off the data axis changes nothing (`data_total`).",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "totality_law",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "function-hygiene-law",
+      "level": "proved",
+      "claim": "Law 2, hygiene. Hole NAMES are inert: renaming every hole of a witness leaves `apply`, `curry` and `compose` unchanged, because the walk keys on the absolute address and reads nothing else (`walk_rename`). An argument at an address no data hole declares is refused as `UnknownHoleAddr`, naming the address and the declared set, before any binding — the same under any `Bind` (`undeclared_address_refused`). And no capture: a single binding at address `k` lands at the hole declared at `k` and nowhere else (`walk_single`), so binding one of two same-named holes through `curry` is the same on a witness that declares the other and on one that does not (`same_name_no_capture`). `signatureExcluding` removes exactly the bound addresses and keeps the effect (`signature_excluding_exact`); `validateArg`'s defensive `ActionHole` arm is unreachable from the walk (`data_holes_all_data`).",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "hygiene_law",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "function-effect-law",
+      "level": "proved",
+      "claim": "Law 3, the effect signature. `composedEffect` is `Effect.join`, and the join is the LEAST class covering both parts — a class covers the join exactly when it covers each part (`join_least`), so any class a composition is assigned that is below either part fails `covers`. With `join_comm`, `join_assoc`, `join_idem` and `join_pure` the effect classes under `join` are a bounded join-semilattice with `pureDeterministic` at the bottom, `covers` is the order (`covers_refl` / `covers_trans` / `covers_antisym`), and the two rank tables are inverse on the ranks they produce (`host_of_rank` / `det_of_rank`) — the fact every one of those rests on.",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "effect_law",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "function-audit-effect-join",
+      "level": "proved",
+      "claim": "The effect law carried to the audit. `observedEffect` is the least class covering every node on the preorder walk (`observed_least`, by `fold_covers` over the join-fold), so it covers each node's declared class; an `Ok` audit says the root's declaration covers every descendant's; an `Error` audit is `(declared root, observed)` and exhibits a node under the root the declaration is narrower than. A composition's effect class is the join of its parts and never lower, at the declaration (`effect_law`) and at the walk (this).",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "theorem": "audit_effect_join",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "capability-differential",
+      "level": "tested",
+      "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#177",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the function oracle agrees with Function.signature, apply, curry, compose and auditEffect over generated artifacts and argument sets",
+          "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations",
+          "a capability oracle handed a BLIND int reader DISAGREES with Capability.validateArgs and Function.apply — the measurement can fail",
+          "no handler runs on a refused dispatch — `unregistered_refused` and `validate_before_invoke`, on the shipped seam"
+        ]
+      }
+    },
+    {
+      "id": "capability-scalar-readers-abstract",
+      "level": "assumed",
+      "claim": "THE READERS PREMISE. `Space.validate` reaches for three host functions — `System.Int32.TryParse`, `System.Double.TryParse` against a float range, and `String.Length` — and the model takes them as a `readers` record: the five-constructor space vocabulary and the clause structure of `validate` are modelled, the lexical parsers behind two of the constructors are not, and a float range's two bounds cross as opaque carriers (the round-trip `R` format) that the float reader compares against. Every theorem about validation is therefore about the ENVELOPE — which entry a value is checked against, which refusal names it, that the body waits on the answer — and nothing about whether \"12\" is in `[0, 10]`. The differential instantiates the readers at production's own three calls, so the envelope is compared and the parsers are exercised, not modelled. Permanent: modelling `Int32.TryParse` and `Double.TryParse` is a lexical model of two numeral grammars, which is theorem 4's cost and not this theorem's. The witness (`Holes` / `Effect` / `Bind` / `KindTag` / `preorder`) is the model's other parameter and is the standing `lawful-abstract-witness` obligation, not a second row here.",
+      "phase": "fuaran-core#177",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the three scalar readers behind Space.validate are host functions the model takes as parameters; a float range's bounds are opaque carriers"
+      }
     }
   ]
 }
