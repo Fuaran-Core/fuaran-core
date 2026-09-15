@@ -521,5 +521,11 @@ let contained_shape : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.tre
      end))
 
 
+let pos_before : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("p", "para", []))::[])
+
+
+let pos_after : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("q", "sec", (TreeOps.TNode ("p", "para", []))::[]))::[])
+
+
 
 

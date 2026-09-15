@@ -17,13 +17,13 @@
   "modules": [
     {
       "module": "DagFold",
-      "budgetSeconds": 100,
-      "measuredSeconds": 48,
+      "budgetSeconds": 130,
+      "measuredSeconds": 65,
       "floorSeconds": 12,
       "fastestSeconds": 24,
       "floorPhase": "fuaran-core#164",
-      "phase": "fuaran-core#148",
-      "note": "The first model, and the one section 11's delta recovery lives in. It carries no `--ext context_pruning`; what it carries instead is the SMT-pattern lesson (see the README's per-module costs) — `rev` / `app` / `ids_of` / `ops_of` rewrite into one another and their lemmas deliberately have NO `SMTPat`. Adding one back is the cost cliff here, and it is a cliff rather than a slope: the query stops returning."
+      "phase": "fuaran-core#156",
+      "note": "The first model, and the one section 11's delta recovery lives in. It carries no `--ext context_pruning`; what it carries instead is the SMT-pattern lesson (see the README's per-module costs) — `rev` / `app` / `ids_of` / `ops_of` rewrite into one another and their lemmas deliberately have NO `SMTPat`. Adding one back is the cost cliff here, and it is a cliff rather than a slope: the query stops returning. BUMPED by fuaran-core#156 from 100s/48s: section 13 added the general drain — the id-ordered frontier drain over an abstract node set, three theorems, and three inductions over the drain's own accumulator (`kahn_extends`, `kahn_complete`, `kahn_det`) with about twenty list lemmas under them. Seeded from FIVE cold observations taken across the phase: 64s standalone, then 58s, 54s, 62s and 65s across four cold passes of the leg, so the rule's slowest observed is 65s and 2x65 rounds to 130. Three of the new lemmas carry a scoped `#push-options \"--z3rlimit 200\"` or `250`; if this budget is ever bumped again, check those are still SCOPED rather than hoisted to the file, because a file-wide rlimit would inflate every query in sections 0-12 as well and would read as ordinary growth — the shape `TreeOps`'s entry warns about for `--ext context_pruning`. The Phase 164 FLOOR is deliberately left at 12s/24s: the module got slower and never faster, so the floor stays correct and merely conservative, and `floorSeeding`'s own rule forces a re-seed only on a breach."
     },
     {
       "module": "WireDecode",
@@ -37,13 +37,13 @@
     },
     {
       "module": "TreeOps",
-      "budgetSeconds": 160,
-      "measuredSeconds": 77,
+      "budgetSeconds": 200,
+      "measuredSeconds": 99,
       "floorSeconds": 19,
       "fastestSeconds": 38,
       "floorPhase": "fuaran-core#164",
-      "phase": "fuaran-core#148",
-      "note": "Carries `#set-options \"--ext context_pruning\"` at line 62 — 300s with the default context against 56s pruned, measured on the pinned prover. The single most expensive module in the leg even so, because it is an order of magnitude larger than DagFold. If this budget is ever bumped, check first that the pruning option is still in force: losing it is a 5x regression that looks like ordinary growth in the log."
+      "phase": "fuaran-core#162",
+      "note": "Carries `#set-options \"--ext context_pruning\"` near the top — 300s with the default context against 56s pruned, measured on the pinned prover. The single most expensive module in the leg even so, because it is an order of magnitude larger than DagFold. If this budget is ever bumped, check first that the pruning option is still in force: losing it is a 5x regression that looks like ordinary growth in the log. BUMPED by fuaran-core#162 from 160s/77s: sections 19 and 20 added the preorder-position lemma and the batch lift, some five hundred lines, and the lift is a mutual induction over the operation type and over lists of it — the shape that costs, because every case of it meets the module's whole membership algebra. Seeded over FIVE cold runs measuring 92s, 99s, 75s, 88s and 145s, and the number is 2x the 99s rather than 2x the 145s — which is a departure from the rule as written, so here is the reason rather than a silent choice. The 145s run inflated three UNTOUCHED modules by the same factor in the same pass (DagFold 58s against 35-49s, JsonParse 164s against 86-132s, Chain 31s against 16-23s), so it measures the afternoon and not this module; 2x145 would be 290s, a ceiling nothing on this machine could ever reach, and a detector that cannot fire is not one. 200s covers the worst run observed with room and still fires on a real regression. No COST finding fired at the OLD number on any of the five, which is the point of re-seeding here rather than waiting: the budget had been left behind by the module underneath it, and the first run to say so would have been someone else's contended afternoon. The Phase 164 FLOOR is deliberately left at 19s/38s: every run this phase measured is slower than the 38s it was seeded from, so the floor stays correct and merely conservative, and `floorSeeding`'s own rule forces a re-seed only on a breach."
     },
     {
       "module": "Skeleton",
@@ -87,13 +87,13 @@
     },
     {
       "module": "TreeDiff",
-      "budgetSeconds": 30,
-      "measuredSeconds": 12,
+      "budgetSeconds": 80,
+      "measuredSeconds": 37,
       "floorSeconds": 4,
       "fastestSeconds": 8,
       "floorPhase": "fuaran-core#164",
-      "phase": "fuaran-core#141",
-      "note": "The diff — `Diff.toOps`'s two refusals, the four passes, and the container-aware mirror. Seeded over EIGHT cold runs: 9s, 10s, 9s, 9s, 9s before the Phase 161 merge and 12s, 9s, 9s after it, so the rule's slowest observed is 12s, 2x is 24s and the next 10s is 30. It was first written as the 20s floor off the first five runs, and the 12s arrived in the very pass that would have shipped that number — the same shape `Preservation`'s entry below records, and the reason the rule says slowest rather than typical. Nothing regressed: the 12s run is inside the old 20s too, and the module is unchanged between the two passes; what moved is which runs the rule had seen. It is the cheapest model in the leg after `Skeleton`, and the reason is worth knowing before anyone reads a future bump as ordinary growth: what is proved here is what the four passes GUARANTEE ABOUT THE SCRIPT — shape, order and the refusal characterisation — and not what applying that script DOES, which the README's theorem 6 carries at level 2 instead. The lemmas are therefore structural inductions over lists, which Z3 discharges quickly; the reconstruction theorem, if it is ever taken, reasons about `ins` and `rem_at` over intermediate trees and would put this module in `Preservation`'s cost class rather than `Chain`'s. Carries `#set-options \"--ext context_pruning\"`, like the three modules above and for the same reason — it opens `TreeOps` and `DagFold`, whose ninety-odd patterned lemmas would otherwise be live at every query here."
+      "phase": "fuaran-core#162",
+      "note": "The diff — `Diff.toOps`'s two refusals, the four passes, and the container-aware mirror. Seeded over EIGHT cold runs: 9s, 10s, 9s, 9s, 9s before the Phase 161 merge and 12s, 9s, 9s after it, so the rule's slowest observed is 12s, 2x is 24s and the next 10s is 30. It was first written as the 20s floor off the first five runs, and the 12s arrived in the very pass that would have shipped that number — the same shape `Preservation`'s entry below records, and the reason the rule says slowest rather than typical. Nothing regressed: the 12s run is inside the old 20s too, and the module is unchanged between the two passes; what moved is which runs the rule had seen. It is the cheapest model in the leg after `Skeleton`, and the reason is worth knowing before anyone reads a future bump as ordinary growth: what is proved here is what the four passes GUARANTEE ABOUT THE SCRIPT — shape, order and the refusal characterisation — and not what applying that script DOES, which the README's theorem 6 carries at level 2 instead. The lemmas are therefore structural inductions over lists, which Z3 discharges quickly; the reconstruction theorem, if it is ever taken, reasons about `ins` and `rem_at` over intermediate trees and would put this module in `Preservation`'s cost class rather than `Chain`'s. Carries `#set-options \"--ext context_pruning\"`, like the three modules above and for the same reason — it opens `TreeOps` and `DagFold`, whose ninety-odd patterned lemmas would otherwise be live at every query here. BUMPED by fuaran-core#162 from 30s/12s: section 9 added the positional facts over the preorder-position lemma, which are the module's first inductions over the TREE rather than over a list — the prediction in the sentence above, arriving for the positional half and not for the reconstruction half. Seeded over FOUR cold runs measuring 13s, 21s, 13s and 37s: the rule's slowest observed is the 37s, 2x37 is 74 and the next 10s is 80. Where that 37s came from is worth knowing before anyone reads a future figure as ordinary growth — it was measured in a pass that spiked machine-wide, with `JsonParse` at 132s against its usual 86-105 and `Preservation` at 127s against its usual 57-65 in the same run, on a machine carrying six concurrent proof sessions. The rule takes the slowest observed anyway, deliberately and for the reason its own note gives; recording the provenance is how the next reader tells a slow afternoon from a regression. The Phase 164 FLOOR is deliberately left at 4s/8s: every run this phase measured is slower than the 8s it was seeded from, so the floor stays correct and merely conservative, and `floorSeeding`'s own rule forces a re-seed only on a breach."
     },
     {
       "module": "Limits",

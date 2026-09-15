@@ -6,13 +6,14 @@ the pinned prover, the extracted model agrees with production over every lane se
 host draws, and the model reads beside the F# in one sitting — and seven further theorems have
 shipped beside it since. **Shipped, eight in all: fold confluence (131, with its hypothesis
 corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
-totality (135), independence soundness for the tree algebra (133), chain integrity (136, its
+totality (135), independence soundness for the tree algebra (133, completed over the WHOLE
+operation alphabet by 162), chain integrity (136, its
 content-id premise decomposed by 145),
 `Json.parse` totality, bounded (146), apply-engine preservation (138, which also lifts 133's
 model to the validator 137 fixed), the diff's refusal characterisation and emission order
-(141), and the canonical form's injectivity (149, which also brings the §21 resource limits into
-the models as named premises).** Each carries its own claims ladder in its own section
-below; the "Next" section at the foot is the live list.
+(141, with its positional facts about `after` added by 162), and the canonical form's injectivity
+(149, which also brings the §21 resource limits into the models as named premises).** Each carries
+its own claims ladder in its own section below; the "Next" section at the foot is the live list.
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -21,12 +22,12 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`). Every definition names its F# counterpart. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`); and, since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter. Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. |
-| `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. |
+| `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. Phase 162 added the preorder-position lemma (section 19) and the batch lift (section 20), which retired `covered` and made that diamond unconditional. |
+| `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. Since Phase 162 the op alphabet is the WHOLE of `SkeletonOp`, `Batch` included and nested to any depth; it was the four non-`Batch` ops until then. |
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -157,6 +158,89 @@ ladder's "not claimed" entry, and the `Proofs.Oracle` case that holds the refuti
 
 `--report_assumes error` is on: the module carries no `assume`, no `admit`, no `assume val`.
 
+### The drain over an abstract DAG (Phase 156)
+
+Section 12 proves the order on a SPINE. The shape a clone actually folds is the UNION of N lanes,
+and there the ready frontier is N wide once the base is drained — so the tie-break section 12 could
+leave as an unexercised parameter is what decides the sequence, and the determinism claim every
+convergent consumer rests on ("the same node set gives the same order on every machine") rests on
+it. Section 13 is that case, over an **abstract** node set: no `mint`, no lanes, no base, just
+nodes naming parents.
+
+It is section 12's own `kahn`, at the selector `pick_min lt`, and not a second drain. Three
+theorems, no admits:
+
+- **`drain_linear_extension`** — every node the drain places stands after every one of its in-set
+  parents. Stated over the nodes it PLACED rather than over all of them, because on a cyclic set
+  it places only a prefix, and a statement quantified over all of them would be false there rather
+  than silent.
+- **`drain_total_on_acyclic`** — on an acyclic set it places every node exactly once, and what it
+  produces is itself a topological enumeration.
+- **`drain_deterministic`** — the sequence is a function of the node SET: permute the work list
+  (F#: receive the lanes in any arrival order) and the same list comes back, under either policy.
+
+**This is where the tie-break stops being decoration.** `frontier` answers in the work list's
+order, so a permuted node set hands the selector a permuted frontier; `pick_min` is invariant under
+that and section 12's `pick_head` is not. A drain taking the head of an unsorted frontier satisfies
+`picks_from_frontier` and FAILS `drain_deterministic` — which is the precise sense in which
+smallest-id-first is load-bearing. Section 12's two spine results are re-derived here as corollaries
+by instantiating its selector at `pick_min lt` (`spine_drain_is_the_parent_walk`,
+`spine_drain_is_append_order`), so the spine case is this section's special case rather than a
+parallel claim to keep in step.
+
+**The ID ORDER is a parameter, and that is the stronger statement rather than a weaker one.** The
+model takes any `lt` satisfying `total_order` — irreflexive, transitive, trichotomous — and every
+result holds for all of them. What determinism needs is that all clones use the SAME order, never
+that the order is any particular one, and quantifying over total orders says exactly that without
+the module acquiring the character arithmetic a concrete string comparison would need (finding 2).
+Production's `List.sort` on a string list is F#'s structural comparison and so
+`String.CompareOrdinal`; tying the abstract order to that one is the differential's job rather than
+the model's, and the host instantiates `lt` there.
+
+**The DANGLING-PARENT POLICY is a parameter, because the two production call sites differ on it**
+and a theorem about "the drain" that did not say which would be a theorem about neither:
+
+- `IgnoreDangling` — `Dag.topoCore`'s closure walk (`match Map.tryFind id dag.Nodes with | Some n
+  -> … | None -> collect acc rest`) with `Dag.ancestorsOf`'s `ContainsKey` guard beside it and the
+  `parentsIn` filter that follows. A parent the set does not hold never enters the closure and is
+  filtered out of the in-degree, so it constrains nothing and the drain proceeds. This is the
+  policy on the FOLD path — `topoOrder` -> `between` -> `betweenOps` -> `reconcileMany` ->
+  `foldOnce` — and on `replayTo`.
+- `RefuseDangling` — `Dag.firstBreak` (`n.Parents |> List.tryFind (fun p -> not
+  (dag.Nodes.ContainsKey p))` -> `MissingParent`), hence `verifyDag` and `fromJsonlVerified`,
+  which refuse the whole set before any drain runs.
+
+`drain_policies_agree` proves the two are the same function on a set with no dangling parent — so
+the fold path pays nothing for the refusing one's existence — and `drain_refusal_characterised`
+proves the refusal fires exactly when a parent lies outside. The refusal names the SMALLEST such id
+rather than the first in the work list, which is not a liberty: `firstBreak` scans `Map.toList`, in
+id order, and its docstring says so, so the refusal is order-invariant on both sides and
+`drain_deterministic` covers it. What the model does NOT carry is the refusal's diagnostic payload
+— `firstBreak` reports the missing parent beside the node, and the node determines the parent, so
+the model names the node and stops there.
+
+**How a cycle is surfaced, stated exactly, because it is a claim about production.** `topoCore`
+does not raise: a node inside a cycle never reaches in-degree zero, so the emitted list is strictly
+SHORTER than the closure — `isAcyclic` and `tryTopoOrder` read that length comparison and surface
+it, while `replayTo` and `between` fold the truncated prefix. The model says the same thing without
+lengths. `drain_total_on_acyclic` gives completeness from acyclicity; `drain_complete_is_acyclic`
+reads the converse off the linear-extension theorem, because a complete drain IS a topological
+enumeration and so witnesses acyclicity. The two are an iff, and that iff is exactly what
+`isAcyclic`'s comparison claims.
+
+**Acyclicity is "a topological enumeration exists", supplied as a witness LIST.** It is the standard
+characterisation of a finite acyclic digraph; it is not circular, because the witness is any such
+list and never the drain's own output; and taking it as a parameter rather than as an existential
+or as the absence of a self-reachable node keeps every statement in the first-order fragment this
+module stays inside. `drain_complete_is_acyclic` is what keeps the hypothesis non-vacuous in the
+direction that matters — the drain's own output is such a witness whenever it is complete.
+
+**What is still NOT claimed here.** That any particular id ordering is production's — `lt` is a
+parameter and the differential is the tie. The DELTA RECOVERY over a merge DAG: `between_chain` is
+still stated for the base-plus-N-chains shape, and what Phase 156 adds is the ORDER over an
+arbitrary set, not the recovery over one. `Dag.mergeBase`, still. And any consumer's own
+instantiation of this theorem for its own total order, which is that consumer's work.
+
 ## What the corpus covers
 
 The differential host draws lane sets from three pools and compares, per lane set and per sampled
@@ -194,6 +278,28 @@ which is the thing under test — and the comparison is required to fail. Two va
 with it, in the pack's posture: a run that recovered no ops compared two empty lists, and a run
 whose every lane was one op walked no chain at all. Both are asserted.
 
+**And since Phase 156 the ORDER itself is measured over a MERGE DAG, which is the case the
+delta-recovery cases above structurally cannot reach.** The lane heads are folded into one
+convergent head with `Dag.merge` — the node a real reconciliation writes — so the union head's
+closure is every node and the ready frontier is N wide once the base is drained. The extracted
+`drain`, instantiated at `String.CompareOrdinal`, is compared against `Dag.tryTopoOrder` over the
+same nodes: per lane head (the spine case, which no tie-break can get wrong) and per union (the
+case that needs one). Its adequacy guard is the frontier WIDTH — a run whose frontier never passed
+one node has re-measured the spine under a different name, and the case says so by number. Its
+**go-red** is a model draining LARGEST-id-first, as legitimate a selector as the model's own since
+it still returns a member of the frontier it is handed, so what it breaks is agreement with
+production and nothing else; it is run over the unions and not the lane heads, deliberately,
+because a one-element frontier has one minimum and one maximum and no tie-break can lose there.
+Three further cases ride with it: every permutation of the node set drained and compared against
+the drain of the set, which is `drain_deterministic` measured; the two policies, agreeing on a
+closure and diverging the moment the base node is dropped from it, which is `drain_policies_agree`
+and `drain_refusal_characterised` measured against the two callers they model; and a cyclic node
+set built by hand — unreachable through `Dag.append`, whose parent id is minted before its child's,
+and exactly the hand-crafted or tampered JSONL load `Dag.fromJsonl`'s docstring warns about — where
+production's `isAcyclic` must see the cycle and the model's drain must stop at the same short
+prefix, with an acyclic control beside it so the comparison is a discrimination rather than a
+refusal of everything.
+
 **And the theorem's HYPOTHESIS is measured, not only stated.** Over the same generator, for every
 op pair the model's own `independent` declares disjoint and every state where both ops apply, the
 host checks the diamond directly on the tree `apply`: each applies after the other, and the two
@@ -225,8 +331,22 @@ What may be said, and at what strength, per the attested-stack programme's §6:
    (`reconcile_many_dag_ordered_eq`, `fold_once_dag_ordered_eq`), so no result here depends on
    which topological order was walked. The tie-break is a parameter constrained only to select from
    the frontier, and the frontier on a spine is one element wide at every step
-   (`kahn_frontier_singleton`) — so this says nothing about how ids compare, and nothing about a
-   MERGE DAG, where the frontier genuinely widens. That case stays unclaimed, below.
+   (`kahn_frontier_singleton`) — so that phase says nothing about how ids compare.
+
+   **And, since Phase 156, the ORDER OVER AN ARBITRARY ACYCLIC SET, which is where the tie-break
+   does become observable.** The drain is deterministic — a function of the node set alone,
+   invariant under the order the lanes arrived (`drain_deterministic`) — a linear extension of the
+   parent relation over every node it places (`drain_linear_extension`), and TOTAL on an acyclic
+   set, placing each node exactly once and producing a topological enumeration
+   (`drain_total_on_acyclic`). The id order is a parameter constrained to be a total order, so the
+   claim is that all clones using the SAME order agree, and the differential is what ties that
+   parameter to `String.CompareOrdinal`. The dangling-parent policy is likewise a parameter, and
+   `drain_policies_agree` / `drain_refusal_characterised` say which of the two production call
+   sites gets which. `drain_complete_is_acyclic` gives the converse of totality, so a complete
+   drain and an acyclic set are an iff — which is exactly the length comparison `Dag.isAcyclic` and
+   `Dag.tryTopoOrder` make. Section 12's spine results are corollaries of this one at
+   `pick_min lt`. What is NOT here is the DELTA RECOVERY over a merge DAG, which stays where Phase
+   134 put it, below.
 
    **And, since Phase 133, the tree algebra's own diamond** — `TreeOps.tree_independence_diamond`,
    which discharges that hypothesis for `SkeletonOp` rather than sampling it, and
@@ -268,12 +388,15 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      is the only way `lookup` returns a node other than the one a chain named. The model states it
      as `distinct_ids` and consumes it as `resolves`, with `resolves_of_distinct` between them.
    - _(**How the topological order is CHOSEN** left this level at Phase 142 and is now at level 1
-     above. What remains assumed about the order is nothing on this shape; over a MERGE DAG it is
-     not claimed at any level, below.)_
+     above. Nothing about the order is assumed at any shape since Phase 156: the drain over an
+     arbitrary acyclic set is proved deterministic, a linear extension and total, and the only
+     parameters left — which total order on ids, and which dangling-parent policy — are universally
+     quantified rather than assumed, with the differential tying the first to production's.)_
    - **`Dag.mergeBase` is outside the model**, because it is outside this path: `foldOnce` hands
      `reconcileMany` the base node's id directly and never locates a divergence point. Level 2 is
-     the only evidence about it, and the general topological order over an arbitrary MERGE DAG is
-     not claimed at any level.
+     the only evidence about it. _(The general topological ORDER over an arbitrary acyclic set —
+     merge DAGs included — is at level 1 since Phase 156; what is still unclaimed over a merge DAG
+     is the delta RECOVERY, below.)_
    - **The extractor and the F# compiler are trusted.** The proof leg holds the committed oracle
      to a fresh extraction byte for byte, which makes "the oracle is the model" a checked claim;
      it does not make the F# backend correct. The backend is second-class upstream (findings
@@ -285,10 +408,10 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      diamond is FALSE without it, because `Tree.tryFind` returns the first match in document order
      and a reorder moves document order. Nothing in the estate produces such a tree, but no
      shipped type carries the invariant. "Theorem 2" below has the argument.
-   - **The composite's op alphabet excludes a nested `Batch`** (Phase 133). Three of the fifteen
-     pairs, all the same shape, and `Ops.apply` threads a `Batch` exactly as the fold threads a
-     lane, so it removes no behaviour — it declines to nest one lane inside another. Counted in
-     "Theorem 2" below.
+   - _(**The composite's op alphabet excludes a nested `Batch`** was an assumption here from Phase
+     133 — three of the fifteen pairs, all the same shape — and is RETIRED by Phase 162, which
+     lifted the diamond along a batch's script. The alphabet is the whole of `SkeletonOp` and there
+     is no shape hypothesis left. Counted, and its history kept, in "Theorem 2" below.)_
 4. **Not claimed.**
    - **Rejection identity.** That two independent ops, one of which rejects, reject *identically*
      whichever ran first. The reference algebra cannot keep it and the theorem no longer asks for
@@ -302,9 +425,13 @@ What may be said, and at what strength, per the attested-stack programme's §6:
 
    - **Delta recovery over a MERGE DAG.** `between_chain` is stated for the base-plus-N-chains
      shape, which is what `foldOnce` builds and what the fold-confluence pack certifies. A DAG
-     whose heads have already been merged has nodes with two parents, `mergeBase` on its path, and
-     a topological order that is genuinely a choice rather than a forced one; none of that is
-     modelled, and a consumer folding over already-merged heads is outside every level here.
+     whose heads have already been merged has nodes with two parents and `mergeBase` on its path,
+     and neither is modelled, so a consumer folding over already-merged heads is outside every
+     level here. **What this entry no longer covers is the ORDER**: Phase 156 proves the drain
+     deterministic, a linear extension and total over an arbitrary acyclic node set, so the third
+     thing this entry used to name — "a topological order that is genuinely a choice rather than a
+     forced one" — is at level 1 above, and is measured over a real `Dag.merge` union. The
+     RECOVERY over such a DAG is what remains.
 
    Also not claimed: anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over
@@ -785,34 +912,46 @@ id-unique and disjoint from the tree. That pair is the specification the Phase 1
 and it is why guarding on the result is an exact stand-in for the check rather than an approximation
 of it.
 
-### What is left open, and how big it is — twelve of the fifteen pairs, exactly
+### What was left open, and is now closed — all fifteen pairs (Phase 162)
 
 Counted rather than estimated. The fifteen unordered pairs over the five ops are the ten pairs of
-non-`Batch` ops plus the five involving a `Batch`. **All ten non-`Batch` pairs are proved** — nine
-of them by `relocating_forces_inert` and the three commutation equalities covering the rest. **Two
-of the five `Batch` pairs are proved**: `RemoveNode`/`Batch` and `MoveNode`/`Batch`, because a
-relocating op forces the other side inert whatever it is, so no lift is needed.
+non-`Batch` ops plus the five involving a `Batch`. **All ten non-`Batch` pairs were proved by Phase
+133** — nine of them by `relocating_forces_inert` and the three commutation equalities covering the
+rest — along with **two of the five `Batch` pairs**, `RemoveNode`/`Batch` and `MoveNode`/`Batch`,
+because a relocating op forces the other side inert whatever it is, so no lift was needed.
 
-**Three remain open**, and all three are the same shape: `InsertChild`/`Batch`,
-`ReorderChildren`/`Batch` and `Batch`/`Batch`, where the batch is one that neither does nothing nor
-relocates — a batch built only from inserts and reorders. `TreeOps.covered` is that boundary written
-as a predicate, and `tree_independence_diamond` is stated over it.
+**Three remained open**, all the same shape: `InsertChild`/`Batch`, `ReorderChildren`/`Batch` and
+`Batch`/`Batch`, where the batch is one that neither does nothing nor relocates — a batch built only
+from inserts and reorders. `TreeOps.covered` was that boundary written as a predicate, and the
+diamond was stated over it.
 
-Lifting the leaf diamond along a batch's script is the argument `DagFold.replay_diamond` already
-performs at lane granularity — no new idea is needed — and it needs the id-uniqueness invariant at
-each intermediate state of the script, which is exactly what the paragraph above says the algebra
-does not currently give.
+**Phase 162 performed the lift and `covered` is gone.** `tree_independence_diamond` now quantifies
+over every pair with no shape hypothesis, `op_independence_diamond` states it over the guarded
+algebra, and `Skeleton.fst` composes over the whole `SkeletonOp` alphabet — `Batch` included and
+nested to any depth. The argument is section 20 of `TreeOps.fst` and it is the one Phase 133
+predicted: independence descends through a union, then the leaf diamond lifts along a script by
+induction, threading the id-uniqueness invariant at each intermediate step, in the shape
+`DagFold.replay_diamond` already uses at lane granularity.
 
-**That invariant arrived in Phase 138 and the three pairs are still open** — the sentence here used
-to read "it closes when Phase 137 lands", which was true of the BLOCKER and not of the work. Phase
-137 fixed the validator, Phase 138 lifted this model to it and proved `apply_preserves_wf`
-unconditionally, so the hypothesis the lift was waiting on now holds; what remains is the induction,
-which nobody has done. The distinction is worth keeping visible: a boundary waiting on a theorem and
-a boundary waiting on labour are not the same kind of open.
+**The history of the boundary is worth keeping, because it moved twice and the two moves are
+different kinds of thing.** Phase 133 wrote "it closes when Phase 137 lands", which was true of the
+BLOCKER and not of the work: 137 fixed the validator and Phase 138 proved `apply_preserves_wf`
+unconditionally, so the hypothesis arrived — and the three pairs stayed open anyway, because nobody
+had done the induction. A boundary waiting on a theorem and a boundary waiting on labour are not
+the same kind of open, and only the second was left by 2026-09-14.
 
-The composite theorem in `Skeleton.fst` takes the same boundary as its op alphabet. That costs less
-than it looks: `Ops.apply` threads a `Batch` exactly as the fold threads a lane, so the alphabet
-removes no behaviour from the fold — it declines to nest one lane inside another.
+**One thing Phase 162 found while doing it, which is worth the sentence.** The lift did NOT need
+`Preservation.apply_preserves_wf`, although that is the lemma every note above names. That module
+OPENS `TreeOps`, so it could not have been cited here in any case — and it does not have to be: the
+residue `covered` left out is precisely the pairs where NEITHER side relocates, and a non-relocating
+op carries no `RemoveNode` and no `MoveNode` at any depth. It is built from inserts, reorders and
+nests of them, for which `ins_wf` and `reorder_wf` were already in this module. What section 20 adds
+is `no_reloc_preserves_wf`, the non-relocating fragment of 138's invariant, proved where the lift
+needs it. The unconditional statement remains `Preservation`'s.
+
+`batch_lift_is_not_vacuous` pins that the widening is real: a concrete batch/insert pair whose
+footprints ARE independent, which `covered_classes` REFUSES, and whose two orders reach the same
+tree — evaluated, so it goes red if the excluded shape is ever readmitted.
 
 `applyContained`'s container capability is out of scope and is Phase 140's; `Diff` is Phase 141's.
 `Ops.invert` was named here as Phase 141's too and is theorem 5's — see
@@ -863,9 +1002,12 @@ before the fourth model is written.
 
 ### The claims ladder, for this theorem
 
-1. **Proved (machine-checked, no admits).** The diamond for every operation pair `covered` names,
-   at every id-unique tree; the composite fold-confluence law over the non-`Batch` alphabet, with
-   its halt half under no hypothesis at all; the refutation of unconditional well-formedness
+1. **Proved (machine-checked, no admits).** The diamond for EVERY operation pair, at every id-unique
+   tree — `Batch` included and nested to any depth, since Phase 162 — and the composite
+   fold-confluence law over the whole `SkeletonOp` alphabet, with
+   its halt half under no hypothesis at all; the preorder-position lemma
+   (`preorder_parent_first`) with its preservation corollaries; the refutation of unconditional
+   well-formedness
    preservation with the conditional form and its converse beside it; and, since Phase 143, that
    the pinned unknown-parent clause is NECESSARY over this `Footprint` record
    (`relocation_clause_is_necessary`, with `relocation_disjoint_diamond`,
@@ -879,10 +1021,11 @@ before the fourth model is written.
    - **The tree is id-unique.** As above: the diamond is false without it, and no shipped type
      carries the invariant — `Diff.toOps` refuses an ill-formed tree with `DuplicateIdInTree`, and
      that is the closest the code comes to enforcing it.
-   - **The op alphabet excludes a nested `Batch`.** The one open pair shape, and its size is stated
-     above rather than left to be guessed.
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
      the other two theorems.
+   - _(**The op alphabet excludes a nested `Batch`** was the third assumption here and is RETIRED —
+     Phase 162 lifted the diamond along a batch's script, so there is no shape hypothesis left to
+     assume. The section above keeps what the assumption was and how it closed.)_
 4. **Not claimed.** Rejection PAYLOADS: the differential compares a refusal by class, and
    `UnknownNode`'s `addressable` and `ReorderMismatch`'s two orders are outside the comparison (the
    Phase 132 entry says why they cannot be claimed to agree across orders in the first place).
@@ -1575,6 +1718,13 @@ already proves — must make the run lose, and it does.
    `contained_preserves_all_with` all shed `contained_op`. That is the only direction of travel the
    ladder should ever show for a premise: discharged by a code change, with the refutation kept
    evaluable, never quietly dropped.
+   **Phase 162 adds two**, section 10 — the preorder-position lemma's corollaries on this side of
+   the module boundary: `rem_preserves_parent_first`, in the SURVIVOR form (a remove takes ids
+   away, so the statement is over the tree it hands back and not over the one it was given), and
+   `apply_preserves_parent_first`, which is the same over ANY accepted operation including a
+   nested `Batch` and is the one a reconstruction argument cites. Both are `rem_wf` /
+   `apply_preserves_wf` followed by `TreeOps.preorder_parent_first`; they are here rather than in
+   `TreeOps` because `rem_wf` is this module's and that module cannot cite it.
    F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply`, `Ops.canApply` and
@@ -1674,16 +1824,37 @@ node of `after` that really carries children and really is refused), and the pha
 `toOpsContained` returns cannot be refused for containment at any step, and the typed refusal is the
 exact price of that guarantee.
 
+**The positional facts about `after` (section 9, Phase 162).** `diff_insert_parent_precedes` — an
+insert's parent precedes its own node in `after`'s preorder, which is the source comment's
+"top-down" stated about the emitted operations rather than about the loop;
+`diff_move_destination_precedes` — a move's destination precedes the moved node; and
+`diff_move_destination_is_outside` — therefore, **in `after`, a move's destination is never inside
+the moved node's subtree**, which is the consequence Phase 141 named when it deferred the two
+theorems below. All three stand on `TreeOps.preorder_parent_first` (section 19 there), with
+`precedes`' antisymmetry and its irreflexivity on an id-unique tree closing the last one.
+`positional_facts_are_not_vacuous` evaluates a pair that emits exactly one insert and one move, and
+pins that the moved node does NOT precede its destination — so the claim is an ordering fact and
+not a tautology.
+
 ### What is NOT proved, and why the boundary is where it is
 
 `diff_reconstructs` (`applyAll (toOps b a) b = a`) and the OPERATIONAL `diff_applicable` (every
-emitted step is ACCEPTED in sequence) are **differentially tested here and not proved**. Both need
-the same missing piece: a positional argument relating a preorder walk of `after` to the
-intermediate trees the script builds. Informally it is short — a parent precedes its children in
-preorder, so by the time `MoveNode(c, p)` is emitted while processing `p`, every after-ancestor of
-`p` has already been placed and `p` cannot be inside `c`'s subtree — and mechanising it means
-reasoning about `ins` and `rem_at` over intermediate trees, in the cost class `Preservation.fst`
-occupies rather than the one this module does. This phase was time-boxed and did not take it. The
+emitted step is ACCEPTED in sequence) are **differentially tested here and not proved**.
+
+**Phase 141 named the blocker as one missing positional fact, and Phase 162 proved it — and the two
+theorems are still open, which is the honest correction to make here rather than a note to bury.**
+The fact is real and the section above carries it; what it does not do is close these two, because
+they are statements about a different quantifier. `apply` validates each step against the tree IN
+HAND at that step — the before-tree with the script's earlier operations run on it — and not against
+`after`. `diff_move_destination_is_outside` says the destination is outside the moved subtree in
+`after`; what `WouldNestUnderSelf` asks is whether it is outside in the intermediate tree. Carrying
+one across to the other needs an invariant about how much of `after`'s structure each PREFIX of the
+script has already built, and that induction is the remaining work: it reasons about `ins` and
+`rem_at` over intermediate trees, in the cost class `Preservation.fst` occupies rather than the one
+this module does. Both phases were time-boxed and neither took it.
+
+What changed is the SHAPE of the gap, and it is worth naming because it is the difference between
+two kinds of open: this was a missing fact, and it is now a named induction over a proved one. The
 boundary is stated rather than smoothed over because a reader who sees "the diff is proved" and
 assumes reconstruction is proved would be wrong about the one thing they most likely care about.
 
@@ -1734,7 +1905,10 @@ the container check's contribution and nothing else's.
    predicate: `diff_total`, `diff_refusals_exact`, `diff_ok_on_any_wf_pair`,
    `diff_never_target_not_a_container`, `diff_emission_order`, `diff_script_shape` and the four
    block theorems it discharges, `diff_contained_diff`, `diff_contained_locates`,
-   `diff_contained_at_total_is_plain` and `diff_applicable_contained`. F\* 2026.09.06, Z3 4.13.3,
+   `diff_contained_at_total_is_plain` and `diff_applicable_contained` — and, since Phase 162, the
+   three positional facts about `after`: `diff_insert_parent_precedes`,
+   `diff_move_destination_precedes` and `diff_move_destination_is_outside`. F\* 2026.09.06,
+   Z3 4.13.3,
    every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted `to_ops` / `to_ops_contained` agree with
    `Diff.toOps` / `Diff.toOpsContained` over independently generated pairs and a drawn predicate —
@@ -1750,8 +1924,10 @@ the container check's contribution and nothing else's.
      discharge, because the model's tree carries a kind and the theorem is about structure: it is
      the precondition under which asking for a skeleton script is a well-formed question at all.
 4. **Not claimed.**
-   - **Reconstruction and operational applicability**, at level 1 — see the boundary above. They are
-     the natural successor and they are one positional lemma away.
+   - **Reconstruction and operational applicability**, at level 1 — see the boundary above. They
+     were described here as "one positional lemma away"; Phase 162 proved that lemma and they are
+     still open, so what is left is the named induction relating `after`'s order to the
+     intermediate trees, not a missing fact.
    - **`Diff.toOpsMoved`** (fuaran-core#63, the move-aware diff) — not shipped, so not modelled and
      not claimed. When it lands it is a second emission strategy over the same two trees, and every
      theorem here is about `toOps`' four passes specifically rather than about diffing in general.
@@ -1964,15 +2140,27 @@ canonical subset is already the predicate such a guard would enforce, which is w
 token) is a design choice the guard should NOT refuse, so the guard is the first clause alone.
 
 **The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
-shortest informal argument and the longest mechanisation. What it needs is one positional lemma: a
-parent precedes its children in a preorder walk, so by the time the second pass emits
+shortest informal argument and the longest mechanisation. **This entry has been corrected by Phase
+162 and the correction is the useful part of it.** It used to say the item needed one positional
+lemma — a parent precedes its children in a preorder walk, so by the time the second pass emits
 `MoveNode(c, p)` while processing `p`, every after-ancestor of `p` has already been placed and `p`
-cannot be inside `c`'s subtree. Everything else follows from the four block characterisations
-theorem 6 already proves. The cost is that the lemma is about `ins` and `rem_at` over the
-INTERMEDIATE trees the script builds, which is `Preservation.fst`'s cost class rather than
-`TreeDiff.fst`'s — so the module that checks in ten seconds today would not afterwards, and that is
-the honest price rather than a reason not to pay it. `Diff.toOpsMoved` (fuaran-core#63) travels
-beside it: a second emission strategy over the same two trees, which would want the same lemma.
+cannot be inside `c`'s subtree. That lemma is now proved (`TreeOps.preorder_parent_first`, section
+19) and so is its instantiation at the diff (`TreeDiff` section 9, including the conclusion about
+`c`'s subtree), and reconstruction is still open — because the fact holds of `after`, and `apply`
+validates each step against the INTERMEDIATE tree, the before-tree with the script's earlier
+operations run on it. What remains is an induction carrying an invariant about how much of `after`'s
+structure each PREFIX of the script has built; everything else follows from the four block
+characterisations theorem 6 already proves, plus the three positional facts. The cost is unchanged
+and is the honest price rather than a reason not to pay it: the induction is about `ins` and
+`rem_at` over intermediate trees, `Preservation.fst`'s cost class rather than `TreeDiff.fst`'s, so
+the module that checks in twelve seconds today would not afterwards. `Diff.toOpsMoved`
+(fuaran-core#63) travels beside it: a second emission strategy over the same two trees, which would
+want the same invariant.
+
+_(**The batch lift** — "the three `Batch` pair shapes `TreeOps.covered` names" — was an item here
+and is DONE: Phase 162, section 20 of `TreeOps.fst`, with `covered` deleted and `Skeleton.fst`
+restated over the whole `SkeletonOp` alphabet. Theorem 2's "What was left open" section carries
+what it was and how it closed.)_
 
 **Discharging theorem 1's policy assumption** — the smallest of what is left, and now reachable.
 `WireDecode.fst` assumes the parser's member-null absorption is equivalent to erasing member nulls
@@ -1996,10 +2184,13 @@ self-delimitation has to be composed with the sequence numeral's. It is the item
 precedent sitting beside it.
 
 _(**The topological order's uniqueness on a spine** was named here and is DONE — Phase 142,
-`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. What it
-deliberately did not take is the general order over a MERGE DAG, where the frontier widens past one
-and the tie-break would have to be modelled for real; that is the larger successor, and it travels
-with `Dag.mergeBase`.)_
+`spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. **And
+the successor it named — the general order over a MERGE DAG, where the frontier widens past one and
+the tie-break has to be modelled for real — is DONE too**, Phase 156, section 13: the drain over an
+abstract acyclic node set at an abstract total order, proved deterministic, a linear extension and
+total, with the dangling-parent policy a parameter naming which production caller gets which. What
+those two did NOT take, and what still travels with `Dag.mergeBase`, is the delta RECOVERY over a
+merge DAG — `between_chain` remains stated for the base-plus-N-chains shape.)_
 
 **A `Footprint` record that can name a relocation's KIND** — the successor Phase 143 priced and
 deliberately did not take. Section 18 of `TreeOps.fst` proves that no clause over the four address

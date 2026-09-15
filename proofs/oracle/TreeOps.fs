@@ -782,7 +782,7 @@ if (not ((has_id p t))) then begin
      end))
 
 
-let covered : op  ->  op  ->  Prims.bool = (fun ( a  :  op ) ( b  :  op ) -> ((((((is_leaf a) && (is_leaf b)) || (inert a)) || (inert b)) || (relocating a)) || (relocating b)))
+let covered_classes : op  ->  op  ->  Prims.bool = (fun ( a  :  op ) ( b  :  op ) -> ((((((is_leaf a) && (is_leaf b)) || (inert a)) || (inert b)) || (relocating a)) || (relocating b)))
 
 
 let wapply : op  ->  tree  ->  DagFold.outcome<tree, rejection> = (fun ( o  :  op ) ( t  :  tree ) ->  
@@ -832,6 +832,56 @@ let cross_a : op = MoveNode ("x", "np")
 
 
 let cross_b : op = MoveNode ("y", "mp")
+
+
+let rec precedes : Prims.string  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( p  :  Prims.string ) ( x  :  Prims.string ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     false
+     end
+| (h)::r -> begin
+      
+if (Prims.op_Equals h p) then begin
+     (DagFold.mem x r)
+     end else begin
+      
+if (Prims.op_Equals h x) then begin
+     false
+     end else begin
+     (precedes p x r)
+     end
+     end
+     end))
+
+
+let rec no_reloc : op  ->  Prims.bool = (fun ( o  :  op ) -> (match (o) with
+| RemoveNode (uu___) -> begin
+     false
+     end
+| MoveNode (uu___, uu___1) -> begin
+     false
+     end
+| Batch (os) -> begin
+     (no_reloc_all os)
+     end
+| uu___ -> begin
+     true
+     end))
+and no_reloc_all : Prims.list<op>  ->  Prims.bool = (fun ( os  :  Prims.list<op> ) -> (match (os) with
+| [] -> begin
+     true
+     end
+| (o)::r -> begin
+     ((no_reloc o) && (no_reloc_all r))
+     end))
+
+
+let lift_tree : tree = TNode ("root", "doc", (TNode ("x", "sec", []))::(TNode ("y", "sec", []))::[])
+
+
+let lift_batch : op = Batch ((InsertChild ("x", TNode ("n1", "para", [])))::(ReorderChildren ("root", ("y")::("x")::[]))::[])
+
+
+let lift_leaf : op = InsertChild ("y", TNode ("n2", "para", []))
 
 
 
