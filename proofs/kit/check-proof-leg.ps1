@@ -272,7 +272,13 @@ if ($CacheDir) {
     # is for. So refuse one holding anything that is not a checked-module file: the flag is for
     # naming where the cache goes, and pointing it at a directory with other contents in it would
     # delete them. It is not removed at exit; the caller named it, so the caller keeps it.
-    $cache = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $CacheDir))
+    # `[IO.Path]::Combine` and not `Join-Path`: PowerShell's Join-Path CONCATENATES a rooted second
+    # argument, so `-CacheDir C:\somewhere` resolved to `<proofs>\C:\somewhere` and the run died a
+    # second later with a path nobody would recognise as their own argument. .NET's Combine returns
+    # the second path when it is rooted and joins when it is not, so the relative case — which is
+    # what the flag's "cleared before every run" contract is written against — is unchanged.
+    # (Inherited from Phase 164 and found by using the flag; a kit must not ship it.)
+    $cache = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine((Get-Location).Path, $CacheDir))
     if (Test-Path $cache) {
         $foreign = Get-ChildItem $cache -Force | Where-Object { $_.PSIsContainer -or $_.Name -notlike '*.checked*' }
         if ($foreign) {
