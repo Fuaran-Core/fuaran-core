@@ -198,4 +198,13 @@ let main argv =
     | "--regen-idl-classify-fixtures" :: _ ->
         IdlStabilityClassTests.regen ()
         0
+    // Phase 150 — regenerate the committed F* proof model and its theorems from the pinned
+    // wire-format IDL:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar
+    // The generation diff in IdlFStarTargetTests fails naming this command when the corpus
+    // has moved and the committed `.fst` files have not, on exactly the discipline the proof
+    // leg already applies to the extracted oracle. A flag rather than a test side-effect, for
+    // the `--emit-laws` reason: a suite that rewrote a committed artefact on every run could
+    // not also be the thing that notices it has changed.
+    | "--emit-fstar" :: _ -> IdlFStarTargetTests.emit ()
     | _ -> runTestsInAssemblyWithCLIArgs [] argv

@@ -35,7 +35,14 @@
 #   2. EXTRACT — each checked model is extracted to F# and DIFFED against its committed oracle
 #               (<OracleDir>/<Module>.fs). A difference fails: the oracle the suite runs must be
 #               the model the theorem is about, byte for byte. -Extract overwrites the committed
-#               files with the fresh extractions instead (then commit them).
+#               files with the fresh extractions instead (then commit them). A model named in
+#               -ProofOnly is EXEMPT and says so on its own line: an oracle exists so a
+#               differential can run the extracted model beside the production code, so a model
+#               with no production code to run beside earns no oracle, and committing one would
+#               commit generated F# that nothing compiles, calls or compares. The exemption is
+#               the caller's to declare and to justify — what step 2 buys for the other models
+#               ("the artefact is the model, byte for byte") an exempt one must get some other
+#               way, one level further up, and the caller says where.
 #   3. HOST   — the -HostFilters the caller declared, each its own invocation of the host test
 #               project (-HostProject / -HostProjectFile) with its own failure message. Separate
 #               invocations rather than one prefix filter, so two failures read as what they are
@@ -56,6 +63,9 @@
 param(
     # The models, in the order they are to be checked. The CALLER owns this list.
     [Parameter(Mandatory)][string[]] $Modules,
+    # Models that are CHECKED but not EXTRACTED — see step 2 in the header. A narrow, declared
+    # exemption, never a default.
+    [string[]] $ProofOnly = @(),
     # The directory holding the .fst models. Everything else defaults relative to it.
     [Parameter(Mandatory)][string] $ProofsDir,
     # The repository root the host step runs from. Defaults to the parent of -ProofsDir.
@@ -356,6 +366,11 @@ if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 
 foreach ($module in $Modules) {
+    if ($ProofOnly -contains $module) {
+        Write-Host "==== proofs: $module is checked, not extracted — no oracle runs it (see `$proofOnly)" -ForegroundColor Cyan
+        continue
+    }
+
     & $fstar --cache_checked_modules --cache_dir $cache --codegen FSharp --extract $module --odir $out "$module.fst"
     if ($LASTEXITCODE -ne 0) { Fail "extraction of $module to F# failed" $LASTEXITCODE }
 

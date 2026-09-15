@@ -2143,6 +2143,41 @@ Phase 141 (`diffContainedLaws`). Each phase appends
 its own entry beneath this header as it lands; the version moves only if a later class outranks
 what the draft already carries (the draft-slot rule).
 
+### An F\* PROOF-MODEL target for the IDL generator (`0.24.0`, Phase 150) — ADDITIVE
+
+`Fuaran.Core.Idl.Codegen` gains a fourth backend and one `CodegenError` case. Nothing existing
+changes shape, no runtime package gains code, and no host's build gains a generation step: what the
+target emits is read by a PROVER and by nobody at runtime.
+
+```fsharp
+FStarTarget.vocabularyModule : string -> Idl -> string list -> Result<string, CodegenError>
+FStarTarget.proofsModule     : string -> string -> Idl -> string list -> Result<string, CodegenError>
+FStarTarget.partition        : Idl -> FStarTarget.Verdict list
+FStarTarget.proofKinds       : Idl -> string list
+FStarTarget.beyondEnvelope   : Idl -> string -> string list
+```
+
+`vocabularyModule` emits a vocabulary's types, its discriminated encoder and its tag-dispatch
+decoder as an F\* module over the wire decode model; `proofsModule` emits the round-trip and
+totality THEOREMS over exactly those definitions, from the same walk. Generating the proof script
+as well as the model is the point rather than a convenience: a hand-written proof over a vocabulary
+is a theorem about the day it was written, and a generated one re-proves itself when a kind lands.
+The emitted proof discharges for a small vocabulary and not yet for this corpus's own — measured,
+with the reason and the structural fix in `proofs/README.md` — so this release ships the emitter
+and the generated MODEL, and commits no proof script.
+
+**The `CodegenError` addition is a DU case on a published closed union** —
+`UnmodellableInFStar of construct: string * where: string` — so a consumer matching
+`CodegenError` exhaustively gains a warning, and one matching it with `| _ ->` gains nothing. It is
+filed as additive on the draft-slot rule's class test: the slot already carries breaking changes
+(137, 161), so this cannot outrank what the draft carries, and it moves no number.
+
+The refusal is a refusal rather than a dropped member, deliberately: a model that silently omitted
+the construct it could not express would prove a round trip for a document nobody sends, and the
+theorem would read exactly as it reads now. The kinds a vocabulary's model covers, the two
+different reasons it may not cover one, and the measured cost that decided the second are in
+`proofs/README.md`, theorem 1.
+
 ### A container-aware SEQUENCE surface — `Ops.applyAllWith` / `Ops.canApplyAllWith` (`0.24.0`, Phase 160) — ADDITIVE
 
 Two new public functions in `Fuaran.Core.Ops`, and nothing existing changes shape:

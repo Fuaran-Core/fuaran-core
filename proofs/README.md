@@ -759,6 +759,115 @@ Five things are proved:
   — see the section below, which is also where the duplicate-key premise is argued and proved
   necessary.
 
+### The vocabulary is GENERATED now, and the round trip is a theorem about `idl.json` (Phase 150)
+
+Everything above is about a **reference** vocabulary: four cases, written by hand beside the
+combinators, chosen to exercise one combinator each. That was the honest scope of Phase 135 and it
+said so — but it leaves theorem 1 saying nothing about the kind that landed last week, because the
+real vocabulary is the wire-format specification's `idl.json`, it carries 43 kinds, 28 records, 22
+unions and 46 enums, and it grows.
+
+`Vocabulary.fst` closes most of that gap, and it is **generated** — from `idl.json`, by a fourth
+backend of the IDL's own code generator (`FStarTarget`, beside the F# structural layer, the
+TypeScript encoder and the JSON schema). The same backend emits the proof script over it, from the
+same walk; how far that got, and why it is not committed here, is the cost note below:
+
+- **`Vocabulary.fst`** — the vocabulary's types, its `$type`-discriminated encoder and its
+  tag-dispatch decoder, over the `jval` value model and the combinators above. Generic unions are
+  monomorphised at the arguments the vocabulary reaches (`Binding<string>`, `Binding<bool>`,
+  `Binding<SelectOption list>`, …), which is what keeps every definition and every lemma
+  first-order: a parametric `Binding` would have to take its element codec as a value, and the
+  round-trip lemma would then need a higher-order hypothesis relating an encoder to a decoder it
+  cannot see.
+- **the proof script** — `rt_node` and the mutual family beside it: **`dec_node (enc_node x) == Ok
+  x`, for every value of every modelled type**, at every depth, through every list, map, optional
+  member and omit-default, plus `dec_node_total` for the outcome's exclusivity. `proofsModule`
+  emits it and the suite exercises it, but **no proof script is COMMITTED beside the model, and
+  that is a measurement rather than a plan** — see the cost note below.
+
+**Why the proof script is generated and not written.** A hand-written proof over the real
+vocabulary would be a theorem about the vocabulary as it stood on the day it was written — the same
+defect as the reference vocabulary, one release later and harder to see. Generated, a kind added to
+the IDL enters the model at the next regeneration and **re-proves itself**, and a kind whose
+encoder and decoder disagree fails the leg.
+
+**Two diffs hold it, and they are one level apart.** Step 2 of `check.ps1` holds each committed
+oracle to a fresh EXTRACTION, so the artefact the suite runs is the model. The `Proofs.Vocabulary`
+family holds the committed `Vocabulary.fst` to a fresh GENERATION from the pinned corpus, so the
+model is the vocabulary the specification declares — an IDL that moves without a regeneration is
+**vocabulary drift** and the leg names it, with
+`dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. The model is CHECKED
+but not EXTRACTED (`$proofOnly` in `check.ps1`): nothing here runs it beside production, because
+the decoder it models is one a generator emits into a consuming host and not one this repository
+ships, so an oracle for it would be several hundred kilobytes of generated F# that nothing
+compiles, calls or compares.
+
+**What the model covers, and the two different reasons it does not cover the rest.** The emitted
+header carries the live list; the shapes are:
+
+- **A construct with no wire-level meaning in the model is a BOUNDARY**, and a typed refusal
+  (`CodegenError.UnmodellableInFStar`) rather than a dropped member — a silently-dropped member
+  would make the round trip a theorem about a document nobody sends. One kind of this corpus is
+  refused outright: `Tabs.activeIndex` declares the default `Binding.Static 0`, and the model's
+  numeric carriers are opaque type parameters, so there is no F* literal for it.
+- **A kind held out of the proof vocabulary is a COST CONTROL**, which a measurement could lift.
+  The rule is `FStarTarget.proofKinds`: every expressible kind that introduces no declared type
+  beyond the node envelope's own closure. It selects 20 of this corpus's 43 kinds, and the reason
+  it is drawn there rather than anywhere else is measured below.
+
+Three things are deliberately NOT claimed here. The `wf` characterisation — `Ok? (dec el) == wf
+el`, which the reference vocabulary carries above — is not restated over the generated vocabulary:
+it needs a second generated predicate mirroring the decoder's accept set, a model-sized artefact of
+its own, so the round trip covers everything the encoder can produce and the characterisation of
+what ELSE is accepted is open. A **host-only** member is absent from the model entirely, because it
+is never on the wire. And a **wire-visible closure** is modelled as `unit` encoding to the fixed
+`"<closure>"` sentinel — not a weakening but the precise statement that the member carries no
+information, and the difference between a model of 67% of the vocabulary and one of 16%, since the
+node envelope reaches `Binding.Computed` and every kind reaches the envelope.
+
+**The cost, measured — and the reason the theorems are OPT-IN.** On the pinned prover, cold, with
+the leg's own flags (`--z3rlimit 40 --quake 3`; `--ext context_pruning` emitted inside both
+generated modules). `WireDecode` measured 37s here against the 33s `modules.json` records, which is
+what says the measurement is of this leg rather than of something adjacent to it.
+
+- **`Vocabulary` — 322s and 398s across two runs.** Budgeted in `modules.json` like every other
+  module, and checked on every run.
+- **the proof script — NOT COMMITTED, and here is exactly how far it got.** The emitted round trip
+  verifies for a SMALL vocabulary: green at one kind and at eight, on the pinned prover, with no
+  admits. At the twenty kinds this corpus's proof vocabulary selects it does not, and it fails
+  twice over, in this order. First `rt_node`, a single query of 65 goals — the node's five OPTIONAL
+  envelope members put 32 object shapes into it — proved 64 of 65 at the leg's default rlimit and
+  FAILED the third `--quake` seed: green standalone, red under `check.ps1`, the shape
+  `Preservation`'s `invert_applicable` entry warns about. Raising to `--z3rlimit 200`, the remedy
+  that precedent took, stops that goal failing and starts it grinding, with no run under
+  `--quake 3` observed to finish inside half an hour. And at that rlimit WITHOUT quake the run
+  completes in 442s and reports a different failure: `rt_vkind`'s `FileUpload` arm — eleven
+  members, five of them conditional, so the same 2^k explosion one kind wider. **A `.fst` that does
+  not verify is worse than no `.fst`**, so none is committed, and `proofs.json` carries no `proved`
+  row for the round trip: a claim the leg does not reproduce is not a claim the ladder will carry.
+
+**Where the cost is, which is the finding worth carrying forward: the node ENVELOPE's closure, not
+the kinds.** One kind and eight kinds measured the same, because `Accessibility`, `SemanticStyle`,
+`StateBehaviour`, `TextSource` and nine `Binding<…>` instantiations are paid by any kind at all.
+The curve then turns superlinear in the size of the mutual family: the whole expressible
+vocabulary — 42 kinds, ~30 more declared types — did not finish a single check in twenty-five
+minutes. So narrowing the selection further buys almost nothing, and widening it is not a matter of
+patience.
+
+**What would make the theorems land, for whoever takes it — and the two levers already spent.** Both
+failures are the same shape: one lemma, one query, 2^k object shapes for k conditional members. The
+fix is therefore structural, and it is to emit each kind's round trip as its OWN lemma rather than
+as one arm of `rt_vkind`, and to break the node's five envelope members across several lemmas
+rather than one. That is generator work, and the emitter is where it belongs.
+
+Two levers were tried first, and are recorded so they are not tried again blind. `--split_queries
+always` is the option actually designed for one hard goal inside a large query — it is **not
+settable as a `#set-options` pragma on the pinned prover** ("unrecognized option"), so it would
+have to be passed by the leg. And routing conditional members through an `opt_cons` helper with an
+SMT-patterned lookup law — sound, and it removes an exponential duplication in the emitted text as
+well — **measured WORSE**: `Vocabulary` itself, 322-398s before, had not finished in over twenty
+minutes after, because the helper's pattern then fires throughout the encoder too.
+
 ### The boundary — `Json.parse` is excluded, and why
 
 **`Json.parse`, the string-to-`JVal` parser, is outside theorem 1.** Its totality is a property of
@@ -935,6 +1044,19 @@ reddens `perm_as_int`. Each landed on the lemma that should have caught it.
    are certified by the wire-format corpus, not by this theorem; and transitivity or symmetry of
    `member_perm`, which nothing here needs and nothing here asserts.
 
+**Phase 150 amends clause 4's middle third, and it is worth saying which third.** The third is
+"anything about a domain's own decoder beyond the reference vocabulary modelled here", and it is no
+longer the boundary: `Vocabulary.fst` is the wire-format specification's OWN vocabulary, generated
+from `idl.json`, and the model covers 20 of its 43 kinds — so what carries to a
+domain is now the combinator layer **and** a machine-checked MODEL of a substantial slice of the
+vocabulary the specification declares, with every generated decoder total on every input. (The
+ROUND TRIP over it is emitted and not committed, for the measured reason in the cost note above,
+and `proofs.json` carries no `proved` row for it while that is true.) What the amendment does NOT
+buy, and must not be read as buying: this
+is a theorem about the vocabulary, not about any HOST's decoder. The six conformant hosts keep
+their own hand-written decoders and are certified against the fixture corpus; no host's build
+generates this model, and nothing here says a host implements it. The per-kind coverage, the two
+reasons a kind is outside it, and the cost that decided them are in the Phase 150 section above.
 ## Theorem 2 — independence soundness for the tree algebra (Phase 133)
 
 Phase 131 proved fold confluence under one domain hypothesis, and Phase 132 established what that

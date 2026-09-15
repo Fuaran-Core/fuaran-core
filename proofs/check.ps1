@@ -1,17 +1,23 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 164 and 155).
+# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 164 and 155).
 #
 # THE ENGINE IS `kit/check-proof-leg.ps1` (Phase 155) and this file is the caller: it declares
-# what THIS repository has — the models, where the oracle host lives, which Expecto families the
-# host step runs — and the kit runs the leg. Read the kit script's header for what the three steps
-# are and why each is shaped the way it is; read `kit/README.md` for what the kit is and how
-# another repository adopts it. Nothing about the mechanism lives here any more, and nothing about
-# this repository lives in the kit.
+# what THIS repository has — the models, which of them are checked but not extracted, where the
+# oracle host lives, and which Expecto families the host step runs — and the kit runs the leg.
+# Read the kit script's header for what the three steps are and why each is shaped the way it is;
+# read `kit/README.md` for what the kit is and how another repository adopts it. Nothing about the
+# mechanism lives here any more, and nothing about this repository lives in the kit.
+#
+# Step 2b (Phase 150) is this repository's own and sits in the host step below rather than in the
+# engine: the one GENERATED model is held to a fresh generation from the pinned `idl.json` by the
+# Proofs.Vocabulary family — the same discipline as the engine's extraction diff, one level
+# further up. Step 2 says the oracle is the model; this says the model is the vocabulary the
+# specification declares.
 #
 # The flags are unchanged and are forwarded verbatim:
 #   -Runs N          N cold-cache verifications of every model (CI asks for 3)
 #   -Extract         rewrite the committed oracle/*.fs from a fresh extraction, then commit them
-#   -SkipOracleHost  leave the two Expecto families to ./verify.ps1, which runs the whole suite
+#   -SkipOracleHost  leave the Expecto families to ./verify.ps1, which runs the whole suite
 #   -Strict          promote every cost finding to a red leg
 #   -NoFloor         do not enforce the per-module time floors declared in modules.json
 #   -CacheDir <dir>  put the checked-module cache somewhere you name
@@ -56,17 +62,71 @@ $ErrorActionPreference = 'Stop'
 #                emit, and the canonical form proved in both directions: equal bytes imply equal
 #                normal forms, equal normal forms imply equal bytes. It `open`s Limits, so it
 #                follows it.
+#   Vocabulary — Phase 150, and the only GENERATED model here: the wire-format IDL's own
+#                vocabulary — its types, its discriminated encoder and its tag-dispatch decoder —
+#                emitted from `idl.json` by `Fuaran.Core.Idl.Codegen`'s F* target. Opens
+#                WireDecode, so it follows it. See the note below the list for the theorems that
+#                the same target emits and that are NOT committed beside it.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'Vocabulary')
 
-# The host step. Two invocations rather than one prefix filter, so the two failures read as what
-# they are: a model and production disagreeing, versus the ladder and the tree disagreeing.
+# Phase 150 — why there is a generated MODEL here and no generated THEOREMS beside it (yet).
+#
+# `Fuaran.Core.Idl.Codegen`'s F* target emits both: `FStarTarget.vocabularyModule` for the model
+# below, and `FStarTarget.proofsModule` for the round trip over it. The emitted proof script
+# DISCHARGES on the pinned prover for a small vocabulary — it was checked green at one kind and at
+# eight — and at the twenty this corpus's proof vocabulary selects it does not: the widest kind's
+# arm (`FileUpload`, eleven members, five of them conditional) is not proved even at
+# `--z3rlimit 200`, because a decoder reading eleven members off an object with five conditional
+# cells puts thirty-two object shapes into one query. So no theorems module is committed, rather
+# than one committed that does not verify.
+#
+# The cause is understood and named in `proofs/README.md`'s theorem 1 section, along with the three
+# remedies already measured, so that whoever takes it does not start from scratch. What IS here is
+# the model, checked below like every other module — and the totality it carries is not nothing:
+# every generated decoder is `Tot` on an arbitrary `jval`, which F* admits only after proving it.
+
+# Phase 150 — the model that is CHECKED but not EXTRACTED, and why an exemption exists at all.
+#
+# An oracle is here so the Expecto differential can run the extracted model beside the production
+# code over the same inputs. `Vocabulary` has no production code on this side to run beside: it
+# models the vocabulary an `idl.json` DECLARES, and the decoder it models is one a GENERATOR emits
+# into a consuming host rather than one this repository ships. Extracting it anyway would commit
+# ~400 KB of generated F# that nothing compiles, calls or compares — which is what an oracle is
+# supposed to be the opposite of. (The extractor also emits its mutual TYPE group with the `and`
+# indented one space, which F# 10's parser rejects outright even under the oracle project's
+# `--strict-indentation-`; that is a real finding about the F# backend — this is the first model
+# here with a mutual type group — and it is NOT the reason for this exemption. An oracle nothing
+# runs would not be worth committing even if it compiled.)
+#
+# The exemption is NARROW and it is not a hole in the discipline: what step 2 buys for the other
+# models — "the artefact is the model, byte for byte" — this one gets from the GENERATION diff in
+# the host step instead, one level further up, against the `idl.json` it is generated from.
+$proofOnly = @('Vocabulary')
+
+# The host step, in this order. Separate invocations rather than one prefix filter, so each failure
+# reads as what it is rather than as one red suite.
+#   Proofs.Vocabulary — Phase 150's GENERATION diff, beside the engine's extraction diff and for
+#                       the same reason one step further up: it holds the committed
+#                       `Vocabulary.fst` to a fresh generation from the pinned `idl.json`, so the
+#                       vocabulary the model is about is the vocabulary the specification declares.
+#                       An IDL that moves without a regeneration is VOCABULARY DRIFT, and this is
+#                       where it is named. It runs here rather than ahead of the prover because
+#                       the generator is F# and the host step is the first thing with a built test
+#                       project to hand — and because the leg fails either way: a stale model still
+#                       verifies, and then this step reports what it is stale against.
+#   Proofs.Oracle     — the differential: each extracted model beside the production code.
+#   Proofs.Ladder     — ../proofs.json against this tree.
 $hostFilters = @(
+    @{
+        Filter  = 'Proofs.Vocabulary'
+        Failure = 'the generated vocabulary (Proofs.Vocabulary) is RED — the committed F* model and the pinned idl.json disagree, or the target refused a construct'
+    }
     @{
         Filter  = 'Proofs.Oracle'
         Failure = 'the oracle host (Proofs.Oracle) is RED — an extracted model and production disagree'
@@ -79,6 +139,7 @@ $hostFilters = @(
 
 $legArgs = @{
     Modules         = $modules
+    ProofOnly       = $proofOnly
     ProofsDir       = $PSScriptRoot
     HostProject     = 'tests/Fuaran.Core.Tests'
     HostProjectFile = 'tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj'

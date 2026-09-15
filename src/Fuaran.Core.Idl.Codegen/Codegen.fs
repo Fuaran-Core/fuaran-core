@@ -46,6 +46,18 @@ type CodegenError =
     /// has no unambiguous positional split for it (several single-`Node` fields ARE generated,
     /// re-assigned positionally; no mixed kind exists in the current vocabulary). Names the kind tag.
     | MultiChildFieldKind of kindTag: string
+    /// Phase 150 — the F\* PROOF-MODEL target's refusal: an IDL construct with no wire-level
+    /// meaning in a model over the `jval` value model (a closure in a wire-visible slot, an
+    /// `obj`-erased sentinel, a bare-kind or tree-op slot, an unresolved type parameter, a
+    /// declared default the opaque numeric carriers cannot spell). Names the construct and the
+    /// declaration it was reached through.
+    ///
+    /// **It is a REFUSAL rather than a dropped member, and that is the whole of its value.** A
+    /// model that silently omitted the member it could not express would prove a round trip for
+    /// a document nobody sends, and the theorem would read exactly as it reads now. The F\*
+    /// target's own kind partition consumes this case: a kind whose closure raises it is named
+    /// in the emitted header, with this description as its reason, instead of being absent.
+    | UnmodellableInFStar of construct: string * where: string
 
 /// Rendering for [[CodegenError]] — the one place a codegen refusal becomes prose.
 [<RequireQualifiedAccess>]
@@ -60,6 +72,8 @@ module CodegenError =
         | UnsupportedDefault(ty, value) -> sprintf "no default literal for an IDL value of type %A: %A" ty value
         | MultiChildFieldKind kindTag ->
             sprintf "kind '%s' mixes a 'Node list' field with other node-bearing fields" kindTag
+        | UnmodellableInFStar(construct, where) ->
+            sprintf "the F* proof model cannot express %s (at %s)" construct where
 
 /// The type-generation leg: emit illustrative F# type source from the IDL — the
 /// "generate Types.fs" half of the inversion. Spike-grade (a source string, not a
