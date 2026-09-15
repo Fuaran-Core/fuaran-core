@@ -3876,6 +3876,272 @@ let private diffDifferential' (containedDiff: ContainedDiff) (seed: int) (trials
 let private diffDifferential (seed: int) (trials: int) : DiffTally =
     diffDifferential' TreeDiff.to_ops_contained seed trials
 
+// ---------------------------------------------------------------------------
+//  Phase 152 — KEY ORDER, differentially.
+//
+//  WIRE_FORMAT §2 rule 2 obliges a decoder to accept an object's members in any order, and §20
+//  ratifies that the same bytes decode to the same tree on every conformant host. Every fixture
+//  in the corpus is canonically ordered, so a decoder that silently read member order would pass
+//  all of them — which is what makes this family different from the Phase 135 one above. It
+//  SHUFFLES: every object of every document, at every depth, seeded and replayable, and then asks
+//  three questions of each shuffle.
+//
+//    1. Is the shuffle an instance of the theorem at all? The extracted `member_perm` — the model's
+//       own relation, not a second one written here — must hold of the pair. A shuffle the
+//       relation does not relate would be measuring something the lemma never claimed.
+//    2. Does PRODUCTION answer the same on the shuffle as on the original? Every combinator whose
+//       result carries no members is compared for equality, message included; `getProp`, whose
+//       result is a subtree and so is itself reordered, is compared through the model's
+//       `outcome_perm`.
+//    3. Does the oracle still agree with production on the shuffled document? The Phase 135 probes,
+//       on documents no fixture contains.
+//
+//  Duplicate-keyed documents are FILTERED OUT, using the extracted `keys_unique_deep` rather than
+//  a predicate written here, because on a repeated key `List.tryFind` genuinely does depend on
+//  order — see `duplicate_keys_break_order_invariance`, which proves the premise necessary rather
+//  than assuming it away. Arrays are NOT shuffled: an array's order is content.
+// ---------------------------------------------------------------------------
+
+/// Fisher–Yates over the suite's own replayable generator.
+let private shuffleList (xs: 'a list) (r0: ConfRng.T) : 'a list * ConfRng.T =
+    let arr = List.toArray xs
+    let mutable r = r0
+
+    for i in (arr.Length - 1) .. -1 .. 1 do
+        let j, r' = ConfRng.intBelow (i + 1) r
+        r <- r'
+        let tmp = arr.[i]
+        arr.[i] <- arr.[j]
+        arr.[j] <- tmp
+
+    List.ofArray arr, r
+
+/// Reorder the members of EVERY object in the document, at every depth. Arrays keep their order.
+let rec private shuffleDeep (v: JVal) (r0: ConfRng.T) : JVal * ConfRng.T =
+    match v with
+    | JArr xs ->
+        let items, r =
+            xs
+            |> List.fold
+                (fun (acc, rr) x ->
+                    let x', rr' = shuffleDeep x rr
+                    acc @ [ x' ], rr')
+                ([], r0)
+
+        JArr items, r
+    | JObj fields ->
+        let inner, r1 =
+            fields
+            |> List.fold
+                (fun (acc, rr) (k, x) ->
+                    let x', rr' = shuffleDeep x rr
+                    acc @ [ k, x' ], rr')
+                ([], r0)
+
+        let reordered, r2 = shuffleList inner r1
+        JObj reordered, r2
+    | _ -> v, r0
+
+/// The model's own deep duplicate-free predicate, asked of a production value.
+let private keysUniqueDeep (v: JVal) : bool = WireDecode.keys_unique_deep (toModel v)
+
+/// The model's own relation, asked of a pair of production values.
+let private relatedByModel (a: JVal) (b: JVal) : bool =
+    WireDecode.member_perm (toModel a) (toModel b)
+
+/// A decoder — the parameter is `getProp`, so the go-red instrument below can be the SAME decoder
+/// reading members by position instead of by name. Everything else is `Wire.Decode`.
+type private GetProp = string -> JVal -> Result<JVal, string>
+
+let rec private decodeRefWith (getProp: GetProp) (el: JVal) : Result<RefNode, string> =
+    let strField name e =
+        getProp name e |> Result.bind Decode.asString
+
+    match getProp "kind" el |> Result.bind Decode.asString with
+    | Error m -> Error m
+    | Ok tag ->
+        if tag = "text" then
+            strField "value" el |> Result.map RefText
+        elif tag = "flag" then
+            getProp "on" el |> Result.bind Decode.asBool |> Result.map RefFlag
+        elif tag = "tags" then
+            getProp "tags" el
+            |> Result.bind (Decode.mapList Decode.asString)
+            |> Result.map RefTags
+        elif tag = "group" then
+            match strField "id" el with
+            | Error m -> Error m
+            | Ok id ->
+                match getProp "items" el with
+                | Error m -> Error m
+                | Ok(JArr ys) ->
+                    let rec go acc rest =
+                        match rest with
+                        | [] -> Ok(List.rev acc)
+                        | x :: t ->
+                            match decodeRefWith getProp x with
+                            | Ok n -> go (n :: acc) t
+                            | Error m -> Error m
+
+                    go [] ys |> Result.map (fun ns -> RefGroup(id, ns))
+                | Ok other -> Error("expected array, got " + kindWord other)
+        else
+            Error("unknown kind: " + tag)
+
+/// THE GO-RED INSTRUMENT: a `getProp` that reads the FIRST member of an object rather than the
+/// one it was asked for. On the canonically-ordered corpus it is very nearly right — which is the
+/// point, and why the corpus alone could not catch it. Under a shuffle it must lose.
+let private getPropByPosition (name: string) (el: JVal) : Result<JVal, string> =
+    match el with
+    | JObj((_, v) :: _) -> Ok v
+    | JObj [] -> Error("missing property: " + name)
+    | other -> Error("expected object, got " + kindWord other)
+
+/// Production's answers to the questions the theorem says are order-insensitive. Each result
+/// carries no members of its own, so these are compared for EQUALITY — message included.
+let private orderFreeAnswers (getProp: GetProp) (el: JVal) : (string * string) list =
+    [ "kindOf", resR asStr (getProp "kind" el |> Result.bind Decode.asString)
+      "strField id", resR asStr (getProp "id" el |> Result.bind Decode.asString)
+      "strField value", resR asStr (getProp "value" el |> Result.bind Decode.asString)
+      "intField n", resR string (getProp "n" el |> Result.bind Decode.asInt)
+      "asString", resR asStr (Decode.asString el)
+      "asInt", resR string (Decode.asInt el)
+      "asBool", resR string (Decode.asBool el)
+      "asFloat", resR asFlt (Decode.asFloat el)
+      "mapList asString", resR asStrs (Decode.mapList Decode.asString el)
+      "decodeRef", resR renderRef (decodeRefWith getProp el) ]
+
+/// `getProp`'s own result is a SUBTREE, so the two answers are related rather than equal — and
+/// the relation they are compared by is the extracted model's, which is the one the lemma is
+/// about.
+let private getPropRelated (getProp: GetProp) (name: string) (a: JVal) (b: JVal) : bool =
+    let toO (r: Result<JVal, string>) : WireDecode.outcome<MJVal> =
+        match r with
+        | Ok v -> WireDecode.Ok(toModel v)
+        | Error m -> WireDecode.Error m
+
+    WireDecode.outcome_perm (toO (getProp name a)) (toO (getProp name b))
+
+type private ShuffleTally =
+    {
+        Diffs: string list
+        /// Documents the filter admitted (duplicate-free at every depth).
+        Admitted: int
+        /// Shuffles that actually MOVED a member — without these the family re-runs Phase 135's.
+        Moved: int
+        /// Values the node decoder ACCEPTED, across all shuffles.
+        Accepted: int
+        /// Values it refused. Both arms must be reached, or the agreement certifies one of them.
+        Refused: int
+        /// Pairs the extracted relation did NOT relate — a defect in the shuffle, not in the tree.
+        Unrelated: int
+    }
+
+let private emptyShuffleTally =
+    { Diffs = []
+      Admitted = 0
+      Moved = 0
+      Accepted = 0
+      Refused = 0
+      Unrelated = 0 }
+
+/// One document, `trials` shuffles of it. `getProp` is `Decode.getProp` in every real run and the
+/// positional instrument only in the go-red case.
+let private shuffleProbe
+    (getProp: GetProp)
+    (label: string)
+    (trials: int)
+    (seed: int)
+    (el: JVal)
+    (tally: ShuffleTally)
+    : ShuffleTally =
+    if not (keysUniqueDeep el) then
+        tally
+    else
+        let baseline = orderFreeAnswers getProp el
+        let mutable r = ConfRng.ofSeed seed
+
+        let mutable t =
+            { tally with
+                Admitted = tally.Admitted + 1 }
+
+        for i in 1..trials do
+            let shuffled, r' = shuffleDeep el r
+            r <- r'
+
+            if shuffled <> el then
+                t <- { t with Moved = t.Moved + 1 }
+
+            // 1. the shuffle is an instance of the relation the lemma is about
+            if not (relatedByModel el shuffled) then
+                t <-
+                    { t with
+                        Unrelated = t.Unrelated + 1
+                        Diffs =
+                            t.Diffs
+                            @ [ sprintf
+                                    "%s/%d: the extracted member_perm does NOT relate the document to its shuffle\n  original: %s\n  shuffled: %s"
+                                    label
+                                    i
+                                    (Json.render el)
+                                    (Json.render shuffled) ] }
+
+            // 2. production answers the same on the shuffle as on the original
+            let answers = orderFreeAnswers getProp shuffled
+
+            for idx in 0 .. baseline.Length - 1 do
+                let name, before = baseline.[idx]
+                let _, after = answers.[idx]
+
+                if before <> after then
+                    t <-
+                        { t with
+                            Diffs =
+                                t.Diffs
+                                @ [ sprintf
+                                        "%s/%d: %s MOVED under a member reordering\n  original: %s -> %s\n  shuffled: %s -> %s"
+                                        label
+                                        i
+                                        name
+                                        (Json.render el)
+                                        before
+                                        (Json.render shuffled)
+                                        after ] }
+
+            for name in [ "kind"; "id"; "value"; "items"; "tags"; "on"; "no-such-member" ] do
+                if not (getPropRelated getProp name el shuffled) then
+                    t <-
+                        { t with
+                            Diffs =
+                                t.Diffs
+                                @ [ sprintf
+                                        "%s/%d: getProp %s answers an UNRELATED subtree under a member reordering\n  original: %s\n  shuffled: %s"
+                                        label
+                                        i
+                                        name
+                                        (Json.render el)
+                                        (Json.render shuffled) ] }
+
+            match decodeRefWith getProp shuffled with
+            | Ok _ -> t <- { t with Accepted = t.Accepted + 1 }
+            | Error _ -> t <- { t with Refused = t.Refused + 1 }
+
+        t
+
+/// The tally's own vacuity guards: a run that admitted nothing, or that never actually moved a
+/// member, proves nothing whatever else it reports. Which arms of the node decoder a pool reaches
+/// is a property of that pool, so each case asserts its own.
+let private expectShuffleAgreement (label: string) (t: ShuffleTally) =
+    match t.Diffs with
+    | d :: _ -> failtestf "%s: a member reordering CHANGED a decode answer\n%s" label d
+    | [] ->
+        Expect.isGreaterThan t.Admitted 0 (sprintf "%s: no document passed the duplicate-free filter" label)
+
+        Expect.isGreaterThan
+            t.Moved
+            0
+            (sprintf "%s: no shuffle actually moved a member — the family re-ran the unshuffled probes" label)
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -4731,7 +4997,11 @@ let proofOracleTests =
           <| fun _ ->
               // `TreeOps.leaf_independence_diamond` is proved on the model; this is that theorem's
               // instance on the EXTRACTED code, over the pool Phase 80's generator produces. The
-              // alphabet is the non-`Batch` ops, which is the alphabet the theorem is stated over.
+              // alphabet is the non-`Batch` ops, which is the alphabet THAT theorem is stated over
+              // — Phase 133's, and this case is Phase 133's evidence, unchanged. Since Phase 162
+              // the model also carries `op_independence_diamond` over the whole alphabet, batches
+              // included; its evidence is the case below rather than a widening of this one, so
+              // that the two alphabets stay separately measured.
               let mutable r = ConfRng.ofSeed 1331
               let mutable breaks = []
               let mutable met = 0
@@ -4799,6 +5069,98 @@ let proofOracleTests =
               Expect.isNonEmpty
                   breaks
                   "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose"
+
+          // ---- Phase 162 — the same diamond over the WHOLE alphabet, nested batches included ----
+
+          testCase "the extracted model keeps the diamond on BATCH pairs — the shape Phase 133 left open"
+          <| fun _ ->
+              // `TreeOps.covered` named three pair shapes the Phase 133 diamond could not reach:
+              // either side a `Batch` that neither does nothing nor relocates. Phase 162 lifted the
+              // diamond along a batch's script, deleted `covered`, and stated
+              // `op_independence_diamond` over the whole `SkeletonOp` alphabet. This is that
+              // widening measured on the EXTRACTED code, and it is a case of its own rather than a
+              // change to the one above, so Phase 133's evidence stays exactly what it was.
+              //
+              // The pool is built from the generated ops the case above filters out batches from,
+              // wrapped three ways: a singleton batch (same footprint as its member, so it inherits
+              // that member's independence and guarantees the premise is met at all), a paired
+              // batch, and one doubly-nested batch — because "nested to any depth" is the part of
+              // the claim a single wrapping would not exercise. Only inserts and reorders are
+              // wrapped: a batch carrying a remove or a move RELOCATES, and such a pair was already
+              // closed by Phase 133 without any lift.
+              let mutable r = ConfRng.ofSeed 1620
+              let mutable breaks = []
+              let mutable met = 0
+              let mutable batchMet = 0
+
+              for _ in 1..20 do
+                  let lanes, r' = treeLaneGen.Lanes 3 r
+                  r <- r'
+                  let ops = List.concat lanes
+
+                  let states =
+                      ops
+                      |> List.fold
+                          (fun (acc, cur) op ->
+                              match Ops.apply nodew idw op cur with
+                              | Ok t -> (acc @ [ t ]), t
+                              | Error _ -> acc, cur)
+                          ([ treeBase ], treeBase)
+                      |> fst
+                      |> List.map toModelTree
+
+                  let leaves =
+                      ops
+                      |> List.filter (fun o ->
+                          match o with
+                          | Batch _ -> false
+                          | _ -> true)
+                      |> List.map (toModelOpWith toModelTree)
+
+                  let liftable =
+                      leaves
+                      |> List.filter (fun o ->
+                          match o with
+                          | TreeOps.InsertChild _
+                          | TreeOps.ReorderChildren _ -> true
+                          | _ -> false)
+
+                  let batches =
+                      (liftable |> List.map (fun o -> TreeOps.Batch [ o ]))
+                      @ (liftable |> List.chunkBySize 2 |> List.map TreeOps.Batch)
+                      @ (match liftable with
+                         | o :: _ -> [ TreeOps.Batch [ TreeOps.Batch [ o ] ] ]
+                         | [] -> [])
+
+                  let b, m = modelDiamondBreaks TreeOps.op_fp (leaves @ batches) states
+                  breaks <- breaks @ b
+                  met <- met + m
+
+                  // The adequacy this family cannot read off `met`: how many of the met pairs
+                  // carried a batch at all. Without it the pool could collapse to leaves and the
+                  // widening would be measured by nothing while the case still passed. Measured at
+                  // 20 trials, seed 1620: met=156 of which batchMet=91. The thresholds are below
+                  // both with room and are there to catch a generator that stops producing
+                  // independent pairs, not to pin the numbers.
+                  for a in batches do
+                      for bb in leaves @ batches do
+                          if DagFold.independent (TreeOps.op_fp a) (TreeOps.op_fp bb) then
+                              for s in states do
+                                  match TreeOps.wapply a s, TreeOps.wapply bb s with
+                                  | DagFold.Ok _, DagFold.Ok _ -> batchMet <- batchMet + 1
+                                  | _ -> ()
+
+              match breaks with
+              | why :: _ -> failtest why
+              | [] ->
+                  Expect.isGreaterThan met 100 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+
+                  Expect.isGreaterThan
+                      batchMet
+                      0
+                      (sprintf
+                          "the pool met the premise on pairs carrying a BATCH — the shape Phase 133 left open (batchMet=%d)"
+                          batchMet)
 
           // ---- Phase 143 — the precision ceiling: the pinned unknown-parent clause is NECESSARY ----
 
@@ -6092,4 +6454,155 @@ let proofOracleTests =
                   (t.Diffs |> List.exists (fun d -> d.Contains "toOpsContained differs"))
                   (sprintf
                       "the disagreement is the one this phase is about — production refuses the pair up front, the unchecked one emits a script. Got:\n%s"
-                      (List.head t.Diffs)) ]
+                      (List.head t.Diffs))
+
+          // ---- Phase 152: the decode surface under a MEMBER REORDERING ----
+
+          testCase "every combinator answers the same on every shuffle of every nodes/ fixture"
+          <| fun _ ->
+              // Real documents, in a real vocabulary, with their members reordered at every depth
+              // — the case the corpus itself cannot present, because every fixture in it is
+              // canonically ordered.
+              match SiblingCorpus.resolve "nodes" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let files = Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort
+                  Expect.isGreaterThan files.Length 50 "the nodes/ family carries a real corpus"
+
+                  let tally =
+                      files
+                      |> Array.fold
+                          (fun acc path ->
+                              let name = Path.GetFileNameWithoutExtension path
+
+                              match Json.parse (File.ReadAllText path) with
+                              | Error e -> failtestf "%s: not JSON (%s)" name e
+                              | Ok v ->
+                                  everyValue v
+                                  |> List.fold (fun a el -> shuffleProbe Decode.getProp name 4 15201 el a) acc)
+                          emptyShuffleTally
+
+                  expectShuffleAgreement "nodes/ fixtures, shuffled" tally
+
+                  Expect.isGreaterThan
+                      tally.Refused
+                      0
+                      "the reference decoder refused — the corpus is in a vocabulary it does not know, so this is its arm"
+
+                  // … and the oracle still agrees with production on the shuffled documents,
+                  // which is the Phase 135 comparison over inputs no fixture contains.
+                  let probes =
+                      files
+                      |> Array.fold
+                          (fun acc path ->
+                              match Json.parse (File.ReadAllText path) with
+                              | Error e -> failtestf "%s: not JSON (%s)" (Path.GetFileNameWithoutExtension path) e
+                              | Ok v ->
+                                  if keysUniqueDeep v then
+                                      let shuffled, _ = shuffleDeep v (ConfRng.ofSeed 15202)
+                                      runProbes toModel (Path.GetFileNameWithoutExtension path) shuffled acc
+                                  else
+                                      acc)
+                          emptyTally
+
+                  expectProbeAgreement "nodes/ fixtures, shuffled" probes
+
+          testCase "every combinator answers the same on every shuffle of every ops/ fixture"
+          <| fun _ ->
+              match SiblingCorpus.resolve "ops" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let files = Directory.GetFiles(Path.Combine(root, "ops"), "*.json") |> Array.sort
+                  Expect.isGreaterThan files.Length 8 "the ops/ family carries a real corpus"
+
+                  files
+                  |> Array.fold
+                      (fun acc path ->
+                          let name = Path.GetFileNameWithoutExtension path
+
+                          match Json.parse (File.ReadAllText path) with
+                          | Error e -> failtestf "%s: not JSON (%s)" name e
+                          | Ok v ->
+                              everyValue v
+                              |> List.fold (fun a el -> shuffleProbe Decode.getProp name 4 15203 el a) acc)
+                      emptyShuffleTally
+                  |> expectShuffleAgreement "ops/ fixtures, shuffled"
+
+          testCase "the node decoder returns the SAME TREE on every shuffle — §20's one answer"
+          <| fun _ ->
+              // The accept path, which the corpus pools above cannot reach: documents in the
+              // reference vocabulary, encoded, then reordered at every depth. `decode_node`'s
+              // result carries no members of its own, so the lemma claims literal equality and
+              // this is where that is measured.
+              let mutable rng = ConfRng.ofSeed 15204
+              let mutable tally = emptyShuffleTally
+              let mutable exact = 0
+
+              for i in 1..150 do
+                  let n, r' = genRef 0 rng
+                  rng <- r'
+                  let el = encodeRef n
+                  tally <- shuffleProbe Decode.getProp (sprintf "ref %d" i) 4 (15300 + i) el tally
+
+                  // … and the tree it returns is the node that was encoded, not merely a stable
+                  // answer: a decoder that answered `Error` consistently would pass the above.
+                  let shuffled, r'' = shuffleDeep el rng
+                  rng <- r''
+                  Expect.equal (decodeRef shuffled) (Ok n) "the reordered encoding decodes to the same node"
+                  exact <- exact + 1
+
+              expectShuffleAgreement "reference vocabulary, shuffled" tally
+
+              Expect.isGreaterThan tally.Accepted 0 "the node decoder ACCEPTED — this pool is its accept arm"
+              Expect.isGreaterThan exact 0 "the round-trip-under-shuffle sample is non-empty"
+
+              // The refusal arm under a shuffle, where the MESSAGE is the whole comparison.
+              let mutable rng2 = ConfRng.ofSeed 15205
+              let mutable refusals = emptyShuffleTally
+
+              for i in 1..300 do
+                  let v, r' = genJ 0 rng2
+                  rng2 <- r'
+
+                  for el in everyValue v do
+                      refusals <- shuffleProbe Decode.getProp (sprintf "generated %d" i) 3 (15400 + i) el refusals
+
+              expectShuffleAgreement "generated documents, shuffled" refusals
+              Expect.isGreaterThan refusals.Refused 0 "the node decoder REFUSED — the message comparison ran"
+
+          testCase "a decoder that reads the FIRST member rather than the named one LOSES on a shuffle"
+          <| fun _ ->
+              // The teeth. `getPropByPosition` is `Wire.Decode` with one clause changed: it takes
+              // the first member of an object instead of the one asked for. On the canonically
+              // ordered corpus it is very nearly right, and every Phase 135 pool would pass it —
+              // which is precisely why this family exists. Under a reordering it must lose.
+              let mutable rng = ConfRng.ofSeed 15206
+              let mutable tally = emptyShuffleTally
+
+              for i in 1..120 do
+                  let n, r' = genRef 0 rng
+                  rng <- r'
+                  tally <- shuffleProbe getPropByPosition (sprintf "positional %d" i) 4 (15500 + i) (encodeRef n) tally
+
+              Expect.isGreaterThan
+                  tally.Moved
+                  0
+                  "the go-red run actually moved members — otherwise it proves nothing about order"
+
+              match tally.Diffs with
+              | [] ->
+                  failtest
+                      "a positional getProp reads whichever member came first, so a reordering MUST change its answer — this comparison cannot lose"
+              | ds ->
+                  Expect.isTrue
+                      (ds |> List.exists (fun d -> d.Contains "MOVED under a member reordering"))
+                      (sprintf "the disagreement is an answer that moved with the order — got:\n%s" (List.head ds))
+
+                  // … and the SHUFFLE ITSELF is not what broke: every pair it drew is one the
+                  // extracted relation relates, so the loss is the decoder's and not the probe's.
+                  Expect.equal
+                      tally.Unrelated
+                      0
+                      "every drawn pair is related by the extracted member_perm — the go-red measures the decoder, not a bad shuffle" ]
