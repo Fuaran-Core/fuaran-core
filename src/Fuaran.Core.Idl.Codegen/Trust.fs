@@ -181,6 +181,61 @@ module Trust =
 
         go v
 
+    /// Refuse a vocabulary whose [[HardenPolicy]] leaves a member the run NEEDS
+    /// undeclared (empty) — Phase 178's opt-in half.
+    ///
+    /// **Static in `(idl, policy)`, not in the value.** Whether a member is needed is
+    /// decided by the vocabulary and the caller's trust decisions, never by which nodes
+    /// a particular tree happens to contain: the gate runs over every harden, so the
+    /// gated kind and the four members its inert placeholder is built from are always
+    /// needed; the URL literal members are needed exactly when the caller declared a URL
+    /// field to sanitise. A value-dependent answer would be worse than useless here — a
+    /// tree with no `Custom` node today would pass, and the same vocabulary would refuse
+    /// tomorrow on a document nobody changed.
+    ///
+    /// [[HardenPolicy.TransparentUnions]] is never refused: it is a list, and an empty
+    /// one is the honest declaration of a vocabulary no case of which encodes bare —
+    /// `ReferenceIdl` says exactly that, in a comment, on purpose.
+    ///
+    /// Reports the FIRST undeclared member in the record's own declaration order, so the
+    /// refusal a caller sees does not depend on iteration order or on how many members
+    /// are missing.
+    let checkHardenPolicy (idl: Idl) (policy: Policy) : Result<unit, CodegenError> =
+        let tokens = idl.Harden
+
+        let needed =
+            [ "GatedKind", tokens.GatedKind, "the gate"
+              "PlaceholderKind", tokens.PlaceholderKind, "the inert placeholder the gate mints"
+              "PlaceholderField", tokens.PlaceholderField, "the inert placeholder the gate mints"
+              "TextLiteralCase", tokens.TextLiteralCase, "the inert placeholder the gate mints"
+              "TextLiteralField", tokens.TextLiteralField, "the inert placeholder the gate mints" ]
+            @ (if Set.isEmpty policy.UrlFields then
+                   []
+               else
+                   [ "ValueLiteralCase", tokens.ValueLiteralCase, "a declared URL field"
+                     "ValueLiteralField", tokens.ValueLiteralField, "a declared URL field" ])
+
+        match needed |> List.tryFind (fun (_, value, _) -> value = "") with
+        | Some(name, _, need) -> Error(CodegenError.UndeclaredHardenToken(name, need))
+        | None -> Ok()
+
+    /// [[harden]], refusing an undeclared policy instead of hardening through it —
+    /// Phase 178's opt-in entry point.
+    ///
+    /// **A vocabulary on [[HardenPolicy.Default]] is unaffected**: the default declares
+    /// every member, so this is `Ok` over exactly the value [[harden]] returns. The
+    /// refusal is reachable only for a vocabulary that opted in by leaving a member
+    /// undeclared ([[HardenPolicy.Undeclared]], or any policy with an empty member).
+    ///
+    /// **Why this is beside [[harden]] and not inside it.** Phase 178 was written to
+    /// make the undeclared policy the DEFAULT and `harden` itself the refusal; the
+    /// estate measurement recorded in `DECISIONS.md` D40 refuted the premise that
+    /// licensed it, so the refusal ships reachable and opt-in rather than not at all.
+    /// `harden`'s signature returns a value, and every caller of a published function
+    /// would have to change to receive a refusal only an undeclared policy can raise.
+    let hardenOrRefuse (idl: Idl) (policy: Policy) (v: IdlValue) : Result<IdlValue, CodegenError> =
+        checkHardenPolicy idl policy |> Result.map (fun () -> harden idl policy v)
+
     /// Harden then scaffold an authored node to F# source (the codegen boundary
     /// end to end): the emitted source constructs an inert-by-construction,
     /// sanitised tree, prefixed with the Phase 321 provenance stamp. `wireHash` /
