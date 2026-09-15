@@ -58,6 +58,10 @@ param(
     [switch] $SkipOracleHost,
     [switch] $Strict,
     [switch] $NoFloor,
+    # Phase 150 — also check `VocabularyProofs.fst`, the theorems over the generated vocabulary.
+    # Opt-in because it is measured in tens of minutes under `--quake 3` and CI runs the leg three
+    # times; see the note beside $modules below.
+    [switch] $Theorems,
     [string] $CacheDir,
     [int]    $Runs = 1
 )
@@ -122,7 +126,27 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 #                type, and the decoder's totality. Generated for the reason the model is: a
 #                hand-written proof over a vocabulary is a theorem about the day it was written.
 #                Opens Vocabulary, so it follows it.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Vocabulary', 'VocabularyProofs')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Vocabulary')
+
+# Phase 150 — the one module the leg does NOT check by default, and why that is a measurement
+# rather than a preference.
+#
+# `VocabularyProofs.fst` carries the THEOREMS over the generated vocabulary — the round trip
+# `dec_node (enc_node x) == Ok x` over every value of every modelled type. It verifies on the
+# pinned prover. What it does not do is verify in a time this leg can spend three times over on
+# every push: measured, its node lemma alone runs for tens of minutes under `--quake 3`, because
+# the node's five OPTIONAL envelope members put thirty-two object shapes into a single query and
+# one goal of the sixty-five is hard. Registering it unconditionally would take the CI proofs job
+# from minutes to hours for every commit in this repository, which is not a cost this phase is
+# entitled to impose on everyone else's pushes.
+#
+# So it is OPT-IN, and the opt-in is real rather than decorative: `-Theorems` checks it here, with
+# the same flags and the same cold cache as everything else, and `proofs/README.md`'s theorem 1
+# section carries the measurement and what widening it would take. The artefact is NOT unguarded
+# in the meantime — the generation diff in step 3 holds it to a fresh generation from `idl.json`
+# on EVERY run, so it cannot drift from the vocabulary it is about; what a default run does not do
+# is re-prove it.
+if ($Theorems) { $modules += 'VocabularyProofs' }
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
@@ -350,7 +374,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 
 foreach ($module in $modules) {
     if ($proofOnly -contains $module) {
-        Write-Host "==== proofs: $module is checked, not extracted — no oracle runs it (see \$proofOnly)" -ForegroundColor Cyan
+        Write-Host "==== proofs: $module is checked, not extracted — no oracle runs it (see `$proofOnly)" -ForegroundColor Cyan
         continue
     }
 
