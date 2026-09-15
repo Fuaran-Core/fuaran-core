@@ -177,6 +177,13 @@
          case names, so it compiles after ProofOracleTests.fs, and Snapshots.fs for the repository
          root. Appended here (append-only registration) — nothing else in this list reads it. -->
     <Compile Include="ProofsLadderTests.fs" />
+    <!-- Phase 150 - the F* proof-model target's refusals, its expressibility partition over
+         the pinned vocabulary, and the GENERATION DIFF that holds the two committed `.fst`
+         artefacts to a fresh generation from `idl.json` - the oracle's extraction diff, one
+         step further up. Reads SiblingCorpus.fs for the corpus and Snapshots.fs for the
+         repository root, so after both; Program.fs calls its `emit` for the `emit-fstar`
+         mode, so before that. Appended (append-only registration). -->
+    <Compile Include="IdlFStarTargetTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

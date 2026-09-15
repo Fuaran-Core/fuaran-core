@@ -517,6 +517,83 @@ Four things are proved:
   the policy note below, which is also where this model diverges from what the phase's brief
   assumed.
 
+### The vocabulary is GENERATED now, and the round trip is a theorem about `idl.json` (Phase 150)
+
+Everything above is about a **reference** vocabulary: four cases, written by hand beside the
+combinators, chosen to exercise one combinator each. That was the honest scope of Phase 135 and it
+said so — but it leaves theorem 1 saying nothing about the kind that landed last week, because the
+real vocabulary is the wire-format specification's `idl.json`, it carries 43 kinds, 28 records, 22
+unions and 46 enums, and it grows.
+
+`Vocabulary.fst` and `VocabularyProofs.fst` close that gap for most of it. Both are **generated**,
+from `idl.json`, by a fourth backend of the IDL's own code generator (`FStarTarget`, beside the F#
+structural layer, the TypeScript encoder and the JSON schema) — the model AND its proof script,
+from the same walk:
+
+- **`Vocabulary.fst`** — the vocabulary's types, its `$type`-discriminated encoder and its
+  tag-dispatch decoder, over the `jval` value model and the combinators above. Generic unions are
+  monomorphised at the arguments the vocabulary reaches (`Binding<string>`, `Binding<bool>`,
+  `Binding<SelectOption list>`, …), which is what keeps every definition and every lemma
+  first-order: a parametric `Binding` would have to take its element codec as a value, and the
+  round-trip lemma would then need a higher-order hypothesis relating an encoder to a decoder it
+  cannot see.
+- **`VocabularyProofs.fst`** — `rt_node` and the mutual family beside it: **`dec_node (enc_node x)
+  == Ok x`, for every value of every modelled type**, at every depth, through every list, map,
+  optional member and omit-default. Plus `dec_node_total`, the outcome's exclusivity.
+
+**Why the proof script is generated and not written.** A hand-written proof over the real
+vocabulary would be a theorem about the vocabulary as it stood on the day it was written — the same
+defect as the reference vocabulary, one release later and harder to see. Generated, a kind added to
+the IDL enters the model at the next regeneration and **re-proves itself**, and a kind whose
+encoder and decoder disagree fails the leg.
+
+**Two diffs hold it, and they are one level apart.** Step 2 of `check.ps1` holds each committed
+oracle to a fresh EXTRACTION, so the artefact the suite runs is the model. The
+`Proofs.Vocabulary` family holds these two committed `.fst` files to a fresh GENERATION from the
+pinned corpus, so the model is the vocabulary the specification declares — an IDL that moves
+without a regeneration is **vocabulary drift** and the leg names it, with
+`dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar` as the remedy. These two models are
+CHECKED but not EXTRACTED (`$proofOnly` in `check.ps1`): nothing here runs the model beside
+production, because the decoder it models is one a generator emits into a consuming host and not
+one this repository ships, so an oracle for it would be several hundred kilobytes of generated F#
+that nothing compiles, calls or compares.
+
+**What the model covers, and the two different reasons it does not cover the rest.** The emitted
+header carries the live list; the shapes are:
+
+- **A construct with no wire-level meaning in the model is a BOUNDARY**, and a typed refusal
+  (`CodegenError.UnmodellableInFStar`) rather than a dropped member — a silently-dropped member
+  would make the round trip a theorem about a document nobody sends. One kind of this corpus is
+  refused outright: `Tabs.activeIndex` declares the default `Binding.Static 0`, and the model's
+  numeric carriers are opaque type parameters, so there is no F* literal for it.
+- **A kind held out of the proof vocabulary is a COST CONTROL**, which a measurement could lift.
+  The rule is `FStarTarget.proofKinds`: every expressible kind that introduces no declared type
+  beyond the node envelope's own closure. It selects 20 of this corpus's 43 kinds, and the reason
+  it is drawn there rather than anywhere else is measured below.
+
+Three things are deliberately NOT claimed here. The `wf` characterisation — `Ok? (dec el) == wf
+el`, which the reference vocabulary carries above — is not restated over the generated vocabulary:
+it needs a second generated predicate mirroring the decoder's accept set, a model-sized artefact of
+its own, so the round trip covers everything the encoder can produce and the characterisation of
+what ELSE is accepted is open. A **host-only** member is absent from the model entirely, because it
+is never on the wire. And a **wire-visible closure** is modelled as `unit` encoding to the fixed
+`"<closure>"` sentinel — not a weakening but the precise statement that the member carries no
+information, and the difference between a model of 67% of the vocabulary and one of 16%, since the
+node envelope reaches `Binding.Computed` and every kind reaches the envelope.
+
+**The cost, and the finding that decided the rule.** Measured on the pinned prover with the leg's
+own flags (`--z3rlimit 40 --quake 3`, `--ext context_pruning` set inside both generated modules):
+`Vocabulary` 398s, `VocabularyProofs` — see `modules.json`. Both are budgeted there like every
+other module. The finding worth carrying forward is **where the cost is**: it is the node
+ENVELOPE's closure, not the kinds. One kind and eight kinds cost the same, because
+`Accessibility`, `SemanticStyle`, `StateBehaviour`, `TextSource` and nine `Binding<…>`
+instantiations are paid by any kind at all; the curve then turns superlinear in the size of the
+mutual family, and the whole expressible vocabulary — 42 kinds, ~30 more declared types — did not
+finish a single check in twenty-five minutes. So narrowing the selection further buys almost
+nothing, and widening it is not a matter of patience: it needs the mutual family split, which the
+node recursion currently forbids (every kind is reachable from every node). **This roughly triples
+the leg's wall clock, and that is the one consequence to weigh before widening anything.**
+
 ### The boundary — `Json.parse` is excluded, and why
 
 **`Json.parse`, the string-to-`JVal` parser, is outside theorem 1.** Its totality is a property of
@@ -616,10 +693,19 @@ reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have c
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as
      for the fold model. The leg holds the committed oracle to a fresh extraction byte for byte,
      which makes "the oracle is the model" a checked claim and nothing more.
-4. **Not claimed.** Anything about `Json.parse`; anything about a domain's own decoder beyond the
-   reference vocabulary modelled here (what carries to one is the combinator layer it is built
-   from, not its clauses); and anything about encode — `Canon.render`'s key ordering and float
-   layout are certified by the wire-format corpus, not by this theorem.
+4. **Not claimed.** Anything about `Json.parse`; and anything about encode — `Canon.render`'s key
+   ordering and float layout are certified by the wire-format corpus, not by this theorem.
+
+**Phase 150 amends clause 4's middle third, and it is worth saying which third.** It used to read
+"anything about a domain's own decoder beyond the reference vocabulary modelled here". That is no
+longer the boundary: `Vocabulary.fst` is the wire-format specification's OWN vocabulary, generated
+from `idl.json`, and `rt_node` proves the round trip over 20 of its 43 kinds — so what carries to a
+domain is now the combinator layer **and** a machine-checked round trip over most of the vocabulary
+the specification declares. What the amendment does NOT buy, and must not be read as buying: this
+is a theorem about the vocabulary, not about any HOST's decoder. The six conformant hosts keep
+their own hand-written decoders and are certified against the fixture corpus; no host's build
+generates this model, and nothing here says a host implements it. The per-kind coverage, the two
+reasons a kind is outside it, and the cost that decided them are in the Phase 150 section above.
 
 ## Theorem 2 — independence soundness for the tree algebra (Phase 133)
 

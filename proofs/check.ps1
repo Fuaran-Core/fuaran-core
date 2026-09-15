@@ -20,7 +20,12 @@
 #   2. EXTRACT — each checked model is extracted to F# and DIFFED against its committed oracle
 #               (proofs/oracle/<Module>.fs). A difference fails: the oracle the suite runs must be
 #               the model the theorem is about, byte for byte. -Extract overwrites the committed
-#               files with the fresh extractions instead (then commit them).
+#               files with the fresh extractions instead (then commit them). A model listed in
+#               $proofOnly below is EXEMPT and says so on its own line — see that list.
+#   2b. GENERATE — the one GENERATED model (Phase 150) is held to a fresh generation from the
+#               pinned `idl.json` by the Proofs.Vocabulary family in step 3, which is the same
+#               discipline as step 2 one level further up: step 2 says the oracle is the model,
+#               and that says the model is the vocabulary the specification declares.
 #   3. HOST   — two Expecto families. Proofs.Oracle runs the extracted models beside the production
 #               code (the differential tests); Proofs.Ladder holds ../proofs.json — the claims
 #               ladder declared as data — to this tree, so a row naming a theorem no model
@@ -76,7 +81,16 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 #                two refusals characterised exactly, the four-pass emission order, what each pass
 #                guarantees about the block it emits, and the container-aware mirror's pre-emptive
 #                refusal. Opens TreeOps (and through it DagFold), so it follows both.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff')
+#   Vocabulary — Phase 150, and the only GENERATED model here: the wire-format IDL's own
+#                vocabulary — its types, its discriminated encoder and its tag-dispatch decoder —
+#                emitted from `idl.json` by `Fuaran.Core.Idl.Codegen`'s F* target. Opens
+#                WireDecode, so it follows it.
+#   VocabularyProofs — Phase 150, the theorems over that model, emitted by the same walk: the
+#                round trip `dec_node (enc_node x) == Ok x` over EVERY value of every modelled
+#                type, and the decoder's totality. Generated for the reason the model is: a
+#                hand-written proof over a vocabulary is a theorem about the day it was written.
+#                Opens Vocabulary, so it follows it.
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Vocabulary', 'VocabularyProofs')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
@@ -203,10 +217,32 @@ for ($run = 1; $run -le $Runs; $run++) {
 
 # ---- 4. extract, and hold the committed oracle to the model ---------------------------------------
 
+# Phase 150 — the models that are CHECKED but not EXTRACTED, and why an exemption exists at all.
+#
+# An oracle is here so the Expecto differential can run the extracted model beside the production
+# code over the same inputs. Two of the models have no production code on this side to run beside:
+# `Vocabulary` models the vocabulary an `idl.json` DECLARES, and the decoder it models is one a
+# GENERATOR emits into a consuming host, not one this repository ships; `VocabularyProofs` is
+# lemmas, which erase. Extracting them anyway would commit ~400 KB of generated F# that nothing
+# compiles, calls or compares — which is what an oracle is supposed to be the opposite of. (The
+# extractor also emits a mutual TYPE group with the `and` indented one space, which F# 10's parser
+# rejects outright; that is a real finding about the F# backend, and it is not the reason for this
+# exemption — an oracle nothing runs would not be worth committing even if it compiled.)
+#
+# The exemption is NARROW and it is not a hole in the discipline: what step 2 buys for the other
+# models — "the artefact is the model, byte for byte" — these two get from the GENERATION diff in
+# step 3 instead, one level further up, against the `idl.json` they are generated from.
+$proofOnly = @('Vocabulary', 'VocabularyProofs')
+
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 
 foreach ($module in $modules) {
+    if ($proofOnly -contains $module) {
+        Write-Host "==== proofs: $module is checked, not extracted — no oracle runs it (see \$proofOnly)" -ForegroundColor Cyan
+        continue
+    }
+
     & $fstar --cache_checked_modules --cache_dir $cache --codegen FSharp --extract $module --odir $out "$module.fst"
     if ($LASTEXITCODE -ne 0) { Fail "extraction of $module to F# failed" $LASTEXITCODE }
 
@@ -241,6 +277,21 @@ if (-not $SkipOracleHost) {
     try {
         dotnet build tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj --nologo
         if ($LASTEXITCODE -ne 0) { Fail "the test project did not build" $LASTEXITCODE }
+
+        # Phase 150 — the GENERATION diff, beside the extraction diff above and for the same
+        # reason one step further up. Step 4 holds each committed oracle to a fresh EXTRACTION of
+        # its model, so the oracle the suite runs is the model the theorem is about; this holds
+        # the committed `Vocabulary.fst` / `VocabularyProofs.fst` to a fresh GENERATION from the
+        # pinned `idl.json`, so the vocabulary the theorem is about is the vocabulary the
+        # specification declares. An IDL that moves without a regeneration is VOCABULARY DRIFT,
+        # and this is where it is named.
+        #
+        # It runs HERE rather than ahead of the prover because the generator is F# and the check
+        # above is the first thing in this script that has a built test project to hand — and
+        # because the leg fails either way: a stale model still verifies, and then this step
+        # reports what it is stale against. Moving it earlier would restructure the CHECK step.
+        dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter Proofs.Vocabulary
+        if ($LASTEXITCODE -ne 0) { Fail "the generated vocabulary (Proofs.Vocabulary) is RED — the committed F* model and the pinned idl.json disagree, or the target refused a construct" $LASTEXITCODE }
 
         dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter Proofs.Oracle
         if ($LASTEXITCODE -ne 0) { Fail "the oracle host (Proofs.Oracle) is RED — an extracted model and production disagree" $LASTEXITCODE }

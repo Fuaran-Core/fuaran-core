@@ -874,6 +874,28 @@
           "a generator that can never build the graft arm fails the adequacy guard"
         ]
       }
+    },
+    {
+      "id": "vocabulary-generated-model",
+      "level": "proved",
+      "claim": "The wire-format specification's OWN vocabulary is modelled, and the model is GENERATED from it. `proofs/Vocabulary.fst` carries the types, the `$type`-discriminated encoder and the tag-dispatch decoder of 20 of the pinned `idl.json`'s 43 kinds, emitted by a fourth backend of the IDL's code generator (`FStarTarget`, beside the F# structural layer, the TypeScript encoder and the JSON schema) over Phase 135's `jval` model and the combinators modelled with it. Every decoder is `Tot` on an arbitrary `jval` and therefore total and terminating on every input, which F* admits only after proving it; the termination argument is `get_prop`'s return-type refinement, since a decoder that descends BY NAME into a value it looked up has no syntactic one. Generic unions are monomorphised at the arguments the vocabulary reaches, which keeps every definition first-order. Proved with no assume and no admit under --report_assumes error. TWO refusal shapes are named rather than dropped, because a silently-dropped member would make the round trip a theorem about a document nobody sends: a construct with no wire-level meaning in the model is a typed `CodegenError.UnmodellableInFStar` (one kind of this corpus — `Tabs.activeIndex` declares an integer default and the model's numeric carriers are opaque type parameters), and a kind outside the proof vocabulary is a declared COST control (`FStarTarget.proofKinds`: every expressible kind introducing no declared type beyond the node envelope's closure). The committed file is held to a fresh generation from the pinned corpus by the Proofs.Vocabulary family — an IDL that moves without a regeneration fails the leg as vocabulary drift.",
+      "phase": "fuaran-core#150",
+      "evidence": {
+        "theorem": "dec_node",
+        "model": "proofs/Vocabulary.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "vocabulary-roundtrip",
+      "level": "proved",
+      "claim": "THE ROUND TRIP OVER THE GENERATED VOCABULARY. `dec_node (enc_node x) == Ok x` for every value of every modelled type, at every depth, through every list, map, optional member and omit-default — the mutual induction in `proofs/VocabularyProofs.fst`, emitted by the same walk that emits the model. `dec_node_total` beside it states the outcome's exclusivity: every input reaches exactly one of Ok / Error and never both. Proved with no assume and no admit under --report_assumes error. THE PROOF SCRIPT IS GENERATED, and that is the content of the claim rather than an implementation note: a hand-written proof over a vocabulary is a theorem about the day it was written, so a kind added to the IDL re-proves itself at the next check and a kind whose encoder and decoder disagree fails the leg. NOT claimed: the `wf` characterisation (`Ok? (dec el) == wf el`) is not restated over the generated vocabulary — it needs a second generated predicate mirroring the decoder's accept set, so this covers everything the encoder can produce and says nothing about what else is accepted; and this is a theorem about the VOCABULARY, never about a host's decoder — the conformant hosts keep their own and are certified against the fixture corpus.",
+      "phase": "fuaran-core#150",
+      "evidence": {
+        "theorem": "rt_node",
+        "model": "proofs/VocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
     }
   ]
 }

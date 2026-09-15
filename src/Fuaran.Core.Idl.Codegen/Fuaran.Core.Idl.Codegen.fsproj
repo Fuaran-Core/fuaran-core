@@ -35,6 +35,12 @@
          F# source in whichever repo compiled the generator. Reads Gen.GenSupport, so
          after Codegen.fs; appended last (append-only registration). -->
     <Compile Include="SupportArtifact.fs" />
+    <!-- Phase 150 - the F* PROOF-MODEL target: the vocabulary's types, encoder and
+         tag-dispatch decoder emitted as an F* module over the wire model the proof leg
+         checks, together with the round-trip theorems over exactly those definitions.
+         Reads the shared CodegenError channel declared in Codegen.fs, so after it;
+         appended last (append-only registration). It emits nothing any host builds. -->
+    <Compile Include="FStar.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
