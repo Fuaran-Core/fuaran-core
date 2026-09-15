@@ -1,0 +1,28 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 174 classification clauses (see ladder-ok.json). ONE defect: an `assumed` row claims a class outside the closed three, which is how an assumed row quietly acquires a kind the contract never defined.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-premise",
+      "level": "assumed",
+      "claim": "An assumed row at a class the contract does not define.",
+      "phase": "fuaran-core#144",
+      "class": "inherited",
+      "evidence": {
+        "assumption": "the fixture assumes nothing that matters"
+      }
+    }
+  ]
+}

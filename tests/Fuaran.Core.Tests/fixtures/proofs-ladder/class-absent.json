@@ -1,0 +1,27 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 174 classification clauses (see ladder-ok.json). ONE defect: an `assumed` row carries no `class`, which is what every assumed row looked like before Phase 174 — a domain reading it cannot tell what it owes from what it inherits.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-premise",
+      "level": "assumed",
+      "claim": "An assumed row carrying no class at all.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "assumption": "the fixture assumes nothing that matters"
+      }
+    }
+  ]
+}

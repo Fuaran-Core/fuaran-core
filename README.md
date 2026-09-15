@@ -93,6 +93,14 @@ insert introduces no id already present"` is about the op that can create a dupl
 `"apply's accept path preserves Tree.WellFormed"` is about every op, so a `MoveNode` or a `Batch`
 that broke it could not hide behind the first.
 
+**Which of this library's assumptions you can discharge, and which you inherit**, is one table:
+[the Core-to-domain proof contract](proofs/README.md#the-core-to-domain-proof-contract). Every
+`assumed` row of the claims ladder is classed there as a `domain-obligation` (a green
+`Conformance` law at your witness is the sampled discharge — the invariant above is one of
+them), a `model-bridge` (this repository's own model-to-production gap, which you inherit), or a
+`premise` (what nothing discharges — the witness surface boundary above is one of those). The
+table is checked against `proofs.json` row for row rather than reviewed.
+
 ### The container capability — what `applyContained` enforces, and the one thing it asks of you
 
 `Ops.applyContained canHold` is the variant for a domain with leaves: `canHold` answers *can this

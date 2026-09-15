@@ -8,6 +8,7 @@
       "level": "assumed",
       "claim": "An assumed row, so the ladder is not empty.",
       "phase": "fuaran-core#144",
+      "class": "premise",
       "evidence": {
         "assumption": "the fixture assumes nothing that matters"
       }

@@ -1,0 +1,29 @@
+{
+  "kind": "proofs",
+  "subject": "fixture",
+  "$comment": "A FIXTURE for the Phase 174 classification clauses (see ladder-ok.json). ONE defect: a `domain-obligation` names a law the conformance kit does not export — a law renamed or removed with the row left behind, so the row cites a run a domain cannot make.",
+  "claims": [
+    {
+      "id": "fixture-theorem",
+      "level": "proved",
+      "claim": "A clean proved row, so the every-module clause stays quiet.",
+      "phase": "fuaran-core#144",
+      "evidence": {
+        "theorem": "alpha",
+        "model": "Model.fst",
+        "prover": "fixture"
+      }
+    },
+    {
+      "id": "fixture-obligation",
+      "level": "assumed",
+      "claim": "A domain obligation citing a law that is not there.",
+      "phase": "fuaran-core#174",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.lawThatWasRenamed",
+      "evidence": {
+        "assumption": "the fixture domain's witness is lawful"
+      }
+    }
+  ]
+}
