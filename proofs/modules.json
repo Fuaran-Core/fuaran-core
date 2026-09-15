@@ -139,12 +139,12 @@
     {
       "module": "VocabularyProofs",
       "budgetSeconds": 40,
-      "measuredSeconds": 17,
+      "measuredSeconds": 18,
       "floorSeconds": 2,
       "fastestSeconds": 5,
       "floorPhase": "fuaran-core#173",
-      "phase": "fuaran-core#173",
-      "note": "The generated ROUND TRIP over `Vocabulary` — `rt_node` and the mutual family beside it (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total` — emitted by the same target from the same walk. Carries `--z3rlimit 200 --ext context_pruning` inside the file: the rlimit is the remedy Phase 150 measured at the UI vocabulary's scale, where one node query of 65 goals failed a `--quake` seed at 40; a vocabulary with a small envelope never meets that goal and pays nothing for the option. Measured on the pinned prover, cold, with the leg's own flags. Phase 150 could not commit a proof script at all — at twenty UI kinds it did not discharge — and Phase 173's measurement is that over the certification set it does, in seconds: the difference is the node ENVELOPE's closure, not the kinds, exactly as the README's theorem 1 recorded. The per-kind lemma shape that reaches UI scale is Phase 168's. SEEDED from cold quaked runs on the pinned prover with the leg's own flags — one direct run and four `check.ps1 -Runs 3` legs on the same dev machine, idle for some and shared with a build for others (9s, 6s, 7s, 5s, 6s, 17s, 5s): slowest 17s, so the budget is 40s by the seeding rule; fastest 5s, so the floor is 2s by floorSeeding."
+      "phase": "fuaran-core#168",
+      "note": "The generated ROUND TRIP over `Vocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total`. Emitted by the same target from the same walk as the model, ONE LEMMA PER CONSTRUCTOR and one per PRESENCE PATTERN (Phase 168): `rt_<T>` is a case split whose arms cite `rt_<T>__<Ctor>`, one constructor's arm alone, and a constructor with `presenceSplitAt` (2) or more conditional members is split further into `…__p<bits>` lemmas whose `requires` pins every conditional member present or absent — so no query carries more than one constructor's object shapes, which is the structural fix Phase 150 named for the 2^k failure it measured at twenty UI kinds. The family is one mutual induction on the lexicographic measure `%[x; tier]`. The in-file `--z3rlimit 200` precedent is RETIRED with the shape that needed it: every query here discharges at the leg's own rlimit of 40, under `--quake 3`, cold. Twenty-six lemmas: the reference vocabulary reaches the split twice — the node envelope (hidden, label) and `Embed` (contentHash, props), four patterns each. MEASURED on the pinned prover, cold, with the leg's own flags (Phase 168, this dev machine, shared with a build for some runs): one direct run and three `check.ps1 -Runs 1` legs — 18s (direct), 13s, 11s, 12s. Slowest 18s, so the budget stays 40s by the seeding rule; Phase 173's 17s slowest for the one-lemma shape is the BEFORE. The floor is NOT re-seeded from these few runs: the new shape is strictly more work than the one Phase 173 observed at 5s fastest, so the 2s floor seeded then remains a true lower bound, and raising it from four samples on one machine would risk a red leg on a faster runner — the direction Phase 164's asymmetry says to fear."
     },
     {
       "module": "DocVocabulary",
@@ -159,12 +159,12 @@
     {
       "module": "DocVocabularyProofs",
       "budgetSeconds": 20,
-      "measuredSeconds": 9,
+      "measuredSeconds": 10,
       "floorSeconds": 2,
       "fastestSeconds": 5,
       "floorPhase": "fuaran-core#173",
-      "phase": "fuaran-core#173",
-      "note": "The generated ROUND TRIP over `DocVocabulary` — `rt_node` and the mutual family beside it (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total` — emitted by the same target from the same walk. Carries `--z3rlimit 200 --ext context_pruning` inside the file: the rlimit is the remedy Phase 150 measured at the UI vocabulary's scale, where one node query of 65 goals failed a `--quake` seed at 40; a vocabulary with a small envelope never meets that goal and pays nothing for the option. Measured on the pinned prover, cold, with the leg's own flags. Phase 150 could not commit a proof script at all — at twenty UI kinds it did not discharge — and Phase 173's measurement is that over the certification set it does, in seconds: the difference is the node ENVELOPE's closure, not the kinds, exactly as the README's theorem 1 recorded. The per-kind lemma shape that reaches UI scale is Phase 168's. SEEDED from cold quaked runs on the pinned prover with the leg's own flags — one direct run and four `check.ps1 -Runs 3` legs on the same dev machine, idle for some and shared with a build for others (6s, 6s, 6s, 8s, 9s, 7s, 5s): slowest 9s, so the budget is 20s by the seeding rule; fastest 5s, so the floor is 2s by floorSeeding."
+      "phase": "fuaran-core#168",
+      "note": "The generated ROUND TRIP over `DocVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total`. Emitted by the same target from the same walk as the model, ONE LEMMA PER CONSTRUCTOR and one per PRESENCE PATTERN (Phase 168): `rt_<T>` is a case split whose arms cite `rt_<T>__<Ctor>`, one constructor's arm alone, and a constructor with `presenceSplitAt` (2) or more conditional members is split further into `…__p<bits>` lemmas whose `requires` pins every conditional member present or absent — so no query carries more than one constructor's object shapes, which is the structural fix Phase 150 named for the 2^k failure it measured at twenty UI kinds. The family is one mutual induction on the lexicographic measure `%[x; tier]`. The in-file `--z3rlimit 200` precedent is RETIRED with the shape that needed it: every query here discharges at the leg's own rlimit of 40, under `--quake 3`, cold. Twenty-seven lemmas; no constructor of the second-domain sample reaches the presence split (none carries two conditional members), so this module is the per-constructor shape alone — one arm lemma per kind, `rt_vkind` the case split. MEASURED (Phase 168) as for `VocabularyProofs`: 8s (direct), 10s, 10s, 8s. Slowest 10s, budget stays 20s (the 20s minimum); Phase 173's 9s slowest is the BEFORE. Floor kept at 2s for the reason `VocabularyProofs` gives."
     },
     {
       "module": "ScoreVocabulary",
@@ -178,13 +178,13 @@
     },
     {
       "module": "ScoreVocabularyProofs",
-      "budgetSeconds": 90,
-      "measuredSeconds": 42,
+      "budgetSeconds": 220,
+      "measuredSeconds": 108,
       "floorSeconds": 6,
       "fastestSeconds": 12,
       "floorPhase": "fuaran-core#173",
-      "phase": "fuaran-core#173",
-      "note": "The generated ROUND TRIP over `ScoreVocabulary` — `rt_node` and the mutual family beside it (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total` — emitted by the same target from the same walk. Carries `--z3rlimit 200 --ext context_pruning` inside the file: the rlimit is the remedy Phase 150 measured at the UI vocabulary's scale, where one node query of 65 goals failed a `--quake` seed at 40; a vocabulary with a small envelope never meets that goal and pays nothing for the option. Measured on the pinned prover, cold, with the leg's own flags; the largest proof script here. Phase 150 could not commit a proof script at all — at twenty UI kinds it did not discharge — and Phase 173's measurement is that over the certification set it does, in seconds: the difference is the node ENVELOPE's closure, not the kinds, exactly as the README's theorem 1 recorded. The per-kind lemma shape that reaches UI scale is Phase 168's. SEEDED from cold quaked runs on the pinned prover with the leg's own flags — one direct run and four `check.ps1 -Runs 3` legs on the same dev machine, idle for some and shared with a build for others (18s, 19s, 26s, 17s, 42s, 15s, 12s): slowest 42s, so the budget is 90s by the seeding rule; fastest 12s, so the floor is 6s by floorSeeding."
+      "phase": "fuaran-core#168",
+      "note": "The generated ROUND TRIP over `ScoreVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total`. Emitted by the same target from the same walk as the model, ONE LEMMA PER CONSTRUCTOR and one per PRESENCE PATTERN (Phase 168): `rt_<T>` is a case split whose arms cite `rt_<T>__<Ctor>`, one constructor's arm alone, and a constructor with `presenceSplitAt` (2) or more conditional members is split further into `…__p<bits>` lemmas whose `requires` pins every conditional member present or absent — so no query carries more than one constructor's object shapes, which is the structural fix Phase 150 named for the 2^k failure it measured at twenty UI kinds. The family is one mutual induction on the lexicographic measure `%[x; tier]`. The in-file `--z3rlimit 200` precedent is RETIRED with the shape that needed it: every query here discharges at the leg's own rlimit of 40, under `--quake 3`, cold. Sixty-two lemmas — the largest proof script in the leg: nineteen kind arms, and `Measure` and `Score` reach the presence split (omit-at-default members, so the pattern lemmas pin equality with the default the encoder tests, not `Some?`). MEASURED (Phase 168) as for `VocabularyProofs`: 58s (direct), 46s, 108s, 47s — the 108s leg ran the whole leg 37% slower than the other two, so it is load, and it is kept because the rule seeds from the slowest. Slowest 108s, so the budget is RAISED from 90s to 220s by the seeding rule — the price of forty-four more lemmas, each its own query, against Phase 173's 42s slowest for the one-lemma shape (the BEFORE). Floor kept at 6s for the reason `VocabularyProofs` gives."
     }
   ]
 }

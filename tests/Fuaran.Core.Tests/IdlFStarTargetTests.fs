@@ -1,6 +1,7 @@
 module Fuaran.Core.Tests.IdlFStarTargetTests
 
 open System.IO
+open System.Text.RegularExpressions
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
@@ -190,6 +191,144 @@ let private refusalOf (t: IdlType) =
     match FStarTarget.vocabularyModule "M" (tinyIdl t Required) [ "Only" ] with
     | Ok _ -> None
     | Error e -> Some(CodegenError.describe e)
+
+// ---------------------------------------------------------------------------
+// Phase 168 — reading the SHAPE of an emitted proof script. The pins below are over the
+// text the emitter produces, so these read it the way a reader does: by the lemma heads.
+// ---------------------------------------------------------------------------
+
+/// The proof script over a vocabulary, every expressible kind selected, or a failed test.
+let private proofsOver (idl: Idl) : string =
+    match FStarTarget.proofsModule "MP" "M" idl (selection idl) with
+    | Ok text -> text
+    | Error e -> failtestf "the target refused the vocabulary: %s" (CodegenError.describe e)
+
+/// Every round-trip lemma head in emission order: its keyword (`let rec` / `and` / `let`)
+/// and its name.
+let private lemmaHeads (proofs: string) : (string * string) list =
+    [ for m in Regex.Matches(proofs, @"(?m)^(let rec|and|let) (rt_[A-Za-z0-9_]+) ") ->
+          m.Groups[1].Value, m.Groups[2].Value ]
+
+/// The presence-pattern lemmas — `…__p<bits>`.
+let private patternLemmas (proofs: string) : string list =
+    lemmaHeads proofs
+    |> List.map snd
+    |> List.filter (fun n -> Regex.IsMatch(n, @"__p[01]+$"))
+
+/// The constructor arms of one type's family — `rt_<T>__<Ctor>` — by constructor label.
+let private armLemmas (family: string) (proofs: string) : string list =
+    lemmaHeads proofs
+    |> List.map snd
+    |> List.choose (fun n ->
+        let m = Regex.Match(n, "^" + Regex.Escape family + @"__([A-Za-z0-9]+)$")
+        if m.Success then Some m.Groups[1].Value else None)
+
+/// The right-hand sides of one lemma's `match` arms, trimmed — what the lemma proves with.
+let private bodyOf (name: string) (proofs: string) : string list =
+    let start = proofs.IndexOf(sprintf " %s (#num #flt: eqtype)" name)
+    Expect.isTrue (start >= 0) (sprintf "the script declares %s" name)
+    let rest = proofs.Substring(start)
+    let stop = Regex.Match(rest.Substring(1), @"(?m)^(and|let) ")
+
+    let text =
+        if stop.Success then
+            rest.Substring(0, stop.Index + 1)
+        else
+            rest
+
+    [ for m in Regex.Matches(text, @"(?m)^  \| .*? -> (.+)$") -> m.Groups[1].Value.Trim() ]
+
+/// How many conditional members one pattern lemma's `requires` pins — one `None?` / `Some?`
+/// per optional member, one equality (or its negation) per omit-at-default member.
+let private conditionalsPinned (name: string) (proofs: string) : int =
+    let m =
+        Regex.Match(
+            proofs,
+            Regex.Escape name
+            + @" \(#num #flt: eqtype\) \(x: [^)]+\) : Lemma \(requires \((.*?)\)\) \(ensures"
+        )
+
+    Expect.isTrue m.Success (sprintf "%s carries a `requires`" name)
+    Regex.Matches(m.Groups[1].Value, @"None\? |Some\? |not \(f[0-9]+ = |(?<!not \()f[0-9]+ = ").Count
+
+/// The conditional (optional or omit-at-default) members of a field list, host-only excluded.
+let private conditionalCount (fs: IdlField list) =
+    fs
+    |> List.filter (fun f ->
+        match f.Opt with
+        | Optional
+        | OmitDefault _ -> true
+        | Required
+        | HostOnly -> false)
+    |> List.length
+
+/// The pattern lemmas an IDL's KINDS and node ENVELOPE should produce: for each conditional
+/// constructor with k >= `presenceSplitAt` conditional members, `rt_<family>__p<bits>` for
+/// all 2^k patterns. (Records and union cases split by the same rule; the certification
+/// vocabularies carry none wide enough, which the reference pin's literal count states.)
+let private expectedPatternLemmas (idl: Idl) : string list =
+    let bits (k: int) =
+        [ for i in 0 .. (1 <<< k) - 1 -> System.Convert.ToString(i, 2).PadLeft(k, '0') ]
+
+    let over (family: string) (k: int) =
+        if k >= FStarTarget.presenceSplitAt then
+            [ for b in bits k -> sprintf "%s__p%s" family b ]
+        else
+            []
+
+    over "rt_node" (conditionalCount idl.NodeFields)
+    @ [ for k in idl.Kinds do
+            if List.contains k.Tag (selection idl) then
+                yield! over ("rt_vkind__" + k.Tag) (conditionalCount k.Fields) ]
+
+/// A vocabulary at the SCALE Phase 150 measured the one-lemma shape failing at — the UI
+/// vocabulary's node envelope carried five optional members and its widest kind eleven members
+/// with five conditional — under neutral names and scalar members, so the pin is about the
+/// emitted shape and nothing else. Never checked by a prover here.
+let private uiScaleIdl: Idl =
+    let field name t opt =
+        { Name = name
+          Type = t
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    let kind tag fields =
+        { Tag = tag
+          Category = "Display"
+          Fields = fields
+          Annotations = Annotations.Empty }
+
+    { Kinds =
+        [ kind "Leaf" [ field "text" TStr Required ]
+          kind "Branch" [ field "children" (TList TNode) Required; field "title" TStr Optional ]
+          kind
+              "Wide"
+              [ field "a" TStr Required
+                field "b" TBool Required
+                field "c" (TList TStr) Required
+                field "d" TStr Required
+                field "e" TBool Required
+                field "f" (TList TNode) Required
+                field "g" TStr Optional
+                field "h" TBool Optional
+                field "i" (TList TStr) Optional
+                field "j" TStr (OmitDefault(VStr "x"))
+                field "k" TBool (OmitDefault(VBool false)) ] ]
+      Unions = []
+      Enums = []
+      Records = []
+      Defaults = []
+      NodeFields =
+        [ field "hidden" TBool Optional
+          field "label" TStr Optional
+          field "role" TStr Optional
+          field "state" TStr Optional
+          field "style" TStr Optional ]
+      Ops = []
+      Wire = WireShape.Default
+      Harden =
+        { HardenPolicy.Default with
+            TransparentUnions = [] } }
 
 [<Tests>]
 let idlFStarTargetTests =
@@ -530,8 +669,8 @@ let idlFStarTargetTests =
               // vocabulary they are talking about. (Phase 150 measured the emitted round trip
               // NOT discharging at the UI vocabulary's twenty kinds, for a structural reason
               // `proofs/README.md`'s theorem 1 records; at the certification set it discharges,
-              // which is why the scripts are committed since Phase 173. The per-kind lemma shape
-              // that reaches UI scale is Phase 168's.)
+              // which is why the scripts are committed since Phase 173. The per-constructor lemma
+              // shape that reaches UI scale is Phase 168's, pinned below.)
               match
                   FStarTarget.vocabularyModule "M" (tinyIdl TStr Required) [ "Only" ],
                   FStarTarget.proofsModule "MP" "M" (tinyIdl TStr Required) [ "Only" ]
@@ -565,4 +704,152 @@ let idlFStarTargetTests =
                   Expect.stringContains plain "the IDL its caller supplied" "the default names no source it cannot know"
                   Expect.isFalse (plain.Contains "proofs/check.ps1") "and no script of this repository"
                   Expect.stringContains named "ReferenceIdl.fs" "a named provenance is what the header carries"
-                  Expect.stringContains named "F* BACKEND" "and what the model is a property of" ]
+                  Expect.stringContains named "F* BACKEND" "and what the model is a property of"
+
+          // ---- the lemma SHAPE — one per constructor, one per presence pattern (Phase 168) ----
+          //
+          // These pin the emitted TEXT, not a prover result: the certification set's scripts are
+          // checked by `proofs/check.ps1`, and the UI-scale fixture below is never checked here
+          // at all. What is pinned is that the emitter isolates every constructor's object
+          // shapes in its own query — the structural fix Phase 150 named for the failure it
+          // measured at twenty UI kinds — so that an adopter at that scale (`fuaran#1754`)
+          // inherits a generator already proved to emit the shape, and so that the certification
+          // set itself exercises the split rather than leaving it to be met first elsewhere.
+
+          testCase "the reference vocabulary's round trip is one lemma per kind, and `rt_vkind` is only the case split"
+          <| fun _ ->
+              let proofs = proofsOver ReferenceIdl.refIdl
+              let kinds = selection ReferenceIdl.refIdl |> Set.ofList
+
+              Expect.equal
+                  (armLemmas "rt_vkind" proofs |> Set.ofList)
+                  kinds
+                  "one `rt_vkind__<Kind>` per modelled kind — the per-kind lemma the phase was cut for — and none for a refused kind"
+
+              Expect.equal
+                  (bodyOf "rt_vkind" proofs)
+                  [ for k in selection ReferenceIdl.refIdl -> sprintf "rt_vkind__%s #num #flt x" k ]
+                  "`rt_vkind`'s arms cite the per-kind lemmas and prove nothing themselves, so no query carries two kinds' shapes"
+
+              Expect.isTrue
+                  (proofs.Contains "\nlet rec rt_node (#num #flt: eqtype)")
+                  "`rt_node` stays the family's first `let rec` — the top-level declaration the claims ladder resolves"
+
+          testCase
+              "a constructor with `presenceSplitAt` or more conditional members is proved one presence pattern per lemma — and the certification set reaches the split"
+          <| fun _ ->
+              let proofs = proofsOver ReferenceIdl.refIdl
+              let expected = expectedPatternLemmas ReferenceIdl.refIdl
+
+              Expect.equal
+                  (patternLemmas proofs |> Set.ofList)
+                  (Set.ofList expected)
+                  "every conditional constructor's 2^k presence patterns, and nothing else, has a `__p<bits>` lemma"
+
+              // The literal figure, so that a move in the reference vocabulary reads as the
+              // coverage change it is: the node envelope (hidden, label) and `Embed`
+              // (contentHash, props) each carry exactly two conditional members.
+              Expect.equal
+                  (List.length expected)
+                  8
+                  "the reference vocabulary reaches the split twice: its envelope and `Embed`, four patterns each"
+
+              for name in expected do
+                  let k = conditionalsPinned name proofs
+
+                  Expect.isGreaterThanOrEqual
+                      k
+                      FStarTarget.presenceSplitAt
+                      (sprintf
+                          "%s pins every conditional member in its `requires`, so its query carries one object literal"
+                          name)
+
+              Expect.stringContains
+                  proofs
+                  "rt_vkind__Embed__p01 #num #flt x"
+                  "the constructor's own lemma is the split that cites each pattern"
+
+          testCase
+              "at UI scale — a five-optional envelope and an eleven-member kind with five conditional — the split isolates every shape (shape only; no prover run)"
+          <| fun _ ->
+              // The scale Phase 150 measured the ONE-LEMMA shape failing at: the UI vocabulary's
+              // node envelope carried five optional members (a 65-goal `rt_node` query that
+              // failed a `--quake` seed) and its widest kind eleven members, five of them
+              // conditional (an arm that failed outright). Authored here with neutral names
+              // rather than read from the UI vocabulary's `idl.json`: this repository has no
+              // reader for that artefact (`Artifact` renders one and parses none), Phase 123
+              // removed the UI fixture from this project when Phase 114 cut the reference
+              // vocabulary, and the property the adopter inherits is the SCALE, not the names.
+              let proofs = proofsOver uiScaleIdl
+
+              Expect.equal
+                  (patternLemmas proofs |> List.length)
+                  64
+                  "2^5 patterns for the envelope and 2^5 for the wide kind — the two 2^k blow-ups Phase 150 measured, each now 32 one-shape lemmas"
+
+              Expect.equal
+                  (patternLemmas proofs
+                   |> List.filter (fun n -> n.StartsWith "rt_node__p")
+                   |> List.length)
+                  32
+                  "the envelope's 32 presence patterns"
+
+              Expect.equal
+                  (patternLemmas proofs
+                   |> List.filter (fun n -> n.StartsWith "rt_vkind__Wide__p")
+                   |> List.length)
+                  32
+                  "the wide kind's 32 presence patterns"
+
+              for name in patternLemmas proofs do
+                  Expect.equal
+                      (conditionalsPinned name proofs)
+                      5
+                      (sprintf
+                          "%s pins all five conditional members — optional by `None?`/`Some?`, omit-at-default by the encoder's own equality"
+                          name)
+
+              Expect.equal
+                  (bodyOf "rt_vkind" proofs)
+                  [ "rt_vkind__Leaf #num #flt x"
+                    "rt_vkind__Branch #num #flt x"
+                    "rt_vkind__Wide #num #flt x" ]
+                  "the kind case split cites each kind's lemma, in declaration order"
+
+              Expect.isFalse
+                  (bodyOf "rt_vkind__Wide" proofs
+                   |> List.exists (fun l -> l.Contains "rt_items_" || l.Contains "rt_u_" || l.Contains "rt_r_"))
+                  "the wide kind's own lemma is the split and proves no member itself — its shapes live in the pattern lemmas"
+
+              Expect.equal
+                  (bodyOf "rt_vkind__Leaf" proofs |> List.length)
+                  1
+                  "a kind under the threshold is proved in one query, as before"
+
+          testCase
+              "the family recurses on a lexicographic measure, and the rlimit precedent is retired with the shape that needed it"
+          <| fun _ ->
+              let proofs = proofsOver ReferenceIdl.refIdl
+
+              let heads =
+                  lemmaHeads proofs
+                  |> List.filter (fun (_, name) -> not (name.StartsWith "rt_e_"))
+
+              for kw, name in heads do
+                  Expect.isTrue (kw = "let rec" || kw = "and") (sprintf "%s is in the one mutual family" name)
+
+              let lex = Regex.Matches(proofs, @"\(decreases %\[[a-z]+; [0-9]\]\)").Count
+
+              Expect.equal
+                  lex
+                  (List.length heads)
+                  "every lemma of the family carries `decreases %[value; tier]` — the split lemmas recurse on the SAME value and differ only in tier"
+
+              Expect.stringContains
+                  proofs
+                  "#set-options \"--ext context_pruning\""
+                  "the one cost option is still in force"
+
+              Expect.isFalse
+                  (proofs.Contains "#set-options \"--z3rlimit")
+                  "the in-file `--z3rlimit 200` Phase 150 measured at UI scale is gone: the leg's own rlimit is what the split is checked under" ]

@@ -28,32 +28,43 @@
        type-check at `Tot` is the termination proof; the lemma states that every input
        reaches exactly one of `Ok` / `Error` and never both.
 
-   WHAT IS NOT PROVED HERE. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`, which
-   Phase 135 carries for the reference vocabulary — is not restated over the generated
-   vocabulary: it needs a second generated predicate mirroring the decoder's accept set,
-   which is a model-sized artefact of its own. The round trip covers one direction
+   THE SHAPE — one lemma per constructor, one per presence pattern (fuaran-core Phase 168).
+   A constructor with k conditional members (optional, or omitted at its default) encodes
+   to 2^k object shapes, and a lemma over the whole constructor puts all of them in ONE
+   query. Measured at a twenty-kind vocabulary whose node envelope carried five optional
+   members (Phase 150): the node lemma's 65-goal query failed a `--quake` seed at the leg's
+   rlimit, the widest kind's arm failed outright, and raising the rlimit turned failing into
+   grinding. `--split_queries` is not settable as a pragma on the pinned prover, so the
+   isolation is in the emitted shape instead. `rt_<T>` is the round trip over a type — for a
+   type with several constructors, a CASE SPLIT whose arms cite `rt_<T>__<Ctor>`, one
+   constructor's arm alone under `C__<T>__<Ctor>? x`. A constructor with
+   2 or more conditional members is split further: `rt_<T>__<Ctor>__p<bits>` proves ONE
+   presence pattern, its `requires` pinning every conditional member present or absent so
+   the encoder's nested match collapses to one object literal in the query, and the
+   constructor's lemma is a split on exactly those members citing each. The family is still
+   one mutual induction — a kind's children reach `rt_node` — on the lexicographic measure
+   `%[x; tier]`, because the split lemmas recurse on the SAME value and differ only in how
+   much of it they have fixed. Every query therefore carries at most one constructor's
+   shapes, and a wide envelope or a wide kind costs 2^k small lemmas rather than one it
+   cannot discharge. The rlimit precedent Phase 150 took (`--z3rlimit 200` in this file)
+   is retired with the shape that needed it: the leg's own rlimit is what these are
+   checked under, and a query that wants more is a query the split has failed to isolate.
+
+   WHAT IS NOT PROVED HERE, and why. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`,
+   which Phase 135 carries for its hand-written reference vocabulary — is not restated over
+   the generated vocabulary. The only predicate this emitter could generate from the same
+   walk is the decoder's own accept set restated clause for clause, and `Ok? (dec el) ==
+   (that predicate) el` is then a theorem about two renderings of one definition — true,
+   and empty. A characterisation worth the name needs an INDEPENDENT statement of the
+   accept set (a schema-shaped predicate), which is a model-sized artefact of its own;
+   `proofs/README.md` (theorem 1) records the halt. The round trip covers one direction
    (everything the encoder can produce is read back exactly); the characterisation of what
    ELSE is accepted is not covered, and is named here rather than left to be assumed.
 
-   TWO COST OPTIONS ARE PART OF THE ARTEFACT, and the second was MEASURED rather than
-   guessed. `--ext context_pruning` is set below for the reason the model module's header
-   gives at greater length: a mutual induction over the whole family would otherwise carry
-   the whole family in every query.
-
-   The other is a MEASURED finding rather than a default anybody chose, and it was measured
-   at the scale this emitter was first run at — a twenty-kind vocabulary whose node envelope
-   carries five OPTIONAL members (fuaran-core Phase 150). Under the leg's own `--quake 3`
-   that node lemma proved 64 of 65 goals in a single query and FAILED the third seed at the
-   leg's default rlimit of 40 — green standalone and red under `check.ps1`, exactly the
-   shape `Preservation`'s `invert_applicable` records in `modules.json`, and exactly the
-   failure an unquaked run hides. `--z3rlimit 200` is the same remedy that precedent took.
-   It is a blunt one: the hard goal is hard because k conditional envelope members put 2^k
-   object shapes in one query, and isolating that goal would be the sharper fix —
-   `--split_queries` is not settable as a pragma on the pinned prover, so it would mean
-   emitting the node's proof as several smaller lemmas, which is a successor's work rather
-   than a flag. A vocabulary with a small envelope never meets the goal and pays nothing for
-   the option. If this module is ever slow enough to want investigating, check both options
-   are still in force first: losing the rlimit does not read as slowness, it reads as a flake.
+   ONE COST OPTION IS PART OF THE ARTEFACT: `--ext context_pruning` is set below for the
+   reason the model module's header gives at greater length — a mutual induction over the
+   whole family would otherwise carry the whole family in every query. If this module is
+   ever slow enough to want investigating, check it is still in force first.
 
    Apache-2.0, like everything beside it.
 *)
@@ -62,7 +73,7 @@ module ScoreVocabularyProofs
 open WireDecode
 open ScoreVocabulary
 
-#set-options "--z3rlimit 200 --ext context_pruning"
+#set-options "--ext context_pruning"
 
 (* ======================================================================================
    1. The closed string sets. Each is a finite match on distinct literals, so its round
@@ -84,77 +95,339 @@ let rt_e_navigation_kind (#num #flt: eqtype) (x: e_navigation_kind) : Lemma (ens
 (* ======================================================================================
    2. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL
       value — F*'s subterm order spans a mutual inductive family, so each case needs only
-      the sub-lemmas of the members it carries.
+      the sub-lemmas of the members it carries. ONE LEMMA PER CONSTRUCTOR, and one per
+      PRESENCE PATTERN where a constructor's conditional members warrant it (the header
+      says why): no query carries more than one constructor's object shapes.
    ====================================================================================== *)
 
-let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases x) =
+let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
-  | C__node__Node i k  ->
-    rt_vkind #num #flt k
+  | C__node__Node i k -> rt_vkind #num #flt k
 
-and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases x) =
+and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 2]) =
+  match x with
+  | C__vkind__Score _ _ _ -> rt_vkind__Score #num #flt x
+  | C__vkind__Part _ _ _ -> rt_vkind__Part #num #flt x
+  | C__vkind__PartGroup _ _ _ -> rt_vkind__PartGroup #num #flt x
+  | C__vkind__Measure _ _ _ _ _ _ -> rt_vkind__Measure #num #flt x
+  | C__vkind__Staff _ _ -> rt_vkind__Staff #num #flt x
+  | C__vkind__GraceNote _ _ -> rt_vkind__GraceNote #num #flt x
+  | C__vkind__Dynamic _ -> rt_vkind__Dynamic #num #flt x
+  | C__vkind__Fermata -> rt_vkind__Fermata #num #flt x
+  | C__vkind__HairpinStart _ -> rt_vkind__HairpinStart #num #flt x
+  | C__vkind__HairpinEnd -> rt_vkind__HairpinEnd #num #flt x
+  | C__vkind__SlurStart -> rt_vkind__SlurStart #num #flt x
+  | C__vkind__SlurEnd -> rt_vkind__SlurEnd #num #flt x
+  | C__vkind__OctaveShiftStart _ -> rt_vkind__OctaveShiftStart #num #flt x
+  | C__vkind__OctaveShiftEnd -> rt_vkind__OctaveShiftEnd #num #flt x
+  | C__vkind__MultiRest _ -> rt_vkind__MultiRest #num #flt x
+  | C__vkind__Ornament _ _ -> rt_vkind__Ornament #num #flt x
+  | C__vkind__RehearsalMark _ -> rt_vkind__RehearsalMark #num #flt x
+  | C__vkind__NavigationMark _ -> rt_vkind__NavigationMark #num #flt x
+  | C__vkind__Form _ _ _ -> rt_vkind__Form #num #flt x
+
+and rt_vkind__Score (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__Score f0 f1 f2 ->
+    (match f1 with
+      | None ->
+        (match f2 with
+          | None ->
+            rt_vkind__Score__p00 #num #flt x
+          | Some _ ->
+            rt_vkind__Score__p01 #num #flt x
+        )
+      | Some _ ->
+        (match f2 with
+          | None ->
+            rt_vkind__Score__p10 #num #flt x
+          | Some _ ->
+            rt_vkind__Score__p11 #num #flt x
+        )
+    )
+
+(* rt_vkind__Score__p00 — composer absent, title absent *)
+and rt_vkind__Score__p00 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 && None? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
   match x with
   | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
+
+(* rt_vkind__Score__p01 — composer absent, title present *)
+and rt_vkind__Score__p01 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 && Some? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
+
+(* rt_vkind__Score__p10 — composer present, title absent *)
+and rt_vkind__Score__p10 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 && None? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
+
+(* rt_vkind__Score__p11 — composer present, title present *)
+and rt_vkind__Score__p11 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 && Some? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
+
+and rt_vkind__Part (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Part? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Part f0 f1 f2 -> rt_items_l_node #num #flt [] f0; rt_items_l_r_staff_definition #num #flt [] f2
+
+and rt_vkind__PartGroup (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__PartGroup? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__PartGroup f0 f1 f2 -> rt_e_bracket_kind #num #flt f0; rt_items_l_node #num #flt [] f1
+
+and rt_vkind__Measure (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    (if f1 = false then
+      (if f3 = false then
+        (if f4 = false then
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p0000 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p0001 #num #flt x
+          )
+        else
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p0010 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p0011 #num #flt x
+          )
+        )
+      else
+        (if f4 = false then
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p0100 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p0101 #num #flt x
+          )
+        else
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p0110 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p0111 #num #flt x
+          )
+        )
+      )
+    else
+      (if f3 = false then
+        (if f4 = false then
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p1000 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p1001 #num #flt x
+          )
+        else
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p1010 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p1011 #num #flt x
+          )
+        )
+      else
+        (if f4 = false then
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p1100 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p1101 #num #flt x
+          )
+        else
+          (match f5 with
+            | None ->
+              rt_vkind__Measure__p1110 #num #flt x
+            | Some _ ->
+              rt_vkind__Measure__p1111 #num #flt x
+          )
+        )
+      )
+    )
+
+(* rt_vkind__Measure__p0000 — isAnacrusis at its default, repeatEnd at its default, repeatStart at its default, volta absent *)
+and rt_vkind__Measure__p0000 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
   | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p0001 — isAnacrusis at its default, repeatEnd at its default, repeatStart at its default, volta present *)
+and rt_vkind__Measure__p0001 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p0010 — isAnacrusis at its default, repeatEnd at its default, repeatStart not at its default, volta absent *)
+and rt_vkind__Measure__p0010 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p0011 — isAnacrusis at its default, repeatEnd at its default, repeatStart not at its default, volta present *)
+and rt_vkind__Measure__p0011 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p0100 — isAnacrusis at its default, repeatEnd not at its default, repeatStart at its default, volta absent *)
+and rt_vkind__Measure__p0100 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p0101 — isAnacrusis at its default, repeatEnd not at its default, repeatStart at its default, volta present *)
+and rt_vkind__Measure__p0101 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p0110 — isAnacrusis at its default, repeatEnd not at its default, repeatStart not at its default, volta absent *)
+and rt_vkind__Measure__p0110 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p0111 — isAnacrusis at its default, repeatEnd not at its default, repeatStart not at its default, volta present *)
+and rt_vkind__Measure__p0111 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1000 — isAnacrusis not at its default, repeatEnd at its default, repeatStart at its default, volta absent *)
+and rt_vkind__Measure__p1000 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1001 — isAnacrusis not at its default, repeatEnd at its default, repeatStart at its default, volta present *)
+and rt_vkind__Measure__p1001 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1010 — isAnacrusis not at its default, repeatEnd at its default, repeatStart not at its default, volta absent *)
+and rt_vkind__Measure__p1010 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1011 — isAnacrusis not at its default, repeatEnd at its default, repeatStart not at its default, volta present *)
+and rt_vkind__Measure__p1011 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1100 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart at its default, volta absent *)
+and rt_vkind__Measure__p1100 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1101 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart at its default, volta present *)
+and rt_vkind__Measure__p1101 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1110 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart not at its default, volta absent *)
+and rt_vkind__Measure__p1110 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+(* rt_vkind__Measure__p1111 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart not at its default, volta present *)
+and rt_vkind__Measure__p1111 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+
+and rt_vkind__Staff (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Staff? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Staff f0 f1 -> rt_items_l_node #num #flt [] f0
+
+and rt_vkind__GraceNote (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__GraceNote? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__GraceNote f0 f1 -> rt_e_grace_kind #num #flt f0; rt_r_pitch #num #flt f1
+
+and rt_vkind__Dynamic (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Dynamic? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Dynamic f0 -> rt_e_dynamic_level #num #flt f0
-  | C__vkind__Fermata  -> ()
+
+and rt_vkind__Fermata (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Fermata? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__Fermata -> ()
+
+and rt_vkind__HairpinStart (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__HairpinStart? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__HairpinStart f0 -> rt_e_hairpin_kind #num #flt f0
-  | C__vkind__HairpinEnd  -> ()
-  | C__vkind__SlurStart  -> ()
-  | C__vkind__SlurEnd  -> ()
+
+and rt_vkind__HairpinEnd (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__HairpinEnd? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__HairpinEnd -> ()
+
+and rt_vkind__SlurStart (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__SlurStart? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__SlurStart -> ()
+
+and rt_vkind__SlurEnd (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__SlurEnd? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__SlurEnd -> ()
+
+and rt_vkind__OctaveShiftStart (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__OctaveShiftStart? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__OctaveShiftStart f0 -> rt_e_octave_shift_kind #num #flt f0
-  | C__vkind__OctaveShiftEnd  -> ()
+
+and rt_vkind__OctaveShiftEnd (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__OctaveShiftEnd? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__OctaveShiftEnd -> ()
+
+and rt_vkind__MultiRest (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__MultiRest? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__MultiRest f0 -> ()
+
+and rt_vkind__Ornament (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Ornament? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Ornament f0 f1 -> rt_e_ornament_name #num #flt f0
+
+and rt_vkind__RehearsalMark (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__RehearsalMark? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__RehearsalMark f0 -> ()
+
+and rt_vkind__NavigationMark (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__NavigationMark? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__NavigationMark f0 -> rt_e_navigation_kind #num #flt f0
+
+and rt_vkind__Form (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Form? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Form f0 f1 f2 -> rt_items_l_str #num #flt [] f0; rt_items_l_r_form_section #num #flt [] f2
 
-and rt_r_staff_definition (#num #flt: eqtype) (x: r_staff_definition num flt) : Lemma (ensures dec_r_staff_definition (enc_r_staff_definition #num #flt x) == Ok x) (decreases x) =
+and rt_r_staff_definition (#num #flt: eqtype) (x: r_staff_definition num flt) : Lemma (ensures dec_r_staff_definition (enc_r_staff_definition #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__r_staff_definition__Mk f0 f1 f2 f3 -> rt_e_clef_kind #num #flt f0; rt_r_key_signature #num #flt f1; rt_r_time_signature #num #flt f2
 
-and rt_r_key_signature (#num #flt: eqtype) (x: r_key_signature num flt) : Lemma (ensures dec_r_key_signature (enc_r_key_signature #num #flt x) == Ok x) (decreases x) =
+and rt_r_key_signature (#num #flt: eqtype) (x: r_key_signature num flt) : Lemma (ensures dec_r_key_signature (enc_r_key_signature #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__r_key_signature__Mk f0 f1 f2 -> rt_e_mode #num #flt f0; rt_e_note_letter #num #flt f1; rt_e_accidental #num #flt f2
 
-and rt_r_time_signature (#num #flt: eqtype) (x: r_time_signature num flt) : Lemma (ensures dec_r_time_signature (enc_r_time_signature #num #flt x) == Ok x) (decreases x) =
+and rt_r_time_signature (#num #flt: eqtype) (x: r_time_signature num flt) : Lemma (ensures dec_r_time_signature (enc_r_time_signature #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__r_time_signature__Mk f0 f1 -> ()
 
-and rt_r_pitch (#num #flt: eqtype) (x: r_pitch num flt) : Lemma (ensures dec_r_pitch (enc_r_pitch #num #flt x) == Ok x) (decreases x) =
+and rt_r_pitch (#num #flt: eqtype) (x: r_pitch num flt) : Lemma (ensures dec_r_pitch (enc_r_pitch #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__r_pitch__Mk f0 f1 f2 f3 -> rt_e_accidental #num #flt f0; rt_e_note_letter #num #flt f1
 
-and rt_r_form_section (#num #flt: eqtype) (x: r_form_section num flt) : Lemma (ensures dec_r_form_section (enc_r_form_section #num #flt x) == Ok x) (decreases x) =
+and rt_r_form_section (#num #flt: eqtype) (x: r_form_section num flt) : Lemma (ensures dec_r_form_section (enc_r_form_section #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__r_form_section__Mk f0 f1 -> rt_items_l_node #num #flt [] f0
 
-and rt_items_l_node (#num #flt: eqtype) (acc: list (node num flt)) (xs: list (node num flt)) : Lemma (ensures dec_items_l_node acc (enc_items_l_node #num #flt xs) == Ok (rev_app acc xs)) (decreases xs) =
+and rt_items_l_node (#num #flt: eqtype) (acc: list (node num flt)) (xs: list (node num flt)) : Lemma (ensures dec_items_l_node acc (enc_items_l_node #num #flt xs) == Ok (rev_app acc xs)) (decreases %[xs; 2]) =
   match xs with
   | [] -> ()
   | y :: t -> rt_node #num #flt y; rt_items_l_node #num #flt (y :: acc) t
 
-and rt_items_l_r_staff_definition (#num #flt: eqtype) (acc: list (r_staff_definition num flt)) (xs: list (r_staff_definition num flt)) : Lemma (ensures dec_items_l_r_staff_definition acc (enc_items_l_r_staff_definition #num #flt xs) == Ok (rev_app acc xs)) (decreases xs) =
+and rt_items_l_r_staff_definition (#num #flt: eqtype) (acc: list (r_staff_definition num flt)) (xs: list (r_staff_definition num flt)) : Lemma (ensures dec_items_l_r_staff_definition acc (enc_items_l_r_staff_definition #num #flt xs) == Ok (rev_app acc xs)) (decreases %[xs; 2]) =
   match xs with
   | [] -> ()
   | y :: t -> rt_r_staff_definition #num #flt y; rt_items_l_r_staff_definition #num #flt (y :: acc) t
 
-and rt_items_l_int (#num #flt: eqtype) (acc: list (num)) (xs: list (num)) : Lemma (ensures dec_items_l_int acc (enc_items_l_int #num #flt xs) == Ok (rev_app acc xs)) (decreases xs) =
+and rt_items_l_int (#num #flt: eqtype) (acc: list (num)) (xs: list (num)) : Lemma (ensures dec_items_l_int acc (enc_items_l_int #num #flt xs) == Ok (rev_app acc xs)) (decreases %[xs; 2]) =
   match xs with
   | [] -> ()
   | y :: t -> rt_items_l_int #num #flt (y :: acc) t
 
-and rt_items_l_r_form_section (#num #flt: eqtype) (acc: list (r_form_section num flt)) (xs: list (r_form_section num flt)) : Lemma (ensures dec_items_l_r_form_section acc (enc_items_l_r_form_section #num #flt xs) == Ok (rev_app acc xs)) (decreases xs) =
+and rt_items_l_r_form_section (#num #flt: eqtype) (acc: list (r_form_section num flt)) (xs: list (r_form_section num flt)) : Lemma (ensures dec_items_l_r_form_section acc (enc_items_l_r_form_section #num #flt xs) == Ok (rev_app acc xs)) (decreases %[xs; 2]) =
   match xs with
   | [] -> ()
   | y :: t -> rt_r_form_section #num #flt y; rt_items_l_r_form_section #num #flt (y :: acc) t
 
-and rt_items_l_str (#num #flt: eqtype) (acc: list (string)) (xs: list (string)) : Lemma (ensures dec_items_l_str acc (enc_items_l_str #num #flt xs) == Ok (rev_app acc xs)) (decreases xs) =
+and rt_items_l_str (#num #flt: eqtype) (acc: list (string)) (xs: list (string)) : Lemma (ensures dec_items_l_str acc (enc_items_l_str #num #flt xs) == Ok (rev_app acc xs)) (decreases %[xs; 2]) =
   match xs with
   | [] -> ()
   | y :: t -> rt_items_l_str #num #flt (y :: acc) t

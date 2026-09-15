@@ -1589,6 +1589,213 @@ module FStarTarget =
                 |> Option.map (fun call -> sprintf "(match %s with | None -> () | Some w -> %s)" b call)
             | _ -> memberLemma m.Slot b)
 
+    // -----------------------------------------------------------------------
+    // 8b. The lemma SHAPE — one lemma per constructor, one per presence pattern (Phase 168).
+    //
+    // A constructor with k CONDITIONAL members — optional, or omitted at its default — encodes to
+    // 2^k object shapes, and a round-trip lemma over the whole constructor puts all of them in one
+    // query. Measured at a twenty-kind vocabulary whose node envelope carried five optional
+    // members (Phase 150): the node lemma's 65-goal query failed a `--quake` seed, the widest
+    // kind's arm failed outright, and raising the rlimit turned failing into grinding.
+    // `--split_queries` is not settable as a pragma on the pinned prover, so the isolation is
+    // done HERE, in the emitted shape:
+    //
+    //   rt_<T>            the round trip over the type — for a type with several constructors a
+    //                     CASE SPLIT, each arm citing the constructor's own lemma;
+    //   rt_<T>__<Ctor>    one constructor's arm alone, under `C__<T>__<Ctor>? x`;
+    //   rt_<T>__<Ctor>__p<bits>  one PRESENCE PATTERN of that constructor — the `requires` pins
+    //                     every conditional member present or absent, so the encoder's nested
+    //                     match collapses to ONE object literal in the query — cited by a split on
+    //                     exactly those members, emitted when the count reaches `presenceSplitAt`.
+    //
+    // The family stays one mutual induction, so a kind's children still reach `rt_node`; the
+    // termination measure is lexicographic, `%[x; tier]`, because the split lemmas recurse on the
+    // SAME value and differ only in how much of it they have already fixed.
+    // -----------------------------------------------------------------------
+
+    /// A constructor with at least this many conditional members has its round trip emitted as
+    /// one lemma per presence pattern. Two, so that the split is exercised — and proved to
+    /// discharge — by the certification set itself (the reference vocabulary's `Embed` and its
+    /// node envelope both carry exactly two), not first met at an adopter's scale.
+    let presenceSplitAt = 2
+
+    /// One conditional member of a constructor: its binder in the constructor pattern, its IDL
+    /// name (for the pattern lemma's caption), and how its two shapes are told apart — `None`
+    /// for an optional member (`None?` / `Some?`), `Some lit` for an omit-at-default member
+    /// (equality with the literal the encoder tests).
+    type private Conditional =
+        { Binder: string
+          Name: string
+          Default: string option }
+
+    let private conditionals (ms: Member list) : Conditional list =
+        ms
+        |> List.mapi (fun i m -> i, m)
+        |> List.choose (fun (i, m) ->
+            match m.Presence with
+            | None -> None
+            | Some d ->
+                Some
+                    { Binder = sprintf "f%d" i
+                      Name = m.Name
+                      Default = d })
+
+    /// Every presence pattern over k conditional members, first member most significant,
+    /// absent before present — so `p00` precedes `p01` precedes `p10`.
+    let rec private patterns (k: int) : bool list list =
+        if k = 0 then
+            [ [] ]
+        else
+            [ for present in [ false; true ] do
+                  for rest in patterns (k - 1) do
+                      present :: rest ]
+
+    let private patternName (bits: bool list) =
+        "p" + (bits |> List.map (fun b -> if b then "1" else "0") |> String.concat "")
+
+    /// The boolean the pattern lemma's `requires` carries for one member.
+    let private condition (c: Conditional) (present: bool) =
+        match c.Default, present with
+        | None, true -> sprintf "Some? %s" c.Binder
+        | None, false -> sprintf "None? %s" c.Binder
+        | Some d, true -> sprintf "not (%s = %s)" c.Binder d
+        | Some d, false -> sprintf "%s = %s" c.Binder d
+
+    let private caption (c: Conditional) (present: bool) =
+        match c.Default, present with
+        | None, true -> c.Name + " present"
+        | None, false -> c.Name + " absent"
+        | Some _, true -> c.Name + " not at its default"
+        | Some _, false -> c.Name + " at its default"
+
+    /// The case split that cites one pattern lemma per leaf — nested on the conditional members
+    /// in order, an optional member by `match`, an omit-at-default one by the encoder's own test.
+    let rec private splitLines (name: string) (cs: Conditional list) (bits: bool list) : string list =
+        match cs with
+        | [] -> [ sprintf "%s__%s #num #flt x" name (patternName (List.rev bits)) ]
+        | c :: rest ->
+            let absent = splitLines name rest (false :: bits)
+            let present = splitLines name rest (true :: bits)
+
+            match c.Default with
+            | None ->
+                [ sprintf "(match %s with" c.Binder; "  | None ->" ]
+                @ (absent |> List.map (indent 2))
+                @ [ "  | Some _ ->" ]
+                @ (present |> List.map (indent 2))
+                @ [ ")" ]
+            | Some d ->
+                [ sprintf "(if %s = %s then" c.Binder d ]
+                @ (absent |> List.map (indent 1))
+                @ [ "else" ]
+                @ (present |> List.map (indent 1))
+                @ [ ")" ]
+
+    /// One constructor of a modelled type, as the proof emitter sees it: the model's constructor
+    /// name, the binders that precede its members in the pattern (`i k` for the node), the
+    /// members under their presence rules, and the lemma calls that precede the members' own
+    /// (`rt_vkind k` for the node).
+    type private Ctor =
+        { Label: string
+          CtorName: string
+          Lead: string list
+          Members: Member list
+          Extra: string list }
+
+    /// One type's round trip as a family of lemmas — see 8b above for the shape. `rtHead` supplies
+    /// `let rec` / `and`; `line` receives the emitted text.
+    let private emitFamily
+        (line: string -> unit)
+        (rtHead: string -> string)
+        (typeName: string)
+        (fsType: string)
+        (ctors: Ctor list)
+        =
+        let rt = "rt_" + typeName
+
+        let signature (name: string) (requires: string option) (tier: int) =
+            let req =
+                match requires with
+                | Some r -> sprintf "(requires (%s)) " r
+                | None -> ""
+
+            sprintf
+                "%s (#num #flt: eqtype) (x: %s) : Lemma %s(ensures dec_%s (enc_%s #num #flt x) == Ok x) (decreases %%[x; %d]) ="
+                name
+                fsType
+                req
+                typeName
+                typeName
+                tier
+
+        let members (c: Ctor) = sortMembers c.Members
+
+        let binders (c: Ctor) =
+            c.Lead @ (members c |> List.mapi (fun i _ -> sprintf "f%d" i))
+
+        let pattern (c: Ctor) =
+            String.concat " " (c.CtorName :: binders c)
+
+        let wildcard (c: Ctor) =
+            String.concat " " (c.CtorName :: (binders c |> List.map (fun _ -> "_")))
+
+        let direct (c: Ctor) =
+            let calls = c.Extra @ memberLemmas (members c)
+            if calls.IsEmpty then "()" else String.concat "; " calls
+
+        let multi = List.length ctors > 1
+
+        // The arm-level lemma: the constructor proved in one query when its conditional members
+        // are few, else a split citing one pattern lemma per presence pattern.
+        let armLemma (name: string) (requires: string option) (tier: int) (c: Ctor) =
+            let cs = conditionals (members c)
+
+            if List.length cs < presenceSplitAt then
+                line (rtHead (signature name requires tier))
+                line "  match x with"
+                line (sprintf "  | %s -> %s" (pattern c) (direct c))
+                line ""
+            else
+                line (rtHead (signature name requires tier))
+                line "  match x with"
+                line (sprintf "  | %s ->" (pattern c))
+
+                for l in splitLines name cs [] do
+                    line (indent 2 l)
+
+                line ""
+
+                for bits in patterns (List.length cs) do
+                    let pname = sprintf "%s__%s" name (patternName bits)
+                    let conds = List.map2 condition cs bits |> String.concat " && "
+                    let captions = List.map2 caption cs bits |> String.concat ", "
+
+                    let requires =
+                        if multi then
+                            sprintf "match x with | %s -> %s | _ -> false" (pattern c) conds
+                        else
+                            sprintf "match x with | %s -> %s" (pattern c) conds
+
+                    line (sprintf "(* %s — %s *)" pname captions)
+                    line (rtHead (signature pname (Some requires) 0))
+                    line "  match x with"
+                    line (sprintf "  | %s -> %s" (pattern c) (direct c))
+                    line ""
+
+        if not multi then
+            armLemma rt None 2 ctors.Head
+        else
+            line (rtHead (signature rt None 2))
+            line "  match x with"
+
+            for c in ctors do
+                line (sprintf "  | %s -> %s__%s #num #flt x" (wildcard c) rt c.Label)
+
+            line ""
+
+            for c in ctors do
+                armLemma (sprintf "%s__%s" rt c.Label) (Some(sprintf "%s? x" c.CtorName)) 1 c
+
     let private proofsHeader
         (provenance: Provenance)
         (moduleName: string)
@@ -1622,32 +1829,45 @@ module FStarTarget =
           "       type-check at `Tot` is the termination proof; the lemma states that every input"
           "       reaches exactly one of `Ok` / `Error` and never both."
           ""
-          "   WHAT IS NOT PROVED HERE. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`, which"
-          "   Phase 135 carries for the reference vocabulary — is not restated over the generated"
-          "   vocabulary: it needs a second generated predicate mirroring the decoder's accept set,"
-          "   which is a model-sized artefact of its own. The round trip covers one direction"
+          "   THE SHAPE — one lemma per constructor, one per presence pattern (fuaran-core Phase 168)."
+          "   A constructor with k conditional members (optional, or omitted at its default) encodes"
+          "   to 2^k object shapes, and a lemma over the whole constructor puts all of them in ONE"
+          "   query. Measured at a twenty-kind vocabulary whose node envelope carried five optional"
+          "   members (Phase 150): the node lemma's 65-goal query failed a `--quake` seed at the leg's"
+          "   rlimit, the widest kind's arm failed outright, and raising the rlimit turned failing into"
+          "   grinding. `--split_queries` is not settable as a pragma on the pinned prover, so the"
+          "   isolation is in the emitted shape instead. `rt_<T>` is the round trip over a type — for a"
+          "   type with several constructors, a CASE SPLIT whose arms cite `rt_<T>__<Ctor>`, one"
+          "   constructor's arm alone under `C__<T>__<Ctor>? x`. A constructor with"
+          sprintf
+              "   %d or more conditional members is split further: `rt_<T>__<Ctor>__p<bits>` proves ONE"
+              presenceSplitAt
+          "   presence pattern, its `requires` pinning every conditional member present or absent so"
+          "   the encoder's nested match collapses to one object literal in the query, and the"
+          "   constructor's lemma is a split on exactly those members citing each. The family is still"
+          "   one mutual induction — a kind's children reach `rt_node` — on the lexicographic measure"
+          "   `%[x; tier]`, because the split lemmas recurse on the SAME value and differ only in how"
+          "   much of it they have fixed. Every query therefore carries at most one constructor's"
+          "   shapes, and a wide envelope or a wide kind costs 2^k small lemmas rather than one it"
+          "   cannot discharge. The rlimit precedent Phase 150 took (`--z3rlimit 200` in this file)"
+          "   is retired with the shape that needed it: the leg's own rlimit is what these are"
+          "   checked under, and a query that wants more is a query the split has failed to isolate."
+          ""
+          "   WHAT IS NOT PROVED HERE, and why. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`,"
+          "   which Phase 135 carries for its hand-written reference vocabulary — is not restated over"
+          "   the generated vocabulary. The only predicate this emitter could generate from the same"
+          "   walk is the decoder's own accept set restated clause for clause, and `Ok? (dec el) =="
+          "   (that predicate) el` is then a theorem about two renderings of one definition — true,"
+          "   and empty. A characterisation worth the name needs an INDEPENDENT statement of the"
+          "   accept set (a schema-shaped predicate), which is a model-sized artefact of its own;"
+          "   `proofs/README.md` (theorem 1) records the halt. The round trip covers one direction"
           "   (everything the encoder can produce is read back exactly); the characterisation of what"
           "   ELSE is accepted is not covered, and is named here rather than left to be assumed."
           ""
-          "   TWO COST OPTIONS ARE PART OF THE ARTEFACT, and the second was MEASURED rather than"
-          "   guessed. `--ext context_pruning` is set below for the reason the model module's header"
-          "   gives at greater length: a mutual induction over the whole family would otherwise carry"
-          "   the whole family in every query."
-          ""
-          "   The other is a MEASURED finding rather than a default anybody chose, and it was measured"
-          "   at the scale this emitter was first run at — a twenty-kind vocabulary whose node envelope"
-          "   carries five OPTIONAL members (fuaran-core Phase 150). Under the leg's own `--quake 3`"
-          "   that node lemma proved 64 of 65 goals in a single query and FAILED the third seed at the"
-          "   leg's default rlimit of 40 — green standalone and red under `check.ps1`, exactly the"
-          "   shape `Preservation`'s `invert_applicable` records in `modules.json`, and exactly the"
-          "   failure an unquaked run hides. `--z3rlimit 200` is the same remedy that precedent took."
-          "   It is a blunt one: the hard goal is hard because k conditional envelope members put 2^k"
-          "   object shapes in one query, and isolating that goal would be the sharper fix —"
-          "   `--split_queries` is not settable as a pragma on the pinned prover, so it would mean"
-          "   emitting the node's proof as several smaller lemmas, which is a successor's work rather"
-          "   than a flag. A vocabulary with a small envelope never meets the goal and pays nothing for"
-          "   the option. If this module is ever slow enough to want investigating, check both options"
-          "   are still in force first: losing the rlimit does not read as slowness, it reads as a flake."
+          "   ONE COST OPTION IS PART OF THE ARTEFACT: `--ext context_pruning` is set below for the"
+          "   reason the model module's header gives at greater length — a mutual induction over the"
+          "   whole family would otherwise carry the whole family in every query. If this module is"
+          "   ever slow enough to want investigating, check it is still in force first."
           ""
           "   Apache-2.0, like everything beside it."
           "*)"
@@ -1656,7 +1876,7 @@ module FStarTarget =
           "open WireDecode"
           sprintf "open %s" modelName
           ""
-          "#set-options \"--z3rlimit 200 --ext context_pruning\""
+          "#set-options \"--ext context_pruning\""
           "" ]
         |> String.concat nl
 
@@ -1702,7 +1922,9 @@ module FStarTarget =
             line "(* ======================================================================================"
             line "   2. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL"
             line "      value — F*'s subterm order spans a mutual inductive family, so each case needs only"
-            line "      the sub-lemmas of the members it carries."
+            line "      the sub-lemmas of the members it carries. ONE LEMMA PER CONSTRUCTOR, and one per"
+            line "      PRESENCE PATTERN where a constructor's conditional members warrant it (the header"
+            line "      says why): no query carries more than one constructor's object shapes."
             line "   ====================================================================================== *)"
             line ""
 
@@ -1713,88 +1935,58 @@ module FStarTarget =
                 firstRt <- false
                 sprintf "%s %s" kw sig_
 
-            line (
-                rtHead (
-                    "rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases x) ="
-                )
-            )
+            let family = emitFamily line rtHead
 
-            line "  match x with"
+            // The node: one constructor, `id` and the kind ahead of the envelope members, and the
+            // kind's own round trip cited ahead of theirs. `rt_node` stays the first `let rec`, which
+            // is the top-level declaration the claims ladder resolves.
+            family
+                "node"
+                "node num flt"
+                [ { Label = "Node"
+                    CtorName = ctorName "node" "Node"
+                    Lead = [ "i"; "k" ]
+                    Members = envArgs
+                    Extra = [ "rt_vkind #num #flt k" ] } ]
 
-            let envBinders =
-                envArgs |> List.mapi (fun i _ -> sprintf "f%d" i) |> String.concat " "
-
-            line (sprintf "  | %s i k %s ->" (ctorName "node" "Node") envBinders)
-
-            let nodeCalls = "rt_vkind #num #flt k" :: memberLemmas envArgs
-            line (indent 2 (String.concat "; " nodeCalls))
-            line ""
-
-            line (
-                rtHead (
-                    "rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases x) ="
-                )
-            )
-
-            line "  match x with"
-
-            for tag, ms in c.Kinds do
-                let sorted = sortMembers ms
-                let bs = sorted |> List.mapi (fun i _ -> sprintf "f%d" i) |> String.concat " "
-                let calls = memberLemmas sorted
-                let body = if calls.IsEmpty then "()" else String.concat "; " calls
-                line (sprintf "  | %s %s -> %s" (ctorName "vkind" tag) bs body)
-
-            line ""
+            // The kinds: `rt_vkind` is the case split, `rt_vkind__<Kind>` each kind's arm alone —
+            // the per-kind lemma Phase 168 was cut for.
+            family
+                "vkind"
+                "vkind num flt"
+                [ for tag, ms in c.Kinds do
+                      { Label = tag
+                        CtorName = ctorName "vkind" tag
+                        Lead = []
+                        Members = ms
+                        Extra = [] } ]
 
             for s in declared do
                 match s with
                 | SNode -> ()
                 | SRecord _ ->
                     let n = slotName s
-                    let ms = c.Members[n] |> sortMembers
-                    let bs = ms |> List.mapi (fun i _ -> sprintf "f%d" i) |> String.concat " "
-                    let calls = memberLemmas ms
-                    let body = if calls.IsEmpty then "()" else String.concat "; " calls
 
-                    line (
-                        rtHead (
-                            sprintf
-                                "rt_%s (#num #flt: eqtype) (x: %s num flt) : Lemma (ensures dec_%s (enc_%s #num #flt x) == Ok x) (decreases x) ="
-                                n
-                                n
-                                n
-                                n
-                        )
-                    )
-
-                    line "  match x with"
-                    line (sprintf "  | %s %s -> %s" (ctorName n "Mk") bs body)
-                    line ""
+                    family
+                        n
+                        (n + " num flt")
+                        [ { Label = "Mk"
+                            CtorName = ctorName n "Mk"
+                            Lead = []
+                            Members = c.Members[n]
+                            Extra = [] } ]
                 | SUnion _ ->
                     let n = slotName s
 
-                    line (
-                        rtHead (
-                            sprintf
-                                "rt_%s (#num #flt: eqtype) (x: %s num flt) : Lemma (ensures dec_%s (enc_%s #num #flt x) == Ok x) (decreases x) ="
-                                n
-                                n
-                                n
-                                n
-                        )
-                    )
-
-                    line "  match x with"
-
-                    for tag, ms in c.Cases[n] do
-                        let sorted = sortMembers ms
-                        let bs = sorted |> List.mapi (fun i _ -> sprintf "f%d" i) |> String.concat " "
-                        let calls = memberLemmas sorted
-                        let body = if calls.IsEmpty then "()" else String.concat "; " calls
-                        line (sprintf "  | %s %s -> %s" (ctorName n tag) bs body)
-
-                    line ""
+                    family
+                        n
+                        (n + " num flt")
+                        [ for tag, ms in c.Cases[n] do
+                              { Label = tag
+                                CtorName = ctorName n tag
+                                Lead = []
+                                Members = ms
+                                Extra = [] } ]
                 | _ -> ()
 
             for s in c.Order do
@@ -1806,7 +1998,7 @@ module FStarTarget =
                     line (
                         rtHead (
                             sprintf
-                                "rt_items_%s (#num #flt: eqtype) (acc: list (%s)) (xs: list (%s)) : Lemma (ensures dec_items_%s acc (enc_items_%s #num #flt xs) == Ok (rev_app acc xs)) (decreases xs) ="
+                                "rt_items_%s (#num #flt: eqtype) (acc: list (%s)) (xs: list (%s)) : Lemma (ensures dec_items_%s acc (enc_items_%s #num #flt xs) == Ok (rev_app acc xs)) (decreases %%[xs; 2]) ="
                                 n
                                 ity
                                 ity
@@ -1832,7 +2024,7 @@ module FStarTarget =
                     line (
                         rtHead (
                             sprintf
-                                "rt_entries_%s (#num #flt: eqtype) (acc: list (string & %s)) (es: list (string & %s)) : Lemma (ensures dec_entries_%s acc (enc_entries_%s #num #flt es) == Ok (rev_app acc es)) (decreases es) ="
+                                "rt_entries_%s (#num #flt: eqtype) (acc: list (string & %s)) (es: list (string & %s)) : Lemma (ensures dec_entries_%s acc (enc_entries_%s #num #flt es) == Ok (rev_app acc es)) (decreases %%[es; 2]) ="
                                 n
                                 ity
                                 ity

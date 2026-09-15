@@ -876,7 +876,10 @@ decoder over the `jval` value model and the combinators above; generic unions ar
 at the arguments the vocabulary reaches, which is what keeps every definition and every lemma
 first-order. The proofs half is `rt_node` and the mutual family beside it — **`dec_node (enc_node
 x) == Ok x`, for every value of every modelled type**, at every depth, through every list, map,
-optional member and omit-default — plus `dec_node_total` for the outcome's exclusivity.
+optional member and omit-default — plus `dec_node_total` for the outcome's exclusivity. Since
+Phase 168 that family is emitted **one lemma per constructor and one per presence pattern**, so
+no query carries more than one constructor's object shapes; the shape has its own subsection
+below.
 
 **What is proved is the F\* BACKEND, and that sentence is the whole of Phase 173.** Phase 150
 generated the one model from the shared corpus's `idl.json` — the UI vocabulary — which put a
@@ -939,9 +942,9 @@ the live lists; the shape is:
 
 Three things are deliberately NOT claimed here. The `wf` characterisation — `Ok? (dec el) == wf
 el`, which the reference vocabulary carries above — is not restated over the generated
-vocabularies: it needs a second generated predicate mirroring the decoder's accept set, a
-model-sized artefact of its own, so the round trip covers everything the encoder can produce and
-the characterisation of what ELSE is accepted is open (Phase 168 carries it). A **host-only**
+vocabularies. Phase 168 was cut to restate it over a generated acceptance predicate and HALTED,
+with the reason in its subsection below: the round trip covers everything the encoder can
+produce, and the characterisation of what ELSE is accepted is open. A **host-only**
 member is absent from the model entirely, because it is never on the wire. And a **wire-visible
 closure** is modelled as `unit` encoding to the fixed `"<closure>"` sentinel — not a weakening but
 the precise statement that the member carries no information.
@@ -975,13 +978,120 @@ different emitter but the finding Phase 150 itself recorded: **the cost is the n
 closure, not the kinds.** The UI vocabulary's envelope carried five optional members and
 fourteen declared types before any kind was reached; the reference vocabulary's carries two
 scalars. The 2^k object-shape blow-up that stopped `rt_node` at twenty UI kinds has k = 2 here.
-The CI proofs-job wall clock before and after is recorded in Phase 173's outcome.
+The CI proofs-job wall clock before and after is recorded in Phase 173's outcome. Phase 168
+re-measured the three proof scripts under the per-constructor shape — its table is in the
+subsection below, and `modules.json` carries the current budgets.
+
+#### The shape — one lemma per constructor, one per presence pattern (Phase 168)
+
+**The problem, restated in one sentence.** A constructor with k conditional members — optional,
+or omitted at its default — encodes to 2^k object shapes, and a round-trip lemma over the whole
+constructor puts all of them in ONE prover query. That is both failures Phase 150 measured at
+twenty UI kinds (below): a 65-goal `rt_node` query over a five-optional envelope failing a
+`--quake` seed, and `rt_vkind`'s widest arm — eleven members, five conditional — failing
+outright. Raising the rlimit turned failing into grinding, `--split_queries` is not settable as a
+pragma on the pinned prover, and a patterned lookup helper made everything slower. The fix is in
+the generator, and it is the SHAPE of the emitted proof, not a flag.
+
+**The shape.** `FStarTarget.proofsModuleFrom` now emits, for every modelled type `T`:
+
+- **`rt_<T>`** — the round trip over the type. For a type with several constructors (the kind
+  union `vkind`, every value union) it is a CASE SPLIT whose arms cite the constructor lemmas and
+  prove nothing themselves. `rt_node` stays the family's first `let rec`, which is the top-level
+  declaration the claims ladder resolves.
+- **`rt_<T>__<Ctor>`** — one constructor's arm alone, under `requires C__<T>__<Ctor>? x`. For a
+  kind this is the per-kind lemma the phase was cut for: `rt_vkind__Embed`, `rt_vkind__Group`, one
+  per modelled kind and none for a refused one.
+- **`rt_<T>__<Ctor>__p<bits>`** — one PRESENCE PATTERN of a constructor that carries
+  `FStarTarget.presenceSplitAt` (two) or more conditional members: its `requires` pins every
+  conditional member present or absent — an optional member by `None?` / `Some?`, an
+  omit-at-default one by equality with the literal the encoder itself tests — so the encoder's
+  nested match collapses to ONE object literal in the query. The constructor's lemma is then a
+  split on exactly those members, in order, citing each pattern lemma; the node's envelope is the
+  node's one constructor and is treated the same way (`rt_node__p00` … `rt_node__p11` over the
+  reference vocabulary's `hidden` and `label`).
+
+The family is still one mutual induction, because a kind's children reach `rt_node` through
+`rt_items_l_node`; what changed is the termination measure, which is lexicographic — `%[x; tier]`,
+tier 2 for the type, 1 for the constructor, 0 for the pattern — because the split lemmas recurse on
+the SAME value and differ only in how much of it they have already fixed. The threshold is two, not
+five, so that the certification set itself exercises the split and proves it discharges: the
+reference vocabulary reaches it at its envelope and at `Embed` (four patterns each), the score
+sample at `Measure` and `Score` (omit-at-default members, so those pattern lemmas pin equality with
+a default rather than `Some?`), and the second-domain sample carries no constructor wide enough,
+which is the per-constructor shape alone. The rule is uniform over kinds, records and union cases
+— one helper, one measure — rather than special to kinds, because a five-optional RECORD in an
+adopter's envelope closure meets the same wall, and the emitter should not have to be taught it
+twice.
+
+**What it costs, and what it buys.** 2^k small lemmas per wide constructor in place of one it
+cannot discharge: 26 lemmas in `VocabularyProofs` (was 9), 27 in `DocVocabularyProofs`, 62 in
+`ScoreVocabularyProofs`. The widest query in any of the three is the case split's own — two
+dispatch goals per arm, a discriminator and a measure — never a set of object shapes. And the
+`--z3rlimit 200` Phase 150 wrote into the file as the remedy it had measured is RETIRED with the
+shape that needed it: every generated proof script is checked at the leg's own rlimit of 40, and a
+query that wants more is a query the split has failed to isolate. Measured on the pinned prover,
+cold, `--z3rlimit 40 --quake 3`, this dev machine (one direct run and three `check.ps1 -Runs 1`
+legs; the 108s outlier ran inside a leg 37% slower end to end, so it is load, and it is kept
+because the seeding rule takes the slowest):
+
+| module | lemmas | before (Phase 173, fastest–slowest) | after (Phase 168, fastest–slowest) | budget (before → after) |
+|---|---|---|---|---|
+| `VocabularyProofs` | 26 | 5–17s | 11–18s | 40s → 40s |
+| `DocVocabularyProofs` | 27 | 5–9s | 8–10s | 20s → 20s |
+| `ScoreVocabularyProofs` | 62 | 12–42s | 46–108s | 90s → 220s |
+
+Whole-leg wall clock at `-Runs 1`, all seventeen modules plus the host step: 217s, 299s, 219s;
+CI's `-Runs 3` job is three of those. The floors are deliberately NOT re-seeded from four samples
+on one machine: each new script is strictly more work than the one whose fastest run Phase 173
+observed, so the floors seeded then remain true lower bounds, and raising one from few samples
+would risk the red leg on a faster runner that Phase 164's asymmetry exists to fear.
+
+**The pins.** `IdlFStarTargetTests` holds the emitted shape, not a prover result: at the reference
+vocabulary — one `rt_vkind__<Kind>` per modelled kind, `rt_vkind`'s arms citing them and proving
+nothing, exactly the 2^k pattern lemmas the vocabulary's conditional constructors warrant (eight,
+stated as a literal so a move in the vocabulary reads as the coverage change it is), every
+pattern's `requires` pinning every conditional member, the lexicographic measure on every lemma of
+the family, and no in-file rlimit — and at a UI-SCALE fixture: a five-optional envelope and an
+eleven-member kind with five conditional members, the two parameters Phase 150 measured the
+one-lemma shape failing at, producing 32 + 32 pattern lemmas, each pinning all five. The fixture
+is authored under neutral names rather than read from the UI vocabulary's `idl.json`: this
+repository has no reader for that artefact (`Artifact` renders one and parses none), Phase 123
+removed the UI fixture from the test project when Phase 114 cut the reference vocabulary, and the
+property the adopter inherits is the scale, not the names. No UI check runs in this leg; the UI
+vocabulary's proof, cost and coverage decision remain `fuaran#1754`'s.
+
+**The `wf` characterisation — HALTED, with the reason.** Phase 168's fourth task was to restate
+`Ok? (dec_node el) == wf el` over a generated acceptance predicate mirroring the decoder's accept
+set. The only predicate this emitter can generate from the same walk IS the decoder's accept set,
+restated clause for clause — `get_prop` by `get_prop`, `as_string` by `as_string` — and a lemma
+that the decoder succeeds exactly when that predicate holds is a theorem about two renderings of
+one definition: true, provable, and empty, because nothing in it could be wrong without the other
+half being wrong the same way. Phase 135's `decode_node_wf` earns its keep because its `wf` is
+written by hand, independently of the decoder, so agreement between them is evidence. A
+characterisation worth the name over a generated model therefore needs an INDEPENDENT statement of
+the accept set — a schema-shaped predicate, which the IDL's JSON-schema backend already emits for
+hosts and which would have to be modelled in F\* as a third generated artefact of the model's own
+size — and that is a phase, not a task inside this one. Named here rather than left to be
+assumed; the emitted header says the same.
+
+**The successor this phase does not take — the mutual-family split.** What the shape above fixes
+is the WIDTH of a query; what it leaves alone is the size of the mutual family every query is
+checked inside, which is where the cost turns superlinear as the proof vocabulary widens (Phase
+150: the whole expressible UI vocabulary did not finish a check in twenty-five minutes, and
+`--ext context_pruning` is what keeps the family out of each query's context rather than out of
+the run). Widening a proof vocabulary past the envelope's closure needs that family SPLIT into
+groups checked separately, and the node recursion forbids it as the model is shaped: every kind
+with children reaches `node`, `node` reaches every kind, so the whole vocabulary is one strongly
+connected component. Breaking it means an abstract node parameter, or a two-level model where
+kinds are proved against an interface the node satisfies — generator work of its own, sized by
+the adopter's vocabulary, and not this phase's.
 
 #### History — the UI vocabulary's measurements (Phase 150), now `fuaran#1754`'s problem
 
 What follows is Phase 150's measurement over the UI vocabulary, kept verbatim because it is the
-motivation for the per-kind lemma shape (Phase 168) and the test that shape has to pass where the
-UI vocabulary now lives. None of it describes a module in this directory any more: the numbers
+motivation for the per-constructor lemma shape Phase 168 emitted, and the test that shape has to
+pass where the UI vocabulary now lives. None of it describes a module in this directory any more: the numbers
 are the adopter's to reproduce, and the remedies are the adopter's to spend. "This corpus" below
 is the wire-format corpus's `idl.json`, 43 kinds, of which the cost rule selected 20.
 

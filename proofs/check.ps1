@@ -78,7 +78,8 @@ $ErrorActionPreference = 'Stop'
 #   VocabularyProofs — Phase 173: the ROUND TRIP over `Vocabulary`, emitted by the same target from
 #                the same walk (`dec_node (enc_node x) == Ok x`, plus totality's exclusivity). Opens
 #                `Vocabulary`, so it follows it. See the note below the list for why this was not
-#                committed by Phase 150 and is now.
+#                committed by Phase 150 and is now. Since Phase 168 the script is one lemma per
+#                constructor and one per presence pattern, checked at the leg's own rlimit.
 #   DocVocabulary / DocVocabularyProofs — Phase 173: the same pair over the vendored second-domain
 #                sample (`SecondDomainSpike.fs`), which is on the DECLARED non-default wire shape —
 #                bare-string discriminator, flat node envelope, declaration key order — that the
@@ -111,8 +112,10 @@ $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse
 # budgets in modules.json), so the proof scripts are committed and checked like every other module.
 # The UI vocabulary's model, proofs, cost and exhaustive-coverage decision are the adopter's —
 # `fuaran#1754`, the kit's first adopter — where the cost is charged to the commits that change UI
-# kinds. The per-kind lemma shape that reaches that scale is Phase 168's, and the measurement that
-# motivates it is kept in `proofs/README.md`'s theorem 1 section under its own heading.
+# kinds. The per-kind lemma shape that reaches that scale SHIPPED as Phase 168 — one lemma per
+# constructor, one per presence pattern, so no query carries more than one constructor's object
+# shapes — and the measurement that motivated it is kept in `proofs/README.md`'s theorem 1 section
+# under its own heading.
 
 # Phase 150 — the generated modules are CHECKED but not EXTRACTED, and why an exemption exists at all.
 #

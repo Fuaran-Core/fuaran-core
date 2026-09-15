@@ -27,32 +27,43 @@
        type-check at `Tot` is the termination proof; the lemma states that every input
        reaches exactly one of `Ok` / `Error` and never both.
 
-   WHAT IS NOT PROVED HERE. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`, which
-   Phase 135 carries for the reference vocabulary — is not restated over the generated
-   vocabulary: it needs a second generated predicate mirroring the decoder's accept set,
-   which is a model-sized artefact of its own. The round trip covers one direction
+   THE SHAPE — one lemma per constructor, one per presence pattern (fuaran-core Phase 168).
+   A constructor with k conditional members (optional, or omitted at its default) encodes
+   to 2^k object shapes, and a lemma over the whole constructor puts all of them in ONE
+   query. Measured at a twenty-kind vocabulary whose node envelope carried five optional
+   members (Phase 150): the node lemma's 65-goal query failed a `--quake` seed at the leg's
+   rlimit, the widest kind's arm failed outright, and raising the rlimit turned failing into
+   grinding. `--split_queries` is not settable as a pragma on the pinned prover, so the
+   isolation is in the emitted shape instead. `rt_<T>` is the round trip over a type — for a
+   type with several constructors, a CASE SPLIT whose arms cite `rt_<T>__<Ctor>`, one
+   constructor's arm alone under `C__<T>__<Ctor>? x`. A constructor with
+   2 or more conditional members is split further: `rt_<T>__<Ctor>__p<bits>` proves ONE
+   presence pattern, its `requires` pinning every conditional member present or absent so
+   the encoder's nested match collapses to one object literal in the query, and the
+   constructor's lemma is a split on exactly those members citing each. The family is still
+   one mutual induction — a kind's children reach `rt_node` — on the lexicographic measure
+   `%[x; tier]`, because the split lemmas recurse on the SAME value and differ only in how
+   much of it they have fixed. Every query therefore carries at most one constructor's
+   shapes, and a wide envelope or a wide kind costs 2^k small lemmas rather than one it
+   cannot discharge. The rlimit precedent Phase 150 took (`--z3rlimit 200` in this file)
+   is retired with the shape that needed it: the leg's own rlimit is what these are
+   checked under, and a query that wants more is a query the split has failed to isolate.
+
+   WHAT IS NOT PROVED HERE, and why. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`,
+   which Phase 135 carries for its hand-written reference vocabulary — is not restated over
+   the generated vocabulary. The only predicate this emitter could generate from the same
+   walk is the decoder's own accept set restated clause for clause, and `Ok? (dec el) ==
+   (that predicate) el` is then a theorem about two renderings of one definition — true,
+   and empty. A characterisation worth the name needs an INDEPENDENT statement of the
+   accept set (a schema-shaped predicate), which is a model-sized artefact of its own;
+   `proofs/README.md` (theorem 1) records the halt. The round trip covers one direction
    (everything the encoder can produce is read back exactly); the characterisation of what
    ELSE is accepted is not covered, and is named here rather than left to be assumed.
 
-   TWO COST OPTIONS ARE PART OF THE ARTEFACT, and the second was MEASURED rather than
-   guessed. `--ext context_pruning` is set below for the reason the model module's header
-   gives at greater length: a mutual induction over the whole family would otherwise carry
-   the whole family in every query.
-
-   The other is a MEASURED finding rather than a default anybody chose, and it was measured
-   at the scale this emitter was first run at — a twenty-kind vocabulary whose node envelope
-   carries five OPTIONAL members (fuaran-core Phase 150). Under the leg's own `--quake 3`
-   that node lemma proved 64 of 65 goals in a single query and FAILED the third seed at the
-   leg's default rlimit of 40 — green standalone and red under `check.ps1`, exactly the
-   shape `Preservation`'s `invert_applicable` records in `modules.json`, and exactly the
-   failure an unquaked run hides. `--z3rlimit 200` is the same remedy that precedent took.
-   It is a blunt one: the hard goal is hard because k conditional envelope members put 2^k
-   object shapes in one query, and isolating that goal would be the sharper fix —
-   `--split_queries` is not settable as a pragma on the pinned prover, so it would mean
-   emitting the node's proof as several smaller lemmas, which is a successor's work rather
-   than a flag. A vocabulary with a small envelope never meets the goal and pays nothing for
-   the option. If this module is ever slow enough to want investigating, check both options
-   are still in force first: losing the rlimit does not read as slowness, it reads as a flake.
+   ONE COST OPTION IS PART OF THE ARTEFACT: `--ext context_pruning` is set below for the
+   reason the model module's header gives at greater length — a mutual induction over the
+   whole family would otherwise carry the whole family in every query. If this module is
+   ever slow enough to want investigating, check it is still in force first.
 
    Apache-2.0, like everything beside it.
 *)
@@ -61,7 +72,7 @@ module VocabularyProofs
 open WireDecode
 open Vocabulary
 
-#set-options "--z3rlimit 200 --ext context_pruning"
+#set-options "--ext context_pruning"
 
 (* ======================================================================================
    1. The closed string sets. Each is a finite match on distinct literals, so its round
@@ -74,46 +85,151 @@ let rt_e_layout_kind (#num #flt: eqtype) (x: e_layout_kind) : Lemma (ensures dec
 (* ======================================================================================
    2. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL
       value — F*'s subterm order spans a mutual inductive family, so each case needs only
-      the sub-lemmas of the members it carries.
+      the sub-lemmas of the members it carries. ONE LEMMA PER CONSTRUCTOR, and one per
+      PRESENCE PATTERN where a constructor's conditional members warrant it (the header
+      says why): no query carries more than one constructor's object shapes.
    ====================================================================================== *)
 
-let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases x) =
+let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__node__Node i k f0 f1 ->
-    rt_vkind #num #flt k
+    (match f0 with
+      | None ->
+        (match f1 with
+          | None ->
+            rt_node__p00 #num #flt x
+          | Some _ ->
+            rt_node__p01 #num #flt x
+        )
+      | Some _ ->
+        (match f1 with
+          | None ->
+            rt_node__p10 #num #flt x
+          | Some _ ->
+            rt_node__p11 #num #flt x
+        )
+    )
 
-and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases x) =
+(* rt_node__p00 — hidden absent, label absent *)
+and rt_node__p00 (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Node i k f0 f1 -> None? f0 && None? f1)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__node__Node i k f0 f1 -> rt_vkind #num #flt k
+
+(* rt_node__p01 — hidden absent, label present *)
+and rt_node__p01 (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Node i k f0 f1 -> None? f0 && Some? f1)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__node__Node i k f0 f1 -> rt_vkind #num #flt k
+
+(* rt_node__p10 — hidden present, label absent *)
+and rt_node__p10 (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Node i k f0 f1 -> Some? f0 && None? f1)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__node__Node i k f0 f1 -> rt_vkind #num #flt k
+
+(* rt_node__p11 — hidden present, label present *)
+and rt_node__p11 (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Node i k f0 f1 -> Some? f0 && Some? f1)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__node__Node i k f0 f1 -> rt_vkind #num #flt k
+
+and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 2]) =
+  match x with
+  | C__vkind__Embed _ _ _ _ -> rt_vkind__Embed #num #flt x
+  | C__vkind__Group _ _ _ -> rt_vkind__Group #num #flt x
+  | C__vkind__Link _ _ _ -> rt_vkind__Link #num #flt x
+  | C__vkind__Note _ -> rt_vkind__Note #num #flt x
+
+and rt_vkind__Embed (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Embed? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
+  | C__vkind__Embed f0 f1 f2 f3 ->
+    (match f1 with
+      | None ->
+        (match f3 with
+          | None ->
+            rt_vkind__Embed__p00 #num #flt x
+          | Some _ ->
+            rt_vkind__Embed__p01 #num #flt x
+        )
+      | Some _ ->
+        (match f3 with
+          | None ->
+            rt_vkind__Embed__p10 #num #flt x
+          | Some _ ->
+            rt_vkind__Embed__p11 #num #flt x
+        )
+    )
+
+(* rt_vkind__Embed__p00 — contentHash absent, props absent *)
+and rt_vkind__Embed__p00 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> None? f1 && None? f3 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 -> (match f1 with | None -> () | Some w -> rt_r_content_hash #num #flt w); (match f3 with | None -> () | Some w -> rt_entries_m_json #num #flt [] w)
+
+(* rt_vkind__Embed__p01 — contentHash absent, props present *)
+and rt_vkind__Embed__p01 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> None? f1 && Some? f3 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Embed f0 f1 f2 f3 -> (match f1 with | None -> () | Some w -> rt_r_content_hash #num #flt w); (match f3 with | None -> () | Some w -> rt_entries_m_json #num #flt [] w)
+
+(* rt_vkind__Embed__p10 — contentHash present, props absent *)
+and rt_vkind__Embed__p10 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> Some? f1 && None? f3 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Embed f0 f1 f2 f3 -> (match f1 with | None -> () | Some w -> rt_r_content_hash #num #flt w); (match f3 with | None -> () | Some w -> rt_entries_m_json #num #flt [] w)
+
+(* rt_vkind__Embed__p11 — contentHash present, props present *)
+and rt_vkind__Embed__p11 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> Some? f1 && Some? f3 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
+  match x with
+  | C__vkind__Embed f0 f1 f2 f3 -> (match f1 with | None -> () | Some w -> rt_r_content_hash #num #flt w); (match f3 with | None -> () | Some w -> rt_entries_m_json #num #flt [] w)
+
+and rt_vkind__Group (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Group? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Group f0 f1 f2 -> rt_items_l_node #num #flt [] f0; rt_e_layout_kind #num #flt f1
+
+and rt_vkind__Link (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Link? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Link f0 f1 f2 -> rt_u_slot__str #num #flt f0; rt_u_text #num #flt f1
+
+and rt_vkind__Note (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Note? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__vkind__Note f0 -> rt_u_text #num #flt f0
 
-and rt_r_content_hash (#num #flt: eqtype) (x: r_content_hash num flt) : Lemma (ensures dec_r_content_hash (enc_r_content_hash #num #flt x) == Ok x) (decreases x) =
+and rt_r_content_hash (#num #flt: eqtype) (x: r_content_hash num flt) : Lemma (ensures dec_r_content_hash (enc_r_content_hash #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__r_content_hash__Mk f0 f1 -> rt_e_strictness #num #flt f1
 
-and rt_u_slot__str (#num #flt: eqtype) (x: u_slot__str num flt) : Lemma (ensures dec_u_slot__str (enc_u_slot__str #num #flt x) == Ok x) (decreases x) =
+and rt_u_slot__str (#num #flt: eqtype) (x: u_slot__str num flt) : Lemma (ensures dec_u_slot__str (enc_u_slot__str #num #flt x) == Ok x) (decreases %[x; 2]) =
+  match x with
+  | C__u_slot__str__Fixed _ -> rt_u_slot__str__Fixed #num #flt x
+  | C__u_slot__str__Ref _ -> rt_u_slot__str__Ref #num #flt x
+
+and rt_u_slot__str__Fixed (#num #flt: eqtype) (x: u_slot__str num flt) : Lemma (requires (C__u_slot__str__Fixed? x)) (ensures dec_u_slot__str (enc_u_slot__str #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
   | C__u_slot__str__Fixed f0 -> ()
+
+and rt_u_slot__str__Ref (#num #flt: eqtype) (x: u_slot__str num flt) : Lemma (requires (C__u_slot__str__Ref? x)) (ensures dec_u_slot__str (enc_u_slot__str #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__u_slot__str__Ref f0 -> ()
 
-and rt_u_text (#num #flt: eqtype) (x: u_text num flt) : Lemma (ensures dec_u_text (enc_u_text #num #flt x) == Ok x) (decreases x) =
+and rt_u_text (#num #flt: eqtype) (x: u_text num flt) : Lemma (ensures dec_u_text (enc_u_text #num #flt x) == Ok x) (decreases %[x; 2]) =
+  match x with
+  | C__u_text__Inline _ -> rt_u_text__Inline #num #flt x
+  | C__u_text__Lookup _ _ -> rt_u_text__Lookup #num #flt x
+
+and rt_u_text__Inline (#num #flt: eqtype) (x: u_text num flt) : Lemma (requires (C__u_text__Inline? x)) (ensures dec_u_text (enc_u_text #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
   | C__u_text__Inline f0 -> ()
+
+and rt_u_text__Lookup (#num #flt: eqtype) (x: u_text num flt) : Lemma (requires (C__u_text__Lookup? x)) (ensures dec_u_text (enc_u_text #num #flt x) == Ok x) (decreases %[x; 1]) =
+  match x with
   | C__u_text__Lookup f0 f1 -> (match f0 with | None -> () | Some w -> rt_entries_m_str #num #flt [] w)
 
-and rt_entries_m_json (#num #flt: eqtype) (acc: list (string & jval num flt)) (es: list (string & jval num flt)) : Lemma (ensures dec_entries_m_json acc (enc_entries_m_json #num #flt es) == Ok (rev_app acc es)) (decreases es) =
+and rt_entries_m_json (#num #flt: eqtype) (acc: list (string & jval num flt)) (es: list (string & jval num flt)) : Lemma (ensures dec_entries_m_json acc (enc_entries_m_json #num #flt es) == Ok (rev_app acc es)) (decreases %[es; 2]) =
   match es with
   | [] -> ()
   | (k, v) :: t -> rt_entries_m_json #num #flt ((k, v) :: acc) t
 
-and rt_items_l_node (#num #flt: eqtype) (acc: list (node num flt)) (xs: list (node num flt)) : Lemma (ensures dec_items_l_node acc (enc_items_l_node #num #flt xs) == Ok (rev_app acc xs)) (decreases xs) =
+and rt_items_l_node (#num #flt: eqtype) (acc: list (node num flt)) (xs: list (node num flt)) : Lemma (ensures dec_items_l_node acc (enc_items_l_node #num #flt xs) == Ok (rev_app acc xs)) (decreases %[xs; 2]) =
   match xs with
   | [] -> ()
   | y :: t -> rt_node #num #flt y; rt_items_l_node #num #flt (y :: acc) t
 
-and rt_entries_m_str (#num #flt: eqtype) (acc: list (string & string)) (es: list (string & string)) : Lemma (ensures dec_entries_m_str acc (enc_entries_m_str #num #flt es) == Ok (rev_app acc es)) (decreases es) =
+and rt_entries_m_str (#num #flt: eqtype) (acc: list (string & string)) (es: list (string & string)) : Lemma (ensures dec_entries_m_str acc (enc_entries_m_str #num #flt es) == Ok (rev_app acc es)) (decreases %[es; 2]) =
   match es with
   | [] -> ()
   | (k, v) :: t -> rt_entries_m_str #num #flt ((k, v) :: acc) t
