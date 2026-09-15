@@ -3,16 +3,17 @@
 **Status: GO** (Phase 131, 2026-09-12; the header last brought level with the body 2026-09-14).
 Phase 131's three exit criteria were met and remain met — the confluence proof is reproducible on
 the pinned prover, the extracted model agrees with production over every lane set the differential
-host draws, and the model reads beside the F# in one sitting — and six further theorems have
-shipped beside it since. **Shipped, seven in all: fold confluence (131, with its hypothesis
+host draws, and the model reads beside the F# in one sitting — and seven further theorems have
+shipped beside it since. **Shipped, eight in all: fold confluence (131, with its hypothesis
 corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
 totality (135), independence soundness for the tree algebra (133, completed over the WHOLE
 operation alphabet by 162), chain integrity (136, its
 content-id premise decomposed by 145),
 `Json.parse` totality, bounded (146), apply-engine preservation (138, which also lifts 133's
-model to the validator 137 fixed), and the diff's refusal characterisation and emission order
-(141, with its positional facts about `after` added by 162).** Each carries its own claims ladder
-in its own section below; the "Next" section at the foot is the live list.
+model to the validator 137 fixed), the diff's refusal characterisation and emission order
+(141, with its positional facts about `after` added by 162), and the canonical form's injectivity
+(149, which also brings the §21 resource limits into the models as named premises).** Each carries
+its own claims ladder in its own section below; the "Next" section at the foot is the live list.
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -36,6 +37,9 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `TreeDiff.fst` | The seventh model (Phase 141): the DIFF — `Diff.toOps`'s two refusals characterised exactly, its four passes clause for clause, what each pass guarantees about the block it emits, and `Diff.toOpsContained`'s pre-emptive container refusal. Named `TreeDiff` and not `Diff` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`. It `open`s `TreeOps` (and through it `DagFold`); it is independent of `Preservation.fst`. |
 | `oracle/TreeDiff.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Limits.fst` | The WIRE_FORMAT §21 resource limits as NAMED PREMISES and nothing else (Phase 149): eight constants with their captions, and the two relations the section's own argument uses. It models no enforcement — §21.2's host obligations are about code it does not describe — and it exists so that a changed limit moves one constant rather than a paragraph of prose, and so the ladder can say which theorem depends on which bound. `WireCanon.fst` is the first consumer and takes one of the eight. |
+| `WireCanon.fst` | The eighth model (Phase 149): the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and `Canon.render` clause for clause, a READER for exactly the grammar they emit, and the canonical form proved in BOTH directions. Named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`, which already carries a `Canon`. It `open`s `Limits`; otherwise it shares nothing with the models above but `oracle/Prims.fs`. |
+| `oracle/Limits.fs`, `oracle/WireCanon.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -1313,6 +1317,16 @@ where the sentence said it would:
   gains a conformance law: `Conformance.codecInjectivityLaws`, which a witness certifies by
   sampling. Same division of labour as the fold theorem's `independence_diamond`.
 
+  **A codec built on `Canon.render` no longer has to be sampled for it — see theorem 7.** Phase 149
+  proves the canonical form injective up to object-member order over the subset rule 5's own slot
+  rule describes, so a codec that renders through `Canon.render` DISCHARGES this parameter from
+  that theorem rather than from its witness, with one thing to check and one to know. The thing to
+  check is the subset: the codec's payloads must carry no non-finite float and no float whose token
+  is integer-shaped, which are exactly the two aliasing families theorem 7 exhibits. The thing to
+  know is that "up to member order" is not a weakening here — a codec's own injectivity is a claim
+  about the VALUES it encodes, and two objects differing only in authored member order are the same
+  value. A codec that does not render through `Canon.render` is unaffected and stays at this level.
+
 `node_injective_derived` composes the four back into the premise the tamper theorems take, so the
 composite is a theorem now rather than an assumption. Two things about the decomposition are worth
 knowing. It costs a **hypothesis about `string` itself** — `symbols_faithful reveal`: concatenation
@@ -2122,7 +2136,206 @@ the container check's contribution and nothing else's.
    - **Rejection PAYLOADS.** The differential compares a refusal by class and by the offender a
      `TargetNotAContainer` names; `UnknownNode`'s `addressable` list is outside the comparison.
 
+## Theorem 7 — the canonical form is injective (Phase 149)
+
+WIRE_FORMAT §2 promises that its twelve encoder rules make the canonical form **deterministic**:
+structurally equal values render byte-for-byte identically. Every digest in the estate needs the
+stronger property nobody states — that **equal bytes imply equal values**. The op-stream chain id,
+the DAG content id, the teleport digest (§17.3) and cross-host attestation all hash the canonical
+rendering and read hash equality as value equality, and theorem 3's decomposition leaves
+`op_codec_injective` a parameter precisely because a codec built on `Canon.render` inherits
+injectivity only if `Canon.render` has it.
+
+`WireCanon.fst` models `Canon.escape` (rule 6), `Canon.canonicalFloat` (rule 5, including the `-0`
+collapse and the three non-finite tokens) and `Canon.render` (rules 2, 3, 5, 6, 7, and the omitted
+key that is rule 4) clause for clause, and proves the converse. **Read the refutation first**,
+because it is what the theorem's shape is for.
+
+### The finding: `render_injective`, as the phase was chartered to prove it, is FALSE
+
+The shard asked for `render a == render b ==> a == b` with no hypothesis. That statement does not
+hold of the shipped encoder, four ways. Each is proved in the model for **every** instantiation
+rather than exhibited at a contrived one, so no future choice of numeric carrier escapes them:
+
+1. **A non-finite float is a STRING on the wire.** `canonicalFloat` emits the quoted token `"NaN"`
+   — and so does the *string* `NaN`. `render_aliases_nan`, `render_aliases_pos_inf` and
+   `render_aliases_neg_inf`.
+2. **An integral float is an INTEGER on the wire.** A finite float whose layout carries no `.` and
+   no `E` renders exactly as the integer of that token. `render_aliases_integral_float`. This is
+   the numeric normalisation `JVal`'s own type doc names ("`render (JFloat 2.0)` emits `2`, which
+   `parse` reads back as `JInt 2`"), and rule 5's last paragraph is the same sentence from the
+   format's side.
+3. **The two zeroes are one token**, by rule 5's `-0` collapse. `render_aliases_negative_zero`.
+4. **Member order is not observable**, by rule 2's sort. `render_aliases_member_order`.
+
+The fourth is not a loss at all — it is the entire purpose of a canonical form, and it is why the
+theorem below is stated *up to member order* rather than flatly. The second and third are
+documented design choices of the format, and the model exhibits them so that a future session
+cannot "fix" one by accident.
+
+**The first is the finding, and it is about the shipped code rather than about the format.**
+`Json.render` has a guarded companion, `Json.tryRender`, which names a non-finite float as a typed
+`Error` "instead of producing un-parseable wire". `Canon` has **no such companion**. A non-finite
+float reaching `Canon.render` is not un-parseable — it is worse than that, because it silently
+becomes a *string*, so a digest over `JFloat nan` equals the digest over `JStr "NaN"`, which is
+precisely the value a reader decodes those bytes back to. Nothing in `Canon` refuses it. This
+phase records the asymmetry rather than repairing it: a repair is a refusal-class change to a
+shipped encoder, in the shape Phase 137 took, and belongs to a phase chartered for it. The
+`Proofs.Oracle` case that holds the four aliases asserts them on **production**, so the finding
+goes red if the encoder ever changes.
+
+### What is proved
+
+**The canonical subset is rule 5's own slot rule, read as a predicate.** A float is canonical
+exactly when it is finite and its canonical token carries a `.` or an `E` — which is the
+discriminator rule 5 uses to decide whether a token "keeps integer identity". Refutations 1 and 2
+are exactly its two failure modes, so the premise is the format's sentence rather than a hedge
+chosen to make a proof go through.
+
+- **`render_total`.** That `render` reaches a rendering on every value is carried by its type. What
+  the lemma adds is that the rendering is never empty and that its FIRST CHARACTER classifies the
+  constructor that produced it, and is never a closing or separating one. That is what makes the
+  shape dispatch exhaustive rather than merely non-empty — theorem 1's distinction, on the encode
+  side — and it is what the reader's own dispatch turns on at every position.
+- **`read_render_roundtrip`.** A reader for exactly the grammar `render` emits is a LEFT INVERSE of
+  it on the canonical subset, **in every trailing context**: `read (render v ++ rest) == Ok
+  (normalise v, rest)`. This is the engine; everything below is a corollary.
+- **`render_injective_up_to_key_order`.** Equal bytes imply equal normal forms — the converse §2
+  never stated, and the one the digests rest on.
+- **`render_deterministic`.** Equal normal forms imply equal bytes — §2's own promise, proved.
+- **`canonical_form_iff`.** The two together, which is what "canonical form" means and is more than
+  either half.
+- **`render_injective_on_normal`.** The literal `render a == render b ==> a == b`, on values whose
+  object members are already in canonical key order. That is not a contrivance: it is the shape of
+  every value a reader hands back (`read_returns_a_normal_value`), so it is what a consumer
+  comparing two decoded documents actually holds.
+
+**The four rule lemmas are the proof's own parts rather than decoration.** Rule 2 —
+`sort_produces_sorted` and `sorted_is_its_own_sort`: under the comparator's total-order premises
+the sort is idempotent, so the author's key order carries no information into the bytes. Rule 6 —
+`read_str_inverts_escape`: the escaped body is uniquely decodable **in any trailing context**,
+which is the property injectivity needs and which plain injectivity of `escape` would not give.
+Rule 5 — `canonical_float_injective` and `int_layout_injective`, DERIVED rather than assumed (see
+the ladder). Rule 4 — `absence_is_structural`: two objects that render alike carry the same keys,
+so an omitted key can never be confused with a present one, which is what makes "`None` fields are
+excluded" safe rather than merely tidy.
+
+### Why a reader, and not a second model of `Json.parse`
+
+Injectivity of a recursive encoder is either a first-difference induction over rendered byte lists
+or the exhibition of a left inverse. The second is very much cheaper, and it is also more useful:
+what it produces is a **round trip**, which is a statement a reader of this document already knows
+how to want.
+
+The reader is deliberately **not** a second model of `Json.parse`. Theorem 4 models that parser —
+its depth counter, its twelve error classes, its two numeric guards — and remodelling it here would
+prove the same thing twice at several times the prover cost. What injectivity needs is that an
+inverse EXISTS, not a second account of production's own. Its behaviour on input `render` never
+emits is therefore not claimed and not tested, and the differential runs the round trip against
+`Json.parse` to tie the two together over the corpus.
+
+### The §21 limits, and the one premise that reaches them
+
+`Limits.fst` carries WIRE_FORMAT §21's eight bounds as named premises, with the two relations the
+section's own argument uses — every bound admits something, and the node-depth bound sits below the
+syntactic-depth bound with room for the worst-shaped kind, which is what makes "a host must never
+report a node-depth breach as a syntax-depth breach" a fact about the table rather than a hope
+about it. It models **no enforcement**: §21.2's host obligations are about code it does not
+describe.
+
+`read_render_roundtrip_within_limits` is the round trip restated with `max_json_depth` carried.
+Nothing in the proof uses the hypothesis, and that is the point — within the format's own limits
+the round trip is unconditional, and outside them it is *production's* cap and not this model that
+decides. The premise is there so a change to the §21 table moves one constant and the ladder can
+say which theorem depended on which bound.
+
+### What the corpus covers
+
+The differential host runs the extracted encoder beside `Canon.render` and compares the **bytes**,
+which is the only comparison that means anything for an encoder whose whole job is to produce a
+digest input.
+
+| Pool | What is asked | Reached |
+|---|---|---|
+| the wire corpus's `nodes/` fixtures | every fixture rendered by both, byte for byte; and the round trip on the canonical subset | yes (asserted: fixtures, sortable objects, round trips) |
+| the wire corpus's `ops/` fixtures | the same | yes (asserted) |
+| a generated `JVal` pool | 1,200 seed-replayable documents over an alphabet carrying rule 6's three escape classes, astral and private-use keys, and rule 5's scientific layout | yes (each shape asserted reached) |
+| the four aliasing pairs | asserted on PRODUCTION, and on the model beside it | the finding, as a check that can go red |
+| the non-canonical arms | both infinities, NaN, both zeroes, the Int32 boundaries, an empty string, an empty object and array | the model is a model of the whole encoder, not only of the part the theorem covers |
+
+The **go-red** is rule 2's comparator REVERSED — the sort the rule mandates still runs, but orders
+keys the other way. Every object carrying two distinct keys must then disagree, and a document
+carrying none must still agree; both are asserted, so the instrument is known to be one that can
+lose *and* to be narrow to the rule it is about.
+
+One thing about the host is worth knowing before anyone reads a stack trace. The extracted model is
+a **character-list interpreter** and F\*'s F# backend emits plain recursion with no tail calls, so
+rendering a multi-kilobyte fixture walks a stack proportional to the document's bytes and the
+largest fixture in the corpus overflows the default 1 MB one. That is a property of the
+EXTRACTION, not of the model — the theorem is about a function, not about a runtime's frame budget
+— so the differential runs on a thread with a stack sized for the corpus rather than shrinking the
+pool until it fits. Shrinking would have silently narrowed what the corpus leg certifies, and the
+fixture it would have dropped first is the deepest one.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** On the model: `render_total`,
+   `read_render_roundtrip`, `render_injective_up_to_key_order`, `render_deterministic`,
+   `canonical_form_iff`, `render_injective_on_normal`, `read_returns_a_normal_value`, the four
+   rule lemmas, the §21 relations in `Limits.fst`, and the four refutations. F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
+   `admit`. The module carries a scoped `--ext context_pruning` for the reason `TreeOps.fst` gives
+   at the same line.
+2. **Differentially tested.** The extracted encoder agrees with `Canon.render` byte for byte over
+   both corpus families and the generated pool, and the model's round trip agrees with
+   `Json.parse ∘ Canon.render` over the same documents on the canonical subset. Agreement is over
+   the corpus and the pool drawn, never over all inputs. One go-red, required to lose.
+3. **Assumed, and stated as such.**
+   - **The numerals are opaque, and there is exactly ONE premise about them.** The two layouts and
+     the numeral read-back are parameters, and `tok_read_ok` says the read-back inverts the
+     layouts — which is what rule 5 means by "the shortest digit sequence that ROUND-TRIPS", so the
+     premise is the float layout's own definition rather than an extra assumption beside it. Rule
+     5's injectivity lemmas are **derived** from it, because a read-back that is a function cannot
+     answer twice for one token. What is therefore not said is anything about the digits: which
+     decimal .NET produces for a given double is the differential's and the cross-host parity
+     vectors' to measure.
+   - **The comparator is a parameter constrained to be a total order.** What is proved is that a
+     canonical form follows FROM a total order. That `System.String.CompareOrdinal` IS one, and
+     that it is UTF-16 code-unit order rather than code-point or UTF-8-byte order, are facts about
+     .NET — observable exactly where rule 2's own note says they are, above the BMP, and pinned by
+     the corpus fixture and by the differential's astral keys.
+   - **A character is a constructor, and the bridge is the correspondence.** As in theorem 4. The
+     model writes the bridge's condition down as `bridged` — a verbatim character never aliases a
+     constructor's own spelling — rather than leaving it in prose, and the host's mapping satisfies
+     it by construction; the mapping itself is one line per class and is not proved.
+   - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as
+     for the six theorems above.
+4. **Not claimed.**
+   - **Injectivity outside the canonical subset**, which the four refutations show is not merely
+     unproved but false. A consumer hashing `Canon.render` output is relying on the subset whether
+     it says so or not, and the two families it has to exclude are named above.
+   - **`Canon.renderOrdered`.** It is the declared-key-order leg, where the ENCODER is the order
+     authority and no sort runs; its canonicity rests on a different argument (the IDL's
+     `WireShape.KeyOrder`), and nothing here carries to it.
+   - **That a non-finite float cannot reach `Canon.render`.** It can; nothing refuses it. See the
+     finding above.
+   - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
+     measures — that is theorem 4's, and the boundary between the two is deliberate.
+
 ## Next
+
+**A guarded `Canon.tryRender`** — theorem 7's finding, and the smallest item on this list. `Json`
+has the pair: `render` formats a non-finite float into a token that is not valid JSON, and
+`tryRender` names it as a typed `Error` instead. `Canon` has only the unguarded half, and its
+failure mode is worse rather than better — a non-finite float does not produce un-parseable wire,
+it produces a `"NaN"` STRING, so the digest over `JFloat nan` equals the digest over the value a
+reader decodes those bytes back to. `render_aliases_nan` is that sentence proved, and the
+`Proofs.Oracle` alias case is it asserted on production. What it needs is a refusal-class addition
+in the shape Phase 137 took — a guarded entry point beside the existing one, not a change to what
+`render` does, since the bytes are pinned by the corpus and by four other hosts. The theorem's
+canonical subset is already the predicate such a guard would enforce, which is why this is small:
+`float_canonical`'s two clauses ARE the refusal, and the second of them (an integer-shaped float
+token) is a design choice the guard should NOT refuse, so the guard is the first clause alone.
 
 **The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
 shortest informal argument and the longest mechanisation. **This entry has been corrected by Phase

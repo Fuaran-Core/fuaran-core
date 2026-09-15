@@ -113,12 +113,21 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 #                two refusals characterised exactly, the four-pass emission order, what each pass
 #                guarantees about the block it emits, and the container-aware mirror's pre-emptive
 #                refusal. Opens TreeOps (and through it DagFold), so it follows both.
+#   Limits     — Phase 149, the WIRE_FORMAT section-21 resource limits as named premises and
+#                nothing else: eight constants with their captions, and the two relations the
+#                specification's own argument uses. It models no enforcement and opens nothing;
+#                it is here because `WireCanon` imports it, which is why it precedes it.
+#   WireCanon  — Phase 149, the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and
+#                `Canon.render` clause for clause, with a reader for exactly the grammar they
+#                emit, and the canonical form proved in both directions: equal bytes imply equal
+#                normal forms, equal normal forms imply equal bytes. It `open`s Limits, so it
+#                follows it.
 #   Vocabulary — Phase 150, and the only GENERATED model here: the wire-format IDL's own
 #                vocabulary — its types, its discriminated encoder and its tag-dispatch decoder —
 #                emitted from `idl.json` by `Fuaran.Core.Idl.Codegen`'s F* target. Opens
 #                WireDecode, so it follows it. See the note below the list for the theorems that
 #                the same target emits and that are NOT committed beside it.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Vocabulary')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'Vocabulary')
 
 # Phase 150 — why there is a generated MODEL here and no generated THEOREMS beside it (yet).
 #
@@ -135,7 +144,6 @@ $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse
 # remedies already measured, so that whoever takes it does not start from scratch. What IS here is
 # the model, checked below like every other module — and the totality it carries is not nothing:
 # every generated decoder is `Tot` on an arbitrary `jval`, which F* admits only after proving it.
-
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 

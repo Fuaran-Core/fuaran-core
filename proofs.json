@@ -1009,6 +1009,116 @@
       }
     },
     {
+      "id": "canonical-render-total",
+      "level": "proved",
+      "claim": "`Canon.render` reaches a rendering on every value — carried by its type, since F* admits a definition only after showing it defined everywhere and terminating — and WHICH constructor produced a rendering is determined by its FIRST CHARACTER: a string opens with a quote, an array with a bracket, an object with a brace, a boolean with one of two letters, a number with a numeric character, and never with a closing or separating one. That is what makes the encoder's shape dispatch exhaustive rather than merely non-empty, the same distinction `decode-total` draws on the decode side, and it is the fact the reader's own dispatch turns on at every position.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "theorem": "render_total",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canonical-form-roundtrip",
+      "level": "proved",
+      "claim": "A reader for exactly the grammar `Canon.render` emits is a LEFT INVERSE of it on the canonical subset, in every trailing context: reading the rendering of a value followed by anything returns that value's normal form and the anything, unchanged. This is the engine of the phase — every other proved row here is a corollary of it — and it is what makes the canonical form's converse a construction rather than an induction over byte lists. It is deliberately NOT a second model of `Json.parse`: that parser has theorem 4, and what injectivity needs is the existence of an inverse rather than a second account of production's own.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "theorem": "read_render_roundtrip",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canonical-form-injective",
+      "level": "proved",
+      "claim": "EQUAL BYTES IMPLY EQUAL VALUES, up to the object-member order rule 2 normalises away: two canonical values that render identically have the same normal form. This is the converse WIRE_FORMAT section 2 never stated and that every digest in the estate silently rests on — the op-stream chain id, the DAG content id, the teleport digest and cross-host attestation all hash this rendering and read hash equality as value equality, and `op-codec-injective-certified` leaves a codec's own injectivity to the codec precisely because one built on `Canon.render` inherits it only if `Canon.render` has it. `render_injective_on_normal` is the literal form on values whose members are already in key order, which is the shape every value a reader returns has.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "theorem": "render_injective_up_to_key_order",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canonical-form-deterministic",
+      "level": "proved",
+      "claim": "EQUAL VALUES IMPLY EQUAL BYTES — section 2's own promise that the twelve rules make the encoding deterministic, proved rather than asserted, for values equal up to the member order rule 2 normalises away. With `canonical-form-injective` it is an iff (`canonical_form_iff`), which is what the words 'canonical form' mean and is more than either half. The sorting half of it is where rule 2 is doing the work: under the comparator's total-order premises the sort is idempotent and depends only on the members, so the author's key order carries no information into the bytes at all.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "theorem": "render_deterministic",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canonical-render-not-injective",
+      "level": "proved",
+      "claim": "The REFUTATION, and the reason the two rows above are stated over a subset and up to member order rather than flatly. `render a == render b ==> a == b` is FALSE of the shipped encoder four ways, each proved for EVERY instantiation rather than exhibited at a contrived one: a non-finite float renders as the quoted string of its token and therefore as that STRING (`render_aliases_nan` and its two siblings); a finite float whose layout carries no point and no exponent renders as the INTEGER of that token, which is the numeric normalisation `JVal`'s own type doc names; the two zeroes are one token, by rule 5's collapse; and two objects differing only in authored member order are one byte sequence, by rule 2's sort. The fourth is not a loss but the purpose of a canonical form. The first is the finding: unlike `Json.render`, which has the guarded `Json.tryRender` beside it, `Canon` has no guarded counterpart, so a digest over a non-finite float collides with the digest over the string a reader decodes it back to and nothing refuses it.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "theorem": "render_aliases_integral_float",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "wire-resource-limits",
+      "level": "proved",
+      "claim": "WIRE_FORMAT section 21's eight resource limits, carried as named premises in one place so that a changed limit moves one constant rather than a paragraph of prose, with the two RELATIONS between them that the section's own argument uses: every bound admits something, and the node-depth bound sits below the syntactic-depth bound with room for the worst-shaped kind — which is what makes 'a host must never report a node-depth breach as a syntax-depth breach' a fact about the table rather than a hope about it. The module models no enforcement: section 21.2's host obligations are about code it does not describe, and what a consumer gets here is a number with a caption. `canonical-form-roundtrip` takes exactly one of the eight.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "theorem": "depth_bounds_do_not_alias",
+        "model": "proofs/Limits.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canon-differential",
+      "level": "tested",
+      "claim": "The extracted canonical encoder agrees with the shipped `Canon.render` BYTE FOR BYTE over every corpus fixture in both families and over a generated pool, and its reader's round trip agrees with production's own parser over the same documents on the canonical subset. The bytes are the only comparison that means anything for an encoder whose whole job is to produce a digest input. The pool is where the corpus is thin: rule 6's three escape classes, rule 2's comparator above the BMP — an astral key beside a private-use one, the pair the rule's own note says UTF-16 order decides differently from code-point order — and rule 5's scientific layout, each asserted REACHED rather than hoped for. The go-red is rule 2's comparator REVERSED: every object carrying two distinct keys must then disagree, and a document carrying none must still agree, so the instrument is known to be one that can lose and to be narrow to the rule it is about. A sixth case pins the four aliasing renderings on production itself, so the refutation goes red if the encoder ever changes. Agreement is over the corpus and the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the canon oracle agrees with Canon.render over every nodes/ fixture",
+          "the canon oracle agrees with Canon.render over every ops/ fixture",
+          "the canon oracle agrees with Canon.render over a generated JVal pool",
+          "a model with rule 2's key order REVERSED loses — the comparison can fail",
+          "the four renderings that ALIAS — `render_injective` is false, and this is why",
+          "the canon oracle handles the non-canonical arms production reaches"
+        ]
+      }
+    },
+    {
+      "id": "canon-numeral-layouts",
+      "level": "assumed",
+      "claim": "The numerals are OPAQUE, as they are for the decode combinators and for the parser, and for the same reason: the F# extraction carries no floats and F*'s integers are unbounded where `JInt` is Int32. The two layouts and the numeral read-back are parameters, and the ONE premise the theorems carry about them is that the read-back inverts the layouts — which is the property `Double.ToString(\"R\")` is DEFINED by, since rule 5 pins the float layout as the shortest digit sequence that round-trips. Rule 5's injectivity lemmas are DERIVED from that premise rather than assumed beside it, because a read-back that is a function cannot return two different values for one token. What is therefore not said here is anything about the digits themselves: which decimal .NET produces for a given double is measured by the differential and by the cross-host parity vectors, not proved.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "assumption": "tok_read_ok — the numeral read-back inverts the integer and float layouts, which is rule 5's own definition of the float layout"
+      }
+    },
+    {
+      "id": "canon-key-comparator",
+      "level": "assumed",
+      "claim": "Rule 2's comparator is a PARAMETER, constrained to be a total order: reflexive, total, transitive and antisymmetric on keys. What is proved is that a canonical form follows FROM a total order — which is the half a model can settle. What is NOT proved is that `System.String.CompareOrdinal` is one, or that it is UTF-16 code-unit order rather than code-point or UTF-8-byte order; those are facts about .NET, and the distinction is observable exactly where the rule's own note says it is, above the BMP. The corpus fixture that pins it and the differential's astral keys are the evidence, not this theorem.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "assumption": "key_order_ok — the ordinal comparator is a total order on keys, and it is UTF-16 code-unit order"
+      }
+    },
+    {
+      "id": "canon-character-bridge",
+      "level": "assumed",
+      "claim": "A character is a CONSTRUCTOR, exactly as in the parser model and for the same reason. The model distinguishes the three classes rule 6 names and the characters a numeric or literal token can carry, and carries every other character verbatim, so two ordinary characters are never identified. What is assumed is the BRIDGE: that the host's mapping never puts a character into the verbatim constructor when another constructor already denotes it. The model writes that condition down as `bridged` rather than leaving it in prose, and the host's mapping is total and classifies before it falls through, so it holds by construction — but the correspondence between a `ch` and a .NET `char` is one line per class and is not itself proved.",
+      "phase": "fuaran-core#149",
+      "evidence": {
+        "assumption": "the character bridge is faithful — a verbatim character never aliases a constructor's own spelling"
+      }
+    },
+    {
       "id": "vocabulary-generated-model",
       "level": "proved",
       "claim": "The wire-format specification's OWN vocabulary is modelled, and the model is GENERATED from it. `proofs/Vocabulary.fst` carries the types, the `$type`-discriminated encoder and the tag-dispatch decoder of 20 of the pinned `idl.json`'s 43 kinds, emitted by a fourth backend of the IDL's code generator (`FStarTarget`, beside the F# structural layer, the TypeScript encoder and the JSON schema) over Phase 135's `jval` model and the combinators modelled with it. Every decoder is `Tot` on an arbitrary `jval` and therefore total and terminating on every input, which F* admits only after proving it; the termination argument is `get_prop`'s return-type refinement, since a decoder that descends BY NAME into a value it looked up has no syntactic one. Generic unions are monomorphised at the arguments the vocabulary reaches, which keeps every definition first-order. Proved with no assume and no admit under --report_assumes error. TWO refusal shapes are named rather than dropped, because a silently-dropped member would make the round trip a theorem about a document nobody sends: a construct with no wire-level meaning in the model is a typed `CodegenError.UnmodellableInFStar` (one kind of this corpus — `Tabs.activeIndex` declares an integer default and the model's numeric carriers are opaque type parameters), and a kind outside the proof vocabulary is a declared COST control (`FStarTarget.proofKinds`: every expressible kind introducing no declared type beyond the node envelope's closure). The committed file is held to a fresh generation from the pinned corpus by the Proofs.Vocabulary family — an IDL that moves without a regeneration fails the leg as vocabulary drift. WHAT IS NOT CLAIMED HERE, and it is the half a reader will look for: the ROUND TRIP over this vocabulary (`dec_node (enc_node x) == Ok x`) is emitted by the same walk and is NOT committed, so it is not a row on this ladder. Measured on the pinned prover, the emitted proof discharges for a small vocabulary — green at one kind and at eight — and at the twenty this corpus selects it does not: the node lemma is a single 65-goal query that fails one `--quake` seed at the default rlimit and grinds at `--z3rlimit 200`, and past it the widest kind's arm fails outright, both for the same reason (k conditional members put 2^k object shapes into one query). A `.fst` that does not verify is worse than none, so none is committed. `proofs/README.md`'s theorem 1 section carries the measurement, the two levers already spent, and the structural fix. A claim the leg does not reproduce is not a claim this file will carry, which is the clause `Proofs.Ladder` enforces and the reason this row stops where it does.",
@@ -1017,7 +1127,6 @@
         "theorem": "dec_node",
         "model": "proofs/Vocabulary.fst",
         "prover": "proofs/fstar-pin.json"
-      }
-    }
+      }    }
   ]
 }
