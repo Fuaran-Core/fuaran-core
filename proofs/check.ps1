@@ -47,13 +47,22 @@ $ErrorActionPreference = 'Stop'
 #                two refusals characterised exactly, the four-pass emission order, what each pass
 #                guarantees about the block it emits, and the container-aware mirror's pre-emptive
 #                refusal. Opens TreeOps (and through it DagFold), so it follows both.
+#   Limits     — Phase 149, the WIRE_FORMAT section-21 resource limits as named premises and
+#                nothing else: eight constants with their captions, and the two relations the
+#                specification's own argument uses. It models no enforcement and opens nothing;
+#                it is here because `WireCanon` imports it, which is why it precedes it.
+#   WireCanon  — Phase 149, the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and
+#                `Canon.render` clause for clause, with a reader for exactly the grammar they
+#                emit, and the canonical form proved in both directions: equal bytes imply equal
+#                normal forms, equal normal forms imply equal bytes. It `open`s Limits, so it
+#                follows it.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon')
 
 # The host step. Two invocations rather than one prefix filter, so the two failures read as what
 # they are: a model and production disagreeing, versus the ladder and the tree disagreeing.

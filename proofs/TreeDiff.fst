@@ -36,14 +36,24 @@
        `toOpsContained` returns cannot be refused for containment at any step, and the typed
        `TargetNotAContainer` is the exact price of that guarantee.
 
-   WHAT IS NOT CLAIMED, and it is the larger half — see the README's theorem 6 for the full
+     - the POSITIONAL facts (section 9, Phase 162), over `TreeOps.preorder_parent_first`: an
+       insert's parent precedes its own node in `after`'s preorder — the source comment's
+       "top-down", mechanised — a move's destination precedes the moved node, and therefore a
+       move's destination is NOT inside the moved subtree in `after`, which is the consequence
+       Phase 141 named when it deferred the two theorems below.
+
+   WHAT IS NOT CLAIMED, and it is still the larger half — see the README's theorem 6 for the full
    statement and the reason. `diff_reconstructs` (`apply_all (to_ops b a) b == Ok a`) and the
    operational `diff_applicable` (every emitted step is ACCEPTED in sequence by `apply`) are carried
-   there as differentially TESTED rather than proved: both need the positional argument relating a
-   preorder walk of `after` to the intermediate trees the script builds, which is a body of work
-   about `ins` and `rem_at` this phase's time box did not contain. What is proved here is everything
-   the four passes guarantee about the SCRIPT; what is tested, over independently generated pairs,
-   is what applying it does.
+   there as differentially TESTED rather than proved. Phase 141 named the missing fact as a
+   positional one and Phase 162 supplied it; what remains is a different quantifier, and section 9
+   says so where it proves the fact: `apply` validates each step against the tree IN HAND — the
+   before-tree with the script's earlier operations run on it — not against `after`, so carrying
+   an after-tree fact across needs an invariant about how much of `after`'s structure each PREFIX
+   of the script has already built. That induction is the remaining work, and it is now a named
+   induction over a proved fact rather than a missing fact. What is proved here is everything the
+   four passes guarantee about the SCRIPT and about `after`; what is tested, over independently
+   generated pairs, is what applying it does.
 
    WHY `TreeDiff` AND NOT `Diff`. The same reason `TreeOps.fst` models `Ops.fs` and is not called
    `Ops`: the extracted oracle is a top-level F# module, and the differential host opens
@@ -808,3 +818,202 @@ let diff_applicable_contained (ch:tree -> bool) (b a:tree) (o:op)
       after_child_accepts ch (pre a) (tid_of n) p
     | MoveNode x np -> after_child_accepts ch (pre a) x np
     | _ -> ()
+
+
+(* ======================================================================================
+   9. THE POSITIONAL FACTS, over `TreeOps.preorder_parent_first` (Phase 162).
+
+      Phase 141 named one missing fact and left `diff_reconstructs` and the operational
+      `diff_applicable` at level 2 on it: "a parent precedes its children in preorder, so by the
+      time the second pass emits a move while processing the destination, every after-ancestor of
+      that destination is already placed and it cannot be inside the moved subtree." Phase 162
+      proves that fact — `TreeOps.preorder_parent_first`, section 19 there — and this section is
+      it INSTANTIATED AT THE DIFF: what the emitted operations say about the order of `after`.
+
+      WHAT THIS SECTION CLOSES, and it is worth being exact because the two remaining theorems are
+      NOT closed by it. Every parent address the script names is positioned in the walk the passes
+      iterate: an insert's parent precedes its own node, a move's destination precedes the moved
+      node, and — the consequence 141 named — a move's destination is NOT inside the moved node's
+      subtree in `after`. Those are the obligations the reconstruction argument discharges at the
+      AFTER tree, and they are now theorems rather than the prose of the source comment.
+
+      WHAT IS STILL OPEN. `diff_reconstructs` (`apply_all (to_ops b a) b == Ok a`) and the
+      operational `diff_applicable` are statements about the INTERMEDIATE trees the script builds,
+      which is a different quantifier: `apply` checks `WouldNestUnderSelf` against the tree in
+      hand at step k, not against `after`, and the tree in hand at step k is the before-tree with
+      k operations run on it. Relating the two is the induction that remains, and it needs an
+      invariant about how much of `after`'s structure each prefix of the script has already built.
+      Both claims are carried at level 2 by the differential over independently generated pairs
+      exactly as Phase 141 left them; the README's theorem 6 carries the boundary and the price.
+      The facts below are the after-tree half, and stating them separately is what makes the
+      remaining half a named induction rather than an unexamined gap.
+   ====================================================================================== *)
+
+(* ---- the walk contains what the tree contains ---- *)
+
+let rec pre_sub_ids (t n:tree) (y:string)
+  : Lemma (requires mem n (pre t) /\ mem y (ids n)) (ensures mem y (ids t)) (decreases t)
+  = match t with
+    | TNode _ _ cs -> if n = t then () else pre_all_sub_ids cs n y
+and pre_all_sub_ids (ts:list tree) (n:tree) (y:string)
+  : Lemma (requires mem n (pre_all ts) /\ mem y (ids n)) (ensures mem y (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | c :: r ->
+      mem_app n (pre c) (pre_all r);
+      (if mem n (pre c) then pre_sub_ids c n y else pre_all_sub_ids r n y);
+      mem_app y (ids c) (ids_all r)
+
+(* ---- a node of the walk precedes its own subtree in the walk's id list ----
+
+   `TreeOps.node_precedes_its_subtree` says this of a tree about itself; this says it of any node
+   the walk reaches, inside the tree the walk is of. Well-formedness is used at exactly one step —
+   lifting past an ancestor's own id — and that is the step at which a repeated id would make the
+   claim false rather than merely unproved. *)
+
+let rec pre_precedes (t:tree) (n:tree) (y:string)
+  : Lemma (requires wf t /\ mem n (pre t) /\ mem y (ids_all (kids_of n)))
+          (ensures precedes (tid_of n) y (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if n = t then ()
+      else begin
+        pre_all_precedes cs n y;
+        pre_all_sub_ids cs n (tid_of n);
+        pre_all_sub_ids cs n y
+      end
+and pre_all_precedes (ts:list tree) (n:tree) (y:string)
+  : Lemma (requires wf_all ts /\ mem n (pre_all ts) /\ mem y (ids_all (kids_of n)))
+          (ensures precedes (tid_of n) y (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | c :: r ->
+      mem_app n (pre c) (pre_all r);
+      if mem n (pre c) then begin
+        pre_precedes c n y;
+        precedes_app_left (tid_of n) y (ids c) (ids_all r)
+      end
+      else begin
+        pre_all_precedes r n y;
+        pre_all_sub_ids r n (tid_of n);
+        pre_all_sub_ids r n y;
+        inter_nil_iff (ids c) (ids_all r);
+        precedes_app_right (tid_of n) y (ids c) (ids_all r)
+      end
+
+(* ---- and `Tree.tryFind`'s answer is a node of the walk ---- *)
+
+let rec find_in_mem_pre (x:string) (t:tree) (n:tree)
+  : Lemma (requires find_in x t == Some n) (ensures mem n (pre t)) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = x then () else (find_all_mem_pre_all x cs n; mem_app n (pre_all cs) [])
+and find_all_mem_pre_all (x:string) (ts:list tree) (n:tree)
+  : Lemma (requires find_all x ts == Some n) (ensures mem n (pre_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | c :: r ->
+      (match find_in x c with
+       | Some m -> find_in_mem_pre x c n
+       | None -> find_all_mem_pre_all x r n);
+      mem_app n (pre c) (pre_all r)
+
+(* ---- THE BRIDGE: an after-parent precedes its child in the walk the passes iterate ---- *)
+
+let rec after_parent_precedes_in (a:tree) (ns:list tree) (x np:string)
+  : Lemma (requires wf a /\ is_after_child ns x np /\
+                    (forall (n:tree). mem n ns ==> mem n (pre a)))
+          (ensures precedes np x (ids a)) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: r ->
+      if tid_of n = np && mem x (kid_ids (kids_of n))
+      then (kid_ids_sub x (kids_of n); pre_precedes a n x)
+      else after_parent_precedes_in a r x np
+
+let after_parent_precedes (a:tree) (x np:string)
+  : Lemma (requires wf a /\ is_after_child (pre a) x np)
+          (ensures precedes np x (ids a))
+  = after_parent_precedes_in a (pre a) x np
+
+(* ---- the three theorems ---- *)
+
+(* PASS 1 IS TOP-DOWN, mechanised. Every insert the script emits names a parent that precedes the
+   inserted node in `after`'s own preorder — which is the walk pass 1 iterates, so by the time it
+   reaches an added child it has already emitted its added parent. That is the source comment's
+   "added nodes go in as leaf shells (top-down)", stated about the emitted operations rather than
+   about the loop. *)
+let diff_insert_parent_precedes (b a:tree) (o:op)
+  : Lemma (requires wf a /\ Ok? (to_ops b a) /\ mem o (Ok?._0 (to_ops b a)) /\ InsertChild? o)
+          (ensures precedes (InsertChild?.parent o)
+                            (tid_of (InsertChild?.node o))
+                            (ids a))
+  = diff_inserts_are_new_leaf_shells b a o;
+    match o with
+    | InsertChild p n ->
+      lookup_parent_map (pre a) (tid_of n) p;
+      after_parent_precedes a (tid_of n) p
+
+(* PASS 2's destination is likewise positioned: a move names a destination that precedes the moved
+   node in `after`. `diff_moves_are_survivor_reattachments` already says the destination HOLDS the
+   moved node in `after`; this is where that sits in the walk. *)
+let diff_move_destination_precedes (b a:tree) (o:op)
+  : Lemma (requires wf a /\ Ok? (to_ops b a) /\ mem o (Ok?._0 (to_ops b a)) /\ MoveNode? o)
+          (ensures precedes (MoveNode?.new_parent o) (MoveNode?.target o) (ids a))
+  = diff_moves_are_survivor_reattachments b a o;
+    match o with
+    | MoveNode x np -> after_parent_precedes a x np
+
+(* AND THE CONSEQUENCE PHASE 141 NAMED: a move's destination is not inside the moved subtree.
+   In `after` the destination is the moved node's parent, so it precedes it; a node inside the
+   moved subtree is preceded BY it; and `precedes` is antisymmetric and — on an id-unique tree —
+   irreflexive, so the two cannot both hold.
+
+   READ THE QUANTIFIER. This is about `after`, which is the tree the diff derived the move FROM.
+   `Ops.apply` checks `WouldNestUnderSelf` against the tree IN HAND when the move runs, which is
+   the before-tree with the script's earlier operations applied. Carrying this fact across to that
+   tree is the induction `diff_applicable` still needs; what is settled here is that the fact is
+   true where the diff could see it, which is the half the diff can be responsible for — the same
+   boundary `diff_applicable_contained` draws in section 8, for the same reason. *)
+let diff_move_destination_is_outside (b a:tree) (xn:tree) (o:op)
+  : Lemma (requires wf a /\ Ok? (to_ops b a) /\ mem o (Ok?._0 (to_ops b a)) /\ MoveNode? o /\
+                    find_in (MoveNode?.target o) a == Some xn)
+          (ensures not (mem (MoveNode?.new_parent o) (ids_all (kids_of xn))))
+  = diff_move_destination_precedes b a o;
+    match o with
+    | MoveNode x np ->
+      if mem np (ids_all (kids_of xn)) then begin
+        find_in_mem_pre x a xn;
+        find_in_id x a xn;
+        pre_precedes a xn np;
+        precedes_antisym np x (ids a);
+        wf_iff_no_dups a;
+        precedes_irrefl x (ids a)
+      end
+      else ()
+
+(* ---- and the three are NOT VACUOUS, evaluated on a pair that exercises both ----
+
+   `before` is a root with one child; `after` adds a container above it and moves the child
+   inside. The diff emits exactly one insert and exactly one move, so both theorems above have a
+   witness rather than a quantifier over nothing — and the last conjunct is the direction check:
+   the moved node does NOT precede its destination, so the positional claim is an ordering fact
+   and not a tautology. It goes red if the four passes ever stop emitting this pair's script. *)
+
+let pos_before : tree = TNode "root" "doc" [ TNode "p" "para" [] ]
+
+let pos_after : tree = TNode "root" "doc" [ TNode "q" "sec" [ TNode "p" "para" [] ] ]
+
+let positional_facts_are_not_vacuous ()
+  : Lemma (ensures wf pos_before /\ wf pos_after /\
+                   to_ops pos_before pos_after ==
+                     Ok [ InsertChild "root" (TNode "q" "sec" []); MoveNode "p" "q" ] /\
+                   precedes "root" "q" (ids pos_after) /\
+                   precedes "q" "p" (ids pos_after) /\
+                   ~(precedes "p" "q" (ids pos_after)))
+  = assert_norm (wf pos_before);
+    assert_norm (wf pos_after);
+    assert_norm (to_ops pos_before pos_after ==
+                 Ok [ InsertChild "root" (TNode "q" "sec" []); MoveNode "p" "q" ]);
+    assert_norm (precedes "root" "q" (ids pos_after));
+    assert_norm (precedes "q" "p" (ids pos_after));
+    assert_norm (not (precedes "p" "q" (ids pos_after)))

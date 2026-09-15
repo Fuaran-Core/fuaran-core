@@ -3,15 +3,17 @@
 **Status: GO** (Phase 131, 2026-09-12; the header last brought level with the body 2026-09-14).
 Phase 131's three exit criteria were met and remain met — the confluence proof is reproducible on
 the pinned prover, the extracted model agrees with production over every lane set the differential
-host draws, and the model reads beside the F# in one sitting — and six further theorems have
-shipped beside it since. **Shipped, seven in all: fold confluence (131, with its hypothesis
+host draws, and the model reads beside the F# in one sitting — and seven further theorems have
+shipped beside it since. **Shipped, eight in all: fold confluence (131, with its hypothesis
 corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
-totality (135), independence soundness for the tree algebra (133), chain integrity (136, its
+totality (135), independence soundness for the tree algebra (133, completed over the WHOLE
+operation alphabet by 162), chain integrity (136, its
 content-id premise decomposed by 145),
 `Json.parse` totality, bounded (146), apply-engine preservation (138, which also lifts 133's
-model to the validator 137 fixed), and the diff's refusal characterisation and emission order
-(141).** Each carries its own claims ladder in its own section
-below; the "Next" section at the foot is the live list.
+model to the validator 137 fixed), the diff's refusal characterisation and emission order
+(141, with its positional facts about `after` added by 162), and the canonical form's injectivity
+(149, which also brings the §21 resource limits into the models as named premises).** Each carries
+its own claims ladder in its own section below; the "Next" section at the foot is the live list.
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -24,8 +26,8 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. |
-| `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. |
+| `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. Phase 162 added the preorder-position lemma (section 19) and the batch lift (section 20), which retired `covered` and made that diamond unconditional. |
+| `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. Since Phase 162 the op alphabet is the WHOLE of `SkeletonOp`, `Batch` included and nested to any depth; it was the four non-`Batch` ops until then. |
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -35,6 +37,9 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `TreeDiff.fst` | The seventh model (Phase 141): the DIFF — `Diff.toOps`'s two refusals characterised exactly, its four passes clause for clause, what each pass guarantees about the block it emits, and `Diff.toOpsContained`'s pre-emptive container refusal. Named `TreeDiff` and not `Diff` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`. It `open`s `TreeOps` (and through it `DagFold`); it is independent of `Preservation.fst`. |
 | `oracle/TreeDiff.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Limits.fst` | The WIRE_FORMAT §21 resource limits as NAMED PREMISES and nothing else (Phase 149): eight constants with their captions, and the two relations the section's own argument uses. It models no enforcement — §21.2's host obligations are about code it does not describe — and it exists so that a changed limit moves one constant rather than a paragraph of prose, and so the ladder can say which theorem depends on which bound. `WireCanon.fst` is the first consumer and takes one of the eight. |
+| `WireCanon.fst` | The eighth model (Phase 149): the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and `Canon.render` clause for clause, a READER for exactly the grammar they emit, and the canonical form proved in BOTH directions. Named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`, which already carries a `Canon`. It `open`s `Limits`; otherwise it shares nothing with the models above but `oracle/Prims.fs`. |
+| `oracle/Limits.fs`, `oracle/WireCanon.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
 | `fstar-pin.json` | The pinned F\* release (which bundles Z3) and its hash. |
@@ -403,10 +408,10 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      diamond is FALSE without it, because `Tree.tryFind` returns the first match in document order
      and a reorder moves document order. Nothing in the estate produces such a tree, but no
      shipped type carries the invariant. "Theorem 2" below has the argument.
-   - **The composite's op alphabet excludes a nested `Batch`** (Phase 133). Three of the fifteen
-     pairs, all the same shape, and `Ops.apply` threads a `Batch` exactly as the fold threads a
-     lane, so it removes no behaviour — it declines to nest one lane inside another. Counted in
-     "Theorem 2" below.
+   - _(**The composite's op alphabet excludes a nested `Batch`** was an assumption here from Phase
+     133 — three of the fifteen pairs, all the same shape — and is RETIRED by Phase 162, which
+     lifted the diamond along a batch's script. The alphabet is the whole of `SkeletonOp` and there
+     is no shape hypothesis left. Counted, and its history kept, in "Theorem 2" below.)_
 4. **Not claimed.**
    - **Rejection identity.** That two independent ops, one of which rejects, reject *identically*
      whichever ran first. The reference algebra cannot keep it and the theorem no longer asks for
@@ -729,7 +734,7 @@ naming what was expected is most of what these combinators are for. On top of th
 vocabulary, its `Json.kindObj` encoder, and the kind-dispatch node decoder a domain writes from
 those combinators.
 
-Four things are proved:
+Five things are proved:
 
 - **`decode_total`.** Every combinator reaches exactly one outcome on every input — `Ok` or a named
   `Error` — and WHICH one is characterised structurally: `as_string` succeeds exactly on a string,
@@ -749,6 +754,10 @@ Four things are proved:
 - **`lenient_agrees_off_policy` / `strict_unchanged_on_null_free`.** The Phase 102 promise — see
   the policy note below, which is also where this model diverges from what the phase's brief
   assumed.
+- **`decode_perm_invariant` / `decode_node_perm_invariant`.** Key-order invariance: WIRE_FORMAT §2
+  rule 2's obligation on the decoder, and §20's one-answer rule at this layer. Added by Phase 152
+  — see the section below, which is also where the duplicate-key premise is argued and proved
+  necessary.
 
 ### The boundary — `Json.parse` is excluded, and why
 
@@ -803,6 +812,48 @@ that HAS a null into the wire model that cannot carry one, which is the type-lev
   arm; `nullish`, which the following `,`/`}` expectation catches) are grammar, and stay with
   `Json.parse`. The differential below is the evidence for the assumption, not a proof of it.
 
+### Key order — rule 2's decoder obligation, and §20's one answer (Phase 152)
+
+WIRE_FORMAT §2 rule 2 obliges every decoder to accept an object's members in **any order**, and §20
+ratifies that the same bytes decode to the same tree on every conformant host. Both were pinned by
+`reject` and round-trip fixtures and neither was a theorem — and **every fixture in the corpus is
+canonically ordered**, so a decoder that silently depended on member order would have passed all of
+them. That is the gap this closes, and it is why the differential below SHUFFLES rather than adding
+fixtures: a fixture family cannot test a property its own canonical form excludes.
+
+**The relation.** `member_perm` relates two documents that differ only by the order of object
+members, at any depth. Arrays are compared **pointwise** — an array's order is content, not
+presentation, and a relation that permuted them too would be proving something false. Scalars must
+be equal. An object's members are matched **by key**, with the matched values related recursively,
+so it is a congruence and not a shallow list permutation: `{"a":{"x":1,"y":2}}` and
+`{"a":{"y":2,"x":1}}` are related.
+
+**What is proved, in both directions.** Forwards: `decode_perm_invariant` — for every related pair,
+the scalar readers, `kindOf`, `strField`, `intField` and `mapList` return **equal** outcomes,
+message included, and `getProp`, whose result is itself a reordered subtree, returns a **related**
+one. `decode_node_perm_invariant` is §20's sentence at this layer: the node decoder returns the
+*same tree*, literally equal, since a decoded node carries no members of its own. Backwards — and
+this is the half that keeps the first from being vacuous, since every invariance lemma above is
+trivially true of a relation that holds of nothing — `perm_covers_reorder` shows the relation
+**contains every reordering of a duplicate-free member list whose values are themselves related**.
+That is one level of a deep reordering, with `member_perm`'s scalar arms as the base cases, so it is
+the induction step rather than a claim about the root; `member_perm_refl` and
+`perm_covers_selection` are the instances a reader can check by eye.
+
+**The premise, and why it is necessary rather than convenient.** `getProp` is a `List.tryFind` over
+the member list, so it answers with the **first** member of the given name. On a list with no
+repeated key that is order-independent; on one with a repeated key it is not — and **nothing
+upstream excludes the case**: `Json.parseObject` appends every member with no key check, and Phase
+146's `parse_members` models exactly that accumulation. So the duplicate-free premise is carried
+here rather than inherited from the parser, and `duplicate_keys_break_order_invariance` proves it
+cannot be dropped: two documents that are the same members in a different order, and `getProp`
+answers differently. Matching by key is where the premise lives in this formulation — the relation
+declines to relate that pair rather than relating it and lying.
+
+**Not claimed.** The relation is not proved transitive or symmetric; nothing needs either, and
+neither is asserted. And nothing here is said about `Canon.render`'s key ordering on the way **out**
+— that is the wire-format corpus's, not this theorem's.
+
 ### What the corpus covers
 
 The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs
@@ -818,25 +869,47 @@ agreeing on accept-vs-refuse alone would not notice a decoder that named the wro
 | the reference vocabulary | 150 generated nodes encoded and decoded, model against the same decoder written from the shipped combinators — the round-trip theorem's instance on the extracted code | accept path |
 | the same, refused | every corpus `nodes/` value and 400 generated documents through both node decoders | refuse path (asserted) |
 | the read policy | 7 hand-written null positions + 400 generated documents carrying the token at every position, rendered to wire text and read by `Json.parseDetailedWithPolicy` under BOTH policies | yes, and the policy is asserted to have FIRED |
+| the same corpus, SHUFFLED (Phase 152) | every value of every `nodes/` and `ops/` fixture, members reordered at every depth, 4 seeded shuffles each: production against ITSELF across the shuffle, and the oracle against production on the shuffled document | refuse path (asserted) |
+| the reference vocabulary, shuffled | 150 generated nodes encoded and reordered, 4 shuffles each, plus 300 generated documents | both (each asserted where its pool reaches it) |
 
-The **go-red case** hands the oracle a *blind bridge* that reads every wire integer as a float — the
-decode family's counterpart to the fold family's blind footprint — and requires `asInt` to
-disagree, on a hand-made value and over the generated sample. A green report is therefore known to
-be a comparison that can lose.
+The **go-red cases** are two, because this theorem has two halves to lose. The Phase 135 one hands
+the oracle a *blind bridge* that reads every wire integer as a float — the decode family's
+counterpart to the fold family's blind footprint — and requires `asInt` to disagree, on a hand-made
+value and over the generated sample. The Phase 152 one hands the SHUFFLE differential a `getProp`
+that reads the **first** member of an object rather than the one it was asked for: on the
+canonically ordered corpus that decoder is very nearly right and every pool above it passes, and
+under a reordering it must lose. That case also asserts its shuffles actually **moved** a member and
+that every drawn pair is one the extracted relation relates — so a failure there is the decoder's
+and not the probe's. A green report is therefore known to be a comparison that can lose, in both
+directions.
+
+Each shuffle is additionally checked to be an instance of the theorem at all: the extracted
+`member_perm` — the model's own relation, not a second one written in the host — must hold of the
+pair, and duplicate-keyed documents are filtered out by the extracted `keys_unique_deep` for the
+reason the section above gives.
 
 The **proof** was falsified the same way before it was trusted, on scratch copies: dropping
 `as_float`'s `JInt` clause reddens `decode_total`; renaming the `"text"` kind tag in the encoder
 reddens `decode_encode_roundtrip`; making the tolerant reader erase one off-policy member shape
-reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have caught it.
+reddens `lenient_agrees_off_policy`. Phase 152 added four more, each on a scratch copy and each
+landing on a different lemma: making `extract_field` ignore the name it was given reddens
+`perm_covers_selection`; relating arrays by length alone reddens `map_list_go_perm`; dropping
+`keys_unique` from `perm_covers_reorder`'s hypotheses reddens it at exactly the step the premise
+pays for (`key_count k hs' == 0`); and relating two `JInt`s without their payloads being equal
+reddens `perm_as_int`. Each landed on the lemma that should have caught it.
 
 ### The claims ladder, for this theorem
 
-1. **Proved (machine-checked, no admits).** On the model: the four results above, for every input,
+1. **Proved (machine-checked, no admits).** On the model: the five results above, for every input,
    under no hypothesis at all — unlike the fold theorem, which rests on `independence_diamond`,
    this one assumes nothing about a domain. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Wire.Decode` over the pools above,
-   on class, value and message. Agreement is over those pools, never over all inputs.
+   on class, value and message. Agreement is over those pools, never over all inputs. Since Phase
+   152 that includes each pool SHUFFLED: production's answers are compared against its own on the
+   unreordered document — equality for every combinator whose result carries no members, the
+   extracted `outcome_perm` for `getProp`, whose result is itself reordered — with a decoder that
+   reads members by position required to lose.
 3. **Assumed, and stated as such.**
    - **The numeric payloads are opaque.** `jval` is parametric in the int and float carriers, and
      `as_float` takes the widening `to_flt` where F# writes `float i`. No combinator in `Decode`
@@ -849,10 +922,18 @@ reddens `lenient_agrees_off_policy`. Each landed on the lemma that should have c
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as
      for the fold model. The leg holds the committed oracle to a fresh extraction byte for byte,
      which makes "the oracle is the model" a checked claim and nothing more.
+   - **Duplicate keys are out of scope, by a premise taken HERE.** Nothing upstream excludes a
+     repeated member name — the parser appends every member, and Phase 146's model says so — and on
+     one `getProp` genuinely does depend on order. `member_perm` therefore does not relate a
+     duplicate-key reordering, and `duplicate_keys_break_order_invariance` proves that is
+     necessary rather than convenient. What the key-order result claims is claimed about
+     duplicate-free documents; on a document with a repeated key the question is open and the
+     answer is "whichever came first".
 4. **Not claimed.** Anything about `Json.parse`; anything about a domain's own decoder beyond the
    reference vocabulary modelled here (what carries to one is the combinator layer it is built
-   from, not its clauses); and anything about encode — `Canon.render`'s key ordering and float
-   layout are certified by the wire-format corpus, not by this theorem.
+   from, not its clauses); anything about encode — `Canon.render`'s key ordering and float layout
+   are certified by the wire-format corpus, not by this theorem; and transitivity or symmetry of
+   `member_perm`, which nothing here needs and nothing here asserts.
 
 ## Theorem 2 — independence soundness for the tree algebra (Phase 133)
 
@@ -974,34 +1055,46 @@ id-unique and disjoint from the tree. That pair is the specification the Phase 1
 and it is why guarding on the result is an exact stand-in for the check rather than an approximation
 of it.
 
-### What is left open, and how big it is — twelve of the fifteen pairs, exactly
+### What was left open, and is now closed — all fifteen pairs (Phase 162)
 
 Counted rather than estimated. The fifteen unordered pairs over the five ops are the ten pairs of
-non-`Batch` ops plus the five involving a `Batch`. **All ten non-`Batch` pairs are proved** — nine
-of them by `relocating_forces_inert` and the three commutation equalities covering the rest. **Two
-of the five `Batch` pairs are proved**: `RemoveNode`/`Batch` and `MoveNode`/`Batch`, because a
-relocating op forces the other side inert whatever it is, so no lift is needed.
+non-`Batch` ops plus the five involving a `Batch`. **All ten non-`Batch` pairs were proved by Phase
+133** — nine of them by `relocating_forces_inert` and the three commutation equalities covering the
+rest — along with **two of the five `Batch` pairs**, `RemoveNode`/`Batch` and `MoveNode`/`Batch`,
+because a relocating op forces the other side inert whatever it is, so no lift was needed.
 
-**Three remain open**, and all three are the same shape: `InsertChild`/`Batch`,
-`ReorderChildren`/`Batch` and `Batch`/`Batch`, where the batch is one that neither does nothing nor
-relocates — a batch built only from inserts and reorders. `TreeOps.covered` is that boundary written
-as a predicate, and `tree_independence_diamond` is stated over it.
+**Three remained open**, all the same shape: `InsertChild`/`Batch`, `ReorderChildren`/`Batch` and
+`Batch`/`Batch`, where the batch is one that neither does nothing nor relocates — a batch built only
+from inserts and reorders. `TreeOps.covered` was that boundary written as a predicate, and the
+diamond was stated over it.
 
-Lifting the leaf diamond along a batch's script is the argument `DagFold.replay_diamond` already
-performs at lane granularity — no new idea is needed — and it needs the id-uniqueness invariant at
-each intermediate state of the script, which is exactly what the paragraph above says the algebra
-does not currently give.
+**Phase 162 performed the lift and `covered` is gone.** `tree_independence_diamond` now quantifies
+over every pair with no shape hypothesis, `op_independence_diamond` states it over the guarded
+algebra, and `Skeleton.fst` composes over the whole `SkeletonOp` alphabet — `Batch` included and
+nested to any depth. The argument is section 20 of `TreeOps.fst` and it is the one Phase 133
+predicted: independence descends through a union, then the leaf diamond lifts along a script by
+induction, threading the id-uniqueness invariant at each intermediate step, in the shape
+`DagFold.replay_diamond` already uses at lane granularity.
 
-**That invariant arrived in Phase 138 and the three pairs are still open** — the sentence here used
-to read "it closes when Phase 137 lands", which was true of the BLOCKER and not of the work. Phase
-137 fixed the validator, Phase 138 lifted this model to it and proved `apply_preserves_wf`
-unconditionally, so the hypothesis the lift was waiting on now holds; what remains is the induction,
-which nobody has done. The distinction is worth keeping visible: a boundary waiting on a theorem and
-a boundary waiting on labour are not the same kind of open.
+**The history of the boundary is worth keeping, because it moved twice and the two moves are
+different kinds of thing.** Phase 133 wrote "it closes when Phase 137 lands", which was true of the
+BLOCKER and not of the work: 137 fixed the validator and Phase 138 proved `apply_preserves_wf`
+unconditionally, so the hypothesis arrived — and the three pairs stayed open anyway, because nobody
+had done the induction. A boundary waiting on a theorem and a boundary waiting on labour are not
+the same kind of open, and only the second was left by 2026-09-14.
 
-The composite theorem in `Skeleton.fst` takes the same boundary as its op alphabet. That costs less
-than it looks: `Ops.apply` threads a `Batch` exactly as the fold threads a lane, so the alphabet
-removes no behaviour from the fold — it declines to nest one lane inside another.
+**One thing Phase 162 found while doing it, which is worth the sentence.** The lift did NOT need
+`Preservation.apply_preserves_wf`, although that is the lemma every note above names. That module
+OPENS `TreeOps`, so it could not have been cited here in any case — and it does not have to be: the
+residue `covered` left out is precisely the pairs where NEITHER side relocates, and a non-relocating
+op carries no `RemoveNode` and no `MoveNode` at any depth. It is built from inserts, reorders and
+nests of them, for which `ins_wf` and `reorder_wf` were already in this module. What section 20 adds
+is `no_reloc_preserves_wf`, the non-relocating fragment of 138's invariant, proved where the lift
+needs it. The unconditional statement remains `Preservation`'s.
+
+`batch_lift_is_not_vacuous` pins that the widening is real: a concrete batch/insert pair whose
+footprints ARE independent, which `covered_classes` REFUSES, and whose two orders reach the same
+tree — evaluated, so it goes red if the excluded shape is ever readmitted.
 
 `applyContained`'s container capability is out of scope and is Phase 140's; `Diff` is Phase 141's.
 `Ops.invert` was named here as Phase 141's too and is theorem 5's — see
@@ -1052,9 +1145,12 @@ before the fourth model is written.
 
 ### The claims ladder, for this theorem
 
-1. **Proved (machine-checked, no admits).** The diamond for every operation pair `covered` names,
-   at every id-unique tree; the composite fold-confluence law over the non-`Batch` alphabet, with
-   its halt half under no hypothesis at all; the refutation of unconditional well-formedness
+1. **Proved (machine-checked, no admits).** The diamond for EVERY operation pair, at every id-unique
+   tree — `Batch` included and nested to any depth, since Phase 162 — and the composite
+   fold-confluence law over the whole `SkeletonOp` alphabet, with
+   its halt half under no hypothesis at all; the preorder-position lemma
+   (`preorder_parent_first`) with its preservation corollaries; the refutation of unconditional
+   well-formedness
    preservation with the conditional form and its converse beside it; and, since Phase 143, that
    the pinned unknown-parent clause is NECESSARY over this `Footprint` record
    (`relocation_clause_is_necessary`, with `relocation_disjoint_diamond`,
@@ -1068,10 +1164,11 @@ before the fourth model is written.
    - **The tree is id-unique.** As above: the diamond is false without it, and no shipped type
      carries the invariant — `Diff.toOps` refuses an ill-formed tree with `DuplicateIdInTree`, and
      that is the closest the code comes to enforcing it.
-   - **The op alphabet excludes a nested `Batch`.** The one open pair shape, and its size is stated
-     above rather than left to be guessed.
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
      the other two theorems.
+   - _(**The op alphabet excludes a nested `Batch`** was the third assumption here and is RETIRED —
+     Phase 162 lifted the diamond along a batch's script, so there is no shape hypothesis left to
+     assume. The section above keeps what the assumption was and how it closed.)_
 4. **Not claimed.** Rejection PAYLOADS: the differential compares a refusal by class, and
    `UnknownNode`'s `addressable` and `ReorderMismatch`'s two orders are outside the comparison (the
    Phase 132 entry says why they cannot be claimed to agree across orders in the first place).
@@ -1164,6 +1261,16 @@ where the sentence said it would:
 - **The op codec's injectivity is the DOMAIN'S** (`op_codec_injective`), so it stays a parameter and
   gains a conformance law: `Conformance.codecInjectivityLaws`, which a witness certifies by
   sampling. Same division of labour as the fold theorem's `independence_diamond`.
+
+  **A codec built on `Canon.render` no longer has to be sampled for it — see theorem 7.** Phase 149
+  proves the canonical form injective up to object-member order over the subset rule 5's own slot
+  rule describes, so a codec that renders through `Canon.render` DISCHARGES this parameter from
+  that theorem rather than from its witness, with one thing to check and one to know. The thing to
+  check is the subset: the codec's payloads must carry no non-finite float and no float whose token
+  is integer-shaped, which are exactly the two aliasing families theorem 7 exhibits. The thing to
+  know is that "up to member order" is not a weakening here — a codec's own injectivity is a claim
+  about the VALUES it encodes, and two objects differing only in authored member order are the same
+  value. A codec that does not render through `Canon.render` is unaffected and stays at this level.
 
 `node_injective_derived` composes the four back into the premise the tamper theorems take, so the
 composite is a theorem now rather than an assumption. Two things about the decomposition are worth
@@ -1754,6 +1861,13 @@ already proves — must make the run lose, and it does.
    `contained_preserves_all_with` all shed `contained_op`. That is the only direction of travel the
    ladder should ever show for a premise: discharged by a code change, with the refutation kept
    evaluable, never quietly dropped.
+   **Phase 162 adds two**, section 10 — the preorder-position lemma's corollaries on this side of
+   the module boundary: `rem_preserves_parent_first`, in the SURVIVOR form (a remove takes ids
+   away, so the statement is over the tree it hands back and not over the one it was given), and
+   `apply_preserves_parent_first`, which is the same over ANY accepted operation including a
+   nested `Batch` and is the one a reconstruction argument cites. Both are `rem_wf` /
+   `apply_preserves_wf` followed by `TreeOps.preorder_parent_first`; they are here rather than in
+   `TreeOps` because `rem_wf` is this module's and that module cannot cite it.
    F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply`, `Ops.canApply` and
@@ -1853,16 +1967,37 @@ node of `after` that really carries children and really is refused), and the pha
 `toOpsContained` returns cannot be refused for containment at any step, and the typed refusal is the
 exact price of that guarantee.
 
+**The positional facts about `after` (section 9, Phase 162).** `diff_insert_parent_precedes` — an
+insert's parent precedes its own node in `after`'s preorder, which is the source comment's
+"top-down" stated about the emitted operations rather than about the loop;
+`diff_move_destination_precedes` — a move's destination precedes the moved node; and
+`diff_move_destination_is_outside` — therefore, **in `after`, a move's destination is never inside
+the moved node's subtree**, which is the consequence Phase 141 named when it deferred the two
+theorems below. All three stand on `TreeOps.preorder_parent_first` (section 19 there), with
+`precedes`' antisymmetry and its irreflexivity on an id-unique tree closing the last one.
+`positional_facts_are_not_vacuous` evaluates a pair that emits exactly one insert and one move, and
+pins that the moved node does NOT precede its destination — so the claim is an ordering fact and
+not a tautology.
+
 ### What is NOT proved, and why the boundary is where it is
 
 `diff_reconstructs` (`applyAll (toOps b a) b = a`) and the OPERATIONAL `diff_applicable` (every
-emitted step is ACCEPTED in sequence) are **differentially tested here and not proved**. Both need
-the same missing piece: a positional argument relating a preorder walk of `after` to the
-intermediate trees the script builds. Informally it is short — a parent precedes its children in
-preorder, so by the time `MoveNode(c, p)` is emitted while processing `p`, every after-ancestor of
-`p` has already been placed and `p` cannot be inside `c`'s subtree — and mechanising it means
-reasoning about `ins` and `rem_at` over intermediate trees, in the cost class `Preservation.fst`
-occupies rather than the one this module does. This phase was time-boxed and did not take it. The
+emitted step is ACCEPTED in sequence) are **differentially tested here and not proved**.
+
+**Phase 141 named the blocker as one missing positional fact, and Phase 162 proved it — and the two
+theorems are still open, which is the honest correction to make here rather than a note to bury.**
+The fact is real and the section above carries it; what it does not do is close these two, because
+they are statements about a different quantifier. `apply` validates each step against the tree IN
+HAND at that step — the before-tree with the script's earlier operations run on it — and not against
+`after`. `diff_move_destination_is_outside` says the destination is outside the moved subtree in
+`after`; what `WouldNestUnderSelf` asks is whether it is outside in the intermediate tree. Carrying
+one across to the other needs an invariant about how much of `after`'s structure each PREFIX of the
+script has already built, and that induction is the remaining work: it reasons about `ins` and
+`rem_at` over intermediate trees, in the cost class `Preservation.fst` occupies rather than the one
+this module does. Both phases were time-boxed and neither took it.
+
+What changed is the SHAPE of the gap, and it is worth naming because it is the difference between
+two kinds of open: this was a missing fact, and it is now a named induction over a proved one. The
 boundary is stated rather than smoothed over because a reader who sees "the diff is proved" and
 assumes reconstruction is proved would be wrong about the one thing they most likely care about.
 
@@ -1913,7 +2048,10 @@ the container check's contribution and nothing else's.
    predicate: `diff_total`, `diff_refusals_exact`, `diff_ok_on_any_wf_pair`,
    `diff_never_target_not_a_container`, `diff_emission_order`, `diff_script_shape` and the four
    block theorems it discharges, `diff_contained_diff`, `diff_contained_locates`,
-   `diff_contained_at_total_is_plain` and `diff_applicable_contained`. F\* 2026.09.06, Z3 4.13.3,
+   `diff_contained_at_total_is_plain` and `diff_applicable_contained` — and, since Phase 162, the
+   three positional facts about `after`: `diff_insert_parent_precedes`,
+   `diff_move_destination_precedes` and `diff_move_destination_is_outside`. F\* 2026.09.06,
+   Z3 4.13.3,
    every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted `to_ops` / `to_ops_contained` agree with
    `Diff.toOps` / `Diff.toOpsContained` over independently generated pairs and a drawn predicate —
@@ -1929,8 +2067,10 @@ the container check's contribution and nothing else's.
      discharge, because the model's tree carries a kind and the theorem is about structure: it is
      the precondition under which asking for a skeleton script is a well-formed question at all.
 4. **Not claimed.**
-   - **Reconstruction and operational applicability**, at level 1 — see the boundary above. They are
-     the natural successor and they are one positional lemma away.
+   - **Reconstruction and operational applicability**, at level 1 — see the boundary above. They
+     were described here as "one positional lemma away"; Phase 162 proved that lemma and they are
+     still open, so what is left is the named induction relating `after`'s order to the
+     intermediate trees, not a missing fact.
    - **`Diff.toOpsMoved`** (fuaran-core#63, the move-aware diff) — not shipped, so not modelled and
      not claimed. When it lands it is a second emission strategy over the same two trees, and every
      theorem here is about `toOps`' four passes specifically rather than about diffing in general.
@@ -1941,18 +2081,229 @@ the container check's contribution and nothing else's.
    - **Rejection PAYLOADS.** The differential compares a refusal by class and by the offender a
      `TargetNotAContainer` names; `UnknownNode`'s `addressable` list is outside the comparison.
 
+## Theorem 7 — the canonical form is injective (Phase 149)
+
+WIRE_FORMAT §2 promises that its twelve encoder rules make the canonical form **deterministic**:
+structurally equal values render byte-for-byte identically. Every digest in the estate needs the
+stronger property nobody states — that **equal bytes imply equal values**. The op-stream chain id,
+the DAG content id, the teleport digest (§17.3) and cross-host attestation all hash the canonical
+rendering and read hash equality as value equality, and theorem 3's decomposition leaves
+`op_codec_injective` a parameter precisely because a codec built on `Canon.render` inherits
+injectivity only if `Canon.render` has it.
+
+`WireCanon.fst` models `Canon.escape` (rule 6), `Canon.canonicalFloat` (rule 5, including the `-0`
+collapse and the three non-finite tokens) and `Canon.render` (rules 2, 3, 5, 6, 7, and the omitted
+key that is rule 4) clause for clause, and proves the converse. **Read the refutation first**,
+because it is what the theorem's shape is for.
+
+### The finding: `render_injective`, as the phase was chartered to prove it, is FALSE
+
+The shard asked for `render a == render b ==> a == b` with no hypothesis. That statement does not
+hold of the shipped encoder, four ways. Each is proved in the model for **every** instantiation
+rather than exhibited at a contrived one, so no future choice of numeric carrier escapes them:
+
+1. **A non-finite float is a STRING on the wire.** `canonicalFloat` emits the quoted token `"NaN"`
+   — and so does the *string* `NaN`. `render_aliases_nan`, `render_aliases_pos_inf` and
+   `render_aliases_neg_inf`.
+2. **An integral float is an INTEGER on the wire.** A finite float whose layout carries no `.` and
+   no `E` renders exactly as the integer of that token. `render_aliases_integral_float`. This is
+   the numeric normalisation `JVal`'s own type doc names ("`render (JFloat 2.0)` emits `2`, which
+   `parse` reads back as `JInt 2`"), and rule 5's last paragraph is the same sentence from the
+   format's side.
+3. **The two zeroes are one token**, by rule 5's `-0` collapse. `render_aliases_negative_zero`.
+4. **Member order is not observable**, by rule 2's sort. `render_aliases_member_order`.
+
+The fourth is not a loss at all — it is the entire purpose of a canonical form, and it is why the
+theorem below is stated *up to member order* rather than flatly. The second and third are
+documented design choices of the format, and the model exhibits them so that a future session
+cannot "fix" one by accident.
+
+**The first is the finding, and it is about the shipped code rather than about the format.**
+`Json.render` has a guarded companion, `Json.tryRender`, which names a non-finite float as a typed
+`Error` "instead of producing un-parseable wire". `Canon` has **no such companion**. A non-finite
+float reaching `Canon.render` is not un-parseable — it is worse than that, because it silently
+becomes a *string*, so a digest over `JFloat nan` equals the digest over `JStr "NaN"`, which is
+precisely the value a reader decodes those bytes back to. Nothing in `Canon` refuses it. This
+phase records the asymmetry rather than repairing it: a repair is a refusal-class change to a
+shipped encoder, in the shape Phase 137 took, and belongs to a phase chartered for it. The
+`Proofs.Oracle` case that holds the four aliases asserts them on **production**, so the finding
+goes red if the encoder ever changes.
+
+### What is proved
+
+**The canonical subset is rule 5's own slot rule, read as a predicate.** A float is canonical
+exactly when it is finite and its canonical token carries a `.` or an `E` — which is the
+discriminator rule 5 uses to decide whether a token "keeps integer identity". Refutations 1 and 2
+are exactly its two failure modes, so the premise is the format's sentence rather than a hedge
+chosen to make a proof go through.
+
+- **`render_total`.** That `render` reaches a rendering on every value is carried by its type. What
+  the lemma adds is that the rendering is never empty and that its FIRST CHARACTER classifies the
+  constructor that produced it, and is never a closing or separating one. That is what makes the
+  shape dispatch exhaustive rather than merely non-empty — theorem 1's distinction, on the encode
+  side — and it is what the reader's own dispatch turns on at every position.
+- **`read_render_roundtrip`.** A reader for exactly the grammar `render` emits is a LEFT INVERSE of
+  it on the canonical subset, **in every trailing context**: `read (render v ++ rest) == Ok
+  (normalise v, rest)`. This is the engine; everything below is a corollary.
+- **`render_injective_up_to_key_order`.** Equal bytes imply equal normal forms — the converse §2
+  never stated, and the one the digests rest on.
+- **`render_deterministic`.** Equal normal forms imply equal bytes — §2's own promise, proved.
+- **`canonical_form_iff`.** The two together, which is what "canonical form" means and is more than
+  either half.
+- **`render_injective_on_normal`.** The literal `render a == render b ==> a == b`, on values whose
+  object members are already in canonical key order. That is not a contrivance: it is the shape of
+  every value a reader hands back (`read_returns_a_normal_value`), so it is what a consumer
+  comparing two decoded documents actually holds.
+
+**The four rule lemmas are the proof's own parts rather than decoration.** Rule 2 —
+`sort_produces_sorted` and `sorted_is_its_own_sort`: under the comparator's total-order premises
+the sort is idempotent, so the author's key order carries no information into the bytes. Rule 6 —
+`read_str_inverts_escape`: the escaped body is uniquely decodable **in any trailing context**,
+which is the property injectivity needs and which plain injectivity of `escape` would not give.
+Rule 5 — `canonical_float_injective` and `int_layout_injective`, DERIVED rather than assumed (see
+the ladder). Rule 4 — `absence_is_structural`: two objects that render alike carry the same keys,
+so an omitted key can never be confused with a present one, which is what makes "`None` fields are
+excluded" safe rather than merely tidy.
+
+### Why a reader, and not a second model of `Json.parse`
+
+Injectivity of a recursive encoder is either a first-difference induction over rendered byte lists
+or the exhibition of a left inverse. The second is very much cheaper, and it is also more useful:
+what it produces is a **round trip**, which is a statement a reader of this document already knows
+how to want.
+
+The reader is deliberately **not** a second model of `Json.parse`. Theorem 4 models that parser —
+its depth counter, its twelve error classes, its two numeric guards — and remodelling it here would
+prove the same thing twice at several times the prover cost. What injectivity needs is that an
+inverse EXISTS, not a second account of production's own. Its behaviour on input `render` never
+emits is therefore not claimed and not tested, and the differential runs the round trip against
+`Json.parse` to tie the two together over the corpus.
+
+### The §21 limits, and the one premise that reaches them
+
+`Limits.fst` carries WIRE_FORMAT §21's eight bounds as named premises, with the two relations the
+section's own argument uses — every bound admits something, and the node-depth bound sits below the
+syntactic-depth bound with room for the worst-shaped kind, which is what makes "a host must never
+report a node-depth breach as a syntax-depth breach" a fact about the table rather than a hope
+about it. It models **no enforcement**: §21.2's host obligations are about code it does not
+describe.
+
+`read_render_roundtrip_within_limits` is the round trip restated with `max_json_depth` carried.
+Nothing in the proof uses the hypothesis, and that is the point — within the format's own limits
+the round trip is unconditional, and outside them it is *production's* cap and not this model that
+decides. The premise is there so a change to the §21 table moves one constant and the ladder can
+say which theorem depended on which bound.
+
+### What the corpus covers
+
+The differential host runs the extracted encoder beside `Canon.render` and compares the **bytes**,
+which is the only comparison that means anything for an encoder whose whole job is to produce a
+digest input.
+
+| Pool | What is asked | Reached |
+|---|---|---|
+| the wire corpus's `nodes/` fixtures | every fixture rendered by both, byte for byte; and the round trip on the canonical subset | yes (asserted: fixtures, sortable objects, round trips) |
+| the wire corpus's `ops/` fixtures | the same | yes (asserted) |
+| a generated `JVal` pool | 1,200 seed-replayable documents over an alphabet carrying rule 6's three escape classes, astral and private-use keys, and rule 5's scientific layout | yes (each shape asserted reached) |
+| the four aliasing pairs | asserted on PRODUCTION, and on the model beside it | the finding, as a check that can go red |
+| the non-canonical arms | both infinities, NaN, both zeroes, the Int32 boundaries, an empty string, an empty object and array | the model is a model of the whole encoder, not only of the part the theorem covers |
+
+The **go-red** is rule 2's comparator REVERSED — the sort the rule mandates still runs, but orders
+keys the other way. Every object carrying two distinct keys must then disagree, and a document
+carrying none must still agree; both are asserted, so the instrument is known to be one that can
+lose *and* to be narrow to the rule it is about.
+
+One thing about the host is worth knowing before anyone reads a stack trace. The extracted model is
+a **character-list interpreter** and F\*'s F# backend emits plain recursion with no tail calls, so
+rendering a multi-kilobyte fixture walks a stack proportional to the document's bytes and the
+largest fixture in the corpus overflows the default 1 MB one. That is a property of the
+EXTRACTION, not of the model — the theorem is about a function, not about a runtime's frame budget
+— so the differential runs on a thread with a stack sized for the corpus rather than shrinking the
+pool until it fits. Shrinking would have silently narrowed what the corpus leg certifies, and the
+fixture it would have dropped first is the deepest one.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** On the model: `render_total`,
+   `read_render_roundtrip`, `render_injective_up_to_key_order`, `render_deterministic`,
+   `canonical_form_iff`, `render_injective_on_normal`, `read_returns_a_normal_value`, the four
+   rule lemmas, the §21 relations in `Limits.fst`, and the four refutations. F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
+   `admit`. The module carries a scoped `--ext context_pruning` for the reason `TreeOps.fst` gives
+   at the same line.
+2. **Differentially tested.** The extracted encoder agrees with `Canon.render` byte for byte over
+   both corpus families and the generated pool, and the model's round trip agrees with
+   `Json.parse ∘ Canon.render` over the same documents on the canonical subset. Agreement is over
+   the corpus and the pool drawn, never over all inputs. One go-red, required to lose.
+3. **Assumed, and stated as such.**
+   - **The numerals are opaque, and there is exactly ONE premise about them.** The two layouts and
+     the numeral read-back are parameters, and `tok_read_ok` says the read-back inverts the
+     layouts — which is what rule 5 means by "the shortest digit sequence that ROUND-TRIPS", so the
+     premise is the float layout's own definition rather than an extra assumption beside it. Rule
+     5's injectivity lemmas are **derived** from it, because a read-back that is a function cannot
+     answer twice for one token. What is therefore not said is anything about the digits: which
+     decimal .NET produces for a given double is the differential's and the cross-host parity
+     vectors' to measure.
+   - **The comparator is a parameter constrained to be a total order.** What is proved is that a
+     canonical form follows FROM a total order. That `System.String.CompareOrdinal` IS one, and
+     that it is UTF-16 code-unit order rather than code-point or UTF-8-byte order, are facts about
+     .NET — observable exactly where rule 2's own note says they are, above the BMP, and pinned by
+     the corpus fixture and by the differential's astral keys.
+   - **A character is a constructor, and the bridge is the correspondence.** As in theorem 4. The
+     model writes the bridge's condition down as `bridged` — a verbatim character never aliases a
+     constructor's own spelling — rather than leaving it in prose, and the host's mapping satisfies
+     it by construction; the mapping itself is one line per class and is not proved.
+   - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as
+     for the six theorems above.
+4. **Not claimed.**
+   - **Injectivity outside the canonical subset**, which the four refutations show is not merely
+     unproved but false. A consumer hashing `Canon.render` output is relying on the subset whether
+     it says so or not, and the two families it has to exclude are named above.
+   - **`Canon.renderOrdered`.** It is the declared-key-order leg, where the ENCODER is the order
+     authority and no sort runs; its canonicity rests on a different argument (the IDL's
+     `WireShape.KeyOrder`), and nothing here carries to it.
+   - **That a non-finite float cannot reach `Canon.render`.** It can; nothing refuses it. See the
+     finding above.
+   - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
+     measures — that is theorem 4's, and the boundary between the two is deliberate.
+
 ## Next
 
+**A guarded `Canon.tryRender`** — theorem 7's finding, and the smallest item on this list. `Json`
+has the pair: `render` formats a non-finite float into a token that is not valid JSON, and
+`tryRender` names it as a typed `Error` instead. `Canon` has only the unguarded half, and its
+failure mode is worse rather than better — a non-finite float does not produce un-parseable wire,
+it produces a `"NaN"` STRING, so the digest over `JFloat nan` equals the digest over the value a
+reader decodes those bytes back to. `render_aliases_nan` is that sentence proved, and the
+`Proofs.Oracle` alias case is it asserted on production. What it needs is a refusal-class addition
+in the shape Phase 137 took — a guarded entry point beside the existing one, not a change to what
+`render` does, since the bytes are pinned by the corpus and by four other hosts. The theorem's
+canonical subset is already the predicate such a guard would enforce, which is why this is small:
+`float_canonical`'s two clauses ARE the refusal, and the second of them (an integer-shaped float
+token) is a design choice the guard should NOT refuse, so the guard is the first clause alone.
+
 **The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
-shortest informal argument and the longest mechanisation. What it needs is one positional lemma: a
-parent precedes its children in a preorder walk, so by the time the second pass emits
+shortest informal argument and the longest mechanisation. **This entry has been corrected by Phase
+162 and the correction is the useful part of it.** It used to say the item needed one positional
+lemma — a parent precedes its children in a preorder walk, so by the time the second pass emits
 `MoveNode(c, p)` while processing `p`, every after-ancestor of `p` has already been placed and `p`
-cannot be inside `c`'s subtree. Everything else follows from the four block characterisations
-theorem 6 already proves. The cost is that the lemma is about `ins` and `rem_at` over the
-INTERMEDIATE trees the script builds, which is `Preservation.fst`'s cost class rather than
-`TreeDiff.fst`'s — so the module that checks in ten seconds today would not afterwards, and that is
-the honest price rather than a reason not to pay it. `Diff.toOpsMoved` (fuaran-core#63) travels
-beside it: a second emission strategy over the same two trees, which would want the same lemma.
+cannot be inside `c`'s subtree. That lemma is now proved (`TreeOps.preorder_parent_first`, section
+19) and so is its instantiation at the diff (`TreeDiff` section 9, including the conclusion about
+`c`'s subtree), and reconstruction is still open — because the fact holds of `after`, and `apply`
+validates each step against the INTERMEDIATE tree, the before-tree with the script's earlier
+operations run on it. What remains is an induction carrying an invariant about how much of `after`'s
+structure each PREFIX of the script has built; everything else follows from the four block
+characterisations theorem 6 already proves, plus the three positional facts. The cost is unchanged
+and is the honest price rather than a reason not to pay it: the induction is about `ins` and
+`rem_at` over intermediate trees, `Preservation.fst`'s cost class rather than `TreeDiff.fst`'s, so
+the module that checks in twelve seconds today would not afterwards. `Diff.toOpsMoved`
+(fuaran-core#63) travels beside it: a second emission strategy over the same two trees, which would
+want the same invariant.
+
+_(**The batch lift** — "the three `Batch` pair shapes `TreeOps.covered` names" — was an item here
+and is DONE: Phase 162, section 20 of `TreeOps.fst`, with `covered` deleted and `Skeleton.fst`
+restated over the whole `SkeletonOp` alphabet. Theorem 2's "What was left open" section carries
+what it was and how it closed.)_
 
 **Discharging theorem 1's policy assumption** — the smallest of what is left, and now reachable.
 `WireDecode.fst` assumes the parser's member-null absorption is equivalent to erasing member nulls

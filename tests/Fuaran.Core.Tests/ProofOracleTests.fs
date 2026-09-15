@@ -3876,6 +3876,692 @@ let private diffDifferential' (containedDiff: ContainedDiff) (seed: int) (trials
 let private diffDifferential (seed: int) (trials: int) : DiffTally =
     diffDifferential' TreeDiff.to_ops_contained seed trials
 
+// ---------------------------------------------------------------------------
+//  Phase 152 — KEY ORDER, differentially.
+//
+//  WIRE_FORMAT §2 rule 2 obliges a decoder to accept an object's members in any order, and §20
+//  ratifies that the same bytes decode to the same tree on every conformant host. Every fixture
+//  in the corpus is canonically ordered, so a decoder that silently read member order would pass
+//  all of them — which is what makes this family different from the Phase 135 one above. It
+//  SHUFFLES: every object of every document, at every depth, seeded and replayable, and then asks
+//  three questions of each shuffle.
+//
+//    1. Is the shuffle an instance of the theorem at all? The extracted `member_perm` — the model's
+//       own relation, not a second one written here — must hold of the pair. A shuffle the
+//       relation does not relate would be measuring something the lemma never claimed.
+//    2. Does PRODUCTION answer the same on the shuffle as on the original? Every combinator whose
+//       result carries no members is compared for equality, message included; `getProp`, whose
+//       result is a subtree and so is itself reordered, is compared through the model's
+//       `outcome_perm`.
+//    3. Does the oracle still agree with production on the shuffled document? The Phase 135 probes,
+//       on documents no fixture contains.
+//
+//  Duplicate-keyed documents are FILTERED OUT, using the extracted `keys_unique_deep` rather than
+//  a predicate written here, because on a repeated key `List.tryFind` genuinely does depend on
+//  order — see `duplicate_keys_break_order_invariance`, which proves the premise necessary rather
+//  than assuming it away. Arrays are NOT shuffled: an array's order is content.
+// ---------------------------------------------------------------------------
+
+/// Fisher–Yates over the suite's own replayable generator.
+let private shuffleList (xs: 'a list) (r0: ConfRng.T) : 'a list * ConfRng.T =
+    let arr = List.toArray xs
+    let mutable r = r0
+
+    for i in (arr.Length - 1) .. -1 .. 1 do
+        let j, r' = ConfRng.intBelow (i + 1) r
+        r <- r'
+        let tmp = arr.[i]
+        arr.[i] <- arr.[j]
+        arr.[j] <- tmp
+
+    List.ofArray arr, r
+
+/// Reorder the members of EVERY object in the document, at every depth. Arrays keep their order.
+let rec private shuffleDeep (v: JVal) (r0: ConfRng.T) : JVal * ConfRng.T =
+    match v with
+    | JArr xs ->
+        let items, r =
+            xs
+            |> List.fold
+                (fun (acc, rr) x ->
+                    let x', rr' = shuffleDeep x rr
+                    acc @ [ x' ], rr')
+                ([], r0)
+
+        JArr items, r
+    | JObj fields ->
+        let inner, r1 =
+            fields
+            |> List.fold
+                (fun (acc, rr) (k, x) ->
+                    let x', rr' = shuffleDeep x rr
+                    acc @ [ k, x' ], rr')
+                ([], r0)
+
+        let reordered, r2 = shuffleList inner r1
+        JObj reordered, r2
+    | _ -> v, r0
+
+/// The model's own deep duplicate-free predicate, asked of a production value.
+let private keysUniqueDeep (v: JVal) : bool = WireDecode.keys_unique_deep (toModel v)
+
+/// The model's own relation, asked of a pair of production values.
+let private relatedByModel (a: JVal) (b: JVal) : bool =
+    WireDecode.member_perm (toModel a) (toModel b)
+
+/// A decoder — the parameter is `getProp`, so the go-red instrument below can be the SAME decoder
+/// reading members by position instead of by name. Everything else is `Wire.Decode`.
+type private GetProp = string -> JVal -> Result<JVal, string>
+
+let rec private decodeRefWith (getProp: GetProp) (el: JVal) : Result<RefNode, string> =
+    let strField name e =
+        getProp name e |> Result.bind Decode.asString
+
+    match getProp "kind" el |> Result.bind Decode.asString with
+    | Error m -> Error m
+    | Ok tag ->
+        if tag = "text" then
+            strField "value" el |> Result.map RefText
+        elif tag = "flag" then
+            getProp "on" el |> Result.bind Decode.asBool |> Result.map RefFlag
+        elif tag = "tags" then
+            getProp "tags" el
+            |> Result.bind (Decode.mapList Decode.asString)
+            |> Result.map RefTags
+        elif tag = "group" then
+            match strField "id" el with
+            | Error m -> Error m
+            | Ok id ->
+                match getProp "items" el with
+                | Error m -> Error m
+                | Ok(JArr ys) ->
+                    let rec go acc rest =
+                        match rest with
+                        | [] -> Ok(List.rev acc)
+                        | x :: t ->
+                            match decodeRefWith getProp x with
+                            | Ok n -> go (n :: acc) t
+                            | Error m -> Error m
+
+                    go [] ys |> Result.map (fun ns -> RefGroup(id, ns))
+                | Ok other -> Error("expected array, got " + kindWord other)
+        else
+            Error("unknown kind: " + tag)
+
+/// THE GO-RED INSTRUMENT: a `getProp` that reads the FIRST member of an object rather than the
+/// one it was asked for. On the canonically-ordered corpus it is very nearly right — which is the
+/// point, and why the corpus alone could not catch it. Under a shuffle it must lose.
+let private getPropByPosition (name: string) (el: JVal) : Result<JVal, string> =
+    match el with
+    | JObj((_, v) :: _) -> Ok v
+    | JObj [] -> Error("missing property: " + name)
+    | other -> Error("expected object, got " + kindWord other)
+
+/// Production's answers to the questions the theorem says are order-insensitive. Each result
+/// carries no members of its own, so these are compared for EQUALITY — message included.
+let private orderFreeAnswers (getProp: GetProp) (el: JVal) : (string * string) list =
+    [ "kindOf", resR asStr (getProp "kind" el |> Result.bind Decode.asString)
+      "strField id", resR asStr (getProp "id" el |> Result.bind Decode.asString)
+      "strField value", resR asStr (getProp "value" el |> Result.bind Decode.asString)
+      "intField n", resR string (getProp "n" el |> Result.bind Decode.asInt)
+      "asString", resR asStr (Decode.asString el)
+      "asInt", resR string (Decode.asInt el)
+      "asBool", resR string (Decode.asBool el)
+      "asFloat", resR asFlt (Decode.asFloat el)
+      "mapList asString", resR asStrs (Decode.mapList Decode.asString el)
+      "decodeRef", resR renderRef (decodeRefWith getProp el) ]
+
+/// `getProp`'s own result is a SUBTREE, so the two answers are related rather than equal — and
+/// the relation they are compared by is the extracted model's, which is the one the lemma is
+/// about.
+let private getPropRelated (getProp: GetProp) (name: string) (a: JVal) (b: JVal) : bool =
+    let toO (r: Result<JVal, string>) : WireDecode.outcome<MJVal> =
+        match r with
+        | Ok v -> WireDecode.Ok(toModel v)
+        | Error m -> WireDecode.Error m
+
+    WireDecode.outcome_perm (toO (getProp name a)) (toO (getProp name b))
+
+type private ShuffleTally =
+    {
+        Diffs: string list
+        /// Documents the filter admitted (duplicate-free at every depth).
+        Admitted: int
+        /// Shuffles that actually MOVED a member — without these the family re-runs Phase 135's.
+        Moved: int
+        /// Values the node decoder ACCEPTED, across all shuffles.
+        Accepted: int
+        /// Values it refused. Both arms must be reached, or the agreement certifies one of them.
+        Refused: int
+        /// Pairs the extracted relation did NOT relate — a defect in the shuffle, not in the tree.
+        Unrelated: int
+    }
+
+let private emptyShuffleTally =
+    { Diffs = []
+      Admitted = 0
+      Moved = 0
+      Accepted = 0
+      Refused = 0
+      Unrelated = 0 }
+
+/// One document, `trials` shuffles of it. `getProp` is `Decode.getProp` in every real run and the
+/// positional instrument only in the go-red case.
+let private shuffleProbe
+    (getProp: GetProp)
+    (label: string)
+    (trials: int)
+    (seed: int)
+    (el: JVal)
+    (tally: ShuffleTally)
+    : ShuffleTally =
+    if not (keysUniqueDeep el) then
+        tally
+    else
+        let baseline = orderFreeAnswers getProp el
+        let mutable r = ConfRng.ofSeed seed
+
+        let mutable t =
+            { tally with
+                Admitted = tally.Admitted + 1 }
+
+        for i in 1..trials do
+            let shuffled, r' = shuffleDeep el r
+            r <- r'
+
+            if shuffled <> el then
+                t <- { t with Moved = t.Moved + 1 }
+
+            // 1. the shuffle is an instance of the relation the lemma is about
+            if not (relatedByModel el shuffled) then
+                t <-
+                    { t with
+                        Unrelated = t.Unrelated + 1
+                        Diffs =
+                            t.Diffs
+                            @ [ sprintf
+                                    "%s/%d: the extracted member_perm does NOT relate the document to its shuffle\n  original: %s\n  shuffled: %s"
+                                    label
+                                    i
+                                    (Json.render el)
+                                    (Json.render shuffled) ] }
+
+            // 2. production answers the same on the shuffle as on the original
+            let answers = orderFreeAnswers getProp shuffled
+
+            for idx in 0 .. baseline.Length - 1 do
+                let name, before = baseline.[idx]
+                let _, after = answers.[idx]
+
+                if before <> after then
+                    t <-
+                        { t with
+                            Diffs =
+                                t.Diffs
+                                @ [ sprintf
+                                        "%s/%d: %s MOVED under a member reordering\n  original: %s -> %s\n  shuffled: %s -> %s"
+                                        label
+                                        i
+                                        name
+                                        (Json.render el)
+                                        before
+                                        (Json.render shuffled)
+                                        after ] }
+
+            for name in [ "kind"; "id"; "value"; "items"; "tags"; "on"; "no-such-member" ] do
+                if not (getPropRelated getProp name el shuffled) then
+                    t <-
+                        { t with
+                            Diffs =
+                                t.Diffs
+                                @ [ sprintf
+                                        "%s/%d: getProp %s answers an UNRELATED subtree under a member reordering\n  original: %s\n  shuffled: %s"
+                                        label
+                                        i
+                                        name
+                                        (Json.render el)
+                                        (Json.render shuffled) ] }
+
+            match decodeRefWith getProp shuffled with
+            | Ok _ -> t <- { t with Accepted = t.Accepted + 1 }
+            | Error _ -> t <- { t with Refused = t.Refused + 1 }
+
+        t
+
+/// The tally's own vacuity guards: a run that admitted nothing, or that never actually moved a
+/// member, proves nothing whatever else it reports. Which arms of the node decoder a pool reaches
+/// is a property of that pool, so each case asserts its own.
+let private expectShuffleAgreement (label: string) (t: ShuffleTally) =
+    match t.Diffs with
+    | d :: _ -> failtestf "%s: a member reordering CHANGED a decode answer\n%s" label d
+    | [] ->
+        Expect.isGreaterThan t.Admitted 0 (sprintf "%s: no document passed the duplicate-free filter" label)
+
+        Expect.isGreaterThan
+            t.Moved
+            0
+            (sprintf "%s: no shuffle actually moved a member — the family re-ran the unshuffled probes" label)
+
+//  Phase 149 — the CANONICAL ENCODER. `proofs/WireCanon.fst`'s extracted `render`
+//  beside `Fuaran.Core.Canon.render`, byte for byte.
+//
+//  The model is named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is
+//  not called `Ops` and `TreeDiff.fst` is not called `Diff`: the extracted oracle is
+//  a top-level F# module and this host opens `Fuaran.Core`, which already carries a
+//  `Canon`. The two would shadow each other exactly where the differential needs both.
+// ---------------------------------------------------------------------------
+
+/// The model's hex nibble, by value. Used in both directions of the bridge.
+let private canonHexdOf (n: int) : WireCanon.hexd =
+    match n with
+    | 0 -> WireCanon.HD0
+    | 1 -> WireCanon.HD1
+    | 2 -> WireCanon.HD2
+    | 3 -> WireCanon.HD3
+    | 4 -> WireCanon.HD4
+    | 5 -> WireCanon.HD5
+    | 6 -> WireCanon.HD6
+    | 7 -> WireCanon.HD7
+    | 8 -> WireCanon.HD8
+    | 9 -> WireCanon.HD9
+    | 10 -> WireCanon.HDa
+    | 11 -> WireCanon.HDb
+    | 12 -> WireCanon.HDc
+    | 13 -> WireCanon.HDd
+    | 14 -> WireCanon.HDe
+    | 15 -> WireCanon.HDf
+    | _ -> failwithf "not a hex nibble: %d" n
+
+let private canonHexdChar (d: WireCanon.hexd) : char =
+    match d with
+    | WireCanon.HD0 -> '0'
+    | WireCanon.HD1 -> '1'
+    | WireCanon.HD2 -> '2'
+    | WireCanon.HD3 -> '3'
+    | WireCanon.HD4 -> '4'
+    | WireCanon.HD5 -> '5'
+    | WireCanon.HD6 -> '6'
+    | WireCanon.HD7 -> '7'
+    | WireCanon.HD8 -> '8'
+    | WireCanon.HD9 -> '9'
+    | WireCanon.HDa -> 'a'
+    | WireCanon.HDb -> 'b'
+    | WireCanon.HDc -> 'c'
+    | WireCanon.HDd -> 'd'
+    | WireCanon.HDe -> 'e'
+    | WireCanon.HDf -> 'f'
+
+/// A .NET `char` as one of the model's constructors. TOTAL and CLASSIFYING: every character the
+/// canonical encoder distinguishes has its own constructor, and `CPlain` catches the rest
+/// VERBATIM — so two different ordinary characters are never identified, and `WireCanon.bridged`
+/// (the model's own statement of what this function has to be: a `CPlain` never carries a
+/// spelling another constructor already denotes) holds of everything produced here by
+/// construction. That is the level-3 assumption, written where it is discharged.
+let private canonToCh (c: char) : WireCanon.ch =
+    match c with
+    | '"' -> WireCanon.CQuote
+    | '\\' -> WireCanon.CBackslash
+    | '{' -> WireCanon.CLBrace
+    | '}' -> WireCanon.CRBrace
+    | '[' -> WireCanon.CLBrack
+    | ']' -> WireCanon.CRBrack
+    | ':' -> WireCanon.CColon
+    | ',' -> WireCanon.CComma
+    | '-' -> WireCanon.CMinus
+    | '+' -> WireCanon.CPlus
+    | '.' -> WireCanon.CDot
+    | 'E' -> WireCanon.CUpE
+    | 'u' -> WireCanon.CLu
+    | c when c < ' ' -> WireCanon.CCtrl(int c >= 16, canonHexdOf (int c % 16))
+    | c when c >= '0' && c <= '9' -> WireCanon.CHexCh(canonHexdOf (int c - int '0'))
+    | c when c >= 'a' && c <= 'f' -> WireCanon.CHexCh(canonHexdOf (int c - int 'a' + 10))
+    | c -> WireCanon.CPlain(string c)
+
+let private canonFromCh (c: WireCanon.ch) : string =
+    match c with
+    | WireCanon.CQuote -> "\""
+    | WireCanon.CBackslash -> "\\"
+    | WireCanon.CLBrace -> "{"
+    | WireCanon.CRBrace -> "}"
+    | WireCanon.CLBrack -> "["
+    | WireCanon.CRBrack -> "]"
+    | WireCanon.CColon -> ":"
+    | WireCanon.CComma -> ","
+    | WireCanon.CMinus -> "-"
+    | WireCanon.CPlus -> "+"
+    | WireCanon.CDot -> "."
+    | WireCanon.CUpE -> "E"
+    | WireCanon.CLu -> "u"
+    | WireCanon.CHexCh d -> string (canonHexdChar d)
+    | WireCanon.CCtrl(hi, lo) ->
+        string (
+            char (
+                (if hi then 16 else 0)
+                + int (
+                    canonHexdChar lo
+                    |> fun ch ->
+                        if ch <= '9' then
+                            int ch - int '0'
+                        else
+                            int ch - int 'a' + 10
+                )
+            )
+        )
+    | WireCanon.CPlain s -> s
+
+let private canonToChs (s: string) : WireCanon.ch list = s |> Seq.map canonToCh |> List.ofSeq
+
+let private canonFromChs (l: WireCanon.ch list) : string =
+    l |> List.map canonFromCh |> String.concat ""
+
+let rec private canonToModel (v: JVal) : WireCanon.jval<int, float> =
+    match v with
+    | JStr s -> WireCanon.JStr(canonToChs s)
+    | JInt i -> WireCanon.JInt i
+    | JBool b -> WireCanon.JBool b
+    | JFloat f -> WireCanon.JFloat f
+    | JArr xs -> WireCanon.JArr(xs |> List.map canonToModel)
+    | JObj fs -> WireCanon.JObj(fs |> List.map (fun (k, v) -> (canonToChs k, canonToModel v)))
+
+let rec private canonOfModel (v: WireCanon.jval<int, float>) : JVal =
+    match v with
+    | WireCanon.JStr s -> JStr(canonFromChs s)
+    | WireCanon.JInt i -> JInt i
+    | WireCanon.JBool b -> JBool b
+    | WireCanon.JFloat f -> JFloat f
+    | WireCanon.JArr xs -> JArr(xs |> List.map canonOfModel)
+    | WireCanon.JObj fs -> JObj(fs |> List.map (fun (k, v) -> (canonFromChs k, canonOfModel v)))
+
+/// The `wire` the model is parametric over, instantiated at production's own layouts. Two of the
+/// seven fields are worth naming.
+///
+/// `float_str` is `Double.ToString("R", InvariantCulture)` DIRECTLY and not `Canon.canonicalFloat`,
+/// so the `-0` collapse and the three non-finite tokens stay the MODEL's clauses to get right
+/// rather than being handed to it — that is the difference between a comparison and a tautology.
+/// The digits themselves are .NET's, per the opaque-numeral boundary theorems 1 and 4 also draw.
+///
+/// `tok_read` is the numeral READ-BACK the model does not compute: production's own parser over
+/// the token the model scanned. `tok_read_ok`, the one premise the theorems carry, is exactly the
+/// claim that this function inverts the two layouts above — which is what rule 5 means by "the
+/// shortest digit sequence that ROUND-TRIPS", so the premise is the layout's definition rather
+/// than an extra assumption about it.
+let private canonWire: WireCanon.wire<int, float> =
+    { int_str = fun i -> canonToChs (string i)
+      float_str = fun f -> canonToChs (f.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+      fclass =
+        fun f ->
+            if System.Double.IsNaN f then
+                WireCanon.FNaN
+            elif System.Double.IsPositiveInfinity f then
+                WireCanon.FPosInf
+            elif System.Double.IsNegativeInfinity f then
+                WireCanon.FNegInf
+            else
+                WireCanon.FFinite
+      is_zero = fun f -> f = 0.0
+      pos_zero = 0.0
+      key_le = fun a b -> System.String.CompareOrdinal(canonFromChs a, canonFromChs b) <= 0
+      tok_read =
+        fun t ->
+            match Json.parse (canonFromChs t) with
+            | Result.Ok v -> WireCanon.Ok(canonToModel v)
+            | Result.Error m -> WireCanon.Error m }
+
+/// The GO-RED instrument, and this family's counterpart to the fold family's blind footprint and
+/// the decode family's blind integer bridge: rule 2's comparator REVERSED, so the sort the rule
+/// mandates still runs but orders keys the other way. Every object carrying two distinct keys must
+/// then disagree with production, and a document carrying none still agrees — so the comparison is
+/// known to be both one that can lose and one that is narrow to the rule it is about.
+let private canonWireGoRed: WireCanon.wire<int, float> =
+    { canonWire with
+        key_le = fun a b -> System.String.CompareOrdinal(canonFromChs a, canonFromChs b) >= 0 }
+
+/// Rule 5's own slot rule, as a predicate on a value: a token with no `.`, no `e`/`E` and a
+/// magnitude inside the int53 window "keeps integer identity", so a float whose canonical token
+/// carries neither marker is INDISTINGUISHABLE ON THE WIRE from the integer of that token. That is
+/// the model's `canonical`, and the subset every theorem in section 10 is stated over.
+let rec private isCanonicalValue (v: JVal) : bool =
+    match v with
+    | JFloat f ->
+        System.Double.IsFinite f
+        && (let t = Canon.canonicalFloat f in t.Contains "." || t.Contains "E")
+    | JArr xs -> xs |> List.forall isCanonicalValue
+    | JObj fs -> fs |> List.forall (snd >> isCanonicalValue)
+    | _ -> true
+
+/// The extracted model is a CHARACTER-LIST interpreter, and F*'s F# backend emits plain recursion
+/// with no tail calls (README, finding 3's neighbour: the backend is second-class upstream). So
+/// rendering a multi-kilobyte corpus fixture walks a stack proportional to the document's BYTES,
+/// and the largest fixture in the corpus overflows the default 1 MB one. That is a property of the
+/// EXTRACTION and not of the model — the theorem is about a function, not about a runtime's frame
+/// budget — so the differential runs on a thread with a stack sized for the corpus rather than
+/// shrinking the pool until it fits the default. Shrinking would silently narrow what the corpus
+/// leg certifies, and the fixture it would drop first is the deepest one.
+let private onBigStack (f: unit -> 'a) : 'a =
+    let mutable result = Unchecked.defaultof<'a>
+    let mutable failure: exn = null
+
+    let body () =
+        try
+            result <- f ()
+        with e ->
+            failure <- e
+
+    let t = System.Threading.Thread(body, 128 * 1024 * 1024)
+    t.Start()
+    t.Join()
+
+    if not (isNull failure) then
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw()
+
+    result
+
+type private CanonTally =
+    {
+        Docs: int
+        Diffs: string list
+        /// Objects carrying two or more DISTINCT keys — the shape rule 2's sort is observable on,
+        /// and therefore the shape the go-red needs to have met.
+        SortableObjects: int
+        /// Strings carrying a character rule 6 escapes.
+        EscapedStrings: int
+        /// Strings carrying a control character — the `\u00xx` arm specifically.
+        ControlStrings: int
+        /// Floats whose canonical token is in scientific notation — rule 5's other layout.
+        ScientificFloats: int
+        /// Canonical documents whose model round trip was checked.
+        RoundTrips: int
+    }
+
+let private emptyCanonTally =
+    { Docs = 0
+      Diffs = []
+      SortableObjects = 0
+      EscapedStrings = 0
+      ControlStrings = 0
+      ScientificFloats = 0
+      RoundTrips = 0 }
+
+let rec private canonShape (v: JVal) (t: CanonTally) : CanonTally =
+    match v with
+    | JStr s ->
+        let t =
+            if s |> Seq.exists (fun c -> c = '"' || c = '\\' || c < ' ') then
+                { t with
+                    EscapedStrings = t.EscapedStrings + 1 }
+            else
+                t
+
+        if s |> Seq.exists (fun c -> c < ' ') then
+            { t with
+                ControlStrings = t.ControlStrings + 1 }
+        else
+            t
+    | JFloat f when System.Double.IsFinite f && (Canon.canonicalFloat f).Contains "E" ->
+        { t with
+            ScientificFloats = t.ScientificFloats + 1 }
+    | JArr xs -> xs |> List.fold (fun acc x -> canonShape x acc) t
+    | JObj fs ->
+        let t =
+            if (fs |> List.map fst |> List.distinct |> List.length) >= 2 then
+                { t with
+                    SortableObjects = t.SortableObjects + 1 }
+            else
+                t
+
+        fs |> List.fold (fun acc (_, x) -> canonShape x acc) t
+    | _ -> t
+
+/// One document, asked of production and of the model. The comparison is the BYTES — which is the
+/// only comparison that means anything for an encoder whose whole job is to produce a digest input.
+let private canonProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: CanonTally) : CanonTally =
+    let expected = Canon.render v
+    let got = canonFromChs (WireCanon.render w (canonToModel v))
+
+    let t = canonShape v { t with Docs = t.Docs + 1 }
+
+    if expected = got then
+        t
+    else
+        { t with
+            Diffs =
+                sprintf "%s: production rendered\n  %s\nthe model rendered\n  %s" label expected got
+                :: t.Diffs }
+
+/// The value-level round trip, on the canonical subset: the model's own reader over the model's
+/// own rendering, against production's parser over production's rendering. A disagreement here
+/// says the reader and the encoder have drifted apart, which is the one way the injectivity
+/// theorem could be true of a model that is not this encoder.
+let private canonRoundTrip (label: string) (v: JVal) (t: CanonTally) : CanonTally =
+    if not (isCanonicalValue v) then
+        t
+    else
+        let t = { t with RoundTrips = t.RoundTrips + 1 }
+
+        let modelSide =
+            match WireCanon.read canonWire (WireCanon.render canonWire (canonToModel v)) with
+            | WireCanon.Ok(mv, []) -> Result.Ok(canonOfModel mv)
+            | WireCanon.Ok(_, rest) -> Result.Error(sprintf "the reader left %d characters unread" (List.length rest))
+            | WireCanon.Error m -> Result.Error m
+
+        let productionSide =
+            match Json.parse (Canon.render v) with
+            | Result.Ok pv -> Result.Ok pv
+            | Result.Error m -> Result.Error m
+
+        if modelSide = productionSide then
+            t
+        else
+            { t with
+                Diffs =
+                    sprintf "%s: round trip — production read %A, the model read %A" label productionSide modelSide
+                    :: t.Diffs }
+
+// ---- the generated pool ----
+
+let private canonKeys =
+    [| "$type"
+       "a"
+       "b"
+       "Z"
+       "z"
+       "0"
+       "_x"
+       "é"
+       "\u00e9x"
+       "\U0001D11E"
+       "\uE000"
+       "kind"
+       "A"
+       "aa" |]
+
+let private canonChars =
+    [| "a"
+       "Z"
+       "0"
+       " "
+       "/"
+       "\""
+       "\\"
+       "\n"
+       "\r"
+       "\t"
+       "\u0000"
+       "\u0007"
+       "\u001f"
+       "é"
+       "字"
+       "\U0001D11E"
+       "$"
+       "E"
+       "." |]
+
+let private canonFloats =
+    [| 0.5
+       -1.25
+       1e21
+       1e-7
+       1.602e-19
+       5e-324
+       0.1
+       3.141592653589793
+       -0.0
+       0.0
+       2.0
+       1e17
+       100.0 |]
+
+let private nextCanonSeed (r: int) : int = (r * 1103515245 + 12345) &&& 0x3FFFFFFF
+
+let private genCanonValue (r: int ref) (depth: int) : JVal =
+    let draw (n: int) =
+        r.Value <- nextCanonSeed r.Value
+        r.Value % n
+
+    let rec go (depth: int) : JVal =
+        match draw (if depth <= 0 then 5 else 7) with
+        | 0 ->
+            let n = draw 5
+            JStr(String.concat "" [ for _ in 1..n -> canonChars[draw canonChars.Length] ])
+        | 1 -> JInt(draw 2000 - 1000)
+        | 2 -> JBool(draw 2 = 0)
+        | 3 -> JFloat canonFloats[draw canonFloats.Length]
+        | 4 -> JStr canonKeys[draw canonKeys.Length]
+        | 5 -> JArr [ for _ in 1 .. draw 4 -> go (depth - 1) ]
+        | _ -> JObj [ for _ in 1 .. draw 5 -> canonKeys[draw canonKeys.Length], go (depth - 1) ]
+
+    go depth
+
+let private canonGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) (roundTrip: bool) : CanonTally =
+    let r = ref seed
+    let mutable t = emptyCanonTally
+
+    for i in 1..trials do
+        let v = genCanonValue r 3
+        t <- canonProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+        if roundTrip then
+            t <- canonRoundTrip (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+    t
+
+let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundTrip: bool) : CanonTally =
+    let mutable t = emptyCanonTally
+
+    for name, text in JsonParseDiff.corpusTexts family do
+        match Json.parse text with
+        | Result.Error m -> failtestf "the corpus fixture %s/%s did not parse: %s" family name m
+        | Result.Ok v ->
+            t <- canonProbe w (sprintf "%s/%s" family name) v t
+
+            if roundTrip then
+                t <- canonRoundTrip (sprintf "%s/%s" family name) v t
+
+    t
+
+let private renderCanonDiffs (diffs: string list) : string =
+    diffs |> List.rev |> List.truncate 5 |> String.concat "\n"
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -4731,7 +5417,11 @@ let proofOracleTests =
           <| fun _ ->
               // `TreeOps.leaf_independence_diamond` is proved on the model; this is that theorem's
               // instance on the EXTRACTED code, over the pool Phase 80's generator produces. The
-              // alphabet is the non-`Batch` ops, which is the alphabet the theorem is stated over.
+              // alphabet is the non-`Batch` ops, which is the alphabet THAT theorem is stated over
+              // — Phase 133's, and this case is Phase 133's evidence, unchanged. Since Phase 162
+              // the model also carries `op_independence_diamond` over the whole alphabet, batches
+              // included; its evidence is the case below rather than a widening of this one, so
+              // that the two alphabets stay separately measured.
               let mutable r = ConfRng.ofSeed 1331
               let mutable breaks = []
               let mutable met = 0
@@ -4799,6 +5489,98 @@ let proofOracleTests =
               Expect.isNonEmpty
                   breaks
                   "a footprint declaring EVERY pair independent must break the diamond — otherwise this measurement cannot lose"
+
+          // ---- Phase 162 — the same diamond over the WHOLE alphabet, nested batches included ----
+
+          testCase "the extracted model keeps the diamond on BATCH pairs — the shape Phase 133 left open"
+          <| fun _ ->
+              // `TreeOps.covered` named three pair shapes the Phase 133 diamond could not reach:
+              // either side a `Batch` that neither does nothing nor relocates. Phase 162 lifted the
+              // diamond along a batch's script, deleted `covered`, and stated
+              // `op_independence_diamond` over the whole `SkeletonOp` alphabet. This is that
+              // widening measured on the EXTRACTED code, and it is a case of its own rather than a
+              // change to the one above, so Phase 133's evidence stays exactly what it was.
+              //
+              // The pool is built from the generated ops the case above filters out batches from,
+              // wrapped three ways: a singleton batch (same footprint as its member, so it inherits
+              // that member's independence and guarantees the premise is met at all), a paired
+              // batch, and one doubly-nested batch — because "nested to any depth" is the part of
+              // the claim a single wrapping would not exercise. Only inserts and reorders are
+              // wrapped: a batch carrying a remove or a move RELOCATES, and such a pair was already
+              // closed by Phase 133 without any lift.
+              let mutable r = ConfRng.ofSeed 1620
+              let mutable breaks = []
+              let mutable met = 0
+              let mutable batchMet = 0
+
+              for _ in 1..20 do
+                  let lanes, r' = treeLaneGen.Lanes 3 r
+                  r <- r'
+                  let ops = List.concat lanes
+
+                  let states =
+                      ops
+                      |> List.fold
+                          (fun (acc, cur) op ->
+                              match Ops.apply nodew idw op cur with
+                              | Ok t -> (acc @ [ t ]), t
+                              | Error _ -> acc, cur)
+                          ([ treeBase ], treeBase)
+                      |> fst
+                      |> List.map toModelTree
+
+                  let leaves =
+                      ops
+                      |> List.filter (fun o ->
+                          match o with
+                          | Batch _ -> false
+                          | _ -> true)
+                      |> List.map (toModelOpWith toModelTree)
+
+                  let liftable =
+                      leaves
+                      |> List.filter (fun o ->
+                          match o with
+                          | TreeOps.InsertChild _
+                          | TreeOps.ReorderChildren _ -> true
+                          | _ -> false)
+
+                  let batches =
+                      (liftable |> List.map (fun o -> TreeOps.Batch [ o ]))
+                      @ (liftable |> List.chunkBySize 2 |> List.map TreeOps.Batch)
+                      @ (match liftable with
+                         | o :: _ -> [ TreeOps.Batch [ TreeOps.Batch [ o ] ] ]
+                         | [] -> [])
+
+                  let b, m = modelDiamondBreaks TreeOps.op_fp (leaves @ batches) states
+                  breaks <- breaks @ b
+                  met <- met + m
+
+                  // The adequacy this family cannot read off `met`: how many of the met pairs
+                  // carried a batch at all. Without it the pool could collapse to leaves and the
+                  // widening would be measured by nothing while the case still passed. Measured at
+                  // 20 trials, seed 1620: met=156 of which batchMet=91. The thresholds are below
+                  // both with room and are there to catch a generator that stops producing
+                  // independent pairs, not to pin the numbers.
+                  for a in batches do
+                      for bb in leaves @ batches do
+                          if DagFold.independent (TreeOps.op_fp a) (TreeOps.op_fp bb) then
+                              for s in states do
+                                  match TreeOps.wapply a s, TreeOps.wapply bb s with
+                                  | DagFold.Ok _, DagFold.Ok _ -> batchMet <- batchMet + 1
+                                  | _ -> ()
+
+              match breaks with
+              | why :: _ -> failtest why
+              | [] ->
+                  Expect.isGreaterThan met 100 (sprintf "the sample met the diamond's premise in earnest (met=%d)" met)
+
+                  Expect.isGreaterThan
+                      batchMet
+                      0
+                      (sprintf
+                          "the pool met the premise on pairs carrying a BATCH — the shape Phase 133 left open (batchMet=%d)"
+                          batchMet)
 
           // ---- Phase 143 — the precision ceiling: the pinned unknown-parent clause is NECESSARY ----
 
@@ -6092,4 +6874,338 @@ let proofOracleTests =
                   (t.Diffs |> List.exists (fun d -> d.Contains "toOpsContained differs"))
                   (sprintf
                       "the disagreement is the one this phase is about — production refuses the pair up front, the unchecked one emits a script. Got:\n%s"
-                      (List.head t.Diffs)) ]
+                      (List.head t.Diffs))
+
+          // ---- Phase 152: the decode surface under a MEMBER REORDERING ----
+
+          testCase "every combinator answers the same on every shuffle of every nodes/ fixture"
+          <| fun _ ->
+              // Real documents, in a real vocabulary, with their members reordered at every depth
+              // — the case the corpus itself cannot present, because every fixture in it is
+              // canonically ordered.
+              match SiblingCorpus.resolve "nodes" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let files = Directory.GetFiles(Path.Combine(root, "nodes"), "*.json") |> Array.sort
+                  Expect.isGreaterThan files.Length 50 "the nodes/ family carries a real corpus"
+
+                  let tally =
+                      files
+                      |> Array.fold
+                          (fun acc path ->
+                              let name = Path.GetFileNameWithoutExtension path
+
+                              match Json.parse (File.ReadAllText path) with
+                              | Error e -> failtestf "%s: not JSON (%s)" name e
+                              | Ok v ->
+                                  everyValue v
+                                  |> List.fold (fun a el -> shuffleProbe Decode.getProp name 4 15201 el a) acc)
+                          emptyShuffleTally
+
+                  expectShuffleAgreement "nodes/ fixtures, shuffled" tally
+
+                  Expect.isGreaterThan
+                      tally.Refused
+                      0
+                      "the reference decoder refused — the corpus is in a vocabulary it does not know, so this is its arm"
+
+                  // … and the oracle still agrees with production on the shuffled documents,
+                  // which is the Phase 135 comparison over inputs no fixture contains.
+                  let probes =
+                      files
+                      |> Array.fold
+                          (fun acc path ->
+                              match Json.parse (File.ReadAllText path) with
+                              | Error e -> failtestf "%s: not JSON (%s)" (Path.GetFileNameWithoutExtension path) e
+                              | Ok v ->
+                                  if keysUniqueDeep v then
+                                      let shuffled, _ = shuffleDeep v (ConfRng.ofSeed 15202)
+                                      runProbes toModel (Path.GetFileNameWithoutExtension path) shuffled acc
+                                  else
+                                      acc)
+                          emptyTally
+
+                  expectProbeAgreement "nodes/ fixtures, shuffled" probes
+
+          testCase "every combinator answers the same on every shuffle of every ops/ fixture"
+          <| fun _ ->
+              match SiblingCorpus.resolve "ops" with
+              | SiblingCorpus.SkippedByRequest why -> skiptest why
+              | SiblingCorpus.Absent why -> failtest why
+              | SiblingCorpus.Found root ->
+                  let files = Directory.GetFiles(Path.Combine(root, "ops"), "*.json") |> Array.sort
+                  Expect.isGreaterThan files.Length 8 "the ops/ family carries a real corpus"
+
+                  files
+                  |> Array.fold
+                      (fun acc path ->
+                          let name = Path.GetFileNameWithoutExtension path
+
+                          match Json.parse (File.ReadAllText path) with
+                          | Error e -> failtestf "%s: not JSON (%s)" name e
+                          | Ok v ->
+                              everyValue v
+                              |> List.fold (fun a el -> shuffleProbe Decode.getProp name 4 15203 el a) acc)
+                      emptyShuffleTally
+                  |> expectShuffleAgreement "ops/ fixtures, shuffled"
+
+          testCase "the node decoder returns the SAME TREE on every shuffle — §20's one answer"
+          <| fun _ ->
+              // The accept path, which the corpus pools above cannot reach: documents in the
+              // reference vocabulary, encoded, then reordered at every depth. `decode_node`'s
+              // result carries no members of its own, so the lemma claims literal equality and
+              // this is where that is measured.
+              let mutable rng = ConfRng.ofSeed 15204
+              let mutable tally = emptyShuffleTally
+              let mutable exact = 0
+
+              for i in 1..150 do
+                  let n, r' = genRef 0 rng
+                  rng <- r'
+                  let el = encodeRef n
+                  tally <- shuffleProbe Decode.getProp (sprintf "ref %d" i) 4 (15300 + i) el tally
+
+                  // … and the tree it returns is the node that was encoded, not merely a stable
+                  // answer: a decoder that answered `Error` consistently would pass the above.
+                  let shuffled, r'' = shuffleDeep el rng
+                  rng <- r''
+                  Expect.equal (decodeRef shuffled) (Ok n) "the reordered encoding decodes to the same node"
+                  exact <- exact + 1
+
+              expectShuffleAgreement "reference vocabulary, shuffled" tally
+
+              Expect.isGreaterThan tally.Accepted 0 "the node decoder ACCEPTED — this pool is its accept arm"
+              Expect.isGreaterThan exact 0 "the round-trip-under-shuffle sample is non-empty"
+
+              // The refusal arm under a shuffle, where the MESSAGE is the whole comparison.
+              let mutable rng2 = ConfRng.ofSeed 15205
+              let mutable refusals = emptyShuffleTally
+
+              for i in 1..300 do
+                  let v, r' = genJ 0 rng2
+                  rng2 <- r'
+
+                  for el in everyValue v do
+                      refusals <- shuffleProbe Decode.getProp (sprintf "generated %d" i) 3 (15400 + i) el refusals
+
+              expectShuffleAgreement "generated documents, shuffled" refusals
+              Expect.isGreaterThan refusals.Refused 0 "the node decoder REFUSED — the message comparison ran"
+
+          testCase "a decoder that reads the FIRST member rather than the named one LOSES on a shuffle"
+          <| fun _ ->
+              // The teeth. `getPropByPosition` is `Wire.Decode` with one clause changed: it takes
+              // the first member of an object instead of the one asked for. On the canonically
+              // ordered corpus it is very nearly right, and every Phase 135 pool would pass it —
+              // which is precisely why this family exists. Under a reordering it must lose.
+              let mutable rng = ConfRng.ofSeed 15206
+              let mutable tally = emptyShuffleTally
+
+              for i in 1..120 do
+                  let n, r' = genRef 0 rng
+                  rng <- r'
+                  tally <- shuffleProbe getPropByPosition (sprintf "positional %d" i) 4 (15500 + i) (encodeRef n) tally
+
+              Expect.isGreaterThan
+                  tally.Moved
+                  0
+                  "the go-red run actually moved members — otherwise it proves nothing about order"
+
+              match tally.Diffs with
+              | [] ->
+                  failtest
+                      "a positional getProp reads whichever member came first, so a reordering MUST change its answer — this comparison cannot lose"
+              | ds ->
+                  Expect.isTrue
+                      (ds |> List.exists (fun d -> d.Contains "MOVED under a member reordering"))
+                      (sprintf "the disagreement is an answer that moved with the order — got:\n%s" (List.head ds))
+
+                  // … and the SHUFFLE ITSELF is not what broke: every pair it drew is one the
+                  // extracted relation relates, so the loss is the decoder's and not the probe's.
+                  Expect.equal
+                      tally.Unrelated
+                      0
+                      "every drawn pair is related by the extracted member_perm — the go-red measures the decoder, not a bad shuffle"
+
+          // ---- the canonical encoder, over the corpus and a generated pool (Phase 149) ----
+
+          testCase "the canon oracle agrees with Canon.render over every nodes/ fixture"
+          <| fun _ ->
+              let t = onBigStack (fun () -> canonCorpus canonWire "nodes" true)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan t.Docs 100 (sprintf "the nodes/ family was read at all (%d fixtures)" t.Docs)
+
+              Expect.isGreaterThan
+                  t.SortableObjects
+                  100
+                  (sprintf
+                      "fixtures carrying an object with two or more DISTINCT keys (%d) — rule 2's sort is unobservable without one"
+                      t.SortableObjects)
+
+              Expect.isGreaterThan
+                  t.RoundTrips
+                  100
+                  (sprintf "fixtures inside the canonical subset, whose round trip was checked (%d)" t.RoundTrips)
+
+          testCase "the canon oracle agrees with Canon.render over every ops/ fixture"
+          <| fun _ ->
+              let t = onBigStack (fun () -> canonCorpus canonWire "ops" true)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan t.Docs 10 (sprintf "the ops/ family was read at all (%d fixtures)" t.Docs)
+
+          testCase "the canon oracle agrees with Canon.render over a generated JVal pool"
+          <| fun _ ->
+              // The pool is where the corpus is thin: rule 6's three escape classes (a quote, a
+              // backslash, a control character), rule 2's comparator above the BMP (an astral key
+              // beside a private-use one — the pair WIRE_FORMAT's own rule-2 note says UTF-16
+              // order decides differently from code-point order), and rule 5's scientific layout.
+              let t = onBigStack (fun () -> canonGenerated canonWire 1490 1200 true)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the canon oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // adequacy — a pool that never reached a shape measures nothing about the rule that
+              // governs it. MEASURED at 1200 documents, seed 1490, and every threshold below sits
+              // under its measurement with headroom and above zero.
+              Expect.isGreaterThan
+                  t.SortableObjects
+                  100
+                  (sprintf "documents carrying a sortable object (%d)" t.SortableObjects)
+
+              Expect.isGreaterThan
+                  t.EscapedStrings
+                  100
+                  (sprintf "strings carrying a character rule 6 escapes (%d)" t.EscapedStrings)
+
+              Expect.isGreaterThan
+                  t.ControlStrings
+                  20
+                  (sprintf "strings carrying a CONTROL character — the \\u00xx arm specifically (%d)" t.ControlStrings)
+
+              Expect.isGreaterThan
+                  t.ScientificFloats
+                  20
+                  (sprintf "floats whose canonical token is in scientific notation (%d)" t.ScientificFloats)
+
+              Expect.isGreaterThan
+                  t.RoundTrips
+                  200
+                  (sprintf "documents inside the canonical subset, whose round trip was checked (%d)" t.RoundTrips)
+
+          testCase "a model with rule 2's key order REVERSED loses — the comparison can fail"
+          <| fun _ ->
+              // The go-red. `render_injective_up_to_key_order` and `render_deterministic` both turn
+              // on the sort being a canonical choice, so the instrument that must lose is one whose
+              // sort is a DIFFERENT choice: the same comparator, reversed. Every object carrying two
+              // distinct keys must then disagree — and a document carrying none must still agree,
+              // which is what says the instrument is narrow to the rule rather than broken.
+              let t = onBigStack (fun () -> canonGenerated canonWireGoRed 1490 1200 false)
+
+              Expect.isGreaterThan
+                  t.SortableObjects
+                  100
+                  (sprintf
+                      "the go-red run reached objects with two distinct keys at all (%d) — otherwise it proves nothing"
+                      t.SortableObjects)
+
+              Expect.isNonEmpty t.Diffs "a model that sorts object keys the other way MUST disagree with Canon.render"
+
+              // and it must NOT disagree on everything: a document with no sortable object is
+              // outside rule 2 entirely, and an instrument that reddened those too would be
+              // measuring something other than the key order.
+              Expect.isLessThan
+                  (List.length t.Diffs)
+                  t.Docs
+                  (sprintf
+                      "the reversed comparator disagreed on %d of %d documents — it must leave the ones with no sortable object alone"
+                      (List.length t.Diffs)
+                      t.Docs)
+
+          testCase "the four renderings that ALIAS — `render_injective` is false, and this is why"
+          <| fun _ ->
+              // The phase's finding, as assertions over PRODUCTION rather than as prose. The shard
+              // asked for `render a == render b ==> a == b`; these are the four ways it fails, and
+              // `proofs/WireCanon.fst` carries each as a lemma. They go red if the encoder ever
+              // changes — which is the point: three of them are documented design choices that a
+              // future session must not "fix" by accident, and the first is the one worth knowing.
+
+              // 1. a non-finite float is a STRING on the wire. `Json.render` has the guarded
+              //    `Json.tryRender` beside it; `Canon.render` has no guarded counterpart, so a
+              //    digest over `JFloat nan` collides with the digest over `JStr "NaN"`.
+              Expect.equal
+                  (Canon.render (JFloat nan))
+                  (Canon.render (JStr "NaN"))
+                  "rule 5 renders NaN as the quoted string \"NaN\", which is what that STRING renders as"
+
+              Expect.equal (Canon.render (JFloat infinity)) (Canon.render (JStr "Infinity")) "the same, for +infinity"
+
+              Expect.equal (Canon.render (JFloat -infinity)) (Canon.render (JStr "-Infinity")) "the same, for -infinity"
+
+              // 2. an integral float is an INTEGER on the wire — the documented normalisation
+              //    `JVal`'s own type doc names.
+              Expect.equal (Canon.render (JFloat 2.0)) (Canon.render (JInt 2)) "rule 5: `render (JFloat 2.0)` emits `2`"
+
+              // 3. the two zeroes are one token — rule 5's `-0` collapse.
+              Expect.equal (Canon.render (JFloat -0.0)) (Canon.render (JFloat 0.0)) "rule 5 collapses -0 to 0"
+
+              // 4. member order is not observable — rule 2's sort. Not a loss: it is the purpose of
+              //    a canonical form, and the reason the theorem is stated up to member order.
+              Expect.equal
+                  (Canon.render (JObj [ "a", JInt 1; "b", JInt 2 ]))
+                  (Canon.render (JObj [ "b", JInt 2; "a", JInt 1 ]))
+                  "rule 2 sorts, so the authored member order does not reach the bytes"
+
+              // and the model agrees with production on all four, which is what makes the lemmas
+              // statements about THIS encoder rather than about a model of one.
+              for a, b in
+                  [ JFloat nan, JStr "NaN"
+                    JFloat infinity, JStr "Infinity"
+                    JFloat -infinity, JStr "-Infinity"
+                    JFloat 2.0, JInt 2
+                    JFloat -0.0, JFloat 0.0
+                    JObj [ "a", JInt 1; "b", JInt 2 ], JObj [ "b", JInt 2; "a", JInt 1 ] ] do
+                  Expect.equal
+                      (canonFromChs (WireCanon.render canonWire (canonToModel a)))
+                      (canonFromChs (WireCanon.render canonWire (canonToModel b)))
+                      (sprintf "the model aliases the pair production aliases: %A / %A" a b)
+
+          testCase "the canon oracle handles the non-canonical arms production reaches"
+          <| fun _ ->
+              // Outside the canonical subset the theorems say nothing, but the DIFFERENTIAL still
+              // has to agree — the model is a model of the whole encoder, not only of the part the
+              // theorem covers, and a model that diverged here would be a model of something else.
+              let mutable t = emptyCanonTally
+
+              for v in
+                  [ JFloat nan
+                    JFloat infinity
+                    JFloat -infinity
+                    JFloat -0.0
+                    JFloat 0.0
+                    JFloat 2.0
+                    JFloat 1e17
+                    JInt 0
+                    JInt -2147483648
+                    JInt 2147483647
+                    JStr ""
+                    JStr "\u0000\u001f\"\\/"
+                    JArr []
+                    JObj []
+                    JObj [ "a", JFloat nan; "$type", JStr "X" ]
+                    JArr [ JFloat infinity; JObj [ "b", JArr [ JFloat -0.0 ] ] ] ] do
+                  t <- canonProbe canonWire "non-canonical arm" v t
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf
+                      "the canon oracle disagreed with production off the canonical subset:\n%s"
+                      (renderCanonDiffs t.Diffs)) ]
