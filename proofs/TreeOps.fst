@@ -24,8 +24,11 @@
      2. `diamond_sym` — the diamond's conclusion is symmetric in the pair, so the remaining
         ordered cases halve.
      3. Three concrete commutation equalities on the tree — insert/insert, insert/reorder,
-        reorder/reorder — plus a flattening that reduces every `Batch` to its leaves and lifts
-        the leaf diamond along a script, in the shape `DagFold.replay_diamond` already uses.
+        reorder/reorder — plus the lift of the leaf diamond along a `Batch`'s script (section 20,
+        Phase 162), in the shape `DagFold.replay_diamond` already uses at lane granularity. The
+        alphabet is therefore the WHOLE of `SkeletonOp`, `Batch` included and nested to any
+        depth; Phase 133 shipped this module with that one shape open and `covered` naming it,
+        and Phase 162 closed it.
 
    WHY WELL-FORMEDNESS. `Tree.tryFind` and `Tree.parentOf` resolve an id to the FIRST node in
    preorder, and `ReorderChildren` validates against the children of the node they resolve to.
@@ -1434,10 +1437,10 @@ and ins_wf_all (p:string) (n:tree) (ts:list tree)
       disjoint_via_mem (ids (ins p n t)) (ids_all (ins_all p n r))
 
 (* ======================================================================================
-   14. THE DOMAIN HYPOTHESIS, for the pair shapes this phase closes.
+   14. THE DOMAIN HYPOTHESIS — the three pair CLASSES the leaf argument settles.
 
        `DagFold.independence_diamond` at this domain, restricted to well-formed states (section
-       0's `WHY WELL-FORMEDNESS`) and to the pair shapes `covered` names:
+       0's `WHY WELL-FORMEDNESS`):
 
          - EITHER side relocating (a `RemoveNode` or a `MoveNode` anywhere in it) — nine of the
            fifteen unordered pairs, closed by `relocating_forces_inert` with no tree involved;
@@ -1445,20 +1448,27 @@ and ins_wf_all (p:string) (n:tree) (ts:list tree)
          - BOTH sides leaves — insert/insert, insert/reorder and reorder/reorder, the three
            genuinely-commuting cases, plus their swaps.
 
-       What is NOT covered, and why: a pair in which one side is a NON-inert, NON-relocating
-       `Batch`. Lifting the leaf diamond along a batch's script is the shape
-       `DagFold.replay_diamond` already has, and it needs the well-formedness invariant to hold
-       at each intermediate state of the script — which section 13 has just shown the algebra
-       does not give, because `Ops.validateInsert` admits an insert that breaks id uniqueness.
-       That is a gap in the ALGEBRA rather than in the proof: it closes when Phase 137 lands the
-       validation `ins_wf` specifies, and the lift then goes through with no new ideas.
+       WHAT PHASE 133 COULD NOT REACH, AND PHASE 162 DID. A pair in which one side is a NON-inert,
+       NON-relocating `Batch` fell outside all three classes, and Phase 133 wrote that boundary
+       out as a predicate, `covered`, so the theorem stated its own scope. Lifting the leaf
+       diamond along a batch's script needed the well-formedness invariant at each intermediate
+       state of the script, which the algebra of the day did not give (section 13's refutation);
+       Phase 137 fixed the validator, Phase 138 proved the invariant, and PHASE 162 PERFORMED THE
+       LIFT — section 20. `covered` is therefore gone, along with the `covered`-restricted
+       statement that lived here, and `tree_independence_diamond` is the unconditional theorem
+       stated at the end of that section. This section keeps the three classes because they are
+       still what the argument is made of, and because the class analysis is the useful reading
+       of it; the fourth class is one induction away and is written there.
    ====================================================================================== *)
 
-let covered (a b:op) : Tot bool =
+let covered_classes (a b:op) : Tot bool =
   (is_leaf a && is_leaf b) || inert a || inert b || relocating a || relocating b
 
-let tree_independence_diamond (a b:op) (s:tree)
-  : Lemma (requires independent (op_fp a) (op_fp b) /\ covered a b)
+(* The three classes, discharged. Section 20's `tree_independence_diamond` drops the hypothesis by
+   supplying the fourth; this is the part of it that needs no induction over a script, kept under
+   its own name so a reader can see which half of the theorem each argument carries. *)
+let classed_tree_independence_diamond (a b:op) (s:tree)
+  : Lemma (requires independent (op_fp a) (op_fp b) /\ covered_classes a b)
           (ensures wstep a b s)
   = if relocating a then (relocating_forces_inert a b; inert_wstep_right a b s)
     else if relocating b then
@@ -1698,10 +1708,15 @@ let wapply_preserves_wf (o:op) (t:tree)
 
        `DagFold.independence_diamond` instantiated at the tree algebra over the NON-BATCH
        skeleton ops. A `Batch` is a list of ops written as one op — `Ops.apply` threads it
-       exactly as the fold threads a lane — so restricting the op alphabet here removes no
-       behaviour from the fold, it only declines to nest one lane inside another. Closing that
-       nesting is the lift `DagFold.replay_diamond` already performs at lane granularity; it is
-       named in the README as the one pair shape left open.
+       exactly as the fold threads a lane — so restricting the op alphabet here removed no
+       behaviour from the fold, it only declined to nest one lane inside another.
+
+       THAT RESTRICTION IS GONE (Phase 162): section 20 lifts the diamond along a batch's script
+       and `op_independence_diamond` states it over the whole alphabet, which is what
+       `Skeleton.fst` now composes. This section is KEPT rather than replaced, because it is the
+       direct argument — the one that reads off the three commutation equalities with no
+       induction over a script in the way — and a reader checking the widening wants to see both
+       statements and the difference between them.
    ====================================================================================== *)
 
 type leaf_op = o:op{is_leaf o}
@@ -1963,3 +1978,456 @@ let still_refused (a b:op)
   : Lemma (requires relocating a /\ not (inert b))
           (ensures not (independent (op_fp a) (op_fp b)))
   = if independent (op_fp a) (op_fp b) then relocating_forces_inert a b else ()
+
+(* ======================================================================================
+   19. THE PREORDER-POSITION LEMMA — a parent precedes its children in the walk (Phase 162).
+
+       Phase 141 left `diff_reconstructs` and the operational `diff_applicable` at level 2 naming
+       exactly one missing fact: "a parent precedes its children in preorder, so by the time the
+       second pass emits a move while processing the destination, every after-ancestor of that
+       destination is already placed". This section is that fact, stated over the model's own
+       `ids` — which IS `Tree.preorder |> List.map w.Id` (section 0).
+
+       WHAT IT TURNED OUT TO BE, which is worth saying plainly because it changes where the cost
+       of the reconstruction theorem actually sits. `ids (TNode i _ cs)` is `i :: ids_all cs`: the
+       walk emits a node BEFORE its subtree by construction, so the property is a theorem of the
+       walk rather than an invariant an edit could break, and it needs `wf` only to know that the
+       parent's occurrence is the FIRST one — which is what makes "precedes" well defined when an
+       id could otherwise appear twice.
+
+       So "preservation by `ins`, `rem_at` and `reorder_at`" is the COROLLARY that each edit
+       preserves `wf`: `ins_wf` and `reorder_wf` are above, `rem_wf` is `Preservation.fst`'s and
+       the `rem_at` corollary is stated there beside it, in its survivor form. Nothing here is a
+       fresh induction over an edit, and a reader expecting one should read that as the shape of
+       the result rather than as a gap.
+
+       WHY "PRECEDES" AND NOT AN INDEX. The tree induction composes along `app`, and an
+       index-based reading would carry an arithmetic obligation at every step where this one
+       carries a membership. The decision is the same one `same_multiset` makes about `List.sort`
+       and `more_than_one` makes about `List.length`: model the ordering, not a numeral.
+   ====================================================================================== *)
+
+(* `p` precedes `x` in `l`: walking left to right, `p` is met first and `x` is still to come.
+   False when `x` comes first, and false when either is absent. *)
+let rec precedes (p x:string) (l:list string) : Tot bool (decreases l) =
+  match l with
+  | [] -> false
+  | h :: r -> if h = p then mem x r
+              else if h = x then false
+              else precedes p x r
+
+(* ---- how it composes along `app`, which is how `ids_all` is built ---- *)
+
+let rec precedes_app_left (p x:string) (l m:list string)
+  : Lemma (requires precedes p x l) (ensures precedes p x (app l m)) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: r -> if h = p then mem_app x r m
+                else if h = x then ()
+                else precedes_app_left p x r m
+
+let rec precedes_app_right (p x:string) (l m:list string)
+  : Lemma (requires not (mem p l) /\ not (mem x l) /\ precedes p x m)
+          (ensures precedes p x (app l m)) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> precedes_app_right p x r m
+
+(* The crossing case: the parent is in the left segment and the child in the right. This is the
+   one that carries the content — it is why a node's own id, emitted at the head of its subtree's
+   segment, precedes every id of every LATER sibling subtree as well as of its own. *)
+let rec precedes_app_split (p x:string) (l m:list string)
+  : Lemma (requires mem p l /\ not (mem x l) /\ mem x m)
+          (ensures precedes p x (app l m)) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: r -> if h = p then mem_app x r m
+                else if h = x then ()
+                else precedes_app_split p x r m
+
+(* ---- and the two ordering facts a consumer closes an argument with ----
+
+   An ordering predicate is only useful if it can CONTRADICT: what a positional argument does with
+   "the parent comes first" is rule out the arrangement in which it comes second. These are the
+   two halves of that. Antisymmetry holds for any list; irreflexivity needs id-uniqueness, and
+   that is not an accident of the definition — on a list carrying an id twice, the id genuinely
+   does precede its own second occurrence. *)
+
+let rec precedes_antisym (p x:string) (l:list string)
+  : Lemma (requires precedes p x l /\ precedes x p l) (ensures p == x) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: r -> if h = p then () else if h = x then () else precedes_antisym p x r
+
+let rec precedes_irrefl (p:string) (l:list string)
+  : Lemma (requires no_dups l) (ensures not (precedes p p l)) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: r -> if h = p then () else precedes_irrefl p r
+
+(* WHICH WAY ROUND IT READS, pinned by evaluation. An ordering predicate written backwards makes
+   every theorem stated over it true and none of them meaningful, and nothing else in this module
+   would notice — so the direction is asserted rather than left to the reader of the definition.
+   The third conjunct is the one that matters: an id absent from the list precedes nothing. *)
+let precedes_reads_left_to_right ()
+  : Lemma (ensures precedes "a" "b" ["a"; "b"] /\
+                   not (precedes "b" "a" ["a"; "b"]) /\
+                   not (precedes "a" "z" ["a"; "b"]))
+  = assert_norm (precedes "a" "b" ["a"; "b"]);
+    assert_norm (not (precedes "b" "a" ["a"; "b"]));
+    assert_norm (not (precedes "a" "z" ["a"; "b"]))
+
+(* ---- `parent_of` answers with two ids the tree really carries ---- *)
+
+let rec has_kid_is_mem (x:string) (ts:list tree)
+  : Lemma (ensures has_kid x ts == mem x (kid_ids ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> has_kid_is_mem x r
+
+let rec parent_of_ids (x p:string) (t:tree)
+  : Lemma (requires parent_of x t == Some p)
+          (ensures mem p (ids t) /\ mem x (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if has_kid x cs then (has_kid_is_mem x cs; kid_ids_sub x cs)
+      else parent_all_ids x p cs
+and parent_all_ids (x p:string) (ts:list tree)
+  : Lemma (requires parent_all x ts == Some p)
+          (ensures mem p (ids_all ts) /\ mem x (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      (match parent_of x t with
+       | Some q -> parent_of_ids x p t; mem_app p (ids t) (ids_all r); mem_app x (ids t) (ids_all r)
+       | None -> parent_all_ids x p r; mem_app p (ids t) (ids_all r); mem_app x (ids t) (ids_all r))
+
+(* ---- THE LEMMA ---- *)
+
+let rec preorder_parent_first (t:tree) (x p:string)
+  : Lemma (requires wf t /\ parent_of x t == Some p)
+          (ensures precedes p x (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if has_kid x cs then (has_kid_is_mem x cs; kid_ids_sub x cs)
+      else begin
+        parent_all_ids x p cs;
+        preorder_parent_first_all cs x p
+      end
+and preorder_parent_first_all (ts:list tree) (x p:string)
+  : Lemma (requires wf_all ts /\ parent_all x ts == Some p)
+          (ensures precedes p x (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      (match parent_of x t with
+       | Some q ->
+         preorder_parent_first t x p;
+         precedes_app_left p x (ids t) (ids_all r)
+       | None ->
+         preorder_parent_first_all r x p;
+         parent_all_ids x p r;
+         inter_nil_iff (ids t) (ids_all r);
+         precedes_app_right p x (ids t) (ids_all r))
+
+(* The whole-subtree form, which needs no hypothesis at all: a node's id is the head of its own
+   segment of the walk, so it precedes every id below it. The parent lemma above is the instance a
+   caller holding a `parent_of` answer wants; this one is the instance a caller walking `after`
+   top-down wants. *)
+let node_precedes_its_subtree (t:tree) (x:string)
+  : Lemma (requires mem x (ids_all (kids_of t)))
+          (ensures precedes (tid_of t) x (ids t))
+  = match t with TNode _ _ _ -> ()
+
+(* ---- preservation, as the corollaries it is ---- *)
+
+let ins_preserves_parent_first (p:string) (n:tree) (t:tree) (x q:string)
+  : Lemma (requires wf t /\ wf n /\ disjoint (ids n) (ids t) /\
+                    parent_of x (ins p n t) == Some q)
+          (ensures precedes q x (ids (ins p n t)))
+  = ins_wf p n t; preorder_parent_first (ins p n t) x q
+
+let reorder_preserves_parent_first (p:string) (o:list string) (t:tree) (x q:string)
+  : Lemma (requires wf t /\ reorder_ok p o t /\ parent_of x (reorder_at p o t) == Some q)
+          (ensures precedes q x (ids (reorder_at p o t)))
+  = reorder_wf p o t; preorder_parent_first (reorder_at p o t) x q
+
+(* ======================================================================================
+   20. THE BATCH LIFT — `covered` retired, and the diamond stated over the WHOLE alphabet
+       (Phase 162, closing Phase 133's task t3).
+
+       Phase 133 proved the diamond for twelve of the fifteen unordered pairs and named the three
+       it could not: either side a `Batch` that neither does nothing nor relocates.
+       `TreeOps.covered` was that boundary written as a predicate. Phase 138 named what it waited
+       on — the id-uniqueness invariant at each INTERMEDIATE state of a batch's script — and
+       supplied it as `Preservation.apply_preserves_wf`, leaving the induction undone. This is the
+       induction, and `covered` is gone: the diamond now quantifies over every pair, and
+       `Skeleton.fst` composes over the whole `SkeletonOp` alphabet.
+
+       WHAT THE LIFT ACTUALLY NEEDS, which is less than the unconditional invariant.
+       `Preservation.fst` OPENS this module, so `apply_preserves_wf` cannot be cited here — and it
+       does not have to be. The residue `covered` left out is exactly the pairs where NEITHER side
+       relocates (a relocating side forces the other inert, section 8, and that case was already
+       closed), and a non-relocating op carries no `RemoveNode` and no `MoveNode` at any depth: it
+       is built from inserts, reorders and nests of them. `ins_wf` (section 13) and `reorder_wf`
+       (section 15) are already here, so `no_reloc_preserves_wf` below is a dozen lines rather
+       than a module inversion. The unconditional statement remains `Preservation`'s; this is its
+       non-relocating fragment, proved where the lift needs it.
+
+       THE ARGUMENT, in three moves and no new mathematics — which is what Phase 133 predicted
+       ("the argument `DagFold.replay_diamond` already performs at lane granularity — no new idea
+       is required"):
+
+         1. INDEPENDENCE DESCENDS. `fp_all` is a union, so a footprint declared independent of a
+            batch's is independent of each element's. Every clause is monotone in the right
+            direction, the two pinned relocation clauses included.
+         2. THE RIGHT LIFT. If an operation commutes with each step of a script at every state the
+            script reaches, it commutes with the script — by induction, threading the invariant
+            with `no_reloc_preserves_wf` at each step. This is the whole content.
+         3. THE LEFT LIFT is the same induction on the other side. It is written out rather than
+            obtained from `wstep_sym`, because the recursion has to descend into the head
+            operation — which may itself be a batch — and the symmetric route would make the
+            termination measure circular.
+
+       WHAT THIS DOES NOT CHANGE. Section 18's precision ceiling is untouched: that section is
+       about which pairs `independent` DECLARES disjoint, and this lift is about pairs it already
+       declares disjoint. `still_refused` stands verbatim.
+   ====================================================================================== *)
+
+(* ---- the non-relocating fragment, structurally. The shape `inert` has, for the same reason: a
+   predicate over the OP is what a recursion can carry, where a fact about its footprint is not.
+   ---- *)
+
+let rec no_reloc (o:op) : Tot bool (decreases o) =
+  match o with
+  | RemoveNode _ -> false
+  | MoveNode _ _ -> false
+  | Batch os -> no_reloc_all os
+  | _ -> true
+and no_reloc_all (os:list op) : Tot bool (decreases os) =
+  match os with
+  | [] -> true
+  | o :: r -> no_reloc o && no_reloc_all r
+
+(* … and it IS the footprint's verdict — the link `structure_free_iff_inert` is for inertness. *)
+let rec relocating_iff_not_no_reloc (o:op)
+  : Lemma (ensures relocating o == not (no_reloc o)) (decreases o)
+  = match o with
+    | Batch os -> relocating_all_iff_not_no_reloc_all os
+    | _ -> ()
+and relocating_all_iff_not_no_reloc_all (os:list op)
+  : Lemma (ensures not (is_empty (fp_all os).unknown_parent_writes) == not (no_reloc_all os))
+          (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r -> relocating_iff_not_no_reloc o; relocating_all_iff_not_no_reloc_all r
+
+(* ---- the invariant, for the fragment the lift meets ---- *)
+
+let rec no_reloc_preserves_wf (o:op) (t:tree)
+  : Lemma (requires wf t /\ no_reloc o)
+          (ensures (match apply o t with Ok t' -> wf t' | Error _ -> True)) (decreases o)
+  = match o with
+    | InsertChild p n ->
+      first_dup_none_iff n t;
+      wf_iff_no_dups n;
+      if None? (first_dup n t) && has_id p t then ins_wf p n t else ()
+    | ReorderChildren p order ->
+      (match find_in p t with
+       | None -> ()
+       | Some n ->
+         if same_multiset (kid_ids (kids_of n)) order then
+           (wf_reorder_ok p order t; reorder_wf p order t)
+         else ())
+    | Batch os -> no_reloc_all_preserves_wf os t
+    | RemoveNode _ -> ()
+    | MoveNode _ _ -> ()
+and no_reloc_all_preserves_wf (os:list op) (t:tree)
+  : Lemma (requires wf t /\ no_reloc_all os)
+          (ensures (match apply_all os t with Ok t' -> wf t' | Error _ -> True)) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      no_reloc_preserves_wf o t;
+      (match apply o t with
+       | Ok t' -> no_reloc_all_preserves_wf r t'
+       | Error _ -> ())
+
+(* ---- move 1: independence descends through a union ---- *)
+
+let independent_union_left (fo fr fb:footprint)
+  : Lemma (requires independent (union_fp fo fr) fb)
+          (ensures independent fo fb /\ independent fr fb)
+  = let fu = union_fp fo fr in
+    inter_nil_iff fu.content_writes fb.content_writes;
+    inter_nil_iff fo.content_writes fb.content_writes;
+    inter_nil_iff fr.content_writes fb.content_writes;
+    inter_nil_iff fu.content_writes fb.reads;
+    inter_nil_iff fo.content_writes fb.reads;
+    inter_nil_iff fr.content_writes fb.reads;
+    inter_nil_iff fb.content_writes fu.reads;
+    inter_nil_iff fb.content_writes fo.reads;
+    inter_nil_iff fb.content_writes fr.reads;
+    inter_nil_iff fu.structure_writes fb.structure_writes;
+    inter_nil_iff fo.structure_writes fb.structure_writes;
+    inter_nil_iff fr.structure_writes fb.structure_writes
+
+let independent_union_right (fa fo fr:footprint)
+  : Lemma (requires independent fa (union_fp fo fr))
+          (ensures independent fa fo /\ independent fa fr)
+  = independent_sym fa (union_fp fo fr);
+    independent_union_left fo fr fa;
+    independent_sym fo fa;
+    independent_sym fr fa
+
+(* ---- move 2: a LEAF against anything, lifting on the right ---- *)
+
+let rec leaf_vs_any (a b:op) (s:tree)
+  : Lemma (requires is_leaf a /\ no_reloc b /\ independent (op_fp a) (op_fp b))
+          (ensures wstep a b s) (decreases b)
+  = match b with
+    | Batch os -> leaf_vs_script a os s
+    | _ -> leaf_wstep a b s
+and leaf_vs_script (a:op) (os:list op) (s:tree)
+  : Lemma (requires is_leaf a /\ no_reloc_all os /\ independent (op_fp a) (fp_all os))
+          (ensures wstep a (Batch os) s) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      independent_union_right (op_fp a) (op_fp o) (fp_all r);
+      leaf_vs_any a o s;
+      if wf s then begin
+        no_reloc_preserves_wf o s;
+        match apply o s with
+        | Ok s1 -> leaf_vs_script a r s1
+        | Error _ -> ()
+      end
+      else ()
+
+(* ---- move 3: anything against anything, lifting on the left ---- *)
+
+let rec any_vs_any (a b:op) (s:tree)
+  : Lemma (requires no_reloc a /\ no_reloc b /\ independent (op_fp a) (op_fp b))
+          (ensures wstep a b s) (decreases a)
+  = match a with
+    | Batch os -> script_vs_any os b s
+    | _ -> leaf_vs_any a b s
+and script_vs_any (os:list op) (b:op) (s:tree)
+  : Lemma (requires no_reloc_all os /\ no_reloc b /\ independent (fp_all os) (op_fp b))
+          (ensures wstep (Batch os) b s) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      independent_union_left (op_fp o) (fp_all r) (op_fp b);
+      any_vs_any o b s;
+      if wf s then begin
+        no_reloc_preserves_wf o s;
+        match apply o s with
+        | Ok s1 -> script_vs_any r b s1
+        | Error _ -> ()
+      end
+      else ()
+
+(* ---- THE DOMAIN HYPOTHESIS, unconditionally ----
+
+   The successor of section 14's `covered`-restricted statement, which is deleted: every pair of
+   skeleton operations whose footprints `Ops.independent` declares disjoint commutes at every
+   well-formed tree at which both apply. Nine of the fifteen unordered pairs are still closed by
+   `relocating_forces_inert` without looking at a tree, three are section 12's genuinely-commuting
+   leaf cases, and the three that carry a batch are the induction above. *)
+let tree_independence_diamond (a b:op) (s:tree)
+  : Lemma (requires independent (op_fp a) (op_fp b))
+          (ensures wstep a b s)
+  = if relocating a then (relocating_forces_inert a b; inert_wstep_right a b s)
+    else if relocating b then
+      (independent_sym (op_fp a) (op_fp b); relocating_forces_inert b a; inert_wstep_left a b s)
+    else begin
+      relocating_iff_not_no_reloc a;
+      relocating_iff_not_no_reloc b;
+      any_vs_any a b s
+    end
+
+(* ---- and the same over the GUARDED algebra, which is what the composite folds ----
+
+   `wapply` declines a step whose result is not id-unique, so the diamond over it has one thing
+   left to say beyond the equation: that the common tree the two orders reach is itself
+   well-formed, and so is not declined. Section 17's `leaf_diamond` does this case by case for the
+   leaf alphabet; over the whole alphabet the three branches below cover it — a relocating side
+   forces the other to be the identity, and otherwise `no_reloc_preserves_wf` answers directly. *)
+let full_diamond (a b:op) (s:tree)
+  : Lemma (requires independent (op_fp a) (op_fp b))
+          (ensures Ok? (wapply a s) ==> Ok? (wapply b s) ==>
+                   (Ok? (bind (wapply a s) (wapply b)) /\
+                    bind (wapply a s) (wapply b) == bind (wapply b s) (wapply a)))
+  = tree_independence_diamond a b s;
+    if wf s && Ok? (apply a s) && Ok? (apply b s) then
+      match apply a s, apply b s with
+      | Ok sa, Ok sb ->
+        if wf sa && wf sb then begin
+          if relocating a then
+            (relocating_forces_inert a b; inert_is_identity b s; inert_is_identity b sa)
+          else if relocating b then
+            (independent_sym (op_fp a) (op_fp b); relocating_forces_inert b a;
+             inert_is_identity a s; inert_is_identity a sb)
+          else begin
+            relocating_iff_not_no_reloc b;
+            no_reloc_preserves_wf b sa
+          end
+        end
+        else ()
+      | _, _ -> ()
+    else ()
+
+(* THE COMPOSITE'S HYPOTHESIS, over the whole alphabet. `Skeleton.fst` consumes this in place of
+   `leaf_independence_diamond`, which is kept beside it: the leaf statement is what section 17's
+   `leaf_diamond` proves directly, and a reader checking the widening wants to see both. *)
+let op_independence_diamond ()
+  : Lemma (ensures independence_diamond #op #tree #rejection op_fp wapply)
+  = let aux (a b:op) : Lemma (independent (op_fp a) (op_fp b) ==> diamond wapply a b) =
+      if independent (op_fp a) (op_fp b) then
+        let per_state (s:tree)
+          : Lemma (Ok? (wapply a s) ==> Ok? (wapply b s) ==>
+                   (Ok? (bind (wapply a s) (wapply b)) /\
+                    bind (wapply a s) (wapply b) == bind (wapply b s) (wapply a)))
+          = full_diamond a b s
+        in
+        FStar.Classical.forall_intro per_state
+      else ()
+    in
+    FStar.Classical.forall_intro_2 aux
+
+(* ---- and the widening is NOT VACUOUS ----
+
+   A theorem that drops a hypothesis has to be checked for the possibility that the hypothesis was
+   never doing anything, and here it plainly was: `covered` named three pair shapes and Phase 133
+   wrote them out because it could not close them. This is one of them, concrete and evaluated —
+   a batch that inserts under one child and reorders the root, against an insert under the other
+   child. The two footprints are independent, `covered_classes` REFUSES the pair, both sides apply
+   at the tree, and the two orders reach the same tree. It goes red if `covered_classes` is ever
+   widened to admit the shape it is here to exclude, and it is the evaluated instance of the
+   theorem beside the proved one. *)
+
+let lift_tree : tree = TNode "root" "doc" [ TNode "x" "sec" []; TNode "y" "sec" [] ]
+
+let lift_batch : op =
+  Batch [ InsertChild "x" (TNode "n1" "para" []); ReorderChildren "root" ["y"; "x"] ]
+
+let lift_leaf : op = InsertChild "y" (TNode "n2" "para" [])
+
+let batch_lift_is_not_vacuous ()
+  : Lemma (ensures wf lift_tree /\
+                   independent (op_fp lift_batch) (op_fp lift_leaf) /\
+                   not (covered_classes lift_batch lift_leaf) /\
+                   Ok? (wapply lift_batch lift_tree) /\
+                   Ok? (wapply lift_leaf lift_tree) /\
+                   Ok? (bind (wapply lift_batch lift_tree) (wapply lift_leaf)) /\
+                   bind (wapply lift_batch lift_tree) (wapply lift_leaf) ==
+                   bind (wapply lift_leaf lift_tree) (wapply lift_batch))
+  = assert_norm (wf lift_tree);
+    assert_norm (independent (op_fp lift_batch) (op_fp lift_leaf));
+    assert_norm (not (covered_classes lift_batch lift_leaf));
+    assert_norm (Ok? (wapply lift_batch lift_tree));
+    assert_norm (Ok? (wapply lift_leaf lift_tree));
+    assert_norm (Ok? (bind (wapply lift_batch lift_tree) (wapply lift_leaf)));
+    assert_norm (bind (wapply lift_batch lift_tree) (wapply lift_leaf) ==
+                 bind (wapply lift_leaf lift_tree) (wapply lift_batch))

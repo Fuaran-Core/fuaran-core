@@ -320,7 +320,7 @@
     {
       "id": "tree-independence-diamond",
       "level": "proved",
-      "claim": "For the skeleton-op tree algebra, two operations whose footprints are declared disjoint and which both apply at an id-unique tree each apply after the other and reach the same tree — the fold theorem's domain hypothesis, proved rather than sampled, for twelve of the fifteen unordered operation pairs (the three left open are one shape, at `tree-algebra-batch-nesting`). Nine of the twelve are closed by the conservative footprint alone and never look at a tree: a remove or a move writes an unknown parent, independence refuses that against any structural write, and every skeleton operation except a do-nothing batch writes structure — so such a pair is independent only where the other operation does nothing at all.",
+      "claim": "For the skeleton-op tree algebra, two operations whose footprints are declared disjoint and which both apply at an id-unique tree each apply after the other and reach the same tree — the fold theorem's domain hypothesis, proved rather than sampled, for ALL FIFTEEN unordered operation pairs since Phase 162 lifted the diamond along a batch's script; it covered twelve of the fifteen when Phase 133 shipped it, and the three it left are `tree-algebra-batch-nesting`, which is now a proved row rather than an assumed one. Nine of the fifteen are closed by the conservative footprint alone and never look at a tree: a remove or a move writes an unknown parent, independence refuses that against any structural write, and every skeleton operation except a do-nothing batch writes structure — so such a pair is independent only where the other operation does nothing at all.",
       "phase": "fuaran-core#133",
       "evidence": {
         "theorem": "tree_independence_diamond",
@@ -366,7 +366,7 @@
     {
       "id": "skeleton-fold-confluence",
       "level": "proved",
-      "claim": "Fold confluence for the skeleton-op tree algebra with NO domain hypothesis remaining, over the non-batch operation alphabet: the same lanes reach the same tree however they arrive, a lane set that cannot fold halts with the same canonical report however it arrives, and none folds under one order and halts under another. The halt half is proved separately under no hypothesis at all — not the diamond, not id uniqueness, nothing about the apply engine.",
+      "claim": "Fold confluence for the skeleton-op tree algebra with NO domain hypothesis remaining, over the WHOLE skeleton operation alphabet since Phase 162 — batch included and nested to any depth, where Phase 133 shipped it over the four non-batch operations: the same lanes reach the same tree however they arrive, a lane set that cannot fold halts with the same canonical report however it arrives, and none folds under one order and halts under another. The halt half is proved separately under no hypothesis at all — not the diamond, not id uniqueness, nothing about the apply engine.",
       "phase": "fuaran-core#133",
       "evidence": {
         "theorem": "skeleton_fold_confluence",
@@ -411,11 +411,35 @@
     },
     {
       "id": "tree-algebra-batch-nesting",
-      "level": "assumed",
-      "claim": "The proved diamond covers twelve of the fifteen operation pairs; the three left open are one shape — either side a batch that neither does nothing nor relocates. A batch is a list of operations written as one operation and the fold already threads a list, so excluding it removes no behaviour: it declines to nest one lane inside another. Lifting the leaf diamond along a batch script is the argument the fold theorem already performs at lane granularity, and it needs the id-uniqueness invariant at each intermediate state of the script. PHASE 138 SUPPLIES THAT INVARIANT and does not perform the lift: `apply-preserves-wf` is exactly the missing hypothesis, so this boundary is now unblocked rather than blocked, and the three pairs stay open because nobody has done the induction. That is a different statement from the one this row carried, and the distinction is the point — a boundary waiting on a theorem and a boundary waiting on labour are not the same debt.",
-      "phase": "fuaran-core#133",
+      "level": "proved",
+      "claim": "CLOSED BY PHASE 162, and the row is rewritten in place rather than retired because what it assumed and how it stopped being an assumption is the useful part of it. It carried, from Phase 133: the proved diamond covers twelve of the fifteen operation pairs, and the three left open are one shape — either side a batch that neither does nothing nor relocates. Lifting the leaf diamond along a batch script is the argument the fold theorem already performs at lane granularity, and it needs the id-uniqueness invariant at each intermediate state of the script. Phase 138 supplied that invariant and did not perform the lift, so the boundary moved from waiting on a theorem to waiting on labour — a distinction this row was rewritten once already to record. Phase 162 did the induction: independence descends through a union, the leaf diamond lifts along a script by induction threading the invariant at each step, and the guarded algebra's diamond follows, so `covered` is deleted and the alphabet is the whole of the skeleton operations. One correction that matters for anyone reading the history: the lift did NOT consume `apply-preserves-wf`, which every earlier note names — the residue is exactly the pairs where neither side relocates, so the operations involved are inserts, reorders and nests of them, for which the per-operation preservation lemmas were already in the model. `Preservation.fst` opens `TreeOps.fst` and could not have been cited from it in any case.",
+      "phase": "fuaran-core#162",
       "evidence": {
-        "assumption": "an operation pair in which either side is a non-trivial nested batch"
+        "theorem": "op_independence_diamond",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "preorder-parent-first",
+      "level": "proved",
+      "claim": "On an id-unique tree, a node's parent PRECEDES it in the preorder walk — the fact Phase 141 named when it deferred the diff's reconstruction, proved over the model's own preorder. Two things about its shape are worth reading before citing it. It is a theorem of the WALK rather than an invariant an edit could break: the walk emits a node before its subtree by construction, and id uniqueness is needed only so that the parent's occurrence is the first one, which is what makes `precedes` well defined at all. So preservation by insert, remove and reorder is the COROLLARY that each preserves id uniqueness, and the remove's form is over the SURVIVORS — a removed subtree's positions do not move, they vanish, and a statement over the original tree's nodes would be false on exactly the nodes the operation exists to destroy. The ordering predicate is written without indices, the same decision the model makes about `List.sort` and `List.length`, and its direction is pinned by evaluation because an ordering predicate written backwards makes every theorem over it true and none of them meaningful.",
+      "phase": "fuaran-core#162",
+      "evidence": {
+        "theorem": "preorder_parent_first",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "apply-preserves-parent-first",
+      "level": "proved",
+      "claim": "The preorder-position lemma under ANY accepted operation, batch included: if a well-formed tree accepts an operation, then in the tree it hands back a node's parent still precedes it in the walk. It is `apply-preserves-wf` composed with `preorder-parent-first`, and it lives beside the first of those because the remove clause's well-formedness lemma is that module's and the tree model cannot cite it — that module opens this one. `rem_preserves_parent_first` states the remove alone, in the survivor form. This is the statement a reconstruction argument cites; what it does NOT give is the same fact about the tree in hand at step k of a script, which is a different quantifier and is the induction the diff's reconstruction still needs.",
+      "phase": "fuaran-core#162",
+      "evidence": {
+        "theorem": "apply_preserves_parent_first",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
       }
     },
     {
@@ -944,9 +968,20 @@
       }
     },
     {
+      "id": "diff-after-positional",
+      "level": "proved",
+      "claim": "The positional facts the diff's emitted script carries about `after`, over `preorder-parent-first`: an insert's parent precedes its own node in the after tree's preorder — which is the walk pass 1 iterates, so the source comment's `added nodes go in as leaf shells, top-down` is now a property of the emitted operations rather than of the loop — a move's destination precedes the moved node, and therefore a move's destination is NEVER INSIDE the moved node's subtree in `after`, which is the consequence Phase 141 named when it deferred the reconstruction. The last one closes by antisymmetry of the ordering predicate plus its irreflexivity on an id-unique tree. READ THE QUANTIFIER, because it is exactly why the two deferred theorems are still deferred: this is about `after`, and the apply engine validates each step against the tree IN HAND — the before tree with the script's earlier operations run on it. Carrying the fact across is an induction over an invariant about how much of `after` each PREFIX of the script has built, and that induction is the remaining work. The pair of theorems is evaluated on a concrete before/after that emits exactly one insert and one move, which also pins that the moved node does not precede its destination, so the claim is an ordering fact and not a tautology.",
+      "phase": "fuaran-core#162",
+      "evidence": {
+        "theorem": "diff_move_destination_is_outside",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "diff-differential",
       "level": "tested",
-      "claim": "The extracted diff model agrees with the shipped `Diff.toOps` and `Diff.toOpsContained` over pairs drawn INDEPENDENTLY from a shared id space — the widening this phase is about, since `Conformance.diffLaws` derives `after` by applying operations to `before` and so has only ever diffed pairs the algebra could already reach. Six comparisons per pair: the verdict, the error class, the SCRIPT operation for operation, RECONSTRUCTION through production's own `Tree.encodeHash`, APPLICABILITY through `canApplyAll`, and the PROVED block shape evaluated over production's own script. Reconstruction and applicability are at THIS level rather than level 1 deliberately, and the boundary is stated in the README: proving them needs a positional lemma about intermediate trees that this phase's time box did not contain. One constraint on the pair is a property of the problem rather than of the generator — a node's content is a function of its id, because skeleton operations cannot edit a node and a pair whose shared id carries different content in each tree is unreconstructible by any skeleton script; measured, not assumed, when a first generator that redrew content reconstructed 1,738 of 4,000 pairs and the corrected one 20,000 of 20,000. Measured at 240 pairs, seed 1410: 179 scripts insert, 146 remove, 140 move, 168 reorder, 80 contained diffs produced a script and 160 were refused for containment, all 8 predicates drawn. TWO go-reds, each required to lose: the same four blocks reassembled with the REMOVES FIRST fails to reconstruct on 52 of the 240 pairs, and the model's own plain diff substituted into the contained slot — an engine that emits an insert under a non-container because it never looked — disagrees with the shipped `toOpsContained`. Agreement is over the pool drawn, never over all inputs.",
+      "claim": "The extracted diff model agrees with the shipped `Diff.toOps` and `Diff.toOpsContained` over pairs drawn INDEPENDENTLY from a shared id space — the widening this phase is about, since `Conformance.diffLaws` derives `after` by applying operations to `before` and so has only ever diffed pairs the algebra could already reach. Six comparisons per pair: the verdict, the error class, the SCRIPT operation for operation, RECONSTRUCTION through production's own `Tree.encodeHash`, APPLICABILITY through `canApplyAll`, and the PROVED block shape evaluated over production's own script. Reconstruction and applicability are at THIS level rather than level 1 deliberately, and the boundary is stated in the README: Phase 141 described it as one missing positional lemma about intermediate trees, Phase 162 PROVED that lemma and its instantiation at the diff (`diff-after-positional`), and both claims are still at this level — because the lemma holds of `after` and the engine validates against the tree in hand, so what remains is an induction relating the two rather than a missing fact. One constraint on the pair is a property of the problem rather than of the generator — a node's content is a function of its id, because skeleton operations cannot edit a node and a pair whose shared id carries different content in each tree is unreconstructible by any skeleton script; measured, not assumed, when a first generator that redrew content reconstructed 1,738 of 4,000 pairs and the corrected one 20,000 of 20,000. Measured at 240 pairs, seed 1410: 179 scripts insert, 146 remove, 140 move, 168 reorder, 80 contained diffs produced a script and 160 were refused for containment, all 8 predicates drawn. TWO go-reds, each required to lose: the same four blocks reassembled with the REMOVES FIRST fails to reconstruct on 52 of the 240 pairs, and the model's own plain diff substituted into the contained slot — an engine that emits an insert under a non-container because it never looked — disagrees with the shipped `toOpsContained`. Agreement is over the pool drawn, never over all inputs.",
       "phase": "fuaran-core#141",
       "evidence": {
         "family": "Proofs.Oracle",
