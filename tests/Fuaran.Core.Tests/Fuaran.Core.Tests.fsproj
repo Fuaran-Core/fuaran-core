@@ -217,6 +217,19 @@
          two generated artefacts and their `emit-families` freshness legs; it reads nothing
          from another test module, so the position is free. -->
     <Compile Include="ConformanceFamiliesTests.fs" />
+    <!-- Phase 185 — the Fable smoke's membership derived rather than remembered: every packable
+         project under src/ is compiled by tests/fable-smoke or carries an exclusions.json entry
+         with a reason, checked in both directions so a stale reason fails too. Reads Snapshots.fs
+         for the repository root and the two smoke files off disk; it references no other test
+         module, so it is appended here (append-only registration). -->
+    <Compile Include="FableSmokeCompletenessTests.fs" />
+    <!-- Phase 199 — the package roster held to the tree: the README table's rows equal the
+         packable projects under src/, nothing packable sits outside that scope, STABILITY.md
+         carries an entry header naming the standing <Version>, and no draft-slot preamble
+         denies a tag the repository holds. Spawns git through ChildProcess.fs above and
+         reads no other test module, so the position is free; appended at the end of the
+         list (append-only registration). -->
+    <Compile Include="PackageRosterTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
