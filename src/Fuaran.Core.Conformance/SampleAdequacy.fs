@@ -185,9 +185,11 @@ module SampleAdequacy =
     ///
     /// It is a DECLARATION rather than a derivation, so the one thing it cannot do on its own is
     /// notice a family nobody enrolled — the blind spot any manifest-quantified check structurally
-    /// has. The kit's own suite closes that half by reflecting over the public law entry points and
-    /// refusing any name this list does not carry, so a family added without answering the question
-    /// fails to ship rather than passing silently.
+    /// has. The kit's own suite closes that half by holding this list equal to `Families` — the
+    /// roster whose own completeness is quantified over RETURN TYPE across the shipped assembly
+    /// (Phase 184) — so a family added without answering the question fails to ship rather than
+    /// passing silently. Until that phase the same half was closed by reflecting over method NAMES
+    /// ending in `Laws`, which is why three families sat outside this list unnoticed.
     ///
     /// `WireNullTolerance` is deliberately absent: it runs a FIXED vector corpus, so it has no
     /// sample that could miss anything, and enrolling a family with no sample would make the census
@@ -296,4 +298,20 @@ module SampleAdequacy =
               "every corpus document is decoded, rebuilt through the authoring surface and re-encoded on every run — the sample is the caller's own corpus rather than a draw, and an empty one fails the family's own non-vacuity law instead of passing quietly"
           "Conformance.dagBreakReasonLaws",
           Unconditional
-              "each iteration BUILDS both break kinds on the DAG walk — a node whose op is tampered with its map key left alone, and a named parent deleted — rather than drawing them, and the family's own last law fails if either kind was not actually observed" ]
+              "each iteration BUILDS both break kinds on the DAG walk — a node whose op is tampered with its map key left alone, and a named parent deleted — rather than drawing them, and the family's own last law fails if either kind was not actually observed"
+
+          // Phase 184. These three were absent from this census for the whole of its life, and
+          // the omission was not a judgement — the completeness check that keeps this list honest
+          // reflected over method NAMES ending in `Laws`, and none of the three is spelled that
+          // way. Two of them are the families `certify` and `certifyStream` are BUILT FROM. The
+          // check now reads `Families`, whose own completeness is quantified over RETURN TYPE, so
+          // a family cannot be missing from either list by how it is named.
+          "Conformance.opAlgebra",
+          Unconditional
+              "each iteration applies, inverts and re-checks a DRAWN op, and BUILDS the two id-colliding insert candidates the uniqueness and equivalence laws need — the built arm is skipped only where the witness cannot carry a multi-node subtree at all, which is a witness that cannot exhibit the defect rather than a sample that missed it"
+          "Conformance.reducer",
+          Unconditional
+              "each iteration drives the domain's own apply to totality and replays the accepted ops from State0, both built every iteration — the envelope law runs only when the caller supplies `namesAlternatives`, whose absence REMOVES the law rather than leaving it unsampled"
+          "Conformance.compositionPilot",
+          Unconditional
+              "it runs `compositionLaws` (unconditional above) and BUILDS both applyMemo arms across the witness boundary each iteration — a closed inner sub-function memoised, and the composed outer compared against direct apply" ]

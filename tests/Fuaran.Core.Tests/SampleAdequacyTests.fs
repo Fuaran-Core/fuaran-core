@@ -8,7 +8,6 @@ module Fuaran.Core.Tests.SampleAdequacyTests
 // guard which cannot go red is exactly the thing it exists to detect.
 
 open System
-open System.Reflection
 open Expecto
 open Fuaran.Core
 
@@ -170,28 +169,21 @@ let motivatingInstanceTests =
 //  census completeness — the half a declaration cannot check about itself
 // ---------------------------------------------------------------------------
 
-/// Every public law entry point the kit ships, found by reflection rather than by a list, because a
-/// list is exactly what cannot notice a family nobody added to it.
-let private shippedFamilies () : string list =
-    let asm = typeof<LawResult>.Assembly
-
-    let isLawEntry (m: MethodInfo) =
-        let n = m.Name
-
-        n.EndsWith("Laws", StringComparison.Ordinal)
-        || n.EndsWith("LawsWith", StringComparison.Ordinal)
-        || n = "laws"
-        || n = "lawsWith"
-
-    [ for moduleName in [ "Conformance"; "FoldConfluence"; "IncrementalDelta"; "WireNullTolerance" ] do
-          match asm.GetType("Fuaran.Core." + moduleName) with
-          | null -> failtestf "the kit no longer ships a module named %s" moduleName
-          | t ->
-              for m in t.GetMethods(BindingFlags.Public ||| BindingFlags.Static ||| BindingFlags.DeclaredOnly) do
-                  if isLawEntry m then
-                      yield moduleName + "." + m.Name ]
-    |> List.distinct
-    |> List.sort
+/// Every law family the kit ships — the roster `Fuaran.Core.Families` declares, which is itself
+/// held to REFLECTION OVER RETURN TYPE across the shipped assembly by `ConformanceFamiliesTests`.
+///
+/// Phase 184 replaced what stood here, and the replacement is the point rather than a tidy-up.
+/// This function used to do its own reflection over method NAMES — anything ending in `Laws` /
+/// `LawsWith`, plus the two bare `laws` spellings — over four named modules. A naming convention
+/// is not what a law family IS, and three families are not spelled that way: `opAlgebra`,
+/// `reducer` and `compositionPilot` were invisible here, and therefore absent from the census,
+/// and therefore absent from the roster a consumer's conformance projection quantifies over. Two
+/// of the three are the families `certify` and `certifyStream` are built from.
+///
+/// Reading the roster keeps this file's completeness claim exactly as strong as it was and moves
+/// the derivation to one place: a family answers with `LawResult list` or it is not a family, and
+/// no module list is restated here for a new module to fall outside of.
+let private shippedFamilies () : string list = Families.ids
 
 [<Tests>]
 let censusTests =
@@ -204,7 +196,8 @@ let censusTests =
               // This is the half the census structurally cannot do for itself. A declaration
               // quantifies over what it names, so a family nobody enrolled produces no finding at
               // any grade — which is how a store can hold nine files while the class holds twelve.
-              // Reflection is what closes it: a family added without answering the adequacy
+              // The kit's declared roster closes it — itself held to reflection over the shipped
+              // assembly BY RETURN TYPE — so a family added without answering the adequacy
               // question fails to ship rather than passing silently.
               let declared = SampleAdequacy.census |> List.map fst |> Set.ofList
               let shipped = shippedFamilies ()

@@ -26,6 +26,12 @@
          it reads `ConfRng` and `LawResult` from Conformance.fs, which is the only ordering
          constraint it has. -->
     <Compile Include="IncrementalDelta.fs" />
+    <!-- Phase 184 — the law-family roster, exported as data. LAST, and the position is a
+         property rather than a habit: it declares the enumeration of every family above it and
+         depends on none of them (it carries strings, not laws), so appending is the only
+         placement that cannot make the roster a compile-order question. A family added to any
+         module above gains its record here in the same commit. -->
+    <Compile Include="Families.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

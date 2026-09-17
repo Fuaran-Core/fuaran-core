@@ -196,16 +196,39 @@ tree with no gated node and refuse tomorrow on a document nobody changed.
 vocabulary no case of which encodes bare, and `ReferenceIdl` says exactly that on purpose.
 `IdlTrustTests` pins each member's refusal as its own case, and both directions of the conditional
 pair; each was confirmed to go red with the refusal removed. Its last two cases are the guard over
-the compat promise above — an artifact at the default omits the block and reads back as `Default`,
-never as `Undeclared` — and that pair was confirmed to go red, alone, when `readHarden`'s absent-block
-answer was flipped. A later session that reaches for the flip anyway meets a red test naming this
-entry rather than a silent change to what published bytes mean.
+the compat promise above — an artifact carrying no block reads back as `Default`, never as
+`Undeclared` — and that pair was confirmed to go red, alone, when `readHarden`'s absent-block
+answer was flipped. _(Phase 179 amended the first of the two: the writer now emits the block
+unconditionally, so the case asserts the block's PRESENCE on a fresh render and holds the
+absent-block promise over a fixture with the block dropped. The promise it guards is unchanged —
+see the amendment below.)_ A later session that reaches for the flip anyway meets a red test naming
+this entry rather than a silent change to what published bytes mean.
 
 **The route if the flip is still wanted.** It is a migration, not a default change: `fuaran-dotnet`
 spells its own four tokens at `Vocabulary.fs:3482`, its `idl.json` and the shared corpus are
 regenerated to carry an explicit `harden` block, every host reading that corpus is confirmed to
 tolerate the new key, and only then does `Default` empty. Each step is separately shippable and
 none of them is this phase.
+
+**Amended 2026-09-17 (Phase 179) — the route's first step is taken, and it is a WRITER change
+only.** `Artifact.render` now emits the `harden` block for every policy value, `Default` included;
+the omission branch is gone. A freshly rendered artifact therefore declares its hardening
+vocabulary outright and no reader has to infer it, which is what makes the step above ("regenerated
+to carry an explicit `harden` block") a re-render rather than a hand edit. **`readHarden` is
+deliberately untouched**: an absent block still resolves through `Default`, because the artifacts
+written before this phase still exist and step one must not change what they mean — the whole point
+of sequencing the flip rather than collapsing it. The class is additive on both axes and measured
+rather than asserted: `IdlArtifactTests` runs the diff classifier over pre-179 and post-179 bytes
+in both directions and requires no `HardenPolicyChanged` row, with a falsifier requiring one for a
+policy that genuinely moved. Shipped on `0.26.0`; `STABILITY.md` carries the entry.
+
+**What remains of the route, and what gates it.** Two published artifacts must be RE-RENDERED under
+this phase — `fuaran-dotnet/src/Fuaran.UI.Idl/idl.json` and the shared cross-host corpus
+`wire-format-fixtures/idl.json` — and every host reading that corpus confirmed to tolerate the new
+key. Only then does step two run: an absent block means "declared nothing", `Default` empties or
+retires, and the tokens leave `src/`. That step is **Phase 180**, and collapsing it back into this
+one recreates exactly the hazard the measurement above refused. This entry, not the code, is what a
+session reaching for the flip should meet first.
 
 ## 2026-09-15 — D39: the producer owns its conformance vectors; the shared corpus is the distribution point
 

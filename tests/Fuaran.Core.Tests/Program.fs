@@ -54,6 +54,23 @@ let main argv =
         printfn "Wrote %s" (ApplyVectorExport.vectorsPath dir)
         printfn "Wrote %s" (ApplyVectorExport.manifestPath dir)
         0
+    // Phase 184 — write the law-family roster's two generated artefacts (the human-readable
+    // `docs/conformance-families.md` and the machine-readable `docs/conformance-families.json`
+    // an offline projection reads):
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-families [<dir>]
+    // With no argument the target is THIS repository's committed `docs/`. A flag rather than a
+    // test side-effect for the `--emit-laws` reason above; the suite COMPARES both files against
+    // what the roster renders and names this command.
+    | "--emit-families" :: rest ->
+        let dir =
+            match rest with
+            | d :: _ when not (d.StartsWith "--") -> d
+            | _ -> ConformanceFamiliesTests.Export.root ()
+
+        ConformanceFamiliesTests.Export.write dir
+        printfn "Wrote %s" (ConformanceFamiliesTests.Export.markdownPath dir)
+        printfn "Wrote %s" (ConformanceFamiliesTests.Export.jsonPath dir)
+        0
     | "--idl-diff" :: oldPath :: newPath :: rest ->
         let read (p: string) = System.IO.File.ReadAllText p
 
