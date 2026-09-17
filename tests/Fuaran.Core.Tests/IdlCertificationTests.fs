@@ -624,24 +624,24 @@ let artifactRoundTrip =
               | Error m -> failtestf "parse rejected the reshuffled rendering: %s" m
               | Ok reparsed -> Expect.equal reparsed valueCoverageIdl "the reshuffled artifact reads back canonically")
 
-          // Phase 116 — the acceptance stated as a test rather than as a claim about
-          // bytes nobody re-renders. A vocabulary carrying the tokens the engine used to
-          // hard-code emits NO harden block, so its artifact cannot have moved; one that
-          // declares its own emits it. Both branches are exercised, because
-          // `refIdl` declares its own and every other vocabulary here does not.
-          testCase "the harden block is omitted at the default and present when declared" (fun _ ->
+          // Phase 116 stated its acceptance as a test rather than as a claim about bytes
+          // nobody re-renders: a vocabulary carrying the tokens the engine used to
+          // hard-code emitted NO harden block, one that declared its own emitted it.
+          //
+          // **Phase 179 removed that branch**, which is why this case now reads the way
+          // it does. The block's ABSENCE was a wire fact meaning one domain's tokens, so
+          // the projection emits it unconditionally — every vocabulary here declares its
+          // policy outright, whether it spells its own tokens or takes the default's.
+          // `IdlArtifactTests` holds the phase's own laws; this is the census over every
+          // round-trip vocabulary.
+          testCase "the harden block is present for every vocabulary" (fun _ ->
               for name, idl in roundTripVocabularies do
                   let text = Artifact.render idl
 
-                  if idl.Harden = HardenPolicy.Default then
-                      Expect.isFalse
-                          (text.Contains "\"harden\"")
-                          (sprintf "'%s' declares the default tokens, so its artifact must be byte-unchanged" name)
-                  else
-                      Expect.stringContains
-                          text
-                          "\"harden\""
-                          (sprintf "'%s' declares its own tokens, so the artifact must carry them" name))
+                  Expect.stringContains
+                      text
+                      "\"harden\""
+                      (sprintf "'%s': a rendered artifact declares its hardening policy" name))
 
           testCase "canonicalise is idempotent" (fun _ ->
               for name, idl in roundTripVocabularies do

@@ -2160,6 +2160,43 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.26.0 (draft)
+
+**This section describes a DRAFT slot.** `<Version>` reads `0.26.0` and no `v0.26.0` tag exists
+yet. `0.25.0` is tagged and published, so it is a released contract rather than a draft and nothing
+here can ride it; the commit carrying the first entry below advanced `<Version>` to this slot.
+Entries append under this header until the release gesture moves the number.
+
+### The artifact ALWAYS carries its `harden` block (Phase 179) — ADDITIVE on the wire and on the API
+
+`Artifact.render` emits the `harden` block for every policy value, `HardenPolicy.Default` included.
+Until now it omitted the block exactly at the default, so a freshly rendered artifact declared its
+hardening vocabulary only when that vocabulary was unusual.
+
+**Why this is a step of its own rather than part of the retirement it begins.** The default was a
+WIRE fact, not only a source one: the block's ABSENCE MEANT one domain's four tokens, by a promise
+`Artifact.readHarden` makes in its own doc comment to every artifact written before those tokens
+were declarable — and both published `idl.json` artifacts in the estate, the UI tier's own and the
+shared cross-host corpus, carry no block at all. Phase 178 measured that before flipping and
+refused ([`DECISIONS.md`](DECISIONS.md) D40); this is step one of the two-step migration that
+finding left in its place. Step two — an absent block meaning "declared nothing", and `Default`
+retired — is Phase 180, gated on those two artifacts having been re-rendered under this one.
+
+**The class, on both axes.** On the WIRE it is additive: an extra member on an object a reader
+looks up by name, which a conformant reader tolerates (`WIRE_FORMAT.md` §2.1 rule 2), and its
+presence at the default says exactly what its absence did. That last clause is MEASURED rather than
+asserted — `IdlArtifactTests` runs the diff classifier over the pre-179 bytes and the post-179
+bytes in both directions and requires no `HardenPolicyChanged` row, beside a falsifier that
+requires one for a policy that genuinely moved, so the quiet answer cannot be a classifier that
+reports nothing. On the API it is additive too: no signature moved, and `readHarden` is
+deliberately unchanged, so a consumer that never re-renders sees nothing at all.
+
+**What a consumer does about it: nothing is required.** Re-rendering a vocabulary's artifact adds
+the block and changes no other byte — the three committed classify fixtures in this repo are the
+worked instance, each a pure insertion. A consumer that pins artifact bytes in a test regenerates
+them; one that merely reads artifacts is untouched, in either direction, because the reader's
+answer for an absent block has not moved.
+
 ## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.24.0` and no `v0.24.0` tag exists
