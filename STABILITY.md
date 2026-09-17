@@ -1153,8 +1153,21 @@ construct that is not Fable-clean fails the green gate in-repo rather than surfa
 `Fuaran.Core.Idl` joined that set at `0.8.0` — it was the one `src/` package absent from it, which
 made its portability an unprovable claim rather than a certified one. What had blocked it was not the
 model but the emitters sharing its project; splitting them into `Fuaran.Core.Idl.Codegen` (Phase 97)
-removed the obstacle rather than working around it. `Idl.Codegen`, `Idl.Spike` and `Observer` stay off
-the surface deliberately: they are build-time tools, not a Fable-targeted surface. (`Double.ToString`
+removed the obstacle rather than working around it.
+
+**Since Phase 185 the claim above is CHECKED for every packable package, not asserted over them.**
+`Fuaran.Core.Tests.FableSmokeCompletenessTests` derives the packable set from the tree — every
+project under `src/` whose own `IsPackable` is not `false`, honouring `Directory.Build.props` — and
+fails naming any that is neither referenced by `tests/fable-smoke/FableSmoke.fsproj` nor listed in
+[`tests/fable-smoke/exclusions.json`](tests/fable-smoke/exclusions.json), the data file that replaced
+the hand-written exclusion comment this paragraph used to be. The exclusions are
+`{ "package", "reason", "phase" }` — what is off the surface, why, and which phase decided — and the
+check runs in both directions, so an entry whose project has since joined the smoke fails as loudly
+as a package covered by neither. Off the surface today: `Idl.Codegen` and `Idl.Cli` (build-time and
+.NET-only — they emit source or are a console tool, and neither ships the `fable/` source
+distribution), and `Fuaran.Core.CSharp` (a C# assembly is not Fable-compiled; listed rather than
+filtered out by project type, so the excusal is on the record). `Idl.Spike` needs no entry — it is
+`IsPackable=false`, so it makes no claim to keep. (`Double.ToString`
 with the round-trip specifier is *not* Fable-supported — float→string must route through
 `Wire.Canon.canonicalFloat`; `Double.TryParse`'s style/provider arguments are ignored under Fable but
 parse invariantly, which is a benign warning, not a gate failure.)
@@ -2335,6 +2348,46 @@ is written into both arms of every conditional member's match, so at sixteen con
 model is a 5.3 MB expression the prover dies loading, with no proof script involved. Exhaustive
 coverage at that width therefore stays refuted, now for a reason that names the artefact responsible.
 [`DECISIONS.md`](DECISIONS.md) D42 and `proofs/README.md`'s theorem 1 section carry the measurements.
+
+### The Fable smoke's membership is DERIVED (Phase 185) — ADDITIVE, and two promises now kept
+
+**No public surface moves.** What moves is which packages the Fable-compile gate actually covers, and
+therefore which of them the "Fable-clean on encode AND decode" claim at the head of
+["Fable cleanliness"](#fable-cleanliness) is entitled to be made about. `Fuaran.Core.Column.Ops` and
+`Fuaran.Core.Observer` join `tests/fable-smoke`; the exclusions become
+[`tests/fable-smoke/exclusions.json`](tests/fable-smoke/exclusions.json) — a JSON array of
+`{ "package": "<Fuaran.Core.X>", "reason": "…", "phase": "<NN>" }`, one entry per packable project
+deliberately off the surface; and `Fuaran.Core.Tests.FableSmokeCompletenessTests` holds the derived
+packable set to the union of the two.
+
+**What was actually wrong, which is not quite what the phase was filed for.** Membership was a
+hand-maintained `<ProjectReference>` list beside a hand-written exclusion COMMENT, and the one thing
+such a pair cannot notice is a package nobody added to either. Measured on the tree rather than taken
+from the shard: **two** packable projects were uncovered, not one. `Column.Ops` is the one the phase
+named — the package whose own `Description` ends "FSharp.Core only, Fable-clean", making the claim
+with nothing behind it. `Idl.Cli` is the second, uncovered since Phase 127 added it and named in no
+list; it is genuinely .NET-only and is now an exclusions entry. Both compile-or-excuse answers are on
+the record now, and neither was before.
+
+**And one recorded reason was FALSE, which is the other half of why this is data now.** The comment
+grouped `Observer` with `Idl.Codegen` and `Idl.Spike` as "build-time tools". `Fuaran.Core.Observer` is
+the RUNTIME verification seam, and its own header has said "FSharp.Core only + Fable-clean … the same
+engine drives the in-memory .NET test substrate and a Fable-compiled host" since it was written. So
+the exclusion was not a decision anyone had taken; it was a sentence that had stopped being true and
+had no check standing over it. Gating it corrects the claim rather than recording it — the compile is
+clean on the first attempt, as `Column.Ops`'s is. The completeness check runs in both directions
+precisely so this class fails next time: an entry whose project has since joined the smoke reddens.
+
+**What this means for a consumer of those two packages: a stronger promise, and nothing to do.**
+`tests/fable-smoke/` is a promise surface (see "The portability set" above) — a member reached from
+there carries a portability guarantee to Fable consumers. `Column.Ops`'s whole round trip
+(`canApply` / `apply` / the partial `invert` / `encode` / `decode` / `streamWitness`) and `Observer`'s
+engine (register / update / derive / observe / subscribe) are now reached deliberately, so a construct
+that stops transpiling in either is a red gate here rather than a downstream discovery. No signature,
+value or emitted byte moved in either package; both were already Fable-clean, which is the finding.
+
+**Riding the draft rather than advancing it.** This adds no public member and breaks nothing, so it is
+strictly below the change class `0.26.0` already carries.
 
 ### The package roster is DERIVED, and this document's header is held to `<Version>` (Phase 199) — DOCS + GATE, no surface moves
 

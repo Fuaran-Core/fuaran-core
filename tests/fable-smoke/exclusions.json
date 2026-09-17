@@ -1,0 +1,17 @@
+[
+  {
+    "package": "Fuaran.Core.Idl.Codegen",
+    "reason": "Build-time and .NET-only: it EMITS source, so its contract is the shape of what it emits rather than a surface a browser calls. Its implementation uses StringBuilder and CultureInfo.InvariantCulture for the TypeScript backend, and its .fsproj Content-Removes the fable/ source distribution every other packable project ships — so it makes no portability promise for this gate to keep.",
+    "phase": "97"
+  },
+  {
+    "package": "Fuaran.Core.Idl.Cli",
+    "reason": "A dotnet TOOL (OutputType Exe, PackAsTool, command `fuaran-core-idl`): a .NET console entry point over the .NET-only generation half above. Like Idl.Codegen it Content-Removes the fable/ source distribution, so nothing it ships is Fable-compiled by a consumer either. It was packable and uncovered from Phase 127 until Phase 185 derived this list rather than remembering it.",
+    "phase": "127"
+  },
+  {
+    "package": "Fuaran.Core.CSharp",
+    "reason": "A C# assembly is not Fable-compiled, so there is no compile for this gate to run. STABILITY.md says so where the package was introduced: the FSharp.Core-only and Fable-clean claim is about the F# packages, and this facade exists precisely to serve the .NET-only consumer that cannot state its authoring surface in F#. Listed rather than filtered out by project type, so the excusal is on the record instead of hiding in the shape of the derivation.",
+    "phase": "128"
+  }
+]
