@@ -484,33 +484,45 @@ module Artifact =
                                | KeyOrder.Sorted -> "sorted"
                                | KeyOrder.Declared -> "declared"
                            ) ] ])
-            // The declared hardening vocabulary (Phase 116). Emitted only when it
-            // differs from the default, so every vocabulary that inherits the tokens
-            // the engine used to hard-code has a byte-identical artifact — the `ops`
-            // and `wire` posture a third time.
+            // The declared hardening vocabulary (Phase 116), emitted ALWAYS since
+            // Phase 179 — `HardenPolicy.Default` included, which used to omit it.
+            //
+            // This is step one of the two-step wire migration D40 laid out, and the
+            // reason it needs two steps is that the default was a WIRE fact rather
+            // than only a source one: the block's ABSENCE meant one domain's tokens,
+            // by a promise [[readHarden]] makes to every artifact written before they
+            // were declarable, so emptying the default in place would have changed
+            // what already-published bytes MEAN, silently and with a green build.
+            // Emitting unconditionally makes a freshly rendered artifact declare its
+            // policy outright, so no reader has to infer it — additive on the wire (an
+            // extra member a reader tolerates by `WIRE_FORMAT.md` §2.1 rule 2,
+            // field-lookup-by-name) and additive on the API.
+            //
+            // [[readHarden]] is deliberately UNCHANGED: an absent block still resolves
+            // through `HardenPolicy.Default`, because the artifacts written before this
+            // phase still exist and this step must not change what they mean. Retiring
+            // that reader answer is Phase 180, gated on the two published artifacts
+            // having been re-rendered under this one.
             //
             // `transparentUnions` is the one member here a WIRE consumer must read:
             // the per-union `transparentCase` above is derived from it, and a decoder
             // that missed it would read a bare value as a tagged object. The rest is
             // codegen-boundary spec — what the trust boundary gates and what it mints
             // in its place — and a decoder ignores it.
-            @ (if idl.Harden = HardenPolicy.Default then
-                   []
-               else
-                   [ "harden",
-                     JObj
-                         [ "gatedKind", JStr idl.Harden.GatedKind
-                           "placeholderKind", JStr idl.Harden.PlaceholderKind
-                           "placeholderField", JStr idl.Harden.PlaceholderField
-                           "textLiteralCase", JStr idl.Harden.TextLiteralCase
-                           "textLiteralField", JStr idl.Harden.TextLiteralField
-                           "valueLiteralCase", JStr idl.Harden.ValueLiteralCase
-                           "valueLiteralField", JStr idl.Harden.ValueLiteralField
-                           "transparentUnions",
-                           JArr(
-                               idl.Harden.TransparentUnions
-                               |> List.map (fun (union, case) -> JObj [ "union", JStr union; "case", JStr case ])
-                           ) ] ])
+            @ [ "harden",
+                JObj
+                    [ "gatedKind", JStr idl.Harden.GatedKind
+                      "placeholderKind", JStr idl.Harden.PlaceholderKind
+                      "placeholderField", JStr idl.Harden.PlaceholderField
+                      "textLiteralCase", JStr idl.Harden.TextLiteralCase
+                      "textLiteralField", JStr idl.Harden.TextLiteralField
+                      "valueLiteralCase", JStr idl.Harden.ValueLiteralCase
+                      "valueLiteralField", JStr idl.Harden.ValueLiteralField
+                      "transparentUnions",
+                      JArr(
+                          idl.Harden.TransparentUnions
+                          |> List.map (fun (union, case) -> JObj [ "union", JStr union; "case", JStr case ])
+                      ) ] ]
         )
 
     /// The `idl.json` bytes — indented, canonically ordered, newline-terminated
@@ -965,9 +977,16 @@ module Artifact =
                                   NodeEnvelope = e
                                   KeyOrder = k })))))
 
-    /// The declared hardening vocabulary. Absent means [[HardenPolicy.Default]] — the
-    /// projection omits the block at the default, so every artifact written before the
-    /// tokens were declarable reads back as the tokens the engine hard-coded.
+    /// The declared hardening vocabulary. Absent means [[HardenPolicy.Default]] — every
+    /// artifact written before the tokens were declarable reads back as the tokens the
+    /// engine hard-coded.
+    ///
+    /// **Unchanged by Phase 179, deliberately.** Since that phase the PROJECTION emits
+    /// the block unconditionally, so a freshly rendered artifact never relies on this
+    /// answer; what still does is every artifact rendered before it, which is why the
+    /// answer stays. Retiring it — making an absent block mean "declared nothing" — is
+    /// Phase 180, and it is gated on the published artifacts having been re-rendered.
+    /// `IdlTrustTests`' compat family is the guard; read D40 before changing either.
     let private readHarden (root: JVal) : Result<HardenPolicy, string> =
         match atKey "harden" root with
         | None -> Ok HardenPolicy.Default

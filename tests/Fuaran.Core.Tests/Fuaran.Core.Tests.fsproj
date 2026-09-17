@@ -198,6 +198,13 @@
          artifact with no `harden` block reads back as the default). Reads ReferenceIdl.fs
          for the fully-declared fixture, so after it. Appended (append-only registration). -->
     <Compile Include="IdlTrustTests.fs" />
+    <!-- Phase 179 - the artifact ALWAYS carries its `harden` block: the unconditional
+         render, the pinned render of `Undeclared`, the round trip with the block, and the
+         diff classifier run over pre-179 and post-179 bytes to measure the additive class
+         rather than assert it. Reads ReferenceIdl.fs for the fixture and the diff
+         classifier from Fuaran.Core.Idl.Codegen, so after both. Appended here
+         (append-only registration) - nothing else in this list reads it. -->
+    <Compile Include="IdlArtifactTests.fs" />
     <!-- Phase 184 — the law-family roster held to the tree: reflection over the shipped
          assembly BY RETURN TYPE, each record's witness re-derived from its own signature,
          opt-in read off the aggregates' bodies, and the discharge relation held equal to the

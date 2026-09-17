@@ -2124,11 +2124,78 @@ disagree.
 
 Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).
 
+## The hardening policy's UNDECLARED half (Phase 178) — ADDITIVE, and it ADVANCES the slot
+
+**The class.** Additive on every published surface. `Fuaran.Core.Idl` gains a
+`HardenPolicy.Undeclared` static member; `Fuaran.Core.Idl.Codegen` gains
+`Trust.checkHardenPolicy`, `Trust.hardenOrRefuse` and one `CodegenError` case
+(`UndeclaredHardenToken`). Nothing existing changes shape: `HardenPolicy`'s members keep their
+types, `HardenPolicy.Default` keeps its tokens, `Trust.harden` keeps its signature and its
+behaviour, and no artifact's bytes move. A vocabulary on the default cannot reach the new refusal —
+the default declares every member — so adoption is an opt-in in the strict sense: you declare
+`Undeclared` (or leave a member empty) and call the checked entry point, or nothing about your build
+changes.
+
+The `CodegenError` case follows this document's own precedent: Phase 150 (`0.24.0`) classed a new
+case on the same union ADDITIVE for the same reason it is additive here — the union is matched
+nowhere outside `Fuaran.Core.Idl.Codegen`, measured, and the new case is reachable only from a leg
+that did not previously exist. A consumer that DOES match it exhaustively would gain a warning, not
+a silent wrong answer; against a same-version repack of the slot it would be the runtime skew the
+workspace's pack guard classifies, which is why the slot advances rather than being repacked.
+
+**It ADVANCES rather than riding the draft.** The standing `<Version>` is `0.24.0`, and `v0.24.0` is
+tagged and published (2026-09-15). That slot is a released contract, not a draft, so under the
+draft-slot rule this cannot ride it: the commit that carries this work advances `<Version>` to the
+next slot. The number itself is the release gesture's to move, not this phase's.
+
+**What this phase deliberately did NOT change, and why the class would have been different.** Phase
+178 was written to FLIP the default — `Undeclared` replacing `Default`, `Trust.harden` itself
+refusing — which would have been **breaking for a vocabulary that declared nothing**, and that is
+the class this document would be recording had the flip landed. It did not, because the flip's
+licensing premise was measured and refuted before the work: thirteen declaration sites in the estate
+take their tokens from the default (the UI tier's own `Vocabulary.fs` among them), and both
+published `idl.json` artifacts — including the shared cross-host corpus — carry no `harden` block at
+all, which `Artifact.readHarden` resolves through `HardenPolicy.Default` by a promise stated in its
+own doc comment. Emptying the default would have changed what already-published bytes MEAN, for
+every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
+measurement, the compat promise, and the migration route if the flip is ever wanted.
+
 ## 0.26.0 (draft)
 
-The slot this release's phases ride. `v0.25.0` is tagged, so it is a released contract and nothing
-below could ride it; `<Version>` advances to `0.26.0` and the entries append here. The number is the
-release gesture's to move again, not any one phase's.
+**This section describes a DRAFT slot.** `<Version>` reads `0.26.0` and no `v0.26.0` tag exists
+yet. `0.25.0` is tagged and published, so it is a released contract rather than a draft and nothing
+here can ride it; the commit carrying the first entry below advanced `<Version>` to this slot.
+Entries append under this header until the release gesture moves the number.
+
+### The artifact ALWAYS carries its `harden` block (Phase 179) — ADDITIVE on the wire and on the API
+
+`Artifact.render` emits the `harden` block for every policy value, `HardenPolicy.Default` included.
+Until now it omitted the block exactly at the default, so a freshly rendered artifact declared its
+hardening vocabulary only when that vocabulary was unusual.
+
+**Why this is a step of its own rather than part of the retirement it begins.** The default was a
+WIRE fact, not only a source one: the block's ABSENCE MEANT one domain's four tokens, by a promise
+`Artifact.readHarden` makes in its own doc comment to every artifact written before those tokens
+were declarable — and both published `idl.json` artifacts in the estate, the UI tier's own and the
+shared cross-host corpus, carry no block at all. Phase 178 measured that before flipping and
+refused ([`DECISIONS.md`](DECISIONS.md) D40); this is step one of the two-step migration that
+finding left in its place. Step two — an absent block meaning "declared nothing", and `Default`
+retired — is Phase 180, gated on those two artifacts having been re-rendered under this one.
+
+**The class, on both axes.** On the WIRE it is additive: an extra member on an object a reader
+looks up by name, which a conformant reader tolerates (`WIRE_FORMAT.md` §2.1 rule 2), and its
+presence at the default says exactly what its absence did. That last clause is MEASURED rather than
+asserted — `IdlArtifactTests` runs the diff classifier over the pre-179 bytes and the post-179
+bytes in both directions and requires no `HardenPolicyChanged` row, beside a falsifier that
+requires one for a policy that genuinely moved, so the quiet answer cannot be a classifier that
+reports nothing. On the API it is additive too: no signature moved, and `readHarden` is
+deliberately unchanged, so a consumer that never re-renders sees nothing at all.
+
+**What a consumer does about it: nothing is required.** Re-rendering a vocabulary's artifact adds
+the block and changes no other byte — the three committed classify fixtures in this repo are the
+worked instance, each a pure insertion. A consumer that pins artifact bytes in a test regenerates
+them; one that merely reads artifacts is untouched, in either direction, because the reader's
+answer for an absent block has not moved.
 
 ### `Fuaran.Core.Families` — the law-family roster, exported by the kit (Phase 184) — ADDITIVE
 
@@ -2201,42 +2268,6 @@ ladder's `dischargedBy` vocabulary was every public static method of `Conformanc
 roster's entry points. That is the phase's title clause — an obligation cannot name a law no
 conformance census enumerates, because the vocabulary IS the enumeration. It constrains
 `proofs.json`, not any published API.
-
-## The hardening policy's UNDECLARED half (Phase 178) — ADDITIVE, and it ADVANCES the slot
-
-**The class.** Additive on every published surface. `Fuaran.Core.Idl` gains a
-`HardenPolicy.Undeclared` static member; `Fuaran.Core.Idl.Codegen` gains
-`Trust.checkHardenPolicy`, `Trust.hardenOrRefuse` and one `CodegenError` case
-(`UndeclaredHardenToken`). Nothing existing changes shape: `HardenPolicy`'s members keep their
-types, `HardenPolicy.Default` keeps its tokens, `Trust.harden` keeps its signature and its
-behaviour, and no artifact's bytes move. A vocabulary on the default cannot reach the new refusal —
-the default declares every member — so adoption is an opt-in in the strict sense: you declare
-`Undeclared` (or leave a member empty) and call the checked entry point, or nothing about your build
-changes.
-
-The `CodegenError` case follows this document's own precedent: Phase 150 (`0.24.0`) classed a new
-case on the same union ADDITIVE for the same reason it is additive here — the union is matched
-nowhere outside `Fuaran.Core.Idl.Codegen`, measured, and the new case is reachable only from a leg
-that did not previously exist. A consumer that DOES match it exhaustively would gain a warning, not
-a silent wrong answer; against a same-version repack of the slot it would be the runtime skew the
-workspace's pack guard classifies, which is why the slot advances rather than being repacked.
-
-**It ADVANCES rather than riding the draft.** The standing `<Version>` is `0.24.0`, and `v0.24.0` is
-tagged and published (2026-09-15). That slot is a released contract, not a draft, so under the
-draft-slot rule this cannot ride it: the commit that carries this work advances `<Version>` to the
-next slot. The number itself is the release gesture's to move, not this phase's.
-
-**What this phase deliberately did NOT change, and why the class would have been different.** Phase
-178 was written to FLIP the default — `Undeclared` replacing `Default`, `Trust.harden` itself
-refusing — which would have been **breaking for a vocabulary that declared nothing**, and that is
-the class this document would be recording had the flip landed. It did not, because the flip's
-licensing premise was measured and refuted before the work: thirteen declaration sites in the estate
-take their tokens from the default (the UI tier's own `Vocabulary.fs` among them), and both
-published `idl.json` artifacts — including the shared cross-host corpus — carry no `harden` block at
-all, which `Artifact.readHarden` resolves through `HardenPolicy.Default` by a promise stated in its
-own doc comment. Emptying the default would have changed what already-published bytes MEAN, for
-every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
-measurement, the compat promise, and the migration route if the flip is ever wanted.
 
 ## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 

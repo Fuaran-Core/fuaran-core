@@ -1,6 +1,7 @@
 module Fuaran.Core.Tests.IdlTrustTests
 
 open Expecto
+open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Tests.ReferenceIdl
 
@@ -149,24 +150,44 @@ let tests =
 
           testList
               "the compat promise D40 measured — this is the guard, read D40 before changing it"
-              [ // `Artifact.render` OMITS the harden block at the default and
-                // `Artifact.readHarden` resolves an absent block through `Default`. Both
+              [ // `Artifact.readHarden` resolves an absent block through `Default`. Both
                 // published `idl.json` artifacts in the estate — including the shared
-                // cross-host corpus — carry no block, so this pair is what those bytes
-                // MEAN. Emptying or removing `Default` changes their meaning silently;
-                // this test is what stops that being silent.
-                testCase "an artifact at the default omits the block and reads back as the default" (fun _ ->
+                // cross-host corpus — carry no block, so that reader answer is what those
+                // bytes MEAN. Emptying or removing `Default` changes their meaning
+                // silently; this test is what stops that being silent.
+                //
+                // **Amended by Phase 179, and only the writer half moved.** That phase
+                // made `Artifact.render` emit the block UNCONDITIONALLY — step one of the
+                // two-step migration D40 laid out — so the old assertion here ("the
+                // projection omits the block at the default") is now false by design and
+                // is replaced by its successor: the block is present on a fresh render,
+                // and an artifact written BEFORE that phase still reads back as `Default`.
+                // The promise this family guards is unchanged; what changed is that the
+                // artifact carrying no block is now a historical one rather than one this
+                // renderer still produces. Retiring the reader answer is Phase 180.
+                testCase "an artifact with no block still reads back as the default" (fun _ ->
                     let onDefault =
                         { refIdl with
                             Harden = HardenPolicy.Default }
 
                     let text = Artifact.render onDefault
 
-                    Expect.isFalse
-                        (text.Contains "\"harden\"")
-                        "the projection omits the block at the default (pre-Phase-116 artifacts carry none)"
+                    Expect.stringContains
+                        text
+                        "\"harden\""
+                        "since Phase 179 the projection emits the block at the default too"
 
-                    match Artifact.parse text with
+                    // What a pre-Phase-179 renderer wrote: the same artifact, block
+                    // dropped at the JSON level rather than by text surgery.
+                    let pre179 =
+                        match Artifact.json onDefault with
+                        | JObj members ->
+                            Artifact.renderJson (JObj(members |> List.filter (fun (k, _) -> k <> "harden")))
+                        | other -> failtestf "the artifact root is not a JSON object: %A" other
+
+                    Expect.isFalse (pre179.Contains "\"harden\"") "the fixture is an artifact carrying no block"
+
+                    match Artifact.parse pre179 with
                     | Ok back ->
                         Expect.equal
                             back.Harden
