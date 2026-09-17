@@ -28,7 +28,8 @@
        type-check at `Tot` is the termination proof; the lemma states that every input
        reaches exactly one of `Ok` / `Error` and never both.
 
-   THE SHAPE — one lemma per constructor, one per presence pattern (fuaran-core Phase 168).
+   THE SHAPE — one lemma per constructor, and the presence split LINEAR in the conditional
+   members (fuaran-core Phase 182, replacing Phase 168's per-pattern split).
    A constructor with k conditional members (optional, or omitted at its default) encodes
    to 2^k object shapes, and a lemma over the whole constructor puts all of them in ONE
    query. Measured at a twenty-kind vocabulary whose node envelope carried five optional
@@ -38,17 +39,18 @@
    isolation is in the emitted shape instead. `rt_<T>` is the round trip over a type — for a
    type with several constructors, a CASE SPLIT whose arms cite `rt_<T>__<Ctor>`, one
    constructor's arm alone under `C__<T>__<Ctor>? x`. A constructor with
-   2 or more conditional members is split further: `rt_<T>__<Ctor>__p<bits>` proves ONE
-   presence pattern, its `requires` pinning every conditional member present or absent so
-   the encoder's nested match collapses to one object literal in the query, and the
-   constructor's lemma is a split on exactly those members citing each. The family is still
-   one mutual induction — a kind's children reach `rt_node` — on the lexicographic measure
-   `%[x; tier]`, because the split lemmas recurse on the SAME value and differ only in how
-   much of it they have fixed. Every query therefore carries at most one constructor's
-   shapes, and a wide envelope or a wide kind costs 2^k small lemmas rather than one it
-   cannot discharge. The rlimit precedent Phase 150 took (`--z3rlimit 200` in this file)
-   is retired with the shape that needed it: the leg's own rlimit is what these are
-   checked under, and a query that wants more is a query the split has failed to isolate.
+   2 or more conditional members is proved from its members' LOOKUPS instead of in one
+   query: `lk_<T>__<Ctor>__<member>` reads one key off the encoded object with every OTHER
+   conditional member left free — one lemma for a member that is always emitted, two for a
+   conditional one — and the constructor's lemma cites them a member at a time. That is
+   2k + r' lemmas where Phase 168 emitted 2^k, and it is why a sixteen-conditional kind
+   costs thirty-odd lemmas rather than 65,536 (`fuaran#1754` measured 71,722 of them in a
+   114 MB script at the UI vocabulary). The family is still one mutual induction — a kind's
+   children reach `rt_node` — on the lexicographic measure `%[x; tier]`; the lookups are
+   NOT in it, since they recurse on nothing, which is what lets each carry the scoped
+   `--fuel` its own walk needs. The rlimit precedent Phase 150 took (`--z3rlimit 200` in
+   this file) stays retired: the leg's own rlimit is what these are checked under, and a
+   query that wants more is a query the split has failed to isolate.
 
    WHAT IS NOT PROVED HERE, and why. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`,
    which Phase 135 carries for its hand-written reference vocabulary — is not restated over
@@ -86,11 +88,21 @@ let rt_e_heading_depth (#num #flt: eqtype) (x: e_heading_depth) : Lemma (ensures
 let rt_e_list_style (#num #flt: eqtype) (x: e_list_style) : Lemma (ensures dec_e_list_style (enc_e_list_style #num #flt x) == Ok x) = ()
 
 (* ======================================================================================
-   2. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL
+   2. THE PRESENCE LOOKUPS. One member's key read off the encoded object, with every
+      conditional member other than that one left FREE — so a constructor with k of them
+      costs 2k + r' lemmas rather than 2^k, and no query has to hold more than one key's
+      walk. Each carries its own scoped fuel: `find_field` pushes through a key it is not
+      looking for, and the default two unfoldings do not reach past the second. Emitted
+      only for a constructor at or above the split threshold, and only from its first
+      conditional member on — everything before that is reached without a branch.
+   ====================================================================================== *)
+
+(* ======================================================================================
+   3. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL
       value — F*'s subterm order spans a mutual inductive family, so each case needs only
-      the sub-lemmas of the members it carries. ONE LEMMA PER CONSTRUCTOR, and one per
-      PRESENCE PATTERN where a constructor's conditional members warrant it (the header
-      says why): no query carries more than one constructor's object shapes.
+      the sub-lemmas of the members it carries. ONE LEMMA PER CONSTRUCTOR: a wide one is
+      proved by citing section 2's lookups, a member at a time, rather than by carrying
+      its object shapes into this query.
    ====================================================================================== *)
 
 let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 2]) =
@@ -204,7 +216,7 @@ and rt_items_l_u_run (#num #flt: eqtype) (acc: list (u_run num flt)) (xs: list (
   | y :: t -> rt_u_run #num #flt y; rt_items_l_u_run #num #flt (y :: acc) t
 
 (* ======================================================================================
-   3. TOTALITY. That the decoders type-check at `Tot` is the termination proof; what the
+   4. TOTALITY. That the decoders type-check at `Tot` is the termination proof; what the
       lemma adds is that the outcome is exactly one of the two, for EVERY input — the
       failure classification is exhaustive rather than merely non-empty.
    ====================================================================================== *)
