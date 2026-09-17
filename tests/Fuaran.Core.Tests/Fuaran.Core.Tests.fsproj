@@ -205,6 +205,13 @@
          classifier from Fuaran.Core.Idl.Codegen, so after both. Appended here
          (append-only registration) - nothing else in this list reads it. -->
     <Compile Include="IdlArtifactTests.fs" />
+    <!-- Phase 184 — the law-family roster held to the tree: reflection over the shipped
+         assembly BY RETURN TYPE, each record's witness re-derived from its own signature,
+         opt-in read off the aggregates' bodies, and the discharge relation held equal to the
+         claims ladder's. Here rather than beside SampleAdequacyTests because it also owns the
+         two generated artefacts and their `emit-families` freshness legs; it reads nothing
+         from another test module, so the position is free. -->
+    <Compile Include="ConformanceFamiliesTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

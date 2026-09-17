@@ -1,0 +1,511 @@
+{
+  "kind": "fuaran.core.conformance.families",
+  "schema": 1,
+  "package": "Fuaran.Core.Conformance",
+  "families": [
+    {
+      "id": "Conformance.aggregateParityLaws",
+      "module": "Conformance",
+      "entry": "aggregateParityLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.aiSurfaceLaws",
+      "module": "Conformance",
+      "entry": "aiSurfaceLaws",
+      "witness": ["AiSurfaceWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.arbitrationLaws",
+      "module": "Conformance",
+      "entry": "arbitrationLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.attestationLaws",
+      "module": "Conformance",
+      "entry": "attestationLaws",
+      "witness": ["StreamWitness", "StreamGen", "IAttestationSink"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.attributedLaws",
+      "module": "Conformance",
+      "entry": "attributedLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.canonicalFloatLaws",
+      "module": "Conformance",
+      "entry": "canonicalFloatLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.capabilityLaws",
+      "module": "Conformance",
+      "entry": "capabilityLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.capabilityPipelineIncrementalLaws",
+      "module": "Conformance",
+      "entry": "capabilityPipelineIncrementalLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.capabilityPipelineLaws",
+      "module": "Conformance",
+      "entry": "capabilityPipelineLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.captureReplayLaws",
+      "module": "Conformance",
+      "entry": "captureReplayLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.casLaws",
+      "module": "Conformance",
+      "entry": "casLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.chainBreakReasonLaws",
+      "module": "Conformance",
+      "entry": "chainBreakReasonLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.codecInjectivityLaws",
+      "module": "Conformance",
+      "entry": "codecInjectivityLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.columnarOpLaws",
+      "module": "Conformance",
+      "entry": "columnarOpLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.columnarOpLawsWith",
+      "module": "Conformance",
+      "entry": "columnarOpLawsWith",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.columnarValidatorLaws",
+      "module": "Conformance",
+      "entry": "columnarValidatorLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.compositionLaws",
+      "module": "Conformance",
+      "entry": "compositionLaws",
+      "witness": ["ArtifactWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.compositionPilot",
+      "module": "Conformance",
+      "entry": "compositionPilot",
+      "witness": ["ArtifactWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.concurrencyLaws",
+      "module": "Conformance",
+      "entry": "concurrencyLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": ["lanes-apply"]
+    },
+    {
+      "id": "Conformance.concurrencyLawsWith",
+      "module": "Conformance",
+      "entry": "concurrencyLawsWith",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.constructThenEncodeLaws",
+      "module": "Conformance",
+      "entry": "constructThenEncodeLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.containerLaws",
+      "module": "Conformance",
+      "entry": "containerLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.dagBreakReasonLaws",
+      "module": "Conformance",
+      "entry": "dagBreakReasonLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.dagLaws",
+      "module": "Conformance",
+      "entry": "dagLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.deferredLaws",
+      "module": "Conformance",
+      "entry": "deferredLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.diffContainedLaws",
+      "module": "Conformance",
+      "entry": "diffContainedLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.diffLaws",
+      "module": "Conformance",
+      "entry": "diffLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": false,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.dirtyPropagationLaws",
+      "module": "Conformance",
+      "entry": "dirtyPropagationLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.encoderInjectivityLaws",
+      "module": "Conformance",
+      "entry": "encoderInjectivityLaws",
+      "witness": ["ArtifactWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.footprintLaws",
+      "module": "Conformance",
+      "entry": "footprintLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": ["independence-diamond"]
+    },
+    {
+      "id": "Conformance.functionVerifyLaws",
+      "module": "Conformance",
+      "entry": "functionVerifyLaws",
+      "witness": ["ArtifactWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.hashFnAdversarialLaws",
+      "module": "Conformance",
+      "entry": "hashFnAdversarialLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.hashFnLaws",
+      "module": "Conformance",
+      "entry": "hashFnLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.idempotencyLaws",
+      "module": "Conformance",
+      "entry": "idempotencyLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.incrementalLaws",
+      "module": "Conformance",
+      "entry": "incrementalLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.leaseLaws",
+      "module": "Conformance",
+      "entry": "leaseLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.memoLaws",
+      "module": "Conformance",
+      "entry": "memoLaws",
+      "witness": ["ArtifactWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.memoSoundnessLaws",
+      "module": "Conformance",
+      "entry": "memoSoundnessLaws",
+      "witness": ["ArtifactWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.mergeConflictLaws",
+      "module": "Conformance",
+      "entry": "mergeConflictLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.noAttestationVacuityLaws",
+      "module": "Conformance",
+      "entry": "noAttestationVacuityLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.normalizeLaws",
+      "module": "Conformance",
+      "entry": "normalizeLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.nowLaws",
+      "module": "Conformance",
+      "entry": "nowLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.opAlgebra",
+      "module": "Conformance",
+      "entry": "opAlgebra",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": false,
+      "discharges": ["tree-algebra-well-formed-states"]
+    },
+    {
+      "id": "Conformance.packLoadingLaws",
+      "module": "Conformance",
+      "entry": "packLoadingLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.paramLaws",
+      "module": "Conformance",
+      "entry": "paramLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.projectionLaws",
+      "module": "Conformance",
+      "entry": "projectionLaws",
+      "witness": ["ProjectionWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.propagationEvalLaws",
+      "module": "Conformance",
+      "entry": "propagationEvalLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.queryLaws",
+      "module": "Conformance",
+      "entry": "queryLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.reconcileLaws",
+      "module": "Conformance",
+      "entry": "reconcileLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.reducer",
+      "module": "Conformance",
+      "entry": "reducer",
+      "witness": ["StreamGen"],
+      "optIn": false,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.registryLaws",
+      "module": "Conformance",
+      "entry": "registryLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.schemaWalkLaws",
+      "module": "Conformance",
+      "entry": "schemaWalkLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.slotParamLaws",
+      "module": "Conformance",
+      "entry": "slotParamLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.snapshotLaws",
+      "module": "Conformance",
+      "entry": "snapshotLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.snapshotLawsWith",
+      "module": "Conformance",
+      "entry": "snapshotLawsWith",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.streamLaws",
+      "module": "Conformance",
+      "entry": "streamLaws",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": false,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.transformLaws",
+      "module": "Conformance",
+      "entry": "transformLaws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.verifyHonestyLaws",
+      "module": "Conformance",
+      "entry": "verifyHonestyLaws",
+      "witness": ["ArtifactWitness"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "Conformance.witnessLaws",
+      "module": "Conformance",
+      "entry": "witnessLaws",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": false,
+      "discharges": ["lawful-abstract-witness"]
+    },
+    {
+      "id": "FoldConfluence.laneFoldLaws",
+      "module": "FoldConfluence",
+      "entry": "laneFoldLaws",
+      "witness": ["StreamWitness", "LaneGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "FoldConfluence.laneFoldLawsWith",
+      "module": "FoldConfluence",
+      "entry": "laneFoldLawsWith",
+      "witness": ["StreamWitness", "LaneGen"],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "IncrementalDelta.laws",
+      "module": "IncrementalDelta",
+      "entry": "laws",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    },
+    {
+      "id": "IncrementalDelta.lawsWith",
+      "module": "IncrementalDelta",
+      "entry": "lawsWith",
+      "witness": [],
+      "optIn": true,
+      "discharges": []
+    }
+  ]
+}
