@@ -2336,10 +2336,51 @@ model is a 5.3 MB expression the prover dies loading, with no proof script invol
 coverage at that width therefore stays refuted, now for a reason that names the artefact responsible.
 [`DECISIONS.md`](DECISIONS.md) D42 and `proofs/README.md`'s theorem 1 section carry the measurements.
 
+### The package roster is DERIVED, and this document's header is held to `<Version>` (Phase 199) — DOCS + GATE, no surface moves
+
+**The class: neither additive nor breaking — no published type, signature, byte or emitted artefact
+moves.** What changes is what the two documents beside the code are permitted to say. It rides this
+draft rather than advancing it for exactly that reason: a consumer has nothing to adopt.
+
+**What was wrong, measured 2026-09-17 rather than assumed.** `README.md`'s package table listed
+twelve packages while `src/` held twenty-one packable projects, so nine shipped packages —
+`AiSurface`, `CSharp`, `Idl`, `Idl.Cli`, `Idl.Codegen`, `Lease`, `Observer`, `Projection`,
+`Propagation` — were documented nowhere a consumer reads. Five of them (`Projection`, `AiSurface`,
+`Propagation`, `Lease`, and `Observer`'s sibling position) are referenced by
+`Fuaran.Core.Conformance`, so a domain adopting the kit already depended on packages the table did
+not admit existed. And this document carried two DRAFT-slot preambles — on `0.24.0` and on
+`0.23.0` — each saying "no `vX.Y.Z` tag exists yet" beside its own header saying it was released,
+because the sentence that was true when the slot was cut was never retired when the tag was made.
+
+**What now holds it.** `PackageRosterTests` in the suite `./verify.ps1` runs in every lane:
+
+1. the README table's rows equal the packable set, derived from the project files themselves
+   (`src/*/*.fsproj` and `src/*/*.csproj` whose `IsPackable` is not `false`, falling back to
+   `Directory.Build.props`), naming every row that is missing and every row that is surplus;
+2. no packable project sits outside `src/` — the scope the derivation assumes is checked rather
+   than trusted, so a package added elsewhere cannot slip past the roster by being out of frame;
+3. some entry header in this document names the standing `<Version>`;
+4. no "no `vX.Y.Z` tag exists" sentence survives the tag it denies, read off `git tag` — so a
+   released slot cannot go on describing itself as a draft.
+
+Each refusal has its own go-red case over synthetic input beside the live one, because a check
+whose only exercised case is the passing one has not been shown to detect anything.
+
+**The purpose column is still hand-written.** Only the ROSTER is asserted: what a package is *for*
+is prose a person writes, and a gate that generated it would be describing the file layout rather
+than the design.
+
+**One premise of the phase's own shard was refuted in passing.** It named *ten* missing rows,
+counting `Fuaran.Core.Idl.Spike`. That project declares `<IsPackable>false</IsPackable>` — it is
+the throwaway second-vocabulary spike — so under the check's own definition it must be ABSENT from
+the table, and adding its row would have made the gate red on the commit that wrote it. Nine rows,
+not ten.
+
 ## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 
-**This section describes a DRAFT slot.** `<Version>` reads `0.24.0` and no `v0.24.0` tag exists
-yet. Cut 2026-09-14 by the campaign driver so the phases below can ride one slot rather than each
+**This section describes a RELEASED slot** — `v0.24.0` is tagged (released 2026-09-15), so the
+entries below are a contract a consumer can pin today and nothing further may ride them. It was cut
+as a DRAFT on 2026-09-14 by the campaign driver so the phases below can ride one slot rather than each
 minting a number: Phase 137 (a previously accepted `InsertChild` whose subtree carries an
 already-present or internally duplicated id is now refused with `DuplicateId` — a parity
 correction with the other hosts), Phase 147 (`Dag.DagBreak.Reason` becomes a closed DU, the
@@ -2797,9 +2838,9 @@ calls it with `CanHold = None` is reported by name rather than skipped.
 
 ## 0.23.0 — the Core API asks routed here from the UI tier (Phase 125) — released 2026-09-13 as `v0.23.0`
 
-**This section describes a DRAFT slot.** `<Version>` reads `0.23.0` and no `v0.23.0` tag exists
-yet, so the entries below are the contract a consumer will meet when the release gesture is made —
-not one anybody can pin today. They are grouped as one section because they are cut as ONE minor
+**This section describes a RELEASED slot** — `v0.23.0` is tagged (released 2026-09-13), so the
+entries below are the contract a consumer can pin today, not the draft they were written as. They
+are grouped as one section because they are cut as ONE minor
 deliberately: each is a separate ask, and raising a pin four times to adopt four asks costs every
 consumer three raises it gains nothing from.
 
