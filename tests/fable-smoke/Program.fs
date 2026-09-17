@@ -7,6 +7,11 @@ module FableSmoke.Program
 
 open Fuaran.Core
 open Fuaran.Core.Idl
+// Phase 185 — `Fuaran.Core.Observer` is its own namespace, so the touch below needs it opened.
+// `IObserver` is spelled out at its one use site rather than relied on here: `System.IObserver`
+// exists, and a bare name that resolves differently depending on an unrelated `open` is not
+// something a gate project should depend on.
+open Fuaran.Core.Observer
 
 // Tree — content hashing + the portable FNV-1a.
 let private treeTouch = Hash.fnv1a "smoke"
@@ -437,6 +442,51 @@ let private constructThenEncodeTouch =
 
     sprintf "%b/%b" (adopted |> List.forall (fun r -> r.Passed)) (notAdopted |> List.exists (fun r -> not r.Passed))
 
+// Column.Ops (Phase 185) — the columnar op-algebra's whole round trip: `canApply`, `apply`, the
+// partial `invert` (the undo a browser-side editor needs), the wire codec's encode AND decode, and
+// the `StreamWitness` that makes a table's edits a hash-chained stream. Named deliberately, like
+// `deltaTouch` and `incrementalTouch`: the package's own Description ends "Fable-clean", and until
+// this phase nothing in the repository held it to that.
+let private columnOpsTouch =
+    let t: Table =
+        { Schema = [ "id", StringType; "amount", IntType ]
+          Columns =
+            [ Column.create "id" StringType [ Str "r0" ]
+              Column.create "amount" IntType [ Int 1 ] ] }
+
+    let op = SetCell("amount", 0, Int 2)
+
+    let applied =
+        match ColumnOps.canApply op t with
+        | Error r -> Error r
+        | Ok() -> ColumnOps.apply op t
+
+    let inverted =
+        applied
+        |> Result.bind (fun _ -> ColumnOps.invert op t)
+        |> Result.map (fun back -> ColumnOps.decode (ColumnOps.encode back))
+
+    sprintf
+        "%A/%A/%A"
+        inverted
+        (ColumnOps.changeOf op)
+        (ColumnOps.streamWitness.Apply op t |> Result.mapError ColumnOps.rejectionString)
+
+// Observer (Phase 185) — the runtime-verification seam. Its header has claimed
+// "FSharp.Core only + Fable-clean … the same engine drives the in-memory .NET test substrate and a
+// Fable-compiled host" since it was written, while the package sat OFF this gate, grouped with the
+// build-time tools. The whole engine is reached: register, update, derive, observe, subscribe.
+let private observerTouch =
+    let obs =
+        InMemoryObserver.create<int, string> (fun n -> if n > 1 then [ "over" ] else [])
+
+    let seam = obs :> Fuaran.Core.Observer.IObserver<int, string>
+    use _sub = seam.Subscribe(fun _ -> ())
+    obs.RegisterNode("n0", 1)
+    obs.Update("n0", 2)
+
+    sprintf "%A/%d" (seam.Observe "n0" |> Option.map (fun o -> o.Flags)) (seam.ObserveTree "n0" |> List.length)
+
 // Phase 118 — the VALUE leg's entry point. `--vectors` prints the cross-pipeline table and nothing
 // else, which is what `parity.ps1` runs on both pipelines and byte-compares. It is a MODE of this
 // program rather than a project of its own on purpose: the table has to be transpiled by the same
@@ -472,7 +522,9 @@ let main argv =
           idlTouch
           foldConfluenceTouch
           sampleAdequacyTouch
-          constructThenEncodeTouch ]
+          constructThenEncodeTouch
+          columnOpsTouch
+          observerTouch ]
         |> List.iter (printfn "%s")
 
     0

@@ -6,10 +6,16 @@
     package's encode + decode surface enforces the GP3 / STABILITY.md "Fable-clean on encode
     AND decode" claim in-repo, instead of leaving it to be discovered downstream. The emitted
     JS is throwaway (output dir is git-ignored); the COMPILE is the gate.
-    Idl.Codegen / Idl.Spike / Observer are intentionally excluded — they are not part of the
-    Fable-targeted public surface. `Fuaran.Core.Idl` itself IS, as of Phase 97: the split moved
-    the source emitters (and their non-portable constructs) into Idl.Codegen, so the model,
-    codec, sampler and sanitisation floor are now gated here like every other public package.
+    MEMBERSHIP IS CHECKED, NOT REMEMBERED (Phase 185). The exclusions that used to be named in
+    this comment are DATA now — `exclusions.json` beside this file, one entry per packable
+    project that is deliberately off the surface, each with the reason and the phase that
+    decided it. `Fuaran.Core.Tests.FableSmokeCompletenessTests` walks every `src/*/*.fsproj`
+    whose `IsPackable` is not `false` and fails naming any that is neither referenced below nor
+    listed there — so a newly-added package cannot join the published set while quietly missing
+    this gate, which is exactly how `Column.Ops` and `Idl.Cli` came to be uncovered.
+    `Fuaran.Core.Idl` IS on the surface, as of Phase 97: the split moved the source emitters
+    (and their non-portable constructs) into Idl.Codegen, so the model, codec, sampler and
+    sanitisation floor are gated here like every other public package.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -59,6 +65,20 @@
          rather than asserted in a comment. Codegen stays off the surface, deliberately and
          permanently: it emits source and is build-time-only. -->
     <ProjectReference Include="..\..\src\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
+    <!-- Phase 185 — `Column.Ops` joins the surface. It was packable and absent from this list,
+         so the package whose own Description ends "FSharp.Core only, Fable-clean" was the one
+         public package making that claim with nothing behind it. Nothing blocked it: the
+         compile is clean on the first attempt, which is the answer the exclusion comment this
+         list replaced could not have given. -->
+    <ProjectReference Include="..\..\src\Fuaran.Core.Column.Ops\Fuaran.Core.Column.Ops.fsproj" />
+    <!-- Phase 185 — `Observer` joins the surface, correcting the exclusion rather than
+         recording it. It sat in the old comment's exclusion list under "they are build-time
+         tools", which is true of `Idl.Codegen` and false of this one: it is the RUNTIME
+         verification seam, and its own header says "FSharp.Core only + Fable-clean … the same
+         engine drives the in-memory .NET test substrate and a Fable-compiled host". A reason
+         that does not hold is not a reason, and the alternative to gating it was writing that
+         sentence down as data. -->
+    <ProjectReference Include="..\..\src\Fuaran.Core.Observer\Fuaran.Core.Observer.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

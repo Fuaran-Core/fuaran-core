@@ -212,6 +212,12 @@
          two generated artefacts and their `emit-families` freshness legs; it reads nothing
          from another test module, so the position is free. -->
     <Compile Include="ConformanceFamiliesTests.fs" />
+    <!-- Phase 185 — the Fable smoke's membership derived rather than remembered: every packable
+         project under src/ is compiled by tests/fable-smoke or carries an exclusions.json entry
+         with a reason, checked in both directions so a stale reason fails too. Reads Snapshots.fs
+         for the repository root and the two smoke files off disk; it references no other test
+         module, so it is appended here (append-only registration). -->
+    <Compile Include="FableSmokeCompletenessTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
