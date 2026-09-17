@@ -880,9 +880,9 @@ at the arguments the vocabulary reaches, which is what keeps every definition an
 first-order. The proofs half is `rt_node` and the mutual family beside it — **`dec_node (enc_node
 x) == Ok x`, for every value of every modelled type**, at every depth, through every list, map,
 optional member and omit-default — plus `dec_node_total` for the outcome's exclusivity. Since
-Phase 168 that family is emitted **one lemma per constructor and one per presence pattern**, so
-no query carries more than one constructor's object shapes; the shape has its own subsection
-below.
+Phase 182 that family is emitted **one lemma per constructor over a presence split LINEAR in the
+conditional members**, so no query carries more than one key's walk; the shape has its own
+subsection below, with what Phase 168 did before it and why it was replaced.
 
 **What is proved is the F\* BACKEND, and that sentence is the whole of Phase 173.** Phase 150
 generated the one model from the shared corpus's `idl.json` — the UI vocabulary — which put a
@@ -985,7 +985,7 @@ The CI proofs-job wall clock before and after is recorded in Phase 173's outcome
 re-measured the three proof scripts under the per-constructor shape — its table is in the
 subsection below, and `modules.json` carries the current budgets.
 
-#### The shape — one lemma per constructor, one per presence pattern (Phase 168)
+#### The shape — one lemma per constructor, and a presence split LINEAR in the conditional members (Phase 182)
 
 **The problem, restated in one sentence.** A constructor with k conditional members — optional,
 or omitted at its default — encodes to 2^k object shapes, and a round-trip lemma over the whole
@@ -996,6 +996,13 @@ outright. Raising the rlimit turned failing into grinding, `--split_queries` is 
 pragma on the pinned prover, and a patterned lookup helper made everything slower. The fix is in
 the generator, and it is the SHAPE of the emitted proof, not a flag.
 
+**And the second problem, which is Phase 168's own.** Phase 168 isolated a shape by PINNING every
+conditional member at once — one lemma per presence PATTERN, which is 2^k lemmas. That trades a
+query too wide to discharge for a script too big to hold, and the trade only shows at scale:
+`fuaran#1754`, the kit's first adopter, measured 71,722 lemmas in a 114 MB, 713,272-line script at
+the UI vocabulary, one kind with sixteen conditional members contributing 65,536 of them. Phase 182
+splits by MEMBER instead of by pattern, which is linear in both.
+
 **The shape.** `FStarTarget.proofsModuleFrom` now emits, for every modelled type `T`:
 
 - **`rt_<T>`** — the round trip over the type. For a type with several constructors (the kind
@@ -1005,59 +1012,89 @@ the generator, and it is the SHAPE of the emitted proof, not a flag.
 - **`rt_<T>__<Ctor>`** — one constructor's arm alone, under `requires C__<T>__<Ctor>? x`. For a
   kind this is the per-kind lemma the phase was cut for: `rt_vkind__Embed`, `rt_vkind__Group`, one
   per modelled kind and none for a refused one.
-- **`rt_<T>__<Ctor>__p<bits>`** — one PRESENCE PATTERN of a constructor that carries
-  `FStarTarget.presenceSplitAt` (two) or more conditional members: its `requires` pins every
-  conditional member present or absent — an optional member by `None?` / `Some?`, an
-  omit-at-default one by equality with the literal the encoder itself tests — so the encoder's
-  nested match collapses to ONE object literal in the query. The constructor's lemma is then a
-  split on exactly those members, in order, citing each pattern lemma; the node's envelope is the
-  node's one constructor and is treated the same way (`rt_node__p00` … `rt_node__p11` over the
-  reference vocabulary's `hidden` and `label`).
+- **`lk_<T>__<Ctor>__<member>`** — one member's LOOKUP off the encoded object, emitted for a
+  constructor that carries `FStarTarget.presenceSplitAt` (two) or more conditional members. A
+  member that is always emitted gets one (`get_prop "<key>" (enc_<T> x) == Ok <its encoding>`); a
+  conditional member gets two, `…__present` and `…__absent`, whose `requires` pins THAT MEMBER only
+  — an optional one by `None?` / `Some?`, an omit-at-default one by equality with the literal the
+  encoder itself tests — and leaves every other conditional member FREE. Nothing before the first
+  conditional member in key order gets one at all: `find_field` reaches it without meeting a branch.
+  The constructor's lemma then cites them a member at a time, the conditional ones under a two-way
+  match on that member alone; the node's envelope is the node's one constructor and is treated the
+  same way.
+
+That is `2k + r'` lemmas for a constructor with k conditional members and `r'` always-emitted
+members sorting after the first of them, where Phase 168 emitted 2^k. (The phase's own figure was
+`2k + 1`: it counted the conditional members and the constructor's round-trip lemma, and passed over
+the always-emitted members whose key the conditionals before them move. Both numbers are pinned in
+`IdlFStarTargetTests`.) The load-bearing fact underneath it is that `find_field name` pushes through
+an entry with a different key, so `find_field n (if c then t else (k, v) :: t)` is `find_field n t`
+on BOTH sides of the test and the two branches merge instead of multiplying.
+
+**The lookup lemmas are NOT in the mutual family, and that is load-bearing rather than tidy.** They
+recurse on nothing, so they need not be — and F\* admits one option set per top-level declaration,
+of which a mutual family is one. Each lookup needs FUEL: the default two unfoldings do not reach
+past the second key, so a lemma about the last member of a wide constructor cannot even start.
+Inside the family that fuel would be paid by every other query in the file; outside it, each lemma
+is pushed under its own `--fuel`, sized to the constructor, and the family keeps the leg's defaults.
 
 The family is still one mutual induction, because a kind's children reach `rt_node` through
-`rt_items_l_node`; what changed is the termination measure, which is lexicographic — `%[x; tier]`,
-tier 2 for the type, 1 for the constructor, 0 for the pattern — because the split lemmas recurse on
-the SAME value and differ only in how much of it they have already fixed. The threshold is two, not
-five, so that the certification set itself exercises the split and proves it discharges: the
-reference vocabulary reaches it at its envelope and at `Embed` (four patterns each), the score
-sample at `Measure` and `Score` (omit-at-default members, so those pattern lemmas pin equality with
-a default rather than `Some?`), and the second-domain sample carries no constructor wide enough,
-which is the per-constructor shape alone. The rule is uniform over kinds, records and union cases
-— one helper, one measure — rather than special to kinds, because a five-optional RECORD in an
-adopter's envelope closure meets the same wall, and the emitter should not have to be taught it
-twice.
+`rt_items_l_node`; the termination measure is lexicographic — `%[x; tier]`, tier 2 for the type, 1
+for the constructor — because the constructor lemmas recurse on the SAME value and differ only in
+how much of it they have already fixed. The threshold is two, not five, so that the certification
+set itself exercises the split and proves it discharges: the reference vocabulary reaches it at its
+envelope and at `Embed`, the score sample at `Measure` and `Score` (omit-at-default members, so
+those lookups pin equality with a default rather than `Some?`), and the second-domain sample carries
+no constructor wide enough, which is the per-constructor shape alone. The rule is uniform over
+kinds, records and union cases — one helper, one measure — rather than special to kinds, because a
+five-optional RECORD in an adopter's envelope closure meets the same wall, and the emitter should
+not have to be taught it twice.
 
-**What it costs, and what it buys.** 2^k small lemmas per wide constructor in place of one it
-cannot discharge: 26 lemmas in `VocabularyProofs` (was 9), 27 in `DocVocabularyProofs`, 62 in
-`ScoreVocabularyProofs`. The widest query in any of the three is the case split's own — two
-dispatch goals per arm, a discriminator and a measure — never a set of object shapes. And the
-`--z3rlimit 200` Phase 150 wrote into the file as the remedy it had measured is RETIRED with the
-shape that needed it: every generated proof script is checked at the leg's own rlimit of 40, and a
-query that wants more is a query the split has failed to isolate. Measured on the pinned prover,
-cold, `--z3rlimit 40 --quake 3`, this dev machine (one direct run and three `check.ps1 -Runs 1`
-legs; the 108s outlier ran inside a leg 37% slower end to end, so it is load, and it is kept
-because the seeding rule takes the slowest):
+**What it costs, and what it buys.** At the certification set the change is small, because k is 2
+there and 2^2 is not a blow-up: `VocabularyProofs` holds 9 lookups + 18 round-trip lemmas where
+Phase 168 emitted 26 round-trip lemmas, `DocVocabularyProofs` is unchanged at 27 (no constructor of
+the second-domain sample reaches the split), and `ScoreVocabularyProofs` holds 13 lookups + 42
+round-trip lemmas where Phase 168 emitted 62. Where it is not small is at width, which is the whole
+point: on a synthetic vocabulary whose widest kind carries sixteen conditional members, the emitted
+script goes from **78,192,374 characters and 655,507 lines to 25,847 and 333**. The
+`--z3rlimit 200` Phase 150 wrote into the file as the remedy it had measured stays RETIRED: every
+generated proof script is checked at the leg's own rlimit of 40, and a query that wants more is a
+query the split has failed to isolate.
 
-| module | lemmas | before (Phase 173, fastest–slowest) | after (Phase 168, fastest–slowest) | budget (before → after) |
+Measured on the pinned prover, cold, `--z3rlimit 40 --quake 3`, this dev machine, one
+`check.ps1 -Runs 3` leg (three cold runs of every module; the leg was green, with two cost findings
+on `Capability`, which this phase does not touch):
+
+| module | lemmas | Phase 168 (fastest–slowest) | Phase 182 (three cold runs) | budget (168 → 182) |
 |---|---|---|---|---|
-| `VocabularyProofs` | 26 | 5–17s | 11–18s | 40s → 40s |
-| `DocVocabularyProofs` | 27 | 5–9s | 8–10s | 20s → 20s |
-| `ScoreVocabularyProofs` | 62 | 12–42s | 46–108s | 90s → 220s |
+| `VocabularyProofs` | 9 lk + 18 rt (was 26 rt) | 11–18s | 12s, 12s, 12s | 40s → **30s** |
+| `DocVocabularyProofs` | 27 rt (unchanged) | 8–10s | 17s, 16s, 16s | 20s → 20s |
+| `ScoreVocabularyProofs` | 13 lk + 42 rt (was 62 rt) | 46–108s | 31s, 32s, 31s | 220s → **70s** |
 
-Whole-leg wall clock at `-Runs 1`, all seventeen modules plus the host step: 217s, 299s, 219s;
-CI's `-Runs 3` job is three of those. The floors are deliberately NOT re-seeded from four samples
-on one machine: each new script is strictly more work than the one whose fastest run Phase 173
-observed, so the floors seeded then remain true lower bounds, and raising one from few samples
-would risk the red leg on a faster runner that Phase 164's asymmetry exists to fear.
+**`DocVocabularyProofs` is the control, and it is why the two re-seedings are trustworthy.** Its
+content changed in COMMENTS ONLY, and it still ran ~1.7x its recorded time on this leg — so the leg
+was contended, and the other two modules' readings are upper bounds rather than best cases. The
+same leg ran `Capability` (untouched) at 75s against a 20s budget and `JsonParse` (untouched) at 76s
+against a 42s first run, while `ScoreVocabularyProofs` did not move across its three readings.
+Its budget is therefore deliberately NOT re-seeded, on the precedent `TreeOps` records: a run that
+inflates an untouched module measures the afternoon, not the module.
+
+The floors are deliberately NOT re-seeded either. Every reading above is SLOWER than the
+`fastestSeconds` each entry already records, so `floorSeeding`'s own rule forces nothing, and a
+floor raised from a loaded afternoon is the one direction that costs a false red on a faster runner
+— which is what Phase 164's asymmetry exists to fear.
 
 **The pins.** `IdlFStarTargetTests` holds the emitted shape, not a prover result: at the reference
 vocabulary — one `rt_vkind__<Kind>` per modelled kind, `rt_vkind`'s arms citing them and proving
-nothing, exactly the 2^k pattern lemmas the vocabulary's conditional constructors warrant (eight,
-stated as a literal so a move in the vocabulary reads as the coverage change it is), every
-pattern's `requires` pinning every conditional member, the lexicographic measure on every lemma of
-the family, and no in-file rlimit — and at a UI-SCALE fixture: a five-optional envelope and an
-eleven-member kind with five conditional members, the two parameters Phase 150 measured the
-one-lemma shape failing at, producing 32 + 32 pattern lemmas, each pinning all five. The fixture
+nothing, exactly the `2k + r'` lookup lemmas the vocabulary's conditional constructors warrant
+(nine, stated as a literal so a move in the vocabulary reads as the coverage change it is, and
+recomputed beside it the way the emitter computes it), every conditional lookup's `requires`
+pinning exactly ONE member, a scoped `--fuel` on every lookup, the lexicographic measure on every
+lemma of the family, and no in-file rlimit — and at a UI-SCALE fixture: a five-optional envelope
+and an eleven-member kind with five conditional members, the two parameters Phase 150 measured the
+one-lemma shape failing at, plus a SIXTEEN-conditional kind at `fuaran#1754`'s `DataGrid` width,
+which emits 33 lookups where Phase 168's shape emitted 65,536. `__p<bits>` is asserted ABSENT at
+both, so the exponential count is pinned gone rather than merely not looked for. The fixture
 is authored under neutral names rather than read from the UI vocabulary's `idl.json`: this
 repository has no reader for that artefact (`Artifact` renders one and parses none), Phase 123
 removed the UI fixture from the test project when Phase 114 cut the reference vocabulary, and the
@@ -1078,17 +1115,43 @@ hosts and which would have to be modelled in F\* as a third generated artefact o
 size — and that is a phase, not a task inside this one. Named here rather than left to be
 assumed; the emitted header says the same.
 
-**The successor this phase does not take — the mutual-family split.** What the shape above fixes
-is the WIDTH of a query; what it leaves alone is the size of the mutual family every query is
-checked inside, which is where the cost turns superlinear as the proof vocabulary widens (Phase
-150: the whole expressible UI vocabulary did not finish a check in twenty-five minutes, and
+**What the linear shape does NOT fix, measured — and why the successor is no longer the
+mutual-family split (Phase 182).** Two exponentials were in play at `fuaran#1754`'s scale, and only
+one of them was the proof shape's. The other is the MODEL emitter's, and it is now the binding one:
+
+- **`encMembers` writes the tail of the member list into BOTH arms of every conditional member's
+  match**, so a constructor with k of them emits an expression 2^k long — 5,318,686 characters for
+  one kind at k=16 on Phase 182's probe, which is `fuaran#1754`'s 5,072,945-character model line
+  reproduced. At that width the prover dies LOADING THE MODEL, with no proof script involved at
+  all: `Fatal error: allocation failure during minor GC`, after 719 s. At k=12 the same model
+  checks in 281 s.
+- **A NEGATIVE lookup still walks the conditional tail.** Showing a key is present ends at the key;
+  showing it ABSENT means reaching the end of the list down every combination of the conditional
+  members after it, which is 2^(k-1) object shapes in one query. That is what fails at k=12 — the
+  first conditional member's `…__absent` lemma, at fuel 30 and again at 60 — while every lookup at
+  k=8 discharges.
+
+So the exhaustive-coverage ambition stays REFUTED at sixteen conditional members, and the reason is
+now named rather than symptomatic. The successor is a non-duplicating member-list emission in the
+MODEL — `let`-bound suffixes, so the emitted text is linear in k AND a suffix is a term a lemma can
+be stated about, which is what would make the negative lookup a chain of k cheap steps rather than
+one exponential query. Note what that is NOT: Phase 150 tried routing conditional members through
+an `opt_cons` helper with an SMT-patterned lookup law and measured it WORSE (below), because the
+pattern then fires throughout the encoder. A `let` binding carries no SMT pattern and is not that
+lever; the measurement does not refute it, and it is recorded here so the distinction is not lost.
+
+**The mutual-family split, which this phase also does not take.** What the shape above fixes is the
+WIDTH of a query; what it leaves alone is the size of the mutual family every query is checked
+inside, which is where the cost turns superlinear as the proof vocabulary widens (Phase 150: the
+whole expressible UI vocabulary did not finish a check in twenty-five minutes, and
 `--ext context_pruning` is what keeps the family out of each query's context rather than out of
 the run). Widening a proof vocabulary past the envelope's closure needs that family SPLIT into
 groups checked separately, and the node recursion forbids it as the model is shaped: every kind
 with children reaches `node`, `node` reaches every kind, so the whole vocabulary is one strongly
 connected component. Breaking it means an abstract node parameter, or a two-level model where
 kinds are proved against an interface the node satisfies — generator work of its own, sized by
-the adopter's vocabulary, and not this phase's.
+the adopter's vocabulary, and not this phase's. It was named as Phase 168's successor; at the
+widths measured above it is no longer what binds first, and the model emission is.
 
 #### History — the UI vocabulary's measurements (Phase 150), now `fuaran#1754`'s problem
 

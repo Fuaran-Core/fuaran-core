@@ -78,8 +78,9 @@ $ErrorActionPreference = 'Stop'
 #   VocabularyProofs — Phase 173: the ROUND TRIP over `Vocabulary`, emitted by the same target from
 #                the same walk (`dec_node (enc_node x) == Ok x`, plus totality's exclusivity). Opens
 #                `Vocabulary`, so it follows it. See the note below the list for why this was not
-#                committed by Phase 150 and is now. Since Phase 168 the script is one lemma per
-#                constructor and one per presence pattern, checked at the leg's own rlimit.
+#                committed by Phase 150 and is now. Since Phase 182 the script is one lemma per
+#                constructor over a presence split LINEAR in the conditional members, checked at
+#                the leg's own rlimit.
 #   DocVocabulary / DocVocabularyProofs — Phase 173: the same pair over the vendored second-domain
 #                sample (`SecondDomainSpike.fs`), which is on the DECLARED non-default wire shape —
 #                bare-string discriminator, flat node envelope, declaration key order — that the
@@ -127,9 +128,11 @@ $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse
 # The UI vocabulary's model, proofs, cost and exhaustive-coverage decision are the adopter's —
 # `fuaran#1754`, the kit's first adopter — where the cost is charged to the commits that change UI
 # kinds. The per-kind lemma shape that reaches that scale SHIPPED as Phase 168 — one lemma per
-# constructor, one per presence pattern, so no query carries more than one constructor's object
-# shapes — and the measurement that motivated it is kept in `proofs/README.md`'s theorem 1 section
-# under its own heading.
+# constructor, one per presence pattern — and Phase 182 made the presence split LINEAR in the
+# conditional members after the adopter measured 168's own 2^k, in the lemma COUNT this time, at
+# 71,722 lemmas in a 114 MB script. The measurements that motivated both, and the model-side
+# exponential that neither fixes, are kept in `proofs/README.md`'s theorem 1 section under its own
+# heading.
 
 # Phase 150 — the generated modules are CHECKED but not EXTRACTED, and why an exemption exists at all.
 #

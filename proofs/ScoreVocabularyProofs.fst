@@ -28,7 +28,8 @@
        type-check at `Tot` is the termination proof; the lemma states that every input
        reaches exactly one of `Ok` / `Error` and never both.
 
-   THE SHAPE — one lemma per constructor, one per presence pattern (fuaran-core Phase 168).
+   THE SHAPE — one lemma per constructor, and the presence split LINEAR in the conditional
+   members (fuaran-core Phase 182, replacing Phase 168's per-pattern split).
    A constructor with k conditional members (optional, or omitted at its default) encodes
    to 2^k object shapes, and a lemma over the whole constructor puts all of them in ONE
    query. Measured at a twenty-kind vocabulary whose node envelope carried five optional
@@ -38,17 +39,18 @@
    isolation is in the emitted shape instead. `rt_<T>` is the round trip over a type — for a
    type with several constructors, a CASE SPLIT whose arms cite `rt_<T>__<Ctor>`, one
    constructor's arm alone under `C__<T>__<Ctor>? x`. A constructor with
-   2 or more conditional members is split further: `rt_<T>__<Ctor>__p<bits>` proves ONE
-   presence pattern, its `requires` pinning every conditional member present or absent so
-   the encoder's nested match collapses to one object literal in the query, and the
-   constructor's lemma is a split on exactly those members citing each. The family is still
-   one mutual induction — a kind's children reach `rt_node` — on the lexicographic measure
-   `%[x; tier]`, because the split lemmas recurse on the SAME value and differ only in how
-   much of it they have fixed. Every query therefore carries at most one constructor's
-   shapes, and a wide envelope or a wide kind costs 2^k small lemmas rather than one it
-   cannot discharge. The rlimit precedent Phase 150 took (`--z3rlimit 200` in this file)
-   is retired with the shape that needed it: the leg's own rlimit is what these are
-   checked under, and a query that wants more is a query the split has failed to isolate.
+   2 or more conditional members is proved from its members' LOOKUPS instead of in one
+   query: `lk_<T>__<Ctor>__<member>` reads one key off the encoded object with every OTHER
+   conditional member left free — one lemma for a member that is always emitted, two for a
+   conditional one — and the constructor's lemma cites them a member at a time. That is
+   2k + r' lemmas where Phase 168 emitted 2^k, and it is why a sixteen-conditional kind
+   costs thirty-odd lemmas rather than 65,536 (`fuaran#1754` measured 71,722 of them in a
+   114 MB script at the UI vocabulary). The family is still one mutual induction — a kind's
+   children reach `rt_node` — on the lexicographic measure `%[x; tier]`; the lookups are
+   NOT in it, since they recurse on nothing, which is what lets each carry the scoped
+   `--fuel` its own walk needs. The rlimit precedent Phase 150 took (`--z3rlimit 200` in
+   this file) stays retired: the leg's own rlimit is what these are checked under, and a
+   query that wants more is a query the split has failed to isolate.
 
    WHAT IS NOT PROVED HERE, and why. The `wf` CHARACTERISATION — `Ok? (dec el) == wf el`,
    which Phase 135 carries for its hand-written reference vocabulary — is not restated over
@@ -93,11 +95,86 @@ let rt_e_ornament_name (#num #flt: eqtype) (x: e_ornament_name) : Lemma (ensures
 let rt_e_navigation_kind (#num #flt: eqtype) (x: e_navigation_kind) : Lemma (ensures dec_e_navigation_kind (enc_e_navigation_kind #num #flt x) == Ok x) = ()
 
 (* ======================================================================================
-   2. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL
+   2. THE PRESENCE LOOKUPS. One member's key read off the encoded object, with every
+      conditional member other than that one left FREE — so a constructor with k of them
+      costs 2k + r' lemmas rather than 2^k, and no query has to hold more than one key's
+      walk. Each carries its own scoped fuel: `find_field` pushes through a key it is not
+      looking for, and the default two unfoldings do not reach past the second. Emitted
+      only for a constructor at or above the split threshold, and only from its first
+      conditional member on — everything before that is reached without a branch.
+   ====================================================================================== *)
+
+(* lk_vkind__Score__composer__present — composer present *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_vkind__Score__composer__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "composer" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f1)) | _ -> True)) = ()
+#pop-options
+
+(* lk_vkind__Score__composer__absent — composer absent *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_vkind__Score__composer__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 | _ -> false)) (ensures (Error? (get_prop "composer" (enc_vkind #num #flt x)))) = ()
+#pop-options
+
+(* lk_vkind__Score__title__present — title present *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_vkind__Score__title__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f2 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "title" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f2)) | _ -> True)) = ()
+#pop-options
+
+(* lk_vkind__Score__title__absent — title absent *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_vkind__Score__title__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f2 | _ -> false)) (ensures (Error? (get_prop "title" (enc_vkind #num #flt x)))) = ()
+#pop-options
+
+(* lk_vkind__Measure__is_anacrusis__present — isAnacrusis not at its default *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__is_anacrusis__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "isAnacrusis" (enc_vkind #num #flt x) == Ok (JBool f1) | _ -> True)) = ()
+#pop-options
+
+(* lk_vkind__Measure__is_anacrusis__absent — isAnacrusis at its default *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__is_anacrusis__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false | _ -> false)) (ensures (Error? (get_prop "isAnacrusis" (enc_vkind #num #flt x)))) = ()
+#pop-options
+
+(* lk_vkind__Measure__number — number — always emitted, at a position the conditionals before it move *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__number (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "number" (enc_vkind #num #flt x) == Ok (JInt f2) | _ -> True)) = ()
+#pop-options
+
+(* lk_vkind__Measure__repeat_end__present — repeatEnd not at its default *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__repeat_end__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f3 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatEnd" (enc_vkind #num #flt x) == Ok (JBool f3) | _ -> True)) = ()
+#pop-options
+
+(* lk_vkind__Measure__repeat_end__absent — repeatEnd at its default *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__repeat_end__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f3 = false | _ -> false)) (ensures (Error? (get_prop "repeatEnd" (enc_vkind #num #flt x)))) = ()
+#pop-options
+
+(* lk_vkind__Measure__repeat_start__present — repeatStart not at its default *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__repeat_start__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f4 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatStart" (enc_vkind #num #flt x) == Ok (JBool f4) | _ -> True)) = ()
+#pop-options
+
+(* lk_vkind__Measure__repeat_start__absent — repeatStart at its default *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__repeat_start__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f4 = false | _ -> false)) (ensures (Error? (get_prop "repeatStart" (enc_vkind #num #flt x)))) = ()
+#pop-options
+
+(* lk_vkind__Measure__volta__present — volta present *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__volta__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> Some? f5 | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "volta" (enc_vkind #num #flt x) == Ok (JArr (enc_items_l_int (Some?.v f5))) | _ -> True)) = ()
+#pop-options
+
+(* lk_vkind__Measure__volta__absent — volta absent *)
+#push-options "--fuel 16 --ifuel 4"
+let lk_vkind__Measure__volta__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> None? f5 | _ -> false)) (ensures (Error? (get_prop "volta" (enc_vkind #num #flt x)))) = ()
+#pop-options
+
+(* ======================================================================================
+   3. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL
       value — F*'s subterm order spans a mutual inductive family, so each case needs only
-      the sub-lemmas of the members it carries. ONE LEMMA PER CONSTRUCTOR, and one per
-      PRESENCE PATTERN where a constructor's conditional members warrant it (the header
-      says why): no query carries more than one constructor's object shapes.
+      the sub-lemmas of the members it carries. ONE LEMMA PER CONSTRUCTOR: a wide one is
+      proved by citing section 2's lookups, a member at a time, rather than by carrying
+      its object shapes into this query.
    ====================================================================================== *)
 
 let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 2]) =
@@ -129,42 +206,9 @@ and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (
 and rt_vkind__Score (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
   | C__vkind__Score f0 f1 f2 ->
-    (match f1 with
-      | None ->
-        (match f2 with
-          | None ->
-            rt_vkind__Score__p00 #num #flt x
-          | Some _ ->
-            rt_vkind__Score__p01 #num #flt x
-        )
-      | Some _ ->
-        (match f2 with
-          | None ->
-            rt_vkind__Score__p10 #num #flt x
-          | Some _ ->
-            rt_vkind__Score__p11 #num #flt x
-        )
-    )
-
-(* rt_vkind__Score__p00 — composer absent, title absent *)
-and rt_vkind__Score__p00 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 && None? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
-
-(* rt_vkind__Score__p01 — composer absent, title present *)
-and rt_vkind__Score__p01 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 && Some? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
-
-(* rt_vkind__Score__p10 — composer present, title absent *)
-and rt_vkind__Score__p10 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 && None? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
-
-(* rt_vkind__Score__p11 — composer present, title present *)
-and rt_vkind__Score__p11 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 && Some? f2 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Score f0 f1 f2 -> rt_items_l_node #num #flt [] f0
+    (match f1 with | None -> lk_vkind__Score__composer__absent #num #flt x | Some _ -> lk_vkind__Score__composer__present #num #flt x);
+    (match f2 with | None -> lk_vkind__Score__title__absent #num #flt x | Some _ -> lk_vkind__Score__title__present #num #flt x);
+    rt_items_l_node #num #flt [] f0
 
 and rt_vkind__Part (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Part? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
@@ -177,155 +221,12 @@ and rt_vkind__PartGroup (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires
 and rt_vkind__Measure (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
   | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    (if f1 = false then
-      (if f3 = false then
-        (if f4 = false then
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p0000 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p0001 #num #flt x
-          )
-        else
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p0010 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p0011 #num #flt x
-          )
-        )
-      else
-        (if f4 = false then
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p0100 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p0101 #num #flt x
-          )
-        else
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p0110 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p0111 #num #flt x
-          )
-        )
-      )
-    else
-      (if f3 = false then
-        (if f4 = false then
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p1000 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p1001 #num #flt x
-          )
-        else
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p1010 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p1011 #num #flt x
-          )
-        )
-      else
-        (if f4 = false then
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p1100 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p1101 #num #flt x
-          )
-        else
-          (match f5 with
-            | None ->
-              rt_vkind__Measure__p1110 #num #flt x
-            | Some _ ->
-              rt_vkind__Measure__p1111 #num #flt x
-          )
-        )
-      )
-    )
-
-(* rt_vkind__Measure__p0000 — isAnacrusis at its default, repeatEnd at its default, repeatStart at its default, volta absent *)
-and rt_vkind__Measure__p0000 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p0001 — isAnacrusis at its default, repeatEnd at its default, repeatStart at its default, volta present *)
-and rt_vkind__Measure__p0001 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p0010 — isAnacrusis at its default, repeatEnd at its default, repeatStart not at its default, volta absent *)
-and rt_vkind__Measure__p0010 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p0011 — isAnacrusis at its default, repeatEnd at its default, repeatStart not at its default, volta present *)
-and rt_vkind__Measure__p0011 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && f3 = false && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p0100 — isAnacrusis at its default, repeatEnd not at its default, repeatStart at its default, volta absent *)
-and rt_vkind__Measure__p0100 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p0101 — isAnacrusis at its default, repeatEnd not at its default, repeatStart at its default, volta present *)
-and rt_vkind__Measure__p0101 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p0110 — isAnacrusis at its default, repeatEnd not at its default, repeatStart not at its default, volta absent *)
-and rt_vkind__Measure__p0110 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p0111 — isAnacrusis at its default, repeatEnd not at its default, repeatStart not at its default, volta present *)
-and rt_vkind__Measure__p0111 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false && not (f3 = false) && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1000 — isAnacrusis not at its default, repeatEnd at its default, repeatStart at its default, volta absent *)
-and rt_vkind__Measure__p1000 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1001 — isAnacrusis not at its default, repeatEnd at its default, repeatStart at its default, volta present *)
-and rt_vkind__Measure__p1001 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1010 — isAnacrusis not at its default, repeatEnd at its default, repeatStart not at its default, volta absent *)
-and rt_vkind__Measure__p1010 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1011 — isAnacrusis not at its default, repeatEnd at its default, repeatStart not at its default, volta present *)
-and rt_vkind__Measure__p1011 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && f3 = false && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1100 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart at its default, volta absent *)
-and rt_vkind__Measure__p1100 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && f4 = false && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1101 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart at its default, volta present *)
-and rt_vkind__Measure__p1101 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && f4 = false && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1110 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart not at its default, volta absent *)
-and rt_vkind__Measure__p1110 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && not (f4 = false) && None? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
-
-(* rt_vkind__Measure__p1111 — isAnacrusis not at its default, repeatEnd not at its default, repeatStart not at its default, volta present *)
-and rt_vkind__Measure__p1111 (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) && not (f3 = false) && not (f4 = false) && Some? f5 | _ -> false)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 0]) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+    (if f1 = false then lk_vkind__Measure__is_anacrusis__absent #num #flt x else lk_vkind__Measure__is_anacrusis__present #num #flt x);
+    lk_vkind__Measure__number #num #flt x;
+    (if f3 = false then lk_vkind__Measure__repeat_end__absent #num #flt x else lk_vkind__Measure__repeat_end__present #num #flt x);
+    (if f4 = false then lk_vkind__Measure__repeat_start__absent #num #flt x else lk_vkind__Measure__repeat_start__present #num #flt x);
+    (match f5 with | None -> lk_vkind__Measure__volta__absent #num #flt x | Some _ -> lk_vkind__Measure__volta__present #num #flt x);
+    rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
 
 and rt_vkind__Staff (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Staff? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
@@ -433,7 +334,7 @@ and rt_items_l_str (#num #flt: eqtype) (acc: list (string)) (xs: list (string)) 
   | y :: t -> rt_items_l_str #num #flt (y :: acc) t
 
 (* ======================================================================================
-   3. TOTALITY. That the decoders type-check at `Tot` is the termination proof; what the
+   4. TOTALITY. That the decoders type-check at `Tot` is the termination proof; what the
       lemma adds is that the outcome is exactly one of the two, for EVERY input — the
       failure classification is exhaustive rather than merely non-empty.
    ====================================================================================== *)

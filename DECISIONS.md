@@ -1,5 +1,61 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-17 — D42: the presence split is LINEAR in the conditional members — and the exponential that remains is the MODEL emitter's, measured
+
+**Decided (Phase 182).** A constructor with k conditional members is no longer proved one lemma per
+PRESENCE PATTERN (Phase 168, 2^k lemmas) but one LOOKUP per MEMBER: `lk_<T>__<Ctor>__<member>` reads
+one key off the encoded object with every OTHER conditional member left free — one lemma for a member
+that is always emitted, two (`__present` / `__absent`) for a conditional one — and the constructor's
+round-trip lemma cites them a member at a time. That is `2k + r'` lemmas, where `r'` counts the
+always-emitted members that sort after the first conditional one; everything before it is reached by
+`find_field` without meeting a branch and needs nothing. `FStarTarget.presenceSplitAt` is RE-PURPOSED
+rather than retired: it was the count at which the per-pattern split began, and it is now the count at
+which the linear split is used instead of proving the whole constructor in one query. It stays at two,
+so the certification set exercises the shape rather than an adopter meeting it first.
+
+**What bought it.** `fuaran#1754`, the kit's first adopter, measured Phase 168's shape at the UI
+vocabulary: 71,722 lemmas in a 114 MB, 713,272-line proof script, one kind with sixteen conditional
+members contributing 65,536 of them. Re-emitting the same synthetic scale here, the script goes from
+78,192,374 characters and 655,507 lines to 25,847 characters and 333 lines — the same theorem, three
+thousand times less of it.
+
+**What it is measured to buy, and where it stops.** Pinned prover, `--z3rlimit 40`, a synthetic
+vocabulary whose widest kind carries k optional string members, this dev machine:
+
+| k | one query per constructor | per-pattern (Phase 168) | per-member (Phase 182) |
+|---|---|---|---|
+| 5 | 29 s green | 96 s green (64 lemmas) | **17 s green** (14 lemmas) |
+| 8 | FAILS at fuel 32 | did not finish in 62 min; 33.7 GB resident when stopped | **64 s green** |
+| 12 | not attempted | not attempted (3.99 MB script) | the first member's `__absent` lookup FAILS, at fuel 30 and at 60 |
+| 16 | — | — | the MODEL alone cannot be checked |
+
+**So the exhaustive-coverage ambition stays REFUTED at sixteen conditional members, and Phase 182
+names the reason precisely where `fuaran#1754` could only name the symptom.** Two exponentials were
+in play and only one of them was the proof shape's.
+
+1. **The lemma count** — Phase 168's, 2^k, and this phase removes it.
+2. **The encoder's own emitted TEXT** — `encMembers` writes the tail of the member list into BOTH
+   arms of every conditional member's match, so a constructor with k of them emits an expression 2^k
+   long: 5,318,686 characters for one kind at k=16, which is `fuaran#1754`'s 5,072,945-character model
+   line reproduced. At k=16 the prover dies loading it — `Fatal error: allocation failure during
+   minor GC`, after 719 s — with no proof script involved at all. A negative lookup has the same root:
+   showing a key is ABSENT means walking the whole conditional tail, which is 2^(k-1) object shapes,
+   and that is what fails at k=12.
+
+Both belong to the MODEL emitter, which this phase deliberately does not touch (`Vocabulary.fst`,
+`DocVocabulary.fst` and `ScoreVocabulary.fst` are byte-identical across it). The successor is
+therefore NOT the mutual-family split the README has named as 168's successor since Phase 168 — that
+addresses query breadth, and query breadth is no longer what binds — but a non-duplicating member-list
+emission in the model (named suffixes, so the text is linear and a suffix is a term a lemma can be
+stated about). `proofs/README.md`'s theorem 1 section carries the measurements.
+
+**The lookup lemmas sit OUTSIDE the mutual family, and that is load-bearing rather than tidy.** They
+recurse on nothing, so they need not be in it — and F* admits one option set per top-level
+declaration, of which a mutual family is one. `find_field` pushes through a key it is not looking
+for, but the default two unfoldings do not reach past the second key, so each lookup needs FUEL sized
+to its constructor. Inside the family that fuel would be paid by every other query in the file;
+outside it, each lemma is pushed under its own `--fuel` and the family keeps the leg's defaults.
+
 ## 2026-09-15 — D41: D14 governs `proofs/` as it governs `tests/` — the proof leg certifies the backend over the certification set, and a domain proves its own vocabulary
 
 **Decided (Phase 173).** The generated F\* files under `proofs/` are emitted from the vocabularies

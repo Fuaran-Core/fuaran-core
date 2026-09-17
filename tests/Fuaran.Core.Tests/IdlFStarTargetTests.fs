@@ -209,11 +209,32 @@ let private lemmaHeads (proofs: string) : (string * string) list =
     [ for m in Regex.Matches(proofs, @"(?m)^(let rec|and|let) (rt_[A-Za-z0-9_]+) ") ->
           m.Groups[1].Value, m.Groups[2].Value ]
 
-/// The presence-pattern lemmas — `…__p<bits>`.
+/// Phase 168's presence-PATTERN lemmas — `…__p<bits>`, one per 2^k pattern. Phase 182 retired
+/// the shape; this reader survives so the exponential count can be asserted ABSENT rather than
+/// merely not looked for.
 let private patternLemmas (proofs: string) : string list =
     lemmaHeads proofs
     |> List.map snd
     |> List.filter (fun n -> Regex.IsMatch(n, @"__p[01]+$"))
+
+/// Phase 182's presence LOOKUP lemmas — `lk_<T>__<Ctor>__<member>` for a member that is always
+/// emitted, `…__present` / `…__absent` for a conditional one. They are NOT in the mutual family,
+/// so they are plain `let` and carry no `decreases`.
+let private lookupLemmas (proofs: string) : string list =
+    [ for m in Regex.Matches(proofs, @"(?m)^let (lk_[A-Za-z0-9_]+) ") -> m.Groups[1].Value ]
+
+/// The scoped fuel one lookup lemma is pushed under, or a failed test.
+let private lookupFuelOf (name: string) (proofs: string) : int =
+    let m =
+        Regex.Match(
+            proofs,
+            @"#push-options ""--fuel (\d+) --ifuel \d+""\s*\r?\nlet "
+            + Regex.Escape name
+            + " "
+        )
+
+    Expect.isTrue m.Success (sprintf "%s is pushed under its own --fuel" name)
+    int m.Groups[1].Value
 
 /// The constructor arms of one type's family — `rt_<T>__<Ctor>` — by constructor label.
 let private armLemmas (family: string) (proofs: string) : string list =
@@ -238,8 +259,10 @@ let private bodyOf (name: string) (proofs: string) : string list =
 
     [ for m in Regex.Matches(text, @"(?m)^  \| .*? -> (.+)$") -> m.Groups[1].Value.Trim() ]
 
-/// How many conditional members one pattern lemma's `requires` pins — one `None?` / `Some?`
-/// per optional member, one equality (or its negation) per omit-at-default member.
+/// How many conditional members one lemma's `requires` pins — one `None?` / `Some?` per optional
+/// member, one equality (or its negation) per omit-at-default member. Phase 168's pattern lemmas
+/// pinned ALL of them; Phase 182's lookup lemmas pin exactly the ONE the lemma is about, which is
+/// the whole difference between 2^k lemmas and 2k.
 let private conditionalsPinned (name: string) (proofs: string) : int =
     let m =
         Regex.Match(
@@ -262,29 +285,49 @@ let private conditionalCount (fs: IdlField list) =
         | HostOnly -> false)
     |> List.length
 
-/// The pattern lemmas an IDL's KINDS and node ENVELOPE should produce: for each conditional
-/// constructor with k >= `presenceSplitAt` conditional members, `rt_<family>__p<bits>` for
-/// all 2^k patterns. (Records and union cases split by the same rule; the certification
-/// vocabularies carry none wide enough, which the reference pin's literal count states.)
-let private expectedPatternLemmas (idl: Idl) : string list =
-    let bits (k: int) =
-        [ for i in 0 .. (1 <<< k) - 1 -> System.Convert.ToString(i, 2).PadLeft(k, '0') ]
+/// How many LOOKUP lemmas one constructor's field list should produce under Phase 182's shape:
+/// nothing at all below the split threshold; otherwise one per member from the FIRST conditional
+/// member in key order onwards, doubled for a conditional one. That is `2k + r'`, where `r'` is
+/// the always-emitted members that sort after the first conditional — the members BEFORE it are
+/// reached by `find_field` without meeting a branch and need no lemma.
+///
+/// Note the arithmetic against the phase's own `2k + 1`: that figure counted the conditional
+/// members and the constructor's own round-trip lemma, and passed over the always-emitted members
+/// whose key the conditionals before them move. Both numbers are pinned below.
+let private expectedLookupCount (fs: IdlField list) : int =
+    let conditional (f: IdlField) =
+        match f.Opt with
+        | Optional
+        | OmitDefault _ -> true
+        | Required
+        | HostOnly -> false
 
-    let over (family: string) (k: int) =
-        if k >= FStarTarget.presenceSplitAt then
-            [ for b in bits k -> sprintf "%s__p%s" family b ]
-        else
-            []
+    let sorted =
+        fs
+        |> List.filter (fun f ->
+            match f.Opt with
+            | HostOnly -> false
+            | _ -> true)
+        |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
 
-    over "rt_node" (conditionalCount idl.NodeFields)
-    @ [ for k in idl.Kinds do
-            if List.contains k.Tag (selection idl) then
-                yield! over ("rt_vkind__" + k.Tag) (conditionalCount k.Fields) ]
+    if conditionalCount fs < FStarTarget.presenceSplitAt then
+        0
+    else
+        let start = sorted |> List.findIndex conditional
+
+        sorted
+        |> List.skip start
+        |> List.sumBy (fun f -> if conditional f then 2 else 1)
 
 /// A vocabulary at the SCALE Phase 150 measured the one-lemma shape failing at — the UI
 /// vocabulary's node envelope carried five optional members and its widest kind eleven members
 /// with five conditional — under neutral names and scalar members, so the pin is about the
 /// emitted shape and nothing else. Never checked by a prover here.
+///
+/// Phase 182 added `Grid`: SIXTEEN conditional members, the width `fuaran#1754` measured its
+/// `DataGrid` at, where Phase 168's per-pattern split emitted 65,536 lemmas for that one kind.
+/// It is the scale the linear shape exists for, and the pin below is what says the exponential
+/// count is gone rather than merely smaller.
 let private uiScaleIdl: Idl =
     let field name t opt =
         { Name = name
@@ -313,7 +356,14 @@ let private uiScaleIdl: Idl =
                 field "h" TBool Optional
                 field "i" (TList TStr) Optional
                 field "j" TStr (OmitDefault(VStr "x"))
-                field "k" TBool (OmitDefault(VBool false)) ] ]
+                field "k" TBool (OmitDefault(VBool false)) ]
+          // `Grid` — sixteen conditional members, `fuaran#1754`'s `DataGrid` width. The one
+          // always-emitted member is named so it sorts AFTER every conditional one, which is the
+          // `DataGrid` shape and is also what makes this kind's lookup count exactly `2k + 1`.
+          kind
+              "Grid"
+              ([ for i in 0..15 -> field (sprintf "c%02d" i) TStr Optional ]
+               @ [ field "rows" (TList TNode) Required ]) ]
       Unions = []
       Enums = []
       Records = []
@@ -706,7 +756,7 @@ let idlFStarTargetTests =
                   Expect.stringContains named "ReferenceIdl.fs" "a named provenance is what the header carries"
                   Expect.stringContains named "F* BACKEND" "and what the model is a property of"
 
-          // ---- the lemma SHAPE — one per constructor, one per presence pattern (Phase 168) ----
+          // ---- the lemma SHAPE — one per constructor, the presence split LINEAR (Phase 182) ----
           //
           // These pin the emitted TEXT, not a prover result: the certification set's scripts are
           // checked by `proofs/check.ps1`, and the UI-scale fixture below is never checked here
@@ -736,38 +786,53 @@ let idlFStarTargetTests =
                   "`rt_node` stays the family's first `let rec` — the top-level declaration the claims ladder resolves"
 
           testCase
-              "a constructor with `presenceSplitAt` or more conditional members is proved one presence pattern per lemma — and the certification set reaches the split"
+              "a constructor with `presenceSplitAt` or more conditional members is proved one LOOKUP per member — and the certification set reaches the split"
           <| fun _ ->
               let proofs = proofsOver ReferenceIdl.refIdl
-              let expected = expectedPatternLemmas ReferenceIdl.refIdl
 
-              Expect.equal
-                  (patternLemmas proofs |> Set.ofList)
-                  (Set.ofList expected)
-                  "every conditional constructor's 2^k presence patterns, and nothing else, has a `__p<bits>` lemma"
+              Expect.isEmpty
+                  (patternLemmas proofs)
+                  "Phase 168's `__p<bits>` per-pattern lemmas are gone — the split is by member now, not by pattern"
 
               // The literal figure, so that a move in the reference vocabulary reads as the
               // coverage change it is: the node envelope (hidden, label) and `Embed`
-              // (contentHash, props) each carry exactly two conditional members.
+              // (contentHash, props) each carry exactly two conditional members, and `Embed`
+              // carries one always-emitted member (`moduleId`) that sorts after `contentHash`.
               Expect.equal
-                  (List.length expected)
-                  8
-                  "the reference vocabulary reaches the split twice: its envelope and `Embed`, four patterns each"
+                  (lookupLemmas proofs |> List.length)
+                  9
+                  "the reference vocabulary reaches the split twice: the envelope's two conditional members (four lookups) and `Embed`'s two plus the always-emitted `moduleId` (five)"
 
-              for name in expected do
-                  let k = conditionalsPinned name proofs
+              Expect.equal
+                  (lookupLemmas proofs |> List.length)
+                  (expectedLookupCount ReferenceIdl.refIdl.NodeFields
+                   + ([ for k in ReferenceIdl.refIdl.Kinds do
+                            if List.contains k.Tag (selection ReferenceIdl.refIdl) then
+                                expectedLookupCount k.Fields ]
+                      |> List.sum))
+                  "and the figure is `2k + r'` per split constructor, computed the same way the emitter does"
 
-                  Expect.isGreaterThanOrEqual
-                      k
-                      FStarTarget.presenceSplitAt
-                      (sprintf
-                          "%s pins every conditional member in its `requires`, so its query carries one object literal"
-                          name)
+              for name in lookupLemmas proofs do
+                  if name.EndsWith "__present" || name.EndsWith "__absent" then
+                      Expect.equal
+                          (conditionalsPinned name proofs)
+                          1
+                          (sprintf
+                              "%s pins exactly ONE conditional member — the others stay free, which is what makes the count linear"
+                              name)
 
               Expect.stringContains
                   proofs
-                  "rt_vkind__Embed__p01 #num #flt x"
-                  "the constructor's own lemma is the split that cites each pattern"
+                  "lk_vkind__Embed__content_hash__present #num #flt x"
+                  "the constructor's own lemma cites each member's lookup"
+
+              for name in lookupLemmas proofs do
+                  Expect.isGreaterThan
+                      (lookupFuelOf name proofs)
+                      2
+                      (sprintf
+                          "%s carries its own scoped fuel — `find_field` pushes through a key it is not looking for, and the default two unfoldings do not reach past the second"
+                          name)
 
           testCase
               "at UI scale — a five-optional envelope and an eleven-member kind with five conditional — the split isolates every shape (shape only; no prover run)"
@@ -782,44 +847,48 @@ let idlFStarTargetTests =
               // vocabulary, and the property the adopter inherits is the SCALE, not the names.
               let proofs = proofsOver uiScaleIdl
 
-              Expect.equal
-                  (patternLemmas proofs |> List.length)
-                  64
-                  "2^5 patterns for the envelope and 2^5 for the wide kind — the two 2^k blow-ups Phase 150 measured, each now 32 one-shape lemmas"
+              Expect.isEmpty
+                  (patternLemmas proofs)
+                  "not one `__p<bits>` lemma is emitted at any width — the 2^k shape is gone, not merely smaller"
+
+              let under (prefix: string) =
+                  lookupLemmas proofs |> List.filter (fun n -> n.StartsWith prefix) |> List.length
+
+              Expect.equal (under "lk_node__Node__") 10 "the envelope's five conditional members, two lookups each"
 
               Expect.equal
-                  (patternLemmas proofs
-                   |> List.filter (fun n -> n.StartsWith "rt_node__p")
-                   |> List.length)
-                  32
-                  "the envelope's 32 presence patterns"
+                  (under "lk_vkind__Wide__")
+                  (expectedLookupCount (uiScaleIdl.Kinds |> List.find (fun k -> k.Tag = "Wide")).Fields)
+                  "the wide kind's five conditional members and the always-emitted members that sort after the first of them"
+
+              // THE FIGURE THE PHASE WAS CUT FOR. Phase 168's shape emitted 2^16 = 65,536 lemmas
+              // for this one kind (`fuaran#1754` measured 71,722 across the vocabulary, in a
+              // 114 MB script). The linear shape emits 2*16 + 1: two per conditional member, plus
+              // the one always-emitted member that sorts after them, and ONE round-trip lemma.
+              Expect.equal
+                  (under "lk_vkind__Grid__")
+                  33
+                  "a kind with sixteen conditional members emits 2*16 + 1 lookups, where the per-pattern split emitted 65,536"
 
               Expect.equal
-                  (patternLemmas proofs
-                   |> List.filter (fun n -> n.StartsWith "rt_vkind__Wide__p")
-                   |> List.length)
-                  32
-                  "the wide kind's 32 presence patterns"
+                  (armLemmas "rt_vkind" proofs |> List.filter (fun n -> n = "Grid") |> List.length)
+                  1
+                  "and exactly one round-trip lemma for that kind"
 
-              for name in patternLemmas proofs do
-                  Expect.equal
-                      (conditionalsPinned name proofs)
-                      5
-                      (sprintf
-                          "%s pins all five conditional members — optional by `None?`/`Some?`, omit-at-default by the encoder's own equality"
-                          name)
+              for name in lookupLemmas proofs do
+                  if name.EndsWith "__present" || name.EndsWith "__absent" then
+                      Expect.equal
+                          (conditionalsPinned name proofs)
+                          1
+                          (sprintf "%s pins exactly the one conditional member it is about" name)
 
               Expect.equal
                   (bodyOf "rt_vkind" proofs)
                   [ "rt_vkind__Leaf #num #flt x"
                     "rt_vkind__Branch #num #flt x"
-                    "rt_vkind__Wide #num #flt x" ]
+                    "rt_vkind__Wide #num #flt x"
+                    "rt_vkind__Grid #num #flt x" ]
                   "the kind case split cites each kind's lemma, in declaration order"
-
-              Expect.isFalse
-                  (bodyOf "rt_vkind__Wide" proofs
-                   |> List.exists (fun l -> l.Contains "rt_items_" || l.Contains "rt_u_" || l.Contains "rt_r_"))
-                  "the wide kind's own lemma is the split and proves no member itself — its shapes live in the pattern lemmas"
 
               Expect.equal
                   (bodyOf "rt_vkind__Leaf" proofs |> List.length)

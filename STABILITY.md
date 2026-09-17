@@ -2124,6 +2124,37 @@ disagree.
 
 Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).
 
+## The generated proof script's presence split, now LINEAR (Phase 182) — ADDITIVE on the API, and it ADVANCES the slot
+
+**The class.** Additive on every published type and signature, and a BEHAVIOUR change in what one
+of them emits. `Fuaran.Core.Idl.Codegen` gains nothing and loses nothing: `FStarTarget.proofsModule`
+and `proofsModuleFrom` keep their signatures, `FStarTarget.presenceSplitAt` keeps its type and its
+value (2). What changed is the text those functions RETURN. A constructor with `presenceSplitAt` or
+more conditional members was emitted as one lemma per presence PATTERN — `rt_<T>__<Ctor>__p<bits>`,
+2^k of them — and is now emitted as one LOOKUP per member: `lk_<T>__<Ctor>__<member>`, with
+`__present` / `__absent` for a conditional one, each pinning only its own member, cited a member at
+a time by the constructor's round-trip lemma. `2k + r'` lemmas where there were `2^k`.
+
+**Why it advances rather than riding.** The standing `<Version>` is `0.25.0` and `v0.25.0` is
+tagged, so that slot is a released contract and the draft-slot rule forbids riding it. And a
+generator whose OUTPUT changes shape is a consumer-visible change even when no signature moves: a
+consumer that regenerates gets a structurally different `.fst`, `presenceSplitAt` means a different
+thing to a reader who sets it, and a same-version repack of the slot would hand two consumers two
+emitters depending only on when their NuGet cache was last populated.
+
+**What a consumer has to do.** Regenerate, and re-run the prover. Nothing else: the MODEL emitter is
+untouched, so `Vocabulary.fst` and its siblings are byte-identical across this change, and the
+theorem proved is the same theorem. A consumer that PINS emitted proof-script text — rather than
+regenerating it — has a diff the size of its whole script, which is the point of the change.
+
+**What it is measured to buy, and the limit it does not lift.** At `fuaran#1754`'s scale the emitted
+script goes from 78,192,374 characters and 655,507 lines to 25,847 and 333 on the same synthetic
+vocabulary. What it does NOT lift is the MODEL emitter's own exponential — the encoder's member list
+is written into both arms of every conditional member's match, so at sixteen conditional members the
+model is a 5.3 MB expression the prover dies loading, with no proof script involved. Exhaustive
+coverage at that width therefore stays refuted, now for a reason that names the artefact responsible.
+[`DECISIONS.md`](DECISIONS.md) D42 and `proofs/README.md`'s theorem 1 section carry the measurements.
+
 ## The hardening policy's UNDECLARED half (Phase 178) — ADDITIVE, and it ADVANCES the slot
 
 **The class.** Additive on every published surface. `Fuaran.Core.Idl` gains a
