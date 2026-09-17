@@ -153,26 +153,30 @@ module ProposalSpike =
         match Gen.fsharpModuleWith Gen.GenSupport.Empty "Spike.Generated" post tags with
         | Error e -> leg "generate" false (sprintf "the F# structural layer does not generate: %A" e), None
         | Ok fsharp ->
-            let schema = Gen.jsonSchema post
-
             // Phase 124 — the TypeScript backend refuses an unrenderable declared default the way
             // the F# one already did, so this leg reports it as a failed generation rather than
             // shipping a module whose omit tests contradict the delta's own IDL.
+            //
+            // Phase 195 — the schema leg refuses too (a generic union with no finite `$defs`), so
+            // it is reported here beside the other two instead of crashing the spike.
             match Gen.typescriptModule post tags with
             | Error e -> leg "generate" false (sprintf "the TypeScript structural layer does not generate: %A" e), None
             | Ok ts ->
-                match Json.parse schema with
-                | Error e -> leg "generate" false ("the generated JSON schema is not parseable JSON: " + e), None
-                | Ok _ ->
-                    leg
-                        "generate"
-                        true
-                        (sprintf
-                            "F# %d chars, TypeScript %d chars, JSON schema %d chars — all three legs emit"
-                            (String.length fsharp)
-                            (String.length ts)
-                            (String.length schema)),
-                    Some ts
+                match Gen.jsonSchema post with
+                | Error e -> leg "generate" false (sprintf "the JSON schema does not generate: %A" e), None
+                | Ok schema ->
+                    match Json.parse schema with
+                    | Error e -> leg "generate" false ("the generated JSON schema is not parseable JSON: " + e), None
+                    | Ok _ ->
+                        leg
+                            "generate"
+                            true
+                            (sprintf
+                                "F# %d chars, TypeScript %d chars, JSON schema %d chars — all three legs emit"
+                                (String.length fsharp)
+                                (String.length ts)
+                                (String.length schema)),
+                        Some ts
 
     let private fuzzLeg
         (post: Idl)
@@ -198,20 +202,19 @@ module ProposalSpike =
                     | Ok w -> Ok(i, v, w)
                     | Error m -> Error(sprintf "vector %d did not encode: %s" i m))
 
-            match
-                interpreter
-                |> List.tryPick (function
-                    | Error e -> Some e
-                    | Ok _ -> None)
-            with
-            | Some e -> [ leg "fuzz" false e ]
-            | None ->
-                let encoded =
-                    interpreter
-                    |> List.map (function
-                        | Ok x -> x
-                        | Error _ -> failwith "unreachable")
+            // Phase 195 — ONE traversal, not a `tryPick` probe followed by a re-walk that had to
+            // answer the already-excluded `Error` arm with a throw. The arm was unreachable and
+            // the throw said so; a fold that carries the first error through is unreachable by
+            // CONSTRUCTION, which is the same claim without a crash standing behind it.
+            let rec sequenceEncoded acc remaining =
+                match remaining with
+                | [] -> Ok(List.rev acc)
+                | Ok x :: rest -> sequenceEncoded (x :: acc) rest
+                | Error e :: _ -> Error e
 
+            match sequenceEncoded [] interpreter with
+            | Error e -> [ leg "fuzz" false e ]
+            | Ok encoded ->
                 let selfDivergences =
                     [ for i, _, w in encoded do
                           match roundTrip post w with

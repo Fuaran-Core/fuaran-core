@@ -197,7 +197,12 @@ let tests =
           // ── leg 3: the JSON-schema leg ───────────────────────────────────
 
           testCase "schema: the enum array lists WIRE strings" (fun _ ->
-              let schema = Gen.jsonSchema idl
+              // Phase 195 — the schema leg's channel carries its refusal now.
+              let schema =
+                  match Gen.jsonSchema idl with
+                  | Ok s -> s
+                  | Error e -> failtestf "the schema leg refused the vocabulary: %A" e
+
               Expect.stringContains schema "\"off\"" "the wire string is the validation contract"
               Expect.stringContains schema "\"assertive\"" "the wire string is the validation contract"
 

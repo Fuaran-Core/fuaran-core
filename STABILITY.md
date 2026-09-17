@@ -2336,6 +2336,46 @@ model is a 5.3 MB expression the prover dies loading, with no proof script invol
 coverage at that width therefore stays refuted, now for a reason that names the artefact responsible.
 [`DECISIONS.md`](DECISIONS.md) D42 and `proofs/README.md`'s theorem 1 section carry the measurements.
 
+### Codegen refusals are DATA — every remaining throw in `Fuaran.Core.Idl.Codegen` is now a `CodegenError` (Phase 195) — BREAKING
+
+**The class is BREAKING, on two axes.** `CodegenError` gains two cases —
+`RequiredEnvelopeField of field * ty * alternative` and
+`UnsupportedConstruct of construct * principle * alternative` — so an exhaustive `match` over the
+reason family stops compiling. And two published emitters change their return type from `string` to
+`Result<string, CodegenError>`: `Gen.fsharpTypes` and `Gen.jsonSchema`.
+
+**What changed, and why the signature change is entailed rather than opportunistic.** Guiding
+principle 3 says every rejection is a typed envelope naming the failure and the valid alternatives,
+never an exception. The generator held thirteen throws that broke it: a required node-envelope
+member, an op-vocabulary slot (`TKind` / `TOp`) in each of the five recursive emitters, a `HostOnly`
+field that declared no placeholder, a declared transparent union case of the wrong arity in three
+backends, an unbounded generic-instantiation walk in the schema leg, and one "unreachable" arm in
+the proposal spike. Every other refusal in the same file was already a value. The five recursive
+emitters feed `fsharpTypes` and `jsonSchema`, whose channels were plain strings — so those two legs
+were the only place the generator's refusal COULD be an exception, and leaving either as a string
+would have left a throw behind it. [`DECISIONS.md`](DECISIONS.md) D44 records the alternative that
+was rejected and why.
+
+**One refusal NARROWED rather than moved: a Required node-envelope member.** A smart constructor
+fills the envelope with an identity value so the common call stays `mkHeading "h" 2 text`, and a
+member that is neither optional, nor omit-at-default, nor host-only used to crash the generator. It
+is now EMITTED when a default is declared for it — the shape the full node envelope needs — and
+refused as data only when none is. A declared envelope default is addressed by the EMPTY
+`IdlDefault.Kind`: the envelope has no kind tag, and a kind's tag is its wire discriminator, so the
+empty address can name nothing else. No published record widened to express it.
+
+**What a consumer has to do.** An exhaustive `match` over `CodegenError` gains two arms;
+`CodegenError.describe` already renders both, so a consumer that only reports the refusal needs
+nothing. A caller of `Gen.fsharpTypes` / `Gen.jsonSchema` unwraps the `Result` — and a caller that
+would rather keep failing loudly writes
+`|> Result.defaultWith (CodegenError.describe >> failwith)`, which is the behaviour it had before,
+with a typed value behind it instead of a sentence.
+
+**What is NOT changed: the emitted bytes.** Every generated artefact this repository commits — the
+spike vocabulary's `Generated.fs`, the second domain's `DocGenerated.fs`, the three F\* vocabulary
+/ proof pairs, and the classify fixtures — regenerates byte-identically across this change. The
+refusals are on paths no declared vocabulary reaches; what moved is what happens when one does.
+
 ## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.24.0` and no `v0.24.0` tag exists

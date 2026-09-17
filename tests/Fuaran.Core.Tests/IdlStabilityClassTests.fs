@@ -200,7 +200,12 @@ let private runFsi (source: string) : (int * string) option =
 
 /// The generated type declarations for one revision — the layer a consumer
 /// compiles against.
-let private types (idl: Idl) : string = Gen.fsharpTypes idl
+/// Phase 195 — the type emitter's channel carries its refusal now; a revision whose
+/// declarations the emitter cannot express is a test defect here, not a class to compile.
+let private types (idl: Idl) : string =
+    match Gen.fsharpTypes idl with
+    | Ok s -> s
+    | Error e -> failtestf "the type emitter refused a revision under test: %A" e
 
 // ---------------------------------------------------------------------------
 // The command, exercised as a command.

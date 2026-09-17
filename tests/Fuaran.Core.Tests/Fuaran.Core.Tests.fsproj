@@ -163,6 +163,11 @@
          whichever checkout compiled it. Reads only the spike vocabulary from the src project,
          so it simply follows. -->
     <Compile Include="IdlCodegenEolTests.fs" />
+    <!-- Phase 195 — the codegen's refusals as DATA: the required node-envelope member, the
+         op-vocabulary slot in each backend that meets it, the HostOnly slot with no placeholder
+         and the transparent case of the wrong arity. Declares its own one-kind vocabularies and
+         reads only the emitters from the src project, so it simply follows. -->
+    <Compile Include="IdlCodegenRefusalTests.fs" />
     <!-- Phase 129 — the other half of the same property: the WORKING COPY's line endings,
          measured by shelling git's own tracked-file listing through ChildProcess.fs. After
          that helper, and it reads nothing else here. -->

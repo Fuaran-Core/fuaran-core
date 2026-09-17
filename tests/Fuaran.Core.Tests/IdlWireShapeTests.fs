@@ -271,7 +271,12 @@ let tests =
                               Discriminator = "tag"
                               NodeEnvelope = NodeEnvelopeShape.FlatKind } }
 
-              let schema = Gen.jsonSchema idl
+              // Phase 195 — the schema leg's channel carries its refusal now.
+              let schema =
+                  match Gen.jsonSchema idl with
+                  | Ok s -> s
+                  | Error e -> failtestf "the schema leg refused the vocabulary: %A" e
+
               Expect.isTrue (schema.Contains "\"tag\"") "the schema's const key is the declared discriminator"
               Expect.isFalse (schema.Contains "$type") "no $type appears in a shaped schema"
 

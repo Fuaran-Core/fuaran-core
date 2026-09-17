@@ -1,5 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-17 — D44: the generator's LAST two string channels carry their refusals — `fsharpTypes` and `jsonSchema` return `Result`, because the alternative was a throw wearing a different name
+
+**Decided (Phase 195).** Guiding principle 3 admits no exception as a rejection, and
+`Fuaran.Core.Idl.Codegen` held thirteen of them while every other refusal in the same file was
+already a `CodegenError`. Removing the eleven that sat in `Result`-returning functions is
+bookkeeping. The other two are a decision, because they are what forced the two published emitters
+`Gen.fsharpTypes : Idl -> string` and `Gen.jsonSchema : Idl -> string` to become
+`Idl -> Result<string, CodegenError>` — a BREAKING change to a second public surface, on a phase
+whose declared impact was a DU growth.
+
+**The shape of the problem.** Five recursive emitters — `fsTypeIn`, `encFn`, `decFn`, `tsEncFn`,
+`tsDecFn` — each carry a `TKind | TOp` arm for a slot no backend emits. F# requires an expression in
+every arm, so an arm that cannot produce a value has exactly three endings: throw, return a
+falsehood, or change the function's type. The first is what GP3 forbids. The second is worse than
+what it replaces — a generated module referencing a type that does not exist compiles nowhere, and a
+JSON Schema missing a `$def` leaves a dangling `$ref`, which a strict validator treats as an error
+and not a permissive skip, so a partial emission is a green build that certifies nothing. So the
+type changes, and it changes all the way up: `fsTypeIn` feeds `fsharpTypes`, and the schema leg's
+instantiation walk feeds `jsonSchema`.
+
+**The alternative that was considered and rejected: a private exception carrying the typed
+`CodegenError`, raised in the deep arms and caught at each entry point.** It is small, it leaves
+both signatures alone, and every published `Result`-returning entry point would still hand its
+caller a value. It was rejected because it relocates the exception rather than removing it: the two
+string-channel emitters still throw, so the property "no path out of this package raises" would be
+false while reading as true, and the next reader has to discover a second refusal mechanism to learn
+that. A guiding principle that holds only where the return type already allowed it is not a
+principle the code obeys; it is one the code happens not to have been asked about.
+
+**What the breakage is worth.** In-repo the change costs four test call sites. Outside, a caller
+adapts with `|> Result.defaultWith (CodegenError.describe >> failwith)`, which is the behaviour it
+had, with a typed value behind it. It rides the open `0.26.0` draft slot, whose class was already
+breaking — the DU growth — so it advances no number of its own (the draft-slot rule).
+
+**A second decision inside the first: a Required node-envelope member is EMITTED when a default is
+declared for it.** The refusal narrowed rather than moved, because the full node envelope needs
+exactly that shape: a required member that always carries a value the smart constructor can fill.
+A declared envelope default is addressed by the EMPTY `IdlDefault.Kind` — the envelope has no kind
+tag, and a kind's tag is its `$type` discriminator on the wire, so the empty address is free and can
+name nothing else. This was preferred to widening the published `IdlDefault` record with an
+envelope flag, or minting a second defaults list on `Idl`: both are breaking changes to the MODEL
+package to express something the existing address already distinguishes. `IdlCodegenRefusalTests`
+pins the discrimination in both directions — a default declared against the KIND does not satisfy
+the envelope member.
+
+**What is deliberately NOT done.** The op-emission leg stays unshipped; a `TKind` / `TOp` slot is
+refused by name in each backend that meets it, which is what tells the phase that wires ops in
+exactly where to look. Making them emittable is that phase's work, not this one's.
+
 ## 2026-09-17 — D43: a refused columnar op has NO inverse, and the refusal is the refusing rejection
 
 **Decided (Phase 181).** `ColumnOps.invert` is guarded by `canApply` on the pre-state. An operation

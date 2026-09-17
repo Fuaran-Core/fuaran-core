@@ -95,7 +95,10 @@ let tests =
         [
 
           test "fsharpTypes: authored prose carrying a CR emits an LF artefact" {
-              expectLfOnly "the emitted F# type declarations" (Gen.fsharpTypes annotatedIdl)
+              // Phase 195 — the type emitter's channel carries its refusal now.
+              match Gen.fsharpTypes annotatedIdl with
+              | Error e -> failtestf "the type emitter rejected the spike vocabulary: %A" e
+              | Ok emitted -> expectLfOnly "the emitted F# type declarations" emitted
           }
 
           test "fsharpModuleWith: declared support carrying a CR emits an LF artefact" {

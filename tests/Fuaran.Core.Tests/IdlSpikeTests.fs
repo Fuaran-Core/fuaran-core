@@ -174,7 +174,12 @@ let tests =
               | Error _ -> ())
 
           testCase "type-generation leg emits F# source (incl. a generic Binding<'T>)" (fun _ ->
-              let src = Gen.fsharpTypes miniIdl
+              // Phase 195 — the type emitter's channel carries its refusal now.
+              let src =
+                  match Gen.fsharpTypes miniIdl with
+                  | Ok s -> s
+                  | Error e -> failtestf "type-gen refused the vocabulary: %A" e
+
               Expect.isGreaterThan src.Length 0 "type-gen produced empty source"
               Expect.isTrue (src.Contains "type Binding<'T>") "type-gen should emit a generic Binding<'T>"
 
@@ -441,7 +446,11 @@ let tests =
           // ---- Phase 317 increment 4: the schema.json leg (third §11 mirror) ----
 
           testCase "schema.json leg: the IDL emits a well-formed JSON Schema for every kind/union/enum" (fun _ ->
-              let schema = Gen.jsonSchema miniIdl
+              // Phase 195 — the schema leg's channel carries its refusal now.
+              let schema =
+                  match Gen.jsonSchema miniIdl with
+                  | Ok s -> s
+                  | Error e -> failtestf "the schema leg refused the vocabulary: %A" e
 
               match Fuaran.Core.Json.parse schema with
               | Error m -> failtestf "emitted schema is not valid JSON: %s" m
