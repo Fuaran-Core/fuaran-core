@@ -275,7 +275,7 @@
          `FS0039` for a caller, of which this repository has none. MINOR rather than major under
          the pre-1.0 policy at the head of STABILITY.md. See DECISIONS.md D29 and STABILITY.md
          "0.23.0 — DRAFT". -->
-    <Version>0.25.0</Version>
+    <Version>0.26.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

@@ -73,10 +73,12 @@ type LadderInputs =
         Modules: string list
         /// The case names a `tested` row may name.
         Cases: Set<string>
-        /// The law names a `domain-obligation` row's `dischargedBy` may name — the public surface
-        /// of the shipped `Fuaran.Core.Conformance` module, for the real file. Read from the
-        /// ASSEMBLY for the same reason `Cases` is read from the test tree: a second copy of that
-        /// list, restated here, is precisely the drift this family exists to catch.
+        /// The law names a `domain-obligation` row's `dischargedBy` may name — the entry points of
+        /// the shipped kit's declared law-family ROSTER, for the real file. Read from
+        /// `Fuaran.Core.Families` for the same reason `Cases` is read from the test tree: a second
+        /// copy of that list, restated here, is precisely the drift this family exists to catch.
+        /// Phase 184 narrowed it from the `Conformance` module's whole public static surface, so
+        /// an obligation can no longer name a law that no conformance census enumerates.
         Laws: Set<string>
     }
 
@@ -595,20 +597,25 @@ let private realCases () =
         (caseNames ProofOracleTests.proofOracleTests |> Set.ofList)
         (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
 
-/// The law names a `domain-obligation` row may cite — the public surface of the shipped
-/// `Fuaran.Core.Conformance` module, read from the ASSEMBLY rather than restated here. An F#
-/// module compiles to a static class, so its public let-bound functions are that type's public
-/// static methods; a law renamed in the kit therefore stops answering for a row with no edit in
-/// this file, which is the drift the clause is for.
+/// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
+/// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.
+///
+/// It used to be every public static method of `Fuaran.Core.Conformance`, read from the assembly.
+/// That answered the renaming half correctly and the ROSTERING half not at all: the module's
+/// public surface is far wider than its law set — aggregates, generators, helpers — so a row could
+/// cite something no domain can run as a law and pass, and, worse, a row could cite a genuine law
+/// that no conformance census enumerates. `Conformance.opAlgebra` was exactly that: the law
+/// `tree-algebra-well-formed-states` names, shipped, citable here, and absent from the roster every
+/// consumer's census quantifies over, so no consumer could ever mark it adopted. Reading the roster
+/// makes the obligation's own clause the guarantee — an obligation cannot name an unrosterable law,
+/// because the vocabulary IS the roster. The renaming half is unchanged: the roster is held to
+/// reflection over the shipped assembly by `ConformanceFamiliesTests`, so a renamed law still stops
+/// answering for a row with no edit in this file.
 let private realLaws () =
-    let asm = typeof<Fuaran.Core.LawResult>.Assembly
-
-    match asm.GetType "Fuaran.Core.Conformance" with
-    | null -> Set.empty
-    | t ->
-        t.GetMethods(System.Reflection.BindingFlags.Public ||| System.Reflection.BindingFlags.Static)
-        |> Seq.map (fun m -> m.Name)
-        |> Set.ofSeq
+    Fuaran.Core.Families.families
+    |> List.filter (fun f -> f.Module = "Conformance")
+    |> List.map (fun f -> f.Entry)
+    |> Set.ofList
 
 /// A fixture ladder is measured against a FIXTURE module list, a FIXTURE case set and a FIXTURE law
 /// set, so nothing a sibling adds to `$modules`, to `Proofs.Oracle` or to the conformance kit can
@@ -680,18 +687,19 @@ let proofsLadderTests =
                   (caseNames ContainedOpsTests.containerLawTests)
                   "the containerLaws conformance suite contributes cases"
 
-          testCase "the law names a domain-obligation row may cite are readable from the assembly"
+          testCase "the law names a domain-obligation row may cite are the kit's declared roster"
           <| fun _ ->
               let laws = realLaws ()
 
-              // A reflection lookup that found the wrong type, or no type, returns an EMPTY set —
-              // under which obligation-law would report every row as dangling rather than going
-              // quietly vacuous. It is asserted anyway: a clause whose input silently collapsed is
-              // the failure this family was cut to catch, in whichever direction it points.
+              // A roster read that collapsed — an empty `Families`, a module name that moved —
+              // returns an EMPTY set, under which obligation-law would report every row as
+              // dangling rather than going quietly vacuous. It is asserted anyway: a clause whose
+              // input silently collapsed is the failure this family was cut to catch, in whichever
+              // direction it points.
               Expect.isGreaterThan
                   (Set.count laws)
                   20
-                  "the shipped `Conformance` module's public static surface is readable, and is the kit's law set"
+                  "the kit's declared law-family roster is readable, and is the vocabulary an obligation draws from"
 
               Expect.isTrue
                   (Set.contains "witnessLaws" laws)

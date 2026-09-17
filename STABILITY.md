@@ -2124,6 +2124,84 @@ disagree.
 
 Reference: [`docs/idl-stability-classes.md`](docs/idl-stability-classes.md).
 
+## 0.26.0 (draft)
+
+The slot this release's phases ride. `v0.25.0` is tagged, so it is a released contract and nothing
+below could ride it; `<Version>` advances to `0.26.0` and the entries append here. The number is the
+release gesture's to move again, not any one phase's.
+
+### `Fuaran.Core.Families` — the law-family roster, exported by the kit (Phase 184) — ADDITIVE
+
+**New public surface: the module `Fuaran.Core.Families`**, in `Fuaran.Core.Conformance`. It declares
+one `LawFamily` record per law family the kit ships — `Id` (`"<Module>.<Entry>"`), `Module`, `Entry`,
+`Witness` (the witness and generator types the entry point takes, in parameter order), `OptIn` (it is
+not folded into `certify` / `certifyStream`) and `Discharges` (the `proofs.json` obligation rows a
+green run of it discharges) — plus `families`, `ids`, `modules`, `tryFind`, `obligations`, `toJson`
+and `toMarkdown`. Purely additive: no existing type, signature or law moved, and a consumer that
+never opens the module is unaffected.
+
+**What it is for.** The kit shipped its families and enumerated them nowhere, so three readers each
+kept a list derived by a rule that could miss one, and a missing row in any of them is silent by
+construction: every check quantifies over the list, so the one thing a list cannot notice is a family
+nobody added to it. `roadmap-engine#476`'s join of the proofs registry to the laws census surfaced the
+instance — `Conformance.opAlgebra`, the law the `tree-algebra-well-formed-states` obligation names, was
+absent from the roster every consumer's conformance census quantifies over, so every consumer reported
+it unrostered and none could ever mark it adopted.
+
+**The roster is held to reflection over the shipped assembly BY RETURN TYPE** — a law family is a
+public static entry point answering with `LawResult list`, which is what a family IS — rather than by
+the naming convention that preceded it. That correction is the substance: the old completeness check
+reflected over method names ending in `Laws` / `LawsWith`, and **three** families are not spelled that
+way. `opAlgebra` and `reducer` are two of the five families `Conformance.certify` and
+`Conformance.certifyStream` are built from, and `compositionPilot` is the third.
+
+**Consequently `SampleAdequacy.census` gains three rows** — `Conformance.opAlgebra`,
+`Conformance.reducer` and `Conformance.compositionPilot`, each `Unconditional` with its reason — and
+is now held equal to the roster. `census` is public and this widens its value; nothing about its type
+or its existing rows changed.
+
+**Two GENERATED artefacts, written by one command and compared by the suite:**
+
+```
+dotnet run --project tests/Fuaran.Core.Tests -- --emit-families
+```
+
+- [`docs/conformance-families.md`](docs/conformance-families.md) — the human-readable table.
+- [`docs/conformance-families.json`](docs/conformance-families.json) — **the machine export, and the
+  one an offline reader consumes without building or running anything.** Its shape is a contract, for
+  `roadmap-engine#482`, which replaces that projection's own roster with this file:
+
+  ```json
+  {
+    "kind": "fuaran.core.conformance.families",
+    "schema": 1,
+    "package": "Fuaran.Core.Conformance",
+    "families": [
+      {
+        "id": "Conformance.opAlgebra",
+        "module": "Conformance",
+        "entry": "opAlgebra",
+        "witness": ["NodeWitness", "IdWitness", "OpGen"],
+        "optIn": false,
+        "discharges": ["tree-algebra-well-formed-states"]
+      }
+    ]
+  }
+  ```
+
+  `kind` and `schema` are the reader's version handle — a shape change bumps `schema`, so a reader
+  can refuse rather than misread. `families` is sorted by `id` and each object writes its members in
+  the order above, so the rendering is byte-stable across runs and a diff shows only what moved;
+  `witness` and `discharges` are arrays and may be empty; `optIn` is a JSON boolean. Two spaces of
+  indent, `\n` line endings, a trailing newline. A reader that only wants the roster reads
+  `families[].id` and needs nothing else.
+
+**One test-side narrowing worth recording, because it changes what a claim means.** The claims
+ladder's `dischargedBy` vocabulary was every public static method of `Conformance`; it is now the
+roster's entry points. That is the phase's title clause — an obligation cannot name a law no
+conformance census enumerates, because the vocabulary IS the enumeration. It constrains
+`proofs.json`, not any published API.
+
 ## The hardening policy's UNDECLARED half (Phase 178) — ADDITIVE, and it ADVANCES the slot
 
 **The class.** Additive on every published surface. `Fuaran.Core.Idl` gains a
