@@ -2882,21 +2882,27 @@ module Conformance =
 
     // ---- columnar op-algebra + op-stream (Phase 31) ----
     // The teeth on `ColumnOps`: a table-edit op DU applies totally, `canApply ≡ apply`, `apply ∘ invert =
-    // id` (where invert is defined), and a table-edit stream chains + verifies + replays byte-identically
-    // through the EXISTING `Fuaran.Core.OpStream` `StreamWitness` (no core change — the witness-free data
-    // strand survives the op-stream adoption).
+    // id` (where invert is defined), an inverse exists ONLY for an applicable op (Phase 181), and a
+    // table-edit stream chains + verifies + replays byte-identically through the EXISTING
+    // `Fuaran.Core.OpStream` `StreamWitness` (no core change — the witness-free data strand survives the
+    // op-stream adoption).
 
-    /// The columnar op-algebra laws (Phase 31). Self-contained — over a seed-replayable sample it evolves
-    /// an all-int reference `Table` by random ops and certifies: **apply totality** (never throws —
-    /// failures are a typed `ColumnRejection`); **canApply ≡ apply**; **apply ∘ invert = id** (for an
-    /// invertible op; `AppendRows`/`ApplyTransform` report `NotInvertible` and are skipped); and that the
-    /// table-edit stream built via `OpStream.append` over the columnar `StreamWitness` **verifies** and
-    /// **replays** back to the live state from the base table.
-    let columnarOpLaws (seed: int) (iterations: int) : LawResult list =
+    /// The columnar op-algebra laws (Phase 31) with an **injectable `invert`** (Phase 181) — the teeth
+    /// seam, on `concurrencyLawsWith`'s pattern: a test injects the PRE-Phase-181 `invert` clause (the
+    /// one that answered `RemoveColumn col.Name` for an `InsertColumn` without reading the pre-state) and
+    /// watches the inverse-only-for-applicable law bite. Domains call `columnarOpLaws`, which pins this
+    /// to the shipped `ColumnOps.invert`.
+    let columnarOpLawsWith
+        (invertUnderTest: ColumnOp -> Table -> Result<ColumnOp, ColumnRejection>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
         let mutable rng = ConfRng.ofSeed seed
         let mutable totality = None
         let mutable equivalence = None
         let mutable inversion = None
+        let mutable refusedInverse = None
+        let mutable refusedStructural = 0
         let mutable verify = None
         let mutable replayLaw = None
 
@@ -2913,7 +2919,7 @@ module Conformance =
         let genColOp (t: Table) (r: ConfRng.T) : ColumnOp * ConfRng.T =
             let rc = Table.rowCount t
             let names = Table.columnNames t
-            let kind, r1 = ConfRng.intBelow 5 r
+            let kind, r1 = ConfRng.intBelow 7 r
 
             match kind with
             | 0 ->
@@ -2947,9 +2953,42 @@ module Conformance =
                 else
                     let ci, r2 = ConfRng.intBelow (List.length names) r1
                     RemoveColumn(List.item ci names), r2
-            | _ ->
+            | 4 ->
                 let v, r2 = ConfRng.intBelow 100 r1
                 AppendRows([ names |> List.map (fun n -> n, Int v) ]), r2
+            | 5 ->
+                // Phase 181 — an insert the table MUST refuse as a duplicate. The four arms above draw
+                // ops the table usually accepts, so without this the inverse-only-for-applicable law
+                // below would be certified over a sample that never reaches the shape it is about.
+                let v, r2 = ConfRng.intBelow 100 r1
+
+                if List.isEmpty names then
+                    InsertColumn(0, Column.create "a" IntType [ Int v; Int v; Int v ]), r2
+                else
+                    let ci, r3 = ConfRng.intBelow (List.length names) r2
+                    let nm = List.item ci names
+                    InsertColumn(0, Column.create nm IntType (List.replicate rc (Int v))), r3
+            | _ ->
+                // Phase 181 — a `SetCell` the table MUST refuse on the VALUE. `invert`'s pre-181
+                // `SetCell` clause read the column and the row but never the value, so this is the
+                // second shape where a refused op had a live inverse.
+                if List.isEmpty names || rc = 0 then
+                    AppendRows([]), r1
+                else
+                    let ci, r2 = ConfRng.intBelow (List.length names) r1
+                    let row, r3 = ConfRng.intBelow rc r2
+                    SetCell(List.item ci names, row, Str "wrong"), r3
+
+        // The four ops an inverse can exist for — the two that never have one are skipped by the
+        // coverage count below, since a law about refused ops learns nothing from them.
+        let structural op =
+            match op with
+            | SetCell _
+            | SetColumn _
+            | InsertColumn _
+            | RemoveColumn _ -> true
+            | AppendRows _
+            | ApplyTransform _ -> false
 
         for i in 0 .. iterations - 1 do
             let mutable state = baseTable
@@ -2983,7 +3022,7 @@ module Conformance =
 
                     match res with
                     | Ok post ->
-                        (match ColumnOps.invert op state with
+                        (match invertUnderTest op state with
                          | Ok inv ->
                              match ColumnOps.apply inv post with
                              | Ok restored when restored = state -> ()
@@ -3009,7 +3048,29 @@ module Conformance =
                             state <- s'
                             recs <- recs'
                         | Error _ -> ()
-                    | Error _ -> ()
+                    | Error rej ->
+                        // Phase 181 — an inverse exists ONLY for an applicable op. A refused op that
+                        // still yields one hands an undo stack a LIVE op derived from a step the table
+                        // never took: the pre-181 `InsertColumn` clause answered `RemoveColumn` for an
+                        // insert refused as a duplicate, and that remove SUCCEEDS at the pre-state and
+                        // takes the column that was already there.
+                        if structural op then
+                            refusedStructural <- refusedStructural + 1
+
+                            match invertUnderTest op state with
+                            | Ok inv ->
+                                if refusedInverse.IsNone then
+                                    refusedInverse <-
+                                        Some(
+                                            sprintf
+                                                "seed=%d iter=%d: %A was REFUSED (%A) and still has an inverse %A"
+                                                seed
+                                                i
+                                                op
+                                                rej
+                                                inv
+                                        )
+                            | Error _ -> ()
 
             if not (OpStream.verifyChain hashFn sw recs) && verify.IsNone then
                 verify <- Some(sprintf "seed=%d iter=%d: verifyChain rejected an intact table-edit stream" seed i)
@@ -3029,12 +3090,33 @@ module Conformance =
           { Law = "columnar apply ∘ invert = identity (where invert is defined)"
             Passed = inversion.IsNone
             Counterexample = inversion }
+          { Law = "columnar inverse exists only for an applicable op"
+            Passed = refusedInverse.IsNone
+            Counterexample = refusedInverse }
           { Law = "verifyChain accepts an intact table-edit stream (over the columnar StreamWitness)"
             Passed = verify.IsNone
             Counterexample = verify }
           { Law = "replay re-derives the live table from the base"
             Passed = replayLaw.IsNone
-            Counterexample = replayLaw } ]
+            Counterexample = replayLaw }
+          // The law above is about REFUSED ops, so a run that refused no invertible op certifies
+          // nothing by it — and would report a hollow green. Phase 121's guard says so instead.
+          SampleAdequacy.reached
+              "columnarOpLaws"
+              "invert's refusal population"
+              seed
+              [ "refused invertible op", refusedStructural ] ]
+
+    /// The columnar op-algebra laws (Phase 31). Self-contained — over a seed-replayable sample it evolves
+    /// an all-int reference `Table` by random ops and certifies: **apply totality** (never throws —
+    /// failures are a typed `ColumnRejection`); **canApply ≡ apply**; **apply ∘ invert = id** (for an
+    /// invertible op; `AppendRows`/`ApplyTransform` report `NotInvertible` and are skipped); **an inverse
+    /// exists only for an applicable op** (Phase 181 — a REFUSED op yields its rejection, never an op,
+    /// with a coverage guard so a sample that refuses nothing invertible reports vacuity rather than a
+    /// hollow green); and that the table-edit stream built via `OpStream.append` over the columnar
+    /// `StreamWitness` **verifies** and **replays** back to the live state from the base table.
+    let columnarOpLaws (seed: int) (iterations: int) : LawResult list =
+        columnarOpLawsWith ColumnOps.invert seed iterations
 
     // ---- columnar validator (Phase 37) ----
     // The teeth on the `ColumnValidator` surface: stock rules over a `Table` emit located, severity-

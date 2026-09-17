@@ -1341,10 +1341,21 @@
     {
       "id": "column-invert-partial-characterised",
       "level": "proved",
-      "claim": "The partial cases of `invert`, characterised. `AppendRows` and `ApplyTransform` are `NotInvertible` on every table (`invert_not_invertible`). On `SetCell`, `SetColumn` and `RemoveColumn`, `invert` refuses EXACTLY the pre-states `apply` refuses for the column and row it reads, with the same rejection; where `apply` goes on to refuse the VALUE — a cell of the wrong type, a column of the wrong length — `invert` has already answered, and `RemoveColumn` has no value to refuse so there the verdicts coincide outright. And THE FINDING: `invert` on `InsertColumn` reads nothing from the pre-state (`invert_insert_reads_nothing`), so the inverse it derives for an insert REFUSED as a duplicate is a remove that succeeds at the pre-state and takes the column that was already there (`refused_insert_inverse_is_live`). A caller that inverts without first checking acceptance loses a column the refused operation never touched. Reported, asserted on the shipped engine by the differential, and not fixed here: a gap the theorem finds is fixed by its own phase, as Phase 137 preceded Phase 138.",
-      "phase": "fuaran-core#176",
+      "claim": "The partial cases of `invert`, characterised. `AppendRows` and `ApplyTransform` are `NotInvertible` on every table, before the guard and so without running the evaluator (`invert_not_invertible`). On the four operations that can have an inverse, `invert` refuses EXACTLY the pre-states `apply` refuses, with the SAME rejection, and answers wherever `apply` does — an equality of verdicts. Phase 176 could state this for only three of them, and only for the pre-states those three READ: where `apply` went on to refuse the VALUE — a cell of the wrong type, a column of the wrong length — `invert` had already answered `Ok`, and on `InsertColumn` it answered without reading anything at all. Phase 181's `canApply` guard makes the fourth operation true of it and drops the value-refusal exception with it.",
+      "phase": "fuaran-core#181",
       "evidence": {
         "theorem": "invert_refuses_as_apply",
+        "model": "proofs/ColumnOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-invert-only-for-applicable",
+      "level": "proved",
+      "claim": "An inverse exists ONLY for an applicable operation — over all six operations, any table and any evaluator. This is the clause a caller deriving `invert op pre` beside every op it attempts needs: what it is handed is either a rejection or an operation the table would have taken. Phase 176 proved it FALSE of the shipped engine, and the theorem that did so is kept rather than deleted: `invert` on `InsertColumn` read nothing from the pre-state (`invert_insert_reads_nothing`), so the inverse it derived for an insert REFUSED as a duplicate was a remove that succeeded at the pre-state and took the column that was already there (`refused_insert_inverse_is_live`) — a caller lost a column the refused operation never touched. Phase 181 guards `ColumnOps.invert` with `canApply`, as the tree engine's `Ops.invert` already was, and the two negative theorems are now about `invert_pre181`, the model's copy of the clause as it stood, with the shipped refusal stated in the same lemma so neither half can be re-proved while the other quietly stops holding. The guard is proved to consult no evaluator (`invert_ignores_evaluator`), which is why the two never-invertible operations answer ahead of it: `invert` does not run a pipeline to report that it has no inverse.",
+      "phase": "fuaran-core#181",
+      "evidence": {
+        "theorem": "invert_only_for_applicable",
         "model": "proofs/ColumnOps.fst",
         "prover": "proofs/fstar-pin.json"
       }
@@ -1363,7 +1374,7 @@
     {
       "id": "columnar-differential",
       "level": "tested",
-      "claim": "The extracted columnar model agrees with the shipped `ColumnOps.apply`, `canApply`, `invert`, `applyAll` and `toOps` over generated tables and op scripts — tables drawn with the well-formedness invariant deliberately broken one draw in ten (a repeated name, a column a row long or short, a schema that is not the columns' projection, a cell of the wrong type), because `apply` is total over all of them and the model must agree there too. Compared per probe: the verdict, an accepted result through the bridge, a rejection by class AND payload, the dry run against the mutating call on each side, the derived inverse as an operation, the round trip asserted exactly where the pre-state is well-formed and only counted where it is not, the invariant on production's result judged by the model's own `wf`, and every script whole. Over pairs: the emitted diff script, and the reconstruction asserted on both sides where both tables are well-formed, both branches counted. The go-red hands the differential a BLIND cell bridge — every present cell read as a string — and requires it to lose on the type check. Agreement is over the pools drawn, never over all inputs.",
+      "claim": "The extracted columnar model agrees with the shipped `ColumnOps.apply`, `canApply`, `invert`, `applyAll` and `toOps` over generated tables and op scripts — tables drawn with the well-formedness invariant deliberately broken one draw in ten (a repeated name, a column a row long or short, a schema that is not the columns' projection, a cell of the wrong type), because `apply` is total over all of them and the model must agree there too. Compared per probe: the verdict, an accepted result through the bridge, a rejection by class AND payload, the dry run against the mutating call on each side, the derived inverse as an operation, the round trip asserted exactly where the pre-state is well-formed and only counted where it is not, the invariant on production's result judged by the model's own `wf`, and every script whole. Over pairs: the emitted diff script, and the reconstruction asserted on both sides where both tables are well-formed, both branches counted. The go-red hands the differential a BLIND cell bridge — every present cell read as a string — and requires it to lose on the type check. A fourth case pins Phase 176's finding and its closure together on the shipped engine: `ColumnOps.invert` refuses a duplicate insert with the rejection `apply` gave, the model's guarded `invert` refuses it too, and the model's `invert_pre181` still derives the live remove — so a reverted guard and a lost finding each go red. Agreement is over the pools drawn, never over all inputs.",
       "phase": "fuaran-core#176",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -1371,7 +1382,7 @@
           "the columnar oracle agrees with ColumnOps.apply, canApply and invert over generated tables and scripts",
           "the columnar oracle agrees with ColumnOps.toOps and applyAll, and the diff reconstructs on well-formed pairs",
           "a columnar oracle handed a BLIND cell bridge DISAGREES with ColumnOps.apply — the measurement can fail",
-          "the inverse of a REFUSED insert is a live remove — `invert_insert_reads_nothing`, on the shipped engine"
+          "a REFUSED insert has no inverse — `refused_insert_inverse_is_live` is now about `invert_pre181`"
         ]
       }
     },

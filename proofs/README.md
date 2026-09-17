@@ -2845,8 +2845,9 @@ The doc comments of `ColumnOps.fs` state four promises and one of them is the th
 > disagree". `invert` — `apply (invert op t) (apply op t) = t`. `toOps` — "`apply`-ing it in order
 > yields `after`".**
 
-`Conformance.columnarOpLaws` samples the first three at one seed over one shape of table. Nothing
-sampled the fourth, and nothing said WHICH tables any of the four hold on. `ColumnOps.fst` models
+`Conformance.columnarOpLaws` samples the first three at one seed over one shape of table — and,
+since Phase 181, the inverse-only-for-applicable law beside them. Nothing sampled the fourth
+promise, and nothing said WHICH tables any of the four hold on. `ColumnOps.fst` models
 `Column.Ops` clause for clause — the six-case op DU, the eight-case rejection, `apply`, `canApply`,
 `invert`, `applyAll` and `Diff.toOps` — over a table read exactly as the algebra reads it: a schema
 (an ordered `(name, type)` list), the columns (name, type, cells), `Null` as the validity mask's
@@ -2856,7 +2857,8 @@ function in the model, as `float i` is in theorem 1 and `ReplaceChildren` in the
 
 ### What is proved
 
-Six lemmas, over the six operations, any table and any evaluator:
+Seven lemmas, over the six operations, any table and any evaluator — six of them Phase 176's, the
+seventh Phase 181's closure of the finding Phase 176 recorded:
 
 1. **`apply_total`** — one outcome on every input, and WHICH rejection each clause can raise is a
    predicate (`raisable`) rather than a list. `NotInvertible` — the eighth class — is proved
@@ -2877,39 +2879,74 @@ Six lemmas, over the six operations, any table and any evaluator:
 5. **`invert_roundtrip`** — on a well-formed table, the inverse of an accepted `SetCell`,
    `SetColumn`, `InsertColumn` or `RemoveColumn` is accepted at the result and restores the input
    EXACTLY. The partial cases are characterised beside it: `AppendRows` and `ApplyTransform` are
-   `NotInvertible` unconditionally; on the three operations that read the pre-state, `invert`
-   refuses exactly the pre-states `apply` refuses for the column and row it reads, with the same
-   rejection, and where `apply` goes on to refuse the VALUE `invert` has already answered.
+   `NotInvertible` unconditionally; and — since Phase 181 — on all four invertible operations
+   `invert` refuses exactly what `apply` refuses, with the same rejection, and answers wherever
+   `apply` does (`invert_refuses_as_apply`, an equality of verdicts). As Phase 176 could state it,
+   that held for three of the four and only for the pre-states those three READ: where `apply` went
+   on to refuse the VALUE, `invert` had already answered `Ok`.
 6. **`diff_applicable`** — `applyAll (toOps before after) before = Ok after` on well-formed tables,
    both branches. The column-granular branch is a walk over `after`'s columns replacing each changed
    one in place, with the invariant that what the walk has passed is already `after`'s and what it
    has not reached is still `before`'s (`changed_apply`); the rebuild branch empties the table
    (`removes_apply` — in any order, since the names are distinct) and refills it in order with the
    invariant that the table so far is a prefix of `after` (`inserts_apply`).
+7. **`invert_only_for_applicable`** (Phase 181) — an inverse exists ONLY for an applicable
+   operation, over all six. This is the clause the finding below reports FALSE of the engine Phase
+   176 modelled, and Phase 181 is where it becomes true. `invert_ignores_evaluator` states the other
+   half of the guard's shape: it consults no evaluator, which is why the two never-invertible
+   operations answer ahead of the guard rather than through it — `invert` does not run a pipeline to
+   report that an `ApplyTransform` has no inverse.
 
-### The finding: `invert` on `InsertColumn` reads nothing
+### The finding: `invert` on `InsertColumn` read nothing — CLOSED by Phase 181
 
-The F# clause is `InsertColumn(_, col) -> Ok(RemoveColumn col.Name)`, unconditionally. Every other
-invertible clause reads the pre-state — the cell it will restore, the column it will put back — and
-refuses when the pre-state does not hold it; this one answers the same for a REFUSED insert as for
-an accepted one. `invert_insert_reads_nothing` states it, and `refused_insert_inverse_is_live`
-states the consequence: the "inverse" of an insert refused as a `DuplicateColumn` is a remove that
-SUCCEEDS at the pre-state and takes the column that was already there. A caller that derives the
-inverse without first checking acceptance — the natural shape of an undo stack that records
-`invert op pre` beside every op it attempts — loses a column the refused operation never touched.
+The F# clause **was** `InsertColumn(_, col) -> Ok(RemoveColumn col.Name)`, unconditionally. Every
+other invertible clause read the pre-state — the cell it would restore, the column it would put
+back — and refused when the pre-state did not hold it; this one answered the same for a REFUSED
+insert as for an accepted one. `invert_insert_reads_nothing` states it, and
+`refused_insert_inverse_is_live` states the consequence: the "inverse" of an insert refused as a
+`DuplicateColumn` is a remove that SUCCEEDS at the pre-state and takes the column that was already
+there. A caller that derives the inverse without first checking acceptance — the natural shape of an
+undo stack that records `invert op pre` beside every op it attempts — loses a column the refused
+operation never touched.
 
-The contract is not violated: the doc comment defines `invert op t` for "`op` applied to the
+The contract was not violated: the doc comment defines `invert op t` for "`op` applied to the
 PRE-state `t`", which presumes acceptance. But the tree engine keeps that presumption HONEST and
-this one does not. `Ops.invert` on the tree side runs `canApply` first and refuses when the forward
+this one did not. `Ops.invert` on the tree side runs `canApply` first and refuses when the forward
 step would be refused — theorem 5's `invert_leaf` models that guard as its first line — so a
-refused `InsertChild` has no inverse to misapply. The columnar `invert` guards three of its four
+refused `InsertChild` has no inverse to misapply. The columnar `invert` guarded three of its four
 clauses by reading the pre-state and the fourth not at all, and the model made the asymmetry
-visible. Reported here, asserted on the shipped engine by the differential's fourth case, and NOT
-fixed in this phase: `Column.Ops` is unchanged, per the shard's own rule that a gap the theorem
-finds is fixed by its own phase, as Phase 137 preceded Phase 138. The fix shape, if taken, is the
-tree engine's — `invert` refusing an insert the pre-state already holds a column for, with
-`DuplicateColumn` as the refusal — which makes `invert_refuses_as_apply` true of a fourth
-operation and is a behaviour change to a public function.
+visible. Phase 176 reported it and did not fix it, per its shard's own rule that a gap the theorem
+finds is fixed by its own phase, as Phase 137 preceded Phase 138.
+
+**Phase 181 took the fix, and it is the shape this section named.** `ColumnOps.invert` now runs
+`canApply` on the pre-state and returns its rejection where it refuses, so `invert_refuses_as_apply`
+is true of a fourth operation and `invert_only_for_applicable` holds over all six. Three details are
+worth recording because each was a decision rather than a consequence:
+
+- **The refusal is the REFUSING rejection, not a blanket `NotInvertible`.** A duplicate insert's
+  inverse is `Error (DuplicateColumn "a")` — what `apply` itself said. `NotInvertible` keeps its
+  meaning, which is "this operation has no inverse at any table", and stays the two never-invertible
+  operations' alone. The alternative would have made `invert_refuses_as_apply` false again, in the
+  other direction.
+- **The guard strengthened all four clauses, not one.** `SetCell` and `SetColumn` read the pre-state
+  for the column and the row but never for the VALUE, so a wrong-typed cell or a wrong-length column
+  — both of which `apply` refuses — had an inverse too. Those inverses were harmless (a `SetCell`
+  restoring a cell to what it already held) rather than destructive, which is why the finding named
+  only the insert; they are gone with it.
+- **The two never-invertible operations answer BEFORE the guard.** `canApply (ApplyTransform p)` runs
+  the evaluator, and `invert` must not evaluate a pipeline to report what it already knows.
+  `invert_ignores_evaluator` is that sentence as a theorem, and it is what earns the model's `invert`
+  an evaluator parameter it never consults — the model calls `can_apply ev`, as the F# calls
+  `canApply`, so the parameter is there and proved dead.
+
+The two negative theorems are **kept, not deleted**: they are now about `invert_pre181`, the model's
+copy of the clause as it stood, and `refused_insert_inverse_is_live` states the shipped refusal in
+the same lemma as the old live remove. A finding deleted at the moment it is fixed leaves nothing
+that goes red if the fix is ever reverted; stated as a pair, neither half can be re-proved while the
+other quietly stops holding. The conformance kit carries the closure as a law of its own —
+`columnarOpLawsWith`'s "an inverse exists only for an applicable op", with the injectable `invert`
+seam `concurrencyLawsWith` established, so the pre-181 clause can be handed to the kit and watched
+to lose.
 
 ### The differential
 
@@ -2938,6 +2975,12 @@ model's envelope and nothing about the pipeline. The go-red hands the differenti
 bridge — every present cell read as a string — and requires it to lose on the type check, which it
 does. Seeded and replayable: the same seed reproduces the same tally, asserted.
 
+The family's fourth case is the finding's pin, and since Phase 181 it pins BOTH halves: the shipped
+`ColumnOps.invert` refuses a duplicate insert with the rejection `apply` gave, the model's guarded
+`invert` refuses it too, and the model's `invert_pre181` still derives the live remove that would
+have taken the column already there. A reverted guard and a lost finding each go red, at the same
+assertion.
+
 ### What it cost
 
 Cheap, and self-contained. Three cold runs through the kit on this machine under `--quake 3` at
@@ -2955,9 +2998,10 @@ fresh one on the first leg run, and the oracle compiles against `Prims.fs` with 
 
 ### The claims ladder, for this theorem
 
-1. **Proved (machine-checked, no admits).** The six lemmas above plus the characterisations
+1. **Proved (machine-checked, no admits).** The seven lemmas above plus the characterisations
    (`apply_never_not_invertible`, `reject_identity_transform`, `invert_not_invertible`,
-   `invert_refuses_as_apply`, `invert_insert_reads_nothing`, `refused_insert_inverse_is_live`,
+   `invert_refuses_as_apply`, `invert_ignores_evaluator`, `invert_insert_reads_nothing`,
+   `refused_insert_inverse_is_live`,
    `apply_preserves_wf_ev`, `apply_all_preserves_wf`), over the six operations, any table and any
    evaluator. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes
    error` on, no `assume`, no `admit`. The module is self-contained — it opens nothing, restates

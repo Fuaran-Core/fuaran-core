@@ -4923,7 +4923,8 @@ let private envelopeProbe (label: string) (text: string) (diffs: string list) =
 //       asserted EXACTLY on production and on the model (`invert_roundtrip` instantiated). Where
 //       the pre-state is not well-formed the round trip is only counted, because the theorem
 //       does not claim it there — and the count of failures is the evidence the hypothesis earns
-//       its place.
+//       its place. Since Phase 181 both sides are GUARDED by `canApply`, so this arm now also
+//       compares a REFUSED op's rejection coming back out of `invert` rather than an inverse.
 //    4. THE INVARIANT: a well-formed pre-state and an accepted structural op give a well-formed
 //       result (`apply_preserves_wf` instantiated), judged by the MODEL's `wf` on the bridged
 //       production result.
@@ -5351,7 +5352,7 @@ let private colProbe (bridge: Cell -> ModelCol.cell) (op: ColumnOp) (st: Table) 
 
     // 3. invert — the derived inverse, and the round trip where the theorem claims it
     let pInv = ColumnOps.invert op st
-    let mInv = ModelCol.invert mop mst
+    let mInv = ModelCol.invert modelEvaluator mop mst
 
     let invDiff =
         match pInv, mInv with
@@ -9234,12 +9235,14 @@ let proofOracleTests =
                   (t.Diffs |> List.exists (fun d -> d.Contains "CellTypeMismatch"))
                   "and the disagreement is about the TYPE check, which is what the bridge blinded"
 
-          testCase
-              "the inverse of a REFUSED insert is a live remove — `invert_insert_reads_nothing`, on the shipped engine"
+          testCase "a REFUSED insert has no inverse — `refused_insert_inverse_is_live` is now about `invert_pre181`"
           <| fun _ ->
-              // The finding, asserted on production so it goes red the day `ColumnOps.invert`
-              // starts reading the pre-state on `InsertColumn`. A refused duplicate insert's
-              // "inverse" removes the column that was already there.
+              // Phase 176's finding, CLOSED by Phase 181, with the negative kept pinned. The
+              // shipped `invert` refuses the refused insert; the pre-181 clause the model still
+              // carries as `invert_pre181` answers a remove that SUCCEEDS at the pre-state and
+              // takes the column that was already there. Both halves are asserted, so this goes
+              // red either if the guard is reverted OR if the finding it closed stops being what
+              // the closed finding was.
               let t: Table =
                   { Schema = [ "a", IntType; "b", IntType ]
                     Columns =
@@ -9250,20 +9253,15 @@ let proofOracleTests =
               Expect.equal (ColumnOps.apply op t) (Error(DuplicateColumn "a")) "the insert is refused as a duplicate"
 
               match ColumnOps.invert op t with
-              | Error e ->
-                  failtestf "invert refused the refused insert (%s) — the finding no longer holds" (prodColRejRender e)
               | Ok inv ->
-                  Expect.equal inv (RemoveColumn "a") "the inverse is derived without reading the pre-state"
+                  failtestf "invert answered %s for a REFUSED insert — Phase 181's guard is gone" (prodColOpRender inv)
+              | Error e ->
+                  Expect.equal
+                      (prodColRejRender e)
+                      (prodColRejRender (DuplicateColumn "a"))
+                      "and the refusal is the one `apply` gave, not a blanket NotInvertible"
 
-                  match ColumnOps.apply inv t with
-                  | Error e -> failtestf "the live remove was refused (%s)" (prodColRejRender e)
-                  | Ok after ->
-                      Expect.equal
-                          (Table.columnNames after)
-                          [ "b" ]
-                          "the pre-existing column `a` is GONE — the refused insert's inverse is destructive"
-
-              // and the model says the same, through the same theorem's hypotheses
+              // the model agrees, on the shipped clause and on the pinned negative beside it
               let mt = tableToModel t
               let mop = colOpToModelWith cellToModel op
 
@@ -9273,9 +9271,23 @@ let proofOracleTests =
                   "the model refuses the same insert"
 
               Expect.equal
-                  (ModelCol.invert mop mt)
+                  (ModelCol.invert modelEvaluator mop mt)
+                  (ModelCol.Error(ModelCol.DuplicateColumn "a"))
+                  "and its guarded invert refuses it too"
+
+              Expect.equal
+                  (ModelCol.invert_pre181 mop mt)
                   (ModelCol.Ok(ModelCol.RemoveColumn "a"))
-                  "and derives the same inverse"
+                  "while the pre-181 clause still derives the live remove — the finding, kept"
+
+              // and that remove really was live: the column that was already there goes
+              match ColumnOps.apply (RemoveColumn "a") t with
+              | Error e -> failtestf "the pre-181 inverse's remove was refused (%s)" (prodColRejRender e)
+              | Ok after ->
+                  Expect.equal
+                      (Table.columnNames after)
+                      [ "b" ]
+                      "the pre-existing column `a` would have GONE — what the guard now prevents"
 
           // ---- Phase 177 — the FUNCTION SEAM: the effect lattice, the function algebra and the
           //      capability registry against the model ----

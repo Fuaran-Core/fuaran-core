@@ -206,6 +206,11 @@ module SampleAdequacy =
           "Conformance.capabilityPipelineIncrementalLaws", Guarded [ "node reuse" ]
           "Conformance.dirtyPropagationLaws", Guarded [ "dirty frontier" ]
           "Conformance.propagationEvalLaws", Guarded [ "node reuse" ]
+          // Phase 181. Every other arm is BUILT each iteration — an op applied, inverted, chained
+          // and replayed — but the inverse-only-for-applicable law is about the ops the table
+          // REFUSES, and whether the generator refused an INVERTIBLE one is a property of the run.
+          "Conformance.columnarOpLawsWith", Guarded [ "invert's refusal population" ]
+          "Conformance.columnarOpLaws", Guarded [ "invert's refusal population (delegates to columnarOpLawsWith)" ]
           "Conformance.concurrencyLawsWith", Guarded [ "independent pair (its own Phase 80 vacuity guard)" ]
           "Conformance.concurrencyLaws", Guarded [ "independent pair (delegates to concurrencyLawsWith)" ]
           "Conformance.schemaWalkLaws", Guarded [ "derivation verdict (its own parity vacuity guard)" ]
@@ -246,8 +251,6 @@ module SampleAdequacy =
           Unconditional "each iteration loads a pack and refuses a stale pin and an unknown base"
           "Conformance.aggregateParityLaws",
           Unconditional "each iteration compares aggregate against a single-group groupBy on the same column"
-          "Conformance.columnarOpLaws",
-          Unconditional "each iteration applies, inverts, chains and replays the same table edit"
           "Conformance.columnarValidatorLaws", Unconditional "each iteration injects a known fault count and validates"
           "Conformance.incrementalLaws",
           Unconditional "each iteration compares evalFrom against a full evalPipeline over the same change"

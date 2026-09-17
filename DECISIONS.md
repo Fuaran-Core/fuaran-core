@@ -1,5 +1,56 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-17 — D42: a refused columnar op has NO inverse, and the refusal is the refusing rejection
+
+**Decided (Phase 181).** `ColumnOps.invert` is guarded by `canApply` on the pre-state. An operation
+the table would refuse yields that refusal — `Error (DuplicateColumn "a")` for a duplicate insert,
+not an operation — where until now the `InsertColumn` clause answered `Ok (RemoveColumn col.Name)`
+unconditionally, having read nothing. This closes the gap [Phase 176](proofs/README.md) found and
+deliberately reported rather than fixed: the "inverse" of a refused insert was a remove that
+SUCCEEDED at the pre-state and took the column that was already there, so an undo stack recording
+`invert op pre` beside every op it attempts lost a column the refused operation never touched.
+
+**Three things about it were decisions rather than consequences, and each had a plausible
+alternative.**
+
+1. **The refusal is the REFUSING rejection, not `NotInvertible`.** The shard's prose could be read
+   either way. It is the refusing rejection because that is the tree engine's shape — `Ops.invert`
+   returns `canApply`'s `Rejection` — and because the alternative would make
+   `invert_refuses_as_apply` false in the other direction, replacing an inverse that lied about the
+   operation with a refusal that lies about the reason. `NotInvertible` keeps one meaning: *this
+   operation has no inverse at any table*, which is `AppendRows`' and `ApplyTransform`'s alone. The
+   proof README's own statement of the fix shape, written by 176, names `DuplicateColumn` as the
+   refusal, and this follows it.
+2. **The two never-invertible operations answer BEFORE the guard, so the guard is not literally on
+   every clause.** `canApply (ApplyTransform p)` runs the pipeline, and `invert` must not evaluate a
+   user pipeline to report what it already knows; the answer for those two does not depend on the
+   table at all. The alternative — one guard at the top, no exceptions — is more uniform and was
+   rejected for that cost, and because it would have made `invert_not_invertible` conditional for
+   nothing: the defect is only ever in a clause that can answer `Ok`. The model carries
+   `invert_ignores_evaluator` so the claim is checked rather than asserted.
+3. **The guard strengthens all FOUR invertible clauses, not just the insert.** `SetCell` and
+   `SetColumn` read the pre-state for the column and the row but never for the VALUE, so a
+   wrong-typed cell or a wrong-length column — both refused by `apply` — had an inverse too. Those
+   were harmless rather than destructive (a `SetCell` restoring a cell to what it already held),
+   which is why 176's finding named only the insert. Narrowing the fix to the named instance would
+   have left the class open.
+
+**The finding is KEPT, not deleted.** `invert_insert_reads_nothing` and
+`refused_insert_inverse_is_live` are now theorems about `invert_pre181`, the model's copy of the
+clause as it stood, and the second states the shipped refusal in the SAME lemma as the old live
+remove. A finding deleted at the moment it is fixed leaves nothing that goes red if the fix is ever
+reverted, and two lemmas that can be re-proved independently let one half rot while the other
+passes. The differential's fourth case asserts both halves on the shipped engine for the same
+reason.
+
+**The class is corrective, and it rides the `0.26.0` draft.** No signature moves, no wire byte
+moves, no record gains a field and no DU gains a case — what changes is that a function refuses
+where it wrongly answered. A consumer depending on the old answer was depending on the defect, and
+the only shape that can notice is a caller that inverts an op it has not checked, which is precisely
+the caller the change protects. It is not one of the classes the draft-slot rule says outranks a
+draft (a required record field, a DU case reorder, a wire-shape break), so it appends to the
+standing draft rather than advancing it.
+
 ## 2026-09-15 — D41: D14 governs `proofs/` as it governs `tests/` — the proof leg certifies the backend over the certification set, and a domain proves its own vocabulary
 
 **Decided (Phase 173).** The generated F\* files under `proofs/` are emitted from the vocabularies

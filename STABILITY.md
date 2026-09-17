@@ -2197,6 +2197,43 @@ worked instance, each a pure insertion. A consumer that pins artifact bytes in a
 them; one that merely reads artifacts is untouched, in either direction, because the reader's
 answer for an absent block has not moved.
 
+### A refused columnar op has no inverse (Phase 181) — CORRECTIVE, and it rides this slot
+
+`ColumnOps.invert` is guarded by `canApply` on the pre-state. An operation the table would refuse
+now yields that refusal — `Error (DuplicateColumn "a")` for a duplicate insert — where until now the
+`InsertColumn` clause answered `Ok (RemoveColumn col.Name)` unconditionally, having read nothing from
+the pre-state at all.
+
+**What was wrong with the old answer.** That remove SUCCEEDS at the pre-state, and takes the column
+that was already there. So an undo stack of the natural shape — record `invert op pre` beside every
+op you attempt, replay the inverses to undo — lost a column the refused operation never touched, on
+the one path where the forward step had done nothing. Phase 176's model found it and reported it
+without fixing it (`invert_insert_reads_nothing`, `refused_insert_inverse_is_live`); this is its
+phase.
+
+**The refusal is the REFUSING rejection, not `NotInvertible`.** `invert` now answers exactly what
+`apply` would have answered on a refusal, which is the tree engine's shape (`Ops.invert` returns
+`canApply`'s `Rejection`). `NotInvertible` keeps one meaning — *this operation has no inverse at any
+table* — and stays `AppendRows`' and `ApplyTransform`'s alone. Those two still answer
+unconditionally, and they answer BEFORE the guard: `canApply (ApplyTransform p)` runs the pipeline,
+and `invert` must not evaluate one to report what it already knows.
+
+**It strengthens all four invertible clauses, not just the insert.** `SetCell` and `SetColumn` read
+the pre-state for the column and the row but never for the VALUE, so a wrong-typed cell or a
+wrong-length column — both of which `apply` refuses — had an inverse too. Those were harmless rather
+than destructive, which is why the finding named only the insert; they are gone with it.
+
+**The class, and what a consumer does about it.** No signature moves, no wire byte moves, no record
+gains a field and no union gains a case: what changes is that a function refuses where it wrongly
+answered. `apply (invert op t) (apply op t) = t` — the doc comment's defining law, and the only
+promise `invert` ever made — is unchanged and still proved, because it was always about an ACCEPTED
+op. A caller that checks acceptance before inverting sees nothing at all. A caller that does not now
+gets a rejection instead of a live operation, which is the point. The conformance kit carries the
+new clause as a law (`columnarOpLaws`' "an inverse exists only for an applicable op", with an
+injectable `invert` seam so the pre-181 clause can be handed to the kit and watched to lose), and
+the model proves it over all six operations, any table and any evaluator
+(`invert_only_for_applicable`).
+
 ## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 
 **This section describes a DRAFT slot.** `<Version>` reads `0.24.0` and no `v0.24.0` tag exists
