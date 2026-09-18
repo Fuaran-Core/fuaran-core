@@ -611,6 +611,67 @@ run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`;
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
 
+### A lost pass has three classes, and only one of them is a proof failure (Phase 166)
+
+Over 2026-09-14/15 the leg lost passes three different ways and all three read as "did NOT verify".
+Phase 162's worker watched `WireDecode.fst` and `JsonParse.fst` — modules it never touched — fail
+with every printed query discharged and no error, warning or exception anywhere in the log; both
+retried green. Phase 149's saw `fstar.exe` killed mid-`Preservation` at a different lemma each time,
+with free memory under 3 GB and six provers on the machine. Phase 155's saw the per-invocation cache
+empty mid-run, so extraction failed with F\* error 317 on a dependency whose `.checked` file had
+vanished. Each cost a session twenty minutes of reading a whole log to establish that nothing had
+been refuted. Phase 164 closed "implausibly fast reads as green"; this closes "abnormally terminated
+reads as a proof failure", and a leg that cannot tell the two apart is not an evidence instrument in
+either direction.
+
+So a non-zero prover exit is **classified** before it is reported:
+
+```
+==== proofs: Refuted.fst did NOT verify (run 1 of 1)
+==== proofs: ColumnOps.fst ABORTED (no diagnostic) — exit -1 after 8s on run 1 of 1, attempt 1 of 2. Nothing was refuted: …
+==== proofs: retrying ColumnOps.fst once — the retry is BOUNDED (one per module per run) and its timing is a WARM measurement, …
+==== proofs: ColumnOps.fst verified ON RETRY — run 1 of 1, 13s (warm cache: NOT a cold measurement), every query 3/3 under --quake
+==== proofs: extraction of PMain hit an APPARATUS fault, not a proof failure: the checked-module file it needs is missing — …\PDep.fst.checked
+```
+
+- **REFUTATION** is the prover exiting non-zero **having printed a diagnostic** — an error line, the
+  end-of-run error summary, `Failed to prove`, `Unexpected`, or a failing-quake line. It keeps the
+  words the leg has always used and the prover's own exit code, and it is **never retried**: a
+  refutation is a result, and re-running it to see whether it goes away is the habit this leg exists
+  to make impossible. It obliges reading the model.
+- **ABORT** is the prover exiting non-zero having printed **nothing** about an undischarged query.
+  Nothing was refuted; the prover died. It is **retried once** in the same run — bounded at one
+  retry per module per run, logged as a retry — and a **second** abort of the same module fails the
+  leg with **exit 3**, which is not a refutation's code. It obliges reading the machine: every run
+  now opens with a **pre-flight line** carrying the concurrent `fstar` process count and the free
+  physical memory, and the abort prints the same snapshot again at the moment it happened, so a
+  post-mortem can tell a contended machine from a broken model without asking anyone who was there.
+- **APPARATUS** is the leg's own machinery failing — at extract, a dependency's `.checked` file
+  missing from the cache, or the cache directory gone. It is reported **naming the file**, with
+  **exit 4**, and it is not retried, because the thing it needs is gone. It obliges finding the
+  second writer.
+
+A retry's clock measures a cache the aborted attempt had already half-filled, so it is **not a cold
+run**: its line says so and it is compared to neither the budget nor the floor. The leg's closing
+verdict names every abort that was retried and passed, because a green run that lost a prover and
+got it back is not the same evidence as one that did not, and finding that out should not require
+scrolling. Every prover invocation's whole output is teed to `proofs/obj/logs/`, and each verdict
+names the transcript it was read from.
+
+**Two things about this were measured rather than assumed, and both inverted the phase's own
+premise.** The first: on the pinned prover a diagnostic reads `* Error 19 at Foo.fst(8,39-8,41):`,
+**not** `(Error 19)` — so a discriminator that knew only the parenthesised spelling classified a
+plain error as an ABORT and *retried* it, which is the exact inversion this verdict exists to
+prevent. It was caught by a probe that staged a missing model file, and not by the
+deliberately-false-lemma probe, which had passed a moment earlier through `Failed to prove` alone
+and was therefore agreeing for the wrong reason. Both spellings are matched now, with the error
+summary as a third witness. The second: **a failed extraction is not always a non-zero exit.**
+Removing a dependency's `.checked` underneath an extraction makes F\* print `* Error 317` and
+`1 error was reported` and then **exit 0**, so the fault fell past an exit-code test and surfaced as
+"extraction produced no `<module>.fs`" — a true sentence naming the symptom and not one thing about
+the cause. Failure is therefore decided as *non-zero exit **or** no file produced*, and only then
+classified.
+
 ### "Cold cache" means it, and "verified" has a floor (Phase 164)
 
 On 2026-09-14 a background `check.ps1` was orphaned at a turn boundary and went on writing the
