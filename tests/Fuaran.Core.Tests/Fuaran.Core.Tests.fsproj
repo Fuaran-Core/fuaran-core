@@ -230,6 +230,12 @@
          reads no other test module, so the position is free; appended at the end of the
          list (append-only registration). -->
     <Compile Include="PackageRosterTests.fs" />
+    <!-- Phase 183 — the committed public-surface baseline per package: the renderer over IL
+         metadata, the baseline diff, and the classifier that tells a record/union/interface
+         widening from ordinary additive growth. Reads PackageRosterTests.fs above for the ONE
+         derivation of "what ships" and Snapshots.fs for the repository root, so it follows
+         both; appended at the end of the list (append-only registration). -->
+    <Compile Include="PublicSurfaceTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

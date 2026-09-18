@@ -1,5 +1,50 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-19 — D45: the class of a surface move is COMPUTED at the gate, and the gate refuses an unclassified move rather than a breaking one
+
+**Decided (Phase 183).** Every packable package carries a committed baseline of its public contract
+at `api/<package>.txt`, rendered from the built assembly's IL metadata, and the `Public surface`
+test family diffs each package's freshly-rendered surface against it on every gate run. A move is
+classified — `removal` / `retype` / `record-widening` / `union-widening` / `interface-widening` /
+`additive` — and the gate fails when a surface moved and its baseline did not. See
+[`STABILITY.md`](STABILITY.md) "Public-surface baselines" for the vocabulary and what each class
+costs a pinned consumer.
+
+**Why a gate at all.** The draft-slot rule asks one question of every commit that touches a
+package: does its public contract move, and in which class. On 2026-09-15 that question was
+answered twice by hand, in two workers' deviations records — "additive, and it advances because the
+slot is tagged"; "additive, rides the draft". Both were right. Neither was checked, and neither
+could be: this repository had no surface baseline, so the only available instrument was a reading
+of the diff by the person who wrote it.
+
+**The gate is on the CLASSIFICATION, not on the class.** Additive or breaking, a classified move
+passes. This is the 2026-08-04 record-widening dispensation implemented rather than restated: the
+estate permits widening, so a gate that refused a breaking class would be enforcing a rule nobody
+made. What it refuses is a surface that moved while its baseline stood still — the state in which
+no reviewer can apply the dispensation, because nothing says what there is to permit.
+
+**Rejected: a removal-only differ, which is the obvious reuse.** The shape already in the estate
+renders a flat token list and calls a removed token breaking and an added one additive. Half of
+what motivates this phase is invisible to it. Adding a case to a closed union REMOVES NOTHING — it
+emits a factory, an `IsCase` property and a `Tags` literal — so the reading is "ordinary growth",
+which is exactly the reading that lets a union widening occupy an unchanged feed slot and reach a
+consumer as an `InvalidCastException` with no compile signal anywhere. So the renderer marks the
+three F#-specific shapes that are source-breaking while looking additive, off the
+`CompilationMappingAttribute` the compiler already emits, and the classifier checks each addition's
+OWNER against the baseline — a field or case on a type the baseline never published is additive,
+because nobody could have constructed or matched it.
+
+**Rejected: rendering through `MetadataLoadContext` or ordinary reflection.** Several packable
+projects are not referenced by the test project, and both alternatives need the whole dependency
+closure resolvable — or the assembly loadable — before they can name a parameter's type.
+`MetadataReader` needs no resolution at all: a type from another assembly is named from its
+TypeReference row. That is the stronger property here and it is what lets one family cover every
+package rather than the subset the suite happens to link.
+
+**Rejected: renaming the whole thing a "no breaking changes" gate.** The surface is not the
+semantics, and saying so once here is cheaper than having it inferred. A function whose signature
+is unchanged and whose behaviour reversed passes this gate and always will.
+
 ## 2026-09-17 — D44: the generator's LAST two string channels carry their refusals — `fsharpTypes` and `jsonSchema` return `Result`, because the alternative was a throw wearing a different name
 
 **Decided (Phase 195).** Guiding principle 3 admits no exception as a rejection, and

@@ -1,0 +1,78 @@
+# Fuaran.Core.Ops — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Footprint..ctor(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
+field Fuaran.Core.Diff+DiffError`1+Tags.DuplicateIdInTree : System.Int32 (literal)
+field Fuaran.Core.Diff+DiffError`1+Tags.RootIdMismatch : System.Int32 (literal)
+field Fuaran.Core.Diff+DiffError`1+Tags.TargetNotAContainer : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.CannotRemoveRoot : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.DuplicateId : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.NotAContainer : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.Rejected : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.ReorderMismatch : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.UnknownNode : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.WouldNestUnderSelf : System.Int32 (literal)
+field Fuaran.Core.SkeletonOp`2+Tags.Batch : System.Int32 (literal)
+field Fuaran.Core.SkeletonOp`2+Tags.InsertChild : System.Int32 (literal)
+field Fuaran.Core.SkeletonOp`2+Tags.MoveNode : System.Int32 (literal)
+field Fuaran.Core.SkeletonOp`2+Tags.RemoveNode : System.Int32 (literal)
+field Fuaran.Core.SkeletonOp`2+Tags.ReorderChildren : System.Int32 (literal)
+method Fuaran.Core.Diff.toOpsContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
+method Fuaran.Core.Diff.toOps`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
+method Fuaran.Core.Ops.applyAllWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.Tuple`3<System.Int32, Fuaran.Core.Rejection`1<!!1>, !!0>>
+method Fuaran.Core.Ops.applyAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.Tuple`3<System.Int32, Fuaran.Core.Rejection`1<!!1>, !!0>>
+method Fuaran.Core.Ops.applyContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.Rejection`1<!!1>>
+method Fuaran.Core.Ops.apply`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.Rejection`1<!!1>>
+method Fuaran.Core.Ops.canApplyAllWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.Tuple`2<System.Int32, Fuaran.Core.Rejection`1<!!1>>>
+method Fuaran.Core.Ops.canApplyAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.Tuple`2<System.Int32, Fuaran.Core.Rejection`1<!!1>>>
+method Fuaran.Core.Ops.canApplyContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Rejection`1<!!1>>
+method Fuaran.Core.Ops.canApply`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Rejection`1<!!1>>
+method Fuaran.Core.Ops.footprint`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>) : Fuaran.Core.Footprint
+method Fuaran.Core.Ops.independent(Fuaran.Core.Footprint, Fuaran.Core.Footprint) : System.Boolean
+method Fuaran.Core.Ops.invert`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SkeletonOp`2<!!0, !!1>, Fuaran.Core.Rejection`1<!!1>>
+method Fuaran.Core.Ops.normalize`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>
+record-field Fuaran.Core.Footprint.ContentWrites #2 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
+record-field Fuaran.Core.Footprint.Reads #0 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
+record-field Fuaran.Core.Footprint.StructureWrites #1 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
+record-field Fuaran.Core.Footprint.UnknownParentWrites #3 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
+type Fuaran.Core.Diff (module)
+type Fuaran.Core.Diff+DiffError`1 (union)
+type Fuaran.Core.Diff+DiffError`1+DuplicateIdInTree (type)
+type Fuaran.Core.Diff+DiffError`1+RootIdMismatch (type)
+type Fuaran.Core.Diff+DiffError`1+Tags (type)
+type Fuaran.Core.Diff+DiffError`1+TargetNotAContainer (type)
+type Fuaran.Core.Footprint (record)
+type Fuaran.Core.Ops (module)
+type Fuaran.Core.Rejection`1 (union)
+type Fuaran.Core.Rejection`1+DuplicateId (type)
+type Fuaran.Core.Rejection`1+NotAContainer (type)
+type Fuaran.Core.Rejection`1+Rejected (type)
+type Fuaran.Core.Rejection`1+ReorderMismatch (type)
+type Fuaran.Core.Rejection`1+Tags (type)
+type Fuaran.Core.Rejection`1+UnknownNode (type)
+type Fuaran.Core.Rejection`1+WouldNestUnderSelf (type)
+type Fuaran.Core.SkeletonOp`2 (union)
+type Fuaran.Core.SkeletonOp`2+Batch (type)
+type Fuaran.Core.SkeletonOp`2+InsertChild (type)
+type Fuaran.Core.SkeletonOp`2+MoveNode (type)
+type Fuaran.Core.SkeletonOp`2+RemoveNode (type)
+type Fuaran.Core.SkeletonOp`2+ReorderChildren (type)
+type Fuaran.Core.SkeletonOp`2+Tags (type)
+union-case Fuaran.Core.Diff+DiffError`1.NewDuplicateIdInTree #1(!0)
+union-case Fuaran.Core.Diff+DiffError`1.NewRootIdMismatch #0(!0, !0)
+union-case Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer #2(!0, System.String)
+union-case Fuaran.Core.Rejection`1.CannotRemoveRoot #2()
+union-case Fuaran.Core.Rejection`1.NewDuplicateId #1(!0)
+union-case Fuaran.Core.Rejection`1.NewNotAContainer #4(!0, System.String)
+union-case Fuaran.Core.Rejection`1.NewRejected #6(System.String, System.String)
+union-case Fuaran.Core.Rejection`1.NewReorderMismatch #5(!0, Microsoft.FSharp.Collections.FSharpList`1<!0>, Microsoft.FSharp.Collections.FSharpList`1<!0>)
+union-case Fuaran.Core.Rejection`1.NewUnknownNode #0(!0, Microsoft.FSharp.Collections.FSharpList`1<!0>)
+union-case Fuaran.Core.Rejection`1.NewWouldNestUnderSelf #3(!0)
+union-case Fuaran.Core.SkeletonOp`2.NewBatch #4(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>)
+union-case Fuaran.Core.SkeletonOp`2.NewInsertChild #0(!1, !0)
+union-case Fuaran.Core.SkeletonOp`2.NewMoveNode #2(!1, !1)
+union-case Fuaran.Core.SkeletonOp`2.NewRemoveNode #1(!1)
+union-case Fuaran.Core.SkeletonOp`2.NewReorderChildren #3(!1, Microsoft.FSharp.Collections.FSharpList`1<!1>)

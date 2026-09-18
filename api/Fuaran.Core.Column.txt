@@ -1,0 +1,165 @@
+# Fuaran.Core.Column — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Column..ctor(System.String, Fuaran.Core.ColumnType, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>)
+ctor Fuaran.Core.SchemaDelta..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>, System.Boolean)
+ctor Fuaran.Core.Table..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Column>)
+field Fuaran.Core.AggFn+Tags.Count : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.CountDistinct : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.First : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.Last : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.Max : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.Mean : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.Median : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.Min : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.StdDev : System.Int32 (literal)
+field Fuaran.Core.AggFn+Tags.Sum : System.Int32 (literal)
+field Fuaran.Core.AggregateError+Tags.AggregateOverflow : System.Int32 (literal)
+field Fuaran.Core.AggregateError+Tags.IncompatibleAggType : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Bool : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Date : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Float : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Int : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Null : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Str : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Timestamp : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.LengthMismatch : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.Malformed : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.MalformedShape : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.MissingField : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.NonFiniteFloat : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.NotJson : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.TypeMismatch : System.Int32 (literal)
+field Fuaran.Core.ColumnError+Tags.UnknownType : System.Int32 (literal)
+field Fuaran.Core.ColumnType+Tags.BoolType : System.Int32 (literal)
+field Fuaran.Core.ColumnType+Tags.DateType : System.Int32 (literal)
+field Fuaran.Core.ColumnType+Tags.FloatType : System.Int32 (literal)
+field Fuaran.Core.ColumnType+Tags.IntType : System.Int32 (literal)
+field Fuaran.Core.ColumnType+Tags.StringType : System.Int32 (literal)
+field Fuaran.Core.ColumnType+Tags.TimestampType : System.Int32 (literal)
+field Fuaran.Core.DataSource+Tags.Embedded : System.Int32 (literal)
+field Fuaran.Core.DataSource+Tags.Ref : System.Int32 (literal)
+field Fuaran.Core.SchemaCompat+Tags.Breaking : System.Int32 (literal)
+field Fuaran.Core.SchemaCompat+Tags.Compatible : System.Int32 (literal)
+field Fuaran.Core.SchemaCompat+Tags.Unknown : System.Int32 (literal)
+method Fuaran.Core.CellModule.defaultFor(Fuaran.Core.ColumnType) : Fuaran.Core.Cell
+method Fuaran.Core.CellModule.isNull(Fuaran.Core.Cell) : System.Boolean
+method Fuaran.Core.CellModule.typeOf(Fuaran.Core.Cell) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ColumnType>
+method Fuaran.Core.ColumnCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.DataSource, Fuaran.Core.ColumnError>
+method Fuaran.Core.ColumnCodec.decodeJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.DataSource, Fuaran.Core.ColumnError>
+method Fuaran.Core.ColumnCodec.encode(Fuaran.Core.DataSource) : System.String
+method Fuaran.Core.ColumnCodec.encodeJson(Fuaran.Core.DataSource) : Fuaran.Core.JVal
+method Fuaran.Core.ColumnCodec.errorString(Fuaran.Core.ColumnError) : System.String
+method Fuaran.Core.ColumnCodec.tryEncode(Fuaran.Core.DataSource) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.ColumnError>
+method Fuaran.Core.ColumnModule.aggType(Fuaran.Core.AggFn, Fuaran.Core.ColumnType) : Fuaran.Core.ColumnType
+method Fuaran.Core.ColumnModule.aggregate(Fuaran.Core.AggFn, Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Cell, Fuaran.Core.AggregateError>
+method Fuaran.Core.ColumnModule.cell(System.Int32, Fuaran.Core.Column) : Fuaran.Core.Cell
+method Fuaran.Core.ColumnModule.create(System.String, Fuaran.Core.ColumnType, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>) : Fuaran.Core.Column
+method Fuaran.Core.ColumnModule.length(Fuaran.Core.Column) : System.Int32
+method Fuaran.Core.ColumnTypeModule.ofTag(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ColumnType>
+method Fuaran.Core.ColumnTypeModule.tag(Fuaran.Core.ColumnType) : System.String
+method Fuaran.Core.ColumnTypeModule.widens(Fuaran.Core.ColumnType, Fuaran.Core.ColumnType) : System.Boolean
+method Fuaran.Core.SchemaModule.classify(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.SchemaDelta) : Fuaran.Core.SchemaCompat
+method Fuaran.Core.SchemaModule.diff(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>) : Fuaran.Core.SchemaDelta
+method Fuaran.Core.SchemaModule.fingerprint(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>) : System.String
+method Fuaran.Core.TableModule.columnNames(Fuaran.Core.Table) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.TableModule.rowCount(Fuaran.Core.Table) : System.Int32
+method Fuaran.Core.TableModule.tryColumn(System.String, Fuaran.Core.Table) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Column>
+method Fuaran.Core.TableModule.validate(Fuaran.Core.Table) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.ColumnError>
+property Fuaran.Core.ColumnCodec.codec : Fuaran.Core.Corpus+Codec`1<Fuaran.Core.DataSource> { get }
+property Fuaran.Core.ColumnTypeModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ColumnType> { get }
+property Fuaran.Core.ColumnTypeModule.allTags : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
+property Fuaran.Core.TableModule.empty : Fuaran.Core.Table { get }
+record-field Fuaran.Core.Column.Cells #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>
+record-field Fuaran.Core.Column.Name #0 : System.String
+record-field Fuaran.Core.Column.Type #1 : Fuaran.Core.ColumnType
+record-field Fuaran.Core.SchemaDelta.Added #0 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>
+record-field Fuaran.Core.SchemaDelta.Removed #1 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>
+record-field Fuaran.Core.SchemaDelta.Reordered #3 : System.Boolean
+record-field Fuaran.Core.SchemaDelta.Retyped #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>
+record-field Fuaran.Core.Table.Columns #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Column>
+record-field Fuaran.Core.Table.Schema #0 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>
+type Fuaran.Core.AggFn (union)
+type Fuaran.Core.AggFn+Tags (type)
+type Fuaran.Core.AggregateError (union)
+type Fuaran.Core.AggregateError+AggregateOverflow (type)
+type Fuaran.Core.AggregateError+IncompatibleAggType (type)
+type Fuaran.Core.AggregateError+Tags (type)
+type Fuaran.Core.Cell (union)
+type Fuaran.Core.Cell+Bool (type)
+type Fuaran.Core.Cell+Date (type)
+type Fuaran.Core.Cell+Float (type)
+type Fuaran.Core.Cell+Int (type)
+type Fuaran.Core.Cell+Str (type)
+type Fuaran.Core.Cell+Tags (type)
+type Fuaran.Core.Cell+Timestamp (type)
+type Fuaran.Core.CellModule (module)
+type Fuaran.Core.Column (record)
+type Fuaran.Core.ColumnCodec (module)
+type Fuaran.Core.ColumnError (union)
+type Fuaran.Core.ColumnError+LengthMismatch (type)
+type Fuaran.Core.ColumnError+Malformed (type)
+type Fuaran.Core.ColumnError+MalformedShape (type)
+type Fuaran.Core.ColumnError+MissingField (type)
+type Fuaran.Core.ColumnError+NonFiniteFloat (type)
+type Fuaran.Core.ColumnError+NotJson (type)
+type Fuaran.Core.ColumnError+Tags (type)
+type Fuaran.Core.ColumnError+TypeMismatch (type)
+type Fuaran.Core.ColumnError+UnknownType (type)
+type Fuaran.Core.ColumnModule (module)
+type Fuaran.Core.ColumnType (union)
+type Fuaran.Core.ColumnType+Tags (type)
+type Fuaran.Core.ColumnTypeModule (module)
+type Fuaran.Core.DataSource (union)
+type Fuaran.Core.DataSource+Embedded (type)
+type Fuaran.Core.DataSource+Ref (type)
+type Fuaran.Core.DataSource+Tags (type)
+type Fuaran.Core.SchemaCompat (union)
+type Fuaran.Core.SchemaCompat+Breaking (type)
+type Fuaran.Core.SchemaCompat+Tags (type)
+type Fuaran.Core.SchemaCompat+Unknown (type)
+type Fuaran.Core.SchemaDelta (record)
+type Fuaran.Core.SchemaModule (module)
+type Fuaran.Core.Table (record)
+type Fuaran.Core.TableModule (module)
+union-case Fuaran.Core.AggFn.Count #4()
+union-case Fuaran.Core.AggFn.CountDistinct #9()
+union-case Fuaran.Core.AggFn.First #7()
+union-case Fuaran.Core.AggFn.Last #8()
+union-case Fuaran.Core.AggFn.Max #3()
+union-case Fuaran.Core.AggFn.Mean #1()
+union-case Fuaran.Core.AggFn.Median #5()
+union-case Fuaran.Core.AggFn.Min #2()
+union-case Fuaran.Core.AggFn.StdDev #6()
+union-case Fuaran.Core.AggFn.Sum #0()
+union-case Fuaran.Core.AggregateError.NewAggregateOverflow #1(System.String)
+union-case Fuaran.Core.AggregateError.NewIncompatibleAggType #0(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.Cell.NewBool #2(System.Boolean)
+union-case Fuaran.Core.Cell.NewDate #4(System.String)
+union-case Fuaran.Core.Cell.NewFloat #1(System.Double)
+union-case Fuaran.Core.Cell.NewInt #0(System.Int32)
+union-case Fuaran.Core.Cell.NewStr #3(System.String)
+union-case Fuaran.Core.Cell.NewTimestamp #5(System.String)
+union-case Fuaran.Core.Cell.Null #6()
+union-case Fuaran.Core.ColumnError.NewLengthMismatch #5(System.String, System.Int32, System.Int32)
+union-case Fuaran.Core.ColumnError.NewMalformed #7(System.String)
+union-case Fuaran.Core.ColumnError.NewMalformedShape #2(System.String)
+union-case Fuaran.Core.ColumnError.NewMissingField #1(System.String)
+union-case Fuaran.Core.ColumnError.NewNonFiniteFloat #6(System.String, System.String)
+union-case Fuaran.Core.ColumnError.NewNotJson #0(System.String)
+union-case Fuaran.Core.ColumnError.NewTypeMismatch #4(System.String, System.String, System.String)
+union-case Fuaran.Core.ColumnError.NewUnknownType #3(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.ColumnType.BoolType #2()
+union-case Fuaran.Core.ColumnType.DateType #4()
+union-case Fuaran.Core.ColumnType.FloatType #1()
+union-case Fuaran.Core.ColumnType.IntType #0()
+union-case Fuaran.Core.ColumnType.StringType #3()
+union-case Fuaran.Core.ColumnType.TimestampType #5()
+union-case Fuaran.Core.DataSource.NewEmbedded #0(Fuaran.Core.Table)
+union-case Fuaran.Core.DataSource.NewRef #1(System.String)
+union-case Fuaran.Core.SchemaCompat.Compatible #0()
+union-case Fuaran.Core.SchemaCompat.NewBreaking #1(Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.SchemaCompat.NewUnknown #2(Microsoft.FSharp.Collections.FSharpList`1<System.String>)

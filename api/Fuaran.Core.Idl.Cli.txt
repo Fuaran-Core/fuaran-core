@@ -1,0 +1,8 @@
+# Fuaran.Core.Idl.Cli — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+method Fuaran.Core.Idl.Cli.Program.main(System.String[]) : System.Int32
+type Fuaran.Core.Idl.Cli.Program (module)
