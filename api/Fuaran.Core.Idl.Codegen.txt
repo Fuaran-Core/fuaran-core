@@ -1,0 +1,441 @@
+# Fuaran.Core.Idl.Codegen — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Idl.Diff+CaseSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>, System.String)
+ctor Fuaran.Core.Idl.Diff+Classification..ctor(Fuaran.Core.Idl.Diff+Change, Fuaran.Core.Idl.Diff+Severity, System.String, System.String)
+ctor Fuaran.Core.Idl.Diff+EnumSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>)
+ctor Fuaran.Core.Idl.Diff+FieldSnap..ctor(System.String, System.String, System.String, System.String, System.String, System.String, System.String, System.String)
+ctor Fuaran.Core.Idl.Diff+Host..ctor(System.String, System.String, Fuaran.Core.Idl.Diff+HostRole)
+ctor Fuaran.Core.Idl.Diff+Obligation..ctor(System.String, Fuaran.Core.Idl.Diff+Strength, System.String)
+ctor Fuaran.Core.Idl.Diff+Snapshot..ctor(System.Int32, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+UnionSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+EnumSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>, System.String, System.String)
+ctor Fuaran.Core.Idl.Diff+UnionSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+CaseSnap>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+ctor Fuaran.Core.Idl.Diff+Verdict..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, Fuaran.Core.Versioning+Evolution, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence>, System.String, System.String)
+ctor Fuaran.Core.Idl.ExternalLeg..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String>>>)
+ctor Fuaran.Core.Idl.FStarTarget+Provenance..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+ctor Fuaran.Core.Idl.FStarTarget+Verdict..ctor(System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+ctor Fuaran.Core.Idl.Gen+GenSupport..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Gen+KindProjection>)
+ctor Fuaran.Core.Idl.Gen+KindProjection..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+ctor Fuaran.Core.Idl.HostPreludeRef..ctor(System.String, System.String)
+ctor Fuaran.Core.Idl.SpikeInput..ctor(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Proposal, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, System.Int32, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ExternalLeg>)
+ctor Fuaran.Core.Idl.SpikeLeg..ctor(System.String, System.Boolean, System.String)
+ctor Fuaran.Core.Idl.SpikeReport..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.SpikeLeg>, System.String, System.Boolean)
+ctor Fuaran.Core.Idl.SupportDocument..ctor(Fuaran.Core.Idl.Gen+GenSupport, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostPreludeRef>)
+ctor Fuaran.Core.Idl.Trust+AllowEntry..ctor(System.String, System.String, System.String)
+ctor Fuaran.Core.Idl.Trust+Policy..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Trust+AllowEntry>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>)
+field Fuaran.Core.Idl.CodegenError+Tags.MultiChildFieldKind : System.Int32 (literal)
+field Fuaran.Core.Idl.CodegenError+Tags.RequiredEnvelopeField : System.Int32 (literal)
+field Fuaran.Core.Idl.CodegenError+Tags.UndeclaredHardenToken : System.Int32 (literal)
+field Fuaran.Core.Idl.CodegenError+Tags.UnmodellableInFStar : System.Int32 (literal)
+field Fuaran.Core.Idl.CodegenError+Tags.UnsupportedConstruct : System.Int32 (literal)
+field Fuaran.Core.Idl.CodegenError+Tags.UnsupportedDefault : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Bump+Tags.Bumped : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Bump+Tags.Undecided : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.ArtifactVersionChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.DefaultAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.DefaultChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.DefaultRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.EnumAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.EnumCaseAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.EnumCaseAnnotationsChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.EnumCaseRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.EnumHostMappingChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.EnumRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.FieldAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.FieldAnnotationsChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.FieldHostSurfaceChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.FieldOptionalityChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.FieldRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.FieldTypeChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.HardenPolicyChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.KindAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.KindAnnotationsChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.KindCategoryChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.KindRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.KindRenamed : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.OpAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.OpRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.RecordAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.RecordRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.UnionAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.UnionCaseAdded : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.UnionCaseAnnotationsChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.UnionCaseRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.UnionParamsChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.UnionRemoved : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.UnionTransparencyChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Change+Tags.WireShapeChanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+FSharpConsequence+Tags.ExhaustiveMatch : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+FSharpConsequence+Tags.FullLiteralConstruction : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+FSharpConsequence+Tags.GeneratedShapeUnreadable : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+FSharpConsequence+Tags.NoGeneratedShapeChange : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+FSharpConsequence+Tags.StalePackageSlot : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+FSharpConsequence+Tags.TypeNameReference : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+HostRole+Tags.CodecHost : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+HostRole+Tags.RenderProjection : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Owner+Tags.OKind : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Owner+Tags.ONodeEnvelope : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Owner+Tags.OOp : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Owner+Tags.ORecord : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Owner+Tags.OUnionCase : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Severity+Tags.Additive : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Severity+Tags.BreakingForEmitters : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Severity+Tags.BreakingWire : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Severity+Tags.HostSurfaceOnly : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Severity+Tags.Unclassifiable : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Strength+Tags.Check : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Strength+Tags.NotBound : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+Strength+Tags.Required : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+VerdictClass+Tags.Additive : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+VerdictClass+Tags.Breaking : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+VerdictClass+Tags.HostSurface : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+VerdictClass+Tags.Unchanged : System.Int32 (literal)
+field Fuaran.Core.Idl.Diff+VerdictClass+Tags.Undecided : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SBool : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SEnum : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SFloat : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SInt : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SJson : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SList : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SMap : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SNode : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SRecord : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SSentinel : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SStr : System.Int32 (literal)
+field Fuaran.Core.Idl.FStarTarget+Slot+Tags.SUnion : System.Int32 (literal)
+field Fuaran.Core.Idl.SupportArtifact.version : System.Int32 (literal)
+field Fuaran.Core.Idl.Trust+CustomGate+Tags.Allowed : System.Int32 (literal)
+field Fuaran.Core.Idl.Trust+CustomGate+Tags.InertPlaceholder : System.Int32 (literal)
+method Fuaran.Core.Idl.CodegenErrorModule.describe(Fuaran.Core.Idl.CodegenError) : System.String
+method Fuaran.Core.Idl.Diff.bumpProfile(Fuaran.Core.Versioning+Profile, Fuaran.Core.Idl.Diff+Verdict) : Fuaran.Core.Idl.Diff+Bump
+method Fuaran.Core.Idl.Diff.changes(Fuaran.Core.Idl.Diff+Snapshot, Fuaran.Core.Idl.Diff+Snapshot) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Change>
+method Fuaran.Core.Idl.Diff.classLabel(Fuaran.Core.Idl.Diff+VerdictClass) : System.String
+method Fuaran.Core.Idl.Diff.classOfLabel(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Diff+VerdictClass>
+method Fuaran.Core.Idl.Diff.classify(Fuaran.Core.Idl.Diff+Change) : Fuaran.Core.Idl.Diff+Classification
+method Fuaran.Core.Idl.Diff.classifyArtifacts(System.String, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Diff+Verdict, System.String>
+method Fuaran.Core.Idl.Diff.classifyDiff(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Diff+Verdict, System.String>
+method Fuaran.Core.Idl.Diff.consequenceLabel(Fuaran.Core.Idl.Diff+FSharpConsequence) : System.String
+method Fuaran.Core.Idl.Diff.consequenceWhy(Fuaran.Core.Idl.Diff+FSharpConsequence) : System.String
+method Fuaran.Core.Idl.Diff.consequences(Fuaran.Core.Idl.Diff+Classification) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence>
+method Fuaran.Core.Idl.Diff.evolution(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>) : Fuaran.Core.Versioning+Evolution
+method Fuaran.Core.Idl.Diff.exitCode(Fuaran.Core.Idl.Diff+VerdictClass) : System.Int32
+method Fuaran.Core.Idl.Diff.obligations(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Host>, Fuaran.Core.Idl.Diff+Classification) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Obligation>
+method Fuaran.Core.Idl.Diff.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Diff+Snapshot, System.String>
+method Fuaran.Core.Idl.Diff.report(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Host>, Fuaran.Core.Idl.Diff+Snapshot, Fuaran.Core.Idl.Diff+Snapshot) : System.String
+method Fuaran.Core.Idl.Diff.run(Microsoft.FSharp.Core.FSharpOption`1<System.String>, System.String, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Idl.Diff.runVerdict(Microsoft.FSharp.Core.FSharpOption`1<System.String>, System.String, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Fuaran.Core.Idl.Diff+Verdict>, System.String>
+method Fuaran.Core.Idl.Diff.snapshot(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Diff+Snapshot, System.String>
+method Fuaran.Core.Idl.Diff.verdictBlock(Fuaran.Core.Idl.Diff+Verdict) : System.String
+method Fuaran.Core.Idl.Diff.verdictClass(Fuaran.Core.Idl.Diff+Verdict) : Fuaran.Core.Idl.Diff+VerdictClass
+method Fuaran.Core.Idl.Diff.verdictOf(Fuaran.Core.Idl.Diff+Snapshot, Fuaran.Core.Idl.Diff+Snapshot) : Fuaran.Core.Idl.Diff+Verdict
+method Fuaran.Core.Idl.FStarTarget.beyondEnvelope(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.Idl.FStarTarget.partition(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.FStarTarget+Verdict>
+method Fuaran.Core.Idl.FStarTarget.proofKinds(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.Idl.FStarTarget.proofsModule(System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.FStarTarget.proofsModuleFrom(Fuaran.Core.Idl.FStarTarget+Provenance, System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.FStarTarget.vocabularyModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.FStarTarget.vocabularyModuleFrom(Fuaran.Core.Idl.FStarTarget+Provenance, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.fsharpModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.fsharpModuleWith(Fuaran.Core.Idl.Gen+GenSupport, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.fsharpTypes(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.fsharpValue(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Idl.Gen.jsonSchema(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.provenanceHeader(System.String, System.String, System.String) : System.String
+method Fuaran.Core.Idl.Gen.typescriptModule(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.typescriptValue(Fuaran.Core.Idl.IdlValue) : System.String
+method Fuaran.Core.Idl.ProposalSpike.render(Fuaran.Core.Idl.SpikeReport) : System.String
+method Fuaran.Core.Idl.ProposalSpike.run(Fuaran.Core.Idl.SpikeInput) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SpikeReport, System.String>
+method Fuaran.Core.Idl.SupportArtifact.json(Fuaran.Core.Idl.SupportDocument) : Fuaran.Core.JVal
+method Fuaran.Core.Idl.SupportArtifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
+method Fuaran.Core.Idl.SupportArtifact.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
+method Fuaran.Core.Idl.SupportArtifact.render(Fuaran.Core.Idl.SupportDocument) : System.String
+method Fuaran.Core.Idl.Trust.checkHardenPolicy(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Trust.harden(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.IdlValue) : Fuaran.Core.Idl.IdlValue
+method Fuaran.Core.Idl.Trust.hardenOrRefuse(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Trust.scaffoldFSharp(Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.Idl, System.String, System.String, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+property Fuaran.Core.Idl.Diff+Owner.Describe : System.String { get }
+property Fuaran.Core.Idl.Diff+Owner.Key : System.String { get }
+property Fuaran.Core.Idl.Diff.allClasses : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+VerdictClass> { get }
+property Fuaran.Core.Idl.Diff.allConsequences : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence> { get }
+property Fuaran.Core.Idl.Diff.consequenceTable : System.String { get }
+property Fuaran.Core.Idl.Diff.declaredRoster : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Host> { get }
+property Fuaran.Core.Idl.FStarTarget+ProvenanceModule.supplied : Fuaran.Core.Idl.FStarTarget+Provenance { get }
+property Fuaran.Core.Idl.FStarTarget.presenceSplitAt : System.Int32 { get }
+property Fuaran.Core.Idl.Gen+GenSupport.Empty : Fuaran.Core.Idl.Gen+GenSupport { get }
+property Fuaran.Core.Idl.SupportDocument.Empty : Fuaran.Core.Idl.SupportDocument { get }
+record-field Fuaran.Core.Idl.Diff+CaseSnap.Annotations #1 : System.String
+record-field Fuaran.Core.Idl.Diff+CaseSnap.Fields #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>
+record-field Fuaran.Core.Idl.Diff+Classification.Change #0 : Fuaran.Core.Idl.Diff+Change
+record-field Fuaran.Core.Idl.Diff+Classification.Citation #3 : System.String
+record-field Fuaran.Core.Idl.Diff+Classification.Rationale #2 : System.String
+record-field Fuaran.Core.Idl.Diff+Classification.Severity #1 : Fuaran.Core.Idl.Diff+Severity
+record-field Fuaran.Core.Idl.Diff+EnumSnap.CaseAnnotations #2 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Diff+EnumSnap.HostCases #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.Diff+EnumSnap.WireCases #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.Diff+FieldSnap.Annotations #7 : System.String
+record-field Fuaran.Core.Idl.Diff+FieldSnap.Label #1 : System.String
+record-field Fuaran.Core.Idl.Diff+FieldSnap.Name #0 : System.String
+record-field Fuaran.Core.Idl.Diff+FieldSnap.Opt #6 : System.String
+record-field Fuaran.Core.Idl.Diff+FieldSnap.OptClass #5 : System.String
+record-field Fuaran.Core.Idl.Diff+FieldSnap.TypeHost #4 : System.String
+record-field Fuaran.Core.Idl.Diff+FieldSnap.TypeTag #2 : System.String
+record-field Fuaran.Core.Idl.Diff+FieldSnap.TypeWire #3 : System.String
+record-field Fuaran.Core.Idl.Diff+Host.Id #0 : System.String
+record-field Fuaran.Core.Idl.Diff+Host.Language #1 : System.String
+record-field Fuaran.Core.Idl.Diff+Host.Role #2 : Fuaran.Core.Idl.Diff+HostRole
+record-field Fuaran.Core.Idl.Diff+Obligation.Note #2 : System.String
+record-field Fuaran.Core.Idl.Diff+Obligation.Strength #1 : Fuaran.Core.Idl.Diff+Strength
+record-field Fuaran.Core.Idl.Diff+Obligation.Surface #0 : System.String
+record-field Fuaran.Core.Idl.Diff+Snapshot.Defaults #9 : Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Enums #7 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+EnumSnap>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Harden #12 : System.String
+record-field Fuaran.Core.Idl.Diff+Snapshot.KindAnnotations #3 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Diff+Snapshot.KindCategory #2 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Kinds #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>
+record-field Fuaran.Core.Idl.Diff+Snapshot.NodeFields #10 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>
+record-field Fuaran.Core.Idl.Diff+Snapshot.OpAnnotations #5 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Ops #4 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Records #8 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Unions #6 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+UnionSnap>
+record-field Fuaran.Core.Idl.Diff+Snapshot.Version #0 : System.Int32
+record-field Fuaran.Core.Idl.Diff+Snapshot.Wire #11 : System.String
+record-field Fuaran.Core.Idl.Diff+UnionSnap.CaseOrder #2 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.Diff+UnionSnap.Cases #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+CaseSnap>
+record-field Fuaran.Core.Idl.Diff+UnionSnap.Params #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.Diff+UnionSnap.TransparentCase #3 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.Diff+Verdict.BreaksEmitters #3 : System.Boolean
+record-field Fuaran.Core.Idl.Diff+Verdict.Changes #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>
+record-field Fuaran.Core.Idl.Diff+Verdict.Evolution #1 : Fuaran.Core.Versioning+Evolution
+record-field Fuaran.Core.Idl.Diff+Verdict.FSharpConsequences #4 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence>
+record-field Fuaran.Core.Idl.Diff+Verdict.ProfileAdvice #6 : System.String
+record-field Fuaran.Core.Idl.Diff+Verdict.StabilityImpact #5 : System.String
+record-field Fuaran.Core.Idl.Diff+Verdict.Undecided #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>
+record-field Fuaran.Core.Idl.ExternalLeg.Name #0 : System.String
+record-field Fuaran.Core.Idl.ExternalLeg.Run #1 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String>>>
+record-field Fuaran.Core.Idl.FStarTarget+Provenance.Origin #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.FStarTarget+Provenance.Proves #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.FStarTarget+Verdict.Refusal #1 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.FStarTarget+Verdict.Tag #0 : System.String
+record-field Fuaran.Core.Idl.Gen+GenSupport.AccessorSplice #4 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.Gen+GenSupport.CaseRefines #5 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Idl.Gen+GenSupport.DecodeSplice #3 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.Gen+GenSupport.Docs #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>
+record-field Fuaran.Core.Idl.Gen+GenSupport.EncodeSplice #2 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.Gen+GenSupport.KindProjections #6 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Gen+KindProjection>
+record-field Fuaran.Core.Idl.Gen+GenSupport.TypeSplice #1 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.Gen+KindProjection.Decoder #2 : System.String
+record-field Fuaran.Core.Idl.Gen+KindProjection.Encoder #1 : System.String
+record-field Fuaran.Core.Idl.Gen+KindProjection.Mk #3 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.Gen+KindProjection.SpecDecl #0 : System.String
+record-field Fuaran.Core.Idl.HostPreludeRef.Module #0 : System.String
+record-field Fuaran.Core.Idl.HostPreludeRef.Path #1 : System.String
+record-field Fuaran.Core.Idl.SpikeInput.Base #0 : Fuaran.Core.Idl.Idl
+record-field Fuaran.Core.Idl.SpikeInput.Corpus #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>
+record-field Fuaran.Core.Idl.SpikeInput.External #5 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ExternalLeg>
+record-field Fuaran.Core.Idl.SpikeInput.FuzzSeed #3 : System.Int32
+record-field Fuaran.Core.Idl.SpikeInput.FuzzVectors #4 : System.Int32
+record-field Fuaran.Core.Idl.SpikeInput.Proposal #1 : Fuaran.Core.Idl.Proposal
+record-field Fuaran.Core.Idl.SpikeLeg.Detail #2 : System.String
+record-field Fuaran.Core.Idl.SpikeLeg.Name #0 : System.String
+record-field Fuaran.Core.Idl.SpikeLeg.Passed #1 : System.Boolean
+record-field Fuaran.Core.Idl.SpikeReport.CostReport #3 : System.String
+record-field Fuaran.Core.Idl.SpikeReport.Defects #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.SpikeReport.Green #4 : System.Boolean
+record-field Fuaran.Core.Idl.SpikeReport.Legs #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.SpikeLeg>
+record-field Fuaran.Core.Idl.SpikeReport.ProposalId #0 : System.String
+record-field Fuaran.Core.Idl.SupportDocument.HostPrelude #1 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostPreludeRef>
+record-field Fuaran.Core.Idl.SupportDocument.Support #0 : Fuaran.Core.Idl.Gen+GenSupport
+record-field Fuaran.Core.Idl.Trust+AllowEntry.ComponentId #1 : System.String
+record-field Fuaran.Core.Idl.Trust+AllowEntry.Hash #2 : System.String
+record-field Fuaran.Core.Idl.Trust+AllowEntry.ModuleId #0 : System.String
+record-field Fuaran.Core.Idl.Trust+Policy.Allowlist #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Trust+AllowEntry>
+record-field Fuaran.Core.Idl.Trust+Policy.MarkdownFields #2 : Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>
+record-field Fuaran.Core.Idl.Trust+Policy.UrlFields #1 : Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>
+type Fuaran.Core.Idl.CodegenError (union)
+type Fuaran.Core.Idl.CodegenError+MultiChildFieldKind (type)
+type Fuaran.Core.Idl.CodegenError+RequiredEnvelopeField (type)
+type Fuaran.Core.Idl.CodegenError+Tags (type)
+type Fuaran.Core.Idl.CodegenError+UndeclaredHardenToken (type)
+type Fuaran.Core.Idl.CodegenError+UnmodellableInFStar (type)
+type Fuaran.Core.Idl.CodegenError+UnsupportedConstruct (type)
+type Fuaran.Core.Idl.CodegenError+UnsupportedDefault (type)
+type Fuaran.Core.Idl.CodegenErrorModule (module)
+type Fuaran.Core.Idl.Diff (module)
+type Fuaran.Core.Idl.Diff+Bump (union)
+type Fuaran.Core.Idl.Diff+Bump+Bumped (type)
+type Fuaran.Core.Idl.Diff+Bump+Tags (type)
+type Fuaran.Core.Idl.Diff+Bump+Undecided (type)
+type Fuaran.Core.Idl.Diff+CaseSnap (record)
+type Fuaran.Core.Idl.Diff+Change (union)
+type Fuaran.Core.Idl.Diff+Change+ArtifactVersionChanged (type)
+type Fuaran.Core.Idl.Diff+Change+DefaultAdded (type)
+type Fuaran.Core.Idl.Diff+Change+DefaultChanged (type)
+type Fuaran.Core.Idl.Diff+Change+DefaultRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+EnumAdded (type)
+type Fuaran.Core.Idl.Diff+Change+EnumCaseAdded (type)
+type Fuaran.Core.Idl.Diff+Change+EnumCaseAnnotationsChanged (type)
+type Fuaran.Core.Idl.Diff+Change+EnumCaseRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+EnumHostMappingChanged (type)
+type Fuaran.Core.Idl.Diff+Change+EnumRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+FieldAdded (type)
+type Fuaran.Core.Idl.Diff+Change+FieldAnnotationsChanged (type)
+type Fuaran.Core.Idl.Diff+Change+FieldHostSurfaceChanged (type)
+type Fuaran.Core.Idl.Diff+Change+FieldOptionalityChanged (type)
+type Fuaran.Core.Idl.Diff+Change+FieldRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+FieldTypeChanged (type)
+type Fuaran.Core.Idl.Diff+Change+HardenPolicyChanged (type)
+type Fuaran.Core.Idl.Diff+Change+KindAdded (type)
+type Fuaran.Core.Idl.Diff+Change+KindAnnotationsChanged (type)
+type Fuaran.Core.Idl.Diff+Change+KindCategoryChanged (type)
+type Fuaran.Core.Idl.Diff+Change+KindRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+KindRenamed (type)
+type Fuaran.Core.Idl.Diff+Change+OpAdded (type)
+type Fuaran.Core.Idl.Diff+Change+OpRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+RecordAdded (type)
+type Fuaran.Core.Idl.Diff+Change+RecordRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+Tags (type)
+type Fuaran.Core.Idl.Diff+Change+UnionAdded (type)
+type Fuaran.Core.Idl.Diff+Change+UnionCaseAdded (type)
+type Fuaran.Core.Idl.Diff+Change+UnionCaseAnnotationsChanged (type)
+type Fuaran.Core.Idl.Diff+Change+UnionCaseRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+UnionParamsChanged (type)
+type Fuaran.Core.Idl.Diff+Change+UnionRemoved (type)
+type Fuaran.Core.Idl.Diff+Change+UnionTransparencyChanged (type)
+type Fuaran.Core.Idl.Diff+Change+WireShapeChanged (type)
+type Fuaran.Core.Idl.Diff+Classification (record)
+type Fuaran.Core.Idl.Diff+EnumSnap (record)
+type Fuaran.Core.Idl.Diff+FSharpConsequence (union)
+type Fuaran.Core.Idl.Diff+FSharpConsequence+Tags (type)
+type Fuaran.Core.Idl.Diff+FieldSnap (record)
+type Fuaran.Core.Idl.Diff+Host (record)
+type Fuaran.Core.Idl.Diff+HostRole (union)
+type Fuaran.Core.Idl.Diff+HostRole+Tags (type)
+type Fuaran.Core.Idl.Diff+Obligation (record)
+type Fuaran.Core.Idl.Diff+Owner (union)
+type Fuaran.Core.Idl.Diff+Owner+OKind (type)
+type Fuaran.Core.Idl.Diff+Owner+OOp (type)
+type Fuaran.Core.Idl.Diff+Owner+ORecord (type)
+type Fuaran.Core.Idl.Diff+Owner+OUnionCase (type)
+type Fuaran.Core.Idl.Diff+Owner+Tags (type)
+type Fuaran.Core.Idl.Diff+Severity (union)
+type Fuaran.Core.Idl.Diff+Severity+Tags (type)
+type Fuaran.Core.Idl.Diff+Snapshot (record)
+type Fuaran.Core.Idl.Diff+Strength (union)
+type Fuaran.Core.Idl.Diff+Strength+Tags (type)
+type Fuaran.Core.Idl.Diff+UnionSnap (record)
+type Fuaran.Core.Idl.Diff+Verdict (record)
+type Fuaran.Core.Idl.Diff+VerdictClass (union)
+type Fuaran.Core.Idl.Diff+VerdictClass+Tags (type)
+type Fuaran.Core.Idl.ExternalLeg (record)
+type Fuaran.Core.Idl.FStarTarget (module)
+type Fuaran.Core.Idl.FStarTarget+Provenance (record)
+type Fuaran.Core.Idl.FStarTarget+ProvenanceModule (module)
+type Fuaran.Core.Idl.FStarTarget+Slot (union)
+type Fuaran.Core.Idl.FStarTarget+Slot+SEnum (type)
+type Fuaran.Core.Idl.FStarTarget+Slot+SList (type)
+type Fuaran.Core.Idl.FStarTarget+Slot+SMap (type)
+type Fuaran.Core.Idl.FStarTarget+Slot+SRecord (type)
+type Fuaran.Core.Idl.FStarTarget+Slot+SSentinel (type)
+type Fuaran.Core.Idl.FStarTarget+Slot+SUnion (type)
+type Fuaran.Core.Idl.FStarTarget+Slot+Tags (type)
+type Fuaran.Core.Idl.FStarTarget+Verdict (record)
+type Fuaran.Core.Idl.Gen (module)
+type Fuaran.Core.Idl.Gen+GenSupport (record)
+type Fuaran.Core.Idl.Gen+KindProjection (record)
+type Fuaran.Core.Idl.HostPreludeRef (record)
+type Fuaran.Core.Idl.ProposalSpike (module)
+type Fuaran.Core.Idl.SpikeInput (record)
+type Fuaran.Core.Idl.SpikeLeg (record)
+type Fuaran.Core.Idl.SpikeReport (record)
+type Fuaran.Core.Idl.SupportArtifact (module)
+type Fuaran.Core.Idl.SupportDocument (record)
+type Fuaran.Core.Idl.Trust (module)
+type Fuaran.Core.Idl.Trust+AllowEntry (record)
+type Fuaran.Core.Idl.Trust+CustomGate (union)
+type Fuaran.Core.Idl.Trust+CustomGate+InertPlaceholder (type)
+type Fuaran.Core.Idl.Trust+CustomGate+Tags (type)
+type Fuaran.Core.Idl.Trust+Policy (record)
+union-case Fuaran.Core.Idl.CodegenError.NewMultiChildFieldKind #1(System.String)
+union-case Fuaran.Core.Idl.CodegenError.NewRequiredEnvelopeField #4(System.String, Fuaran.Core.Idl.IdlType, System.String)
+union-case Fuaran.Core.Idl.CodegenError.NewUndeclaredHardenToken #3(System.String, System.String)
+union-case Fuaran.Core.Idl.CodegenError.NewUnmodellableInFStar #2(System.String, System.String)
+union-case Fuaran.Core.Idl.CodegenError.NewUnsupportedConstruct #5(System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.CodegenError.NewUnsupportedDefault #0(Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.IdlValue)
+union-case Fuaran.Core.Idl.Diff+Bump.NewBumped #0(Fuaran.Core.Versioning+Profile)
+union-case Fuaran.Core.Idl.Diff+Bump.NewUndecided #1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>)
+union-case Fuaran.Core.Idl.Diff+Change.NewArtifactVersionChanged #0(System.Int32, System.Int32)
+union-case Fuaran.Core.Idl.Diff+Change.NewDefaultAdded #31(System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewDefaultChanged #33(System.String, System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewDefaultRemoved #32(System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewEnumAdded #15(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewEnumCaseAdded #17(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewEnumCaseAnnotationsChanged #30(System.String, System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewEnumCaseRemoved #18(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewEnumHostMappingChanged #19(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.Idl.Diff+Change.NewEnumRemoved #16(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewFieldAdded #22(Fuaran.Core.Idl.Diff+Owner, Fuaran.Core.Idl.Diff+FieldSnap)
+union-case Fuaran.Core.Idl.Diff+Change.NewFieldAnnotationsChanged #27(Fuaran.Core.Idl.Diff+Owner, System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewFieldHostSurfaceChanged #25(Fuaran.Core.Idl.Diff+Owner, System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewFieldOptionalityChanged #26(Fuaran.Core.Idl.Diff+Owner, System.String, Fuaran.Core.Idl.Diff+FieldSnap, Fuaran.Core.Idl.Diff+FieldSnap)
+union-case Fuaran.Core.Idl.Diff+Change.NewFieldRemoved #23(Fuaran.Core.Idl.Diff+Owner, System.String, Fuaran.Core.Idl.Diff+FieldSnap)
+union-case Fuaran.Core.Idl.Diff+Change.NewFieldTypeChanged #24(Fuaran.Core.Idl.Diff+Owner, System.String, Fuaran.Core.Idl.Diff+FieldSnap, Fuaran.Core.Idl.Diff+FieldSnap)
+union-case Fuaran.Core.Idl.Diff+Change.NewHardenPolicyChanged #2(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewKindAdded #3(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewKindAnnotationsChanged #29(Fuaran.Core.Idl.Diff+Owner, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewKindCategoryChanged #6(System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewKindRemoved #4(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewKindRenamed #5(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewOpAdded #7(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewOpRemoved #8(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewRecordAdded #20(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewRecordRemoved #21(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewUnionAdded #9(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewUnionCaseAdded #11(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewUnionCaseAnnotationsChanged #28(System.String, System.String, System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewUnionCaseRemoved #12(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewUnionParamsChanged #13(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.Idl.Diff+Change.NewUnionRemoved #10(System.String)
+union-case Fuaran.Core.Idl.Diff+Change.NewUnionTransparencyChanged #14(System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+union-case Fuaran.Core.Idl.Diff+Change.NewWireShapeChanged #1(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+FSharpConsequence.ExhaustiveMatch #1()
+union-case Fuaran.Core.Idl.Diff+FSharpConsequence.FullLiteralConstruction #0()
+union-case Fuaran.Core.Idl.Diff+FSharpConsequence.GeneratedShapeUnreadable #5()
+union-case Fuaran.Core.Idl.Diff+FSharpConsequence.NoGeneratedShapeChange #4()
+union-case Fuaran.Core.Idl.Diff+FSharpConsequence.StalePackageSlot #3()
+union-case Fuaran.Core.Idl.Diff+FSharpConsequence.TypeNameReference #2()
+union-case Fuaran.Core.Idl.Diff+HostRole.CodecHost #0()
+union-case Fuaran.Core.Idl.Diff+HostRole.RenderProjection #1()
+union-case Fuaran.Core.Idl.Diff+Owner.NewOKind #0(System.String)
+union-case Fuaran.Core.Idl.Diff+Owner.NewOOp #1(System.String)
+union-case Fuaran.Core.Idl.Diff+Owner.NewORecord #3(System.String)
+union-case Fuaran.Core.Idl.Diff+Owner.NewOUnionCase #2(System.String, System.String)
+union-case Fuaran.Core.Idl.Diff+Owner.ONodeEnvelope #4()
+union-case Fuaran.Core.Idl.Diff+Severity.Additive #0()
+union-case Fuaran.Core.Idl.Diff+Severity.BreakingForEmitters #1()
+union-case Fuaran.Core.Idl.Diff+Severity.BreakingWire #2()
+union-case Fuaran.Core.Idl.Diff+Severity.HostSurfaceOnly #3()
+union-case Fuaran.Core.Idl.Diff+Severity.Unclassifiable #4()
+union-case Fuaran.Core.Idl.Diff+Strength.Check #1()
+union-case Fuaran.Core.Idl.Diff+Strength.NotBound #2()
+union-case Fuaran.Core.Idl.Diff+Strength.Required #0()
+union-case Fuaran.Core.Idl.Diff+VerdictClass.Additive #2()
+union-case Fuaran.Core.Idl.Diff+VerdictClass.Breaking #3()
+union-case Fuaran.Core.Idl.Diff+VerdictClass.HostSurface #1()
+union-case Fuaran.Core.Idl.Diff+VerdictClass.Unchanged #0()
+union-case Fuaran.Core.Idl.Diff+VerdictClass.Undecided #4()
+union-case Fuaran.Core.Idl.FStarTarget+Slot.NewSEnum #6(System.String)
+union-case Fuaran.Core.Idl.FStarTarget+Slot.NewSList #9(Fuaran.Core.Idl.FStarTarget+Slot)
+union-case Fuaran.Core.Idl.FStarTarget+Slot.NewSMap #10(Fuaran.Core.Idl.FStarTarget+Slot)
+union-case Fuaran.Core.Idl.FStarTarget+Slot.NewSRecord #7(System.String)
+union-case Fuaran.Core.Idl.FStarTarget+Slot.NewSSentinel #5(System.String)
+union-case Fuaran.Core.Idl.FStarTarget+Slot.NewSUnion #8(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.FStarTarget+Slot>)
+union-case Fuaran.Core.Idl.FStarTarget+Slot.SBool #2()
+union-case Fuaran.Core.Idl.FStarTarget+Slot.SFloat #3()
+union-case Fuaran.Core.Idl.FStarTarget+Slot.SInt #1()
+union-case Fuaran.Core.Idl.FStarTarget+Slot.SJson #4()
+union-case Fuaran.Core.Idl.FStarTarget+Slot.SNode #11()
+union-case Fuaran.Core.Idl.FStarTarget+Slot.SStr #0()
+union-case Fuaran.Core.Idl.Trust+CustomGate.Allowed #0()
+union-case Fuaran.Core.Idl.Trust+CustomGate.NewInertPlaceholder #1(System.String)

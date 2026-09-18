@@ -12,6 +12,66 @@ Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Publi
 `fuaran-ui` GitHub Packages NuGet feed. The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
 
+## Public-surface baselines — the class of a move is a gate output, not an argument (Phase 183)
+
+Every packable package carries a committed baseline of its public contract at
+[`api/<package>.txt`](api/), rendered from the built assembly's IL metadata: one ordinal-sorted
+line per externally-visible type, member, record field and union case. The `Public surface` test
+family renders each package afresh on every gate run and diffs it against its baseline.
+
+**The gate refuses an UNCLASSIFIED move, never a breaking one.** Additive or breaking, a move whose
+baseline moved with it passes; what fails is a surface that moved while its baseline stood still.
+The estate's record-widening dispensation stands — widening is permitted, widening *in silence* is
+not — and the class below is what a reviewer applies it to.
+
+Regenerate with:
+
+```
+CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+```
+
+**The hazard is the one the same switch carries elsewhere in the estate: it rewrites EVERY drifted
+baseline, not the one you were looking at.** An unrelated drift sitting in the tree lands in your
+commit silently. Stage the baselines you meant to move BY NAME and read the rest back out.
+
+### The classes, and what each costs a pinned consumer
+
+The six are what the diff reports per move; the headline for a whole package is the most
+informative of them present (a required record field widens the primary constructor too, so it
+shows as `record-widening` beside a `retype`, and the headline names the cause rather than its side
+effect).
+
+| class | what moved | what it costs a consumer | ride or advance |
+|---|---|---|---|
+| `removal` | a baseline token with no counterpart — removed or renamed | call sites stop resolving | **advance `<Version>`** |
+| `retype` | the same member rendered differently: a parameter or return type changed, or a record field's POSITION moved | call sites stop type-checking; positional construction binds the wrong slot | **advance** |
+| `record-widening` | a field added to a record the baseline published | every full-literal construction fails, `FS0764` | **advance** |
+| `union-widening` | a case added to a union the baseline published | every exhaustive `match` becomes incomplete — and against a stale same-version pack, an `InvalidCastException` at run time with no compile signal at all | **advance** |
+| `interface-widening` | a member added to an interface the baseline published | every implementer stops compiling | **advance** |
+| `additive` | a new type, a new module function, a new member on a class — and a field or case on a type the baseline never published | nothing: a pinned consumer compiles either way | may **ride** the standing draft slot |
+
+The three middle rows are the reason this is not a plain token diff. A union case addition REMOVES
+NOTHING — it emits a new factory, a new `IsCase` property and a new `Tags` literal — so a
+removal-only differ reports it as ordinary growth. They are read off the
+`CompilationMappingAttribute` the F# compiler already emits, which is what makes them computable
+rather than arguable.
+
+### What the gate prints, and what it does not claim
+
+The family prints the class of every baseline that has moved **since the newest `vX.Y.Z` tag** —
+the "ride or advance" line that entries in this document wrote by hand until now. A package whose
+baseline the newest tag does not carry is reported as a first snapshot rather than as unchanged.
+
+Three boundaries, named rather than assumed:
+
+- **Not semantics.** A function whose signature is unchanged and whose behaviour reversed is
+  invisible here and always will be.
+- **Not the Fable source half.** Every packable project also ships its `.fs` sources under `fable/`
+  for a Fable consumer to compile; what is rendered is the managed assembly, which is the .NET
+  consumer's contract.
+- **Not internals.** An internal member cannot break a consumer in another assembly and is not in
+  the surface to begin with.
+
 ## The load-bearing invariant
 
 `Fuaran.Core.*` is **a library of generic functions over domain-witness records, never a
@@ -2173,12 +2233,14 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.26.0 (draft)
+## 0.26.0 — released 2026-09-17 as `v0.26.0`
 
-**This section describes a DRAFT slot.** `<Version>` reads `0.26.0` and no `v0.26.0` tag exists
-yet. `0.25.0` is tagged and published, so it is a released contract rather than a draft and nothing
-here can ride it; the commit carrying the first entry below advanced `<Version>` to this slot.
-Entries append under this header until the release gesture moves the number.
+**This slot is RELEASED.** `<Version>` reads `0.26.0` and the repository holds the `v0.26.0` tag, so
+this is a released contract rather than a draft and nothing further can ride it: the next
+public-contract change opens a `0.27.0` slot and advances `<Version>` with it. The entries below are
+what shipped in it. _(The draft-slot preamble this replaces still denied the tag after it was cut —
+found by Phase 199's own check, which fails a sentence that outlives the tag it denies, and retired
+here because Phase 183's gate cannot run on a red suite.)_
 
 ### The artifact ALWAYS carries its `harden` block (Phase 179) — ADDITIVE on the wire and on the API
 

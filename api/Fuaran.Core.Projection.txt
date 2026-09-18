@@ -1,0 +1,49 @@
+# Fuaran.Core.Projection — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Projection..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ProjectionLine>)
+ctor Fuaran.Core.ProjectionLine..ctor(System.String, System.String, System.Int32, System.String, System.String)
+ctor Fuaran.Core.ProjectionSnapshot..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>)
+ctor Fuaran.Core.ProjectionWitness`3..ctor(Fuaran.Core.NodeWitness`2<!0, !1>, Fuaran.Core.IdWitness`1<!1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!2>, System.String>>)
+field Fuaran.Core.Scope`1+Tags.ById : System.Int32 (literal)
+field Fuaran.Core.Scope`1+Tags.ChangedSince : System.Int32 (literal)
+field Fuaran.Core.Scope`1+Tags.Subtree : System.Int32 (literal)
+field Fuaran.Core.Scope`1+Tags.Whole : System.Int32 (literal)
+method Fuaran.Core.ProjectionModule.digestOf`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, !!0) : System.String
+method Fuaran.Core.ProjectionModule.lineOf`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, System.Int32, !!0) : Fuaran.Core.ProjectionLine
+method Fuaran.Core.ProjectionModule.lineText(Fuaran.Core.ProjectionLine) : System.String
+method Fuaran.Core.ProjectionModule.parseBack`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!2>, System.String>
+method Fuaran.Core.ProjectionModule.project`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, Fuaran.Core.Scope`1<!!1>, !!0) : Fuaran.Core.Projection
+method Fuaran.Core.ProjectionModule.render(Fuaran.Core.Projection) : System.String
+method Fuaran.Core.ProjectionModule.renderLine(Fuaran.Core.ProjectionLine) : System.String
+method Fuaran.Core.ProjectionModule.sizeOf(Fuaran.Core.Projection) : System.Int32
+method Fuaran.Core.ProjectionModule.snapshot`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, !!0) : Fuaran.Core.ProjectionSnapshot
+record-field Fuaran.Core.Projection.Lines #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ProjectionLine>
+record-field Fuaran.Core.ProjectionLine.Depth #2 : System.Int32
+record-field Fuaran.Core.ProjectionLine.Digest #3 : System.String
+record-field Fuaran.Core.ProjectionLine.IdKey #0 : System.String
+record-field Fuaran.Core.ProjectionLine.Kind #1 : System.String
+record-field Fuaran.Core.ProjectionLine.Snippet #4 : System.String
+record-field Fuaran.Core.ProjectionSnapshot.Digests #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.ProjectionWitness`3.Encode #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.ProjectionWitness`3.IdW #1 : Fuaran.Core.IdWitness`1<!1>
+record-field Fuaran.Core.ProjectionWitness`3.ParseBack #4 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!2>, System.String>>
+record-field Fuaran.Core.ProjectionWitness`3.Snippet #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.ProjectionWitness`3.Tree #0 : Fuaran.Core.NodeWitness`2<!0, !1>
+type Fuaran.Core.Projection (record)
+type Fuaran.Core.ProjectionLine (record)
+type Fuaran.Core.ProjectionModule (module)
+type Fuaran.Core.ProjectionSnapshot (record)
+type Fuaran.Core.ProjectionWitness`3 (record)
+type Fuaran.Core.Scope`1 (union)
+type Fuaran.Core.Scope`1+ById (type)
+type Fuaran.Core.Scope`1+ChangedSince (type)
+type Fuaran.Core.Scope`1+Subtree (type)
+type Fuaran.Core.Scope`1+Tags (type)
+union-case Fuaran.Core.Scope`1.NewById #1(!0)
+union-case Fuaran.Core.Scope`1.NewChangedSince #3(Fuaran.Core.ProjectionSnapshot)
+union-case Fuaran.Core.Scope`1.NewSubtree #2(!0)
+union-case Fuaran.Core.Scope`1.Whole #0()

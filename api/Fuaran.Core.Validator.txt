@@ -1,0 +1,60 @@
+# Fuaran.Core.Validator — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.ColumnRule..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Table, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<System.String>>>)
+ctor Fuaran.Core.ColumnValidator+Registry..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ColumnRule>)
+ctor Fuaran.Core.Defect`1..ctor(System.String, Fuaran.Core.Severity, System.String, Microsoft.FSharp.Core.FSharpOption`1<!0>)
+ctor Fuaran.Core.PackRule..ctor(System.String, System.String)
+ctor Fuaran.Core.RuleFamily`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.NodeWitness`2<!0, !1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!1>>>>)
+ctor Fuaran.Core.Validator+Registry`2..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.RuleFamily`2<!0, !1>>)
+ctor Fuaran.Core.Validator+Summary..ctor(System.Int32, System.Int32, System.Int32)
+field Fuaran.Core.Severity+Tags.Error : System.Int32 (literal)
+field Fuaran.Core.Severity+Tags.Info : System.Int32 (literal)
+field Fuaran.Core.Severity+Tags.Warning : System.Int32 (literal)
+method Fuaran.Core.ColumnValidator.inRange(System.String, System.Double, System.Double) : Fuaran.Core.ColumnRule
+method Fuaran.Core.ColumnValidator.notNull(System.String) : Fuaran.Core.ColumnRule
+method Fuaran.Core.ColumnValidator.ofType(System.String, Fuaran.Core.ColumnType) : Fuaran.Core.ColumnRule
+method Fuaran.Core.ColumnValidator.register(Fuaran.Core.ColumnRule, Fuaran.Core.ColumnValidator+Registry) : Fuaran.Core.ColumnValidator+Registry
+method Fuaran.Core.ColumnValidator.rule(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Table, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<System.String>>>) : Fuaran.Core.ColumnRule
+method Fuaran.Core.ColumnValidator.unique(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Fuaran.Core.ColumnRule
+method Fuaran.Core.ColumnValidator.validate(Fuaran.Core.ColumnValidator+Registry, Fuaran.Core.Table) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<System.String>>
+method Fuaran.Core.Validator.canonicalCodes`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : System.String
+method Fuaran.Core.Validator.empty`2() : Fuaran.Core.Validator+Registry`2<!!0, !!1>
+method Fuaran.Core.Validator.hasErrors`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : System.Boolean
+method Fuaran.Core.Validator.perNode`2(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!1>>>>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
+method Fuaran.Core.Validator.register`2(Fuaran.Core.RuleFamily`2<!!0, !!1>, Fuaran.Core.Validator+Registry`2<!!0, !!1>) : Fuaran.Core.Validator+Registry`2<!!0, !!1>
+method Fuaran.Core.Validator.runAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.Validator+Registry`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!1>>
+method Fuaran.Core.Validator.summary`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : Fuaran.Core.Validator+Summary
+property Fuaran.Core.ColumnValidator.empty : Fuaran.Core.ColumnValidator+Registry { get }
+record-field Fuaran.Core.ColumnRule.Id #0 : System.String
+record-field Fuaran.Core.ColumnRule.Run #1 : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Table, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<System.String>>>
+record-field Fuaran.Core.ColumnValidator+Registry.Rules #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ColumnRule>
+record-field Fuaran.Core.Defect`1.Code #0 : System.String
+record-field Fuaran.Core.Defect`1.Message #2 : System.String
+record-field Fuaran.Core.Defect`1.Node #3 : Microsoft.FSharp.Core.FSharpOption`1<!0>
+record-field Fuaran.Core.Defect`1.Severity #1 : Fuaran.Core.Severity
+record-field Fuaran.Core.PackRule.Pack #0 : System.String
+record-field Fuaran.Core.PackRule.RuleId #1 : System.String
+record-field Fuaran.Core.RuleFamily`2.Id #0 : System.String
+record-field Fuaran.Core.RuleFamily`2.Run #1 : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.NodeWitness`2<!0, !1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!1>>>>
+record-field Fuaran.Core.Validator+Registry`2.Families #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.RuleFamily`2<!0, !1>>
+record-field Fuaran.Core.Validator+Summary.Errors #0 : System.Int32
+record-field Fuaran.Core.Validator+Summary.Infos #2 : System.Int32
+record-field Fuaran.Core.Validator+Summary.Warnings #1 : System.Int32
+type Fuaran.Core.ColumnRule (record)
+type Fuaran.Core.ColumnValidator (module)
+type Fuaran.Core.ColumnValidator+Registry (record)
+type Fuaran.Core.Defect`1 (record)
+type Fuaran.Core.PackRule (record)
+type Fuaran.Core.RuleFamily`2 (record)
+type Fuaran.Core.Severity (union)
+type Fuaran.Core.Severity+Tags (type)
+type Fuaran.Core.Validator (module)
+type Fuaran.Core.Validator+Registry`2 (record)
+type Fuaran.Core.Validator+Summary (record)
+union-case Fuaran.Core.Severity.Error #0()
+union-case Fuaran.Core.Severity.Info #2()
+union-case Fuaran.Core.Severity.Warning #1()

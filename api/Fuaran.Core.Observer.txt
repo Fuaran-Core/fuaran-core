@@ -1,0 +1,31 @@
+# Fuaran.Core.Observer — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Observer.InMemoryObserver`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!1>>, Fuaran.Core.Observer.ObserverOptions`1<!1>)
+ctor Fuaran.Core.Observer.Observation`2..ctor(System.String, !0, Microsoft.FSharp.Collections.FSharpList`1<!1>)
+ctor Fuaran.Core.Observer.ObserverOptions`1..ctor(System.Boolean, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, System.Boolean>>)
+interface-marker Fuaran.Core.Observer.IObserver`2
+method Fuaran.Core.Observer.IObserver`2.Observe(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Observer.Observation`2<!0, !1>>
+method Fuaran.Core.Observer.IObserver`2.ObserveTree(System.String) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Observer.Observation`2<!0, !1>>
+method Fuaran.Core.Observer.IObserver`2.Register(System.String, !0) : System.Void
+method Fuaran.Core.Observer.IObserver`2.Subscribe(Microsoft.FSharp.Core.FSharpFunc`2<System.Tuple`2<System.String, Fuaran.Core.Observer.Observation`2<!0, !1>>, Microsoft.FSharp.Core.Unit>) : System.IDisposable
+method Fuaran.Core.Observer.IObserver`2.Unregister(System.String) : System.Void
+method Fuaran.Core.Observer.InMemoryObserver.createWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<!!1>>, Fuaran.Core.Observer.ObserverOptions`1<!!1>) : Fuaran.Core.Observer.InMemoryObserver`2<!!0, !!1>
+method Fuaran.Core.Observer.InMemoryObserver.create`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<!!1>>) : Fuaran.Core.Observer.InMemoryObserver`2<!!0, !!1>
+method Fuaran.Core.Observer.InMemoryObserver`2.RegisterNode(System.String, !0, Microsoft.FSharp.Core.FSharpOption`1<System.String>) : System.Void
+method Fuaran.Core.Observer.InMemoryObserver`2.Update(System.String, !0) : System.Void
+method Fuaran.Core.Observer.ObserverOptions.defaults`1() : Fuaran.Core.Observer.ObserverOptions`1<!!0>
+record-field Fuaran.Core.Observer.Observation`2.Flags #2 : Microsoft.FSharp.Collections.FSharpList`1<!1>
+record-field Fuaran.Core.Observer.Observation`2.Input #1 : !0
+record-field Fuaran.Core.Observer.Observation`2.NodeId #0 : System.String
+record-field Fuaran.Core.Observer.ObserverOptions`1.EmitOnFlagChangeOnly #0 : System.Boolean
+record-field Fuaran.Core.Observer.ObserverOptions`1.FlagsEqual #1 : Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, System.Boolean>>
+type Fuaran.Core.Observer.IObserver`2 (interface)
+type Fuaran.Core.Observer.InMemoryObserver (module)
+type Fuaran.Core.Observer.InMemoryObserver`2 (type)
+type Fuaran.Core.Observer.Observation`2 (record)
+type Fuaran.Core.Observer.ObserverOptions (module)
+type Fuaran.Core.Observer.ObserverOptions`1 (record)
