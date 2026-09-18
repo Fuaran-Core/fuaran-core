@@ -12,6 +12,13 @@ Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Publi
 `fuaran-ui` GitHub Packages NuGet feed. The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
 
+**Every released slot from `0.25.0` up has an entry header naming it, and the gate refuses a tag
+that has none** — the `Package roster` family reads `git tag` and holds this document to the set of
+releases the repository actually made, rather than to the standing `<Version>` alone. **`0.25.0` is
+the floor because it is the oldest slot for which the record can still be written from evidence**:
+every earlier release predates this document's per-slot classes, so entries for them would be
+invention rather than record, and they are deliberately not retro-fitted.
+
 ## Public-surface baselines — the class of a move is a gate output, not an argument (Phase 183)
 
 Every packable package carries a committed baseline of its public contract at
@@ -2530,6 +2537,86 @@ with a typed value behind it instead of a sentence.
 spike vocabulary's `Generated.fs`, the second domain's `DocGenerated.fs`, the three F\* vocabulary
 / proof pairs, and the classify fixtures — regenerates byte-identically across this change. The
 refusals are on paths no declared vocabulary reaches; what moved is what happens when one does.
+
+## 0.25.0 — the proof programme's certification leg, and the hardening policy's undeclared half — released 2026-09-15 as `v0.25.0`
+
+**This slot is RELEASED.** The repository holds the `v0.25.0` tag, made 2026-09-15 on `cf7a303`, so
+this is a released contract a consumer can pin today and nothing further may ride it. `<Version>`
+has since moved on through `0.26.0`.
+
+**This entry was written after the fact, by Phase 205, and that is itself the finding it records.**
+The slot was cut, filled, tagged and released while no entry header was ever opened under it, and
+the next slot's draft preamble was opened over the top of it. Phase 199's check asserts an entry
+header for the STANDING `<Version>` and nothing else, so a released slot that was skipped is
+invisible to it by construction — which is why 199 reported the gap rather than closing it, and why
+the property that now guards it is per-TAG rather than per-`<Version>`.
+
+**The floor, stated here because this slot is the first held to it.** From `0.25.0` upward, every
+`vX.Y.Z` tag the repository holds has an entry header naming it, and the `Package roster` family
+refuses a tag that has none. Slots below the floor are deliberately not retro-fitted: `0.1.11`,
+`0.2.0`, `0.3.0`, `0.12.0`–`0.15.0` and `0.17.0` were released before this document recorded
+per-slot classes at all, and writing entries for them now would be invention rather than record.
+
+### What shipped in it, and the class of each
+
+`git log v0.24.0..v0.25.0` carries seven phases. The classes are the ones the **Public-surface
+baselines** section above defines, and they were read off the range's `src/` diff rather than
+argued: exactly four source files moved across the whole range —
+`Fuaran.Core.Idl.Codegen/FStar.fs`, `Codegen.fs`, `Trust.fs` and `Fuaran.Core.Idl/Idl.fs` — and
+they belong to the three phases the table marks `additive`. The other four touched no `src/` at
+all, so they moved no published surface; that is a statement about the packaged contract, not a
+claim that nothing a consumer can observe changed, and where something did the row says so.
+
+| phase | what shipped | class |
+|---|---|---|
+| 151 | evolution-policy soundness — §15.4's compatibility table carried as an F\* theorem (`proofs/WireVersioning.fst`, its F# oracle, and the oracle tests that hold the two in step) | none — no published surface moved |
+| 174 | the assumed rows are classified, and every domain obligation names the law that discharges it (`proofs.json`, the ladder tests) | none — no published surface moved |
+| 172 | Core owns its conformance vectors, and the shared corpus carries a DECLARED copy of them rather than the authority | none — no published surface moved; see the note below on what a certifying host sees |
+| 178 | the hardening policy's undeclared half — `HardenPolicy.Undeclared`, `Trust.checkHardenPolicy` / `hardenOrRefuse`, one `CodegenError` case | **additive** — and it is the change that advanced `<Version>` onto this slot; its own entry sits above under *The hardening policy's UNDECLARED half* |
+| 175 | the proof kit ships the generic models, so a domain instantiates a theorem instead of re-modelling it (`proofs/kit/templates/`) | none — no published surface moved |
+| 173 | the proof leg certifies the F\* backend on the certification set (D14 applied to `proofs/`) | **additive** — see below |
+| 168 | generated proofs: one lemma per constructor and one per presence pattern | **additive** — see below |
+
+**The ordering is worth reading, because it is the draft-slot rule working rather than an
+accident.** `0.25.0` was cut as a draft at `ca07895` once Phase 178 had landed — 178 could not ride
+`0.24.0`, which was already tagged and released. Phases 173 and 168 landed *after* that cut and
+rode the open draft, because both are additive and the draft already carried an additive class; the
+release gesture was then made on 168's own commit. No phase in the range outranked what the draft
+held, so the number moved once.
+
+### The two additive moves on `Fuaran.Core.Idl.Codegen` (Phases 173, 168)
+
+`FStarTarget` gains, and loses nothing:
+
+- **Phase 173** — a `Provenance` record (`Origin`, `Proves`) with a `Provenance.supplied` value, and
+  the two `…From` entry points that take one: `vocabularyModuleFrom` and `proofsModuleFrom`.
+- **Phase 168** — `presenceSplitAt`, the constant at which a constructor's optional members stop
+  being enumerated as presence patterns and become a linear split.
+
+`vocabularyModule` and `proofsModule` keep their exact signatures and delegate to the new entry
+points at `Provenance.supplied`, so no call site moves and no baseline token is removed or retyped.
+A pinned consumer compiles either way.
+
+**What is NOT additive-by-default, and is where a consumer should look:** the GENERATED F\* text
+changed shape in both phases — 168 emits a lemma family per constructor and per presence pattern
+where it previously emitted one, and 173 splits the vocabulary module and re-emits it with a
+provenance header. That output is read by a PROVER and by nothing at runtime (the boundary Phase
+150's entry draws for this backend), so it is not a package contract; but a consumer that pins
+generated proof text in a fixture regenerates it, exactly as the committed `proofs/*.fst` pairs in
+this repository did.
+
+### Two artefact facts that are not API classes (Phases 172, and the slot's own re-emit)
+
+**Phase 172 moved where the conformance vectors LIVE, not what they say.** Core's `conformance/`
+directory is now the authority for the vectors Core owns, and the shared cross-host corpus carries
+a declared copy of them (`copies.json`), checked on the workspace sweep. A host certifying against
+the corpus reads the same bytes it read before; what changed is which repository is entitled to
+change them, and where a staleness report will point when they drift.
+
+**The laws vectors were re-emitted at `kitVersion` `0.25.0` after the cut.** The `0.25.0` cut left
+`conformance/laws/transform-laws.json` stamped `0.24.0`; `45cbb9d` and `647af2f` corrected it
+in-slot. The stamp names the kit that produced the vectors, so a consumer comparing stamps across
+this boundary sees `0.24.0` → `0.25.0` with no vector content change beneath it.
 
 ## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 

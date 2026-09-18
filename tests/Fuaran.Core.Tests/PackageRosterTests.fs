@@ -16,9 +16,9 @@ module Fuaran.Core.Tests.PackageRosterTests
 // prose a person writes; a gate that generated that column would be describing the file
 // layout rather than the design.
 //
-// Four properties, each with a go-red case beside it over synthetic input. The live case
+// Five properties, each with a go-red case beside it over synthetic input. The live case
 // alone cannot show a classifier works — every one of these reads a real file that is
-// expected to be correct, so a classifier that matched nothing would pass all four.
+// expected to be correct, so a classifier that matched nothing would pass all five.
 //
 //   1. README rows = the packable set.
 //   2. No packable project sits outside `src/` — the SCOPE property 1's derivation assumes,
@@ -26,9 +26,19 @@ module Fuaran.Core.Tests.PackageRosterTests
 //      property 1 by being out of frame, which is the same drift wearing a different hat.
 //   3. Some entry header in STABILITY.md names the standing `<Version>`.
 //   4. No "no `vX.Y.Z` tag exists" sentence survives the tag it denies.
+//   5. Every release TAG at or above a declared floor has an entry header naming it.
 //
-// Property 4 reads `git tag` LOCALLY, which is the honest limit: it answers "has the
-// release gesture been made in this clone", never "is this version published". A clone
+// Property 5 is Phase 205, and it exists because property 3 structurally cannot see what
+// it caught. Property 3 quantifies over the STANDING `<Version>` — one number — so a slot
+// that was cut, tagged, released and then left behind as `<Version>` moved on is invisible
+// to it: `v0.25.0` was tagged 2026-09-15 and this document carried no entry for it at all,
+// while property 3 read green against `0.26.0` the whole time. Quantifying over the tags
+// is what closes that, and the FLOOR is what keeps it honest — every release below
+// `0.25.0` predates this document's per-slot classes, so demanding entries for them would
+// demand invention rather than record.
+//
+// Properties 4 and 5 read `git tag` LOCALLY, which is the honest limit: they answer "has
+// the release gesture been made in this clone", never "is this version published". A clone
 // with no git at all skips by name with the reason printed, on the
 // `WorkingCopyEolTests` precedent — a check that reads as green when its instrument is
 // missing is worse than an absent one.
@@ -199,6 +209,44 @@ let internal staleDraftSentences (tags: Set<string>) (lines: string list) : (int
             Some(i + 1, m.Groups["v"].Value)
         else
             None)
+
+/// The oldest released slot the per-tag entry rule covers (Phase 205), as
+/// `(major, minor, patch)`. ONE named constant, because the number is a judgement — it is
+/// the oldest slot whose record can still be written from evidence — and a judgement spelt
+/// in two places is a judgement that will disagree with itself. STABILITY.md's versioning
+/// preamble states the same floor in prose; this is what the gate holds.
+let internal entryHeaderFloor = (0, 25, 0)
+
+let private releaseTagRe = Regex(@"^v(\d+)\.(\d+)\.(\d+)$", RegexOptions.Compiled)
+
+/// `(major, minor, patch)` for a plain release tag, else `None`. The shape is deliberately
+/// STRICT: a pre-release spelling (`v0.0.1-alpha.8`) names no released slot in the sense
+/// this rule is about, and every such tag this repository holds sits below the floor in any
+/// case. A tag shape this does not parse is out of frame rather than reported — the
+/// alternative is reddening on someone else's tagging convention.
+let internal releaseTagVersion (tag: string) : (int * int * int) option =
+    let m = releaseTagRe.Match tag
+
+    if m.Success then
+        Some(int m.Groups[1].Value, int m.Groups[2].Value, int m.Groups[3].Value)
+    else
+        None
+
+/// Release tags at or above `floor` that no entry header names, oldest first.
+///
+/// Ordering is NUMERIC, over the parsed triple, not lexical over the tag string: `0.9.0`
+/// sorts BELOW `0.25.0` and a string comparison gets that backwards, which would silently
+/// admit every pre-`0.10` tag the floor exists to exclude. It reuses `entryHeaderNaming` —
+/// the same seam property 3 asserts the standing version through — so the two properties
+/// cannot disagree about what counts as an entry.
+let internal tagsMissingEntryHeader (floor: int * int * int) (tags: Set<string>) (stability: string) : string list =
+    tags
+    |> Set.toList
+    |> List.choose (fun t -> releaseTagVersion t |> Option.map (fun v -> v, t))
+    |> List.filter (fun (v, _) -> v >= floor)
+    |> List.sortBy fst
+    |> List.filter (fun (_, t) -> (entryHeaderNaming (t.Substring 1) stability).IsNone)
+    |> List.map snd
 
 // ---- the instruments ------------------------------------------------------
 
@@ -404,6 +452,37 @@ let tests =
                               shown)
           }
 
+          test "every release tag at or above the floor has a STABILITY entry header" {
+              // Phase 205. Property 3 asserts the STANDING version only, so a released slot
+              // that `<Version>` has moved past is outside its frame entirely — which is
+              // how `v0.25.0` came to be tagged with no entry while this file read green.
+              withRoot (fun root ->
+                  match gitTags root with
+                  | Error why ->
+                      printfn "STABILITY per-tag entry check SKIPPED: %s" why
+                      skiptestf "STABILITY per-tag entry check skipped — %s" why
+                  | Ok tags ->
+                      let covered =
+                          tags
+                          |> Set.toList
+                          |> List.choose releaseTagVersion
+                          |> List.filter (fun v -> v >= entryHeaderFloor)
+
+                      Expect.isNonEmpty
+                          covered
+                          "at least one release tag sits at or above the floor — with none the comparison below would pass vacuously, which is the shape a mis-parsed tag would take"
+
+                      let stability = File.ReadAllText(Path.Combine(root, "STABILITY.md"))
+
+                      match tagsMissingEntryHeader entryHeaderFloor tags stability with
+                      | [] -> ()
+                      | missing ->
+                          failtestf
+                              "%d released tag(s) at or above the floor have no STABILITY.md entry header: %s\n       Remedy: open a level-2 section whose header names the version — the shape the released slots use is '0.25.0 — released <date> as v0.25.0' — and record under it what shipped in that slot, each change classed. A released version with no entry tells a consumer nothing about what adopting it costs.\n       The floor is `entryHeaderFloor` in this file, and lowering it is a decision about which old slots can still be written from evidence, not a tidy-up."
+                              missing.Length
+                              (String.concat ", " missing))
+          }
+
           test "every package the Fable smoke references is documented in the README" {
               // The Phase 185 cross-check in the form that is assertable today: whatever
               // the smoke compiles against is a package a reader must be able to find.
@@ -570,6 +649,44 @@ let tests =
               Expect.isEmpty
                   (staleDraftSentences (Set.ofList [ "v0.23.0" ]) lines)
                   "with neither version tagged, both sentences are true and nothing is reported"
+          }
+
+          test "the per-tag entry check reports an un-entried release and respects the floor" {
+              let stability =
+                  String.concat
+                      "\n"
+                      [ "# Stability"
+                        "## 0.26.0 — released 2026-09-17 as `v0.26.0`"
+                        "## 0.24.0 — released 2026-09-15 as `v0.24.0`"
+                        "Prose mentioning 0.25.0 outside a heading." ]
+
+              let tags =
+                  Set.ofList [ "v0.0.1-alpha.8"; "v0.17.0"; "v0.24.0"; "v0.25.0"; "v0.26.0" ]
+
+              Expect.equal
+                  (tagsMissingEntryHeader (0, 25, 0) tags stability)
+                  [ "v0.25.0" ]
+                  "the released tag with no entry header is reported — and a version named only in prose is not an entry"
+
+              Expect.isEmpty
+                  (tagsMissingEntryHeader (0, 27, 0) tags stability)
+                  "a floor above every tag reports nothing, which is exactly why the live case asserts the covered set is non-empty first"
+
+              Expect.equal
+                  (tagsMissingEntryHeader (0, 17, 0) tags stability)
+                  [ "v0.17.0"; "v0.25.0" ]
+                  "lowering the floor pulls older un-entried slots in, oldest first — the FLOOR is what excludes them, not a gap in the reader"
+
+              Expect.equal
+                  (releaseTagVersion "v0.9.0" |> Option.map (fun v -> v < (0, 25, 0)))
+                  (Some true)
+                  "ordering is numeric: 0.9.0 is BELOW 0.25.0, which a lexical comparison on the tag string gets backwards"
+
+              Expect.isNone
+                  (releaseTagVersion "v0.0.1-alpha.8")
+                  "a pre-release spelling parses to nothing, so it is out of frame rather than reported"
+
+              Expect.isNone (releaseTagVersion "release/v1.2.3") "a foreign tagging convention is out of frame too"
           }
 
           test "the exclusions reader accepts the plausible shapes and refuses the rest" {
