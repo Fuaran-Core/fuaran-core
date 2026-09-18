@@ -33,7 +33,7 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 
 | File | What it is | Copied? |
 |---|---|---|
-| `check-proof-leg.ps1` | **The engine.** Knows how to run a proof leg; knows nothing about which models a repository has. Takes the module list, the oracle host and the paths as parameters. | copy verbatim |
+| `check-proof-leg.ps1` | **The engine.** Knows how to run a proof leg; knows nothing about which models a repository has. Takes the module list, the oracle host and the paths as parameters. Classifies every lost pass into one of the three verdicts below. | copy verbatim |
 | `templates/check.ps1` | The thin caller. Three declarations to edit at the top; nothing below them is per-repository. | copy and edit |
 | `templates/oracle.fsproj.template` | The never-packed oracle project: `--strict-indentation-`, the FS0058/FS0064/FS1182 `NoWarn`, and the compile order the shims and models need. Named `.template` so no build or glob in a host repository can pick it up. | copy, rename and edit |
 | `templates/modules.json` | The cost declaration: the budget rule, the floor rule, and one worked entry. | copy and edit |
@@ -55,6 +55,50 @@ So the copy set is: everything in this directory, **plus** those three files and
 `../`. An adopter copies what it needs and declares what it copies; `copies.json` `$sources` at this
 repository's root is that set written out, one entry per file, and an adopter's record is the entry
 with its own path filled in.
+
+## The three verdict classes (Phase 166)
+
+A leg that reports every lost pass as "did NOT verify" is not an evidence instrument in either
+direction. Over 2026-09-14/15 three different things all read that way — a prover that died with
+nothing printed, a prover killed under memory pressure, and a dependency's checked-module file
+vanishing mid-run — and each cost a session twenty minutes of reading a whole log to establish that
+nothing had been refuted. So a non-zero prover exit is **classified before it is reported**, and the
+class decides the words, the exit code and whether anything is retried.
+
+| Verdict | What happened | Exit | Retried? | What it obliges |
+|---|---|---|---|---|
+| **REFUTATION** — `<module>.fst did NOT verify` | The prover exited non-zero **and printed a diagnostic**: an error line, an error summary, `Failed to prove`, `Unexpected`, or a failing-quake line. | the **prover's** code (1 in practice) | **Never.** | Read the model. Something was refuted, or `--report_assumes error` caught an escape hatch. Re-running it to see whether it goes away is the habit this leg exists to make impossible. |
+| **ABORT** — `<module>.fst ABORTED (no diagnostic)` | The prover exited non-zero and printed **nothing** about an undischarged query. Nothing was refuted; the prover died. | **3**, on the second abort | **Once**, in the same run, bounded at one retry per module per run and logged as a retry. | Read the machine, not the model. The pre-flight line above the abort says how many provers were running and how much memory was free. A module that aborts across legs is a finding about this machine, or about that model's memory appetite, and is worth a phase. |
+| **APPARATUS** — `extraction of <module> hit an APPARATUS fault` | The leg's own machinery failed: at extract, a dependency's `.checked` file missing from the cache, or the cache directory gone. **Named**, so the reader starts from the file. | **4** | **Never** — the thing it needs is gone, so a second attempt asks the same broken apparatus the same question. | Find the second writer. The cache is per invocation and the script owns it, so something removed it underneath the run. |
+
+Three details of that table are load-bearing rather than decorative, and each was measured against
+the pinned prover rather than assumed:
+
+- **The discriminator is the LOG, not the exit code.** A killed process and a refuted lemma are both
+  "non-zero", and nothing about the number tells them apart. What the leg asks is whether the prover
+  *said* anything about an undischarged query — and since F\* prints no per-query line for a query it
+  discharged, a log with no diagnostic in it is a log in which every query the module printed was
+  discharged. That is the same statement, read off the only evidence there is.
+- **Both spellings of an error line are matched, because the prover uses one and the message formats
+  use the other.** On the pinned release a diagnostic reads `* Error 19 at Foo.fst(8,39-8,41):`, not
+  `(Error 19)`. A leg that knew only the parenthesised form classified a plain error as an ABORT and
+  *retried* it — the exact inversion this verdict exists to prevent. The end-of-run
+  `N errors were reported` summary is matched as a third, independent witness.
+- **A failed extraction is not always a non-zero exit.** Removing a dependency's `.checked` file
+  underneath an extraction makes F\* print `* Error 317: Cross-module inlining expects all modules to
+  be checked first` and then **exit 0**; the fault surfaces two lines later as "extraction produced
+  no `<module>.fs`", which names the symptom and nothing about the cause. So the engine decides
+  failure as *non-zero exit **or** no file produced*, and only then classifies.
+
+**A retry's clock is a WARM measurement and feeds neither gate.** The aborted attempt has already
+half-filled the cache, so the retry is not a cold run; its line says so, it is compared to neither
+the budget nor the floor, and the leg's closing verdict names every abort that was retried and
+passed — a green run that lost a prover and got it back is not the same evidence as one that did
+not, and it should not take scrolling to find that out.
+
+**Every prover invocation's whole output is teed** to `<WorkDir>/logs/<module>[.retry].<step>.log`,
+and each verdict names the transcript it was read from, so a post-mortem reads the classification's
+own evidence rather than a scrollback that is gone.
 
 ## Adopting it
 
