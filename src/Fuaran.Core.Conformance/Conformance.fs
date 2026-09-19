@@ -3444,6 +3444,14 @@ module Conformance =
             | 1 -> [ Project [ "a", "a"; "b", "b" ] ] // drops c → an irrelevant c-change can reuse
             | 2 -> [ Derive("d", Binary(Add, Col "a", Lit(Int 1))) ]
             | 3 -> [ GroupBy([ "a" ], [ { Name = "s"; Fn = Sum; Of = "b" } ]) ] // drops c
+            // Phase 202 — a group-by with a step AFTER it. This family is a different seam from
+            // `Incremental.*` (it reuses a whole prior RESULT against a coarse `Change`, where that
+            // one propagates a row delta), so it makes no claim about the group-table tail; the
+            // shape is here because the tail admission makes such pipelines common, and every
+            // pipeline this family draws has to keep answering as a full evaluation would.
+            | 4 ->
+                [ GroupBy([ "a" ], [ { Name = "s"; Fn = Sum; Of = "b" }; { Name = "n"; Fn = Count; Of = "c" } ])
+                  Filter(Binary(Gt, Col "n", Lit(Int 0))) ]
             | _ -> [ Transform.sortBy [ "b", Asc ]; Project [ "a", "a" ] ] // drops b, c
 
         for i in 0 .. iterations - 1 do
@@ -3461,7 +3469,7 @@ module Conformance =
             let c0 = [ for _ in 1..rows -> draw () ]
             let oldSrc = mkTable a0 b0 c0
 
-            let pk, r2 = ConfRng.intBelow 5 r
+            let pk, r2 = ConfRng.intBelow 6 r
             r <- r2
             let pipeline = pipelineOf pk
 

@@ -2471,6 +2471,26 @@ the frozen `AiSurfaceWitness`; `Proposals` keeps its queue, its approval flow an
 rendering; nothing about what `arbitrate` decides, in what order, or with what honesty boundary
 moved. This is a change of address.
 
+### The relocation-kind footprint widening was MEASURED AND DECLINED (Phase 163) — NO surface moves
+
+`Footprint`, `Ops.footprint` and `Ops.independent` are **byte-for-byte unchanged**, and this entry
+exists so that nobody reads their stillness as an oversight. Phase 143 proved a precision ceiling
+(`proofs/TreeOps.fst` section 18, `relocation_clause_is_necessary`): the pinned unknown-parent clause
+cannot be tightened over the record as it stands, because a `MoveNode` and a remove-shaped `Batch`
+present byte-identical footprints while only the move commutes with a structural write inside the
+relocated subtree. Its named remedy was a wider record — one carrying the relocation's KIND and, for
+a move, its target. Phase 163 measured what that would buy before building it, and the answer is
+nothing: **an upper bound of 0 freeable pairs over 20,649,689 concurrent op pairs** in the recorded
+op-stream ledgers available to measure. The instrument, its falsifier and its go-red self-test are
+`proofs/kit/measure-relocation-halts.ps1` (+ `.tests.ps1`); the reasoning is
+[`DECISIONS.md`](DECISIONS.md) D47.
+
+**So no consumer has anything to adopt, and that is the whole of the consumer-facing news.** The
+widening would have been breaking — the record is mirrored by hand in F\* (`proofs/DagFold.fst`
+declares its own `footprint`, with `independent` re-implemented clause-for-clause) and its four
+fields are pinned WITH THEIR ORDINALS in `api/Fuaran.Core.Ops.txt`, so a field added anywhere but
+last moves the baseline. Declining it leaves every projection over this record (`'Op -> Footprint`,
+the shape a scheduling or fold consumer supplies) valid exactly as written.
 ### An evaluator reads only what it declared (Phase 209) — BREAKING: a union case is added, and the driver refuses a non-conforming evaluator
 
 **The class.** `union-widening`, on `Fuaran.Core.Propagation`, and it is a Phase 183 gate output
@@ -2548,6 +2568,159 @@ the other candidate Phase 186 named — a law family generic over a DOMAIN'S eva
 still not taken. The model also gained one bridge in exchange, `propagation-read-witness`: production
 detects the violation by instrumenting its resolver, a pure model cannot observe a call, so the
 observed read set is a parameter the differential supplies.
+
+### Top-N is maintainable (Phase 207) — BREAKING: a case added to `StepIncrementality`
+
+`Incremental.plan` declined every pipeline carrying a `Limit`, as `FallBack (StepNotRowLocal
+"limit")`. It no longer does. A `Limit` whose count and offset are literals is classified
+**`StepIncrementality.TruncateOrder (n, offset)`**, at any position, over any order the restricted
+walk produced — so `Filter > Sort > Limit`, `Filter > Project > Limit`, a bare `Limit`, and a
+`Limit` feeding a maintained `GroupBy` are all restricted rather than declined.
+
+**The class is the gate's output, quoted rather than argued:**
+
+```
+Fuaran.Core.DataFrame — union-widening (3 move(s))
+  additive           + field Fuaran.Core.StepIncrementality+Tags.TruncateOrder : System.Int32 (literal)
+  additive           + type Fuaran.Core.StepIncrementality+TruncateOrder (type)
+  union-widening     + union-case Fuaran.Core.StepIncrementality.NewTruncateOrder #6(System.Int32, System.Int32)
+```
+
+It read `union-widening (4 move(s))` on the first cut, the fourth being a `retype` of
+`StepIncrementality.NewFallBack` from tag `#5` to `#6`: the new case had been declared where it
+belongs thematically, among the admitted classes, and a union case's declaration order **is** its
+tag. That renumbering cost a consumer a second breakage on a case that had not changed, so the case
+is declared last instead — after `FallBack`, appended in arrival order exactly as `FallBackReason`'s
+own cases are. The reason is recorded on the case itself, because the next author to tidy the
+declaration order will otherwise put it back.
+
+**What a pinned consumer pays, exactly.** `StepIncrementality` is a published union, so **every
+exhaustive `match` over it gains an arm** — `FS0025` at compile time against a rebuilt package, and,
+against a stale same-version pack, an `InvalidCastException` at run time with no compile signal at
+all. A `match` with a wildcard arm is unaffected. Nothing was removed, no signature moved, and
+`IncrementalStrategy` did **not** gain a case: a top-N pipeline reports `RowLocal` (or
+`RowLocalThenGroups` behind a maintained group) exactly as a sort-bearing one does, so
+`isIncremental`, the strategy dispatch and every law that keys off `ReferenceOnly`-versus-not are
+untouched. In this repository the cost of the widening measured **zero matches extended** — every
+in-repo reader of the type already carried a wildcard — which is evidence about the shape of the
+type's use rather than a promise about any consumer's.
+
+**One decline moved reason.** A `Limit` whose count or offset is still a `Slot.Param` continues to
+decline, and now does so as `UnresolvedSlotParam ("limit", <param>)` rather than `StepNotRowLocal
+"limit"` — the `0.23.0` rule a `Sort` on a param key already follows. A consumer matching on the old
+pairing sees the new one. The reason is the accurate one: the window is not known without an env,
+and substituting the params (`Transform.substitute`) makes the plan computable again, which the old
+reason denied.
+
+**There is no second decline class, and that is a finding rather than an omission.** The shape this
+was designed to have — admit a `Limit` only where the order it reads is one the seam maintains,
+decline the rest by type — describes a distinction the walk cannot draw. Every step the walk admits
+(`PropagateRows`, `MergeOrder`, `RecomputeFrame`, `FilterByRelation`) preserves the reference's row
+set *and* its order, and a step that does not declines the whole pipeline before the limit is
+reached; so a `Limit` the walk reaches is over a maintained order by construction, and a predicate
+saying so would be a branch that cannot be taken. This is the call `0.19.0` made for `Window` when
+frame boundedness turned out not to be the admission criterion, and it is recorded the same way:
+in the type's own doc comment, beside the code.
+
+**What it buys, measured rather than claimed.** A `Limit` evaluates no expression, so it costs
+nothing on the footprint's scale in either path; what the admission buys is that the steps *before*
+it stop re-evaluating every row. On one machine at 20,000 rows with one row edited, over
+`Filter > Sort > Limit 10`: with a 129-node row expression the refresh is **87 ms against the full
+evaluation's 245 ms**; with a single `Ge` comparison it is **89 ms against 56 ms** and the seam
+still loses. That is Phase 206's finding holding for this shape — the seam's proposition is about
+the size of the ROW EXPRESSION, not the size of the table — with one difference worth knowing: a
+top-N full evaluation sorts the whole frame every tick while the refresh merges into an order it
+already holds, so the trivial-predicate gap narrows from 3.4× against the seam to 1.6×. It does not
+close. `docs/incremental-evaluation.md` carries both tables.
+
+**The maintenance adds no third quadratic class**, and that is asserted rather than asserted-about:
+the `Scaling` family counts the step's element visits at both sizes and pins the shipped shape at
+**exactly linear** (20.00 over a twentyfold span) beside the obvious index-lookup shape at **398.86**
+— a go-red proof that is exact, clock-free and identical on every host, which the timed form of the
+same comparison was not. The whole top-N refresh is also timed, at a ratio of 49 against the
+family's bound of 100.
+
+### Steps after a group-by (Phase 202) — BREAKING: a case added to `FallBackReason`, a field added to `IncrementalEval`
+
+`Incremental.plan` declined every pipeline whose `GroupBy` was not its last step, as `FallBack
+(AggregateStepNotLast "groupBy")`. It no longer does. A `GroupBy` is maintained at **any** position
+and the steps after it are restricted too, so a `Having` — a `Filter` after a `GroupBy`, there being
+no `Having` verb — and a sort, a derive, a projection or a top-N over the GROUP table are all
+refreshed rather than declined.
+
+**The class is the gate's output, quoted rather than argued:**
+
+```
+Fuaran.Core.DataFrame — record-widening (5 move(s))
+  retype             ctor Fuaran.Core.IncrementalEval..ctor(… , Fuaran.Core.RecomputeFootprint)
+                  -> ctor Fuaran.Core.IncrementalEval..ctor(… , Fuaran.Core.RecomputeFootprint,
+                                                            FSharpMap`2<String, FSharpList`1<Cell>>)
+  additive           + field Fuaran.Core.FallBackReason+Tags.AggregateStepRepeated : System.Int32 (literal)
+  record-widening    + record-field Fuaran.Core.IncrementalEval.GroupCells #13 : FSharpMap`2<String, FSharpList`1<Cell>>
+  additive           + type Fuaran.Core.FallBackReason+AggregateStepRepeated (type)
+  union-widening     + union-case Fuaran.Core.FallBackReason.NewAggregateStepRepeated #11(System.String)
+```
+
+It read `record-widening (8 move(s))` on the first cut, the three extra being `retype`s of
+`SortOrders`, `JoinKeys` and `Footprint` — the new field had been declared where it belongs
+thematically, beside `GroupAggs`, and a record field's **position** is part of the published surface
+exactly as a union case's is. That shift cost a consumer three reported breakages on fields that had
+not changed, and it would have moved the structural-comparison precedence of a type whose ordering
+nothing here intends to move. **This is Phase 207's union lesson with a record twin**, found the same
+way — by reading the classifier rather than by arguing about it — so the field is appended last and
+the reason is recorded on the field itself.
+
+**What a pinned consumer pays, exactly.** Two things, and they bite differently. `FallBackReason` is
+a published union, so **every exhaustive `match` over it gains an arm** — `FS0025` against a rebuilt
+package, and against a stale same-version pack an `InvalidCastException` at run time with no compile
+signal. `IncrementalEval` is a published record, so **every full-literal construction of one stops
+compiling** (`FS0764`) and the primary constructor widens by one parameter. Copy-and-update
+(`{ state with … }`), field reads and pattern matches on other types are unaffected. Nothing was
+removed and no existing signature moved. `StepIncrementality` and `IncrementalStrategy` gained
+**nothing**: a tail step classifies as the same `PropagateRows` / `MergeOrder` / `RecomputeFrame` /
+`TruncateOrder` / `FilterByRelation` it would before the group-by, and a tail-bearing pipeline
+reports `RowLocalThenGroups` exactly as a group-by-last one does — so `isIncremental`, the strategy
+dispatch and every law keyed off `ReferenceOnly`-versus-not are untouched.
+
+**`AggregateStepNotLast` is RETAINED and no longer produced by any plan.** Removing a case from a
+published union breaks every consumer that matches on it, and a footprint stored under `0.26.1` still
+has to read, so `reasonString` still renders it. It joins `WindowFrameUnbounded` (`0.19.0`) as the
+second reason kept for that purpose; the type's doc comment says so on the case.
+
+**The new decline is a SECOND aggregating step**, `AggregateStepRepeated ("groupBy")`: grouping the
+group table needs a second level of row-to-group, ordered-membership and per-group aggregate state.
+It refuses as data, never by a silent full re-evaluation — a declined pipeline still answers through
+the reference evaluator with the reason in its footprint. The case is declared **last** in
+`FallBackReason`, after `JoinNotRowPreserving`, for the tag-order reason Phase 207 records above.
+
+**The decomposable-aggregate decline class does not exist, and that is a finding rather than an
+omission.** The shape this was designed to have — maintain the decomposable aggregates (`sum`,
+`count`, `mean` via sum+count, `min`/`max` with a tombstone re-scan), decline the rest — describes a
+*running-accumulator* maintenance model the seam does not use. `groupStep` recomputes an affected
+group **from that group's own member rows**, through the reference evaluator's own aggregator, so
+there is no accumulator to repair, no tombstone, and no decomposability requirement: **all ten
+`AggFn` cases are maintained**, `Median` and `StdDev` included. A deletion from a `min`/`max` group
+is not a special case, because the group is simply re-aggregated over the members it has left. What
+that trades is stated in the doc rather than hidden: a group with a thousand members costs a
+thousand-row aggregation when one of them moves, where a running `sum` would cost an addition. This
+is the same class of finding as the absent second decline above, and it is recorded the same way —
+in `docs/incremental-evaluation.md` beside the aggregate list, and as an enumerating assertion in
+`IncrementalGroupByTests` that goes red if it stops being true.
+
+**What it buys, measured rather than claimed.** The tail's own work is charged by the GROUP count,
+which is small and bounded, so the admission does not move the row-expression threshold at all. On
+one machine at 20,000 rows with one row edited, over `Filter > GroupBy > Filter`: with a 129-node row
+expression the refresh is **61 ms against the full evaluation's 211 ms**; with a single `Ge`
+comparison it is **61 ms against 20 ms** and the seam loses by 3.1×. The refresh's cost is the same
+figure in both rows — it does not move with the expression at all — which is Phase 206's diagnosis
+confirmed a third time: what the refresh pays is per-source-row string-keyed bookkeeping, and what it
+saves is `n−1` evaluations of the row expression. Three admissions have now been measured on this
+axis and all three answer the same way. `docs/incremental-evaluation.md` carries all three tables.
+
+**The maintenance adds no third quadratic class.** The `Scaling` family times the group-tail refresh
+at a ratio of **49 over a twentyfold span**, against the family's bound of 100 and a linear
+expectation of 20 — the same band as Phase 207's top-N (46) and the plain refresh (28), and four
+times clear of the quadratic (400) the family exists to refuse.
 
 ### The capability seam carries the `Deferred` envelope (Phase 210) — BREAKING: a host body's type and three public return types move
 

@@ -66,6 +66,22 @@ namespace Fuaran.Core
 //  while the relation's key index has not moved. A combining join fans a row
 //  out across its matches and stays declined, by type, naming the kind.
 //
+//  Phase 207 admitted a `Limit` on the SAME argument once more, and it is the
+//  argument's limiting case: the step computes nothing, evaluates nothing, and
+//  keeps a slice of the rows it was handed in the order it was handed them. The
+//  walk is already holding the reference's own frame at every step — that is the
+//  invariant the maintained `GroupBy`, the type-inferring `Derive` and the
+//  recomputed window frame all read — so the slice is one positional pass over
+//  it, and a row outside the window leaves exactly as a filtered row leaves.
+//  What the admission buys is again that the steps BEFORE it stop re-evaluating
+//  every row, which on the shapes that motivated it (`Filter > Sort > Limit`, a
+//  top-N board over a live table) is the whole of the pipeline's cost. There is
+//  no condition on WHERE the limit sits or on WHICH order it reads, because
+//  every step this walk admits preserves the reference's row set and order and
+//  a step that does not declines the pipeline before the limit is reached — so
+//  the second decline class the design anticipated is empty by construction, and
+//  saying so is more honest than a predicate that cannot be false.
+//
 //  Three order-sensitivities are handled explicitly rather than assumed away,
 //  because all three are silent when got wrong. A `Derive`d column's TYPE is
 //  inferred from the whole column, so it is recomputed from the rows alive at
@@ -94,9 +110,16 @@ type FallBackReason =
     /// A verb whose output for one row depends on rows the delta does not name — a sort or limit
     /// (order-dependent), a window, a pivot/unpivot, a whole-relation set op, or a join.
     | StepNotRowLocal of verb: string
-    /// A step that WOULD be maintainable, sitting somewhere other than last. Its output rows are
-    /// groups, so a delta over the source rows says nothing about a delta over the group table, and
-    /// the steps after it would be reasoning about a change nobody described.
+    /// A step that WOULD be maintainable, sitting somewhere other than last.
+    ///
+    /// **RETAINED, and no longer produced by `plan` (Phase 202).** The premise was that a delta over
+    /// the source rows says nothing about a delta over the group table. It said one thing: WHICH
+    /// GROUPS MOVED — which is exactly what `MaintainGroups` already computes and records, and what
+    /// the steps after the group-by need. A maintained group-by is now admitted at ANY position and
+    /// the steps after it walk the group table, so nothing constructs this case. It is kept for the
+    /// reason `WindowFrameUnbounded` below is: removing a case from a published DU breaks every
+    /// consumer that matches on it, and `reasonString` still renders it, so a stored reason from
+    /// `0.26.1` still reads.
     | AggregateStepNotLast of verb: string
     /// The delta is the top element — everything may have changed, so there is nothing to restrict.
     | DeltaIsFullRefresh
@@ -135,6 +158,17 @@ type FallBackReason =
     /// a function of the whole left relation. Names the kind, because the filtering joins (`semi` /
     /// `anti`) — which emit each left row at most once, unchanged — are admitted.
     | JoinNotRowPreserving of kind: string
+    /// Phase 202 — a SECOND aggregating step in one pipeline. The first `GroupBy` is maintained and
+    /// the steps after it walk the group table (which is why `AggregateStepNotLast` above is no
+    /// longer produced); a second one would group THAT table, which needs a second level of
+    /// row-to-group, ordered-membership and per-group-aggregate state, keyed by group token rather
+    /// than by source-row token. The seam holds one level and declines the second by name rather
+    /// than falling back silently.
+    ///
+    /// **Declared LAST, deliberately.** A case's declaration order is its `Tags` number, so
+    /// inserting one beside the group-shaped reason above would retype every case after it — a
+    /// second, gratuitous breakage beside the union-widening this already is (Phase 207's finding).
+    | AggregateStepRepeated of verb: string
 
 /// How ONE pipeline step responds to a delta — the per-node incrementality, declared as data.
 type StepIncrementality =
@@ -197,6 +231,44 @@ type StepIncrementality =
     | FilterByRelation of kind: string * on: (string * string) list
     /// Not incrementalisable — the reference evaluator answers this pipeline.
     | FallBack of reason: FallBackReason
+    /// Phase 207 — the step KEEPS A SLICE of the rows it was handed, in the order it was handed
+    /// them, and computes nothing: a `Limit`.
+    ///
+    /// **It is declared AFTER `FallBack` rather than beside the other admitted classes, and the
+    /// position is the contract rather than the reading order.** A union case's declaration order
+    /// is its `Tags` number, so inserting this one where it belongs thematically renumbered
+    /// `FallBack` from `5` to `6` — which the Phase 183 surface classifier reports as a `retype`
+    /// beside the `union-widening`, and which costs a consumer a second, entirely gratuitous
+    /// breakage on a case that did not change. Appending costs a reader one paragraph; inserting
+    /// costs every consumer that reads a tag. `FallBackReason` above is ordered the same way, for
+    /// the same reason: `0.23.0`'s case sits before Phase 120's because that is when each arrived.
+    ///
+    /// Its output for a row is that row's cells unchanged;
+    /// what it decides is the row's SURVIVAL, and that decision is a function of the row's POSITION
+    /// in the frame at this step. The walk already holds that frame — the walked frame IS the
+    /// reference's frame, which is the invariant every other admitted step reads — so the slice is a
+    /// single positional pass over it and the rows outside the window leave exactly as a `Filter`'s
+    /// dropped rows leave. Names the count and the offset, so a consumer can see what is kept rather
+    /// than infer it.
+    ///
+    /// **It carries no position condition and no order condition, and the absence of both is a
+    /// finding rather than an omission.** The obvious shape — admit a `Limit` only where the order
+    /// it reads is one the seam maintains, and decline the rest by type — describes a distinction
+    /// this walk cannot draw: EVERY step the walk admits (`PropagateRows`, `MergeOrder`,
+    /// `RecomputeFrame`, `FilterByRelation`) preserves the reference's row set and the reference's
+    /// order, and a step that does not is declined, which declines the whole pipeline before this
+    /// one is reached. So a `Limit` the walk reaches is over a maintained order by construction,
+    /// and a predicate saying so would be a branch that cannot be taken — the same call `0.19.0`
+    /// made for `Window`, for the same reason. The one `Limit` that still declines is one whose
+    /// count or offset is an unresolved `Slot.Param`: there is no static window to take, and it
+    /// declines as `UnresolvedSlotParam "limit"` exactly as a `Sort` on a param key does.
+    ///
+    /// `PropagateRows` would be a wrong answer — the step's verdict for a row reads every row ahead
+    /// of it in the frame, not that row alone. `FallBack` would be a wrong answer too: it answers a
+    /// delta perfectly well. What the admission buys is what `MergeOrder` and `RecomputeFrame` buy —
+    /// a `Limit` evaluates no expression, so it costs nothing on this seam's instrument in either
+    /// path, and the saving is that the steps BEFORE it stop re-evaluating every row.
+    | TruncateOrder of n: int * offset: int
 
 /// The strategy a whole pipeline's classification induces.
 type IncrementalStrategy =
@@ -305,6 +377,26 @@ type IncrementalEval =
         JoinKeys: Map<int, Cell list list>
         /// What producing `Output` cost.
         Footprint: RecomputeFootprint
+        /// Phase 202 — per group token, the cells the steps AFTER the group-by evaluated for it, in
+        /// their own step order. The group-table twin of `RowCells`, and separate from it for two
+        /// reasons that are both load-bearing: the tail's step index restarts at 0 (so one map could
+        /// not serve both), and the two are keyed by different token vocabularies — a source row's
+        /// `Delta.refToken` and a group's `DataFrame.rowTokenString` — which must not be allowed to
+        /// meet in one keyspace where a collision would silently answer a row with a group's cells.
+        ///
+        /// A group's entry is reusable exactly when that group's aggregates were REUSED rather than
+        /// recomputed: its key cells and its aggregate cells are then byte-identical to the row the
+        /// tail last read, so every tail step's output for it is too. Empty when the pipeline has no
+        /// group-by or nothing after it.
+        ///
+        /// **Declared LAST rather than beside `GroupAggs`, where it belongs by subject** — 207's
+        /// union lesson has a record twin, and the Phase 183 classifier is what showed it. A record
+        /// field's POSITION is part of the published surface: placing this one among the group
+        /// fields reported `SortOrders`, `JoinKeys` and `Footprint` as three `retype` moves, because
+        /// their indices shifted, and it changes the structural-comparison precedence of a type
+        /// whose ordering nothing here intends to move. Appending it leaves every existing field
+        /// exactly where it was, and the subject grouping is served by this comment instead.
+        GroupCells: Map<string, Cell list>
     }
 
 /// The incremental evaluation seam: classify a pipeline, prime a state over a source, then refresh
@@ -386,7 +478,13 @@ module Incremental =
     /// `GroupBy` — reads the order it produced exactly as it would have read the reference's, and
     /// the two order-sensitive readers in the seam (a `Derive`d column's whole-column type inference
     /// and a group's ordered member list) are computed from the walked frame rather than a cache.
-    let internal classifyStep (isLast: bool) (t: Transform) : StepIncrementality =
+    /// Classify ONE step. `isFirstAggregate` is true for the pipeline's first aggregating step and
+    /// false for every later one — position among the aggregates, not position in the pipeline.
+    ///
+    /// Phase 202 changed what this parameter MEANS: it was `isLast`, because a maintained group-by
+    /// had to be the pipeline's last step. It no longer does, so the question a `GroupBy` is asked
+    /// is whether it is the one the seam maintains.
+    let internal classifyStep (isFirstAggregate: bool) (t: Transform) : StepIncrementality =
         match t with
         | Filter _
         | Project _
@@ -419,19 +517,53 @@ module Incremental =
             | Left
             | Right
             | Outer -> FallBack(JoinNotRowPreserving(joinKindName how))
+        // Phase 202 — a `GroupBy` at ANY position, maintained exactly as it was when it had to be
+        // last. What made the old restriction look necessary was reading the delta as describing
+        // only source ROWS; but `MaintainGroups` already computes, and the state already records,
+        // which GROUPS a delta touched — so the group table has a delta of its own, and the steps
+        // after the group-by are the same restricted walk one frame along. The condition is on the
+        // step's position among the AGGREGATES, not in the pipeline.
         | GroupBy(keys, aggs) ->
-            if isLast then
+            if isFirstAggregate then
                 MaintainGroups(keys, aggs |> List.map (fun a -> a.Name))
             else
-                FallBack(AggregateStepNotLast(verbName t))
+                FallBack(AggregateStepRepeated(verbName t))
+        // Phase 207 — a `Limit`, at ANY position, over ANY order the walk produced. There is no
+        // predicate here for the reason there is none on `Window`: every step this walk admits
+        // preserves the reference's row set and order, so the frame a `Limit` slices is the
+        // reference's frame, and a condition saying so could never be false where it is asked.
+        // What DOES decline is a window that is not statically known — the `0.23.0` rule a `Sort`
+        // on a param key already follows, reported against the same reason and in the same slot
+        // order `Transform.paramsOf` reports a limit's params in (count, then offset).
+        | Limit(n, offset) ->
+            match Slot.tryLit n, Slot.tryLit offset with
+            | Some count, Some off -> TruncateOrder(count, off)
+            | _ ->
+                let p = (Slot.paramName n @ Slot.paramName offset) |> List.head
+
+                FallBack(UnresolvedSlotParam("limit", p))
         | other -> FallBack(StepNotRowLocal(verbName other))
 
     /// Classify a whole pipeline. An empty pipeline is `RowLocal` (the identity is trivially
     /// row-local). The FIRST fall-back reason in step order is the pipeline's reason — reporting
     /// the first is what keeps the answer stable as earlier steps are fixed.
     let plan (pipeline: Transform list) : IncrementalPlan =
-        let n = List.length pipeline
-        let steps = pipeline |> List.mapi (fun i t -> classifyStep (i = n - 1) t)
+        // Phase 202 — the flag each step is classified under is "is this the FIRST aggregating
+        // step", carried by a fold rather than computed from the index: only a `GroupBy` consumes
+        // it, and only the first one gets it.
+        let steps =
+            ((true, []), pipeline)
+            ||> List.fold (fun (firstAggAvailable, acc) t ->
+                let isAgg =
+                    match t with
+                    | GroupBy _ -> true
+                    | _ -> false
+
+                let step = classifyStep firstAggAvailable t
+
+                (firstAggAvailable && not isAgg), step :: acc)
+            |> snd
+            |> List.rev
 
         let firstFallBack =
             steps
@@ -493,6 +625,10 @@ module Incremental =
             + fn
             + "' reads the whole partition, not a bounded frame"
         | JoinNotRowPreserving kind -> "a '" + kind + "' join's output rows are not its left rows"
+        | AggregateStepRepeated v ->
+            "'"
+            + v
+            + "' is maintainable once per pipeline; a second one would group the group table"
         | UnresolvedSlotParam(verb, param) ->
             "'"
             + verb
@@ -566,14 +702,52 @@ module Incremental =
         | WSort of int * (string * SortDir) list
         | WWindow of WindowSpec
         | WJoin of int * DataSource * (string * string) list * bool
+        /// Phase 207 — a `Limit`, carrying its already-resolved count and offset. It keys no cache
+        /// and takes no ordinal: the window it keeps is read off the frame the walk is holding, so
+        /// there is nothing about it for a prior evaluation to have recorded.
+        | WLimit of n: int * offset: int
 
-    /// Split a pipeline into its propagating prefix and an optional final `GroupBy`. `None` when the
-    /// pipeline is not of the incremental shape — exactly when `plan` says `ReferenceOnly`.
-    let private split (pipeline: Transform list) : (PrefixStep list * (string list * Agg list) option) option =
+    /// Split a pipeline into its propagating prefix and, when it has one, the maintained `GroupBy`
+    /// plus the steps that follow it. `None` when the pipeline is not of the incremental shape —
+    /// exactly when `plan` says `ReferenceOnly`.
+    ///
+    /// Phase 202 — the third component is the TAIL, and it is a `PrefixStep list` because it is
+    /// literally the same walk over a different frame: the group table rather than the source rows.
+    /// The `sorts` and `joins` ordinals CONTINUE through it rather than restarting, which is what
+    /// lets the tail's cached orders and key indexes live in the state's existing `SortOrders` /
+    /// `JoinKeys` maps with no second keyspace to keep disjoint. (The per-row CELL caches cannot
+    /// share that way — see `IncrementalEval.GroupCells`.)
+    ///
+    /// **A collision would be SAFE today, and the continuation is not what makes it so — measured,
+    /// because the first version of this comment claimed the opposite.** Restarting the tail's
+    /// ordinals at 0 passes every test in `IncrementalGroupByTests`, and it has to: the order-reuse
+    /// condition in `walk`'s `WSort` requires the cached ARRIVAL list, filtered to the current
+    /// step's unaffected tokens, to equal the current arrival list filtered the same way — and the
+    /// two steps' token vocabularies are disjoint by construction (`Delta.refToken` renders `k:` /
+    /// `o:`, `DataFrame.rowTokenString` a length prefix, so a digit), which leaves that condition
+    /// satisfiable only when BOTH sides are empty, where the merge degenerates to a full sort. So a
+    /// collision costs each sort its reuse and never its correctness.
+    ///
+    /// The continuation is kept for the two reasons that survive that: a cache silently disabled by
+    /// another step's writes is a performance defect nothing would report, and a correctness
+    /// argument that rests on two token formats never coinciding is one an unrelated change to
+    /// either format can retire without noticing. Keying them apart costs one threaded counter.
+    let private split
+        (pipeline: Transform list)
+        : (PrefixStep list * (string list * Agg list * PrefixStep list) option) option =
         let rec go acc sorts joins =
             function
             | [] -> Some(List.rev acc, None)
-            | [ GroupBy(keys, aggs) ] -> Some(List.rev acc, Some(keys, aggs))
+            | GroupBy(keys, aggs) :: rest ->
+                // The tail is parsed by the same walker, seeded with the ordinals the prefix
+                // reached. A SECOND `GroupBy` in `rest` falls to this function's `| _ -> None`
+                // through its own recursion, which is the `AggregateStepRepeated` decline `plan`
+                // reports — the two agree by construction rather than by two copies of the rule.
+                go [] sorts joins rest
+                |> Option.bind (fun (tail, inner) ->
+                    match inner with
+                    | Some _ -> None
+                    | None -> Some(List.rev acc, Some(keys, aggs, tail)))
             | Filter p :: rest -> go (WFilter p :: acc) sorts joins rest
             | Project pairs :: rest -> go (WProject pairs :: acc) sorts joins rest
             | Derive(n, e) :: rest -> go (WDerive(n, e) :: acc) sorts joins rest
@@ -585,6 +759,14 @@ module Incremental =
                 | None -> None
                 | Some resolved -> go (WSort(sorts, resolved) :: acc) (sorts + 1) joins rest
             | Window spec :: rest -> go (WWindow spec :: acc) sorts joins rest
+            // Phase 207 — same shape as the `Sort` case above and for the same reason: an
+            // unresolved slot param has no static window, so the walk refuses the pipeline outright
+            // and the seam falls back to the reference evaluator, which is where the `UnboundParam`
+            // will honestly surface.
+            | Limit(n, offset) :: rest ->
+                match Slot.tryLit n, Slot.tryLit offset with
+                | Some count, Some off -> go (WLimit(count, off) :: acc) sorts joins rest
+                | _ -> None
             | Join(src, on, Semi) :: rest -> go (WJoin(joins, src, on, true) :: acc) sorts (joins + 1) rest
             | Join(src, on, Anti) :: rest -> go (WJoin(joins, src, on, false) :: acc) sorts (joins + 1) rest
             | _ -> None
@@ -760,6 +942,41 @@ module Incremental =
                     @ deadWorks
 
                 walk resolve env prior cols2 ws evalIdx evaluated caches rest)
+        // Phase 207 — a `Limit`. The rows alive AT THIS STEP, in the order they are in, are the
+        // reference's frame here (the walk's invariant), so keeping `[offset, offset + n)` of them
+        // is exactly what `DataFrame.evalLimit` does to that frame — the same `max 0` clamps on
+        // both slots, written as a membership test so the arithmetic cannot overflow the way a
+        // precomputed `offset + n` would at `System.Int32.MaxValue`.
+        //
+        // A row outside the window leaves exactly as a `Filter`'s dropped row leaves: it stops
+        // being alive, is carried on so its cached prefix survives, and takes no further part. That
+        // is also what makes a row RE-ENTERING the window correct with no extra machinery — a dead
+        // row accumulates no `Fresh` cell, so its cached prefix stops where it died, and `cellAt`'s
+        // `List.tryItem evalIdx` misses at every step past that point and evaluates afresh.
+        //
+        // `evalIdx` does not advance and `evaluated` does not move: a limit evaluates no
+        // expression, caches no cell, and the reference's own counter charges it nothing. The pass
+        // is SINGLE and positional — no index lookup per row — which is the whole of what keeps it
+        // off the quadratic list Phase 206 spent itself clearing.
+        | WLimit(n, offset) :: rest ->
+            let lo = max 0 offset
+            let keep = max 0 n
+
+            let rec go acc i =
+                function
+                | [] -> List.rev acc
+                | (w: Work) :: tail ->
+                    if not w.Alive then
+                        go (w :: acc) i tail
+                    else
+                        go
+                            ({ w with
+                                Alive = (i >= lo && i - lo < keep) }
+                             :: acc)
+                            (i + 1)
+                            tail
+
+            walk resolve env prior cols (go [] 0 works) evalIdx evaluated caches rest
         // Phase 120 — a filtering join (`Semi` / `Anti`): a `Filter` whose predicate reads a
         // relation instead of an expression. The verdict is cached in the same per-row cell list a
         // `Filter`'s is, so `evalIdx` advances; `evaluated` does not move, because the reference's
@@ -913,12 +1130,25 @@ module Incremental =
     /// per-group ordered member tokens, the per-group aggregate cells, and how many groups were
     /// recomputed rather than reused.
     type private GroupOutcome =
-        { Cols: Schema
-          Rows: Cell list list
-          RowGroup: Map<string, string>
-          Members: Map<string, string list>
-          Aggs: Map<string, Cell list>
-          Recomputed: int }
+        {
+            Cols: Schema
+            Rows: Cell list list
+            /// Phase 202 — the group tokens in the same order as `Rows`, which is what lets the tail
+            /// walk pair each group row with the identity its cache is keyed by. Carried rather than
+            /// recomputed: re-deriving it would mean re-tokenising the key cells, and a second
+            /// derivation of an identity is a second thing that can disagree.
+            Order: string list
+            RowGroup: Map<string, string>
+            Members: Map<string, string list>
+            Aggs: Map<string, Cell list>
+            Recomputed: int
+            /// Phase 202 — the tokens of the groups whose aggregates were RECOMPUTED, beside the count
+            /// of them. The count is the footprint's; this is what the tail walk reads to decide which
+            /// group rows it must re-evaluate, and the two cannot disagree because both are written by
+            /// the same branch. A group absent from this set has key cells and aggregate cells
+            /// byte-identical to the ones the tail last saw.
+            RecomputedGroups: Set<string>
+        }
 
     /// Recompute a final `GroupBy` over the walked rows, recomputing only the affected groups'
     /// aggregates and reusing the cached cells for the rest. Mirrors `evalGroupBy`'s order of
@@ -1010,6 +1240,7 @@ module Incremental =
                         Some(Set.union nowIn wasIn)
 
                 let recomputed = ref 0
+                let recomputedGroups = ref Set.empty
 
                 let cellsFor (gt: string) (grp: Cell list list) (toks: string list) =
                     let reusable =
@@ -1024,6 +1255,7 @@ module Incremental =
                         Ok(Map.find gt priorAggs)
                     else
                         recomputed.Value <- recomputed.Value + 1
+                        recomputedGroups.Value <- Set.add gt recomputedGroups.Value
 
                         resolvedAggs
                         |> traverse (fun (a, ty, ci) ->
@@ -1038,10 +1270,12 @@ module Incremental =
                 |> Result.map (fun built ->
                     { Cols = keyCols @ aggCols
                       Rows = built |> List.map (fun (_, row, _, _) -> row)
+                      Order = built |> List.map (fun (gt, _, _, _) -> gt)
                       RowGroup = rowGroup
                       Members = (Map.empty, built) ||> List.fold (fun m (gt, _, _, toks) -> Map.add gt toks m)
                       Aggs = (Map.empty, built) ||> List.fold (fun m (gt, _, a, _) -> Map.add gt a m)
-                      Recomputed = recomputed.Value }))
+                      Recomputed = recomputed.Value
+                      RecomputedGroups = recomputedGroups.Value }))
 
     // ---- identity tokens ----
 
@@ -1117,7 +1351,7 @@ module Incremental =
         (pipeline: Transform list)
         (p: IncrementalPlan)
         (prefix: PrefixStep list)
-        (final: (string list * Agg list) option)
+        (final: (string list * Agg list * PrefixStep list) option)
         (source: Table)
         (tokens: string list)
         (prior: IncrementalEval option)
@@ -1175,8 +1409,9 @@ module Incremental =
                       Footprint =
                         { SourceRows = List.length tokens
                           ResultRows = List.length aliveRows
-                          Recompute = recomputeOf evaluated 0 } }
-            | Some(keys, aggs) ->
+                          Recompute = recomputeOf evaluated 0 }
+                      GroupCells = Map.empty }
+            | Some(keys, aggs, tail) ->
                 let priorRowGroup =
                     prior |> Option.map (fun s -> s.RowGroup) |> Option.defaultValue Map.empty
 
@@ -1187,23 +1422,71 @@ module Incremental =
                     prior |> Option.map (fun s -> s.GroupAggs) |> Option.defaultValue Map.empty
 
                 groupStep cols aliveRows keys aggs priorRowGroup priorMembers priorAggs named
-                |> Result.map (fun g ->
-                    { Plan = p
-                      Pipeline = pipeline
-                      Env = env
-                      Scheme = scheme
-                      Source = source
-                      Output = tableOf g.Cols g.Rows
-                      RowCells = rowCells
-                      RowGroup = g.RowGroup
-                      GroupMembers = g.Members
-                      GroupAggs = g.Aggs
-                      SortOrders = caches.SortOrders
-                      JoinKeys = caches.JoinKeys
-                      Footprint =
-                        { SourceRows = List.length tokens
-                          ResultRows = List.length g.Rows
-                          Recompute = recomputeOf evaluated g.Recomputed } }))
+                |> Result.bind (fun g ->
+                    // Phase 202 — one state shape whichever side of the branch below built it, so
+                    // the tail cannot quietly record a different kind of answer from the no-tail
+                    // case it generalises.
+                    let finish outCols outRows groupCells evaluated' (caches': WalkCaches) =
+                        { Plan = p
+                          Pipeline = pipeline
+                          Env = env
+                          Scheme = scheme
+                          Source = source
+                          Output = tableOf outCols outRows
+                          RowCells = rowCells
+                          RowGroup = g.RowGroup
+                          GroupMembers = g.Members
+                          GroupAggs = g.Aggs
+                          SortOrders = caches'.SortOrders
+                          JoinKeys = caches'.JoinKeys
+                          Footprint =
+                            { SourceRows = List.length tokens
+                              ResultRows = List.length outRows
+                              Recompute = recomputeOf evaluated' g.Recomputed }
+                          GroupCells = groupCells }
+
+                    if List.isEmpty tail then
+                        // The pipeline every pre-202 state was built for. Taken as its own branch
+                        // rather than as `walk … []` so a maintained group-by that ends the
+                        // pipeline pays nothing at all for a cache it has nothing to put in.
+                        Ok(finish g.Cols g.Rows Map.empty evaluated caches)
+                    else
+                        let priorGroupCells =
+                            prior |> Option.map (fun s -> s.GroupCells) |> Option.defaultValue Map.empty
+
+                        // The group table as a frame of `Work`, keyed by group token. A group is
+                        // AFFECTED exactly when `groupStep` recomputed its aggregates — its row is
+                        // then not the row the tail last read — or when the tail has no cache for
+                        // it, which covers a prime, a group that has just come into existence, and
+                        // a state built before this pipeline had a tail at all.
+                        let groupWorks =
+                            List.map2
+                                (fun token row ->
+                                    { Token = token
+                                      Affected =
+                                        Set.contains token g.RecomputedGroups
+                                        || not (Map.containsKey token priorGroupCells)
+                                      Alive = true
+                                      Cells = row
+                                      Cached = Map.tryFind token priorGroupCells |> Option.defaultValue []
+                                      Fresh = [] })
+                                g.Order
+                                g.Rows
+
+                        // The SAME walk as the prefix, one frame along: its invariant is that the
+                        // frame it holds is the frame the reference evaluator would have handed the
+                        // next step, and `groupStep` mirrors `evalGroupBy` exactly, so the group
+                        // table it is handed here is the reference's group table. `evalIdx` restarts
+                        // at 0 because `GroupCells` is its own cache; `evaluated` does not, because
+                        // the footprint counts row evaluations on ONE scale across the pipeline.
+                        walk resolve env priorCaches g.Cols groupWorks 0 evaluated caches tail
+                        |> Result.map (fun (outCols, tws, evaluated', caches') ->
+                            let groupCells =
+                                (Map.empty, tws) ||> List.fold (fun m w -> Map.add w.Token (List.rev w.Fresh) m)
+
+                            let outRows = tws |> List.filter (fun w -> w.Alive) |> List.map (fun w -> w.Cells)
+
+                            finish outCols outRows groupCells evaluated' caches')))
 
     /// Evaluate through the reference evaluator and wrap the answer in a cache-free state — the
     /// always-available degradation. A refresh over such a state re-primes, so a fall-back costs a
@@ -1238,7 +1521,8 @@ module Incremental =
               Footprint =
                 { SourceRows = Table.rowCount source
                   ResultRows = Table.rowCount output
-                  Recompute = recompute evaluated } })
+                  Recompute = recompute evaluated }
+              GroupCells = Map.empty })
 
     /// The shared entry: run the incremental path when the shape and the witness allow it, and the
     /// reference path otherwise. `named` is `None` for "every row".
