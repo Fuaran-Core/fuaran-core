@@ -2722,6 +2722,80 @@ at a ratio of **49 over a twentyfold span**, against the family's bound of 100 a
 expectation of 20 — the same band as Phase 207's top-N (46) and the plain refresh (28), and four
 times clear of the quadratic (400) the family exists to refuse.
 
+### The capability seam carries the `Deferred` envelope (Phase 210) — BREAKING: a host body's type and three public return types move
+
+**The class.** `retype`, and it is a Phase 183 gate output rather than a claim. The family reported it
+verbatim as `Fuaran.Core.Function — retype (3 move(s))`. **Three** members, not the two the phase was
+framed around, and the third is the part to read before planning an adoption:
+
+| member | the body was | the body is | the return was | the return is |
+|---|---|---|---|---|
+| `Capability.invoke` | `unit -> Result<'v, string>` | `unit -> Deferred<'v>` | `Result<'v, InvokeError>` | `Result<Deferred<'v>, InvokeError>` |
+| `Registry.dispatch` | `Capability -> unit -> Result<'v, string>` | `Capability -> unit -> Deferred<'v>` | the same move | the same move |
+| `FunctionRegistry.dispatch` | `FunctionEntry -> unit -> Result<'v, string>` | `FunctionEntry -> unit -> Deferred<'v>` | the same move | the same move |
+
+`FunctionRegistry.dispatch` moved because it IS `Capability.invoke` — it resolves an id and delegates,
+deliberately holding no parallel dispatch path — and once `invoke` answers in the envelope there is no
+TOTAL way to project back: `Pending` has no `InvokeError` case, and minting one would widen a
+published union precisely to avoid carrying the envelope. A consumer of the signature-typed registry
+therefore pays this change too, whether or not it uses the capability registry.
+
+**Nothing else moves, and one thing that looks additive is not.** `BodyFailed of reason: string` was
+already `InvokeError`'s seventh and last case, so the projection reuses it and **no union case, record
+field or declaration position changes anywhere** — `Capability`, `InvokeError`, `Deferred`,
+`CapabilityRegistry`, `FunctionRegistry` and `FunctionEntry` keep every field, case and position.
+`validateArgs`, `invocationKey`, `determinismTag`, `register`, `tryFind`, `enumerate`,
+`findBySignature`, `partiallyApply` and the whole `CapabilityCodec` keep their signatures, and no
+encoded byte of a declaration or an invocation record changes.
+
+**What a consumer pays.** Every capability body returns `Deferred` — a synchronous body wraps its
+value in `Ready v` where it returned `Ok v`, and answers `Failed m` where it returned `Error m` — and
+every caller of `invoke` / `dispatch` handles the three outcomes: SETTLED `Ok(Ready v)`, PENDING
+`Ok Pending`, REFUSED `Error e`. Refusals are unchanged: every `InvokeError` a caller matches today
+arrives exactly as it did, a body failure included, which is still `BodyFailed m`. A caller with no
+use for `Pending` writes one line — `Result.map Deferred.toResult`, or `Deferred.toResult` on the
+accepted value — which is what the envelope has shipped for since Phase 32. The in-repo adoption cost
+is 13 call sites and 8 bodies across the law kit and the tests; an adopter's is its own count of the
+same two kinds.
+
+**Why the envelope rather than a wrapper, and why now.** `Deferred`'s own declaration in this package
+calls it "a domain-general async-result envelope **for a capability invocation**", put in the
+substrate so every host gets the async-invocation envelope from Core — and until this change the
+capability seam was the one seam in the repository that did not use it, while `Placement` routed a
+body to a `Server` or a `ClientIsland`, `DeterminismSource` admitted `Network`, and the seam's own
+header offered it to model inference. A body that cannot settle synchronously had to be reported as a
+failure, or wrapped in a three-state shape the host invented above the seam — the drift a seam exists
+to prevent. So the ASYNC axis rides `Deferred` and the ERROR axis stays typed on the outer `Result`,
+which is the split that lets both be true at once, and it is now the SAME split on both seams a host
+adopts (Phase 198 made it on `Query`). **That supersedes Phase 198's "What this deliberately did NOT
+do" paragraph above**, which recorded the asymmetry as the state this repository was leaving behind:
+the two seams are symmetric from this entry onward.
+
+**The fourth case is unreachable, and it is proved rather than asserted.** Letting a body's `Failed`
+ride out inside an `Ok` would have traded the enumerated `InvokeError` for a rendered message, so
+`invoke` projects `Failed m` into `BodyFailed m`: `Ok(Failed _)` cannot occur.
+`proofs/Capability.fst` carries that as a theorem over every body and every argument set
+(`invoke_never_ok_failed`, and `dispatch_never_ok_failed` through the registry, ladder row
+`capability-envelope-three-outcomes`), and Phase 177's four capability theorems were re-DISCHARGED
+over the new clause — each holds verbatim, because every one of them is about what happens before the
+body is consulted or about body-independence, and the envelope sits on the body's answer.
+`Conformance.capabilityLaws` gained three laws for the shipped seam: the envelope riding out of
+`invoke` and `dispatch` unchanged on `Ready` / `Pending`, the three-outcome property with the refusal
+shown to precede the body, and the typed-failure invariant. Its reported law list grows from 4 entries
+to 7, so a consumer asserting a law count or indexing positionally into the results adjusts; one
+reading `AllPassed` or matching on `Law` does not. Its four existing laws, and every other family, are
+unchanged in verdict.
+
+**What this deliberately did NOT do.** It did not put a handle on `Pending` or a typed error on
+`Failed`: `Deferred<'T> = Pending | Ready of 'T | Failed of message: string` is untouched, because
+widening it would move a type this repository's codec, `deferredLaws` and every adopting host already
+read, and a pending invocation is correlated by `invocationKey`, a function of the declaration and the
+validated arguments alone. It did not touch `CapabilityPipeline.eval`, whose per-node body is a fourth
+plain-`Result` body on this package: it does not go through `Capability.invoke`, and threading a
+`Pending` through a fold needs a resumption model rather than a retype — a design question, recorded
+rather than answered. And it moved no version: this rides the `0.27.0` draft, whose entries already
+carry a breaking class.
+
 ### The restricted refresh pays for the delta (Phase 208) — BREAKING: `IncrementalEval`'s representation becomes private
 
 **What a consumer pays, in one sentence: every read of a field on an `IncrementalEval` becomes a call

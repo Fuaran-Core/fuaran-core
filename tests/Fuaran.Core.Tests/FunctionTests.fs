@@ -316,11 +316,27 @@ let tests =
               | Error(DuplicateCapability "apple") -> ()
               | other -> failtestf "expected DuplicateCapability, got %A" other
 
-              match Registry.dispatch reg "ghost" [] (fun _ () -> Ok 1) with
+              match Registry.dispatch reg "ghost" [] (fun _ () -> Ready 1) with
               | Error(NoSuchCapability("ghost", _)) -> ()
               | other -> failtestf "expected NoSuchCapability, got %A" other
 
-              Expect.equal (Registry.dispatch reg "apple" [] (fun _ () -> Ok 42)) (Ok 42) "registered id dispatches"
+              Expect.equal
+                  (Registry.dispatch reg "apple" [] (fun _ () -> Ready 42))
+                  (Ok(Ready 42))
+                  "registered id dispatches, settled"
+
+              // Phase 210 — the envelope's other two cases on the seam: a pending body stays
+              // pending inside an `Ok`, and a failing one is the typed `BodyFailed`, never
+              // `Ok(Failed _)`.
+              Expect.equal
+                  (Registry.dispatch reg "apple" [] (fun _ () -> Pending))
+                  (Ok Pending: Result<Deferred<int>, InvokeError>)
+                  "a pending body stays pending"
+
+              Expect.equal
+                  (Registry.dispatch reg "apple" [] (fun _ () -> Failed "boom"))
+                  (Error(BodyFailed "boom"): Result<Deferred<int>, InvokeError>)
+                  "a failing body is the typed BodyFailed"
 
           testCase "a capability declaration + invocation round-trips through the codec"
           <| fun _ ->
@@ -964,11 +980,11 @@ let memoTests =
                   Expect.isFalse (List.contains "doc-fn" ids) "un-narrowed base still needs h0 — not findable from {h1}"
                   // FGP 6 — the pack carried no body; the HOST supplies it at dispatch (content stays domain-side)
                   let dispatched =
-                      FunctionRegistry.dispatch loaded "house-style" [ "h1", "5" ] (fun _ () -> Ok "rendered")
+                      FunctionRegistry.dispatch loaded "house-style" [ "h1", "5" ] (fun _ () -> Ready "rendered")
 
                   Expect.equal
                       dispatched
-                      (Ok "rendered")
+                      (Ok(Ready "rendered"))
                       "host-supplied body runs; the pack carried only the typed declaration"
               | Error e -> failtestf "load failed: %A" e
 

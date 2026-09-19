@@ -101,7 +101,7 @@ method Fuaran.Core.CapabilityCodec.signatureOf(Fuaran.Core.JVal) : Microsoft.FSh
 method Fuaran.Core.CapabilityModule.create(System.String, Fuaran.Core.Signature, Fuaran.Core.Placement) : Fuaran.Core.Capability
 method Fuaran.Core.CapabilityModule.determinismTag(Fuaran.Core.Capability) : System.String
 method Fuaran.Core.CapabilityModule.invocationKey(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : System.String
-method Fuaran.Core.CapabilityModule.invoke`1(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.InvokeError>
+method Fuaran.Core.CapabilityModule.invoke`1(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Deferred`1<!!0>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityModule.validateArgs(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityPipelineModule.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityPipeline, System.String>
 method Fuaran.Core.CapabilityPipelineModule.dirtySet(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.CapabilityPipeline) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
@@ -138,7 +138,7 @@ method Fuaran.Core.Function.signatureExcluding(Microsoft.FSharp.Collections.FSha
 method Fuaran.Core.Function.signature`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, System.String, !!0) : Fuaran.Core.Signature
 method Fuaran.Core.Function.toJsonSchema(Fuaran.Core.Signature) : Fuaran.Core.JVal
 method Fuaran.Core.Function.toSchema(Fuaran.Core.Signature) : Fuaran.Core.JVal
-method Fuaran.Core.FunctionRegistryModule.dispatch`1(Fuaran.Core.FunctionRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.FunctionEntry, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.InvokeError>
+method Fuaran.Core.FunctionRegistryModule.dispatch`1(Fuaran.Core.FunctionRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.FunctionEntry, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Deferred`1<!!0>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
 method Fuaran.Core.FunctionRegistryModule.entry(System.String, Fuaran.Core.Capability) : Fuaran.Core.FunctionEntry
 method Fuaran.Core.FunctionRegistryModule.enumerate(Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.FunctionEntry>
 method Fuaran.Core.FunctionRegistryModule.findBySignature(Fuaran.Core.MatchMode, Fuaran.Core.SignatureQuery, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.FunctionEntry>
@@ -148,7 +148,7 @@ method Fuaran.Core.FunctionRegistryModule.tryFind(System.String, Fuaran.Core.Fun
 method Fuaran.Core.Memo.count`1(Fuaran.Core.MemoCache`1<!!0>) : System.Int32
 method Fuaran.Core.Memo.empty`1() : Fuaran.Core.MemoCache`1<!!0>
 method Fuaran.Core.Memo.isMemoisable(Fuaran.Core.EffectClass) : System.Boolean
-method Fuaran.Core.Registry.dispatch`1(Fuaran.Core.CapabilityRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Capability, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>>) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.InvokeError>
+method Fuaran.Core.Registry.dispatch`1(Fuaran.Core.CapabilityRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Capability, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Deferred`1<!!0>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
 method Fuaran.Core.Registry.enumerate(Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Capability>
 method Fuaran.Core.Registry.register(Fuaran.Core.Capability, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.Registry.tryFind(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>

@@ -3343,6 +3343,35 @@ Six theorems, over any witness, any readers, any registry and any host body:
    least class covering every node (`observed_least`), an `Ok` audit says the root covers every
    descendant, and an `Error` audit exhibits a descendant it does not.
 
+### What Phase 210 changed here, and the one row it added
+
+The seam's host body answers in the `Deferred<'v>` envelope now — `invoke` takes
+`unit -> Deferred<'v>` and returns `Result<Deferred<'v>, InvokeError>`, `dispatch` follows — so the
+model's `invoke` clause moved with it and the six theorems above were re-DISCHARGED over the new
+clause rather than re-run against the old one. Every one of them holds verbatim, which is the
+interesting part and is a property of where the change lands: the envelope sits on the body's
+ANSWER, and every theorem here is about what happens BEFORE the body is consulted (which id
+resolves, which arg set is accepted, which refusal names what) or about body-INDEPENDENCE (the
+same result under every body alike). A change to the body's codomain leaves both untouched. The
+model gained the envelope's three cases — and nothing else of it: the combinators
+(`Deferred.map` / `bind` / `toResult` / `tryValue`) are outside the seam and stay `deferredLaws`'s.
+
+The one row it added is **`capability-envelope-three-outcomes`**: past an accepted validation the
+result carries the body's `Ready` or `Pending` and NOTHING ELSE, because a body's `Failed m` crossed
+into the enumerated `BodyFailed m` at the seam. So `Ok (Failed _)` is unreachable rather than merely
+unproduced — at the seam (`invoke_never_ok_failed`) and through the registry, where a host actually
+reaches it (`dispatch_never_ok_failed`). That is what keeps the two axes independent: the envelope
+carries "not yet", the outer `Result` carries every refusal, and the one shape that would blur them
+cannot be constructed. `capabilityLaws` samples the same claim on the shipped seam over drawn
+bodies; the theorem is it over all of them.
+
+The differential moved with the clause rather than around it: the instrumented body on each side now
+draws a settling, a pending and a failing answer, the accepted value is compared by RENDERING the
+envelope case for case (production's `Deferred` and the extracted `deferred` are two types, so the
+comparison is the one the refusal already used), and an `Ok (Failed _)` from either side is a
+recorded difference. It cost the prover nothing measurable — the module still verifies in 7s, every
+query 3/3, and the extraction was byte-identical to a fresh one on the first run.
+
 ### The finding: a slot hole makes a capability un-invocable
 
 `Function.signature` enters a `SlotHole` as `Required = true, Space = None` — required on the data
@@ -3421,7 +3450,9 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
    `registered_dispatches`, `register_refuses_duplicate`, `register_extends`,
    `register_keeps_distinct`, `rejected_never_bound`, `undeclared_address_refused`,
    `same_name_no_capture`, `signature_excluding_exact`, `data_holes_all_data`, `observed_least`,
-   `audit_effect_join`) and the finding (`slot_hole_uninvocable`, `slot_entry_shape`), over any
+   `audit_effect_join`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
+   `dispatch_never_ok_failed` — Phase 210) and the finding
+   (`slot_hole_uninvocable`, `slot_entry_shape`), over any
    witness, any readers, any registry and any host body. F\* 2026.09.06, Z3 4.13.3, every query
    3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it
    opens nothing and restates `outcome` and its list helpers as `ColumnOps.fst` does.

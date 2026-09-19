@@ -1457,12 +1457,30 @@ module Conformance =
     ///  - **stable enumeration** — `Registry.enumerate` is order-stable (by id) regardless of
     ///    insertion order;
     ///  - **declaration round-trip** — `CapabilityCodec.decode (encode c) = Ok c`.
+    ///
+    /// Since Phase 210 it also certifies the seam's `Deferred` envelope, in the shape `queryLaws`
+    /// carries it (Phase 198): the envelope rides out of `invoke` and `dispatch` UNCHANGED on
+    /// `Ready` / `Pending`, a refusal is typed and lands BEFORE the body runs, and a body's untyped
+    /// `Failed` never rides out of the seam — it becomes the enumerated `BodyFailed`, so
+    /// `Ok(Failed _)` is unreachable. The three shapes MIRROR the query family's rather than being
+    /// instantiated from `deferredLaws`, which takes no witness.
+    ///
+    /// One of `queryLaws`' three is deliberately NOT mirrored here, and the reason is worth stating
+    /// so it does not read as an omission: its first envelope law is a `Deferred&lt;QueryResult&gt;`
+    /// WIRE round-trip, and this seam's counterpart already exists and is already certified —
+    /// `CapabilityCodec.encodeDeferred` / `decodeDeferred` are value-codec-parameterised, and
+    /// `deferredLaws` round-trips all three cases at an `int` payload. Restating it here would
+    /// duplicate a law rather than mirror one. What is mirrored is the part `queryLaws` could only
+    /// state about ITS seam: the three outcomes, and the unreachable fourth.
     let capabilityLaws (seed: int) (iterations: int) : LawResult list =
         let mutable rng = ConfRng.ofSeed seed
         let mutable validation = None
         let mutable replay = None
         let mutable enumeration = None
         let mutable roundtrip = None
+        let mutable envelope = None
+        let mutable asyncAxis = None
+        let mutable typedFailure = None
 
         // value-codec for the captured realized value (an int — the stand-in for a model output).
         let encodeV (v: int) : string = string v
@@ -1563,6 +1581,87 @@ module Conformance =
                 if roundtrip.IsNone then
                     roundtrip <- Some(sprintf "seed=%d iter=%d: decode failed: %s" seed i m)
 
+            // ---- the Deferred envelope on the seam (Phase 210) ----
+
+            let creg = Registry.empty |> Registry.register cap |> Result.toOption |> Option.get
+
+            // SETTLED and PENDING: the body's envelope rides out of the seam unchanged, through the
+            // capability-level `invoke` and the registry-level `dispatch` alike.
+            for answer in [ Ready realized; Pending ] do
+                let direct = Capability.invoke cap args (fun () -> answer)
+                let dispatched = Registry.dispatch creg cap.Id args (fun _ () -> answer)
+
+                if (direct <> Ok answer || dispatched <> Ok answer) && envelope.IsNone then
+                    envelope <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: %A did not ride out unchanged (invoke %A, dispatch %A)"
+                                seed
+                                i
+                                answer
+                                direct
+                                dispatched
+                        )
+
+            // REFUSED: typed, and before the body runs — on a rejected arg set and on an
+            // unregistered id alike.
+            let ran = ref false
+
+            (match
+                Registry.dispatch creg cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
+                    ran.Value <- true
+                    Ready realized)
+             with
+             | Error(ArgOutOfSpace _) when not ran.Value -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: refusal not typed-before-body (%A; body ran: %b)"
+                                 seed
+                                 i
+                                 other
+                                 ran.Value
+                         ))
+
+            (match
+                Registry.dispatch creg "no-such-capability" args (fun _ () ->
+                    ran.Value <- true
+                    Ready realized)
+             with
+             | Error(NoSuchCapability _) when not ran.Value -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: an unregistered id was not refused before the body (%A; body ran: %b)"
+                                 seed
+                                 i
+                                 other
+                                 ran.Value
+                         ))
+
+            // a body's untyped failure never rides out of the seam: it becomes the enumerated
+            // `BodyFailed`, so `Ok(Failed _)` is unreachable. Exhausts the body's three answers
+            // rather than asserting the fourth away.
+            for answer in [ Ready realized; Pending; Failed("boom-" + string i) ] do
+                match Registry.dispatch creg cap.Id args (fun _ () -> answer), answer with
+                | Error(BodyFailed m), Failed fm when m = fm -> ()
+                | Ok d, (Ready _ | Pending) when d = answer -> ()
+                | other, _ ->
+                    if typedFailure.IsNone then
+                        typedFailure <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: a %A body did not project to a typed outcome: %A"
+                                    seed
+                                    i
+                                    answer
+                                    other
+                            )
+
         [ { Law = "arg-validation accepts in-space + rejects out-of-space / unknown args"
             Passed = validation.IsNone
             Counterexample = validation }
@@ -1574,7 +1673,16 @@ module Conformance =
             Counterexample = enumeration }
           { Law = "capability declaration round-trips through the codec"
             Passed = roundtrip.IsNone
-            Counterexample = roundtrip } ]
+            Counterexample = roundtrip }
+          { Law = "the envelope rides out of invoke / dispatch unchanged for Ready and Pending"
+            Passed = envelope.IsNone
+            Counterexample = envelope }
+          { Law = "dispatch settles, stays pending, or refuses typed before the body runs"
+            Passed = asyncAxis.IsNone
+            Counterexample = asyncAxis }
+          { Law = "a body failure is a typed BodyFailed, never Ok(Failed _)"
+            Passed = typedFailure.IsNone
+            Counterexample = typedFailure } ]
 
     /// Certify the `Fuaran.Core.Query` data-acquisition seam (Phase 46): typed-param validation
     /// (in-type accepts; wrong-type + unknown reject), a non-deterministic query replays
@@ -2668,7 +2776,8 @@ module Conformance =
                              ))
 
                 // ---- 4. dispatch stays default-deny + arg-validated ----
-                let body (_: FunctionEntry) () = Ok 1
+                // the body answers in the `Deferred` envelope since Phase 210; this one settles.
+                let body (_: FunctionEntry) () = Ready 1
 
                 let unreg =
                     FunctionRegistry.dispatch r "nope" [ "h0", string lo; "h1", string lo ] body
@@ -2681,7 +2790,7 @@ module Conformance =
 
                 let denyOk =
                     match unreg, okCall, badArg with
-                    | Error(NoSuchCapability _), Ok 1, Error(ArgOutOfSpace _) -> true
+                    | Error(NoSuchCapability _), Ok(Ready 1), Error(ArgOutOfSpace _) -> true
                     | _ -> false
 
                 if not denyOk && defaultDeny.IsNone then

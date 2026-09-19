@@ -5760,6 +5760,21 @@ let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
 let private invokeErrClass (e: InvokeError) : string =
     (prodInvokeErrRender e).Substring(0, (prodInvokeErrRender e).IndexOf '(')
 
+/// Phase 210 — the body answers in the `Deferred` envelope on both sides, and the two `deferred`
+/// types are distinct (production's `Fuaran.Core.Deferred`, the model's extracted `deferred`), so
+/// the accepted VALUE is compared by rendering exactly as the refusal already is.
+let private prodDeferredRender (d: Deferred<int>) : string =
+    match d with
+    | Pending -> "Pending"
+    | Ready v -> sprintf "Ready(%d)" v
+    | Failed m -> sprintf "Failed(%s)" m
+
+let private modelDeferredRender (d: ModelCap.deferred<int>) : string =
+    match d with
+    | ModelCap.Pending -> "Pending"
+    | ModelCap.Ready v -> sprintf "Ready(%d)" v
+    | ModelCap.Failed m -> sprintf "Failed(%s)" m
+
 let private placementToModel (p: Placement) : ModelCap.placement =
     match p with
     | BuildTime -> ModelCap.BuildTime
@@ -6197,6 +6212,8 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
             | Some c -> genInvocation c.Signature rng
             | None -> [ "h1", "1" ], rng
 
+        // Phase 210 — the body answers in the envelope, so the draw reaches all three of its cases:
+        // 0 fails (the typed `BodyFailed`), 1 is still pending, 2 and 3 settle.
         let failBody, r8 = ConfRng.intBelow 4 r7
         rng <- r8
         let pRan = ref false
@@ -6204,15 +6221,19 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
 
         let pBody (_: Capability) () =
             pRan.Value <- true
-            if failBody = 0 then Error "boom" else Ok 42
+
+            match failBody with
+            | 0 -> Failed "boom"
+            | 1 -> Pending
+            | _ -> Ready 42
 
         let mBody (_: ModelCap.capability) () =
             mRan.Value <- true
 
-            if failBody = 0 then
-                ModelCap.Error "boom"
-            else
-                ModelCap.Ok 42
+            match failBody with
+            | 0 -> ModelCap.Failed "boom"
+            | 1 -> ModelCap.Pending
+            | _ -> ModelCap.Ready 42
 
         let p = Registry.dispatch preg id args pBody
         let m = ModelCap.dispatch rd mreg id args mBody
@@ -6221,8 +6242,23 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
          | Ok pv, ModelCap.Ok mv ->
              dispatched <- dispatched + 1
 
-             if pv <> mv then
-                 diffs.Add(sprintf "seed %d: dispatch %s accepted with different values" seedTag id)
+             if prodDeferredRender pv <> modelDeferredRender mv then
+                 diffs.Add(
+                     sprintf
+                         "seed %d: dispatch %s accepted with different envelopes\n  prod %s\n  model %s"
+                         seedTag
+                         id
+                         (prodDeferredRender pv)
+                         (modelDeferredRender mv)
+                 )
+
+             // and neither side ever hands an `Ok(Failed _)` out of the seam
+             // (`invoke_never_ok_failed` / `dispatch_never_ok_failed`, sampled here on the shipped one).
+             match pv, mv with
+             | Failed _, _
+             | _, ModelCap.Failed _ ->
+                 diffs.Add(sprintf "seed %d: dispatch %s accepted with an Ok(Failed _) envelope" seedTag id)
+             | _ -> ()
          | Error pe, ModelCap.Error me ->
              classes <- Set.add (invokeErrClass pe) classes
 
@@ -9865,11 +9901,15 @@ let proofOracleTests =
 
               let body (_: Capability) () =
                   ran.Value <- ran.Value + 1
-                  Ok "ran"
+                  Ready "ran"
 
               let failing (_: Capability) () =
                   ran.Value <- ran.Value + 1
-                  Error "boom"
+                  Failed "boom"
+
+              let pending (_: Capability) () =
+                  ran.Value <- ran.Value + 1
+                  Pending
 
               // unregistered_refused
               Expect.equal
@@ -9895,7 +9935,7 @@ let proofOracleTests =
 
                   Expect.equal
                       a
-                      (Capability.validateArgs cap args |> Result.map (fun () -> "unreachable"))
+                      (Capability.validateArgs cap args |> Result.map (fun () -> Ready "unreachable"))
                       "and it IS the validation's refusal"
 
               Expect.equal ran.Value 0 "no body ran on any refusal"
@@ -9927,12 +9967,29 @@ let proofOracleTests =
               Expect.equal ran.Value 0 "and no body ran on any of those either"
 
               // and the accepted set runs it, once
+              let accepted = [ "tpl/t", "x"; "tpl/c", "3" ]
+
               Expect.equal
-                  (Registry.dispatch reg "cap-t" [ "tpl/t", "x"; "tpl/c", "3" ] body)
-                  (Ok "ran")
+                  (Registry.dispatch reg "cap-t" accepted body)
+                  (Ok(Ready "ran"))
                   "an accepted set runs the body"
 
               Expect.equal ran.Value 1 "exactly once"
+
+              // Phase 210 — invoke_never_ok_failed / dispatch_never_ok_failed on the shipped seam:
+              // past an accepted validation the envelope's three cases go to exactly the three
+              // outcomes, and `Ok(Failed _)` is not among them.
+              Expect.equal
+                  (Registry.dispatch reg "cap-t" accepted pending)
+                  (Ok Pending: Result<Deferred<string>, InvokeError>)
+                  "a pending body stays pending inside the Ok"
+
+              Expect.equal
+                  (Registry.dispatch reg "cap-t" accepted failing)
+                  (Error(BodyFailed "boom"): Result<Deferred<string>, InvokeError>)
+                  "a failing body is the typed BodyFailed, never Ok(Failed _)"
+
+              Expect.equal ran.Value 3 "and each of those ran its body once"
 
               // and the model says the same through the same theorems' clauses
               let mreg =
@@ -9941,7 +9998,7 @@ let proofOracleTests =
                   | ModelCap.Error _ -> failtest "the model refused the registration"
 
               Expect.equal
-                  (ModelCap.dispatch readers mreg "cap-u" [ "tpl/t", "x" ] (fun _ () -> ModelCap.Ok "ran"))
+                  (ModelCap.dispatch readers mreg "cap-u" [ "tpl/t", "x" ] (fun _ () -> ModelCap.Ready "ran"))
                   (ModelCap.Error(ModelCap.NoSuchCapability("cap-u", [ "cap-t" ])))
                   "the model refuses the unregistered id the same way"
 

@@ -1017,16 +1017,27 @@ module Capability =
     /// re-evaluate freely; for a non-`Deterministic` capability the caller journals the realized
     /// value via `OpStream.captureEffect` keyed by `invocationKey` + `determinismTag` (Phase 27),
     /// so the invocation replays exactly. A body failure is a named `BodyFailed`, never a throw.
+    ///
+    /// Since Phase 210 the body answers in the `Deferred` envelope declared above — a body placed on
+    /// a `Server` or in a `ClientIsland` cannot settle synchronously, and `Deferred` was put in this
+    /// package for exactly that. A synchronous body wraps its value in `Ready`. The ASYNC axis rides
+    /// the envelope; the ERROR axis stays typed on the outer `Result`, with a body's `Failed m`
+    /// projected into the enumerated `BodyFailed m`. So an invocation has exactly three outcomes —
+    /// SETTLED (`Ok(Ready v)`), PENDING (`Ok Pending`) and REFUSED (`Error e`, typed) — and
+    /// `Ok(Failed _)` is unreachable by construction, which `capabilityLaws` certifies and
+    /// `proofs/Capability.fst`'s `invoke_never_ok_failed` proves rather than this comment asserting.
+    /// The same shape `Query.invoke` carries (Phase 198): one async shape across both seams.
     let invoke
         (c: Capability)
         (args: (string * string) list)
-        (body: unit -> Result<'v, string>)
-        : Result<'v, InvokeError> =
+        (body: unit -> Deferred<'v>)
+        : Result<Deferred<'v>, InvokeError> =
         validateArgs c args
         |> Result.bind (fun () ->
             match body () with
-            | Ok v -> Ok v
-            | Error m -> Error(BodyFailed m))
+            | Ready v -> Ok(Ready v)
+            | Pending -> Ok Pending
+            | Failed m -> Error(BodyFailed m))
 
 /// A typed capability registry — the discovery surface an agent enumerates (the compute analogue of
 /// node-introspection): "what compute may I invoke, with what typed args". Default-deny by shape on
@@ -1056,13 +1067,14 @@ module Registry =
 
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered
     /// id is `NoSuchCapability`), then `Capability.invoke`. The host body is supplied by the caller
-    /// per the resolved capability's placement.
+    /// per the resolved capability's placement, and answers in the `Deferred` envelope (Phase 210 —
+    /// the same three outcomes `Capability.invoke` documents).
     let dispatch
         (r: CapabilityRegistry)
         (id: string)
         (args: (string * string) list)
-        (body: Capability -> unit -> Result<'v, string>)
-        : Result<'v, InvokeError> =
+        (body: Capability -> unit -> Deferred<'v>)
+        : Result<Deferred<'v>, InvokeError> =
         match Map.tryFind id r.Capabilities with
         | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
         | Some c -> Capability.invoke c args (body c)
@@ -1532,13 +1544,18 @@ module FunctionRegistry =
     /// Dispatch an invocation through the registry (Phase 50): resolve the id (default-deny — an
     /// unregistered id is `NoSuchCapability`), then invoke via `Capability.invoke` (arg-validated — the
     /// SAME trust posture as `Registry.dispatch`, no parallel path). The host supplies the body per the
-    /// resolved entry's placement.
+    /// resolved entry's placement, and answers in the `Deferred` envelope.
+    ///
+    /// It moved with `Capability.invoke` in Phase 210 because it IS `Capability.invoke` — there is no
+    /// total projection from `Result<Deferred<'v>, InvokeError>` back to `Result<'v, InvokeError>`
+    /// (`Pending` has no `InvokeError` case, and minting one would widen a published union to avoid
+    /// carrying the envelope), and a parallel path is the one thing this registry was built not to be.
     let dispatch
         (r: FunctionRegistry)
         (id: string)
         (args: (string * string) list)
-        (body: FunctionEntry -> unit -> Result<'v, string>)
-        : Result<'v, InvokeError> =
+        (body: FunctionEntry -> unit -> Deferred<'v>)
+        : Result<Deferred<'v>, InvokeError> =
         match Map.tryFind id r.Entries with
         | None -> Error(NoSuchCapability(id, r.Entries |> Map.toList |> List.map fst))
         | Some e -> Capability.invoke e.Capability args (body e)

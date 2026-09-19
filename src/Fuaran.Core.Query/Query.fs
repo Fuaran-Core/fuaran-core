@@ -36,11 +36,15 @@ namespace Fuaran.Core
 //  handle — the host correlates a pending fetch by `invocationKey`, which is a
 //  function of the declaration and the validated args alone.
 //
-//  NOTE the asymmetry, so a reader is not misled by the sibling framing above:
-//  `Capability.invoke` returns a plain `Result<'v, InvokeError>` and does not
-//  carry the envelope. `Query` is the first seam to, not the second — giving
-//  `Capability` the same shape retypes a surface the proof leg models, and is
-//  its own change.
+//  The sibling framing above covers the ASYNC axis too, since Phase 210:
+//  `Capability.invoke` takes `body: unit -> Deferred<'v>` and returns
+//  `Result<Deferred<'v>, InvokeError>`, projecting a body's `Failed` into the
+//  enumerated `BodyFailed` exactly as this seam projects a resolver's into
+//  `ExecutionFailed`. So both seams a host adopts have the same three outcomes
+//  and the same unreachable fourth, and each keeps its OWN typed error — which
+//  is what the sibling relation does and does not mean: one async shape, two
+//  error vocabularies. (`Query` was the first to carry the envelope; Phase 198
+//  recorded the asymmetry it left behind, and 210 closed it.)
 // ============================================================================
 
 /// A typed parameter a query expects at invocation — the data-acquisition analogue of a

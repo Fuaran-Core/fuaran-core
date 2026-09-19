@@ -1501,17 +1501,64 @@ in (match ((check_args rd holes declared a)) with
      end)
      end))))
 
+type deferred<'a> =
+| Pending
+| Ready of 'a
+| Failed of Prims.string
 
-let invoke = (fun ( rd  :  readers ) ( c  :  capability ) ( a  :  invocation ) ( body  :  unit  ->  outcome<'v, Prims.string> ) -> (match ((validate_args rd c a)) with
+
+let uu___is_Pending = (fun ( projectee  :  deferred<'a> ) -> (match (projectee) with
+| Pending -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Ready = (fun ( projectee  :  deferred<'a> ) -> (match (projectee) with
+| Ready (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Ready__item___0 = (fun ( projectee  :  deferred<'a> ) -> (match (projectee) with
+| Ready (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_Failed = (fun ( projectee  :  deferred<'a> ) -> (match (projectee) with
+| Failed (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Failed__item___0 = (fun ( projectee  :  deferred<'a> ) -> (match (projectee) with
+| Failed (_0) -> begin
+     _0
+     end))
+
+
+let invoke = (fun ( rd  :  readers ) ( c  :  capability ) ( a  :  invocation ) ( body  :  unit  ->  deferred<'v> ) -> (match ((validate_args rd c a)) with
 | Error (e) -> begin
      Error (e)
      end
 | Ok (()) -> begin
      (match ((body ())) with
-| Ok (x) -> begin
-     Ok (x)
+| Ready (x) -> begin
+     Ok (Ready (x))
      end
-| Error (m) -> begin
+| Pending -> begin
+     Ok (Pending)
+     end
+| Failed (m) -> begin
      Error (BodyFailed (m))
      end)
      end))
@@ -1566,7 +1613,7 @@ let try_find_cap : Prims.string  ->  registry  ->  FStar_Pervasives_Native.optio
 let enumerate : registry  ->  Prims.list<capability> = (fun ( r  :  registry ) -> r.capabilities)
 
 
-let dispatch = (fun ( rd  :  readers ) ( r  :  registry ) ( id  :  Prims.string ) ( a  :  invocation ) ( body  :  capability  ->  unit  ->  outcome<'v, Prims.string> ) -> (match ((find_cap id r.capabilities)) with
+let dispatch = (fun ( rd  :  readers ) ( r  :  registry ) ( id  :  Prims.string ) ( a  :  invocation ) ( body  :  capability  ->  unit  ->  deferred<'v> ) -> (match ((find_cap id r.capabilities)) with
 | FStar_Pervasives_Native.None -> begin
      Error (NoSuchCapability (id, (ids r.capabilities)))
      end

@@ -51,7 +51,20 @@ let private functionTouch =
           Holes = []
           Effect = Effect.pureDeterministic }
 
-    Function.toJsonSchema sg |> Json.render
+    // Phase 210 — the capability seam's `Deferred` envelope: the host body answers in it and the
+    // retyped `Registry.dispatch` has to compile under Fable too. Named deliberately, because
+    // `Function.toJsonSchema` alone reached neither dispatcher.
+    let cap = Capability.create "c" sg (ClientIsland Fable)
+    let reg = Registry.empty |> Registry.register cap |> Result.toOption |> Option.get
+    let body (_: Capability) () : Deferred<string> = Pending
+
+    let dispatched =
+        match Registry.dispatch reg "c" [] body with
+        | Ok Pending -> "pending"
+        | Ok other -> sprintf "%A" other
+        | Error e -> sprintf "%A" e
+
+    sprintf "%s|%s" (Function.toJsonSchema sg |> Json.render) dispatched
 
 // Column + DataFrame — the cell-type probe + the Phase-55 float cell-string.
 let private columnTouch = Cell.typeOf (Int 1)
