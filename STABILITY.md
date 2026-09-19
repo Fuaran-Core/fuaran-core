@@ -2240,6 +2240,87 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## Pending — awaiting the next BREAKING slot
+
+**This is NOT a version slot and nothing has ridden it.** The entry below is a public-contract
+change whose class is `union-widening`, which the table above says **advances** `<Version>`. The
+standing draft immediately under this heading carries only additive and behaviour-identical work, so
+riding it would put a number on this change that understates what adopting it costs — and the
+breaking slot is not this phase's to open. The entry is therefore written self-contained and parked
+here: whoever opens the breaking slot moves the `###` block below under that slot's `##` header
+unchanged, and deletes this heading when nothing is left beneath it.
+
+### Top-N is maintainable (Phase 207) — BREAKING: a case added to `StepIncrementality`
+
+`Incremental.plan` declined every pipeline carrying a `Limit`, as `FallBack (StepNotRowLocal
+"limit")`. It no longer does. A `Limit` whose count and offset are literals is classified
+**`StepIncrementality.TruncateOrder (n, offset)`**, at any position, over any order the restricted
+walk produced — so `Filter > Sort > Limit`, `Filter > Project > Limit`, a bare `Limit`, and a
+`Limit` feeding a maintained `GroupBy` are all restricted rather than declined.
+
+**The class is the gate's output, quoted rather than argued:**
+
+```
+Fuaran.Core.DataFrame — union-widening (3 move(s))
+  additive           + field Fuaran.Core.StepIncrementality+Tags.TruncateOrder : System.Int32 (literal)
+  additive           + type Fuaran.Core.StepIncrementality+TruncateOrder (type)
+  union-widening     + union-case Fuaran.Core.StepIncrementality.NewTruncateOrder #6(System.Int32, System.Int32)
+```
+
+It read `union-widening (4 move(s))` on the first cut, the fourth being a `retype` of
+`StepIncrementality.NewFallBack` from tag `#5` to `#6`: the new case had been declared where it
+belongs thematically, among the admitted classes, and a union case's declaration order **is** its
+tag. That renumbering cost a consumer a second breakage on a case that had not changed, so the case
+is declared last instead — after `FallBack`, appended in arrival order exactly as `FallBackReason`'s
+own cases are. The reason is recorded on the case itself, because the next author to tidy the
+declaration order will otherwise put it back.
+
+**What a pinned consumer pays, exactly.** `StepIncrementality` is a published union, so **every
+exhaustive `match` over it gains an arm** — `FS0025` at compile time against a rebuilt package, and,
+against a stale same-version pack, an `InvalidCastException` at run time with no compile signal at
+all. A `match` with a wildcard arm is unaffected. Nothing was removed, no signature moved, and
+`IncrementalStrategy` did **not** gain a case: a top-N pipeline reports `RowLocal` (or
+`RowLocalThenGroups` behind a maintained group) exactly as a sort-bearing one does, so
+`isIncremental`, the strategy dispatch and every law that keys off `ReferenceOnly`-versus-not are
+untouched. In this repository the cost of the widening measured **zero matches extended** — every
+in-repo reader of the type already carried a wildcard — which is evidence about the shape of the
+type's use rather than a promise about any consumer's.
+
+**One decline moved reason.** A `Limit` whose count or offset is still a `Slot.Param` continues to
+decline, and now does so as `UnresolvedSlotParam ("limit", <param>)` rather than `StepNotRowLocal
+"limit"` — the `0.23.0` rule a `Sort` on a param key already follows. A consumer matching on the old
+pairing sees the new one. The reason is the accurate one: the window is not known without an env,
+and substituting the params (`Transform.substitute`) makes the plan computable again, which the old
+reason denied.
+
+**There is no second decline class, and that is a finding rather than an omission.** The shape this
+was designed to have — admit a `Limit` only where the order it reads is one the seam maintains,
+decline the rest by type — describes a distinction the walk cannot draw. Every step the walk admits
+(`PropagateRows`, `MergeOrder`, `RecomputeFrame`, `FilterByRelation`) preserves the reference's row
+set *and* its order, and a step that does not declines the whole pipeline before the limit is
+reached; so a `Limit` the walk reaches is over a maintained order by construction, and a predicate
+saying so would be a branch that cannot be taken. This is the call `0.19.0` made for `Window` when
+frame boundedness turned out not to be the admission criterion, and it is recorded the same way:
+in the type's own doc comment, beside the code.
+
+**What it buys, measured rather than claimed.** A `Limit` evaluates no expression, so it costs
+nothing on the footprint's scale in either path; what the admission buys is that the steps *before*
+it stop re-evaluating every row. On one machine at 20,000 rows with one row edited, over
+`Filter > Sort > Limit 10`: with a 129-node row expression the refresh is **87 ms against the full
+evaluation's 245 ms**; with a single `Ge` comparison it is **89 ms against 56 ms** and the seam
+still loses. That is Phase 206's finding holding for this shape — the seam's proposition is about
+the size of the ROW EXPRESSION, not the size of the table — with one difference worth knowing: a
+top-N full evaluation sorts the whole frame every tick while the refresh merges into an order it
+already holds, so the trivial-predicate gap narrows from 3.4× against the seam to 1.6×. It does not
+close. `docs/incremental-evaluation.md` carries both tables.
+
+**The maintenance adds no third quadratic class**, and that is asserted rather than asserted-about:
+the `Scaling` family counts the step's element visits at both sizes and pins the shipped shape at
+**exactly linear** (20.00 over a twentyfold span) beside the obvious index-lookup shape at **398.86**
+— a go-red proof that is exact, clock-free and identical on every host, which the timed form of the
+same comparison was not. The whole top-N refresh is also timed, at a ratio of 49 against the
+family's bound of 100.
+
 ## 0.26.1 (draft)
 
 **This slot is a DRAFT.** `<Version>` reads `0.26.1` and no `v0.26.1` tag exists, so an additive or

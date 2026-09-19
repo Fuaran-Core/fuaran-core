@@ -139,7 +139,8 @@ let motivatingInstanceTests =
                         "merged-order-restricted"
                         "window-restricted"
                         "partition-global-window-restricted"
-                        "relation-filtered-restricted" ])
+                        "relation-filtered-restricted"
+                        "top-n-restricted" ])
                   "every class the family's laws distinguish is demanded"
 
           // The Phase 100 instance — 150 halting trials out of 150, the folding branch never

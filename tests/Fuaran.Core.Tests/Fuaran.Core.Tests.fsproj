@@ -242,6 +242,7 @@
          no other test module — it builds its own tables — so it is appended at the end of the
          list (append-only registration). -->
     <Compile Include="ScalingTests.fs" />
+    <Compile Include="IncrementalTopNTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

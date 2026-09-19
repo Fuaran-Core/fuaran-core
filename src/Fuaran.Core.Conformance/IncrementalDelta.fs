@@ -201,7 +201,11 @@ module IncrementalDelta =
             // declined: a maintainable step that is not last
             [ GroupBy([ "b" ], [ agg "n" Count "a" ])
               Filter(Binary(Gt, Col "n", Lit(Int 0))) ]
-        | 8 -> [ Transform.limit 2 0 ] // declined: order-dependent
+        // Phase 207 — this was the family's `limit` DECLINE until a `Limit` was admitted. It is kept
+        // and re-read rather than replaced: a bare top-N is the shape whose restriction is visible
+        // with nothing else in the pipeline to attribute it to, exactly as `15` is for the
+        // partition-global windows. The decline it used to carry is now `18`'s and `6`'s.
+        | 8 -> [ Transform.limit 2 0 ]
         | 9 ->
             // a derived column whose TYPE depends on which rows survive, followed by a filter that
             // can drop the only typed row — the inferred-type trap.
@@ -349,12 +353,53 @@ module IncrementalDelta =
                     Fn = Rank
                     Of = "a"
                     As = "rk" } ]
+        | 27 ->
+            // Phase 207 — the headline top-N shape: a filter, a merged order over the TIE-HEAVY key,
+            // then the cut. `b` is drawn from three values over up to nine rows, so the cut lands
+            // inside a run of ties in most draws, and which of the tying rows is kept is decided by
+            // the arrival-position tiebreak alone. The `reverse` edit is what makes that
+            // load-bearing here as it is for `11`–`13`: an identity diff reports it as quiet, so a
+            // truncation taken over a cached order that was not re-checked against arrival order
+            // answers a delta naming nothing with the wrong rows in the window.
+            [ Filter(Binary(Gt, Col "a", Lit(Int -5)))
+              Transform.sortBy [ "b", Asc ]
+              Transform.limit 2 0 ]
+        | 28 ->
+            // A top-N with NO sort in front of it — the second shape the phase's acceptance names,
+            // and the one that shows the admission is not conditioned on a preceding `Sort`. The
+            // order it truncates is ARRIVAL order, which the walk maintains exactly as it maintains
+            // a merged one, so a reordering edit moves this window with nothing in the delta to say
+            // so and a filter edit moves it by changing who arrives at the cut.
+            [ Filter(Binary(Gt, Col "a", Lit(Int 0)))
+              Project [ "id", "id"; "a", "a" ]
+              Transform.limit 3 0 ]
+        | 29 ->
+            // A non-zero OFFSET: the window skips before it keeps, so a change in the SKIPPED
+            // prefix moves both kept rows while appearing in neither. An implementation that
+            // truncated before it skipped, or that clamped the skip against the wrong length, is
+            // right on every `offset = 0` draw in the corpus and wrong on every one of these.
+            [ Transform.sortBy [ "a", Desc ]; Transform.limit 2 1 ]
+        | 30 ->
+            // A truncated order feeding an ORDER-SENSITIVE maintained group: `First` and `Last` read
+            // the position the window left each row in, and the group partition is built from the
+            // rows the cut left alive. A maintained group that recomputed its members from the
+            // pre-truncation frame would aggregate rows the limit had already dropped — the same
+            // defect shape `13` catches one verb earlier.
+            [ Transform.sortBy [ "b", Asc; "a", Desc ]
+              Transform.limit 4 0
+              GroupBy([ "b" ], [ agg "f" First "id"; agg "l" Last "id"; agg "n" Count "a" ]) ]
+        | 31 ->
+            // Declined: one source row becomes one row PER value column, so the output rows are not
+            // the input rows at all. It joins the corpus with Phase 207, which admitted `Limit` and
+            // left the declined set a pipeline short — and the class matters more than the count,
+            // since a fall-back that returns the wrong answer is the worse failure.
+            [ Unpivot([ "id" ], [ "a"; "b" ]) ]
         | _ ->
             // Phase 120 — declined by KIND: a combining join fans a left row out across its matches
             // and appends the right schema, so one source row is no longer one output row.
             [ Join(Embedded lookup, [ "b", "k" ], Inner) ]
 
-    let private pipelineCount = 27
+    let private pipelineCount = 32
 
     /// Apply one edit to the base rows, returning the new table and a tag naming the edit.
     let private editOf (k: int) (rows: (string * Cell * Cell) list) (n: int) : Table * string =
@@ -504,7 +549,8 @@ module IncrementalDelta =
                 "merged-order-restricted"
                 "window-restricted"
                 "partition-global-window-restricted"
-                "relation-filtered-restricted" ],
+                "relation-filtered-restricted"
+                "top-n-restricted" ],
               fun s ->
                   let restricted =
                       match s.Refresh.Recompute with
@@ -544,6 +590,16 @@ module IncrementalDelta =
                           | FilterByRelation _ -> true
                           | _ -> false)
 
+                  // Phase 207 — the demand that would go vacuous if the admission were reverted.
+                  // `8` is in this corpus as a bare `limit 2 0` and was its DECLINE until this
+                  // phase, so "a limit was drawn" is satisfied by a sample that fell back; what
+                  // the admission claims is that a top-N refresh is RESTRICTED, and that is what
+                  // the sample has to reach.
+                  let truncatesOrder =
+                      carries (function
+                          | TruncateOrder _ -> true
+                          | _ -> false)
+
                   [ match s.Strategy with
                     | ReferenceOnly _ -> "declined"
                     | _ -> ()
@@ -558,7 +614,9 @@ module IncrementalDelta =
                     if framesPartitionGlobalWindow && restricted then
                         "partition-global-window-restricted"
                     if filtersByRelation && restricted then
-                        "relation-filtered-restricted" ]
+                        "relation-filtered-restricted"
+                    if truncatesOrder && restricted then
+                        "top-n-restricted" ]
           )
           Spans("source rows", rowsTheLawsNeed, fun s -> s.Prime.SourceRows) ]
 
