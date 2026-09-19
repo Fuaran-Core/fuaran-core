@@ -2466,6 +2466,27 @@ the frozen `AiSurfaceWitness`; `Proposals` keeps its queue, its approval flow an
 rendering; nothing about what `arbitrate` decides, in what order, or with what honesty boundary
 moved. This is a change of address.
 
+### The relocation-kind footprint widening was MEASURED AND DECLINED (Phase 163) — NO surface moves
+
+`Footprint`, `Ops.footprint` and `Ops.independent` are **byte-for-byte unchanged**, and this entry
+exists so that nobody reads their stillness as an oversight. Phase 143 proved a precision ceiling
+(`proofs/TreeOps.fst` section 18, `relocation_clause_is_necessary`): the pinned unknown-parent clause
+cannot be tightened over the record as it stands, because a `MoveNode` and a remove-shaped `Batch`
+present byte-identical footprints while only the move commutes with a structural write inside the
+relocated subtree. Its named remedy was a wider record — one carrying the relocation's KIND and, for
+a move, its target. Phase 163 measured what that would buy before building it, and the answer is
+nothing: **an upper bound of 0 freeable pairs over 20,649,689 concurrent op pairs** in the recorded
+op-stream ledgers available to measure. The instrument, its falsifier and its go-red self-test are
+`proofs/kit/measure-relocation-halts.ps1` (+ `.tests.ps1`); the reasoning is
+[`DECISIONS.md`](DECISIONS.md) D47.
+
+**So no consumer has anything to adopt, and that is the whole of the consumer-facing news.** The
+widening would have been breaking — the record is mirrored by hand in F\* (`proofs/DagFold.fst`
+declares its own `footprint`, with `independent` re-implemented clause-for-clause) and its four
+fields are pinned WITH THEIR ORDINALS in `api/Fuaran.Core.Ops.txt`, so a field added anywhere but
+last moves the baseline. Declining it leaves every projection over this record (`'Op -> Footprint`,
+the shape a scheduling or fold consumer supplies) valid exactly as written.
+
 ## 0.26.0 — released 2026-09-17 as `v0.26.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.26.0` and the repository holds the `v0.26.0` tag, so
