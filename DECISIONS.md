@@ -1,5 +1,58 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-19 — D46: `arbitrate` belongs to the op algebra, not to the AI surface — and a package name that names four things does not get a fifth
+
+**Decided (Phase 192; operator decision 2026-09-16 on the `AiSurface` placement question.)**
+`arbitrate`, `ArbitrationRejection` and `Arbitration` move from `Fuaran.Core.AiSurface` to
+`Fuaran.Core.Ops`, as `Arbitration.arbitrate` over a new minimal record
+`OpScriptProposal<'Node,'Id>` = `{ Id; Holder; Ops }`. `AiSurface.Proposals` keeps its queue and
+gains `toOpScript`, the one-line projection. Nothing about what the function decides changes. The
+adoption cost and the ride-not-advance argument are in [`STABILITY.md`](STABILITY.md) under the
+`0.27.0` draft.
+
+**The argument is about what the package NAME promises.** `Fuaran.Core.AiSurface` answers one
+question — what does a model need in order to read a domain artifact and propose changes to it — and
+its four parts are four halves of that answer. Six per-domain `*.AiTools` layers adopt it under that
+reading, and `AiSurfaceWitness` is frozen over exactly those four. Arbitration answers a different
+question: given N op scripts and one base tree, which subset can land together. Its inputs are
+footprints, its output is a partition, its callers are schedulers, and no model is involved at any
+point. It is the other end of `Ops.footprint` and `Ops.independent` — the concurrency half of the
+tree algebra whose first half already lives in `Ops`.
+
+**Why it landed in the wrong package, which is the part worth recording.** It landed beside the
+proposal RECORD. `arbitrate` needed a list of things with an id and an op list; `Proposals.Proposal`
+was a thing with an id and an op list; so the function was declared where that type was. That is a
+reason about where a record sat, not about what the function is — and it is a very easy reason to
+act on, because it presents as the absence of friction rather than as a choice. The record was doing
+two jobs (a human-approval lifecycle, and an identity for the partition to sort by), and splitting
+it is what let the function go where it belonged. **The generalisable form: when a function seems to
+belong beside a type, check whether it needs the whole type or three fields of it. A function that
+needs three fields of a six-field record is telling you there are two records.**
+
+**Rejected: renaming `AiSurface`.** The name is correct for what remains, six domains' `*.AiTools`
+layers are named after it, and `AiSurfaceWitness` is in the 1.0 field freeze. A rename would have
+broken every adopter to fix a problem one function had.
+
+**Rejected: leaving it and documenting the oddity.** The cost of the move is two call-site edits in
+two coordination-layer consumers, both of which repin within this release anyway. The cost of not
+moving it is paid repeatedly and by people who did not choose it: a new adopter looking for
+concurrency semantics reads the package that does not have them, and a reader of the arbitration
+theorems is told they are about an AI surface. A one-time cost falling on two known callers beats a
+permanent cost falling on every future reader.
+
+**Rejected: `Ops.Arbitration.arbitrate`, which is what the phase was written as.** `Ops` is a
+module, and F# does not let a second file re-open one; the only way to spell it that way was to put
+arbitration inside `Ops.fs`. The module is therefore a PEER of `Ops` in the same package and the same
+namespace — `Fuaran.Core.Arbitration`, exactly as `Fuaran.Core.Diff` already is — which reads
+`Arbitration.arbitrate` under the `open Fuaran.Core` every consumer already has. It carries
+`[<CompilationRepresentation(ModuleSuffix)>]` so the module coexists with the `Arbitration` type,
+the pattern `Column`, `DataFrame`, `Function` and `OpStream` all use.
+
+**Verbatim was measured, not asserted.** Both implementations ran over the same 300 generated
+proposal sets from the law kit's own generators before the old one was deleted — zero disagreements,
+and the same differential against an inverted pinned order disagreed on 282 of the 300, so the
+comparison was shown able to fail before its passing was believed.
+
 ## 2026-09-19 — D45: the class of a surface move is COMPUTED at the gate, and the gate refuses an unclassified move rather than a breaking one
 
 **Decided (Phase 183).** Every packable package carries a committed baseline of its public contract
