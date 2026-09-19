@@ -1431,6 +1431,17 @@
       }
     },
     {
+      "id": "capability-envelope-three-outcomes",
+      "level": "proved",
+      "claim": "THE ENVELOPE HAS NO FOURTH OUTCOME. Since the body answers in `Deferred<'v>`, an invocation past an accepted validation carries the body's `Ready` or `Pending` and nothing else: a body's `Failed m` crossed into the enumerated `BodyFailed m` at the seam, so `Ok (Failed _)` is unreachable rather than merely unproduced, for every body and every argument set alike (`invoke_never_ok_failed`), and through the registry too, where a host actually reaches the seam (`dispatch_never_ok_failed`). That is what makes the async axis and the typed-error axis independent: the envelope carries \"not yet\", the outer `outcome` carries every refusal, and the one shape that would blur them cannot be constructed. `capabilityLaws` samples the same claim on the shipped seam; this is it over all bodies. The envelope's COMBINATORS (`Deferred.map` / `bind` / `toResult` / `tryValue`) are outside the model and stay `deferredLaws`'s.",
+      "phase": "fuaran-core#210",
+      "evidence": {
+        "theorem": "invoke_never_ok_failed",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "capability-enumerate-is-registry",
       "level": "proved",
       "claim": "An id is in `Registry.enumerate`'s output exactly when `Registry.tryFind` resolves it, and `dispatch` raises `NoSuchCapability` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS capability's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends by exactly one entry otherwise (`register_extends`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`). Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `capabilityLaws`'s to certify and is outside the theorem.",
@@ -1499,7 +1510,7 @@
     {
       "id": "capability-differential",
       "level": "tested",
-      "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Agreement is over the pools drawn, never over all inputs.",
+      "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, an accepted `Deferred` ENVELOPE rendered case for case (Phase 210: the draw reaches a settling, a pending and a failing body, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Agreement is over the pools drawn, never over all inputs.",
       "phase": "fuaran-core#177",
       "evidence": {
         "family": "Proofs.Oracle",

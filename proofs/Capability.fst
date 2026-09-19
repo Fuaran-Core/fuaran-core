@@ -13,7 +13,10 @@
        the `apply` / `curry` that are its two faces, `compose`, `composedEffect`, `observedEffect`
        and `auditEffect`;
      - the CAPABILITY SEAM: `Capability.create` / `validateArgs` / `invoke`, `Registry.empty` /
-       `register` / `tryFind` / `enumerate` / `dispatch`, and the seven-case `InvokeError`.
+       `register` / `tryFind` / `enumerate` / `dispatch`, the seven-case `InvokeError`, and — since
+       Phase 210 — the `Deferred<'T>` envelope the host body answers in. The envelope's three cases
+       are modelled; its COMBINATORS (`Deferred.map` / `bind` / `toResult` / `tryValue`) are not,
+       being outside the seam.
 
    Two things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a parameter
    and Phase 176 made the pipeline evaluator one. The WITNESS (`ArtifactWitness`'s `Holes`,
@@ -32,7 +35,10 @@
        which is what "runs no handler" means without instrumenting one.
      - `validate_before_invoke` — an argument set `validateArgs` rejects makes `invoke` return
        that rejection for every body alike; a `BodyFailed` or an accepted result is reachable only
-       through an accepted validation (`body_runs_only_validated`); and what validation says is
+       through an accepted validation (`body_runs_only_validated`); an accepted invocation carries
+       the body's `Ready` or `Pending` and NOTHING else, so the envelope's fourth outcome
+       `Ok (Failed _)` is unreachable at the seam and through the registry alike
+       (`invoke_never_ok_failed`, `dispatch_never_ok_failed` — Phase 210); and what validation says is
        characterised: the refusal is one of its own four, an accepted set addresses declared
        holes only and binds every required one (`validate_args_sound`), and an `ArgOutOfSpace`
        names a value the space really refuses (`refusal_is_truthful`). THE FINDING read off it,
@@ -646,15 +652,26 @@ let validate_args (rd:readers) (c:capability) (a:invocation) : Tot (outcome unit
     | [] -> Ok ()
     | u -> Error (RequiredArgsUnbound u)
 
-(* F#: `Capability.invoke` — validate, THEN the host body; a body failure is named, never thrown. *)
-let invoke (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> outcome v string)
-  : Tot (outcome v invoke_error) =
+(* F#: `Deferred<'T>` — the async-result envelope the body answers in (Phase 210). The failure rides
+   as a rendered string, which is what `BodyFailed` names it with; the TYPED error axis stays on the
+   outer `outcome`. Restated here rather than opened, like `outcome` and the list helpers above. *)
+type deferred (a:Type) =
+  | Pending : deferred a
+  | Ready   : a -> deferred a
+  | Failed  : string -> deferred a
+
+(* F#: `Capability.invoke` — validate, THEN the host body; a body failure is named, never thrown.
+   Since Phase 210 the body answers in the envelope: `Ready` and `Pending` ride out unchanged inside
+   an `Ok`, and only `Failed` crosses into the typed refusal. *)
+let invoke (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> deferred v)
+  : Tot (outcome (deferred v) invoke_error) =
   match validate_args rd c a with
   | Error e -> Error e
   | Ok () ->
     match body () with
-    | Ok x -> Ok x
-    | Error m -> Error (BodyFailed m)
+    | Ready x -> Ok (Ready x)
+    | Pending -> Ok Pending
+    | Failed m -> Error (BodyFailed m)
 
 (* F#: `CapabilityRegistry` — a `Map<string, Capability>` keyed by `Id`, read as a finite map. *)
 type registry = { capabilities: list capability }
@@ -689,8 +706,8 @@ let enumerate (r:registry) : Tot (list capability) = r.capabilities
 
 (* F#: `Registry.dispatch` — resolve the id (default-deny), then `Capability.invoke`. *)
 let dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
-             (body:capability -> unit -> outcome v string)
-  : Tot (outcome v invoke_error) =
+             (body:capability -> unit -> deferred v)
+  : Tot (outcome (deferred v) invoke_error) =
   match find_cap id r.capabilities with
   | None -> Error (NoSuchCapability id (ids r.capabilities))
   | Some c -> invoke rd c a (body c)
@@ -709,7 +726,7 @@ let rec find_cap_mem (id:string) (cs:list capability)
    the typed `NoSuchCapability`, naming the id and every id it does hold — and the result is the
    same under EVERY host body, which is what "runs no handler" means for a pure function. *)
 let unregistered_refused (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
-                         (body body':capability -> unit -> outcome v string)
+                         (body body':capability -> unit -> deferred v)
   : Lemma (requires not (mem id (ids (enumerate r))))
           (ensures dispatch rd r id a body == Error (NoSuchCapability id (ids r.capabilities)) /\
                    dispatch rd r id a body == dispatch rd r id a body')
@@ -737,7 +754,7 @@ let validate_args_shape (rd:readers) (c:capability) (a:invocation)
                     | Error e -> UnknownArg? e \/ UninvocableArg? e \/ ArgOutOfSpace? e \/ RequiredArgsUnbound? e))
   = check_args_shape rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
 
-let invoke_never_registry_refusal (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> outcome v string)
+let invoke_never_registry_refusal (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> deferred v)
   : Lemma (ensures (match invoke rd c a body with
                     | Error (NoSuchCapability _ _) -> False
                     | Error (DuplicateCapability _) -> False
@@ -751,7 +768,7 @@ let invoke_never_registry_refusal (#v:Type) (rd:readers) (c:capability) (a:invoc
 (* THE SECOND THEOREM. F#: `Capability.invoke` is `validateArgs |> Result.bind (body)`. When
    validation rejects, `invoke` IS that rejection — for every body alike, so no body ran. *)
 let validate_before_invoke (#v:Type) (rd:readers) (c:capability) (a:invocation)
-                           (body body':unit -> outcome v string)
+                           (body body':unit -> deferred v)
   : Lemma (requires Error? (validate_args rd c a))
           (ensures (match validate_args rd c a with
                     | Error e -> invoke rd c a body == Error e
@@ -762,7 +779,7 @@ let validate_before_invoke (#v:Type) (rd:readers) (c:capability) (a:invocation)
 (* The registry-level restatement: a dispatch that resolved its id still runs nothing on a set
    validation rejects. *)
 let dispatch_validates_first (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
-                             (body body':capability -> unit -> outcome v string)
+                             (body body':capability -> unit -> deferred v)
   : Lemma (requires (match find_cap id r.capabilities with
                      | Some c -> Error? (validate_args rd c a)
                      | None -> False))
@@ -777,12 +794,32 @@ let dispatch_validates_first (#v:Type) (rd:readers) (r:registry) (id:string) (a:
 
 (* The converse: a body ran — an accepted result, or a `BodyFailed` — only past an accepted
    validation. *)
-let body_runs_only_validated (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> outcome v string)
+let body_runs_only_validated (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> deferred v)
   : Lemma (ensures (match invoke rd c a body with
                     | Ok _ -> validate_args rd c a == Ok ()
                     | Error (BodyFailed _) -> validate_args rd c a == Ok ()
                     | _ -> True))
   = validate_args_shape rd c a
+
+(* Phase 210, the envelope's fourth outcome: THERE IS NONE. An accepted invocation carries the body's
+   `Ready` or `Pending` and nothing else — a body's `Failed` crossed into the typed `BodyFailed`
+   above, so `Ok (Failed _)` is not merely unproduced but unreachable, for every body and every
+   argument set alike. This is the claim `capabilityLaws` samples; here it is over all of them. Its
+   registry-level restatement follows, because a host reaches the seam through `dispatch`. *)
+let invoke_never_ok_failed (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> deferred v)
+  : Lemma (ensures (match invoke rd c a body with
+                    | Ok (Failed _) -> False
+                    | _ -> True))
+  = ()
+
+let dispatch_never_ok_failed (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
+                             (body:capability -> unit -> deferred v)
+  : Lemma (ensures (match dispatch rd r id a body with
+                    | Ok (Failed _) -> False
+                    | _ -> True))
+  = match find_cap id r.capabilities with
+    | None -> ()
+    | Some c -> invoke_never_ok_failed rd c a (body c)
 
 (* Every key addresses a declared entry. *)
 let rec all_declared (holes:list sig_entry) (ks:list string) : Tot bool =
@@ -896,7 +933,7 @@ let enumerate_is_registry (r:registry) (id:string)
 
 (* And `dispatch` agrees: the `NoSuchCapability` refusal is raised exactly off the enumeration. *)
 let no_such_iff_unregistered (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
-                             (body:capability -> unit -> outcome v string)
+                             (body:capability -> unit -> deferred v)
   : Lemma ((match dispatch rd r id a body with
             | Error (NoSuchCapability _ _) -> True
             | _ -> False) <==> not (mem id (ids (enumerate r))))
@@ -915,7 +952,7 @@ let rec find_cap_id (id:string) (cs:list capability)
 
 (* A resolved id dispatches to ITS capability's `invoke` — the entry enumeration showed. *)
 let registered_dispatches (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
-                          (body:capability -> unit -> outcome v string)
+                          (body:capability -> unit -> deferred v)
   : Lemma (requires mem id (ids (enumerate r)))
           (ensures (match try_find_cap id r with
                     | Some c -> c.c_id == id /\ dispatch rd r id a body == invoke rd c a (body c)
