@@ -2270,6 +2270,46 @@ tells a consumer the wrong thing about what adopting it costs. So `0.26.1` is no
 repository will ever release, and the work that was riding it ships in `0.27.0`. Pre-1.0 breaking is
 a MINOR bump, per the precedent the `0.19.0` and `0.20.0` entries in this document set.
 
+**What adopting `0.27.0` costs — the NET of the entries below, measured against `v0.26.0`.** Seven of
+the ten entries in this slot are breaking, across six packages, and three of them touch the same
+type — so a consumer pays the net, not the sum, and this paragraph is the one to plan an adoption
+from. Each class is the Phase 183 gate's own output for that move, quoted in its entry; the gate's
+since-the-newest-tag report cannot restate them for THIS release, because the `api/` baselines were
+first committed after `v0.26.0` was tagged and it reads every package as a first snapshot. They were
+committed with no change under `src/` since that tag, so they ARE the tagged surface, and from
+`v0.27.0` onward the report answers this question itself.
+
+| package | class (gate output) | what a pinned consumer changes | entry |
+|---|---|---|---|
+| `Fuaran.Core.Query` | `retype` (4 moves) | a resolver returns `Ready r` / `Failed m` where it returned `Ok r` / `Error m`; a caller of `Query.invoke` or `QueryRegistry.dispatch` handles `Ok (Ready r)` and `Ok Pending`. Every `QueryError` arrives as before. No use for `Pending`: one line, `Deferred.toResult` | Phase 198 |
+| `Fuaran.Core.Function` | `retype` (3 moves) | every capability body returns `Deferred` (`Ready v` / `Failed m`); a caller of `Capability.invoke`, `Registry.dispatch` or `FunctionRegistry.dispatch` — THREE members — handles settled / pending / refused. Every `InvokeError` arrives as before. `CapabilityPipeline.eval`'s per-node body is deliberately unchanged | Phase 210 |
+| `Fuaran.Core.AiSurface`, `Fuaran.Core.Ops` | `removal` (15 moves); `additive` (20 moves) | `AiSurface.arbitrate` becomes `Arbitration.arbitrate` over an `OpScriptProposal` list; `Proposals.toOpScript` is the projection. A consumer with no arbitration call site changes nothing | Phase 192 |
+| `Fuaran.Core.Propagation` | `union-widening` (3 moves) | an exhaustive `match` over `PropagationError` gains `EvalUndeclaredRead` (declared last); an evaluator that reads a node it did not declare is now REFUSED by `eval` and `evalFrom` alike — declare the read | Phase 209 |
+| `Fuaran.Core.DataFrame` | `union-widening`; `record-widening`; `removal` (19 moves) | NET of three entries: an exhaustive `match` over `StepIncrementality` gains `TruncateOrder`, and one over `FallBackReason` gains `AggregateStepRepeated` (both declared last, no existing tag moved); `IncrementalEval` is OPAQUE — a field read becomes an accessor call (the substitution table is in Phase 208's entry) and a state can no longer be constructed or copied with `{ … with … }`. Phase 202's record-widening cost never reaches a consumer: the record it widened is private by the end of the same slot | Phases 207, 202, 208 |
+
+**This release is CORRECTIVE as well as breaking, and that is the reason to adopt it promptly.**
+`v0.26.0` carries a wrong answer in the incremental seam: a step that reads a `Window`'s output column
+(`Filter > Window(cumulSum) > Filter` on the window column, and the same with a `Derive`) can reuse a
+cell the window has since recomputed, and the restricted refresh then DISAGREES with the reference
+evaluation — the one thing the seam promises never to do. Phase 208 found it, measured it on the
+`0.26.0` code and fixed it. A consumer of a window-bearing pipeline will see a LARGER recompute
+footprint after adopting: the smaller one came with the wrong answer. No law caught it because the
+conformance corpus generates no step that reads a window's column; closing that class is follow-on
+work and is not in this slot.
+
+**Three statements further down this slot are superseded by later entries in it, and are left as
+written because each was true when its phase landed.** Phase 206's and Phase 207's measurements that
+the restricted refresh LOSES to the full evaluation for a cheap row expression are superseded by
+Phase 208's (it now wins on all three measured pipelines, at 20,000 rows with one row edited). Phase
+198's paragraph recording that `Capability` does NOT carry the envelope is superseded by Phase 210,
+which says so itself. Phases 206, 186 and 163 move no public surface and cost a consumer nothing.
+
+**The stale-pack hazard, once, for the whole slot.** Three of these moves are union-widenings. Against
+a package rebuilt from this source an exhaustive `match` fails to compile, which is the safe failure;
+against a STALE pack of the same version number it is an `InvalidCastException` at run time with no
+compile signal at all. Adopt by version — pin `0.27.0` as released — never by repacking a number a
+consumer has already restored.
+
 ### Linear-time row access (Phase 206) — BEHAVIOUR-IDENTICAL, no public surface moves
 
 The columnar evaluator was **quadratic in the row count**, and the delta and the incremental seam
