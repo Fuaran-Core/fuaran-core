@@ -9,7 +9,15 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      # The package-roster checks (Phases 199 and 205) read the repository's RELEASE TAGS and
+      # refuse an empty tag list on purpose — with none, their comparisons would pass vacuously.
+      # The default checkout is depth 1 with no tags, so this job was red on every push from
+      # Phase 199 onward while the same gate was green on any full clone. Fetch the history and
+      # the tags; the repository is small and the job already spends minutes building.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       # The wire-format conformance corpus is a BUILD INPUT to the live-corpus leg, not an
       # optional extra (Phase 130): once that leg is asked for, an absent corpus FAILS
       # rather than skipping, because a skip is how four consecutive gates reported green
