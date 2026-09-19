@@ -85,6 +85,7 @@
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="ProjectionTests.fs" />
     <Compile Include="PropagationTests.fs" />
+    <Compile Include="PropagationContractTests.fs" />
     <Compile Include="LeaseTests.fs" />
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
