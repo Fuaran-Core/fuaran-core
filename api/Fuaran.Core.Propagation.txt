@@ -7,6 +7,7 @@
 ctor Fuaran.Core.Propagation+EvalOutcome`1..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>, Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>)
 ctor Fuaran.Core.Propagation+TopoResult..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>)
 field Fuaran.Core.Propagation+PropagationError+Tags.EvalNodeFailed : System.Int32 (literal)
+field Fuaran.Core.Propagation+PropagationError+Tags.EvalUndeclaredRead : System.Int32 (literal)
 field Fuaran.Core.Propagation+PropagationError+Tags.EvalUnknownChange : System.Int32 (literal)
 method Fuaran.Core.Propagation.cycleThrough(System.String, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>
 method Fuaran.Core.Propagation.dependencyMap`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Collections.Generic.IEnumerable`1<!!1>>, !!0) : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>
@@ -26,8 +27,10 @@ type Fuaran.Core.Propagation (module)
 type Fuaran.Core.Propagation+EvalOutcome`1 (record)
 type Fuaran.Core.Propagation+PropagationError (union)
 type Fuaran.Core.Propagation+PropagationError+EvalNodeFailed (type)
+type Fuaran.Core.Propagation+PropagationError+EvalUndeclaredRead (type)
 type Fuaran.Core.Propagation+PropagationError+EvalUnknownChange (type)
 type Fuaran.Core.Propagation+PropagationError+Tags (type)
 type Fuaran.Core.Propagation+TopoResult (record)
 union-case Fuaran.Core.Propagation+PropagationError.NewEvalNodeFailed #1(System.String, System.String)
+union-case Fuaran.Core.Propagation+PropagationError.NewEvalUndeclaredRead #2(System.String, System.String)
 union-case Fuaran.Core.Propagation+PropagationError.NewEvalUnknownChange #0(Microsoft.FSharp.Collections.FSharpList`1<System.String>)

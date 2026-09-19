@@ -207,7 +207,9 @@ module SampleAdequacy =
           "Conformance.arbitrationLaws", Guarded [ "arbitration bucket" ]
           "Conformance.capabilityPipelineIncrementalLaws", Guarded [ "node reuse" ]
           "Conformance.dirtyPropagationLaws", Guarded [ "dirty frontier" ]
-          "Conformance.propagationEvalLaws", Guarded [ "node reuse" ]
+          // Phase 209 — the second dimension is the undeclared-read refusal: a real node read
+          // without being declared, and an id the map does not hold at all.
+          "Conformance.propagationEvalLaws", Guarded [ "node reuse"; "undeclared read" ]
           // Phase 181. Every other arm is BUILT each iteration — an op applied, inverted, chained
           // and replayed — but the inverse-only-for-applicable law is about the ops the table
           // REFUSES, and whether the generator refused an INVERTIBLE one is a property of the run.

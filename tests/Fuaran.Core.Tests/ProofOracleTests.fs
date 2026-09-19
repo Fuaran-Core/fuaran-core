@@ -6344,6 +6344,15 @@ let private capDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : C
 // (cycles), dangling reads, multi-id change sets, unknown ids, failing evaluators and priors
 // with a hole in them — and holds production's `sort` to the one fact the agreement theorem
 // assumes of it: `Order` holds no id twice.
+//
+// Phase 209 — the model gained the RESTRICTED resolver and its `EvalUndeclaredRead` refusal, so
+// every model call now carries a `read_witness`: the ids the evaluator actually reads at a node, as
+// production's instrumented resolver observes them. A pure `Tot` function cannot observe a call, so
+// the model takes the observation as a parameter and the bridge SUPPLIES it — which makes the
+// witness this file passes the model's half of `propagation-read-witness`. Getting it wrong here
+// would make the differential green against a model of a different driver, so the witness is derived
+// from the evaluator it is paired with and never guessed: the toy evaluator reads exactly
+// `reads_of deps id`, and the third case's evaluator reads `a` at `b` whatever the map says.
 // ------------------------------------------------------------------------------------------
 
 /// The deps bridge: a `Map<string, Set<string>>` as the model reads it (`sets-are-lists`).
@@ -6361,11 +6370,20 @@ let private blindDepsBridge (deps: Map<string, Set<string>>) : ModelProp.dmap =
 let private modelDepsToMap (d: ModelProp.dmap) : Map<string, Set<string>> =
     d |> List.map (fun (k, vs) -> k, Set.ofList vs) |> Map.ofList
 
+/// The read witness of an evaluator that reads exactly what its map declares — `propSpec`'s, and
+/// the one every generated trial uses. Derived from the same `deps` the evaluator folds over, so the
+/// two cannot drift apart.
+let private declaredReads (deps: Map<string, Set<string>>) : ModelProp.read_witness =
+    fun id ->
+        match Map.tryFind id deps with
+        | Some rs -> Set.toList rs
+        | None -> []
+
 /// The base at which the toy evaluator refuses by name.
 let private failBase = -7
 
 /// The toy pull evaluator of the two law families, with a designated failure. It reads ONLY its
-/// declared reads — the `local` premise of the agreement theorem.
+/// declared reads, which since Phase 209 the driver ENFORCES rather than assuming.
 let private propSpec
     (baseOf: Map<string, int>)
     (deps: Map<string, Set<string>>)
@@ -6414,6 +6432,7 @@ let private prodOutcomeRender (r: Result<Propagation.EvalOutcome<int>, Propagati
     | Ok o -> sprintf "Ok values=%A cyclic=%A" (Map.toList o.Values) o.Cyclic
     | Error(Propagation.EvalUnknownChange ids) -> sprintf "EvalUnknownChange %A" ids
     | Error(Propagation.EvalNodeFailed(n, m)) -> sprintf "EvalNodeFailed %s %s" n m
+    | Error(Propagation.EvalUndeclaredRead(n, r)) -> sprintf "EvalUndeclaredRead %s %s" n r
 
 let private modelOutcomeRender
     (r: ModelProp.outcome<ModelProp.eval_outcome<int>, ModelProp.propagation_error>)
@@ -6422,6 +6441,7 @@ let private modelOutcomeRender
     | ModelProp.Ok o -> sprintf "Ok values=%A cyclic=%A" (o.values |> Map.ofList |> Map.toList) o.cyclic
     | ModelProp.Error(ModelProp.EvalUnknownChange ids) -> sprintf "EvalUnknownChange %A" ids
     | ModelProp.Error(ModelProp.EvalNodeFailed(n, m)) -> sprintf "EvalNodeFailed %s %s" n m
+    | ModelProp.Error(ModelProp.EvalUndeclaredRead(n, r)) -> sprintf "EvalUndeclaredRead %s %s" n r
 
 type private PropTally =
     { PDiffs: string list
@@ -6496,6 +6516,10 @@ let private propProbe
     let mdeps = bridge deps
     let topo = Propagation.sort deps
     let mtopo = topoToModel topo
+    // The witness is `propSpec`'s own reads, derived from PRODUCTION's map — never from the bridge.
+    // Under the go-red bridge that is the point: the evaluator still reads the edge the bridge
+    // dropped, so the model sees an undeclared read there and refuses where production does not.
+    let mreads = declaredReads deps
 
     let where =
         sprintf "trial %d deps=%A changed=%A" i (Map.toList deps) (Set.toList changed)
@@ -6540,7 +6564,7 @@ let private propProbe
     let spec0 = propSpec base0 deps
     let spec1 = propSpec base1 deps
     let prodPrior = Propagation.eval (propProdEvaluator spec0 (ResizeArray())) deps
-    let modelPrior = ModelProp.eval (propModelEvaluator spec0) mtopo
+    let modelPrior = ModelProp.eval (propModelEvaluator spec0) mreads mdeps mtopo
 
     if prodOutcomeRender prodPrior <> modelOutcomeRender modelPrior then
         diffs <-
@@ -6580,7 +6604,13 @@ let private propProbe
             Propagation.evalFrom (propProdEvaluator spec1 prodInvoked) priorValues changed deps
 
         let modelIncr =
-            ModelProp.eval_from (propModelEvaluator spec1) (Map.toList priorValues) (Set.toList changed) mdeps mtopo
+            ModelProp.eval_from
+                (propModelEvaluator spec1)
+                mreads
+                (Map.toList priorValues)
+                (Set.toList changed)
+                mdeps
+                mtopo
 
         if prodOutcomeRender prodIncr <> modelOutcomeRender modelIncr then
             diffs <-
@@ -6592,7 +6622,13 @@ let private propProbe
                 :: diffs
 
         let modelInvoked =
-            ModelProp.walk_invoked (propModelEvaluator spec1) (Map.toList priorValues) (Set.toList changed) mdeps mtopo
+            ModelProp.walk_invoked
+                (propModelEvaluator spec1)
+                mreads
+                (Map.toList priorValues)
+                (Set.toList changed)
+                mdeps
+                mtopo
 
         if List.ofSeq prodInvoked <> modelInvoked then
             diffs <-
@@ -6606,7 +6642,7 @@ let private propProbe
 
         if
             prodOutcomeRender prodFull
-            <> modelOutcomeRender (ModelProp.eval (propModelEvaluator spec1) mtopo)
+            <> modelOutcomeRender (ModelProp.eval (propModelEvaluator spec1) mreads mdeps mtopo)
         then
             diffs <- sprintf "%s: eval after the change disagrees" where :: diffs
 
@@ -9983,10 +10019,10 @@ let proofOracleTests =
 
               Expect.isTrue
                   (t.PDiffs |> List.exists (fun d -> d.Contains ": evalFrom production="))
-                  "and it reaches evalFrom's VALUES: a node the model thinks clean keeps a stale value"
+                  "and it reaches evalFrom's RESULT: since Phase 209 the witness still names the read the bridge dropped, so the model refuses it as undeclared where production (reading the real map) does not"
 
           testCase
-              "evalFrom is eval under the evaluator contract and is NOT without it — `evalfrom_agrees`, `evalfrom_minimal` and `evalfrom_unknown_refused`, on the shipped driver"
+              "evalFrom is eval under the evaluator contract, and an undeclared read is REFUSED by both drivers — `evalfrom_agrees`, `evalfrom_minimal`, `undeclared_refused` and `evalfrom_unknown_refused`, on the shipped driver"
           <| fun _ ->
               // b DECLARES that it reads a; c reads nothing.
               let declared = Map.ofList [ "a", Set.empty; "b", Set.singleton "a"; "c", Set.empty ]
@@ -9994,13 +10030,17 @@ let proofOracleTests =
               // The same graph with the declaration MISSING: b reads a and does not say so.
               let undeclared = Map.ofList [ "a", Set.empty; "b", Set.empty; "c", Set.empty ]
 
-              // An evaluator that reads `a` from `b` whatever the map says — local over
-              // `declared`, NOT local over `undeclared`.
+              // An evaluator that reads `a` from `b` whatever the map says — conforming over
+              // `declared`, a contract violation over `undeclared`.
               let spec (aBase: int) (resolve: string -> int option) (id: string) : Result<int, string> =
                   match id with
                   | "a" -> Ok aBase
                   | "b" -> Ok(10 + (resolve "a" |> Option.defaultValue 0))
                   | _ -> Ok 7
+
+              // What `spec` READS at each node — production observes this off its own resolver; here
+              // it is read off the same three lines the evaluator is written in.
+              let specReads: ModelProp.read_witness = fun id -> if id = "b" then [ "a" ] else []
 
               let run (deps: Map<string, Set<string>>) =
                   let ran = ResizeArray()
@@ -10021,23 +10061,78 @@ let proofOracleTests =
               // `evalfrom_minimal`: exactly the dirty ids ran — c was reused, never evaluated
               Expect.equal ran [ "a"; "b" ] "and only the dirty ids were evaluated"
 
-              // THE FINDING: the same evaluator over a map that does not declare b's read. The
-              // dirty set is {a}, b keeps its stale value, and evalFrom is NOT eval. Nothing in
-              // production refuses this evaluator — the resolver it is handed resolves any id.
-              let incrU, fullU, ranU, _ = run undeclared
-              Expect.notEqual incrU fullU "an evaluator that reads an UNDECLARED node breaks the promise"
-              Expect.equal ranU [ "a" ] "because the undeclared reader was never re-evaluated"
+              // PHASE 186'S FINDING, NOW CLOSED. The same evaluator over a map that does not declare
+              // b's read used to run without complaint: the dirty set was {a}, b kept its stale value
+              // and `evalFrom` was NOT `eval`. Since Phase 209 the resolver answers only for
+              // `deps[b]`, which is empty, so the read is refused as data by BOTH drivers — and
+              // `eval` refuses first, which is why there is no `prior` to reuse a stale value from.
+              Expect.equal
+                  (Propagation.eval (spec 1) undeclared)
+                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  "the full driver refuses the undeclared read, naming the node and the read"
 
-              // …and the model says the same on both, through the same clauses: the premise is
-              // the theorem's, not the model's.
-              let modelRun (deps: Map<string, Set<string>>) =
+              let ranU = ResizeArray()
+
+              Expect.equal
+                  (Propagation.evalFrom (propProdEvaluator (spec 2) ranU) Map.empty (Set.singleton "a") undeclared)
+                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  "and the incremental driver refuses it identically wherever it recomputes the node"
+
+              // The walk stops AT the violating node, so `b` is the last id the recorder saw. Not an
+              // exact list: `undeclared` has no edges at all, so `sort`'s order over its three nodes
+              // is Tarjan's business and asserting a permutation of it would be asserting
+              // `propagation-order-distinct`'s neighbour rather than this phase's refusal.
+              Expect.equal
+                  (List.tryLast (List.ofSeq ranU))
+                  (Some "b")
+                  "the evaluator ran at the violating node and the walk stopped there"
+
+              // THE ONE QUALIFIER, asserted rather than assumed: `evalFrom` invokes the evaluator
+              // only where it recomputes, so a violating node that is CLEAN and present in `prior`
+              // is reused and its violation is not seen here. That is `evalfrom_minimal`, not a hole
+              // — the two assertions above show `eval` refuses, so a `prior` of this shape cannot
+              // have come from `eval` over this map, which is `evalfrom_agrees`' own premise.
+              let priorU = Map.ofList [ "a", 1; "b", 11; "c", 7 ]
+              let ranClean = ResizeArray()
+
+              Expect.equal
+                  (Propagation.evalFrom (propProdEvaluator (spec 2) ranClean) priorU (Set.singleton "a") undeclared)
+                  (Ok
+                      { Values = Map.ofList [ "a", 2; "b", 11; "c", 7 ]
+                        Cyclic = [] })
+                  "a violating node that is clean AND in prior is reused, so nothing invokes it and nothing refuses"
+
+              Expect.equal (List.ofSeq ranClean) [ "a" ] "only the dirty id ran"
+
+              // …and the model says the same on all of it, through the same clauses: the refusal is
+              // the driver's, and the model carries it rather than modelling a driver production no
+              // longer has.
+              let modelRun (deps: Map<string, Set<string>>) (p: Map<string, int>) (chg: string list) =
                   let mtopo = topoToModel (Propagation.sort deps)
 
-                  ModelProp.eval_from (propModelEvaluator (spec 2)) (Map.toList prior) [ "a" ] (depsToModel deps) mtopo
+                  ModelProp.eval_from
+                      (propModelEvaluator (spec 2))
+                      specReads
+                      (Map.toList p)
+                      chg
+                      (depsToModel deps)
+                      mtopo
                   |> modelOutcomeRender
 
-              Expect.equal (modelRun declared) (prodOutcomeRender incr) "the model agrees under the contract"
-              Expect.equal (modelRun undeclared) (prodOutcomeRender incrU) "and agrees on the stale value without it"
+              Expect.equal
+                  (modelRun declared prior [ "a" ])
+                  (prodOutcomeRender incr)
+                  "the model agrees under the contract"
+
+              Expect.equal
+                  (modelRun undeclared Map.empty [ "a" ])
+                  "EvalUndeclaredRead b a"
+                  "and the model refuses the undeclared read in the same words"
+
+              Expect.equal
+                  (modelRun undeclared priorU [ "a" ])
+                  (prodOutcomeRender (Propagation.evalFrom (spec 2) priorU (Set.singleton "a") undeclared))
+                  "and agrees on the reuse qualifier too"
 
               // the qualifier in `evalfrom_minimal`: a CLEAN id absent from prior is recomputed
               let ranHole = ResizeArray()

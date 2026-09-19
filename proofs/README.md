@@ -460,7 +460,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 20 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 21 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -476,7 +476,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, a specification row the model
   covers vacuously. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 12 rows.
+  `unscheduled` where something could and nobody has. 13 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -511,7 +511,8 @@ over-read.
 | `column-transform-evaluator-abstract` | `model-bridge` | `unscheduled` |
 | `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
 | `propagation-order-distinct` | `model-bridge` | `unscheduled` |
-| `propagation-evaluator-contract` | `premise` | — |
+| `propagation-change-set-and-prior` | `premise` | — |
+| `propagation-read-witness` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -3488,13 +3489,15 @@ Over any dependency map, any change set, any value type and any evaluator:
    it is the only sense in which a set can be minimal without naming what it is minimal FOR.
 3. **`evalfrom_agrees`** — `evalFrom ev1 prior changed deps` equals `eval ev1 deps`, as a whole
    `Result`: the same values in the same order, the same cyclic groups, and under a failing
-   evaluator the same `EvalNodeFailed` at the same node. Four premises, each a sentence the
-   production doc comment states in prose: `prior` holds the values `eval ev0` returned over the
-   SAME dependency map, or fewer (`prior_of` — a hole is recomputed, so a prior with holes in it is
-   admitted, as production admits it); the old evaluator reads other nodes only through its
-   DECLARED reads (`local`); `changed` names every id on which `ev1` differs from `ev0`
-   (`agree_off`), and every changed id is known; and the walked order holds no id twice.
-   `evalfrom_agrees_exact` is the reading with no hole.
+   evaluator the same `EvalNodeFailed` at the same node. **Phase 209 removed one of its four
+   premises.** Phase 186 needed the old evaluator to read other nodes only through its DECLARED
+   reads (`local`), assumed of every domain evaluator; the driver now builds the resolver from those
+   reads, so the hypothesis is discharged by construction and `local` is deleted. What remains:
+   `prior` holds the values `eval ev0` returned over the SAME dependency map, or fewer (`prior_of` —
+   a hole is recomputed, so a prior with holes in it is admitted, as production admits it);
+   `changed` names every id on which `ev1` differs from `ev0` (`agree_off`) and every id whose reads
+   differ (`touches_off`); and the walked order holds no id twice. `evalfrom_agrees_exact` is the
+   reading with no hole.
 4. **`evalfrom_minimal`** — a node outside the dirty set AND present in `prior` is not
    re-evaluated: `evalFrom` returns the same `Result` under any two evaluators that agree on the
    dirty ids and on the ids `prior` does not hold, which is what "is not evaluated" means for a
@@ -3505,6 +3508,18 @@ Over any dependency map, any change set, any value type and any evaluator:
 5. **`evalfrom_unknown_refused`** — a changed id the map does not hold makes `evalFrom` the typed
    `EvalUnknownChange` naming exactly the unknown ids (`unknown_exact`), under every evaluator
    alike, with nothing evaluated.
+6. **`undeclared_refused`** (Phase 209) — a walk whose first node reads an id its declaration does
+   not hold refuses with `EvalUndeclaredRead`, naming that node and that read, under every evaluator
+   alike and whatever the reuse policy, provided the node is recomputed there (production's own
+   guard, through `reuse_is_guard`). `eval_refuses_undeclared` and `evalfrom_refuses_undeclared` are
+   the two drivers' readings. The restriction to the FIRST node is what makes it
+   evaluator-independent: a violator further along is reached only if the evaluator did not fail
+   before it, which is a fact about the evaluator — unlike the unknown-change refusal above, which
+   precedes all evaluation and therefore needs no such qualifier.
+7. **`ok_implies_declared`** / **`eval_ok_declared`** (Phase 209) — a full evaluation that returned
+   `Ok` checked every node on the walked order, so none of them read outside its declaration. This
+   is the sentence that makes premise 3's `prior` clause CARRY the enforcement rather than merely
+   assume it: there is no successful `eval` of a non-conforming evaluator to take a `prior` from.
 
 **`grow` is a total function here, which production's is only by argument.** The F# loop stops
 because the accumulator grows inside a finite universe, and nothing checks that. The model's `grow`
@@ -3527,19 +3542,57 @@ without `distinct` the prover refuses `go_agree` at exactly the step that reads 
 value computed from fewer resolved reads). That fact is `propagation-order-distinct`, a bridge and
 not a theorem, because `sort` is outside the model.
 
-**The evaluator contract is a premise production states and cannot enforce.** `walk` hands
-`evalNode` a resolver over EVERYTHING computed so far — `fun k -> Map.tryFind k results` — not
-over the node's declared reads. An evaluator that reads a node it did not declare therefore
-type-checks and runs, its node is not downstream of that read in the dirty set, and `evalFrom`
-returns its STALE prior value where `eval` returns a fresh one. The differential's third case
-exhibits it on the shipped driver: three nodes, `b` reading `a` without declaring it, `a` changed,
-and `evalFrom <> eval`. Nothing is wrong with the driver's arithmetic — `local` is simply the
-domain's to keep, and until this phase it was written down nowhere but in the phrase "a clean
-node's inputs are unchanged". It is `propagation-evaluator-contract`, a `premise`, and the two ways
-to narrow it are each their own phase (the phase charter says a gap the theorem finds is one, and
-`Propagation.fs` is not changed here): restrict the resolver `walk` hands out to the node's
-declared reads, which makes `local` hold by construction; or make the law family generic over a
-domain's evaluator, which makes the row dischargeable by a kit run.
+**The evaluator contract WAS a premise production stated and could not enforce — CLOSED by Phase
+209.** `walk` handed `evalNode` a resolver over EVERYTHING computed so far — `fun k -> Map.tryFind k
+results` — not over the node's declared reads. An evaluator that read a node it did not declare
+therefore type-checked and ran, its node was not downstream of that read in the dirty set, and
+`evalFrom` returned its STALE prior value where `eval` returned a fresh one. The differential's
+third case exhibited it on the shipped driver: three nodes, `b` reading `a` without declaring it,
+`a` changed, and `evalFrom <> eval`. Nothing was wrong with the driver's arithmetic — `local` was
+simply the domain's to keep, and until Phase 186 it was written down nowhere but in the phrase "a
+clean node's inputs are unchanged".
+
+Phase 186 recorded it as `propagation-evaluator-contract`, a `premise`, and named two ways to narrow
+it. **Phase 209 took the first**: the resolver now answers for `deps[id]` and for nothing else, and a
+read outside it ends the evaluation with the typed `EvalUndeclaredRead` naming the node and the read.
+So `local` is not merely satisfiable, it is GONE from the model — see the section below for what that
+cost and what it left behind. The second way (a law family generic over a DOMAIN'S evaluator, which
+would make the row dischargeable by a kit run rather than discharged by construction) is still not
+taken and is still worth having for the evaluator obligations a resolver cannot reach: purity,
+determinism, and the two clauses that remain.
+
+### What Phase 209 changed here, and the one row it added
+
+**`local` is deleted, and the mechanism is worth reading because the obvious version does not
+work.** Restricting the resolver makes the two resolvers a clean node sees POINTWISE equal, and
+pointwise equality of functions is not equality in F\*: concluding `ev f id == ev g id` from it needs
+functional extensionality, which is exactly what `local` was standing in for. So the model routes the
+resolver through a DATA value — `lookups rs results` projects the declared reads that resolve into an
+association list, and `resolve_in` reads that — and two result maps agreeing on `rs` therefore give
+the evaluator the *same argument*, not a pointwise-equal one (`lookups_eq`, `resolver_eq`). Congruence
+finishes it, with no hypothesis on `ev` at all.
+
+**The refusal needed a third parameter, and it is the phase's one new bridge.** Production detects an
+undeclared read by INSTRUMENTING the resolver: it records the ids it was asked for. A `Tot` function
+cannot observe a call, so the model takes the observation as a `read_witness` beside the evaluator —
+the same shape as `topo_result` beside `deps` — and nothing ties it to `ev`. That is
+`propagation-read-witness`, a `permanent` `model-bridge`, and the reason it is permanent rather than
+unscheduled is that the closure which looks available is a different set: a pure model can define the
+ids at which the evaluator's ANSWER depends on the resolver, but an evaluator may ask for an id and
+ignore what it gets, and production refuses on the asking.
+
+**Why carry the refusal in the model at all**, when the agreement theorem no longer needs it: without
+it the model would be a model of a driver production does not have — `eval` refusing where the model
+returns `Ok` — and the differential would have nothing to hold production's refusal to. The bridge is
+the same either way (a pure model cannot see the reads), so modelling the refusal costs one parameter
+and buys the third oracle case its teeth back.
+
+**And one boundary, stated because a reader must not over-read the enforcement.** `evalFrom` invokes
+the evaluator only where it recomputes, so a violating node that is clean AND present in `prior` is
+reused and its violation is not seen. That is `evalfrom_minimal` rather than a hole: premise 3's
+`prior` clause says `prior` came from `eval` over the same map, and `ok_implies_declared` says such a
+`prior` cannot exist, because that `eval` refused instead of returning one. The unit family asserts
+both halves rather than leaving the reader to compose them.
 
 **Two statements the phase was filed with were not true as written**, and the true ones are what
 is proved. "A node outside the dirty set is not re-evaluated" is false without "and present in
@@ -3549,11 +3602,16 @@ promise were `incrementalLaws` and `dirtyPropagationLaws`; `incrementalLaws` is 
 `DataFrame.evalFrom`'s family (Phase 34) and says nothing about this module — the tree-level
 driver's is `propagationEvalLaws`.
 
-**The first consumer.** `Fuaran.Core.Propagation` had no consumer outside this repository when the
-phase was filed. The first is filed and not yet started: `fuaran#1760`, a production
-binding-dependency graph over `dependencyMap` and `dirtyFromChangedIds`. It consumes the dirty-set
-half — theorems 1 and 2 here — and an evaluator it supplies to `evalFrom` would owe the contract
-above.
+**The first consumer.** `Fuaran.Core.Propagation` had no consumer outside this repository when
+Phase 186 was filed, and still had none when Phase 209 landed — measured, not presumed: every caller
+of `eval` / `evalFrom` in this repository is a law family, a test or the Fable smoke host, and each
+of them reads exactly `deps[id]` except the one that violates on purpose. So the blast radius of the
+restriction was this repository alone, and inside it one deliberate violator, which is the case the
+differential now uses as a regression test. The first outside consumer is filed and not yet started:
+`fuaran#1760`, a production binding-dependency graph over `dependencyMap` and `dirtyFromChangedIds`.
+It consumes the dirty-set half — theorems 1 and 2 here — and it should be built against the
+restricted driver: an evaluator it supplies to `evalFrom` is refused at the read rather than trusted
+to keep a clause.
 
 ### The differential
 
@@ -3575,14 +3633,33 @@ changes refused — each with an adequacy guard, and the same seed reproduces th
 
 The go-red hands the model a deps bridge that LOSES a read edge (each node's last read is dropped),
 so its dependents map, its dirty set and its reuse are computed over a smaller graph; it is
-required to lose on the dirty set and on `evalFrom`'s values. During authoring the extracted oracle
-itself was perturbed — `grow` cut to one round, so no transitive closure — and the first case went
-red on trial 2 before the fresh extraction was restored and went green.
+required to lose on the dirty set and on `evalFrom`'s result. Since Phase 209 it loses harder, and
+for a reason worth knowing: the `read_witness` is derived from PRODUCTION's map, so the evaluator
+still reads the edge the bridge dropped and the model refuses it as undeclared where production
+does not. During authoring the extracted oracle itself was perturbed — `grow` cut to one round, so
+no transitive closure — and the first case went red on trial 2 before the fresh extraction was
+restored and went green.
+
+Phase 209 left the generated pool and its tally UNTOUCHED, deliberately: the whole point of the
+restriction is that a conforming evaluator is unaffected, and a differential whose numbers moved
+would not be able to say so. What moved is the third case, from an exhibit of the gap to a
+regression test for its closure — both drivers refusing the same node and read, the model agreeing
+in the same words, and the reuse boundary asserted. The refusal's own sampling is
+`Conformance.propagationEvalLaws`, which gained a fourth law and a second adequacy dimension: two
+leaks per iteration, one reading a real node of the graph and one reading an id the map does not
+hold, both BUILT rather than drawn so a short run cannot go vacuous.
 
 ### What it cost
 
-Cold runs through the kit on this machine at the leg's rlimit of 40 under `--quake 3`, with no
-other prover running: **4s, 4s, 4s**. Budget **20s** (the minimum — 2 × 4 is under it) and floor
+Phase 209 added a third parameter, three new theorems and two new helper lemmas and cost nothing
+measurable: the module still discharges in the same seconds, at the same rlimit, with no query
+needing a second attempt, and the model verified on the FIRST prover run after the rewrite. The
+reason is the `lookups` projection — routing the resolver through a data value turns what would have
+been an extensionality argument into a one-line induction, and the clean-branch step of `go_agree`
+kept exactly the shape it had with one lemma swapped for another.
+
+Phase 186's measurements, unchanged: cold runs through the kit on this machine at the leg's rlimit of
+40 under `--quake 3`, with no other prover running: **4s, 4s, 4s**. Budget **20s** (the minimum — 2 × 4 is under it) and floor
 **0** (`floorSeeding.zeroBelowSeconds`: the fastest genuine cold run is under 5s, so half of it is
 inside process-start noise), seeded per Phase 148/164's rules and recorded in `modules.json`. No
 `--ext context_pruning`: the module opens nothing. No scoped rlimit, no SMT pattern, and no query
@@ -3611,24 +3688,38 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
      a parameter; that its `Order` holds no id twice is a hypothesis, sampled on every generated
      graph and proved nowhere. Closable — a functional model of Tarjan's algorithm with its
      emitted components proved disjoint — and not taken.
-   - **The evaluator contract** (`propagation-evaluator-contract`, a `premise`). Declared reads
-     only, a complete change set, and a `prior` that is `eval`'s own output over the same map. The
-     domain's, enforced nowhere, and discharged by no run: the shipped law family runs a toy
-     evaluator, never a domain's — the `witness-surface-scope` precedent.
+   - **The read bridge** (`propagation-read-witness`, a `model-bridge`, `permanent`). Production
+     detects an undeclared read by instrumenting its resolver; a `Tot` function cannot observe a
+     call, so the model takes the observed read set as a parameter and the differential supplies it.
+     Sampled there, proved nowhere, and permanent rather than closable — the semantic dependency set
+     a pure model could define is a different set.
+   - **What is left of the evaluator contract** (`propagation-change-set-and-prior`, a `premise`).
+     A complete change set — about results and about reads — and a `prior` that is `eval`'s own
+     output over the same map. The domain's, enforced nowhere, and discharged by no run: the shipped
+     law family runs a toy evaluator, never a domain's — the `witness-surface-scope` precedent. The
+     contract's declared-reads clause was the third member of this list until Phase 209 and is now
+     `propagation-evaluator-contract`, a PROVED row.
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row: every
      theorem about a set here is about membership, and the values map is compared as a map.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
 ## Next
 
-**A resolver that resolves only declared reads** — theorem 11's finding, and the one item on this
-list that would turn a `premise` into a property. `Propagation.walk` hands `evalNode` a resolver
-over everything computed so far; restricted to the node's declared reads, an evaluator COULD NOT
-read an undeclared node, `local` would hold by construction, and `propagation-evaluator-contract`
-would shrink to its other two clauses. It changes what a non-conforming evaluator sees (`None`
-where it saw a value), so it is a behaviour change with its own phase, not a repair made here. The
-alternative that leaves the driver alone — a law family generic over a DOMAIN'S evaluator, so the
-row becomes a `domain-obligation` a kit run discharges — is the same size and is not taken either.
+_(**A resolver that resolves only declared reads** was the first item on this list and is DONE:
+Phase 209. The resolver now answers for `deps[id]` and nothing else, a read outside it is the typed
+`EvalUndeclaredRead`, `local` is deleted from the model rather than merely satisfiable, and
+`propagation-evaluator-contract` is a proved row whose other two clauses moved to
+`propagation-change-set-and-prior`. Theorem 11's "What Phase 209 changed here" section carries what
+it cost — one parameter, one permanent bridge — and why the projection through a data value was the
+mechanism rather than functional extensionality.)_
+
+**A law family generic over a DOMAIN'S evaluator** — the OTHER way theorem 11 named of narrowing its
+premise, still not taken and now worth more rather than less. Phase 209 discharged the declared-reads
+clause by construction, which is the strongest form available and reaches every input; it reaches
+nothing else an evaluator owes. `propagation-change-set-and-prior` is still a `premise` discharged by
+no run, and purity and determinism are not resolver-shaped at all: a family a domain runs at its OWN
+evaluator would turn the row into a `domain-obligation` a green kit run discharges. The shape to copy
+is `witnessLaws` — the obligation is the domain's, so the discharge is the domain's run.
 
 **`sort` inside the model** — theorem 11's one bridge (`propagation-order-distinct`). A functional
 model of Tarjan's algorithm with its emitted components proved pairwise disjoint would make "`Order`

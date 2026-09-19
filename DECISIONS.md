@@ -1,5 +1,189 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-19 — D47: the relocation-kind footprint widening is DECLINED — measured, and the one relocation kind anybody records is the kind no record can free
+
+**Decided (Phase 163; the operator's note at accept was "investigate further before building", and
+the measurement is what decides it.)** `Footprint` keeps its four fields. `Ops.footprint` and
+`Ops.independent` are unchanged, byte for byte. `proofs/TreeOps.fst` section 18 stands as the
+ceiling, not as a placeholder for work now due.
+
+**What was being proposed.** Phase 143 proved that `Ops.independent`'s pinned unknown-parent clause —
+a non-empty `UnknownParentWrites` refuses independence against any structural write — cannot be
+tightened over this record. `UnknownParentWrites` carries only the relocated node's id, so a
+`MoveNode` and a remove-shaped `Batch` present byte-identical footprints, while only the move commutes
+with a structural write inside the relocated subtree (`relocation_disjoint_diamond` versus
+`relocation_diamond_fails_for_a_remove`). Any predicate over these four sets frees both or neither.
+The named remedy was a FIFTH address kind: relocations carrying their kind, and a move its target
+parent. That is a change to a public record and to every projection onto it.
+
+### The measurement
+
+**Method.** For a pair to be refused by the pinned clause at all, one side's footprint must carry a
+non-empty `UnknownParentWrites`, which `Ops.footprint` populates for exactly two op shapes —
+`RemoveNode` and `MoveNode`. So over each recorded ledger, count:
+
+- **T** — cross-lane op pairs examined;
+- **C** — pairs the pinned clause could possibly refuse (a relocation-shaped op on one side, a
+  structure-writing op on the other). Halts attributable to the clause are a subset of C;
+- **M** — of those, the ones a kind-aware record could possibly free: every relocation involved is a
+  MOVE. A remove is section 18's fact 2, which proves it does not commute, so no width of record frees
+  it.
+
+M is the ceiling on the widening's value. Both counts are UPPER BOUNDS, by two deliberate
+over-approximations pulling the same way — any two ops in different lanes are treated as concurrent
+(real concurrency is narrower), and C asks only whether the pinned clause COULD fire, not whether the
+other four clauses already refuse the pair. Bounds that can only inflate are what make a zero
+conclusive. The instrument is `proofs/kit/measure-relocation-halts.ps1`; it takes ledger paths and a
+projection map as arguments and reads committed bytes only, so it runs offline against anything.
+
+**Population.** 72 recorded op-stream ledger files from the maintainers' own working estate — eight
+independent stores, their concurrent write lanes, their single-chain bases and their frozen
+predecessor archives. 55 carried ops and every op in all 55 was classified; the other 17 are signing
+and approval artefacts holding no ops. No line failed to parse. Each op was classified through the
+projection its own host computes footprints with, transcribed arm for arm from that host's single
+exhaustive `'Op -> Footprint` match.
+
+**Result. T = 20,649,689 · C = 0 · M = 0.** Of 16,780 classified ops: 230 structural writes, **zero
+move-shaped relocations, and 22 remove-shaped ones — all 22 in frozen predecessor archives that are
+single linear chains with no concurrency at all.** So the pinned clause is not merely rarely decisive
+in this estate; it is VACUOUS. Every op on every live lane has an empty `UnknownParentWrites`, which
+makes `independent`'s last two clauses vacuously true, so no recorded fold was ever refused by them.
+
+**The falsifier, stated before the run, and the guards that answer it.** A zero is worthless if the
+instrument cannot find a halting pair that is there. Three guards, all exercised by
+`proofs/kit/measure-relocation-halts.tests.ps1` (15 assertions):
+
+1. A **planted** move-versus-structural-write pair in a synthetic two-lane ledger must register as
+   C ≥ 1 **and** M ≥ 1. If the planted pair does not register, nothing else in this entry means
+   anything.
+2. The **same probe run the other way**: a planted remove-versus-structural-write pair must register
+   as C ≥ 1 and **M = 0**. A script reporting M ≥ 1 there would be measuring "relocations" rather than
+   "relocations a wider record could free", and would have inflated this result.
+3. **An op kind the projection map does not classify is counted as UNCLASSIFIED, reported BY NAME, and
+   its ledger downgraded to PARTIAL or SKIPPED — never rendered as zero halts.** This guard is the one
+   that earned its keep: the first run over the real ledgers, using the built-in skeleton vocabulary,
+   correctly reported every ledger SKIPPED rather than printing the reassuring `C = 0` it had computed.
+   The result above is from a run in which the PARTIAL and SKIPPED counts are zero and nil-with-ops
+   respectively, which is why its zero is a measurement.
+
+A fourth check, not planned and worth more than the three that were: the instrument's 22 remove-shaped
+ops reconcile exactly with an independent text search for that op's wire kind across the same trees —
+two unrelated methods, the same 22, in the same two files.
+
+### Why the answer is structural, and will not drift with estate growth
+
+A count of zero invites "not yet". This one is a property of the projection rather than of the sample.
+The consuming host's footprint projection has **exactly one arm** producing a non-empty
+`UnknownParentWrites`, and it is a REMOVE. **It has no move-shaped arm at all** — not an unused one, not
+a rare one. Its predecessor model did have a relocation op; that model was retired on the principle that
+completion is a status and not a location, and its ops translate to no current op whatever, so they
+carry no footprint and cannot reach a fold. So the widening frees moves, and nothing anybody records is
+a move. Were the remove op to return to live use tomorrow, section 18's fact 2 proves a kind-aware
+record still refuses it.
+
+Two further bounds worth recording, because each independently caps what the widening could ever buy.
+Section 18's `relocation_move_pair_also_fails` exhibits a refused pair that **no** record could free —
+two moves nesting into each other's subtrees, where the obstruction is the validation and not the
+addresses — so the refused set was never one homogeneous class awaiting a better footprint. And Phase
+133's `relocating_forces_inert` shows a relocation is independent only of an op that does nothing
+whatever, because every skeleton op but a structure-free `Batch` writes structure: the clause's reach is
+total by construction, which is exactly why so little rides on sharpening it.
+
+### The cost, which the proposal had mis-sized in BOTH directions
+
+Checked rather than assumed, and the check moved the answer twice.
+
+**Cheaper than proposed in one respect: `Footprint` is not a wire shape.** Nothing serialises it —
+no codec, no schema, no fixture. It appears in no conformance corpus and in no wire specification. So
+the widening carries no wire migration and no host-by-host adoption, which is what the proposal had
+sized the breaking change against.
+
+**More coupled than proposed in another, and this is the finding that matters.** The record IS
+mirrored — by hand, in F\*: `proofs/DagFold.fst` declares its own four-field `footprint` and
+re-implements `independent` clause for clause, and a byte-identical copy of that model is maintained
+in a second repository's proof tree. Both extract to generated F# oracles. The four fields are
+additionally pinned **with their ordinals** in `api/Fuaran.Core.Ops.txt`, so a field added anywhere but
+last moves the baseline; and the record is reproduced verbatim, field names and all, in transpiled
+JavaScript that reaches shipped production bundles. Beyond that, five independent `'Op -> Footprint`
+projections construct it. So the true cost is a hand-maintained formal model that must move in lockstep
+across a repository boundary, plus five projections, plus an ordinal-bearing surface baseline — to free
+a set measured at zero and argued above to be structurally zero.
+
+**Rejected: widen it anyway, because section 18 names the remedy.** Section 18 proves a ceiling exists;
+it never claimed the ceiling binds. Building the remedy to a proof of impossibility, with the benefit
+unmeasured, is how a correct theorem funds work nothing needs — and this repository's own debt posture
+forbids shipping a mechanism whose value nobody can state.
+
+**Rejected: widen it speculatively, for a future domain whose writers relocate nodes.** A domain like
+that is exactly what would make this worth doing, and the measurement would then say so — the
+instrument is committed and takes its ledgers as arguments, so re-running it is the cheap act. Widening
+a published record for a consumer who does not exist trades a real cost now against a hypothetical
+benefit later, and leaves the wider record to be maintained in the F\* mirror meanwhile.
+
+**Rejected: record this only in a phase outcome.** The next reader to meet section 18 will have the
+same idea, and a ceiling with a named remedy and no recorded verdict is one they will spend their
+budget re-deriving. That is what section 18 itself says about ceilings nobody proved.
+
+**Not added: a new assertion to catch the world changing back.** One already exists — the Phase 143
+teeth-check in `tests/Fuaran.Core.Tests/ConcurrencyTests.fs` erases exactly `UnknownParentWrites` and
+requires the run to go RED, with a comment saying that a green there means either the generator stopped
+producing relocations or the algebra moved under the theorem. That is the assertion this decision would
+otherwise have had to invent, and it is already in the gate. A second one asserting the same fact would
+be two things to keep true.
+
+## 2026-09-19 — D46: `arbitrate` belongs to the op algebra, not to the AI surface — and a package name that names four things does not get a fifth
+
+**Decided (Phase 192; operator decision 2026-09-16 on the `AiSurface` placement question.)**
+`arbitrate`, `ArbitrationRejection` and `Arbitration` move from `Fuaran.Core.AiSurface` to
+`Fuaran.Core.Ops`, as `Arbitration.arbitrate` over a new minimal record
+`OpScriptProposal<'Node,'Id>` = `{ Id; Holder; Ops }`. `AiSurface.Proposals` keeps its queue and
+gains `toOpScript`, the one-line projection. Nothing about what the function decides changes. The
+adoption cost and the ride-not-advance argument are in [`STABILITY.md`](STABILITY.md) under the
+`0.27.0` draft.
+
+**The argument is about what the package NAME promises.** `Fuaran.Core.AiSurface` answers one
+question — what does a model need in order to read a domain artifact and propose changes to it — and
+its four parts are four halves of that answer. Six per-domain `*.AiTools` layers adopt it under that
+reading, and `AiSurfaceWitness` is frozen over exactly those four. Arbitration answers a different
+question: given N op scripts and one base tree, which subset can land together. Its inputs are
+footprints, its output is a partition, its callers are schedulers, and no model is involved at any
+point. It is the other end of `Ops.footprint` and `Ops.independent` — the concurrency half of the
+tree algebra whose first half already lives in `Ops`.
+
+**Why it landed in the wrong package, which is the part worth recording.** It landed beside the
+proposal RECORD. `arbitrate` needed a list of things with an id and an op list; `Proposals.Proposal`
+was a thing with an id and an op list; so the function was declared where that type was. That is a
+reason about where a record sat, not about what the function is — and it is a very easy reason to
+act on, because it presents as the absence of friction rather than as a choice. The record was doing
+two jobs (a human-approval lifecycle, and an identity for the partition to sort by), and splitting
+it is what let the function go where it belonged. **The generalisable form: when a function seems to
+belong beside a type, check whether it needs the whole type or three fields of it. A function that
+needs three fields of a six-field record is telling you there are two records.**
+
+**Rejected: renaming `AiSurface`.** The name is correct for what remains, six domains' `*.AiTools`
+layers are named after it, and `AiSurfaceWitness` is in the 1.0 field freeze. A rename would have
+broken every adopter to fix a problem one function had.
+
+**Rejected: leaving it and documenting the oddity.** The cost of the move is two call-site edits in
+two coordination-layer consumers, both of which repin within this release anyway. The cost of not
+moving it is paid repeatedly and by people who did not choose it: a new adopter looking for
+concurrency semantics reads the package that does not have them, and a reader of the arbitration
+theorems is told they are about an AI surface. A one-time cost falling on two known callers beats a
+permanent cost falling on every future reader.
+
+**Rejected: `Ops.Arbitration.arbitrate`, which is what the phase was written as.** `Ops` is a
+module, and F# does not let a second file re-open one; the only way to spell it that way was to put
+arbitration inside `Ops.fs`. The module is therefore a PEER of `Ops` in the same package and the same
+namespace — `Fuaran.Core.Arbitration`, exactly as `Fuaran.Core.Diff` already is — which reads
+`Arbitration.arbitrate` under the `open Fuaran.Core` every consumer already has. It carries
+`[<CompilationRepresentation(ModuleSuffix)>]` so the module coexists with the `Arbitration` type,
+the pattern `Column`, `DataFrame`, `Function` and `OpStream` all use.
+
+**Verbatim was measured, not asserted.** Both implementations ran over the same 300 generated
+proposal sets from the law kit's own generators before the old one was deleted — zero disagreements,
+and the same differential against an inverted pinned order disagreed on 282 of the 300, so the
+comparison was shown able to fail before its passing was believed.
+
 ## 2026-09-19 — D45: the class of a surface move is COMPUTED at the gate, and the gate refuses an unclassified move rather than a breaking one
 
 **Decided (Phase 183).** Every packable package carries a committed baseline of its public contract

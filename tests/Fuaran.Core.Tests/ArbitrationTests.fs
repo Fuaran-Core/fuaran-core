@@ -1,7 +1,8 @@
 module Fuaran.Core.Tests.ArbitrationTests
 
-// Phase 85 — AiSurface.arbitrate: the deterministic, total partition of N op-script
-// proposals against one base tree. Concrete all-independent / all-conflicting / mixed /
+// Phase 85 — Arbitration.arbitrate (in Fuaran.Core.Ops since Phase 192): the deterministic,
+// total partition of N op-script proposals against one base tree. Concrete
+// all-independent / all-conflicting / mixed /
 // permutation-invariance cases over the reference witness, plus the generative
 // arbitrationLaws (determinism / partition / independence / actionability / confluence).
 
@@ -9,14 +10,11 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
-/// A Phase-59-shaped proposal with a queue-assigned id (unique per test).
-let private prop id ops : Proposals.Proposal<SkeletonOp<RNode, string>> =
+/// An op-script proposal with a queue-assigned id (unique per test).
+let private prop id ops : OpScriptProposal<RNode, string> =
     { Id = id
-      Author = sprintf "agent-%d" id
-      ProposedAt = "2026-07-10T00:00:00Z"
-      Intent = None
-      Ops = ops
-      Status = Proposals.Pending }
+      Holder = sprintf "agent-%d" id
+      Ops = ops }
 
 let private acceptedIds (r: Arbitration<RNode, string>) = r.Accepted |> List.map (fun p -> p.Id)
 
@@ -26,7 +24,7 @@ let private rejectedWith (r: Arbitration<RNode, string>) =
 [<Tests>]
 let arbitrateTests =
     testList
-        "AiSurface.arbitrate"
+        "Arbitration.arbitrate"
         [ testCase "all-independent proposals are all accepted, in pinned (ascending-id) order"
           <| fun _ ->
               // sample(): root[a[a1,a2], b[b1]] — inserts under different parents commute.
@@ -34,7 +32,7 @@ let arbitrateTests =
               let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "v") ]
               let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "w") ]
 
-              let r = AiSurface.arbitrate nodew idw tree [ p2; p1 ] // input order ≠ pinned order
+              let r = Arbitration.arbitrate nodew idw tree [ p2; p1 ] // input order ≠ pinned order
 
               Expect.equal (acceptedIds r) [ 1; 2 ] "both accepted, ascending id"
               Expect.isEmpty r.Rejected "nothing rejected"
@@ -53,7 +51,7 @@ let arbitrateTests =
               let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ]
               let p3 = prop 3 [ InsertChild("a", RNode.leaf "z" "para" "3") ]
 
-              let r = AiSurface.arbitrate nodew idw tree [ p3; p1; p2 ]
+              let r = Arbitration.arbitrate nodew idw tree [ p3; p1; p2 ]
 
               Expect.equal (acceptedIds r) [ 1 ] "only the lowest-id proposal is accepted"
 
@@ -68,7 +66,7 @@ let arbitrateTests =
               let bad = [ InsertChild("zz", RNode.leaf "x" "para" "v") ] // unknown parent
               let p1 = prop 1 bad
 
-              let r = AiSurface.arbitrate nodew idw tree [ p1 ]
+              let r = Arbitration.arbitrate nodew idw tree [ p1 ]
 
               match r.Rejected with
               | [ (p, Inapplicable(ix, rej)) ] ->
@@ -88,7 +86,7 @@ let arbitrateTests =
               let p3 = prop 3 [ RemoveNode "b1" ] // remove ⇒ unknown-parent ⇒ conflicts with any structural write
               let p4 = prop 4 [ InsertChild("b", RNode.leaf "w" "para" "4") ] // independent of p1 — accepted
 
-              let r = AiSurface.arbitrate nodew idw tree [ p4; p3; p2; p1 ]
+              let r = Arbitration.arbitrate nodew idw tree [ p4; p3; p2; p1 ]
 
               Expect.equal (acceptedIds r) [ 1; 4 ] "the two independent applicable proposals are accepted"
 
@@ -106,7 +104,7 @@ let arbitrateTests =
               let p2 = prop 2 [ RemoveNode "b1" ]
               let p3 = prop 3 [ InsertChild("b", RNode.leaf "y" "para" "3") ]
 
-              let r = AiSurface.arbitrate nodew idw tree [ p1; p2; p3 ]
+              let r = Arbitration.arbitrate nodew idw tree [ p1; p2; p3 ]
 
               Expect.equal (acceptedIds r) [ 1; 3 ] "p1 + p3 accepted"
               Expect.equal (rejectedWith r) [ 2, Conflicts [ 1; 3 ] ] "p2 cites BOTH accepted interferers"
@@ -118,17 +116,17 @@ let arbitrateTests =
               let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ]
               let p3 = prop 3 [ InsertChild("b", RNode.leaf "z" "para" "3") ]
 
-              let reference = AiSurface.arbitrate nodew idw tree [ p1; p2; p3 ]
+              let reference = Arbitration.arbitrate nodew idw tree [ p1; p2; p3 ]
 
               for input in [ [ p3; p2; p1 ]; [ p2; p3; p1 ]; [ p3; p1; p2 ] ] do
-                  Expect.equal (AiSurface.arbitrate nodew idw tree input) reference "same partition, any input order"
+                  Expect.equal (Arbitration.arbitrate nodew idw tree input) reference "same partition, any input order"
 
           testCase "the accepted scripts apply confluently in either order (same content hash)"
           <| fun _ ->
               let tree = sample ()
               let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
               let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "2") ]
-              let r = AiSurface.arbitrate nodew idw tree [ p1; p2 ]
+              let r = Arbitration.arbitrate nodew idw tree [ p1; p2 ]
               Expect.equal (acceptedIds r) [ 1; 2 ] "both accepted"
 
               let hashOf = Tree.encodeHash nodew encNode
@@ -143,13 +141,13 @@ let arbitrateTests =
           testCase "arbitrate is total on degenerate input (empty list, empty scripts)"
           <| fun _ ->
               let tree = sample ()
-              let empty = AiSurface.arbitrate nodew idw tree []
+              let empty = Arbitration.arbitrate nodew idw tree []
               Expect.isEmpty empty.Accepted "no proposals, nothing accepted"
               Expect.isEmpty empty.Rejected "no proposals, nothing rejected"
               Expect.isEmpty empty.MergedScript "no proposals, empty merged script"
 
               // an empty script applies vacuously and is independent of everything.
-              let r = AiSurface.arbitrate nodew idw tree [ prop 1 [] ]
+              let r = Arbitration.arbitrate nodew idw tree [ prop 1 [] ]
               Expect.equal (acceptedIds r) [ 1 ] "the empty script is accepted"
               Expect.isEmpty r.MergedScript "and contributes no ops" ]
 

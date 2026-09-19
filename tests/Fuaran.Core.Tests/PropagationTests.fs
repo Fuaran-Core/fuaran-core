@@ -236,10 +236,15 @@ let tests =
               | Error(Propagation.EvalUnknownChange [ "ghost" ]) -> ()
               | other -> failtestf "expected EvalUnknownChange [ghost], got %A" other
 
-          testCase "propagationEvalLaws certify byte-identity + minimality + unknown-change (Phase 69)"
+          testCase
+              "propagationEvalLaws certify byte-identity + minimality + unknown-change + the declared-reads refusal (Phases 69, 209)"
           <| fun _ ->
               let results = Conformance.propagationEvalLaws 4242 200
-              Expect.equal (List.length results) 4 "three laws + the Phase 121 node-reuse adequacy guard reported"
+
+              Expect.equal
+                  (List.length results)
+                  6
+                  "four laws + the Phase 121 node-reuse guard + the Phase 209 undeclared-read guard reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

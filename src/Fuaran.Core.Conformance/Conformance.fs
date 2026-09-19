@@ -1580,12 +1580,22 @@ module Conformance =
     /// (in-type accepts; wrong-type + unknown reject), a non-deterministic query replays
     /// byte-identically through the Phase 27 capture seam, registry enumeration is id-stable, and the
     /// declaration + result round-trip the codec. Mirrors `capabilityLaws`.
+    ///
+    /// Since Phase 198 it also certifies the seam's `Deferred` envelope: the
+    /// `Deferred&lt;QueryResult&gt;` wire round-trip, that a dispatch has exactly the three outcomes
+    /// SETTLED / PENDING / typed-REFUSED, and that a resolver's untyped `Failed` never rides out of
+    /// the seam — it becomes the enumerated `ExecutionFailed`, so `Ok(Failed _)` is unreachable. The
+    /// three shapes MIRROR `deferredLaws` rather than delegating to it: that family takes no witness
+    /// (it is self-contained at an `int` payload), so there is nothing to instantiate over a query.
     let queryLaws (seed: int) (iterations: int) : LawResult list =
         let mutable rng = ConfRng.ofSeed seed
         let mutable validation = None
         let mutable replay = None
         let mutable enumeration = None
         let mutable roundtrip = None
+        let mutable envelope = None
+        let mutable asyncAxis = None
+        let mutable typedFailure = None
 
         // value-codec for the captured realized result (the QueryResult itself, rendered canonically).
         let encodeV (qr: QueryResult) : string = QueryCodec.encodeResult qr
@@ -1695,6 +1705,77 @@ module Conformance =
                  if roundtrip.IsNone then
                      roundtrip <- Some(sprintf "seed=%d iter=%d: result decode failed: %A" seed i m))
 
+            // ---- the Deferred envelope on the seam (Phase 198) ----
+
+            // the envelope round-trips the wire for all three cases, at a QueryResult payload.
+            for d in [ Pending; Ready realized; Failed("resolver-" + string i) ] do
+                match QueryCodec.decodeDeferredResult (QueryCodec.encodeDeferredResult d) with
+                | Ok d2 ->
+                    if d2 <> d && envelope.IsNone then
+                        envelope <- Some(sprintf "seed=%d iter=%d: Deferred<QueryResult> ≠ round-trip (%A)" seed i d)
+                | Error e ->
+                    if envelope.IsNone then
+                        envelope <- Some(sprintf "seed=%d iter=%d: Deferred<QueryResult> decode failed: %A" seed i e)
+
+            // a dispatch has exactly three outcomes, and the refusals stay typed and pre-resolver.
+            let reg =
+                QueryRegistry.empty |> QueryRegistry.register q |> Result.toOption |> Option.get
+
+            let goodArgs = [ "p0", Int 42 ]
+
+            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Ready realized) with
+             | Ok(Ready r) when r = realized -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <- Some(sprintf "seed=%d iter=%d: a settled resolver did not settle: %A" seed i other))
+
+            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Pending) with
+             | Ok Pending -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <-
+                         Some(sprintf "seed=%d iter=%d: a pending resolver did not stay pending: %A" seed i other))
+
+            let ran = ref false
+
+            (match
+                QueryRegistry.dispatch reg q.Id [ "p0", Str "nope" ] (fun _ ->
+                    ran.Value <- true
+                    Ready realized)
+             with
+             | Error(ParamTypeMismatch _) when not ran.Value -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: refusal not typed-before-resolve (%A; resolver ran: %b)"
+                                 seed
+                                 i
+                                 other
+                                 ran.Value
+                         ))
+
+            (match QueryRegistry.dispatch reg "no-such-query" goodArgs (fun _ -> Ready realized) with
+             | Error(NoSuchQuery _) -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <- Some(sprintf "seed=%d iter=%d: an unregistered id was not refused: %A" seed i other))
+
+            // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
+            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
+             | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> ()
+             | other ->
+                 if typedFailure.IsNone then
+                     typedFailure <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: a resolver failure did not become ExecutionFailed: %A"
+                                 seed
+                                 i
+                                 other
+                         ))
+
         [ { Law = "param-validation accepts in-type + rejects type-mismatch / unknown params"
             Passed = validation.IsNone
             Counterexample = validation }
@@ -1706,7 +1787,16 @@ module Conformance =
             Counterexample = enumeration }
           { Law = "query declaration + result round-trip through the codec"
             Passed = roundtrip.IsNone
-            Counterexample = roundtrip } ]
+            Counterexample = roundtrip }
+          { Law = "the query envelope round-trips the wire for Pending / Ready / Failed"
+            Passed = envelope.IsNone
+            Counterexample = envelope }
+          { Law = "dispatch settles, stays pending, or refuses typed before the resolver runs"
+            Passed = asyncAxis.IsNone
+            Counterexample = asyncAxis }
+          { Law = "a resolver failure is a typed ExecutionFailed, never Ok(Failed _)"
+            Passed = typedFailure.IsNone
+            Counterexample = typedFailure } ]
 
     /// The composition sample (Phase 47) a domain supplies per draw to certify cross-witness
     /// `composeAcross`. `Outer` is an `'A`-function carrying TWO independent typed slots (`SlotA`,
@@ -4225,10 +4315,18 @@ module Conformance =
         let mutable byteIdentical = None
         let mutable minimal = None
         let mutable unknownChange = None
+        let mutable undeclaredRefused = None
         // Phase 121 — the minimality law is what says work was AVOIDED, and it says nothing at all
         // over a sample in which every node is dirty. Both classes have to arise.
         let mutable dirtyNodes = 0
         let mutable cleanNodes = 0
+        // Phase 209 — an undeclared read is refused whether the read names a REAL node of the graph or
+        // an id the map does not hold at all, and the law says nothing about a class it never drew.
+        // Both are BUILT every iteration rather than drawn, so the guard cannot go vacuous on a short
+        // run: node `"0"` declares no reads at all (node k reads only below it), so a real undeclared
+        // read is available on every graph this generator can produce.
+        let mutable refusedRealNode = 0
+        let mutable refusedAbsentId = 0
 
         // a toy pull evaluator over the DAG: value(n) = base(n) + Σ value(reads). Records the ids it is
         // invoked on (for the minimality assertion).
@@ -4241,6 +4339,27 @@ module Conformance =
                     |> Set.fold (fun s r -> s + (resolve r |> Option.defaultValue 0)) 0
 
                 Ok(Map.find id baseOf + readSum)
+
+        // The same evaluator with ONE node reading ONE id it never declared — the contract violation
+        // the driver refuses since Phase 209. `leakAt` is the node, `leakRead` the id it reaches for.
+        let leakyEvalNode
+            (baseOf: Map<string, int>)
+            (deps: Map<string, Set<string>>)
+            (leakAt: string)
+            (leakRead: string)
+            =
+            fun (resolve: string -> int option) (id: string) ->
+                let declaredSum =
+                    Map.find id deps
+                    |> Set.fold (fun s r -> s + (resolve r |> Option.defaultValue 0)) 0
+
+                let leaked =
+                    if id = leakAt then
+                        resolve leakRead |> Option.defaultValue 0
+                    else
+                        0
+
+                Ok(Map.find id baseOf + declaredSum + leaked)
 
         for i in 0 .. iterations - 1 do
             let extra, r1 = ConfRng.intBelow 6 rng
@@ -4321,6 +4440,46 @@ module Conformance =
                         unknownChange <-
                             Some(sprintf "seed=%d iter=%d: expected EvalUnknownChange, got %A" seed i other)
 
+                // (4) THE DECLARED-READS REFUSAL (Phase 209): an evaluator that reads outside its
+                // declaration is refused by BOTH drivers, naming the same node and the same read.
+                // Two leaks per iteration — one reaching a real node of the graph, one reaching an id
+                // the map does not hold — because the two are different shapes of the same violation
+                // and a law that drew only one would say nothing about the other. `evalFrom` is asked
+                // with the violating node in its change set, so it recomputes and therefore invokes
+                // it: that is the qualifier `evalFrom`'s doc comment states, not a weaker law.
+                let leakVerdict (leakAt: string) (leakRead: string) : string option =
+                    let expected = Error(Propagation.EvalUndeclaredRead(leakAt, leakRead))
+                    let ev = leakyEvalNode base1 deps leakAt leakRead
+                    let viaFullLeak = Propagation.eval ev deps
+                    let viaIncrLeak = Propagation.evalFrom ev prior.Values (Set.singleton leakAt) deps
+
+                    if viaFullLeak = expected && viaIncrLeak = expected then
+                        None
+                    else
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: node %s reading undeclared %s — eval=%A evalFrom=%A, expected both %A"
+                                seed
+                                i
+                                leakAt
+                                leakRead
+                                viaFullLeak
+                                viaIncrLeak
+                                expected
+                        )
+
+                match leakVerdict "0" "1" with
+                | None -> refusedRealNode <- refusedRealNode + 1
+                | Some why ->
+                    if undeclaredRefused.IsNone then
+                        undeclaredRefused <- Some why
+
+                match leakVerdict changedId "no-such-node" with
+                | None -> refusedAbsentId <- refusedAbsentId + 1
+                | Some why ->
+                    if undeclaredRefused.IsNone then
+                        undeclaredRefused <- Some why
+
         [ { Law = "evalFrom is byte-identical to a full eval over the changed inputs (every change)"
             Passed = byteIdentical.IsNone
             Counterexample = byteIdentical }
@@ -4330,11 +4489,21 @@ module Conformance =
           { Law = "a changed id absent from the dependency map is a named EvalUnknownChange (GP5)"
             Passed = unknownChange.IsNone
             Counterexample = unknownChange }
+          { Law =
+              "an evaluator that reads outside its declared set is refused by eval and evalFrom alike, naming the node and the read (GP5)"
+            Passed = undeclaredRefused.IsNone
+            Counterexample = undeclaredRefused }
           SampleAdequacy.reached
               "propagationEvalLaws"
               "node reuse"
               seed
-              [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
+              [ "dirty node", dirtyNodes; "clean node", cleanNodes ]
+          SampleAdequacy.reached
+              "propagationEvalLaws"
+              "undeclared read"
+              seed
+              [ "read of a real node", refusedRealNode
+                "read of an id the map does not hold", refusedAbsentId ] ]
 
     // ---- cross-witness composition pilot (Phase 51) ----
     // Validate the Wave-13 frontier operators (`composeAcross`, Phase 47; `applyMemo`, Phase 49)
@@ -6718,12 +6887,14 @@ module Conformance =
         concurrencyLawsWith (Ops.footprint nodew idw) nodew idw gen encode seed iterations
 
     // ---- proposal arbitration (Phase 85) ----
-    // The teeth on `AiSurface.arbitrate`: a deterministic, total partition of N op-script
+    // The teeth on `Arbitration.arbitrate`: a deterministic, total partition of N op-script
     // proposals against one base tree — permutation-invariant, a pairwise-independent accepted
     // set, every rejection typed + actionable (GP5), and the accepted scripts confluent in
     // any order.
 
-    /// The proposal-arbitration laws (Phase 85) — over `AiSurface.arbitrate`. Certifies:
+    /// The proposal-arbitration laws (Phase 85) — over `Arbitration.arbitrate` (which lived at
+    /// `AiSurface.arbitrate` until Phase 192; this family's name and signature did not move).
+    /// Certifies:
     /// **determinism + permutation invariance** (arbitrating the same proposals shuffled yields
     /// the identical `Arbitration` — the pinned ascending-id order decides, never input order);
     /// **total partition** (every input proposal lands in exactly one of accepted / rejected —
@@ -6779,13 +6950,10 @@ module Conformance =
 
             accepted, r
 
-        let mkProposal id ops : Proposals.Proposal<SkeletonOp<'Node, 'Id>> =
+        let mkProposal id ops : OpScriptProposal<'Node, 'Id> =
             { Id = id
-              Author = sprintf "agent-%d" id
-              ProposedAt = "t0"
-              Intent = None
-              Ops = ops
-              Status = Proposals.Pending }
+              Holder = sprintf "agent-%d" id
+              Ops = ops }
 
         for i in 0 .. iterations - 1 do
             let tree, r1 = gen.Tree rng
@@ -6816,15 +6984,15 @@ module Conformance =
 
                 proposals <- proposals @ [ mkProposal k ops ]
 
-            let result = AiSurface.arbitrate nodew idw tree proposals
+            let result = Arbitration.arbitrate nodew idw tree proposals
 
             // determinism + permutation invariance: shuffled input ⇒ identical Arbitration.
             let shuffled, rS = ConfRng.shuffle proposals rng
             rng <- rS
 
             if
-                (AiSurface.arbitrate nodew idw tree shuffled <> result
-                 || AiSurface.arbitrate nodew idw tree proposals <> result)
+                (Arbitration.arbitrate nodew idw tree shuffled <> result
+                 || Arbitration.arbitrate nodew idw tree proposals <> result)
                 && permutation.IsNone
             then
                 permutation <-

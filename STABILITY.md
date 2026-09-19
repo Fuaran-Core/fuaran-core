@@ -221,7 +221,12 @@ structural `SkeletonOp` (Phase 68) drives a dirty-subgraph recompute in dependen
 nodes, `Conformance.propagationEvalLaws`, Phase 69). `Propagation.eval` is the reference full evaluator
 the tree-level `evalFrom` is certified against — Core walks the acyclic nodes in dependency order and
 returns cyclic SCCs as data (`EvalOutcome.Cyclic`, the `#CALC!` posture; the iterative upgrade is the
-`office`/Calc convergence work), the host supplies the injected `evalNode` (GP6 — no evaluator in Core). The first two are keyed on the same content-addressing discipline (the Phase-49 `applyMemo` /
+`office`/Calc convergence work), the host supplies the injected `evalNode` (GP6 — no evaluator in Core).
+**On the tree-level path the declared reads are ENFORCED, not assumed (Phase 209):** the resolver
+`evalNode` is handed answers for `deps[id]` and for nothing else, and a read outside that set is the
+typed `EvalUndeclaredRead` naming the node and the read — so the byte-identity above is a property of
+the driver rather than a clause the host has to keep. A host re-implementing this path implements the
+restriction too. The first two are keyed on the same content-addressing discipline (the Phase-49 `applyMemo` /
 Phase-27 capture keys). `CapabilityPipeline.eval` is the reference evaluator the capability path is
 certified against — Core supplies the DAG plumbing (topological walk + `FromNode` edge resolution), the
 host supplies the node `body`. A dirty non-deterministic node re-invokes (or replays from its Phase-27
@@ -1393,8 +1398,8 @@ idempotency-before-CAS ordering — seed-replayable.
 
 ## Proposal arbitration (Phase 85)
 
-`AiSurface.arbitrate : NodeWitness -> IdWitness -> 'Node -> Proposal list -> Arbitration` decides
-which subset of N op-script proposals (Phase 59) can land together against one base tree: batch
+`Arbitration.arbitrate : NodeWitness -> IdWitness -> 'Node -> OpScriptProposal list -> Arbitration`
+decides which subset of N op-script proposals can land together against one base tree: batch
 `Ops.canApplyAll` against the base filters the inapplicable (each rejection carries the op-algebra's
 own envelope + the failing op index), then a greedy pass in the **pinned order** (ascending proposal
 id) accepts each proposal whose footprint (Phase 78) is `Ops.independent` of everything already
@@ -1403,8 +1408,16 @@ mutated): the accepted set is mutually independent — by footprint soundness it
 confluently in any order (`MergedScript` is the pinned-order composition) — and every rejection is
 typed + actionable (GP5): `Inapplicable (opIndex, rejection)`, or `Conflicts interfering` naming the
 accepted ids (computed against the **full** accepted set) the agent must rebase against. Proposal ids
-are queue-assigned and unique (Phase 59); `arbitrate` is total on duplicate-id input, but the
-permutation-invariance guarantee assumes unique ids (only then is the pinned order a total order).
+are expected unique — a queue assigns them, and `AiSurface.Proposals` (Phase 59) is one such assigner,
+projecting to `OpScriptProposal` with `Proposals.toOpScript`; `arbitrate` is total on duplicate-id
+input, but the permutation-invariance guarantee assumes unique ids (only then is the pinned order a
+total order).
+
+**It lives in `Fuaran.Core.Ops` since Phase 192** (`AiSurface.arbitrate` until then), beside
+`Ops.footprint` and `Ops.independent` — the two it is the other end of. `OpScriptProposal<'Node,'Id>`
+is the minimal record the partition needs: `Id` (what the pinned order sorts by), `Holder` (whom a
+rejection is reported to) and `Ops`. The lifecycle fields a queue carries — author, timestamp,
+intent, approval status — stay in `AiSurface.Proposals`, because arbitration reads none of them.
 
 **Coexistence, not quality (GP6).** Arbitration says which proposals *can coexist*, never which is
 *better*: no ranking policy, no quality judgement, no evaluator lives in Core. A host that wants
@@ -2240,21 +2253,321 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## Pending — awaiting the next BREAKING slot
+## 0.27.0 (draft)
 
-**This is NOT a version slot and nothing has ridden it.** The entries below are public-contract
-changes whose classes are `union-widening` (Phase 207) and `record-widening` (Phase 202), both of
-which the table above says **advance** `<Version>`. The standing draft immediately under this heading
-carries only additive and behaviour-identical work, so riding it would put a number on these changes
-that understates what adopting them costs — and the breaking slot is not either phase's to open. The
-entries are therefore written self-contained and parked here: whoever opens the breaking slot moves
-the `###` blocks below under that slot's `##` header unchanged, and deletes this heading when nothing
-is left beneath it.
+**This slot is a DRAFT.** `<Version>` reads `0.27.0` and no `v0.27.0` tag exists, so an additive or
+behaviour-identical change may ride it: append its entry here rather than opening another slot. A
+change of a higher class than the entries below carry advances the number, because the number is
+what tells a consumer what adopting it costs.
 
-**They are in landing order and must stay in it.** Phase 202 builds on Phase 207's tree, and the two
-touch the same type: 207 adds a case to `StepIncrementality`, 202 adds one to `FallBackReason` and a
-field to `IncrementalEval`. Each block quotes the classifier output it was measured against, so a
-reader can see the whole cost of the slot by reading both rather than by re-deriving it.
+**This slot was ADVANCED from a `0.26.1` draft, and the two entries below it come forward with it.**
+`0.26.1` was opened by Phase 206 (because `0.26.0` is tagged) and ridden by Phase 186, both
+BEHAVIOUR-IDENTICAL or ADDITIVE with no public surface moved. No `v0.26.1` tag was ever cut, so
+nothing was published under that number and no consumer can be pinned to it — the slot was a draft
+in the strict sense. Phase 198 then made a BREAKING change to a published seam, which the draft-slot
+rule says advances rather than rides: a number that reads "additive" over a retyped public member
+tells a consumer the wrong thing about what adopting it costs. So `0.26.1` is not a slot this
+repository will ever release, and the work that was riding it ships in `0.27.0`. Pre-1.0 breaking is
+a MINOR bump, per the precedent the `0.19.0` and `0.20.0` entries in this document set.
+
+### Linear-time row access (Phase 206) — BEHAVIOUR-IDENTICAL, no public surface moves
+
+The columnar evaluator was **quadratic in the row count**, and the delta and the incremental seam
+inherited it. Every consumer that wanted a table's rows asked for them one index at a time through
+`Column.cell i c`, which is `List.item` over a linked list: each cell read walked its column from
+the head, so reading an n-row table cost O(n² × columns). Four grouping folds compounded it by
+appending to an accumulator per row (`rows @ [ row ]`), which is quadratic in the group size and —
+where the grouping key has high cardinality — quadratic in the row count again.
+
+Everything is now a single pass. The frame is a transpose, the delta's row tokens are computed once
+per table, the reference identity witnesses build a row-indexable view on their first application,
+and the folds prepend and turn once at the end.
+
+**This is a PATCH and the class is a gate output, not a claim.** `Column.Cells` is still a
+`Cell list` — deliberately, because making it an array would break every consumer's construction
+sites and is not needed to remove the quadratic — no public signature moves, and the Phase 183
+public-surface family renders each package afresh and reports no difference against the committed
+`api/` baselines. Results are byte-identical: the transform-parity family, the incremental
+equivalence family (`IncrementalDelta.laws`), `incrementalLaws`, `footprintLaws` and
+`dirtyPropagationLaws` are all unchanged in verdict, which is the point — this is an access-pattern
+change and not a semantic one. The only file under `conformance/` that moved is
+`laws/transform-laws.json`, and only because it stamps the kit version.
+
+Measured on one machine, 1,000 → 20,000 rows, a `Filter > GroupBy` pipeline with one row of the
+source edited. Median of three timings on both sides:
+
+| at 20,000 rows | before | after | |
+|---|---|---|---|
+| reference evaluation | 3,153.39 ms | **27.49 ms** | 115× |
+| `Delta.diff` | 7,689.30 ms | **107.20 ms** | 72× |
+| prime + diff + refresh | 16,015.97 ms | **246.03 ms** | 65× |
+
+The scaling ratios over 1,000 → 20,000 rows went 163.67 → 20.26, 412.85 → 26.91 and 440.48 → 38.43
+respectively: four hundred is the quadratic signature, twenty the linear one.
+
+A new `Scaling` family holds that SHAPE rather than the times: twenty times the rows may cost at
+most five times the linear expectation. A ratio between two sizes in one process, never an absolute
+threshold — Core owns no clock (GP6), and an absolute bound is a test that eventually fails on a
+slow runner for a reason nobody can act on. The bound is five rather than two because none of the
+three paths is exactly linear even now: they key rows through persistent maps over string and
+string-list keys, so they are n log n, and the family's own best-of-five estimator reports them at
+34, 52 and 44.
+
+**What the fix did NOT buy, stated because the phase set out to buy it.** With the quadratic gone,
+a restricted refresh is still **slower** than the full evaluation it replaces when the row
+expression is trivial: 88 ms against 20 ms at 20,000 rows for a single `Ge` comparison. The seam's
+per-row bookkeeping — an identity token, its uniqueness check, two lookups into the prior row-cell
+map, a group-membership entry, all string-keyed persistent-map operations — does not shrink when
+the expression does, and it now outweighs the one row expression the refresh avoids evaluating
+twenty thousand times. Put real work in the expression and the seam wins as designed: at 129
+expression nodes it is 99 ms against 224 ms. The refresh's own cost barely moves between the two
+(88 → 99 ms) while the full evaluation's goes up eleven-fold, which is the model stated as a
+measurement. The seam's proposition is therefore about the SIZE of the row expression, not about
+the size of the table, and `docs/incremental-evaluation.md` now says so with the figures.
+
+### Incremental evaluation agrees with full evaluation, as a theorem (Phase 186) — ADDITIVE, no public surface moves
+
+`Propagation.evalFrom`'s doc comment says its result is "byte-identical to a full `eval`", and until
+this phase that sentence was sampled by two law families and proved nowhere. `proofs/Propagation.fst`
+models the dirty set and the driver clause for clause and proves it: the dirty set is sound and is
+the LEAST set closed under "reads" (`dirty_sound`, `dirty_least`), `evalFrom` equals `eval` as a
+whole `Result` (`evalfrom_agrees`), reuse is minimal (`evalfrom_minimal`), and an unknown change is
+refused with nothing evaluated (`evalfrom_unknown_refused`). `proofs/README.md`, theorem 11.
+
+**This is ADDITIVE and the class is a gate output, not a claim.** What ships is a proof model, its
+extracted oracle, three `Proofs.Oracle` cases, ladder rows and prose; the one source file touched is
+`Propagation.fs`, and only its doc comment. The Phase 183 public-surface family is green with no
+baseline moved, and every conformance family's verdict is unchanged.
+
+**What a consumer should read, because the theorem has premises the driver cannot enforce.**
+`evalFrom` is `eval` for an evaluator that reads other nodes ONLY through the reads its dependency
+map declares, with a change set naming every node whose evaluation changed, and a `prior` that came
+from `eval` over the same map. The resolver `evalNode` is handed answers for every id computed so
+far, so an evaluator that reads an undeclared node runs without complaint and keeps a stale value
+under `evalFrom` — `Proofs.Oracle` exhibits it on the shipped driver. That contract is now stated on
+`evalFrom` itself and recorded as the ladder row `propagation-evaluator-contract`.
+
+**What this did NOT buy, stated because the phase set out to buy it.** `sort` is not modelled: the
+one fact the agreement theorem needs of it — `Order` holds no id twice — is a hypothesis, checked on
+every generated graph and proved nowhere (`propagation-order-distinct`). And no behaviour changed: a
+resolver restricted to declared reads, which would make the evaluator contract hold by construction,
+is its own phase.
+
+### The Query seam carries the `Deferred` envelope (Phase 198) — BREAKING: a public return type moves
+
+**The class.** `retype`, on two members of `Fuaran.Core.Query`, and it is a Phase 183 gate output
+rather than a claim. The family reported it verbatim as `Fuaran.Core.Query — retype (4 move(s))`:
+two `retype` and two `additive`, one package, with the headline naming the most informative of them.
+The two retyped members:
+
+| member | was | is |
+|---|---|---|
+| `Query.invoke` | `resolve: Query -> Result<QueryResult, string>` → `Result<QueryResult, QueryError>` | `resolve: Query -> Deferred<QueryResult>` → `Result<Deferred<QueryResult>, QueryError>` |
+| `QueryRegistry.dispatch` | the same resolver and the same return | the same move |
+
+Additive beside them: `QueryCodec.encodeDeferredResult` / `decodeDeferredResult`, the wire codec for
+the new result type, which reuses the shipped envelope encoding (`"$type"`-tagged `pending` /
+`ready` / `failed`) rather than minting a second spelling of the same three cases. Nothing else
+moves: `Query`, `QueryParam`, `QueryResult`, `QueryRegistry` and `QueryError` keep every field, case
+and position, `validateParams` and `invocationKey` keep their signatures, and no encoded byte of a
+declaration or a result changes.
+
+**What a consumer pays.** Every caller of `Query.invoke` or `QueryRegistry.dispatch` adapts twice:
+its resolver returns `Ready r` where it returned `Ok r` and `Failed m` where it returned `Error m`,
+and its own match on the result handles `Ok(Ready r)` and `Ok Pending` where it handled `Ok r`.
+Refusals are unchanged — every `QueryError` a caller matches today arrives exactly as it did,
+including a resolver failure, which is still `ExecutionFailed(m, [])`. A caller with no use for
+`Pending` writes one line: `Deferred.toResult` projects the envelope back to a `Result`, which is
+what the envelope has shipped for since Phase 32.
+
+**Why the seam gains an axis rather than a wrapper.** The boundary previously had no way to say *not
+yet*. A fetch in flight had to be reported as a failure, or the host had to invent its own
+three-state shape above the seam and wrap every call in it — which is the drift a seam exists to
+prevent, and this repository's own comment on the seam recorded it as the expected practice. The
+envelope for exactly this has been in `Fuaran.Core.Function` since Phase 32 and the seam did not use
+it. So the async axis now rides `Deferred` and the error axis stays typed, which is the split that
+lets both be true at once.
+
+**The fourth case is unreachable, and that is a certified law rather than a comment.** `Deferred`'s
+failure is a rendered `string` by deliberate design — one type parameter, serialisable — so letting
+a resolver's `Failed` ride out of the seam would have traded the enumerated `QueryError` for a
+message. It does not: `invoke` projects `Failed m` into `ExecutionFailed(m, [])`, so a dispatch has
+exactly three outcomes — SETTLED `Ok(Ready r)`, PENDING `Ok Pending`, REFUSED `Error e` — and
+`Ok(Failed _)` cannot occur. `Conformance.queryLaws` gained three laws for it: the
+`Deferred<QueryResult>` wire round-trip over all three cases, the three-outcome property (with the
+refusal shown to precede the resolver), and the typed-failure invariant. Its four existing laws are
+unchanged in verdict, and every other family is untouched.
+
+**What this deliberately did NOT do, stated because the phase's own brief asked for it.** It did not
+change `Capability`. `Capability.invoke` returns a plain `Result<'v, InvokeError>` and still does, so
+the two seams are NOT symmetric after this change — `Query` is the first to carry the envelope, not
+the second. The phase was framed as reconciling a disagreement between the seams, and the
+disagreement measured the other way: both returned a plain `Result`, and neither carried the
+envelope. Giving `Capability` the same shape retypes a surface Phase 177 models and proves, so the
+model would move in the same change-set; that is its own phase. It also did not put a handle on
+`Pending`: that is a union-widening on a type this repository's codec, `deferredLaws` and every
+adopting host already read, and a pending fetch is correlated by `invocationKey`, which is a function
+of the declaration and the validated arguments alone.
+
+### Arbitration leaves `AiSurface` for the op layer (Phase 192) — BREAKING: a public function and its types change package
+
+`arbitrate` — which subset of N op-script proposals can land together against one base tree — is now
+`Arbitration.arbitrate` in **`Fuaran.Core.Ops`**. It was `AiSurface.arbitrate` in
+`Fuaran.Core.AiSurface`. `ArbitrationRejection<'Id>` and `Arbitration<'Node,'Id>` move with it, and
+the proposal the partition takes is a new minimal record, `OpScriptProposal<'Node,'Id>` =
+`{ Id: int; Holder: string; Ops: SkeletonOp list }`.
+
+**Why it moved.** `Fuaran.Core.AiSurface` is the seam a model is driven through: read tools, the op
+catalogue, the pattern bank, the proposal gate. Arbitration is not one of those — it is the other end
+of `Ops.footprint` and `Ops.independent`, the concurrency half of the tree algebra, and its callers
+are schedulers deciding what may land together rather than orchestrators driving a model. It was
+declared in `AiSurface` because the proposal type was, which is a reason about where a record sat and
+not about what the function is. A reader looking for concurrency semantics now finds them in `Ops`.
+
+**What adopting it costs, exactly.** Callers of `AiSurface.arbitrate` move to
+`Arbitration.arbitrate` over an `OpScriptProposal` list. Under `open Fuaran.Core` — which every
+consumer already has, since both packages declare into that one namespace — the two type names
+resolve unchanged, so a caller that only pattern-matches `Inapplicable` / `Conflicts` or reads
+`Accepted` / `MergedScript` / `Rejected` needs no edit there. Two changes are real: the module
+qualifier on the call, and the proposal value. A caller holding an `AiSurface.Proposals` queue gets
+the second for free — `Proposals.toOpScript` is the projection, one call per proposal — and a caller
+that was constructing the Phase-59 record only to satisfy `arbitrate` now constructs three fields
+instead of six. The `Fuaran.Core.Ops` package reference is new only for a consumer that had
+`AiSurface` without it, which is none: `AiSurface` has always depended on `Ops`.
+
+There are **two** consumers of `arbitrate` outside this repository — both coordination-layer
+components — and each repins for this release. A caller with no arbitration call site is
+unaffected: nothing else in either package moved.
+
+**Why it rides this draft rather than advancing `<Version>`.** The draft already carries a BREAKING
+entry (Phase 198's retyped `Query` return). The Phase 183 classifier reports this change as
+
+```
+Fuaran.Core.AiSurface — removal (15 move(s))
+Fuaran.Core.Ops — additive (20 move(s))
+```
+
+and `removal` is not a HIGHER class than `retype`: the classifier's own ranking exists to say which
+word tells a reader most about what the author did, not to rank severity — the five non-additive
+classes all stop a pinned consumer compiling. So the number already says "breaking", which is the
+true thing to tell a consumer about adopting it, and `0.27.0` admits this entry. Pre-1.0 breaking is
+a MINOR bump, per the `0.19.0` / `0.20.0` precedent above.
+
+**The partition is unchanged, and that was measured rather than asserted.** The body moved verbatim.
+Before the old function was deleted, both implementations ran over the same 300 generated proposal
+sets from the law kit's own generators — `arbitrationLaws`' seed, generator and corruption rate —
+comparing the accepted ids with their holders, the merged script and every rejection reason: 300 sets,
+339 accepted and 729 rejected proposals, **zero disagreements**. The comparison was shown able to go
+red before the green was believed: the same differential against an inverted pinned order disagreed
+on 282 of the 300 sets.
+
+**`Conformance.arbitrationLaws` did not move** — same name, same signature, same six laws, same
+verdicts. Its baseline line in `api/Fuaran.Core.Conformance.txt` is byte-identical: the family builds
+its proposals inside its own body, so only that body was re-pointed. A domain certifying arbitration
+re-pins and runs exactly what it ran before, with no source change.
+
+**What did NOT change:** `AiSurface` keeps its name, the `*.AiTools` vocabulary it is named for, and
+the frozen `AiSurfaceWitness`; `Proposals` keeps its queue, its approval flow and its guidance
+rendering; nothing about what `arbitrate` decides, in what order, or with what honesty boundary
+moved. This is a change of address.
+
+### The relocation-kind footprint widening was MEASURED AND DECLINED (Phase 163) — NO surface moves
+
+`Footprint`, `Ops.footprint` and `Ops.independent` are **byte-for-byte unchanged**, and this entry
+exists so that nobody reads their stillness as an oversight. Phase 143 proved a precision ceiling
+(`proofs/TreeOps.fst` section 18, `relocation_clause_is_necessary`): the pinned unknown-parent clause
+cannot be tightened over the record as it stands, because a `MoveNode` and a remove-shaped `Batch`
+present byte-identical footprints while only the move commutes with a structural write inside the
+relocated subtree. Its named remedy was a wider record — one carrying the relocation's KIND and, for
+a move, its target. Phase 163 measured what that would buy before building it, and the answer is
+nothing: **an upper bound of 0 freeable pairs over 20,649,689 concurrent op pairs** in the recorded
+op-stream ledgers available to measure. The instrument, its falsifier and its go-red self-test are
+`proofs/kit/measure-relocation-halts.ps1` (+ `.tests.ps1`); the reasoning is
+[`DECISIONS.md`](DECISIONS.md) D47.
+
+**So no consumer has anything to adopt, and that is the whole of the consumer-facing news.** The
+widening would have been breaking — the record is mirrored by hand in F\* (`proofs/DagFold.fst`
+declares its own `footprint`, with `independent` re-implemented clause-for-clause) and its four
+fields are pinned WITH THEIR ORDINALS in `api/Fuaran.Core.Ops.txt`, so a field added anywhere but
+last moves the baseline. Declining it leaves every projection over this record (`'Op -> Footprint`,
+the shape a scheduling or fold consumer supplies) valid exactly as written.
+### An evaluator reads only what it declared (Phase 209) — BREAKING: a union case is added, and the driver refuses a non-conforming evaluator
+
+**The class.** `union-widening`, on `Fuaran.Core.Propagation`, and it is a Phase 183 gate output
+rather than a claim. The family reported it verbatim as `Fuaran.Core.Propagation — union-widening
+(3 move(s))`:
+
+```
+additive           + field Fuaran.Core.Propagation+PropagationError+Tags.EvalUndeclaredRead : System.Int32 (literal)
+additive           + type Fuaran.Core.Propagation+PropagationError+EvalUndeclaredRead (type)
+union-widening     + union-case Fuaran.Core.Propagation+PropagationError.NewEvalUndeclaredRead #2(System.String, System.String)
+```
+
+No signature moves. `eval`, `evalFrom`, `dependencyMap`, `sort`, `dirtyFromChangedIds`, `staleSet`,
+`touchedBy`, `dirtyFromOp`, `cycleThrough`, `dependents`, `TopoResult` and `EvalOutcome` keep every
+parameter, field and position; `PropagationError` keeps both of its existing cases at their existing
+tags, and the new case is declared LAST because a case's declaration order IS its tag number — the
+finding Phases 207 and 202 each recorded. It rides the `0.27.0` draft rather than advancing it: the
+slot already carries a breaking `retype` from Phase 198, and this is not a higher class than that.
+
+**And the BEHAVIOUR changes, which is the part a consumer must read rather than the surface.** The
+resolver `walk` hands `evalNode` used to answer for EVERY id computed so far. It now answers for
+`deps[id]` and for nothing else, and a read outside that set ends the evaluation with
+`EvalUndeclaredRead(node, read)`.
+
+So an evaluator that read a node it never declared in the dependency map used to run without
+complaint and is now refused as data. **Say plainly what such an evaluator already was:** wrong under
+`evalFrom` and order-dependent under `eval`. Under `evalFrom` its node was not in the dirty cone of
+the undeclared read, so it was not recomputed when that node changed and kept a STALE value where
+`eval` computed a fresh one — silently, with both calls returning `Ok`. Under `eval` it saw the
+undeclared node's value or `None` depending only on where the topological order happened to place
+it. This change does not take a working program away; it replaces two silent wrong answers with one
+named one, at the read, before the day an upstream edit lands outside the cone.
+
+**What a consumer pays.** Three things, and the first is the only one most callers meet:
+
+| | |
+|---|---|
+| a `match` over `PropagationError` | gains a case. Exhaustive matches stop compiling (`FS0025` as a warning, an error under warnings-as-errors); a consumer holding a STALE same-version pack gets an `InvalidCastException` at run time with no compile signal at all, which is why the slot is a draft and not a repack |
+| an evaluator that reads outside its declaration | is refused. Declare the read in the dependency map — the domain still declares its reads, `dependencyMap` is unchanged — or stop reading it |
+| nothing else | a declared read behaves exactly as before, including one that resolves to `None`: a dangling reference, a cyclic upstream and a not-yet-reached read are all still answered, and still `None` |
+
+**Why the refusal is not `None`.** `None` already means "declared, and absent or failed upstream",
+which a domain propagates as a value of its own — a Calc model renders it `#CALC!`. Answering an
+undeclared read with `None` would report a contract violation in the vocabulary of a legitimate
+missing value, so it is a typed refusal instead. The one-set-lookup cost per read is the whole of
+the runtime price.
+
+**Where the refusal is observable, stated because the enforcement has a boundary.** `evalFrom`
+invokes `evalNode` only on the nodes it recomputes — the dirty set, plus any node absent from
+`prior` — so a violating node that is clean AND present in `prior` is reused without being
+re-invoked and its violation is not seen there. That is not a hole: `evalFrom`'s contract says
+`prior` came from `eval` over the same `deps`, and `eval` recomputes everything, so such a `prior`
+cannot exist. Prime with `eval` and the violation is found before there is a `prior` to reuse.
+`PropagationContractTests` asserts both halves rather than leaving them to be composed.
+
+**What this bought on the proof side.** Phase 186 proved `evalFrom` equal to `eval` under four
+premises, the first of which — the evaluator reads other nodes only through its declared reads — was
+recorded as the ladder row `propagation-evaluator-contract`, a `premise` that production stated in
+prose and enforced nowhere. That row is now a **proved** row: the model's resolver is restricted
+identically, `evalfrom_agrees` no longer carries the hypothesis, `local` is deleted from
+`proofs/Propagation.fst` rather than left as a hypothesis nobody supplies, and the refusal itself is
+proved (`undeclared_refused`, with `eval_refuses_undeclared` / `evalfrom_refuses_undeclared` and
+`ok_implies_declared`). `Conformance.propagationEvalLaws` gained a fourth law — both drivers refuse
+an undeclared read identically, naming the same node and read — and a second adequacy dimension, so
+its reported law list grew from 4 entries to 6; a consumer asserting a law count or indexing
+positionally into `ConformanceReport.Results` adjusts, one reading `AllPassed` or matching on `Law`
+does not. Every other law family, and the propagation differential's whole generated pool, is
+unchanged in verdict, which is the point: a conforming evaluator cannot tell this change happened.
+
+**What this did NOT do.** It did not infer the dependency map from the evaluator — the domain still
+declares its reads. It did not touch `dirtyFromChangedIds` or `sort`. And it did not close the rest
+of the evaluator contract: a complete change set and a `prior` that came from `eval` over the same
+map remain the domain's, now recorded as `propagation-change-set-and-prior`, and closing them wants
+the other candidate Phase 186 named — a law family generic over a DOMAIN'S evaluator — which is
+still not taken. The model also gained one bridge in exchange, `propagation-read-witness`: production
+detects the violation by instrumenting its resolver, a pure model cannot observe a call, so the
+observed read set is a parameter the differential supplies.
 
 ### Top-N is maintainable (Phase 207) — BREAKING: a case added to `StepIncrementality`
 
@@ -2408,97 +2721,6 @@ axis and all three answer the same way. `docs/incremental-evaluation.md` carries
 at a ratio of **49 over a twentyfold span**, against the family's bound of 100 and a linear
 expectation of 20 — the same band as Phase 207's top-N (46) and the plain refresh (28), and four
 times clear of the quadratic (400) the family exists to refuse.
-
-## 0.26.1 (draft)
-
-**This slot is a DRAFT.** `<Version>` reads `0.26.1` and no `v0.26.1` tag exists, so an additive or
-behaviour-identical change may ride it: append its entry here rather than opening another slot. A
-change of a higher class than the entries below carry advances the number, because the number is
-what tells a consumer what adopting it costs. The slot was opened rather than ridden because
-`0.26.0` is tagged and released.
-
-### Linear-time row access (Phase 206) — BEHAVIOUR-IDENTICAL, no public surface moves
-
-The columnar evaluator was **quadratic in the row count**, and the delta and the incremental seam
-inherited it. Every consumer that wanted a table's rows asked for them one index at a time through
-`Column.cell i c`, which is `List.item` over a linked list: each cell read walked its column from
-the head, so reading an n-row table cost O(n² × columns). Four grouping folds compounded it by
-appending to an accumulator per row (`rows @ [ row ]`), which is quadratic in the group size and —
-where the grouping key has high cardinality — quadratic in the row count again.
-
-Everything is now a single pass. The frame is a transpose, the delta's row tokens are computed once
-per table, the reference identity witnesses build a row-indexable view on their first application,
-and the folds prepend and turn once at the end.
-
-**This is a PATCH and the class is a gate output, not a claim.** `Column.Cells` is still a
-`Cell list` — deliberately, because making it an array would break every consumer's construction
-sites and is not needed to remove the quadratic — no public signature moves, and the Phase 183
-public-surface family renders each package afresh and reports no difference against the committed
-`api/` baselines. Results are byte-identical: the transform-parity family, the incremental
-equivalence family (`IncrementalDelta.laws`), `incrementalLaws`, `footprintLaws` and
-`dirtyPropagationLaws` are all unchanged in verdict, which is the point — this is an access-pattern
-change and not a semantic one. The only file under `conformance/` that moved is
-`laws/transform-laws.json`, and only because it stamps the kit version.
-
-Measured on one machine, 1,000 → 20,000 rows, a `Filter > GroupBy` pipeline with one row of the
-source edited. Median of three timings on both sides:
-
-| at 20,000 rows | before | after | |
-|---|---|---|---|
-| reference evaluation | 3,153.39 ms | **27.49 ms** | 115× |
-| `Delta.diff` | 7,689.30 ms | **107.20 ms** | 72× |
-| prime + diff + refresh | 16,015.97 ms | **246.03 ms** | 65× |
-
-The scaling ratios over 1,000 → 20,000 rows went 163.67 → 20.26, 412.85 → 26.91 and 440.48 → 38.43
-respectively: four hundred is the quadratic signature, twenty the linear one.
-
-A new `Scaling` family holds that SHAPE rather than the times: twenty times the rows may cost at
-most five times the linear expectation. A ratio between two sizes in one process, never an absolute
-threshold — Core owns no clock (GP6), and an absolute bound is a test that eventually fails on a
-slow runner for a reason nobody can act on. The bound is five rather than two because none of the
-three paths is exactly linear even now: they key rows through persistent maps over string and
-string-list keys, so they are n log n, and the family's own best-of-five estimator reports them at
-34, 52 and 44.
-
-**What the fix did NOT buy, stated because the phase set out to buy it.** With the quadratic gone,
-a restricted refresh is still **slower** than the full evaluation it replaces when the row
-expression is trivial: 88 ms against 20 ms at 20,000 rows for a single `Ge` comparison. The seam's
-per-row bookkeeping — an identity token, its uniqueness check, two lookups into the prior row-cell
-map, a group-membership entry, all string-keyed persistent-map operations — does not shrink when
-the expression does, and it now outweighs the one row expression the refresh avoids evaluating
-twenty thousand times. Put real work in the expression and the seam wins as designed: at 129
-expression nodes it is 99 ms against 224 ms. The refresh's own cost barely moves between the two
-(88 → 99 ms) while the full evaluation's goes up eleven-fold, which is the model stated as a
-measurement. The seam's proposition is therefore about the SIZE of the row expression, not about
-the size of the table, and `docs/incremental-evaluation.md` now says so with the figures.
-
-### Incremental evaluation agrees with full evaluation, as a theorem (Phase 186) — ADDITIVE, no public surface moves
-
-`Propagation.evalFrom`'s doc comment says its result is "byte-identical to a full `eval`", and until
-this phase that sentence was sampled by two law families and proved nowhere. `proofs/Propagation.fst`
-models the dirty set and the driver clause for clause and proves it: the dirty set is sound and is
-the LEAST set closed under "reads" (`dirty_sound`, `dirty_least`), `evalFrom` equals `eval` as a
-whole `Result` (`evalfrom_agrees`), reuse is minimal (`evalfrom_minimal`), and an unknown change is
-refused with nothing evaluated (`evalfrom_unknown_refused`). `proofs/README.md`, theorem 11.
-
-**This is ADDITIVE and the class is a gate output, not a claim.** What ships is a proof model, its
-extracted oracle, three `Proofs.Oracle` cases, ladder rows and prose; the one source file touched is
-`Propagation.fs`, and only its doc comment. The Phase 183 public-surface family is green with no
-baseline moved, and every conformance family's verdict is unchanged.
-
-**What a consumer should read, because the theorem has premises the driver cannot enforce.**
-`evalFrom` is `eval` for an evaluator that reads other nodes ONLY through the reads its dependency
-map declares, with a change set naming every node whose evaluation changed, and a `prior` that came
-from `eval` over the same map. The resolver `evalNode` is handed answers for every id computed so
-far, so an evaluator that reads an undeclared node runs without complaint and keeps a stale value
-under `evalFrom` — `Proofs.Oracle` exhibits it on the shipped driver. That contract is now stated on
-`evalFrom` itself and recorded as the ladder row `propagation-evaluator-contract`.
-
-**What this did NOT buy, stated because the phase set out to buy it.** `sort` is not modelled: the
-one fact the agreement theorem needs of it — `Order` holds no id twice — is a hypothesis, checked on
-every generated graph and proved nowhere (`propagation-order-distinct`). And no behaviour changed: a
-resolver restricted to declared reads, which would make the evaluator contract hold by construction,
-is its own phase.
 
 ## 0.26.0 — released 2026-09-17 as `v0.26.0`
 
