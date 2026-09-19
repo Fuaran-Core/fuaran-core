@@ -36,7 +36,7 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 | `check-proof-leg.ps1` | **The engine.** Knows how to run a proof leg; knows nothing about which models a repository has. Takes the module list, the oracle host and the paths as parameters. Classifies every lost pass into one of the three verdicts below. | copy verbatim |
 | `templates/check.ps1` | The thin caller. Three declarations to edit at the top; nothing below them is per-repository. | copy and edit |
 | `templates/oracle.fsproj.template` | The never-packed oracle project: `--strict-indentation-`, the FS0058/FS0064/FS1182 `NoWarn`, and the compile order the shims and models need. Named `.template` so no build or glob in a host repository can pick it up. | copy, rename and edit |
-| `templates/modules.json` | The cost declaration: the budget rule, the floor rule, and one worked entry. | copy and edit |
+| `templates/modules.json` | The cost declaration: the budget rule, the floor rule, the contention threshold, and one worked entry. | copy and edit |
 | `templates/proofs.json` | The claims ladder: the closed level set, what each level means, and the host family that holds the rows to the tree. Goes at the **repository root**, not in `proofs/`. | copy and edit |
 | `templates/ci-proofs-job.yml` | The CI job, with the cache key that hashes the pin file — which is the whole mechanism by which a pin bump reaches CI with no second edit. | copy and edit |
 | `templates/Instance.fst.template` | The instantiation template (Phase 175): `../Skeleton.fst` with fourteen named holes. Drop the preamble, fill the holes, and the result is a domain's fold-confluence composite; the one obligation is `{{DIAMOND}}`, a proof of `independence_diamond` at the domain's own footprint and apply. Held to `../Skeleton.fst` byte for byte by the `Proofs.Kit` family, so the template and its first instance cannot drift apart. | copy and instantiate |
@@ -160,6 +160,81 @@ framework, its `NoWarn`, its `--strict-indentation-` and its package references,
 compile list rewritten — so what they prove is a statement about your oracle project and not about a
 second one that resembles it. Where the prover or `dotnet` is absent they are reported **NOT RUN**
 with the remedy, never skipped quietly: "nothing to check" must not read as "everything checked".
+
+## A cost finding that names a contended pass (Phase 171)
+
+A budget overshoot has two entirely different causes — **this module got more expensive**, or **this
+machine was busy** — and the leg used to print the same sentence for both. Three recorded instances,
+all of them the second kind: `Chain` overshot twice in seven runs and came in at 16–25s on the other
+five, untouched by any phase since it was budgeted; a pass measured `TreeOps` at 145s while inflating
+three untouched modules by the same factor, and the phase had to depart from the seeding rule by hand
+and write a paragraph explaining why; and `Capability` measured 75s against a 20s budget on a run
+contended by three sibling gates. A reader of any of those logs cannot tell them from a regression.
+
+So at the end of every **run** the engine reports one number:
+
+> the **median**, over the modules this working tree did **not** change, of what each module just
+> cost divided by the `measuredSeconds` its budget entry records.
+
+An untouched module's cost is a fact about the machine and not about the tree, so a pass in which all
+of them came in at 1.7× their recorded measurements is a pass in which the machine was 1.7× slower,
+whatever any one line says. The median rather than the mean: one module hitting a pathological query,
+or aborting and retrying, is exactly the outlier a mean would launder into the number.
+
+```
+==== proofs: contention — run 1 of 1, x0.29 over 16 untouched module(s), at or under the x0.80 threshold: an ordinary pass. A cost finding on this run is about its module.
+==== proofs: contention — run 1 of 1, x0.29 over 4 untouched module(s), ABOVE the x0.20 threshold: this was a CONTENDED pass. 1 cost finding(s) on this run carry the label, and a labelled finding is NOT a re-seed obligation.
+     ColumnOps.fst took 12s against its 8s budget on run 1 of 1 — 4s over, 150% of budget — CONTENDED PASS (x0.29 against a x0.20 threshold): the modules this tree did not change ran x0.29 of their recorded measurements on this run, so this figure measures the afternoon and not the module
+```
+
+Both lines are transcripts: the first from a quiet cold pass of the reference repository's leg, the
+second from the phase's own probe, which lowered the threshold to 0.20 and one budget to 8s so that
+an ordinary pass crosses it — the labelling path is the same one a genuinely contended pass takes.
+
+Above the threshold, every cost finding from that run is **labelled** where the closing verdict prints
+it, and the label carries the whole consequence: **a labelled finding is not a re-seed obligation.**
+Re-seeding a budget from one raises a ceiling to fit a slow afternoon, which is precisely how a budget
+stops meaning anything. `-Strict` promotes only the **unlabelled** findings — a session that asked for
+a red leg on cost asked to be stopped by a regression, and a contended pass is not one — while the
+coverage and shape findings belong to no run, are never labelled, and so always promote.
+
+Five details are load-bearing rather than decorative:
+
+- **The number's scale is not the obvious one, and it was measured rather than assumed.**
+  `measuredSeconds` is not a typical cost: by the budget file's own seeding rule it is the **slowest**
+  cold run ever observed for that module, and budgets are routinely seeded on busy machines. So the
+  ratio's neutral point sits well *below* one — a quiet pass of this repository's leg measures
+  **x0.29**, not x1. A threshold chosen as though 1.0 meant "normal" would sit above any contention
+  the leg can experience and would never fire: the *detector that cannot fire* that the budget file's
+  own `TreeOps` note warns about. Seed the threshold from a measured quiet pass and a measured
+  contended one, in the file's `contentionSeeding` block, and record both figures there.
+- **Nothing is multiplied into a measurement.** The seconds a green line prints stay the wall clock
+  the module actually took, and the factor sits beside them. A normalised measurement would be a
+  number nobody observed, and the value of this leg's cost half is that every figure in it is one
+  somebody's machine really produced.
+- **The untouched set is derived, not declared** — `git status --porcelain` over the proofs
+  directory, so modified, staged and brand-new all count and no branch name is assumed. Its limit is
+  worth knowing: a session that has already **committed** its model edits has a clean tree, so its
+  module reads as untouched and votes. That is what the median absorbs, and it is the honest boundary
+  of what a working-tree question can answer. Where git cannot answer at all, every module counts as
+  untouched and the leg **says so** — "I could not tell" must never print as "nothing is touched".
+- **A module too cheap to time does not vote.** The clock is whole seconds, so 0s against a recorded
+  2s is a ratio of 0 and 1s is a ratio of 0.5, and neither says anything about the machine. The cut is
+  `floorSeeding.zeroBelowSeconds` — this file's existing answer to "below what is a reading
+  process-start noise", reused rather than minted again — and a run with fewer than
+  `contentionSeeding.minimumSamples` contributors reports the factor as **not computed** rather than
+  taking a median of one.
+- **An absent `contentionSeeding` block is not a finding.** Unlike a missing budget or floor, which
+  fire per module when a model is added, this one is per file and one-off, and a finding present on
+  every run of an unseeded repository is one people learn to scroll past. The factor is still computed
+  and still printed; nothing is labelled, and the line names the block to seed. That is the pre-171
+  behaviour plus one informative number, which is the safe direction for an adopter.
+
+Each entry may also carry an optional **`contentionFactor`** beside its `measuredSeconds`, recorded by
+whichever phase seeds that number: it says what the machine was doing when the measurement was taken,
+so a later reader can tell a budget seeded on a quiet machine from one seeded on a busy one. It is
+**provenance only** — the engine holds it to its shape and computes nothing from it, for the same
+reason the factor is never multiplied into a measurement. Absent reads as "not recorded", never as 1.
 
 ## Adopting it
 

@@ -817,6 +817,90 @@ claim at none of those levels, and it is per MODULE where a ladder row is per CL
 this is it — the ladder's `proof-leg` policy row points here for the cost half rather than carrying
 numbers the family beside it would not be checking.
 
+### A contended pass is named, so a reader can tell the afternoon from the module (Phase 171)
+
+The paragraph above says a single overshoot on a busy machine is noise and a persistent one is a
+regression — and until Phase 171 the log gave a reader nothing with which to tell the two apart.
+Three instances, all of them the machine: `Chain` overshot its 30s budget twice in seven runs (35s
+and 31s) and came in at 16–25s on the other five, untouched by any phase since it was budgeted;
+Phase 162 measured `TreeOps` at 145s in a pass that inflated three untouched modules by the same
+factor, and had to depart from `seeding`'s rule by hand and write a paragraph explaining why; and
+Phase 182 measured `Capability` at 75s against its 20s budget on a run contended by three sibling
+gates. Every one of those ran beside five other provers, and every one reads in the log exactly like
+a regression.
+
+So the leg measures the afternoon directly. At the end of **each run** it reports the **median**,
+over the modules this working tree did **not** change, of what each module just cost divided by the
+`measuredSeconds` its entry records:
+
+```
+==== proofs: contention — run 1 of 1, x0.29 over 16 untouched module(s), at or under the x0.80 threshold: an ordinary pass. A cost finding on this run is about its module.
+```
+
+and when the machine was busy, the same line says so and the finding it qualifies carries the label
+where the closing verdict prints it — this pair is from the phase's own probe, which lowered the
+threshold to 0.20 and one budget to 8s so that an ordinary pass crosses it, the labelling path being
+the same one a genuinely contended pass takes:
+
+```
+==== proofs: contention — run 1 of 1, x0.29 over 4 untouched module(s), ABOVE the x0.20 threshold: this was a CONTENDED pass. 1 cost finding(s) on this run carry the label, and a labelled finding is NOT a re-seed obligation.
+     ColumnOps.fst took 12s against its 8s budget on run 1 of 1 — 4s over, 150% of budget — CONTENDED PASS (x0.29 against a x0.20 threshold): the modules this tree did not change ran x0.29 of their recorded measurements on this run, so this figure measures the afternoon and not the module
+```
+
+An untouched module's cost is a fact about the machine and not about the tree, so a pass in which all
+of them came in at 1.7× their recorded measurements is a pass in which the machine was 1.7× slower,
+whatever any one line says. The median rather than the mean, because a module hitting a pathological
+query — or aborting and retrying — is exactly the outlier a mean would launder into the number.
+
+Above the threshold, every cost finding from that run is **labelled** where the closing verdict
+prints it, and the label carries the whole consequence: **a labelled finding is not a re-seed
+obligation.** Re-seeding a budget from a contended run raises a ceiling to fit a slow afternoon,
+which is how a budget stops meaning anything — the judgement Phase 162 had to make by hand and argue
+in prose. What is new is that the leg makes it, and says so. `check.ps1 -Strict` promotes only the
+**unlabelled** findings: a session that asked for a red leg on cost asked to be stopped by a
+regression, and a contended pass is not one, so reddening on it would make the flag a coin toss on a
+shared machine. Coverage and shape findings belong to no run, are never labelled, and always promote.
+
+**The number's scale is not the obvious one, and this was measured rather than assumed.**
+`measuredSeconds` is not a typical cost — by `seeding`'s own rule it is the **slowest** cold run ever
+observed for that module, and most of the entries below were seeded under six concurrent sessions. So
+the ratio's neutral point sits well *below* one: a quiet cold pass of this leg measures **x0.29**, not
+x1, and the 2026-09-14 contended runs sit near x1.0 because `measuredSeconds` *is* one of them. A
+threshold picked as though 1.0 meant "normal" would sit above any contention this leg can experience
+and would never fire — the *detector that cannot fire* that `TreeOps`'s own entry warns about. The
+threshold therefore lives in `modules.json`'s `contentionSeeding` block, seeded from a measured quiet
+pass and a measured contended one with both figures recorded there, and re-seeding it is the same
+deliberate recorded act as bumping a budget.
+
+Four more things about it are worth knowing before reading a factor:
+
+- **Nothing is multiplied into a measurement.** The seconds a green line prints stay the wall clock
+  the module took, and the factor sits beside them. A normalised measurement would be a number nobody
+  observed, and the value of this leg's cost half is that every figure in it is one somebody's machine
+  really produced. The same reason the optional per-entry `contentionFactor` — recorded beside a
+  `measuredSeconds` by whichever phase seeds it, saying what the machine was doing at the time — is
+  **provenance only**: the leg holds it to its shape and computes nothing from it, and an absent one
+  reads as "not recorded", never as 1.
+- **The untouched set is derived, not declared** — `git status --porcelain` over `proofs/`, so
+  modified, staged and brand-new all count and no branch name is assumed. Its limit: a session that
+  has already **committed** its model edits has a clean tree, so its module reads as untouched and
+  votes. The median absorbs one or two such ratios out of a dozen, and that is the honest boundary of
+  what a working-tree question can answer. Where git cannot answer at all, every module counts as
+  untouched and the leg says so on its own line — "I could not tell" must never print as "nothing is
+  touched".
+- **A module too cheap to time does not vote.** The clock is whole seconds, so `Skeleton` at 0s
+  against a recorded 2s is a ratio of 0 and 1s is a ratio of 0.5, and neither says anything about the
+  machine. The cut is `floorSeeding.zeroBelowSeconds`, reused rather than minted again so there is one
+  number and one argument for it; `Skeleton`, `Limits` and `WireVersioning` are the three it excludes
+  here. A run with fewer than `contentionSeeding.minimumSamples` contributors reports the factor as
+  **not computed** rather than taking a median of one.
+- **The label arrives after the finding, and that ordering is deliberate.** A ceiling finding prints
+  unlabelled at the moment it fires, because at that instant the leg genuinely does not yet know what
+  kind of afternoon it is having — the factor is read off the run's own measurements and does not
+  exist until they are all in. The run's contention line follows a few lines later, and the closing
+  verdict prints every finding with its label. Printing a label the leg could not have computed would
+  be a worse lie than printing the measurement alone.
+
 **The two cost cliffs, to be read before the next model is written.** Both have been paid for once:
 
 - **Context pruning is the difference between minutes and tens of minutes.** `TreeOps.fst` checks in

@@ -18,8 +18,9 @@
 #               -BudgetFile says what each module is expected to cost, every green line prints
 #               the measured seconds beside that budget, and an overshoot is a named COST warning
 #               rather than a failure — prover time varies by machine and by load, so the budget
-#               is a smoke detector and not a gate. -Strict promotes every cost finding to a red
-#               leg, for a session that wants one. A fixed CI job timeout is deliberately NOT what
+#               is a smoke detector and not a gate. -Strict promotes every UNLABELLED cost finding
+#               to a red leg, for a session that wants one — see the contention factor below for
+#               what a labelled one is. A fixed CI job timeout is deliberately NOT what
 #               this is: a timeout says a run died and nothing about which module.
 #               The clock is also measured against a declared FLOOR (Phase 164), and that one
 #               IS a gate: a module that verifies in less than its floorSeconds FAILS the leg on
@@ -83,6 +84,29 @@
 # is: did the prover SAY anything about an undischarged query. F* prints no per-query line for a
 # query it discharged, so a log with no diagnostic in it is one in which every query the module
 # printed was discharged; that is the same statement, read off the only evidence there is.
+#
+# THE CONTENTION FACTOR (Phase 171). A budget overshoot has two entirely different causes — this
+# module got more expensive, or this machine was busy — and until now the log said nothing about
+# which one a reader was looking at. So at the end of every RUN the leg reports one number: the
+# median, over the modules this working tree did NOT change, of what each cost divided by the
+# `measuredSeconds` its budget entry records. An untouched module's cost is a fact about the
+# machine, so a run in which all of them came in at 1.7x their recorded measurements is a run in
+# which the machine was 1.7x slower, whatever any single line says. Above the threshold declared in
+# the budget file's `contentionSeeding` block, every cost finding from that run is LABELLED a
+# contended pass; a labelled finding still prints, still warns, and is explicitly NOT a re-seed
+# obligation, while -Strict promotes only the UNLABELLED ones. Nothing is multiplied into a
+# measurement: the seconds a green line prints stay the wall clock, and the factor sits beside
+# them. Section 2b carries the argument and the limits; section 3c computes it.
+#
+# WHAT THE NUMBER'S SCALE ACTUALLY IS, because it is not the obvious one and the threshold depends
+# on it (measured, Phase 171, on the pinned prover). `measuredSeconds` is not a typical cost — by
+# the budget file's own seeding rule it is the SLOWEST cold run ever observed for that module, and
+# most of this repository's were seeded under several concurrent sessions. So the ratio's neutral
+# point sits well BELOW one: a quiet pass of this leg measured x0.29, not x1. A threshold picked as
+# though 1.0 meant "normal" would therefore sit above any contention this leg can experience and
+# would never fire — the "detector that cannot fire" the budget file's own TreeOps note warns
+# about. The threshold is seeded from a measured quiet pass and a measured contended one, in that
+# block, and re-seeding it is the same recorded act as bumping a budget.
 #
 # Every prover invocation's whole output is also TEED to <WorkDir>/logs/, so a post-mortem reads
 # the classification's own evidence rather than a scrollback. And every run prints a PRE-FLIGHT
@@ -404,10 +428,17 @@ function Invoke-Prover([string[]] $arguments, [string] $logPath) {
 # is a cost finding rather than a failure, because a sibling adding a model should not have their
 # leg go red for a budget nobody could have measured yet — the finding names the module and what
 # to do.
-$costFindings = [System.Collections.Generic.List[string]]::new()
+# A finding is an OBJECT rather than a string since Phase 171, because a ceiling finding acquires
+# one more fact after it is printed: the contention factor of the run it fired on, which is not
+# known until that run has measured every module. `Run` is the run it belongs to (0 for the
+# coverage and shape findings below, which belong to no run and are never labelled), and `Label` is
+# filled in at the end of that run by section 3c. The line printed HERE is byte-identical to the
+# one this leg has always printed — the label reaches the reader on the run's own contention line
+# and on the closing verdict, which are the two places that can carry it honestly.
+$costFindings = [System.Collections.Generic.List[object]]::new()
 
-function Add-CostFinding([string] $message) {
-    $script:costFindings.Add($message)
+function Add-CostFinding([string] $message, [int] $run = 0) {
+    $script:costFindings.Add([pscustomobject]@{ Text = $message; Run = $run; Label = '' })
     Write-Host "==== proofs: COST — $message" -ForegroundColor Yellow
 }
 
@@ -425,9 +456,20 @@ if (-not (Test-Path $BudgetFile)) {
 # the pre-164 behaviour for that module, which is the safe direction; a floor of 0 is legal and
 # means "this module genuinely checks in about a second", which is NOT the same statement as an
 # absent one and reads differently in the file.
+#
+# Two more per-entry numbers are READ here since Phase 171, and neither is required. The
+# `measuredSeconds` this file has always recorded beside a budget — the observation the budget was
+# seeded from — becomes the DENOMINATOR of the contention factor in section 3c, so it is held to
+# its shape when it is there and its absence simply takes that module out of the factor. The
+# optional `contentionFactor` beside it is PROVENANCE and nothing else: it records what the
+# machine was doing when that measurement was taken, so a later reader can tell a number seeded on
+# a quiet machine from one seeded on a busy one. Nothing multiplies it into anything — see the
+# note on section 3c for why the measurement stays the wall clock.
 $budgets = @{}
 $floors = @{}
-foreach ($entry in (Get-Content $BudgetFile -Raw | ConvertFrom-Json).modules) {
+$measurements = @{}
+$budgetDocument = Get-Content $BudgetFile -Raw | ConvertFrom-Json
+foreach ($entry in $budgetDocument.modules) {
     $name = $entry.module
     if ([string]::IsNullOrWhiteSpace($name)) { Fail "$budgetName carries an entry with no module name" }
     if ($budgets.ContainsKey($name)) { Fail "$budgetName declares '$name' twice" }
@@ -451,6 +493,23 @@ foreach ($entry in (Get-Content $BudgetFile -Raw | ConvertFrom-Json).modules) {
         }
         $floors[$name] = [int]$declaredFloor
     }
+
+    $declaredMeasured = $entry.measuredSeconds
+    if ($null -ne $declaredMeasured) {
+        if ($declaredMeasured -isnot [int] -and $declaredMeasured -isnot [long] -and $declaredMeasured -isnot [double]) {
+            Fail "$budgetName entry '$name' has a non-numeric measuredSeconds"
+        }
+        if ([double]$declaredMeasured -lt 0) { Fail "$budgetName entry '$name' has a measuredSeconds of $declaredMeasured — a measurement is a non-negative number of seconds" }
+        $measurements[$name] = [double]$declaredMeasured
+    }
+
+    $declaredContention = $entry.contentionFactor
+    if ($null -ne $declaredContention) {
+        if ($declaredContention -isnot [int] -and $declaredContention -isnot [long] -and $declaredContention -isnot [double]) {
+            Fail "$budgetName entry '$name' has a non-numeric contentionFactor"
+        }
+        if ([double]$declaredContention -le 0) { Fail "$budgetName entry '$name' has a contentionFactor of $declaredContention — a factor is a positive multiple" }
+    }
 }
 
 foreach ($module in $Modules) {
@@ -465,6 +524,116 @@ foreach ($declared in $budgets.Keys) {
     if ($Modules -notcontains $declared) {
         Add-CostFinding "$budgetName budgets '$declared', which the leg does not check — drop the entry, or add the model to check.ps1's module list"
     }
+}
+
+# ---- 2b. the contention factor's declarations (Phase 171) ----------------------------------------
+#
+# WHY THIS EXISTS. A budget overshoot has two completely different causes and the log said nothing
+# about which one it was looking at. On 2026-09-14 `Chain` overshot twice in seven runs and came in
+# at 16-25s on the other five, untouched by any phase since 145. Phase 162 measured `TreeOps` at
+# 145s in a pass that inflated three untouched modules by the same factor, and had to depart from
+# the seeding rule by hand and write a paragraph explaining why. Phase 182 measured `Capability` at
+# 75s against a 20s budget on a run contended by three sibling gates. Every one of those ran beside
+# other provers, and a reader of any of those logs today cannot tell the afternoon from the module.
+#
+# THE MEASUREMENT. At the end of each run the leg takes, for every module the run's tree did NOT
+# change, the ratio of what that module just cost to the `measuredSeconds` its entry records — and
+# reports the MEDIAN of those ratios as the run's contention factor. An untouched module's cost is
+# a property of the machine and not of the tree, so a pass in which all of them ran 1.7x their
+# recorded measurements is a pass in which the machine was 1.7x slower, whatever any one module's
+# line says. The median rather than the mean, because one module aborting-and-retrying or hitting a
+# pathological query is exactly the outlier a mean would launder into the number.
+#
+# WHAT IT IS DELIBERATELY NOT. It is never multiplied into a measurement: the seconds a green line
+# prints stay the wall clock the module actually took, and the factor sits BESIDE them. A
+# normalised measurement would be a number nobody observed, and the whole value of this leg's cost
+# half is that every figure in it is one somebody's machine really produced.
+#
+# THE THRESHOLD is declared, in this file's own `contentionSeeding` block, for the same reason the
+# budget and floor rules are: a number the engine baked in would be a number no repository could
+# re-seed from its own machine. An ABSENT block is NOT a finding — unlike an absent budget or floor,
+# which fire per module when a model is added, this one is per FILE and one-off, and a finding that
+# is present on every run of an unseeded repository is one people learn to scroll past. The factor
+# is still computed and still printed; nothing is labelled, and the line says so and names the
+# block to seed. That is exactly the pre-171 behaviour plus one informative number, which is the
+# safe direction for an adopter.
+$contentionThreshold = $null
+$contentionMinimumSamples = 3
+# A module whose recorded measurement is a second or two contributes noise rather than signal: the
+# clock is whole seconds, so 0s against a recorded 2s is a ratio of 0 and 1s is a ratio of 0.5, and
+# neither says anything about the machine. `floorSeeding.zeroBelowSeconds` already carries this
+# repository's answer to "below what is a reading process-start noise" — reused here rather than
+# minted again, so there is one number and one argument for it.
+$contentionMinimumSeconds = 5
+if ($null -ne $budgetDocument.floorSeeding -and $null -ne $budgetDocument.floorSeeding.zeroBelowSeconds) {
+    $contentionMinimumSeconds = [double]$budgetDocument.floorSeeding.zeroBelowSeconds
+}
+if ($null -ne $budgetDocument.contentionSeeding) {
+    $block = $budgetDocument.contentionSeeding
+    if ($null -ne $block.threshold) {
+        if ($block.threshold -isnot [int] -and $block.threshold -isnot [long] -and $block.threshold -isnot [double]) {
+            Fail "$budgetName contentionSeeding.threshold is not numeric"
+        }
+        if ([double]$block.threshold -le 0) { Fail "$budgetName contentionSeeding.threshold is $($block.threshold) — a threshold is a positive multiple" }
+        $contentionThreshold = [double]$block.threshold
+    }
+    if ($null -ne $block.minimumSamples) {
+        if ([int]$block.minimumSamples -lt 1) { Fail "$budgetName contentionSeeding.minimumSamples is $($block.minimumSamples) — a median needs at least one sample" }
+        $contentionMinimumSamples = [int]$block.minimumSamples
+    }
+    if ($null -ne $block.minimumMeasuredSeconds) { $contentionMinimumSeconds = [double]$block.minimumMeasuredSeconds }
+}
+
+# THE UNTOUCHED SET, derived rather than declared. A module this working tree has changed is one
+# whose cost may have moved for a reason that IS about the module, so it must not vote on whether
+# the machine was slow. `git status --porcelain` answers modified, staged and brand-new in one call
+# and needs no branch name, which matters for a kit an adopter drops into a repository whose
+# default branch this script cannot know.
+#
+# The LIMIT is worth stating rather than leaving to be discovered: a session that has already
+# COMMITTED its model edits has a clean tree, so its module reads as untouched and votes. That is
+# what the median absorbs — one or two skewed ratios out of a dozen move it very little — and it is
+# the honest boundary of what a working-tree question can answer. Where git cannot answer at all
+# (no repository, no git on PATH) every module counts as untouched, and the line below says so:
+# "I could not tell" must never be printed as "nothing is touched".
+function Get-TouchedModules {
+    try {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { $porcelain = & git -C $ProofsDir status --porcelain --untracked-files=all -- . 2>&1 }
+        finally { $ErrorActionPreference = $previous }
+        if ($LASTEXITCODE -ne 0) { return $null }
+    }
+    catch { return $null }
+
+    $touched = [System.Collections.Generic.List[string]]::new()
+    foreach ($module in $Modules) {
+        foreach ($line in @($porcelain)) {
+            if ([string]$line -match "(^|[/\\""\s])$([regex]::Escape($module))\.fst(""|\s|$)") {
+                $touched.Add($module)
+                break
+            }
+        }
+    }
+    , $touched.ToArray()
+}
+
+$touchedModules = Get-TouchedModules
+if ($null -eq $touchedModules) {
+    Write-Host "==== proofs: contention — the touched set could not be derived from git here, so EVERY module counts as untouched and votes on the contention factor" -ForegroundColor Yellow
+}
+elseif ($touchedModules.Count -gt 0) {
+    Write-Host "==== proofs: contention — this working tree changes $($touchedModules -join ', ') — excluded from the contention factor, since their cost may have moved for a reason that is about the module" -ForegroundColor Cyan
+}
+
+# The median of a run's untouched ratios. Separate, small and total: a median of an empty set is
+# not a number and the caller is the one that knows what to print instead.
+function Get-Median([double[]] $values) {
+    $sorted = @($values | Sort-Object)
+    $n = $sorted.Count
+    if ($n -eq 0) { return $null }
+    if ($n % 2 -eq 1) { return [double]$sorted[($n - 1) / 2] }
+    return ([double]$sorted[$n / 2 - 1] + [double]$sorted[$n / 2]) / 2
 }
 
 # ---- 3. check, -Runs times from a cold cache -------------------------------------------------------
@@ -548,6 +717,12 @@ for ($run = 1; $run -le $Runs; $run++) {
     # the run that actually went wrong.
     Write-Host "==== proofs: pre-flight — run $run of $Runs, $(Get-ResourceSnapshot)" -ForegroundColor Cyan
 
+    # This run's contention sample (Phase 171): one ratio per untouched module with a recorded
+    # measurement worth dividing by. Per RUN and not per invocation, for the pre-flight line's own
+    # reason — contention is what changes between run 1 and run 3, so a number taken once says
+    # nothing about the run that actually went wrong.
+    $runRatios = [System.Collections.Generic.List[double]]::new()
+
     foreach ($module in $Modules) {
         # ONE bounded retry per module per run (Phase 166). `$attempt` is the bound, and it is a
         # number rather than a flag so that the log can say which attempt a line is about.
@@ -599,6 +774,14 @@ for ($run = 1; $run -le $Runs; $run++) {
             $cost = if ($null -eq $budget) { "${seconds}s (no budget)" } else { "${seconds}s/${budget}s" }
             Write-Host "==== proofs: $module.fst verified — run $run of $Runs, $cost, every query $Quake/$Quake under --quake" -ForegroundColor Green
 
+            # The contention sample (Phase 171). A COLD attempt only — the retry path above breaks
+            # before it reaches here, which is the same reason it is compared to neither gate.
+            if ($measurements.ContainsKey($module) -and
+                $measurements[$module] -ge $contentionMinimumSeconds -and
+                ($null -eq $touchedModules -or $touchedModules -notcontains $module)) {
+                $runRatios.Add($seconds / $measurements[$module])
+            }
+
             # The CEILING. Restored by Phase 155: Phase 164 deleted this block when it added the floor
             # gate below, so from a27afbc until now an overshoot printed nothing, `$costFindings` was
             # never populated from a measured time, and `-Strict` had nothing to promote — while the
@@ -606,7 +789,7 @@ for ($run = 1; $run -le $Runs; $run++) {
             # measured 32s against a 30s budget said nothing at all. It is a WARNING and the run
             # continues, which is the half the floor below is deliberately not.
             if ($null -ne $budget -and $seconds -gt $budget) {
-                Add-CostFinding "$module.fst took ${seconds}s against its ${budget}s budget on run $run of $Runs — $($seconds - $budget)s over, $([int](100 * $seconds / $budget))% of budget"
+                Add-CostFinding "$module.fst took ${seconds}s against its ${budget}s budget on run $run of $Runs — $($seconds - $budget)s over, $([int](100 * $seconds / $budget))% of budget" $run
             }
 
             # The floor fails HERE rather than joining the cost findings at the end, and the asymmetry
@@ -622,6 +805,39 @@ for ($run = 1; $run -le $Runs; $run++) {
             }
 
             break
+        }
+    }
+
+    # ---- 3c. the run's contention factor (Phase 171) ---------------------------------------------
+    #
+    # Here rather than at the head of the run, because the number is read off the run's own
+    # measurements and does not exist until they are all in. That ordering is why a ceiling finding
+    # is printed unlabelled at the moment it fires and labelled here and in the closing verdict: at
+    # the instant a module goes over budget the leg genuinely does not yet know what kind of
+    # afternoon it is having, and printing a label it could not have computed would be a worse lie
+    # than printing the measurement alone.
+    $factor = Get-Median $runRatios.ToArray()
+    $thresholdText = if ($null -eq $contentionThreshold) { '' } else { 'x{0:0.00}' -f $contentionThreshold }
+    if ($null -eq $factor -or $runRatios.Count -lt $contentionMinimumSamples) {
+        Write-Host ("==== proofs: contention — run $run of $Runs, NOT COMPUTED: $($runRatios.Count) untouched module(s) carried a recorded " +
+            "measuredSeconds of ${contentionMinimumSeconds}s or more and the factor needs $contentionMinimumSamples. No cost finding on this run is labelled.") -ForegroundColor Yellow
+    }
+    else {
+        $rendered = 'x{0:0.00}' -f $factor
+        if ($null -eq $contentionThreshold) {
+            Write-Host ("==== proofs: contention — run $run of $Runs, $rendered over $($runRatios.Count) untouched module(s). $budgetName declares no " +
+                "contentionSeeding.threshold, so nothing on this run is labelled — seed one per that block's rule and this leg can tell a contended pass from a regression.") -ForegroundColor Cyan
+        }
+        elseif ($factor -gt $contentionThreshold) {
+            $label = " — CONTENDED PASS ($rendered against a $thresholdText threshold): the modules this tree did not change ran $rendered of their recorded measurements on this run, so this figure measures the afternoon and not the module"
+            $labelled = 0
+            foreach ($f in $costFindings) { if ($f.Run -eq $run) { $f.Label = $label; $labelled++ } }
+            Write-Host ("==== proofs: contention — run $run of $Runs, $rendered over $($runRatios.Count) untouched module(s), ABOVE the $thresholdText threshold: this was a CONTENDED pass. " +
+                "$labelled cost finding(s) on this run carry the label, and a labelled finding is NOT a re-seed obligation.") -ForegroundColor Yellow
+        }
+        else {
+            Write-Host ("==== proofs: contention — run $run of $Runs, $rendered over $($runRatios.Count) untouched module(s), at or under the $thresholdText threshold: " +
+                'an ordinary pass. A cost finding on this run is about its module.') -ForegroundColor Cyan
         }
     }
 }
@@ -768,13 +984,40 @@ if ($abortFindings.Count -gt 0) {
 }
 
 if ($costFindings.Count -gt 0) {
+    $labelledFindings = @($costFindings | Where-Object { $_.Label })
+    $unlabelledFindings = @($costFindings | Where-Object { -not $_.Label })
+
     Write-Host "==== proofs: $($costFindings.Count) cost finding(s) against the budgets in ${budgetName}:" -ForegroundColor Yellow
-    foreach ($f in $costFindings) { Write-Host "     $f" -ForegroundColor Yellow }
+    foreach ($f in $costFindings) { Write-Host "     $($f.Text)$($f.Label)" -ForegroundColor Yellow }
     Write-Host '     A budget is a smoke detector, not a gate: prover time varies by machine and by load,' -ForegroundColor Yellow
     Write-Host '     so one overshoot on a busy machine is noise and a persistent one is a regression.' -ForegroundColor Yellow
     Write-Host '     Bumping a budget is deliberate: new budgetSeconds + measuredSeconds + your phase in' -ForegroundColor Yellow
     Write-Host "     $budgetName, and a note saying what grew. See the README, ""Running it""." -ForegroundColor Yellow
-    if ($Strict) { Fail "the cost budget is exceeded and -Strict is on ($($costFindings.Count) finding(s) above)" }
+
+    # The label's WHOLE consequence, in one place (Phase 171). A labelled finding has been shown,
+    # by the modules this tree did not change, to be a measurement of the machine — so it is not a
+    # re-seed obligation, and re-seeding a budget from it would raise a ceiling to fit a slow
+    # afternoon, which is precisely how a budget stops meaning anything. That is the same judgement
+    # Phase 162 had to make by hand, in prose, after departing from the seeding rule; what is new
+    # is that the leg makes it and says so.
+    if ($labelledFindings.Count -gt 0) {
+        Write-Host "     $($labelledFindings.Count) finding(s) above are labelled CONTENDED PASS: the untouched modules on that run were slow too," -ForegroundColor Yellow
+        Write-Host '     so those findings measure the machine. They are NOT a re-seed obligation — re-seeding from one' -ForegroundColor Yellow
+        Write-Host '     raises a ceiling to fit a slow afternoon. Re-measure on a quiet run before touching a number.' -ForegroundColor Yellow
+    }
+
+    # -Strict promotes the UNLABELLED findings only. A session that asked for a red leg on cost
+    # asked to be stopped by a regression, and a contended pass is not one; reddening on it would
+    # make -Strict a coin toss on a shared machine, which is how a flag gets passed once and never
+    # again. Coverage and shape findings belong to no run, are never labelled, and so always
+    # promote — which is the half of -Strict's power this must not quietly remove.
+    if ($Strict) {
+        if ($unlabelledFindings.Count -gt 0) {
+            Fail "the cost budget is exceeded and -Strict is on ($($unlabelledFindings.Count) unlabelled finding(s) above)"
+        }
+        Write-Host "     -Strict is on and the leg stays GREEN: every finding above is labelled CONTENDED PASS, which is a" -ForegroundColor Yellow
+        Write-Host '     measurement of the machine rather than of a module. Re-run on a quiet machine to promote a real one.' -ForegroundColor Yellow
+    }
 }
 
 Remove-InvocationCache
