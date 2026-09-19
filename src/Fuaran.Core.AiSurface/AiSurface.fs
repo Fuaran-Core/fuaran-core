@@ -1,11 +1,11 @@
 namespace Fuaran.Core
 
 // ============================================================================
-//  Fuaran.Core.AiSurface (Phase 59) — the generic AI-surface contract that
-//  consolidates the drifted per-domain AiTools (Doc, Pres, Calc each grew their
-//  own) into one seam every witness domain adopts. Four parts, parameterised
-//  over a domain witness so the core carries the *shape*, never the content
-//  (GP6):
+//  Fuaran.Core.AiSurface — ONE seam an orchestrator drives a witness domain
+//  through. It is the answer to a single question: what does a model need in
+//  order to read a domain artifact and propose changes to it, stated once
+//  instead of once per domain? Four parts, parameterised over a domain witness
+//  so the core carries the *shape* and never the content (GP6):
 //
 //    1. Read tools        — the introspection projections (outline / index /
 //                           unbound-reference queries) as a witness-supplied set,
@@ -13,24 +13,29 @@ namespace Fuaran.Core
 //    2. Op catalogue      — the domain's mutation-op catalogue as JSON (the
 //                           `Fuaran.Core.Function` `toSchema` discipline), so an
 //                           orchestrator emits ops from a schema without touching
-//                           the wire encoder. Reference: Pres's `catalogueJson`.
+//                           the wire encoder.
 //    3. Pattern bank      — canonical edit-intents → op sequences, with a
 //                           deterministic fast-path resolver so the common edits
-//                           skip the model. Reference: Calc's `Patterns`.
+//                           skip the model.
 //    4. Proposals         — a human-in-loop approval gate re-using the domain's
 //                           policy, with agent-readable rejection guidance that
-//                           enumerates the alternatives. Reference: Calc's
-//                           `Proposals`.
-//    5. Arbitration       — which subset of N op-script proposals can land
-//                           together against one base tree (Phase 85): batch
-//                           `canApply` + a greedy footprint-independence pass
-//                           (Phase 78) — a deterministic, total partition with
-//                           typed, actionable rejections.
+//                           enumerates the alternatives.
+//
+//  Those four are what an AI surface IS, and `AiSurfaceWitness` is frozen over
+//  them (STABILITY's witness-record field freeze).
+//
+//  NOT here, and the omission is the point: deciding which of N op scripts can
+//  land together. That is `Arbitration.arbitrate` in `Fuaran.Core.Ops` — the
+//  other end of `Ops.footprint` / `Ops.independent`, the concurrency half of
+//  the tree algebra, whose callers are schedulers rather than orchestrators. It
+//  sat here until Phase 192 because the proposal type did, not because it
+//  belonged. `Proposals.toOpScript` is the one line between the two: a domain
+//  that arbitrates its pending queue projects through it.
 //
 //  All read-tool logic, pattern *content*, and policy *rules* stay domain-side;
 //  the witness supplies them per call (GP1/GP2 — additive, no base type, no
-//  module-level state). FSharp.Core + Fuaran.Core.Wire + Fuaran.Core.Ops (the
-//  skeleton-op algebra arbitration runs on) only, Fable-clean.
+//  module-level state). FSharp.Core + Fuaran.Core.Wire + Fuaran.Core.Ops (whose
+//  `SkeletonOp` the proposal queue carries) only, Fable-clean.
 // ============================================================================
 
 /// A named read-only projection over the domain artifact — rendered as a
@@ -338,35 +343,18 @@ module Proposals =
     let explainRejection (w: AiSurfaceWitness<'State, 'Op, 'Rej>) (rejection: 'Rej) : string =
         renderGuidance (w.Explain rejection)
 
-// ---- proposal arbitration (Phase 85) ---------------------------------------
+    /// This queue's proposal as the op layer needs it (Phase 192) — the id the
+    /// pinned order sorts by, the party a decision is reported back to, and the
+    /// script. The richer lifecycle fields (`ProposedAt`, `Intent`, `Status`)
+    /// stay here: arbitration decides coexistence and reads none of them. A
+    /// domain that arbitrates its pending queue projects through this and calls
+    /// `Arbitration.arbitrate` over the result.
+    let toOpScript (p: Proposal<SkeletonOp<'Node, 'Id>>) : OpScriptProposal<'Node, 'Id> =
+        { Id = p.Id
+          Holder = p.Author
+          Ops = p.Ops }
 
-/// Why arbitration rejected one proposal — the AI-feedback protocol shape (GP5):
-/// a rejected agent knows exactly what to repair or rebase against.
-type ArbitrationRejection<'Id> =
-    /// The proposal's script does not apply to the base tree: the op-algebra's
-    /// own rejection envelope, plus the index of the failing op in the script.
-    | Inapplicable of opIndex: int * rejection: Rejection<'Id>
-    /// The script applies, but its footprint (Phase 78) interferes with the
-    /// accepted set — the interfering accepted proposals' ids (computed against
-    /// the FULL accepted set, in pinned order): exactly what to rebase against
-    /// once they land. Non-empty by construction.
-    | Conflicts of interfering: int list
-
-/// The result of arbitrating N op-script proposals against one base tree
-/// (Phase 85) — a deterministic, TOTAL partition. `Accepted` is mutually
-/// independent (pairwise `Ops.independent`), listed in the pinned order
-/// (ascending proposal id); by footprint soundness its scripts apply
-/// confluently in ANY order. `MergedScript` is the accepted scripts composed
-/// in the pinned order — one canonical serialisation of the accepted set.
-/// `Rejected` pairs every non-accepted proposal with its typed reason (GP5);
-/// nothing is ever silently dropped.
-type Arbitration<'Node, 'Id> =
-    { Accepted: Proposals.Proposal<SkeletonOp<'Node, 'Id>> list
-      MergedScript: SkeletonOp<'Node, 'Id> list
-      Rejected: (Proposals.Proposal<SkeletonOp<'Node, 'Id>> * ArbitrationRejection<'Id>) list }
-
-/// The surface descriptor + read-tool dispatch — generic over the witness —
-/// and proposal arbitration (Phase 85) over the skeleton-op algebra.
+/// The surface descriptor + read-tool dispatch — generic over the witness.
 module AiSurface =
 
     /// One read tool's catalogue entry.
@@ -411,86 +399,3 @@ module AiSurface =
         | None ->
             let known = w.ReadTools |> List.map (fun t -> t.Name) |> String.concat ", "
             Error("unknown read tool '" + name + "'; available: " + known)
-
-    /// Arbitrate N op-script proposals (Phase 59) against one base tree
-    /// (Phase 85) — decide which subset can land together. A deterministic,
-    /// total partition (GP4: analysis only — the base is never mutated, and no
-    /// input throws):
-    ///
-    ///   1. **Pin the order.** Proposals are processed in ascending `Id`, so
-    ///      the outcome is invariant under permutation of the input list. Ids
-    ///      are queue-assigned and unique (the Phase 59 `Proposals.propose`
-    ///      discipline); `arbitrate` stays total on duplicate-id input (the
-    ///      stable sort breaks the tie by input order), but the permutation-
-    ///      invariance guarantee assumes unique ids.
-    ///   2. **Batch `canApply`.** `Ops.canApplyAll` against the base filters
-    ///      the inapplicable — each rejection carries the op-algebra's own
-    ///      envelope + the failing op index (GP5).
-    ///   3. **Greedy independence.** Each remaining proposal is accepted iff
-    ///      its footprint (Phase 78, `Ops.footprint`) is `Ops.independent` of
-    ///      everything already accepted; otherwise it is rejected with
-    ///      `Conflicts`, citing the interfering accepted ids (recomputed
-    ///      against the FULL accepted set, so the citation is the complete
-    ///      rebase target, not just the first collision).
-    ///
-    /// The accepted set is pairwise independent, so (footprint soundness,
-    /// `Conformance.footprintLaws`) its scripts apply confluently in any
-    /// order; `MergedScript` is one such order (the pinned one).
-    ///
-    /// **Honesty boundary (the Phase 52 discipline):** greedy-in-pinned-order
-    /// yields *a maximal* mutually-independent set — nothing rejected could be
-    /// added without a conflict — not *the maximum* one; a different order
-    /// could accept more. The order is pinned, documented, deterministic. And
-    /// independence is conservative (Phase 78): a "maybe" is a conflict, so
-    /// `Conflicts` means "not PROVABLY coexistent", never "wrong". No ranking
-    /// policy, no quality judgement, no evaluator (GP6): which proposal is
-    /// *better* is the host's business; Core only says which ones *can
-    /// coexist*.
-    let arbitrate
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (baseTree: 'Node)
-        (proposals: Proposals.Proposal<SkeletonOp<'Node, 'Id>> list)
-        : Arbitration<'Node, 'Id> =
-        // the pinned deterministic order — ascending proposal id.
-        let pinned = proposals |> List.sortBy (fun p -> p.Id)
-
-        // greedy pass: accepted accumulates (proposal, footprint) in reverse pinned
-        // order; a conflict at decision time is provisional (re-cited below).
-        let step (accepted, rejected) (p: Proposals.Proposal<SkeletonOp<'Node, 'Id>>) =
-            match Ops.canApplyAll nodew idw p.Ops baseTree with
-            | Error(i, rej) -> accepted, (p, Inapplicable(i, rej)) :: rejected
-            | Ok() ->
-                let fp = Ops.footprint nodew idw p.Ops
-
-                if accepted |> List.forall (fun (_, afp) -> Ops.independent fp afp) then
-                    (p, fp) :: accepted, rejected
-                else
-                    accepted, (p, Conflicts []) :: rejected
-
-        let acceptedRev, rejectedRev = pinned |> List.fold step ([], [])
-        let accepted = List.rev acceptedRev
-
-        // Re-cite every conflict against the FULL accepted set (a later-accepted
-        // proposal may also interfere) — the complete rebase target, pinned order.
-        // Non-empty by construction: the interferer seen at decision time was
-        // accepted before the conflict and stays accepted.
-        let rejected =
-            List.rev rejectedRev
-            |> List.map (fun (p, reason) ->
-                match reason with
-                | Inapplicable _ -> p, reason
-                | Conflicts _ ->
-                    let fp = Ops.footprint nodew idw p.Ops
-
-                    let interfering =
-                        accepted
-                        |> List.choose (fun (a, afp) -> if Ops.independent fp afp then None else Some a.Id)
-
-                    p, Conflicts interfering)
-
-        let acceptedProposals = accepted |> List.map fst
-
-        { Accepted = acceptedProposals
-          MergedScript = acceptedProposals |> List.collect (fun p -> p.Ops)
-          Rejected = rejected }

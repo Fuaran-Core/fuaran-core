@@ -215,9 +215,14 @@ module Propagation =
 
     /// Why incremental evaluation failed — named, enumerated (GP5), never a throw (GP4). A cyclic reference
     /// is **not** a failure — it is data in `EvalOutcome.Cyclic`.
+    ///
+    /// `EvalUndeclaredRead` (Phase 209) is declared LAST because a case's declaration order IS its tag
+    /// number: appending keeps every existing tag where a consumer's serialised or cached form already has
+    /// it. It names the node that read and the first id it read outside `deps[node]`.
     type PropagationError =
         | EvalUnknownChange of ids: string list
         | EvalNodeFailed of node: string * message: string
+        | EvalUndeclaredRead of node: string * read: string
 
     /// The outcome of a (re)evaluation: the acyclic nodes' values, plus the cyclic SCCs that could not be
     /// ordered (the `#CALC!` set — a caller renders them as cycle errors, or re-runs them under an
@@ -229,9 +234,19 @@ module Propagation =
 
     /// Shared walk: evaluate the acyclic nodes in dependency order, threading the results; recompute a node
     /// when `recompute id` (or it is absent from `prior`), otherwise reuse its `prior` value. `evalNode
-    /// resolve id` computes node `id`, reading already-computed upstreams via `resolve` (present for every
-    /// acyclic read in dependency order; `None` for a cyclic/dangling read). Cyclic SCCs are surfaced, never
-    /// evaluated.
+    /// resolve id` computes node `id`, reading already-computed upstreams via `resolve`.
+    ///
+    /// **The resolver answers for `deps[id]` and for nothing else (Phase 209).** A declared read resolves
+    /// exactly as before — a value once computed, `None` for a cyclic, dangling or not-yet-reached read. A
+    /// read OUTSIDE the declaration is not answered and is not `None`-as-data: `None` already means
+    /// "declared, and absent or failed upstream", which a domain propagates as a value of its own (Calc's
+    /// `#CALC!`), so conflating the two would turn a contract violation into a plausible-looking blank. The
+    /// walk records the first such read, discards whatever the evaluator went on to return, and ends the
+    /// evaluation with `EvalUndeclaredRead`. The undeclared read wins over an `Error` the evaluator itself
+    /// returned: a failure computed from a read that answered nothing is downstream of the violation, and
+    /// naming the violation is what a domain can act on.
+    ///
+    /// Cyclic SCCs are surfaced, never evaluated — so a node in a cycle is never a violator here.
     let private walk
         (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
         (recompute: string -> bool)
@@ -248,9 +263,33 @@ module Propagation =
                       Cyclic = topo.Cycles }
             | id :: rest ->
                 if recompute id || not (Map.containsKey id prior) then
-                    match evalNode (fun k -> Map.tryFind k results) id with
-                    | Ok v -> go (Map.add id v results) rest
-                    | Error m -> Error(EvalNodeFailed(id, m))
+                    let declared =
+                        match Map.tryFind id deps with
+                        | Some reads -> reads
+                        | None -> Set.empty
+
+                    // The FIRST id read outside `declared`, if any. A cell rather than an accumulated list:
+                    // one violation is what a domain fixes, and the read that follows it may only exist
+                    // because the first answered nothing.
+                    let undeclared = ref None
+
+                    let resolve k =
+                        if Set.contains k declared then
+                            Map.tryFind k results
+                        else
+                            if Option.isNone undeclared.Value then
+                                undeclared.Value <- Some k
+
+                            None
+
+                    let computed = evalNode resolve id
+
+                    match undeclared.Value with
+                    | Some r -> Error(EvalUndeclaredRead(id, r))
+                    | None ->
+                        match computed with
+                        | Ok v -> go (Map.add id v results) rest
+                        | Error m -> Error(EvalNodeFailed(id, m))
                 else
                     go (Map.add id (Map.find id prior) results) rest
 
@@ -259,6 +298,9 @@ module Propagation =
     /// The reference full evaluator (Phase 69): evaluate every acyclic node once, in dependency order,
     /// threading the results; cyclic SCCs are returned in `EvalOutcome.Cyclic`. The evaluator the
     /// incremental `evalFrom` is certified byte-identical to.
+    ///
+    /// Every node is recomputed, so this is where an evaluator that reads outside its declaration is ALWAYS
+    /// caught: `EvalUndeclaredRead` at the first such node in dependency order (Phase 209).
     let eval
         (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
         (deps: Map<string, Set<string>>)
@@ -272,13 +314,23 @@ module Propagation =
     /// upstream values. A node absent from `prior` (never evaluated) is always recomputed. A `changed` id
     /// not in the dependency map is a named `EvalUnknownChange` (GP5).
     ///
-    /// **The evaluator contract (Phase 186).** That equality is a THEOREM — `evalfrom_agrees` in
-    /// `proofs/Propagation.fst` — and it holds under a contract this function cannot enforce: `evalNode`
-    /// reads other nodes ONLY through the reads `deps` declares for the node it is computing; `changed`
-    /// names every node whose evaluation differs from the one that produced `prior`; and `prior` came from
-    /// `eval` (or an earlier `evalFrom`) over the SAME `deps`. `resolve` answers for every id computed so
-    /// far, not just the declared reads — so an evaluator that reads an undeclared node runs, is never
-    /// marked dirty by that read, and keeps a STALE value here where `eval` computes a fresh one.
+    /// **The evaluator contract (Phase 186, first clause ENFORCED by Phase 209).** That equality is a
+    /// THEOREM — `evalfrom_agrees` in `proofs/Propagation.fst`. Its first premise is now a property of this
+    /// driver rather than a promise the caller makes: `resolve` answers for `deps[id]` and for nothing else,
+    /// and a read outside it ends the evaluation with `EvalUndeclaredRead` naming the node and the read. An
+    /// evaluator that reads an undeclared node no longer silently keeps a stale value here where `eval`
+    /// computes a fresh one — it is refused, as data, wherever it is invoked.
+    ///
+    /// Two premises remain the caller's, and neither can be read off a resolver: `changed` names every node
+    /// whose evaluation differs from the one that produced `prior`, and `prior` came from `eval` (or an
+    /// earlier `evalFrom`) over the SAME `deps`.
+    ///
+    /// **Where the refusal is observable.** `evalFrom` invokes `evalNode` only on the nodes it recomputes —
+    /// the dirty set, plus any node absent from `prior` — so a violating node that is clean AND present in
+    /// `prior` is reused without being re-invoked and its violation is not seen HERE. That is not a hole in
+    /// the enforcement: the second premise above says `prior` came from `eval` over the same `deps`, and
+    /// `eval` recomputes everything, so such a `prior` cannot exist. Prime with `eval`, and the violation is
+    /// found before there is a `prior` to reuse.
     let evalFrom
         (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
         (prior: Map<string, 'v>)

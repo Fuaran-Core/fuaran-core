@@ -288,7 +288,19 @@
          machine: the reference evaluator 3,153 ms -> 27 ms, `Delta.diff` 7,689 ms -> 107 ms, a
          prime+diff+refresh cycle 16,016 ms -> 248 ms. 0.26.0 is TAGGED, so this opens a new draft
          slot rather than riding it. See STABILITY.md "0.26.1 (draft)". -->
-    <Version>0.26.1</Version>
+    <!-- 0.27.0 (2026-09-19): Phase 198 — the Query seam's resolver and dispatch carry the shipped
+         `Deferred` envelope. `Query.invoke` / `QueryRegistry.dispatch` take
+         `resolve: Query -> Deferred<QueryResult>` and return
+         `Result<Deferred<QueryResult>, QueryError>`, so a host can say "not yet" in the substrate's
+         own vocabulary instead of inventing one at the resolver boundary. BREAKING, and the class is
+         a Phase 183 gate output rather than a claim: `retype` on both members (2 of 21 baselines
+         moved). Pre-1.0 breaking is a MINOR bump per the precedent this document's 0.19.0 and
+         0.20.0 entries set, so the 0.26.1 DRAFT — never tagged — is ADVANCED rather than ridden,
+         and Phases 206 and 186 ship in this slot with it. The error axis is not eroded: a
+         resolver's untyped `Failed` is projected into the enumerated `ExecutionFailed`, so
+         `Ok(Failed _)` is unreachable and `queryLaws` certifies it. See STABILITY.md
+         "0.27.0 (draft)". -->
+    <Version>0.27.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

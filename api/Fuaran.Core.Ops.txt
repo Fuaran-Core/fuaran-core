@@ -4,7 +4,11 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Arbitration`2..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!0, !1>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<Fuaran.Core.OpScriptProposal`2<!0, !1>, Fuaran.Core.ArbitrationRejection`1<!1>>>)
 ctor Fuaran.Core.Footprint..ctor(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
+ctor Fuaran.Core.OpScriptProposal`2..ctor(System.Int32, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>)
+field Fuaran.Core.ArbitrationRejection`1+Tags.Conflicts : System.Int32 (literal)
+field Fuaran.Core.ArbitrationRejection`1+Tags.Inapplicable : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.DuplicateIdInTree : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.RootIdMismatch : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.TargetNotAContainer : System.Int32 (literal)
@@ -20,6 +24,7 @@ field Fuaran.Core.SkeletonOp`2+Tags.InsertChild : System.Int32 (literal)
 field Fuaran.Core.SkeletonOp`2+Tags.MoveNode : System.Int32 (literal)
 field Fuaran.Core.SkeletonOp`2+Tags.RemoveNode : System.Int32 (literal)
 field Fuaran.Core.SkeletonOp`2+Tags.ReorderChildren : System.Int32 (literal)
+method Fuaran.Core.ArbitrationModule.arbitrate`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!!0, !!1>>) : Fuaran.Core.Arbitration`2<!!0, !!1>
 method Fuaran.Core.Diff.toOpsContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
 method Fuaran.Core.Diff.toOps`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
 method Fuaran.Core.Ops.applyAllWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.Tuple`3<System.Int32, Fuaran.Core.Rejection`1<!!1>, !!0>>
@@ -34,10 +39,22 @@ method Fuaran.Core.Ops.footprint`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.C
 method Fuaran.Core.Ops.independent(Fuaran.Core.Footprint, Fuaran.Core.Footprint) : System.Boolean
 method Fuaran.Core.Ops.invert`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SkeletonOp`2<!!0, !!1>, Fuaran.Core.Rejection`1<!!1>>
 method Fuaran.Core.Ops.normalize`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>
+record-field Fuaran.Core.Arbitration`2.Accepted #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!0, !1>>
+record-field Fuaran.Core.Arbitration`2.MergedScript #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>
+record-field Fuaran.Core.Arbitration`2.Rejected #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<Fuaran.Core.OpScriptProposal`2<!0, !1>, Fuaran.Core.ArbitrationRejection`1<!1>>>
 record-field Fuaran.Core.Footprint.ContentWrites #2 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 record-field Fuaran.Core.Footprint.Reads #0 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 record-field Fuaran.Core.Footprint.StructureWrites #1 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 record-field Fuaran.Core.Footprint.UnknownParentWrites #3 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
+record-field Fuaran.Core.OpScriptProposal`2.Holder #1 : System.String
+record-field Fuaran.Core.OpScriptProposal`2.Id #0 : System.Int32
+record-field Fuaran.Core.OpScriptProposal`2.Ops #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>
+type Fuaran.Core.ArbitrationModule (module)
+type Fuaran.Core.ArbitrationRejection`1 (union)
+type Fuaran.Core.ArbitrationRejection`1+Conflicts (type)
+type Fuaran.Core.ArbitrationRejection`1+Inapplicable (type)
+type Fuaran.Core.ArbitrationRejection`1+Tags (type)
+type Fuaran.Core.Arbitration`2 (record)
 type Fuaran.Core.Diff (module)
 type Fuaran.Core.Diff+DiffError`1 (union)
 type Fuaran.Core.Diff+DiffError`1+DuplicateIdInTree (type)
@@ -45,6 +62,7 @@ type Fuaran.Core.Diff+DiffError`1+RootIdMismatch (type)
 type Fuaran.Core.Diff+DiffError`1+Tags (type)
 type Fuaran.Core.Diff+DiffError`1+TargetNotAContainer (type)
 type Fuaran.Core.Footprint (record)
+type Fuaran.Core.OpScriptProposal`2 (record)
 type Fuaran.Core.Ops (module)
 type Fuaran.Core.Rejection`1 (union)
 type Fuaran.Core.Rejection`1+DuplicateId (type)
@@ -61,6 +79,8 @@ type Fuaran.Core.SkeletonOp`2+MoveNode (type)
 type Fuaran.Core.SkeletonOp`2+RemoveNode (type)
 type Fuaran.Core.SkeletonOp`2+ReorderChildren (type)
 type Fuaran.Core.SkeletonOp`2+Tags (type)
+union-case Fuaran.Core.ArbitrationRejection`1.NewConflicts #1(Microsoft.FSharp.Collections.FSharpList`1<System.Int32>)
+union-case Fuaran.Core.ArbitrationRejection`1.NewInapplicable #0(System.Int32, Fuaran.Core.Rejection`1<!0>)
 union-case Fuaran.Core.Diff+DiffError`1.NewDuplicateIdInTree #1(!0)
 union-case Fuaran.Core.Diff+DiffError`1.NewRootIdMismatch #0(!0, !0)
 union-case Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer #2(!0, System.String)

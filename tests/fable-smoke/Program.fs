@@ -153,7 +153,8 @@ let private slotAndClockTouch =
 
     sprintf "%s|%s|%s|%s|%s|%s" wire bound unbound pinned unpinned reason
 
-// Query — declaration codec round-trip.
+// Query — declaration codec round-trip, plus the seam's `Deferred` envelope (Phase 198): the
+// resolver answers in `Deferred<QueryResult>` and that envelope has to encode under Fable too.
 let private queryTouch =
     let q: Query =
         { Id = "q"
@@ -166,7 +167,15 @@ let private queryTouch =
           TimeoutMs = Some 5000
           PageSize = None }
 
-    QueryCodec.encode q
+    let pending = QueryCodec.encodeDeferredResult Pending
+
+    let dispatched =
+        match QueryRegistry.dispatch { Queries = Map.ofList [ q.Id, q ] } q.Id [] (fun _ -> Pending) with
+        | Ok Pending -> "pending"
+        | Ok other -> sprintf "%A" other
+        | Error e -> sprintf "%A" e
+
+    sprintf "%s|%s|%s" (QueryCodec.encode q) pending dispatched
 
 // Conformance — a self-contained law (also exercises Wire's canonical float under Fable).
 let private conformanceTouch = Conformance.canonicalFloatLaws 1 3

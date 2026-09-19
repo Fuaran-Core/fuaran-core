@@ -4,10 +4,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Ops</PackageId>
-    <Description>Fuaran.Core.Ops — the skeleton-five structural ops (InsertChild/RemoveNode/MoveNode/ReorderChildren/Batch) and the recoverable error-envelope contract (name the failure, enumerate the valid alternatives) — the AI-feedback protocol. Per-kind property ops stay domain-side. FSharp.Core only.</Description>
+    <Description>Fuaran.Core.Ops — the skeleton-five structural ops (InsertChild/RemoveNode/MoveNode/ReorderChildren/Batch) and the recoverable error-envelope contract (name the failure, enumerate the valid alternatives) — the AI-feedback protocol — plus proposal arbitration (which subset of N op-script proposals can land together against one base tree: batch canApply + greedy footprint independence, a deterministic total partition with typed rejections), the concurrency half of footprint/independent. Per-kind property ops stay domain-side. FSharp.Core only.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Ops.fs" />
+    <Compile Include="Arbitration.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
