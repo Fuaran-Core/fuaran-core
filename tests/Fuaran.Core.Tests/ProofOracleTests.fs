@@ -34,6 +34,11 @@ module ModelCol = ColumnOps
 // production's `Fuaran.Core.Capability` module shares the model's name once `Fuaran.Core` is open.
 module ModelCap = Capability
 
+// Phase 186 — the extracted INCREMENTAL-PROMISE model, bound the same way and for the same
+// reason: production's `Fuaran.Core.Propagation` module shares the model's name once
+// `Fuaran.Core` is open.
+module ModelProp = Propagation
+
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
@@ -6329,6 +6334,370 @@ let private capDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : C
     tally
 
 
+// ------------------------------------------------------------------------------------------
+// Phase 186 — the INCREMENTAL PROMISE. `proofs/Propagation.fst` models
+// `Fuaran.Core.Propagation`'s dirty set (`dependents`, `dirtyFromChangedIds`, `staleSet`) and its
+// driver (`eval`, `evalFrom`) clause for clause, over an abstract node evaluator and with
+// `sort`'s result handed in; `proofs/oracle/Propagation.fs` is that model extracted. This runs
+// it BESIDE production over generated dependency maps — acyclic ones, the generator
+// `Conformance.propagationEvalLaws` and `dirtyPropagationLaws` use, WIDENED with back edges
+// (cycles), dangling reads, multi-id change sets, unknown ids, failing evaluators and priors
+// with a hole in them — and holds production's `sort` to the one fact the agreement theorem
+// assumes of it: `Order` holds no id twice.
+// ------------------------------------------------------------------------------------------
+
+/// The deps bridge: a `Map<string, Set<string>>` as the model reads it (`sets-are-lists`).
+let private depsToModel (deps: Map<string, Set<string>>) : ModelProp.dmap =
+    deps |> Map.toList |> List.map (fun (k, rs) -> k, Set.toList rs)
+
+/// The go-red: a bridge that LOSES a read edge — every node's last read is dropped — so the
+/// model's dependents map, its dirty set and its reuse are all computed over a smaller graph
+/// than production's.
+let private blindDepsBridge (deps: Map<string, Set<string>>) : ModelProp.dmap =
+    deps
+    |> Map.toList
+    |> List.map (fun (k, rs) -> k, (Set.toList rs |> List.truncate (max 0 (Set.count rs - 1))))
+
+let private modelDepsToMap (d: ModelProp.dmap) : Map<string, Set<string>> =
+    d |> List.map (fun (k, vs) -> k, Set.ofList vs) |> Map.ofList
+
+/// The base at which the toy evaluator refuses by name.
+let private failBase = -7
+
+/// The toy pull evaluator of the two law families, with a designated failure. It reads ONLY its
+/// declared reads — the `local` premise of the agreement theorem.
+let private propSpec
+    (baseOf: Map<string, int>)
+    (deps: Map<string, Set<string>>)
+    (resolve: string -> int option)
+    (id: string)
+    : Result<int, string> =
+    let b = Map.find id baseOf
+
+    if b = failBase then
+        Error("refused:" + id)
+    else
+        Ok(
+            b
+            + (Map.find id deps
+               |> Set.fold (fun s r -> s + (resolve r |> Option.defaultValue -1)) 0)
+        )
+
+/// Production's evaluator, recording the ids it is invoked on.
+let private propProdEvaluator
+    (spec: (string -> int option) -> string -> Result<int, string>)
+    (invoked: ResizeArray<string>)
+    =
+    fun (resolve: string -> int option) (id: string) ->
+        invoked.Add id
+        spec resolve id
+
+/// The SAME evaluator as the model reads it: the resolver and the result cross the option and
+/// outcome shims and nothing else changes.
+let private propModelEvaluator
+    (spec: (string -> int option) -> string -> Result<int, string>)
+    : ModelProp.evaluator<int> =
+    fun resolve id ->
+        match spec (fun k -> ofMOpt (resolve k)) id with
+        | Ok v -> ModelProp.Ok v
+        | Error m -> ModelProp.Error m
+
+let private topoToModel (t: Propagation.TopoResult) : ModelProp.topo_result =
+    { ModelProp.topo_result.order = t.Order
+      ModelProp.topo_result.cycles = t.Cycles }
+
+/// Both sides rendered alike: the values as a sorted association list (production's `Map`
+/// order; the model holds them newest-first), the cyclic groups as given, a refusal by class
+/// and payload.
+let private prodOutcomeRender (r: Result<Propagation.EvalOutcome<int>, Propagation.PropagationError>) : string =
+    match r with
+    | Ok o -> sprintf "Ok values=%A cyclic=%A" (Map.toList o.Values) o.Cyclic
+    | Error(Propagation.EvalUnknownChange ids) -> sprintf "EvalUnknownChange %A" ids
+    | Error(Propagation.EvalNodeFailed(n, m)) -> sprintf "EvalNodeFailed %s %s" n m
+
+let private modelOutcomeRender
+    (r: ModelProp.outcome<ModelProp.eval_outcome<int>, ModelProp.propagation_error>)
+    : string =
+    match r with
+    | ModelProp.Ok o -> sprintf "Ok values=%A cyclic=%A" (o.values |> Map.ofList |> Map.toList) o.cyclic
+    | ModelProp.Error(ModelProp.EvalUnknownChange ids) -> sprintf "EvalUnknownChange %A" ids
+    | ModelProp.Error(ModelProp.EvalNodeFailed(n, m)) -> sprintf "EvalNodeFailed %s %s" n m
+
+type private PropTally =
+    { PDiffs: string list
+      Graphs: int
+      CyclicGraphs: int
+      DanglingGraphs: int
+      OrdersDistinct: int
+      DirtyNodes: int
+      CleanNodes: int
+      Reused: int
+      AbsentRecomputed: int
+      Agreed: int
+      NodeFailed: int
+      UnknownRefused: int }
+
+let private propProbe
+    (bridge: Map<string, Set<string>> -> ModelProp.dmap)
+    (i: int)
+    (acc: PropTally)
+    (rng: ConfRng.T)
+    : PropTally * ConfRng.T =
+    let mutable r = rng
+    let mutable diffs = []
+
+    let draw n =
+        let v, r' = ConfRng.intBelow n r
+        r <- r'
+        v
+
+    let nNodes = draw 6 + 2
+    let ids = [ for k in 0 .. nNodes - 1 -> string k ]
+    // one graph in four carries back edges (a cycle), one in four dangling reads
+    let shape = draw 4
+    let cyclicWanted = (shape = 1)
+    let danglingWanted = (shape = 2)
+
+    let deps =
+        [ for k in 0 .. nNodes - 1 ->
+              let lower =
+                  [ for j in 0 .. k - 1 do
+                        if draw 3 = 0 then
+                            yield string j ]
+
+              let back =
+                  if cyclicWanted && k < nNodes - 1 && draw 2 = 0 then
+                      [ string (k + 1 + draw (nNodes - 1 - k)) ]
+                  else
+                      []
+
+              let dangling = if danglingWanted && draw 4 = 0 then [ "zz" ] else []
+              string k, Set.ofList (lower @ back @ dangling) ]
+        |> Map.ofList
+
+    let base0 = [ for id in ids -> id, draw 100 ] |> Map.ofList
+
+    // the change: one to three ids, each given a new base — one time in six the FAILING base
+    let nChanged = draw 3 + 1
+
+    let changedIds = [ for _ in 1..nChanged -> string (draw nNodes) ] |> Set.ofList
+
+    let base1 =
+        (base0, changedIds)
+        ||> Set.fold (fun m c -> Map.add c (if draw 6 = 0 then failBase else Map.find c base0 + 1000) m)
+
+    // one trial in eight also names an id the map does not hold
+    let changed =
+        if draw 8 = 0 then
+            Set.add "no-such-id" changedIds
+        else
+            changedIds
+
+    let mdeps = bridge deps
+    let topo = Propagation.sort deps
+    let mtopo = topoToModel topo
+
+    let where =
+        sprintf "trial %d deps=%A changed=%A" i (Map.toList deps) (Set.toList changed)
+
+    // (0) the bridge the agreement theorem assumes: `sort`'s Order holds no id twice
+    let orderDistinct = (List.distinct topo.Order = topo.Order)
+
+    if not orderDistinct then
+        diffs <- sprintf "%s: sort's Order holds an id TWICE: %A" where topo.Order :: diffs
+
+    // (1) dependents
+    let prodDependents = Propagation.dependents deps
+    let modelDependents = modelDepsToMap (ModelProp.dependents mdeps)
+
+    if prodDependents <> modelDependents then
+        diffs <-
+            sprintf
+                "%s: dependents production=%A model=%A"
+                where
+                (Map.toList prodDependents)
+                (Map.toList modelDependents)
+            :: diffs
+
+    // (2) the dirty set, and its alias
+    let prodDirty = Propagation.dirtyFromChangedIds deps changed
+
+    let modelDirty =
+        Set.ofList (ModelProp.dirty_from_changed_ids mdeps (Set.toList changed))
+
+    if prodDirty <> modelDirty then
+        diffs <-
+            sprintf "%s: dirty production=%A model=%A" where (Set.toList prodDirty) (Set.toList modelDirty)
+            :: diffs
+
+    if
+        Propagation.staleSet deps changed
+        <> Set.ofList (ModelProp.stale_set mdeps (Set.toList changed))
+    then
+        diffs <- sprintf "%s: staleSet disagrees" where :: diffs
+
+    // (3) the reference evaluator, before the change
+    let spec0 = propSpec base0 deps
+    let spec1 = propSpec base1 deps
+    let prodPrior = Propagation.eval (propProdEvaluator spec0 (ResizeArray())) deps
+    let modelPrior = ModelProp.eval (propModelEvaluator spec0) mtopo
+
+    if prodOutcomeRender prodPrior <> modelOutcomeRender modelPrior then
+        diffs <-
+            sprintf
+                "%s: eval production=%s model=%s"
+                where
+                (prodOutcomeRender prodPrior)
+                (modelOutcomeRender modelPrior)
+            :: diffs
+
+    let mutable reused = 0
+    let mutable absentRecomputed = 0
+    let mutable agreed = 0
+    let mutable nodeFailed = 0
+    let mutable unknownRefused = 0
+
+    match prodPrior with
+    | Error _ -> diffs <- sprintf "%s: the prior eval failed, which base0 never asks for" where :: diffs
+    | Ok prior ->
+        // one trial in five hands `evalFrom` a prior with a HOLE in it: an id absent from
+        // `prior` is recomputed whether or not it is dirty.
+        let hole =
+            if draw 5 = 0 && not topo.Order.IsEmpty then
+                Some(List.item (draw topo.Order.Length) topo.Order)
+            else
+                None
+
+        let priorValues =
+            match hole with
+            | Some h -> Map.remove h prior.Values
+            | None -> prior.Values
+
+        // (4) evalFrom: its result AND the ids it evaluates, in order
+        let prodInvoked = ResizeArray()
+
+        let prodIncr =
+            Propagation.evalFrom (propProdEvaluator spec1 prodInvoked) priorValues changed deps
+
+        let modelIncr =
+            ModelProp.eval_from (propModelEvaluator spec1) (Map.toList priorValues) (Set.toList changed) mdeps mtopo
+
+        if prodOutcomeRender prodIncr <> modelOutcomeRender modelIncr then
+            diffs <-
+                sprintf
+                    "%s: evalFrom production=%s model=%s"
+                    where
+                    (prodOutcomeRender prodIncr)
+                    (modelOutcomeRender modelIncr)
+                :: diffs
+
+        let modelInvoked =
+            ModelProp.walk_invoked (propModelEvaluator spec1) (Map.toList priorValues) (Set.toList changed) mdeps mtopo
+
+        if List.ofSeq prodInvoked <> modelInvoked then
+            diffs <-
+                sprintf "%s: evalFrom EVALUATED production=%A model=%A" where (List.ofSeq prodInvoked) modelInvoked
+                :: diffs
+
+        // (5) the full evaluator after the change, and the theorem on the shipped driver:
+        // under its premises (a local evaluator, a complete change set, the prior eval's own
+        // values or fewer, every changed id known) evalFrom IS eval.
+        let prodFull = Propagation.eval (propProdEvaluator spec1 (ResizeArray())) deps
+
+        if
+            prodOutcomeRender prodFull
+            <> modelOutcomeRender (ModelProp.eval (propModelEvaluator spec1) mtopo)
+        then
+            diffs <- sprintf "%s: eval after the change disagrees" where :: diffs
+
+        match prodIncr with
+        | Error(Propagation.EvalUnknownChange _) ->
+            unknownRefused <- unknownRefused + 1
+
+            if prodInvoked.Count <> 0 then
+                diffs <-
+                    sprintf "%s: an unknown change EVALUATED %A" where (List.ofSeq prodInvoked)
+                    :: diffs
+        | _ ->
+            if prodIncr <> prodFull then
+                diffs <-
+                    sprintf
+                        "%s: evalFrom %s IS NOT eval %s on the shipped driver"
+                        where
+                        (prodOutcomeRender prodIncr)
+                        (prodOutcomeRender prodFull)
+                    :: diffs
+            else
+                agreed <- agreed + 1
+
+            match prodIncr with
+            | Error _ -> nodeFailed <- nodeFailed + 1
+            | Ok _ ->
+                let invokedSet = Set.ofSeq prodInvoked
+
+                reused <-
+                    reused
+                    + (topo.Order
+                       |> List.filter (fun n -> not (Set.contains n invokedSet))
+                       |> List.length)
+
+                match hole with
+                | Some h when not (Set.contains h prodDirty) && Set.contains h invokedSet ->
+                    absentRecomputed <- absentRecomputed + 1
+                | _ -> ()
+
+    { PDiffs = acc.PDiffs @ List.rev diffs
+      Graphs = acc.Graphs + 1
+      CyclicGraphs = acc.CyclicGraphs + (if topo.Cycles.IsEmpty then 0 else 1)
+      DanglingGraphs =
+        acc.DanglingGraphs
+        + (if deps |> Map.exists (fun _ rs -> Set.contains "zz" rs) then
+               1
+           else
+               0)
+      OrdersDistinct = acc.OrdersDistinct + (if orderDistinct then 1 else 0)
+      DirtyNodes =
+        acc.DirtyNodes
+        + (ids |> List.filter (fun n -> Set.contains n prodDirty) |> List.length)
+      CleanNodes =
+        acc.CleanNodes
+        + (ids |> List.filter (fun n -> not (Set.contains n prodDirty)) |> List.length)
+      Reused = acc.Reused + reused
+      AbsentRecomputed = acc.AbsentRecomputed + absentRecomputed
+      Agreed = acc.Agreed + agreed
+      NodeFailed = acc.NodeFailed + nodeFailed
+      UnknownRefused = acc.UnknownRefused + unknownRefused },
+    r
+
+let private propDifferential
+    (bridge: Map<string, Set<string>> -> ModelProp.dmap)
+    (seed: int)
+    (trials: int)
+    : PropTally =
+    let mutable rng = ConfRng.ofSeed seed
+
+    let mutable tally =
+        { PDiffs = []
+          Graphs = 0
+          CyclicGraphs = 0
+          DanglingGraphs = 0
+          OrdersDistinct = 0
+          DirtyNodes = 0
+          CleanNodes = 0
+          Reused = 0
+          AbsentRecomputed = 0
+          Agreed = 0
+          NodeFailed = 0
+          UnknownRefused = 0 }
+
+    for i in 1..trials do
+        let t, r' = propProbe bridge i tally rng
+        tally <- t
+        rng <- r'
+
+    tally
+
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -9540,4 +9909,158 @@ let proofOracleTests =
                   (ModelCap.Error(ModelCap.NoSuchCapability("cap-u", [ "cap-t" ])))
                   "the model refuses the unregistered id the same way"
 
-              Expect.equal (ModelCap.ids (ModelCap.enumerate mreg)) [ "cap-t" ] "and enumerates the registered one" ]
+              Expect.equal (ModelCap.ids (ModelCap.enumerate mreg)) [ "cap-t" ] "and enumerates the registered one"
+
+          // ---- Phase 186: the incremental promise (proofs/Propagation.fst) ----
+
+          testCase
+              "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval and evalFrom, over generated dependency maps and change sets"
+          <| fun _ ->
+              let t = propDifferential depsToModel 1861 400
+
+              match t.PDiffs with
+              | d :: _ -> failtestf "the propagation oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Measured at 400 graphs: cyclic 54, dangling 67, dirty 1031, clean 718,
+                  // reused 461, absentRecomputed 27, agreed 354, nodeFailed 84, unknownRefused 46.
+                  Expect.equal t.Graphs 400 "every trial built a graph"
+
+                  Expect.equal
+                      t.OrdersDistinct
+                      t.Graphs
+                      "sort's Order held no id twice on any graph — the one fact the agreement theorem assumes of it"
+
+                  Expect.isGreaterThan t.CyclicGraphs 25 (sprintf "cyclic graphs arose (cyclic=%d)" t.CyclicGraphs)
+
+                  Expect.isGreaterThan
+                      t.DanglingGraphs
+                      30
+                      (sprintf "graphs with a dangling read arose (dangling=%d)" t.DanglingGraphs)
+
+                  Expect.isGreaterThan t.DirtyNodes 500 (sprintf "dirty nodes arose (dirty=%d)" t.DirtyNodes)
+                  Expect.isGreaterThan t.CleanNodes 300 (sprintf "clean nodes arose (clean=%d)" t.CleanNodes)
+
+                  Expect.isGreaterThan
+                      t.Reused
+                      200
+                      (sprintf "evalFrom REUSED prior values, so minimality was exercised (reused=%d)" t.Reused)
+
+                  Expect.isGreaterThan
+                      t.AbsentRecomputed
+                      5
+                      (sprintf "a clean id absent from prior was recomputed (absentRecomputed=%d)" t.AbsentRecomputed)
+
+                  Expect.isGreaterThan
+                      t.Agreed
+                      200
+                      (sprintf "evalFrom was eval on the shipped driver (agreed=%d)" t.Agreed)
+
+                  Expect.isGreaterThan
+                      t.NodeFailed
+                      20
+                      (sprintf "a failing evaluator was reached on both paths (nodeFailed=%d)" t.NodeFailed)
+
+                  Expect.isGreaterThan
+                      t.UnknownRefused
+                      20
+                      (sprintf "an unknown change was refused (unknownRefused=%d)" t.UnknownRefused)
+
+                  Expect.equal (propDifferential depsToModel 1861 400) t "same seed => identical tally"
+
+          testCase
+              "a propagation oracle handed a BLIND deps bridge DISAGREES with Propagation.dirtyFromChangedIds and evalFrom — the measurement can fail"
+          <| fun _ ->
+              // The teeth. A bridge that drops each node's last read hands the model a smaller
+              // graph, so its dependents map, its dirty set and what it re-evaluates all fall
+              // short of production's. If this ever passes, the dependency map has stopped
+              // reaching the comparison and the green run above certifies nothing about it.
+              let t = propDifferential blindDepsBridge 1861 120
+              Expect.isNonEmpty t.PDiffs "a bridge that loses read edges MUST disagree with production"
+
+              Expect.isTrue
+                  (t.PDiffs |> List.exists (fun d -> d.Contains ": dirty production="))
+                  "and the disagreement reaches the DIRTY SET, which is what the lost edge shrinks"
+
+              Expect.isTrue
+                  (t.PDiffs |> List.exists (fun d -> d.Contains ": evalFrom production="))
+                  "and it reaches evalFrom's VALUES: a node the model thinks clean keeps a stale value"
+
+          testCase
+              "evalFrom is eval under the evaluator contract and is NOT without it — `evalfrom_agrees`, `evalfrom_minimal` and `evalfrom_unknown_refused`, on the shipped driver"
+          <| fun _ ->
+              // b DECLARES that it reads a; c reads nothing.
+              let declared = Map.ofList [ "a", Set.empty; "b", Set.singleton "a"; "c", Set.empty ]
+
+              // The same graph with the declaration MISSING: b reads a and does not say so.
+              let undeclared = Map.ofList [ "a", Set.empty; "b", Set.empty; "c", Set.empty ]
+
+              // An evaluator that reads `a` from `b` whatever the map says — local over
+              // `declared`, NOT local over `undeclared`.
+              let spec (aBase: int) (resolve: string -> int option) (id: string) : Result<int, string> =
+                  match id with
+                  | "a" -> Ok aBase
+                  | "b" -> Ok(10 + (resolve "a" |> Option.defaultValue 0))
+                  | _ -> Ok 7
+
+              let run (deps: Map<string, Set<string>>) =
+                  let ran = ResizeArray()
+
+                  let prior =
+                      match Propagation.eval (spec 1) deps with
+                      | Ok o -> o.Values
+                      | Error e -> failtestf "the prior eval failed: %A" e
+
+                  let incr =
+                      Propagation.evalFrom (propProdEvaluator (spec 2) ran) prior (Set.singleton "a") deps
+
+                  incr, Propagation.eval (spec 2) deps, List.ofSeq ran, prior
+
+              // `evalfrom_agrees`: the contract holds, and the incremental result IS the full one
+              let incr, full, ran, prior = run declared
+              Expect.equal incr full "under the contract evalFrom is eval"
+              // `evalfrom_minimal`: exactly the dirty ids ran — c was reused, never evaluated
+              Expect.equal ran [ "a"; "b" ] "and only the dirty ids were evaluated"
+
+              // THE FINDING: the same evaluator over a map that does not declare b's read. The
+              // dirty set is {a}, b keeps its stale value, and evalFrom is NOT eval. Nothing in
+              // production refuses this evaluator — the resolver it is handed resolves any id.
+              let incrU, fullU, ranU, _ = run undeclared
+              Expect.notEqual incrU fullU "an evaluator that reads an UNDECLARED node breaks the promise"
+              Expect.equal ranU [ "a" ] "because the undeclared reader was never re-evaluated"
+
+              // …and the model says the same on both, through the same clauses: the premise is
+              // the theorem's, not the model's.
+              let modelRun (deps: Map<string, Set<string>>) =
+                  let mtopo = topoToModel (Propagation.sort deps)
+
+                  ModelProp.eval_from (propModelEvaluator (spec 2)) (Map.toList prior) [ "a" ] (depsToModel deps) mtopo
+                  |> modelOutcomeRender
+
+              Expect.equal (modelRun declared) (prodOutcomeRender incr) "the model agrees under the contract"
+              Expect.equal (modelRun undeclared) (prodOutcomeRender incrU) "and agrees on the stale value without it"
+
+              // the qualifier in `evalfrom_minimal`: a CLEAN id absent from prior is recomputed
+              let ranHole = ResizeArray()
+
+              Propagation.evalFrom
+                  (propProdEvaluator (spec 2) ranHole)
+                  (Map.remove "c" prior)
+                  (Set.singleton "a")
+                  declared
+              |> ignore
+
+              Expect.equal (List.ofSeq ranHole) [ "a"; "b"; "c" ] "a clean id absent from prior IS evaluated"
+
+              // `evalfrom_unknown_refused`: nothing runs, and the refusal names the unknown id
+              let ranUnknown = ResizeArray()
+
+              Expect.equal
+                  (Propagation.evalFrom
+                      (propProdEvaluator (spec 2) ranUnknown)
+                      prior
+                      (Set.ofList [ "a"; "nope" ])
+                      declared)
+                  (Error(Propagation.EvalUnknownChange [ "nope" ]))
+                  "an unknown change is the typed refusal naming it"
+
+              Expect.isEmpty ranUnknown "and no evaluator ran" ]

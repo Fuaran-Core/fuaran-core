@@ -510,6 +510,8 @@ over-read.
 | `column-cell-carrier-opaque` | `model-bridge` | `permanent` |
 | `column-transform-evaluator-abstract` | `model-bridge` | `unscheduled` |
 | `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
+| `propagation-order-distinct` | `model-bridge` | `unscheduled` |
+| `propagation-evaluator-contract` | `premise` | — |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -3436,7 +3438,202 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
      `functionVerifyLaws` are where a domain's `Bind` is sampled.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
+## Theorem 11 — incremental evaluation agrees with full evaluation (Phase 186)
+
+_(This directory's eleventh, and the second about the compute strand: theorem 9 proved the columnar
+op algebra, this proves the promise every dashboard and every incremental transform rests on.
+`Fuaran.Core.Propagation` derives the dirty set from a change and drives an incremental
+re-evaluation over it, and its doc comment says the result is "byte-identical to a full `eval`".
+Until this phase that sentence was sampled — `Conformance.dirtyPropagationLaws` (Phase 68) and
+`Conformance.propagationEvalLaws` (Phase 69), over acyclic graphs, one changed id and one toy
+evaluator — and proved nowhere.)_
+
+The doc comments of `Propagation.fs` state the contract in three places and the theorems are their
+names:
+
+> **`dirtyFromChangedIds` — "`changed` ∪ every id transitively downstream of it … Minimal by
+> construction — an id not reverse-reachable from any change is never included." `evalFrom` —
+> "recompute only the dirty subgraph … reusing each clean node's prior value. Byte-identical to a
+> full `eval` over the same inputs … A node absent from `prior` (never evaluated) is always
+> recomputed. A `changed` id not in the dependency map is a named `EvalUnknownChange`."**
+
+`Propagation.fst` models the two halves of that clause for clause — `dependents` through the same
+pair list and grouping the F# writes, `dirtyFromChangedIds` with its private frontier loop `grow`,
+`staleSet`, and the driver: `PropagationError`, `EvalOutcome`, the private `walk` and its loop `go`,
+`eval`, and `evalFrom` with its unknown-change guard — over two **parameters**. The node evaluator
+is a function over an abstract value type, exactly as theorem 9 takes the pipeline evaluator: Core
+owns no evaluator, and nothing here says what a domain computes. And the order the driver walks is
+a `topo_result` handed in where production computes `sort deps`: `sort` is Tarjan's algorithm over
+mutable dictionaries and a stack, the model does not restate it, and the ONE fact about its output
+the agreement theorem turns out to need is a hypothesis, a ladder row and a check the differential
+makes on every graph. `dependencyMap`, `cycleThrough`, `touchedBy` and `dirtyFromOp` build a
+dependency map or a change set from a tree and are outside the model; the theorems start from both.
+
+One clause is restructured rather than transcribed, and says so where it stands. Production guards
+`Map.find id prior` with `recompute id || not (Map.containsKey id prior)`; a partial `find` under a
+refinement extracts to an incomplete match, so the model reads the guard AND the lookup as one
+total function, `reuse`, and `reuse_is_guard` proves it is `None` exactly when the guard is true.
+
+### What is proved
+
+Over any dependency map, any change set, any value type and any evaluator:
+
+1. **`dirty_sound`** — every id whose input changed is dirty: for any read path
+   `c <- n1 <- … <- n` out of a changed `c` (each id reading the one before it), `n` is in
+   `dirtyFromChangedIds deps changed`. It is read off `dirty_closed` — the set contains the change
+   and is closed under "reads" — through `dependents_edge`, which says the inversion is EXACT: an
+   id is among `r`'s dependents exactly when it reads `r`.
+2. **`dirty_least`** — the dirty set is the LEAST set that contains the change and is closed under
+   "reads": any such set contains all of it. That is "minimal by construction" as a theorem — and
+   it is the only sense in which a set can be minimal without naming what it is minimal FOR.
+3. **`evalfrom_agrees`** — `evalFrom ev1 prior changed deps` equals `eval ev1 deps`, as a whole
+   `Result`: the same values in the same order, the same cyclic groups, and under a failing
+   evaluator the same `EvalNodeFailed` at the same node. Four premises, each a sentence the
+   production doc comment states in prose: `prior` holds the values `eval ev0` returned over the
+   SAME dependency map, or fewer (`prior_of` — a hole is recomputed, so a prior with holes in it is
+   admitted, as production admits it); the old evaluator reads other nodes only through its
+   DECLARED reads (`local`); `changed` names every id on which `ev1` differs from `ev0`
+   (`agree_off`), and every changed id is known; and the walked order holds no id twice.
+   `evalfrom_agrees_exact` is the reading with no hole.
+4. **`evalfrom_minimal`** — a node outside the dirty set AND present in `prior` is not
+   re-evaluated: `evalFrom` returns the same `Result` under any two evaluators that agree on the
+   dirty ids and on the ids `prior` does not hold, which is what "is not evaluated" means for a
+   pure function without instrumenting one (theorem 10's reading of "runs no handler").
+   `invoked_only_stale` is the instrumented reading: every id `walk_invoked` lists — the ids the
+   walk hands to the evaluator, in order — is on the walked order and is dirty or absent from
+   `prior`.
+5. **`evalfrom_unknown_refused`** — a changed id the map does not hold makes `evalFrom` the typed
+   `EvalUnknownChange` naming exactly the unknown ids (`unknown_exact`), under every evaluator
+   alike, with nothing evaluated.
+
+**`grow` is a total function here, which production's is only by argument.** The F# loop stops
+because the accumulator grows inside a finite universe, and nothing checks that. The model's `grow`
+carries the measure — the ids of the dependents map not yet accumulated, then the frontier, in
+that order — and `grow_measure` discharges it: a round that finds nothing fresh leaves the
+accumulator alone and hands on an empty frontier, and a round that finds something strictly shrinks
+what is left. It is established BEFORE the function it justifies and re-used by every induction
+over the loop.
+
+### The findings: what the theorem needed, and what it did not
+
+**Agreement does NOT need a dependency order.** The proof of `evalfrom_agrees` uses one fact about
+the walked order — no id twice — and nothing else: not that a node's reads come before it, not that
+cycles were removed. A clean node's reads are clean (the dirty set is closed), so whatever the old
+walk resolved for them — a value, or nothing, because the read had not been reached yet — the new
+walk resolves the same. Dependency order is what makes the VALUES mean something; it is not what
+makes the two paths agree. The one fact it does need is load-bearing, measured by deleting it:
+without `distinct` the prover refuses `go_agree` at exactly the step that reads a prior value back
+(an id walked twice has its prior written at the first occurrence, where the full walk writes a
+value computed from fewer resolved reads). That fact is `propagation-order-distinct`, a bridge and
+not a theorem, because `sort` is outside the model.
+
+**The evaluator contract is a premise production states and cannot enforce.** `walk` hands
+`evalNode` a resolver over EVERYTHING computed so far — `fun k -> Map.tryFind k results` — not
+over the node's declared reads. An evaluator that reads a node it did not declare therefore
+type-checks and runs, its node is not downstream of that read in the dirty set, and `evalFrom`
+returns its STALE prior value where `eval` returns a fresh one. The differential's third case
+exhibits it on the shipped driver: three nodes, `b` reading `a` without declaring it, `a` changed,
+and `evalFrom <> eval`. Nothing is wrong with the driver's arithmetic — `local` is simply the
+domain's to keep, and until this phase it was written down nowhere but in the phrase "a clean
+node's inputs are unchanged". It is `propagation-evaluator-contract`, a `premise`, and the two ways
+to narrow it are each their own phase (the phase charter says a gap the theorem finds is one, and
+`Propagation.fs` is not changed here): restrict the resolver `walk` hands out to the node's
+declared reads, which makes `local` hold by construction; or make the law family generic over a
+domain's evaluator, which makes the row dischargeable by a kit run.
+
+**Two statements the phase was filed with were not true as written**, and the true ones are what
+is proved. "A node outside the dirty set is not re-evaluated" is false without "and present in
+`prior`": an id absent from `prior` is always recomputed, which is production's documented
+contract and which the differential reaches on purpose. And the families named as sampling the
+promise were `incrementalLaws` and `dirtyPropagationLaws`; `incrementalLaws` is the COLUMNAR
+`DataFrame.evalFrom`'s family (Phase 34) and says nothing about this module — the tree-level
+driver's is `propagationEvalLaws`.
+
+**The first consumer.** `Fuaran.Core.Propagation` had no consumer outside this repository when the
+phase was filed. The first is filed and not yet started: `fuaran#1760`, a production
+binding-dependency graph over `dependencyMap` and `dirtyFromChangedIds`. It consumes the dirty-set
+half — theorems 1 and 2 here — and an evaluator it supplies to `evalFrom` would owe the contract
+above.
+
+### The differential
+
+`Proofs.Oracle`, three cases. The generator is the one the two law families share — node `k` reads
+a random subset of the nodes below it, a base value per node, `value(n) = base(n) + Σ value(reads)`
+— WIDENED where the families are narrow: one graph in four carries back edges (cycles, so `Cyclic`
+is non-empty and an acyclic node reads a cyclic one through a resolver that answers nothing), one
+in four carries dangling reads, the change set is one to three ids, one trial in eight names an id
+the map does not hold, one changed base in six is the designated FAILING base, and one trial in
+five hands `evalFrom` a `prior` with a hole in it. Per trial the two sides are held together on the
+dependents map, the dirty set and its alias, the whole `Result` of `eval` before and after the
+change, the whole `Result` of `evalFrom`, and the ids `evalFrom` evaluated IN ORDER — production's
+own recorder against the model's `walk_invoked`. Every graph also holds production's `sort` to
+`propagation-order-distinct`, and every trial whose change is known holds the shipped `evalFrom` to
+the shipped `eval`. Measured at seed 1861 over 400 graphs: 54 cyclic, 67 with a dangling read,
+1031 dirty nodes and 718 clean, 461 reuses, 27 clean ids recomputed because `prior` lacked them,
+354 agreements on the shipped driver, 84 evaluator failures reached on both paths, 46 unknown
+changes refused — each with an adequacy guard, and the same seed reproduces the tally.
+
+The go-red hands the model a deps bridge that LOSES a read edge (each node's last read is dropped),
+so its dependents map, its dirty set and its reuse are computed over a smaller graph; it is
+required to lose on the dirty set and on `evalFrom`'s values. During authoring the extracted oracle
+itself was perturbed — `grow` cut to one round, so no transitive closure — and the first case went
+red on trial 2 before the fresh extraction was restored and went green.
+
+### What it cost
+
+Cold runs through the kit on this machine at the leg's rlimit of 40 under `--quake 3`, with no
+other prover running: **4s, 4s, 4s**. Budget **20s** (the minimum — 2 × 4 is under it) and floor
+**0** (`floorSeeding.zeroBelowSeconds`: the fastest genuine cold run is under 5s, so half of it is
+inside process-start noise), seeded per Phase 148/164's rules and recorded in `modules.json`. No
+`--ext context_pruning`: the module opens nothing. No scoped rlimit, no SMT pattern, and no query
+needed a second attempt. Three authoring notes, none about cost. The set helpers (`union`, `diff`,
+`app`, `dedup`) rewrite into one another and their lemmas carry NO pattern, on the lesson recorded
+under *Running it* — each is called by name where it is needed. Every closure the F# writes twice is a NAMED
+function (`always`, `in_set`, `resolve_in`), on theorem 10's. And the quantified premises (`local`,
+`agree_off`, `agree_on_stale`) each have a one-line elimination lemma, so an induction instantiates
+them at the two resolvers it means rather than leaving the choice to the solver. The extraction is
+byte-identical to a fresh one on the first leg run; the oracle compiles against `Prims.fs` and the
+`option` shim with nothing added.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The five theorems above plus the characterisations
+   (`dependents_edge`, `dirty_closed`, `grow_measure`, `reuse_is_guard`, `evalfrom_agrees_exact`,
+   `invoked_only_stale`, `unknown_exact`), over any dependency map, any change set, any value type
+   and any evaluator. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
+   `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it opens nothing and
+   restates `outcome` and its list helpers as `ColumnOps.fst` and `Capability.fst` do.
+2. **Differentially tested.** The extracted model agrees with the dirty set and the driver over the
+   pools above, with the blind bridge required to lose. Agreement is over those pools, never over
+   all inputs.
+3. **Assumed, and stated as such.**
+   - **The order bridge** (`propagation-order-distinct`, a `model-bridge`, unscheduled). `sort` is
+     a parameter; that its `Order` holds no id twice is a hypothesis, sampled on every generated
+     graph and proved nowhere. Closable — a functional model of Tarjan's algorithm with its
+     emitted components proved disjoint — and not taken.
+   - **The evaluator contract** (`propagation-evaluator-contract`, a `premise`). Declared reads
+     only, a complete change set, and a `prior` that is `eval`'s own output over the same map. The
+     domain's, enforced nowhere, and discharged by no run: the shipped law family runs a toy
+     evaluator, never a domain's — the `witness-surface-scope` precedent.
+   - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row: every
+     theorem about a set here is about membership, and the values map is compared as a map.
+   - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
+
 ## Next
+
+**A resolver that resolves only declared reads** — theorem 11's finding, and the one item on this
+list that would turn a `premise` into a property. `Propagation.walk` hands `evalNode` a resolver
+over everything computed so far; restricted to the node's declared reads, an evaluator COULD NOT
+read an undeclared node, `local` would hold by construction, and `propagation-evaluator-contract`
+would shrink to its other two clauses. It changes what a non-conforming evaluator sees (`None`
+where it saw a value), so it is a behaviour change with its own phase, not a repair made here. The
+alternative that leaves the driver alone — a law family generic over a DOMAIN'S evaluator, so the
+row becomes a `domain-obligation` a kit run discharges — is the same size and is not taken either.
+
+**`sort` inside the model** — theorem 11's one bridge (`propagation-order-distinct`). A functional
+model of Tarjan's algorithm with its emitted components proved pairwise disjoint would make "`Order`
+holds no id twice" a theorem; the agreement theorem needs nothing else of `sort`, so that is the
+whole of what closing the bridge has to prove.
 
 **§15.4's optional-field row, raised to the specification's owners** — theorem 8's finding, and the
 one item on this list that is not work for this repository. The row says an added optional field is

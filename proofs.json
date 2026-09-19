@@ -1521,6 +1521,96 @@
       "evidence": {
         "assumption": "the three scalar readers behind Space.validate are host functions the model takes as parameters; a float range's bounds are opaque carriers"
       }
+    },
+    {
+      "id": "propagation-dirty-sound",
+      "level": "proved",
+      "claim": "Every id whose input changed is dirty. For any dependency map and any change set, `dirtyFromChangedIds` holds every changed id and the id at the end of every read path out of one (`c <- n1 <- ... <- n`, each id reading the one before it) — read off `dirty_closed`: the set contains the change and is closed under \"reads\", through the exact inversion `dependents_edge` (an id is among `r`'s dependents exactly when it reads `r`). The frontier loop `grow` is a TOTAL function in the model, which production's is only by an argument in a doc comment: its termination measure — the ids of the dependents map not yet accumulated, then the frontier — is checked by the prover (`grow_measure`).",
+      "phase": "fuaran-core#186",
+      "evidence": {
+        "theorem": "dirty_sound",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-dirty-least",
+      "level": "proved",
+      "claim": "The dirty set is MINIMAL, in the only sense a set can be: it is the LEAST set that contains the change and is closed under \"reads\" — any such set contains all of it. An id that is not reverse-reachable from a change is therefore never dirty, which is the production doc comment's \"minimal by construction\" as a theorem.",
+      "phase": "fuaran-core#186",
+      "evidence": {
+        "theorem": "dirty_least",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-evalfrom-agrees",
+      "level": "proved",
+      "claim": "Incremental evaluation agrees with full evaluation. `evalFrom ev1 prior changed deps` equals `eval ev1 deps` as a whole `Result` — the same values in the same order, the same cyclic groups, and under a failing evaluator the SAME `EvalNodeFailed` at the same node — for any value type, any dependency map and any evaluator, under four premises: `prior` holds the values `eval ev0` returned over the same map, or fewer (`prior_of` — a hole is recomputed, as production says); the OLD evaluator reads other nodes only through its declared reads (`local`); `changed` names every id on which `ev1` differs from `ev0` (`agree_off`) and every changed id is known; and the walked order holds no id twice. NOT among the premises: that the order is a dependency order. Agreement holds over ANY duplicate-free order — a dependency order is what makes the values mean something, not what makes the two paths agree. The premises are `propagation-evaluator-contract` and `propagation-order-distinct` below; `evalfrom_agrees_exact` is the reading with no hole.",
+      "phase": "fuaran-core#186",
+      "evidence": {
+        "theorem": "evalfrom_agrees",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-evalfrom-minimal",
+      "level": "proved",
+      "claim": "A node outside the dirty set AND present in `prior` is not re-evaluated: `evalFrom` returns the same `Result` under any two evaluators that agree on the dirty ids and on the ids `prior` does not hold — which is what \"is not evaluated\" means for a pure function without instrumenting one — and the instrumented reading says the same (`invoked_only_stale`: every id `walk_invoked` lists is on the walked order and is dirty or absent from `prior`). The statement the phase was filed with — \"a node outside the dirty set is not re-evaluated\" — is FALSE without the qualifier, by production's own contract: an id absent from `prior` is always recomputed, dirty or not, and the differential exhibits it.",
+      "phase": "fuaran-core#186",
+      "evidence": {
+        "theorem": "evalfrom_minimal",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-unknown-change-refused",
+      "level": "proved",
+      "claim": "A changed id the dependency map does not hold makes `evalFrom` the typed `EvalUnknownChange`, naming exactly the unknown ids (`unknown_exact`: changed, and absent from the map), under every evaluator alike, with nothing evaluated (`walk_invoked` is empty).",
+      "phase": "fuaran-core#186",
+      "evidence": {
+        "theorem": "evalfrom_unknown_refused",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-differential",
+      "level": "tested",
+      "claim": "The extracted model agrees with the shipped `Propagation.dependents`, `dirtyFromChangedIds`, `staleSet`, `eval` and `evalFrom` over generated dependency maps — the acyclic generator of `Conformance.propagationEvalLaws` and `dirtyPropagationLaws`, WIDENED with back edges (cycles), dangling reads, change sets of one to three ids, an unknown id, a failing evaluator and a `prior` with a hole in it — on the dependents map, the dirty set, the whole `Result` of both evaluators, and, per `evalFrom`, the ids the evaluator was handed IN ORDER (production's own recorder against the model's `walk_invoked`). Every generated graph also holds production's `sort` to the one fact the agreement theorem assumes of it (`Order` holds no id twice), and every trial whose change is known holds the shipped `evalFrom` to the shipped `eval`. The go-red hands the model a deps bridge that loses a read edge and requires it to lose on the dirty set and on `evalFrom`'s values. A third case instantiates the theorems on the shipped driver and exhibits THE FINDING: an evaluator that reads a node it did not declare makes `evalFrom` disagree with `eval`, and nothing in production refuses it. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#186",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval and evalFrom, over generated dependency maps and change sets",
+          "a propagation oracle handed a BLIND deps bridge DISAGREES with Propagation.dirtyFromChangedIds and evalFrom — the measurement can fail",
+          "evalFrom is eval under the evaluator contract and is NOT without it — `evalfrom_agrees`, `evalfrom_minimal` and `evalfrom_unknown_refused`, on the shipped driver"
+        ]
+      }
+    },
+    {
+      "id": "propagation-order-distinct",
+      "level": "assumed",
+      "claim": "THE ORDER BRIDGE. The model takes `sort deps` as a PARAMETER: production's `sort` is Tarjan's algorithm over mutable dictionaries and a stack, the model does not restate it, and the one fact about its output the agreement theorem needs — `Order` holds no id twice — is a hypothesis of `evalfrom_agrees`, not a theorem. It is load-bearing: with an id walked twice the incremental path writes the prior value at the first occurrence where the full path writes a value computed from fewer resolved reads, and a dirty reader between the two occurrences sees the difference. The differential checks the fact on every generated graph, cyclic ones included, so it is sampled and never proved. Nothing else about `sort` is assumed — not that `Order` is a dependency order, not that `Cycles` are the strongly connected groups — because the theorems do not need it. Closable: a functional model of Tarjan's algorithm with its emitted components proved disjoint is a phase nobody has taken.",
+      "phase": "fuaran-core#186",
+      "class": "model-bridge",
+      "closes": "unscheduled",
+      "evidence": {
+        "assumption": "Propagation.sort returns an Order that holds no id twice"
+      }
+    },
+    {
+      "id": "propagation-evaluator-contract",
+      "level": "assumed",
+      "claim": "THE EVALUATOR CONTRACT, which is the domain's and which no run discharges. `evalfrom_agrees` holds of an evaluator that (1) reads other nodes ONLY through the reads its dependency map declares — two resolvers that agree on a node's declared reads give it the same result (`local`); (2) differs from the evaluator that produced `prior` only on the ids the change set names (`agree_off`); and (3) is handed a `prior` that came from `eval` over the SAME dependency map. Production states all three in prose (\"a clean node's inputs are unchanged, so its value equals its prior\") and enforces none: the resolver `walk` hands to `evalNode` resolves EVERY id computed so far, not the node's declared reads, so an evaluator that reads an undeclared node type-checks, runs, and makes `evalFrom` return a stale value where `eval` returns a fresh one — the differential's third case exhibits it on the shipped driver. A `premise` rather than a `domain-obligation`, on the `witness-surface-scope` precedent: the obligation is the domain's, but no law in the shipped kit runs a DOMAIN'S evaluator (`propagationEvalLaws` is self-contained over a toy one), so there is no green run to cite. Two ways to narrow it are each their own phase: restrict the resolver `walk` hands out to the node's declared reads, which makes (1) hold by construction; or make the law family generic over a domain's evaluator, which makes the row dischargeable.",
+      "phase": "fuaran-core#186",
+      "class": "premise",
+      "evidence": {
+        "assumption": "the domain's evaluator reads only its declared reads, changes only where the change set says, and prior is eval's own output over the same dependency map"
+      }
     }
   ]
 }

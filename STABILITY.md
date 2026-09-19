@@ -2303,6 +2303,34 @@ expression nodes it is 99 ms against 224 ms. The refresh's own cost barely moves
 measurement. The seam's proposition is therefore about the SIZE of the row expression, not about
 the size of the table, and `docs/incremental-evaluation.md` now says so with the figures.
 
+### Incremental evaluation agrees with full evaluation, as a theorem (Phase 186) — ADDITIVE, no public surface moves
+
+`Propagation.evalFrom`'s doc comment says its result is "byte-identical to a full `eval`", and until
+this phase that sentence was sampled by two law families and proved nowhere. `proofs/Propagation.fst`
+models the dirty set and the driver clause for clause and proves it: the dirty set is sound and is
+the LEAST set closed under "reads" (`dirty_sound`, `dirty_least`), `evalFrom` equals `eval` as a
+whole `Result` (`evalfrom_agrees`), reuse is minimal (`evalfrom_minimal`), and an unknown change is
+refused with nothing evaluated (`evalfrom_unknown_refused`). `proofs/README.md`, theorem 11.
+
+**This is ADDITIVE and the class is a gate output, not a claim.** What ships is a proof model, its
+extracted oracle, three `Proofs.Oracle` cases, ladder rows and prose; the one source file touched is
+`Propagation.fs`, and only its doc comment. The Phase 183 public-surface family is green with no
+baseline moved, and every conformance family's verdict is unchanged.
+
+**What a consumer should read, because the theorem has premises the driver cannot enforce.**
+`evalFrom` is `eval` for an evaluator that reads other nodes ONLY through the reads its dependency
+map declares, with a change set naming every node whose evaluation changed, and a `prior` that came
+from `eval` over the same map. The resolver `evalNode` is handed answers for every id computed so
+far, so an evaluator that reads an undeclared node runs without complaint and keeps a stale value
+under `evalFrom` — `Proofs.Oracle` exhibits it on the shipped driver. That contract is now stated on
+`evalFrom` itself and recorded as the ladder row `propagation-evaluator-contract`.
+
+**What this did NOT buy, stated because the phase set out to buy it.** `sort` is not modelled: the
+one fact the agreement theorem needs of it — `Order` holds no id twice — is a hypothesis, checked on
+every generated graph and proved nowhere (`propagation-order-distinct`). And no behaviour changed: a
+resolver restricted to declared reads, which would make the evaluator contract hold by construction,
+is its own phase.
+
 ## 0.26.0 — released 2026-09-17 as `v0.26.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.26.0` and the repository holds the `v0.26.0` tag, so

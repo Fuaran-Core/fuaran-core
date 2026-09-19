@@ -271,6 +271,14 @@ module Propagation =
     /// node's inputs are unchanged, so its value equals its prior; a dirty node re-evaluates against the new
     /// upstream values. A node absent from `prior` (never evaluated) is always recomputed. A `changed` id
     /// not in the dependency map is a named `EvalUnknownChange` (GP5).
+    ///
+    /// **The evaluator contract (Phase 186).** That equality is a THEOREM — `evalfrom_agrees` in
+    /// `proofs/Propagation.fst` — and it holds under a contract this function cannot enforce: `evalNode`
+    /// reads other nodes ONLY through the reads `deps` declares for the node it is computing; `changed`
+    /// names every node whose evaluation differs from the one that produced `prior`; and `prior` came from
+    /// `eval` (or an earlier `evalFrom`) over the SAME `deps`. `resolve` answers for every id computed so
+    /// far, not just the declared reads — so an evaluator that reads an undeclared node runs, is never
+    /// marked dirty by that read, and keeps a STALE value here where `eval` computes a fresh one.
     let evalFrom
         (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
         (prior: Map<string, 'v>)

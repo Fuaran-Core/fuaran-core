@@ -102,13 +102,21 @@ $ErrorActionPreference = 'Stop'
 #                default-deny dispatch, validation before invocation, enumeration equal to the
 #                registry and the three function laws proved. Self-contained: it opens nothing,
 #                so its position is free.
+#   Propagation — Phase 186, the INCREMENTAL PROMISE of the compute strand:
+#                `Fuaran.Core.Propagation`'s `dependents`, `dirtyFromChangedIds` (with its
+#                frontier loop, total here by a checked measure), `staleSet`, and the driver —
+#                `walk` / `eval` / `evalFrom` over an abstract node evaluator, clause for clause,
+#                with `sort`'s result a parameter — and the dirty set proved sound and least,
+#                `evalFrom` proved equal to `eval` under the stated evaluator contract, reuse
+#                proved minimal and an unknown change proved refused. Self-contained: it opens
+#                nothing, so its position is free.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
