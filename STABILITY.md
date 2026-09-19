@@ -2253,12 +2253,14 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.27.0 (draft)
+## 0.27.0 — released 2026-09-19 as `v0.27.0`
 
-**This slot is a DRAFT.** `<Version>` reads `0.27.0` and no `v0.27.0` tag exists, so an additive or
-behaviour-identical change may ride it: append its entry here rather than opening another slot. A
-change of a higher class than the entries below carry advances the number, because the number is
-what tells a consumer what adopting it costs.
+**This slot is RELEASED.** `<Version>` reads `0.27.0` and the repository holds the `v0.27.0` tag, so
+this is a released contract rather than a draft and nothing further can ride it: the next
+public-contract change opens a new slot and advances `<Version>` with it — a `0.27.1` draft for an
+additive or behaviour-identical change, `0.28.0` for a breaking one. The entries below are what
+shipped in it, and the paragraph after next is the one to plan an adoption from. Entries written
+while the slot was open refer to it as the `0.27.0` draft; they are left as written.
 
 **This slot was ADVANCED from a `0.26.1` draft, and the two entries below it come forward with it.**
 `0.26.1` was opened by Phase 206 (because `0.26.0` is tagged) and ridden by Phase 186, both
