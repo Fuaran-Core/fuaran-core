@@ -591,22 +591,22 @@ module IncrementalDelta =
 
                   let full =
                       match Incremental.primeOn idw pipeline after with
-                      | Ok s -> s.Footprint
-                      | Error _ -> primed.Footprint
+                      | Ok s -> Incremental.footprint s
+                      | Error _ -> Incremental.footprint primed
 
                   yield
                       { Seed = seed
                         Iteration = i
                         Pipeline = pipeline
                         Strategy = p.Strategy
-                        Prime = primed.Footprint
+                        Prime = Incremental.footprint primed
                         Full = full
                         Refresh =
                           (match refreshed with
-                           | Ok s -> s.Footprint
-                           | Error _ -> primed.Footprint)
+                           | Ok s -> Incremental.footprint s
+                           | Error _ -> Incremental.footprint primed)
                         Equivalent = (refreshed |> Result.map Incremental.result) = reference
-                        PrimeEquivalent = (Ok primed.Output = DataFrame.evalPipeline pipeline before)
+                        PrimeEquivalent = (Ok(Incremental.result primed) = DataFrame.evalPipeline pipeline before)
                         Edit = edit } ]
 
     /// The table width this family's laws need, and the reason the number is what it is.

@@ -245,6 +245,10 @@
     <Compile Include="ScalingTests.fs" />
     <Compile Include="IncrementalTopNTests.fs" />
     <Compile Include="IncrementalGroupByTests.fs" />
+    <!-- Phase 208 — the refresh's cost, COUNTED rather than timed: refresh work grows with the
+         delta and not with the table. Reads no other test module (it builds its own tables), so
+         it is appended at the end of the list (append-only registration). -->
+    <Compile Include="IncrementalRefreshCostTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

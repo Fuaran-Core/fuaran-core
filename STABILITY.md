@@ -2722,6 +2722,86 @@ at a ratio of **49 over a twentyfold span**, against the family's bound of 100 a
 expectation of 20 — the same band as Phase 207's top-N (46) and the plain refresh (28), and four
 times clear of the quadratic (400) the family exists to refuse.
 
+### The restricted refresh pays for the delta (Phase 208) — BREAKING: `IncrementalEval`'s representation becomes private
+
+**What a consumer pays, in one sentence: every read of a field on an `IncrementalEval` becomes a call
+to an accessor, and a state value cannot be constructed or copied with `{ … with … }` any more.** The
+substitutions are mechanical and total:
+
+| was | is |
+|---|---|
+| `state.Output` | `Incremental.result state` |
+| `state.Footprint` | `Incremental.footprint state` |
+| `state.Plan` | `Incremental.plan' state` |
+| `state.Plan.Strategy` | `Incremental.strategy state` |
+| `state.Source` | `Incremental.source state` |
+| `state.Pipeline` | `Incremental.pipelineOf state` |
+| `state.RowCells` / `.RowGroup` / `.GroupMembers` / `.GroupAggs` / `.GroupCells` / `.SortOrders` / `.JoinKeys` / `.Env` / `.Scheme` | no replacement — engine-owned caches, see below |
+
+**There is no wire form and nothing to migrate.** An `IncrementalEval` is in-memory state a consumer
+holds between refreshes; it has never had an encoder, a decoder or a persisted shape. A state value
+carried across a version boundary in the same process does not arise either, because the type's
+identity is the assembly's. What a consumer holding a state from an earlier version has is a value it
+can no longer read the fields of — a compile error at every such read, which is the whole of the
+adoption cost — and the remedy where a state genuinely cannot be re-primed does not exist and does not
+need to: losing a state costs one `prime`, never a wrong answer.
+
+**The nine cache fields have no accessor, deliberately.** They were public because the columnar strand
+keeps its data transparent, and the doc comment always said they were engine-owned — a hand-built
+state whose caches disagree with its source is a lie the evaluator cannot detect. What publishing them
+actually bought was that every change to HOW they are keyed was a breaking change, and three phases in
+a row paid for it: 206, 207 and 202 each measured the refresh losing to the full evaluation for a cheap
+row expression, each diagnosed the same cause — per-source-row string-keyed persistent-map bookkeeping
+— and each left the keying as it found it, because moving it was not theirs to spend. 202 measured
+that even a field's POSITION in the record is published surface. The representation is private now, so
+the next re-keying is a patch. If a consumer turns out to need something a cache field answered, the
+remedy is an accessor for the QUESTION rather than the field, and an entry in this document; the
+adoption measured in this repository found no such reader — every in-repo consumer read `Output` or
+`Footprint` and nothing else.
+
+**What the re-keying bought, measured on one machine at 20,000 rows with one row edited** — same
+estimator as the three entries above, and the "before" column is the code those entries shipped:
+
+| pipeline, one `Ge` comparison per row | refresh before | refresh after | full evaluation | |
+|---|---|---|---|---|
+| `Filter > GroupBy` | 72.3 ms | **13.0 ms** | 26.3 ms | wins by 2.0× |
+| `Filter > Sort > Limit 10` | 102.5 ms | **25.8 ms** | 55.7 ms | wins by 2.2× |
+| `Filter > GroupBy > Filter` | 69.8 ms | **10.4 ms** | 16.7 ms | wins by 1.6× |
+
+The `Scaling` family now ASSERTS the trivial-predicate case on all three pipelines — the case 206, 207
+and 202 each printed and deliberately did not assert — so the claim is a gate rather than a table. The
+profile that preceded the change, and the one that follows it, are both in
+`docs/incremental-evaluation.md`; the short version is that the caches are positional arrays indexed
+by the row's slot now, a group identity is carried rather than re-minted for a row whose cells have not
+moved, and the partition is accumulated in mutable locals that never leave the function.
+
+**A correctness defect was found and fixed in the same change, and it is the more important half.** The
+per-row cache was reused for any row "the delta did not name". That is not the same statement as "this
+row's cells have not moved", and a `Window` is where the two part: a window recomputes its column over
+the whole frame it is handed, so a row the delta never named comes out of it with a different cell
+whenever another row in its partition moved. A step after the window then reused an answer to a question
+that had changed. Measured on the shipped `0.26.0` code, on ten rows with one edited:
+`Filter > Window(cumulSum) > Filter(on the window column)` and the same with a `Derive` both
+**disagreed with the reference evaluator** — the one thing this seam promises never to do. Both are
+admitted pipelines (`RowLocal`), so this was reachable, not hypothetical; the conformance corpus did not
+generate a step reading a window's output column, which is why no law caught it. The cache condition is
+now "this row's cells are byte-identical to the ones the prior evaluation held for it", which a window
+clears for every row, and `IncrementalRefreshCostTests` holds all three shapes as cases. **Consequence
+for a consumer: a pipeline with a `Window` followed by a `Filter`, `Derive` or maintained `GroupBy` will
+report a LARGER footprint after this version than before it** — more rows re-evaluated and more groups
+recomputed — because it was previously reporting a smaller one and a wrong answer. Every other pipeline's
+footprint is unchanged.
+
+**No conformance verdict moves.** `IncrementalDelta.laws` is unchanged in verdict over the whole
+corpus, top-N and group-tail pipelines included, and so are `incrementalLaws`, `footprintLaws` and
+`dirtyPropagationLaws`; no law family's count moves and no law vector file changes content. The whole
+suite is green at 1,325 cases.
+
+**Why this rides `0.27.0` rather than advancing it.** The draft already carries breaking entries —
+Phase 198 retyped a public return, 192 moved a public function between packages, 209 and 207 each added
+a union case — so the number already tells a consumer that adopting this slot costs source changes. A
+removal is the same class of cost and not a higher one.
+
 ## 0.26.0 — released 2026-09-17 as `v0.26.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.26.0` and the repository holds the `v0.26.0` tag, so
