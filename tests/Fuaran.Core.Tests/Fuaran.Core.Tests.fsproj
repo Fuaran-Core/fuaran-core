@@ -243,6 +243,7 @@
          list (append-only registration). -->
     <Compile Include="ScalingTests.fs" />
     <Compile Include="IncrementalTopNTests.fs" />
+    <Compile Include="IncrementalGroupByTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

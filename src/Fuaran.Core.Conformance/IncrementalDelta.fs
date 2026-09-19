@@ -143,9 +143,18 @@ module IncrementalDelta =
         { Schema = [ "k", IntType ]
           Columns = [ Column.create "k" IntType [ Int 0; Int 2 ] ] }
 
-    /// The pipelines. `0`–`5`, `9`–`17` and `19`–`26` are incrementalisable; `6`–`8` and `18` are
-    /// the declined ones, present because a fall-back that returns the wrong answer is the worse
-    /// failure. `11`–`13` are the sort-bearing shapes (Phase 115): a sort last, a sort before the
+    /// The pipelines. The DECLINED ones are `6`, `18`, `31`, `35` and the `_` arm; every other
+    /// index is incrementalisable. They are present because a fall-back that returns the wrong
+    /// answer is the worse failure.
+    ///
+    /// **That enumeration is maintained here and asserted nowhere, so read it as a reading aid and
+    /// not as a fact** — it was already wrong when Phase 202 arrived (Phase 207 admitted `8` and
+    /// added `31` without amending the sentence, which said `6`–`8` and `18`). The load-bearing
+    /// statement is each arm's own comment, which cannot drift from the arm it sits on; `declined`
+    /// is an adequacy class below, so the *existence* of declines is guarded even when this
+    /// sentence is stale.
+    ///
+    /// `11`–`13` are the sort-bearing shapes (Phase 115): a sort last, a sort before the
     /// steps that read the order it produced, and a sort feeding an order-sensitive maintained
     /// group. `14`–`18` are Phase 120: a bounded-frame window, a partition-global one, a filtering
     /// join with a step after it, another feeding a maintained group, and a combining join.
@@ -197,8 +206,12 @@ module IncrementalDelta =
               GroupBy([ "b" ], [ agg "mx" Max "a"; agg "f" First "id"; agg "l" Last "id" ]) ]
         | 5 -> [ Transform.sortBy [ "b", Asc ] ] // merged order over the TIE-HEAVY key (Phase 115)
         | 6 -> [ Project [ "b", "b" ]; Distinct ] // declined: whole-relation
+        // Phase 202 — this was the family's "maintainable step that is not last" DECLINE until the
+        // steps after a group-by were admitted. It is kept and re-read rather than replaced, on the
+        // same argument Phase 207 kept `8`: a bare `Having` is the shape whose restriction is
+        // visible with nothing else in the pipeline to attribute it to. The decline it used to
+        // carry is now `35`'s.
         | 7 ->
-            // declined: a maintainable step that is not last
             [ GroupBy([ "b" ], [ agg "n" Count "a" ])
               Filter(Binary(Gt, Col "n", Lit(Int 0))) ]
         // Phase 207 — this was the family's `limit` DECLINE until a `Limit` was admitted. It is kept
@@ -394,12 +407,82 @@ module IncrementalDelta =
             // left the declined set a pipeline short — and the class matters more than the count,
             // since a fall-back that returns the wrong answer is the worse failure.
             [ Unpivot([ "id" ], [ "a"; "b" ]) ]
+        | 32 ->
+            // Phase 202 — a `Having` over a group table whose groups can EMPTY: the filter on the
+            // prefix side can take a group's last row away, so a group leaves the group table
+            // entirely while a sibling group's aggregate merely moves. A tail that carried its
+            // cached verdicts forward by group would keep emitting the departed one.
+            [ Filter(Binary(Gt, Col "a", Lit(Int -4)))
+              GroupBy([ "b" ], [ agg "n" Count "a"; agg "mn" Min "a" ])
+              Filter(Binary(Gt, Col "n", Lit(Int 1)))
+              Transform.limit 2 0 ]
+        | 33 ->
+            // Phase 202 — a tail that EVALUATES: the only shape in the corpus where the per-group
+            // cell cache is observable at all, since every other tail step here evaluates no
+            // expression and is charged none. A group whose aggregates were reused must not have
+            // this expression re-evaluated, and one whose aggregates moved must.
+            [ GroupBy([ "b" ], [ agg "s" Sum "a"; agg "n" Count "a" ])
+              Derive("mean2", Binary(Mul, Col "s", Lit(Int 2)))
+              Filter(Binary(Ge, Col "mean2", Lit(Int -20))) ]
+        | 34 ->
+            // Phase 202 × Phase 207 — the two admissions composed, with the limit on the GROUP
+            // table rather than on the source rows: a sort of the groups by a maintained aggregate,
+            // then a cut. Which group survives the cut is decided by an aggregate the delta moved
+            // indirectly, so a stale group row changes the window's membership rather than one
+            // cell of it.
+            [ GroupBy([ "b" ], [ agg "s" Sum "a"; agg "f" First "id" ])
+              Transform.sortBy [ "s", Desc ]
+              Transform.limit 2 0 ]
+        | 35 ->
+            // Phase 202 — declined: a SECOND aggregating step. The first group-by is maintained and
+            // its tail walks the group table; grouping THAT table needs a second level of
+            // row-to-group, ordered-membership and aggregate state. It joins the declined set as
+            // `7` leaves it, and for the reason that set exists at all — a fall-back that returns
+            // the wrong answer is the worse failure.
+            [ GroupBy([ "b" ], [ agg "n" Count "a" ])
+              GroupBy([ "n" ], [ agg "m" Count "n" ]) ]
+        // `36` and `37` widen the group-tail class the way `20`–`26` widened the two narrowest
+        // before it, and for the same measured reason rather than for a count: four tail-bearing
+        // pipelines out of thirty-six reached `group-tail-restricted` on 5.80% of 60,000 samples,
+        // under the 7% floor, and the remedy that file's own note forbids is re-seeding. Each of
+        // these carries a SECOND thin class as well, so the draw they take back is one the thin
+        // classes get returned — which is how `group-tail-restricted` rises without
+        // `relation-filtered-restricted` and the partition-global windows paying for it.
+        //
+        // The measurement that forced the second pass, recorded because it is the trade the note on
+        // `20`–`26` predicts rather than a surprise: widening to thirty-eight pipelines cleared the
+        // 7% floor for the new class and cost `top-n-restricted` its reliability — the seed sweep
+        // fired on `bound=12 seed=243`, where a hundred-iteration draw reached it zero times. Four
+        // of the five pipelines this phase adds therefore end in a `limit`, which is a shape the
+        // seam genuinely newly admits (a top-N over the GROUP table) rather than filler: the
+        // carrier count for `top-n-restricted` rises from five to eight while the draw is spread
+        // over more pipelines, and the sweep fires on 0 of 600 again.
+        | 36 ->
+            // A relation verdict feeding a maintained group feeding a tail: the join decides who is
+            // IN each group, so an unchanged relation and an unchanged row can still move a group's
+            // aggregate and therefore the tail's verdict on it.
+            [ Join(Embedded lookup, [ "b", "k" ], Semi)
+              GroupBy([ "b" ], [ agg "n" Count "a"; agg "s" Sum "a" ])
+              Filter(Binary(Gt, Col "s", Lit(Int -20))) ]
+        | 37 ->
+            // A partition-global window feeding a maintained group feeding a tail that reads the
+            // aggregate OF the window's own appended column — three frames deep, which is the
+            // furthest composition the seam admits.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" }
+              GroupBy([ "b" ], [ agg "mx" Max "run"; agg "n" Count "a" ])
+              Derive("mxn", Binary(Add, Col "mx", Col "n"))
+              Transform.limit 3 0 ]
         | _ ->
             // Phase 120 — declined by KIND: a combining join fans a left row out across its matches
             // and appends the right schema, so one source row is no longer one output row.
             [ Join(Embedded lookup, [ "b", "k" ], Inner) ]
 
-    let private pipelineCount = 32
+    let private pipelineCount = 38
 
     /// Apply one edit to the base rows, returning the new table and a tag naming the edit.
     let private editOf (k: int) (rows: (string * Cell * Cell) list) (n: int) : Table * string =
@@ -550,7 +633,8 @@ module IncrementalDelta =
                 "window-restricted"
                 "partition-global-window-restricted"
                 "relation-filtered-restricted"
-                "top-n-restricted" ],
+                "top-n-restricted"
+                "group-tail-restricted" ],
               fun s ->
                   let restricted =
                       match s.Refresh.Recompute with
@@ -600,6 +684,22 @@ module IncrementalDelta =
                           | TruncateOrder _ -> true
                           | _ -> false)
 
+                  // Phase 202 — the demand that would go vacuous if the admission were reverted.
+                  // "A group was maintained" is `group-restricted` and was already reached at
+                  // `0.26.1` by a group-by that ENDED its pipeline; what this widening claims is
+                  // that the steps AFTER one are maintained too. So the class insists on a
+                  // maintained group with at least one step following it — which is precisely the
+                  // shape `plan` declined until this phase, and which nothing else in the corpus
+                  // can satisfy by accident.
+                  let carriesGroupTail =
+                      let rec afterGroup =
+                          function
+                          | [] -> false
+                          | MaintainGroups _ :: rest -> not (List.isEmpty rest)
+                          | _ :: rest -> afterGroup rest
+
+                      afterGroup steps
+
                   [ match s.Strategy with
                     | ReferenceOnly _ -> "declined"
                     | _ -> ()
@@ -616,7 +716,9 @@ module IncrementalDelta =
                     if filtersByRelation && restricted then
                         "relation-filtered-restricted"
                     if truncatesOrder && restricted then
-                        "top-n-restricted" ]
+                        "top-n-restricted"
+                    if carriesGroupTail && restricted then
+                        "group-tail-restricted" ]
           )
           Spans("source rows", rowsTheLawsNeed, fun s -> s.Prime.SourceRows) ]
 
