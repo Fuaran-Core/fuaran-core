@@ -236,6 +236,12 @@
          derivation of "what ships" and Snapshots.fs for the repository root, so it follows
          both; appended at the end of the list (append-only registration). -->
     <Compile Include="PublicSurfaceTests.fs" />
+    <!-- Phase 206 — the wall-clock scaling gate: a RATIO between two row counts for the reference
+         evaluator, `Delta.diff` and the incremental refresh, plus the inequality the incremental
+         seam exists to make (a restricted refresh beats the full evaluation on the clock). Reads
+         no other test module — it builds its own tables — so it is appended at the end of the
+         list (append-only registration). -->
+    <Compile Include="ScalingTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

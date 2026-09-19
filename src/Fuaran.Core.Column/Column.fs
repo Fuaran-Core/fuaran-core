@@ -175,11 +175,20 @@ module Column =
     let length (c: Column) : int = List.length c.Cells
 
     /// The cell at row `i` (`Null` for an out-of-range index — total).
+    ///
+    /// O(i) in the row index, because `Cells` is a linked list and this walks it. That is a property
+    /// of the representation, not of this function: the only way to make a single indexed read O(1)
+    /// is to change what `Cells` is, which would break every consumer's construction sites for a
+    /// cost nobody pays once the CALLERS stop indexing (Phase 206). A loop that wants every row
+    /// reads the column list once, in order, and does not come through here at all.
+    ///
+    /// What did change is the constant: the bounds test was a second full `List.length` walk of the
+    /// same list before the `List.item` walk, so every read cost one-and-a-half traversals where
+    /// `List.tryItem` — total for a negative index as well as a too-large one — costs at most one.
     let cell (i: int) (c: Column) : Cell =
-        if i >= 0 && i < List.length c.Cells then
-            List.item i c.Cells
-        else
-            Null
+        match List.tryItem i c.Cells with
+        | Some v -> v
+        | None -> Null
 
     /// Build a typed column from a name + cell list (no validation — the codec validates the wire).
     let create (name: string) (ty: ColumnType) (cells: Cell list) : Column =

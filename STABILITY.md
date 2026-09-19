@@ -2240,6 +2240,69 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.26.1 (draft)
+
+**This slot is a DRAFT.** `<Version>` reads `0.26.1` and no `v0.26.1` tag exists, so an additive or
+behaviour-identical change may ride it: append its entry here rather than opening another slot. A
+change of a higher class than the entries below carry advances the number, because the number is
+what tells a consumer what adopting it costs. The slot was opened rather than ridden because
+`0.26.0` is tagged and released.
+
+### Linear-time row access (Phase 206) — BEHAVIOUR-IDENTICAL, no public surface moves
+
+The columnar evaluator was **quadratic in the row count**, and the delta and the incremental seam
+inherited it. Every consumer that wanted a table's rows asked for them one index at a time through
+`Column.cell i c`, which is `List.item` over a linked list: each cell read walked its column from
+the head, so reading an n-row table cost O(n² × columns). Four grouping folds compounded it by
+appending to an accumulator per row (`rows @ [ row ]`), which is quadratic in the group size and —
+where the grouping key has high cardinality — quadratic in the row count again.
+
+Everything is now a single pass. The frame is a transpose, the delta's row tokens are computed once
+per table, the reference identity witnesses build a row-indexable view on their first application,
+and the folds prepend and turn once at the end.
+
+**This is a PATCH and the class is a gate output, not a claim.** `Column.Cells` is still a
+`Cell list` — deliberately, because making it an array would break every consumer's construction
+sites and is not needed to remove the quadratic — no public signature moves, and the Phase 183
+public-surface family renders each package afresh and reports no difference against the committed
+`api/` baselines. Results are byte-identical: the transform-parity family, the incremental
+equivalence family (`IncrementalDelta.laws`), `incrementalLaws`, `footprintLaws` and
+`dirtyPropagationLaws` are all unchanged in verdict, which is the point — this is an access-pattern
+change and not a semantic one. The only file under `conformance/` that moved is
+`laws/transform-laws.json`, and only because it stamps the kit version.
+
+Measured on one machine, 1,000 → 20,000 rows, a `Filter > GroupBy` pipeline with one row of the
+source edited. Median of three timings on both sides:
+
+| at 20,000 rows | before | after | |
+|---|---|---|---|
+| reference evaluation | 3,153.39 ms | **27.49 ms** | 115× |
+| `Delta.diff` | 7,689.30 ms | **107.20 ms** | 72× |
+| prime + diff + refresh | 16,015.97 ms | **246.03 ms** | 65× |
+
+The scaling ratios over 1,000 → 20,000 rows went 163.67 → 20.26, 412.85 → 26.91 and 440.48 → 38.43
+respectively: four hundred is the quadratic signature, twenty the linear one.
+
+A new `Scaling` family holds that SHAPE rather than the times: twenty times the rows may cost at
+most five times the linear expectation. A ratio between two sizes in one process, never an absolute
+threshold — Core owns no clock (GP6), and an absolute bound is a test that eventually fails on a
+slow runner for a reason nobody can act on. The bound is five rather than two because none of the
+three paths is exactly linear even now: they key rows through persistent maps over string and
+string-list keys, so they are n log n, and the family's own best-of-five estimator reports them at
+34, 52 and 44.
+
+**What the fix did NOT buy, stated because the phase set out to buy it.** With the quadratic gone,
+a restricted refresh is still **slower** than the full evaluation it replaces when the row
+expression is trivial: 88 ms against 20 ms at 20,000 rows for a single `Ge` comparison. The seam's
+per-row bookkeeping — an identity token, its uniqueness check, two lookups into the prior row-cell
+map, a group-membership entry, all string-keyed persistent-map operations — does not shrink when
+the expression does, and it now outweighs the one row expression the refresh avoids evaluating
+twenty thousand times. Put real work in the expression and the seam wins as designed: at 129
+expression nodes it is 99 ms against 224 ms. The refresh's own cost barely moves between the two
+(88 → 99 ms) while the full evaluation's goes up eleven-fold, which is the model stated as a
+measurement. The seam's proposition is therefore about the SIZE of the row expression, not about
+the size of the table, and `docs/incremental-evaluation.md` now says so with the figures.
+
 ## 0.26.0 — released 2026-09-17 as `v0.26.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.26.0` and the repository holds the `v0.26.0` tag, so

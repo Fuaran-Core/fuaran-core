@@ -275,7 +275,20 @@
          `FS0039` for a caller, of which this repository has none. MINOR rather than major under
          the pre-1.0 policy at the head of STABILITY.md. See DECISIONS.md D29 and STABILITY.md
          "0.23.0 — DRAFT". -->
-    <Version>0.26.0</Version>
+    <!-- 0.26.1 (2026-09-19): Phase 206 — linear-time row access in the columnar evaluator, the
+         delta and the incremental seam. `DataFrame.toFrame` / `ofFrame`, `Delta.diff`'s row
+         tokens, the reference identity witnesses and the seam's own transposes read a table's
+         cells by INDEX, one `Column.cell i c` per row per column over a linked list, so every
+         pipeline was quadratic in the row count; four grouping folds appended to an accumulator
+         per row, which was quadratic in the group size on top of it. All of it is now one pass.
+         PATCH, not minor: no public signature moves (the Phase 183 classifier reports no change
+         against the committed `api/` baselines), `Column.Cells` is still a `Cell list`, and every
+         result is byte-identical — the conformance families, the incremental equivalence family
+         and the law vectors are unchanged in verdict. Measured 1,000 -> 20,000 rows on one
+         machine: the reference evaluator 3,153 ms -> 27 ms, `Delta.diff` 7,689 ms -> 107 ms, a
+         prime+diff+refresh cycle 16,016 ms -> 248 ms. 0.26.0 is TAGGED, so this opens a new draft
+         slot rather than riding it. See STABILITY.md "0.26.1 (draft)". -->
+    <Version>0.26.1</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
