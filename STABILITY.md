@@ -1398,8 +1398,8 @@ idempotency-before-CAS ordering — seed-replayable.
 
 ## Proposal arbitration (Phase 85)
 
-`AiSurface.arbitrate : NodeWitness -> IdWitness -> 'Node -> Proposal list -> Arbitration` decides
-which subset of N op-script proposals (Phase 59) can land together against one base tree: batch
+`Arbitration.arbitrate : NodeWitness -> IdWitness -> 'Node -> OpScriptProposal list -> Arbitration`
+decides which subset of N op-script proposals can land together against one base tree: batch
 `Ops.canApplyAll` against the base filters the inapplicable (each rejection carries the op-algebra's
 own envelope + the failing op index), then a greedy pass in the **pinned order** (ascending proposal
 id) accepts each proposal whose footprint (Phase 78) is `Ops.independent` of everything already
@@ -1408,8 +1408,16 @@ mutated): the accepted set is mutually independent — by footprint soundness it
 confluently in any order (`MergedScript` is the pinned-order composition) — and every rejection is
 typed + actionable (GP5): `Inapplicable (opIndex, rejection)`, or `Conflicts interfering` naming the
 accepted ids (computed against the **full** accepted set) the agent must rebase against. Proposal ids
-are queue-assigned and unique (Phase 59); `arbitrate` is total on duplicate-id input, but the
-permutation-invariance guarantee assumes unique ids (only then is the pinned order a total order).
+are expected unique — a queue assigns them, and `AiSurface.Proposals` (Phase 59) is one such assigner,
+projecting to `OpScriptProposal` with `Proposals.toOpScript`; `arbitrate` is total on duplicate-id
+input, but the permutation-invariance guarantee assumes unique ids (only then is the pinned order a
+total order).
+
+**It lives in `Fuaran.Core.Ops` since Phase 192** (`AiSurface.arbitrate` until then), beside
+`Ops.footprint` and `Ops.independent` — the two it is the other end of. `OpScriptProposal<'Node,'Id>`
+is the minimal record the partition needs: `Id` (what the pinned order sorts by), `Holder` (whom a
+rejection is reported to) and `Ops`. The lifecycle fields a queue carries — author, timestamp,
+intent, approval status — stay in `AiSurface.Proposals`, because arbitration reads none of them.
 
 **Coexistence, not quality (GP6).** Arbitration says which proposals *can coexist*, never which is
 *better*: no ranking policy, no quality judgement, no evaluator lives in Core. A host that wants
@@ -2400,6 +2408,68 @@ model would move in the same change-set; that is its own phase. It also did not 
 `Pending`: that is a union-widening on a type this repository's codec, `deferredLaws` and every
 adopting host already read, and a pending fetch is correlated by `invocationKey`, which is a function
 of the declaration and the validated arguments alone.
+
+### Arbitration leaves `AiSurface` for the op layer (Phase 192) — BREAKING: a public function and its types change package
+
+`arbitrate` — which subset of N op-script proposals can land together against one base tree — is now
+`Arbitration.arbitrate` in **`Fuaran.Core.Ops`**. It was `AiSurface.arbitrate` in
+`Fuaran.Core.AiSurface`. `ArbitrationRejection<'Id>` and `Arbitration<'Node,'Id>` move with it, and
+the proposal the partition takes is a new minimal record, `OpScriptProposal<'Node,'Id>` =
+`{ Id: int; Holder: string; Ops: SkeletonOp list }`.
+
+**Why it moved.** `Fuaran.Core.AiSurface` is the seam a model is driven through: read tools, the op
+catalogue, the pattern bank, the proposal gate. Arbitration is not one of those — it is the other end
+of `Ops.footprint` and `Ops.independent`, the concurrency half of the tree algebra, and its callers
+are schedulers deciding what may land together rather than orchestrators driving a model. It was
+declared in `AiSurface` because the proposal type was, which is a reason about where a record sat and
+not about what the function is. A reader looking for concurrency semantics now finds them in `Ops`.
+
+**What adopting it costs, exactly.** Callers of `AiSurface.arbitrate` move to
+`Arbitration.arbitrate` over an `OpScriptProposal` list. Under `open Fuaran.Core` — which every
+consumer already has, since both packages declare into that one namespace — the two type names
+resolve unchanged, so a caller that only pattern-matches `Inapplicable` / `Conflicts` or reads
+`Accepted` / `MergedScript` / `Rejected` needs no edit there. Two changes are real: the module
+qualifier on the call, and the proposal value. A caller holding an `AiSurface.Proposals` queue gets
+the second for free — `Proposals.toOpScript` is the projection, one call per proposal — and a caller
+that was constructing the Phase-59 record only to satisfy `arbitrate` now constructs three fields
+instead of six. The `Fuaran.Core.Ops` package reference is new only for a consumer that had
+`AiSurface` without it, which is none: `AiSurface` has always depended on `Ops`.
+
+There are **two** consumers of `arbitrate` outside this repository — both coordination-layer
+components — and each repins for this release. A caller with no arbitration call site is
+unaffected: nothing else in either package moved.
+
+**Why it rides this draft rather than advancing `<Version>`.** The draft already carries a BREAKING
+entry (Phase 198's retyped `Query` return). The Phase 183 classifier reports this change as
+
+```
+Fuaran.Core.AiSurface — removal (15 move(s))
+Fuaran.Core.Ops — additive (20 move(s))
+```
+
+and `removal` is not a HIGHER class than `retype`: the classifier's own ranking exists to say which
+word tells a reader most about what the author did, not to rank severity — the five non-additive
+classes all stop a pinned consumer compiling. So the number already says "breaking", which is the
+true thing to tell a consumer about adopting it, and `0.27.0` admits this entry. Pre-1.0 breaking is
+a MINOR bump, per the `0.19.0` / `0.20.0` precedent above.
+
+**The partition is unchanged, and that was measured rather than asserted.** The body moved verbatim.
+Before the old function was deleted, both implementations ran over the same 300 generated proposal
+sets from the law kit's own generators — `arbitrationLaws`' seed, generator and corruption rate —
+comparing the accepted ids with their holders, the merged script and every rejection reason: 300 sets,
+339 accepted and 729 rejected proposals, **zero disagreements**. The comparison was shown able to go
+red before the green was believed: the same differential against an inverted pinned order disagreed
+on 282 of the 300 sets.
+
+**`Conformance.arbitrationLaws` did not move** — same name, same signature, same six laws, same
+verdicts. Its baseline line in `api/Fuaran.Core.Conformance.txt` is byte-identical: the family builds
+its proposals inside its own body, so only that body was re-pointed. A domain certifying arbitration
+re-pins and runs exactly what it ran before, with no source change.
+
+**What did NOT change:** `AiSurface` keeps its name, the `*.AiTools` vocabulary it is named for, and
+the frozen `AiSurfaceWitness`; `Proposals` keeps its queue, its approval flow and its guidance
+rendering; nothing about what `arbitrate` decides, in what order, or with what honesty boundary
+moved. This is a change of address.
 
 ### An evaluator reads only what it declared (Phase 209) — BREAKING: a union case is added, and the driver refuses a non-conforming evaluator
 

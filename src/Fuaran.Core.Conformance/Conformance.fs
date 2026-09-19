@@ -6879,12 +6879,14 @@ module Conformance =
         concurrencyLawsWith (Ops.footprint nodew idw) nodew idw gen encode seed iterations
 
     // ---- proposal arbitration (Phase 85) ----
-    // The teeth on `AiSurface.arbitrate`: a deterministic, total partition of N op-script
+    // The teeth on `Arbitration.arbitrate`: a deterministic, total partition of N op-script
     // proposals against one base tree — permutation-invariant, a pairwise-independent accepted
     // set, every rejection typed + actionable (GP5), and the accepted scripts confluent in
     // any order.
 
-    /// The proposal-arbitration laws (Phase 85) — over `AiSurface.arbitrate`. Certifies:
+    /// The proposal-arbitration laws (Phase 85) — over `Arbitration.arbitrate` (which lived at
+    /// `AiSurface.arbitrate` until Phase 192; this family's name and signature did not move).
+    /// Certifies:
     /// **determinism + permutation invariance** (arbitrating the same proposals shuffled yields
     /// the identical `Arbitration` — the pinned ascending-id order decides, never input order);
     /// **total partition** (every input proposal lands in exactly one of accepted / rejected —
@@ -6940,13 +6942,10 @@ module Conformance =
 
             accepted, r
 
-        let mkProposal id ops : Proposals.Proposal<SkeletonOp<'Node, 'Id>> =
+        let mkProposal id ops : OpScriptProposal<'Node, 'Id> =
             { Id = id
-              Author = sprintf "agent-%d" id
-              ProposedAt = "t0"
-              Intent = None
-              Ops = ops
-              Status = Proposals.Pending }
+              Holder = sprintf "agent-%d" id
+              Ops = ops }
 
         for i in 0 .. iterations - 1 do
             let tree, r1 = gen.Tree rng
@@ -6977,15 +6976,15 @@ module Conformance =
 
                 proposals <- proposals @ [ mkProposal k ops ]
 
-            let result = AiSurface.arbitrate nodew idw tree proposals
+            let result = Arbitration.arbitrate nodew idw tree proposals
 
             // determinism + permutation invariance: shuffled input ⇒ identical Arbitration.
             let shuffled, rS = ConfRng.shuffle proposals rng
             rng <- rS
 
             if
-                (AiSurface.arbitrate nodew idw tree shuffled <> result
-                 || AiSurface.arbitrate nodew idw tree proposals <> result)
+                (Arbitration.arbitrate nodew idw tree shuffled <> result
+                 || Arbitration.arbitrate nodew idw tree proposals <> result)
                 && permutation.IsNone
             then
                 permutation <-
