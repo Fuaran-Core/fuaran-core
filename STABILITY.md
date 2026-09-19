@@ -221,7 +221,12 @@ structural `SkeletonOp` (Phase 68) drives a dirty-subgraph recompute in dependen
 nodes, `Conformance.propagationEvalLaws`, Phase 69). `Propagation.eval` is the reference full evaluator
 the tree-level `evalFrom` is certified against — Core walks the acyclic nodes in dependency order and
 returns cyclic SCCs as data (`EvalOutcome.Cyclic`, the `#CALC!` posture; the iterative upgrade is the
-`office`/Calc convergence work), the host supplies the injected `evalNode` (GP6 — no evaluator in Core). The first two are keyed on the same content-addressing discipline (the Phase-49 `applyMemo` /
+`office`/Calc convergence work), the host supplies the injected `evalNode` (GP6 — no evaluator in Core).
+**On the tree-level path the declared reads are ENFORCED, not assumed (Phase 209):** the resolver
+`evalNode` is handed answers for `deps[id]` and for nothing else, and a read outside that set is the
+typed `EvalUndeclaredRead` naming the node and the read — so the byte-identity above is a property of
+the driver rather than a clause the host has to keep. A host re-implementing this path implements the
+restriction too. The first two are keyed on the same content-addressing discipline (the Phase-49 `applyMemo` /
 Phase-27 capture keys). `CapabilityPipeline.eval` is the reference evaluator the capability path is
 certified against — Core supplies the DAG plumbing (topological walk + `FromNode` edge resolution), the
 host supplies the node `body`. A dirty non-deterministic node re-invokes (or replays from its Phase-27
@@ -2486,6 +2491,83 @@ declares its own `footprint`, with `independent` re-implemented clause-for-claus
 fields are pinned WITH THEIR ORDINALS in `api/Fuaran.Core.Ops.txt`, so a field added anywhere but
 last moves the baseline. Declining it leaves every projection over this record (`'Op -> Footprint`,
 the shape a scheduling or fold consumer supplies) valid exactly as written.
+### An evaluator reads only what it declared (Phase 209) — BREAKING: a union case is added, and the driver refuses a non-conforming evaluator
+
+**The class.** `union-widening`, on `Fuaran.Core.Propagation`, and it is a Phase 183 gate output
+rather than a claim. The family reported it verbatim as `Fuaran.Core.Propagation — union-widening
+(3 move(s))`:
+
+```
+additive           + field Fuaran.Core.Propagation+PropagationError+Tags.EvalUndeclaredRead : System.Int32 (literal)
+additive           + type Fuaran.Core.Propagation+PropagationError+EvalUndeclaredRead (type)
+union-widening     + union-case Fuaran.Core.Propagation+PropagationError.NewEvalUndeclaredRead #2(System.String, System.String)
+```
+
+No signature moves. `eval`, `evalFrom`, `dependencyMap`, `sort`, `dirtyFromChangedIds`, `staleSet`,
+`touchedBy`, `dirtyFromOp`, `cycleThrough`, `dependents`, `TopoResult` and `EvalOutcome` keep every
+parameter, field and position; `PropagationError` keeps both of its existing cases at their existing
+tags, and the new case is declared LAST because a case's declaration order IS its tag number — the
+finding Phases 207 and 202 each recorded. It rides the `0.27.0` draft rather than advancing it: the
+slot already carries a breaking `retype` from Phase 198, and this is not a higher class than that.
+
+**And the BEHAVIOUR changes, which is the part a consumer must read rather than the surface.** The
+resolver `walk` hands `evalNode` used to answer for EVERY id computed so far. It now answers for
+`deps[id]` and for nothing else, and a read outside that set ends the evaluation with
+`EvalUndeclaredRead(node, read)`.
+
+So an evaluator that read a node it never declared in the dependency map used to run without
+complaint and is now refused as data. **Say plainly what such an evaluator already was:** wrong under
+`evalFrom` and order-dependent under `eval`. Under `evalFrom` its node was not in the dirty cone of
+the undeclared read, so it was not recomputed when that node changed and kept a STALE value where
+`eval` computed a fresh one — silently, with both calls returning `Ok`. Under `eval` it saw the
+undeclared node's value or `None` depending only on where the topological order happened to place
+it. This change does not take a working program away; it replaces two silent wrong answers with one
+named one, at the read, before the day an upstream edit lands outside the cone.
+
+**What a consumer pays.** Three things, and the first is the only one most callers meet:
+
+| | |
+|---|---|
+| a `match` over `PropagationError` | gains a case. Exhaustive matches stop compiling (`FS0025` as a warning, an error under warnings-as-errors); a consumer holding a STALE same-version pack gets an `InvalidCastException` at run time with no compile signal at all, which is why the slot is a draft and not a repack |
+| an evaluator that reads outside its declaration | is refused. Declare the read in the dependency map — the domain still declares its reads, `dependencyMap` is unchanged — or stop reading it |
+| nothing else | a declared read behaves exactly as before, including one that resolves to `None`: a dangling reference, a cyclic upstream and a not-yet-reached read are all still answered, and still `None` |
+
+**Why the refusal is not `None`.** `None` already means "declared, and absent or failed upstream",
+which a domain propagates as a value of its own — a Calc model renders it `#CALC!`. Answering an
+undeclared read with `None` would report a contract violation in the vocabulary of a legitimate
+missing value, so it is a typed refusal instead. The one-set-lookup cost per read is the whole of
+the runtime price.
+
+**Where the refusal is observable, stated because the enforcement has a boundary.** `evalFrom`
+invokes `evalNode` only on the nodes it recomputes — the dirty set, plus any node absent from
+`prior` — so a violating node that is clean AND present in `prior` is reused without being
+re-invoked and its violation is not seen there. That is not a hole: `evalFrom`'s contract says
+`prior` came from `eval` over the same `deps`, and `eval` recomputes everything, so such a `prior`
+cannot exist. Prime with `eval` and the violation is found before there is a `prior` to reuse.
+`PropagationContractTests` asserts both halves rather than leaving them to be composed.
+
+**What this bought on the proof side.** Phase 186 proved `evalFrom` equal to `eval` under four
+premises, the first of which — the evaluator reads other nodes only through its declared reads — was
+recorded as the ladder row `propagation-evaluator-contract`, a `premise` that production stated in
+prose and enforced nowhere. That row is now a **proved** row: the model's resolver is restricted
+identically, `evalfrom_agrees` no longer carries the hypothesis, `local` is deleted from
+`proofs/Propagation.fst` rather than left as a hypothesis nobody supplies, and the refusal itself is
+proved (`undeclared_refused`, with `eval_refuses_undeclared` / `evalfrom_refuses_undeclared` and
+`ok_implies_declared`). `Conformance.propagationEvalLaws` gained a fourth law — both drivers refuse
+an undeclared read identically, naming the same node and read — and a second adequacy dimension, so
+its reported law list grew from 4 entries to 6; a consumer asserting a law count or indexing
+positionally into `ConformanceReport.Results` adjusts, one reading `AllPassed` or matching on `Law`
+does not. Every other law family, and the propagation differential's whole generated pool, is
+unchanged in verdict, which is the point: a conforming evaluator cannot tell this change happened.
+
+**What this did NOT do.** It did not infer the dependency map from the evaluator — the domain still
+declares its reads. It did not touch `dirtyFromChangedIds` or `sort`. And it did not close the rest
+of the evaluator contract: a complete change set and a `prior` that came from `eval` over the same
+map remain the domain's, now recorded as `propagation-change-set-and-prior`, and closing them wants
+the other candidate Phase 186 named — a law family generic over a DOMAIN'S evaluator — which is
+still not taken. The model also gained one bridge in exchange, `propagation-read-witness`: production
+detects the violation by instrumenting its resolver, a pure model cannot observe a call, so the
+observed read set is a parameter the differential supplies.
 
 ## 0.26.0 — released 2026-09-17 as `v0.26.0`
 

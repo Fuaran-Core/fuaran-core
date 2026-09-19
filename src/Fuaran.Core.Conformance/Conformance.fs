@@ -4307,10 +4307,18 @@ module Conformance =
         let mutable byteIdentical = None
         let mutable minimal = None
         let mutable unknownChange = None
+        let mutable undeclaredRefused = None
         // Phase 121 — the minimality law is what says work was AVOIDED, and it says nothing at all
         // over a sample in which every node is dirty. Both classes have to arise.
         let mutable dirtyNodes = 0
         let mutable cleanNodes = 0
+        // Phase 209 — an undeclared read is refused whether the read names a REAL node of the graph or
+        // an id the map does not hold at all, and the law says nothing about a class it never drew.
+        // Both are BUILT every iteration rather than drawn, so the guard cannot go vacuous on a short
+        // run: node `"0"` declares no reads at all (node k reads only below it), so a real undeclared
+        // read is available on every graph this generator can produce.
+        let mutable refusedRealNode = 0
+        let mutable refusedAbsentId = 0
 
         // a toy pull evaluator over the DAG: value(n) = base(n) + Σ value(reads). Records the ids it is
         // invoked on (for the minimality assertion).
@@ -4323,6 +4331,27 @@ module Conformance =
                     |> Set.fold (fun s r -> s + (resolve r |> Option.defaultValue 0)) 0
 
                 Ok(Map.find id baseOf + readSum)
+
+        // The same evaluator with ONE node reading ONE id it never declared — the contract violation
+        // the driver refuses since Phase 209. `leakAt` is the node, `leakRead` the id it reaches for.
+        let leakyEvalNode
+            (baseOf: Map<string, int>)
+            (deps: Map<string, Set<string>>)
+            (leakAt: string)
+            (leakRead: string)
+            =
+            fun (resolve: string -> int option) (id: string) ->
+                let declaredSum =
+                    Map.find id deps
+                    |> Set.fold (fun s r -> s + (resolve r |> Option.defaultValue 0)) 0
+
+                let leaked =
+                    if id = leakAt then
+                        resolve leakRead |> Option.defaultValue 0
+                    else
+                        0
+
+                Ok(Map.find id baseOf + declaredSum + leaked)
 
         for i in 0 .. iterations - 1 do
             let extra, r1 = ConfRng.intBelow 6 rng
@@ -4403,6 +4432,46 @@ module Conformance =
                         unknownChange <-
                             Some(sprintf "seed=%d iter=%d: expected EvalUnknownChange, got %A" seed i other)
 
+                // (4) THE DECLARED-READS REFUSAL (Phase 209): an evaluator that reads outside its
+                // declaration is refused by BOTH drivers, naming the same node and the same read.
+                // Two leaks per iteration — one reaching a real node of the graph, one reaching an id
+                // the map does not hold — because the two are different shapes of the same violation
+                // and a law that drew only one would say nothing about the other. `evalFrom` is asked
+                // with the violating node in its change set, so it recomputes and therefore invokes
+                // it: that is the qualifier `evalFrom`'s doc comment states, not a weaker law.
+                let leakVerdict (leakAt: string) (leakRead: string) : string option =
+                    let expected = Error(Propagation.EvalUndeclaredRead(leakAt, leakRead))
+                    let ev = leakyEvalNode base1 deps leakAt leakRead
+                    let viaFullLeak = Propagation.eval ev deps
+                    let viaIncrLeak = Propagation.evalFrom ev prior.Values (Set.singleton leakAt) deps
+
+                    if viaFullLeak = expected && viaIncrLeak = expected then
+                        None
+                    else
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: node %s reading undeclared %s — eval=%A evalFrom=%A, expected both %A"
+                                seed
+                                i
+                                leakAt
+                                leakRead
+                                viaFullLeak
+                                viaIncrLeak
+                                expected
+                        )
+
+                match leakVerdict "0" "1" with
+                | None -> refusedRealNode <- refusedRealNode + 1
+                | Some why ->
+                    if undeclaredRefused.IsNone then
+                        undeclaredRefused <- Some why
+
+                match leakVerdict changedId "no-such-node" with
+                | None -> refusedAbsentId <- refusedAbsentId + 1
+                | Some why ->
+                    if undeclaredRefused.IsNone then
+                        undeclaredRefused <- Some why
+
         [ { Law = "evalFrom is byte-identical to a full eval over the changed inputs (every change)"
             Passed = byteIdentical.IsNone
             Counterexample = byteIdentical }
@@ -4412,11 +4481,21 @@ module Conformance =
           { Law = "a changed id absent from the dependency map is a named EvalUnknownChange (GP5)"
             Passed = unknownChange.IsNone
             Counterexample = unknownChange }
+          { Law =
+              "an evaluator that reads outside its declared set is refused by eval and evalFrom alike, naming the node and the read (GP5)"
+            Passed = undeclaredRefused.IsNone
+            Counterexample = undeclaredRefused }
           SampleAdequacy.reached
               "propagationEvalLaws"
               "node reuse"
               seed
-              [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
+              [ "dirty node", dirtyNodes; "clean node", cleanNodes ]
+          SampleAdequacy.reached
+              "propagationEvalLaws"
+              "undeclared read"
+              seed
+              [ "read of a real node", refusedRealNode
+                "read of an id the map does not hold", refusedAbsentId ] ]
 
     // ---- cross-witness composition pilot (Phase 51) ----
     // Validate the Wave-13 frontier operators (`composeAcross`, Phase 47; `applyMemo`, Phase 49)
