@@ -626,6 +626,18 @@ for ($run = 1; $run -le $Runs; $run++) {
     }
 }
 
+# ---- 3b. the extraction post-pass -----------------------------------------------------------------
+#
+# Phase 169. F*'s F# backend emits a mutual TYPE group with the `and` indented one space, which
+# F# 10's parser rejects even under the oracle project's `--strict-indentation-`, so an extraction
+# carrying one does not compile. The pass below re-indents exactly those lines and touches nothing
+# else; the committed oracles are the NORMALISED text, so step 4's contract ("byte-identical to a
+# fresh extraction") is unchanged in meaning and every oracle standing today is unchanged in bytes
+# — the pass is the identity on all of them, which `kit/extraction-post-pass.tests.ps1` checks
+# rather than asserts. That script also carries the go-red fixture and the retirement condition;
+# the defect, the pinned prover it was observed on and the reasoning are in the helper's header.
+. (Join-Path $PSScriptRoot 'extraction-post-pass.ps1')
+
 # ---- 4. extract, and hold the committed oracle to the model ---------------------------------------
 
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
@@ -685,6 +697,21 @@ foreach ($module in $Modules) {
     # Compare LF-normalised: the extractor writes LF and the repository pins LF, but a checkout
     # with autocrlf on would otherwise fail this for a reason that is not the model.
     $freshText = (Get-Content $fresh -Raw).Replace("`r`n", "`n")
+
+    # THE POST-PASS (Phase 169, section 3b) — between the extraction and the byte diff, so the
+    # committed oracle is held to text F# can parse. It fires only on a mutual TYPE group, which no
+    # model in this directory has yet, so this line prints nothing and moves nothing today. The next
+    # mutually recursive model is what it is here for, and when it fires it SAYS SO: a silent
+    # rewrite between an extraction and the artefact it is diffed against is exactly the kind of
+    # step that should never be invisible.
+    $postPassLines = Test-ExtractionMutualTypeDefect $freshText
+    if ($postPassLines.Count -gt 0) {
+        $freshText = Repair-ExtractionMutualTypeGroup $freshText
+        Write-Host ("==== proofs: the extraction post-pass re-indented $($postPassLines.Count) mutual-type-group " +
+            "``and`` line(s) in $module (F* $pinnedVersion emits them one space in, which F# rejects — " +
+            'see kit/extraction-post-pass.ps1)') -ForegroundColor Cyan
+    }
+
     $committedText = if (Test-Path $committed) { (Get-Content $committed -Raw).Replace("`r`n", "`n") } else { '' }
 
     if ($Extract) {

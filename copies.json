@@ -11,6 +11,24 @@
       "$note": "The engine. Copied verbatim — an adopter edits its own proofs/check.ps1, never this."
     },
     {
+      "source": "proofs/kit/extraction-post-pass.ps1",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/extraction-post-pass.ps1 from the fuaran-core repository",
+      "$note": "THE EXTRACTION POST-PASS (Phase 169). Copied verbatim, and NOT optional for an adopter: the engine DOT-SOURCES it from its own directory, so a copy of check-proof-leg.ps1 without this file beside it fails at the EXTRACT stage rather than degrading. It repairs the one thing F*'s F# backend emits that F# will not parse — a mutual TYPE group with the `and` one space in, which `--strict-indentation-` does not cover — and it is the identity on every extraction that has no mutual type group, which is all of this repository's today."
+    },
+    {
+      "source": "proofs/kit/extraction-post-pass.tests.ps1",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/extraction-post-pass.tests.ps1 from the fuaran-core repository",
+      "$note": "The post-pass's go-red proof, and the thing that answers the RETIREMENT condition on a pin bump: it fails by name when a fresh extraction of the fixture no longer carries the defect, rather than passing quietly. Two of its four arms compile against a scratch project DERIVED from the adopter's own oracle project, so what it proves is a statement about that project and not about a second one resembling it."
+    },
+    {
+      "source": "proofs/kit/templates/MutualTypes.fst",
+      "check": "fingerprint",
+      "regen": "copy proofs/kit/templates/MutualTypes.fst from the fuaran-core repository",
+      "$note": "The post-pass's FIXTURE — the smallest model that makes the backend emit a mutual type group. Copied verbatim beside the script that extracts it. Despite its directory it is not a template to instantiate, and it must NOT be registered in an adopter's `$modules`: it earns no committed oracle and nothing runs beside it."
+    },
+    {
       "source": "proofs/kit/templates/oracle.fsproj.template",
       "check": "fingerprint",
       "regen": "copy proofs/kit/templates/oracle.fsproj.template from the fuaran-core repository",

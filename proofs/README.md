@@ -586,6 +586,36 @@ either way. What was found, in the order it was hit:
    iterations needed were an implicit type parameter on the indexed `perm` type (made explicit)
    and a `forall_intro_2` whose predicate F\* could not infer inline (a named helper lemma). No
    rlimit tuning, no tactics, no SMT patterns beyond the membership algebra.
+7. **A mutual TYPE group extracts to F\# that does not parse — and `--strict-indentation-` does
+   NOT cover it** (Phase 150 found it; Phase 169 measured and closed it). The backend breaks a
+   mutual type group at the space before each `and`, so the `and` lands **one space** in:
+
+   ```fsharp
+   type node =
+   | Leaf of Prims.string
+   | Branch of attr
+    and attr =              // <- one leading space
+   | Flag of Prims.bool
+   ```
+
+   F\# 10 answers `error FS0010: Unexpected keyword 'and' in member definition`, and it answers it
+   with finding 3's relaxation already in force — which is what makes this a *separate* defect
+   rather than more of the same, and what makes it easy to assume is already handled. It is a
+   TYPE-group defect only: a value `and` is emitted at column 0, because the backend hoists local
+   mutual recursion to the top level. Measured on the pinned **F\* v2026.09.06**, at every name
+   length, for DU groups and record groups alike.
+
+   No model here has hit it yet — `Vocabulary`, `DocVocabulary` and `ScoreVocabulary` have mutual
+   type groups and are all `$proofOnly`, so nothing extracts one — but `Query`-shaped models with
+   mutually recursive expression and pipeline unions are exactly what is coming, and finding this
+   inside such a phase's time box costs that phase the afternoon Phase 150 already spent. So the
+   leg carries a **post-pass** between the extraction and the byte diff: it re-indents those `and`
+   lines to column 0 and changes nothing else, the committed oracles are the normalised text, and
+   the pass is the identity on every oracle standing today. `proofs/kit/extraction-post-pass.ps1`
+   is the pass, `proofs/kit/extraction-post-pass.tests.ps1` its go-red proof, and the kit README's
+   "The extraction post-pass" section has the whole account — including the **retirement
+   condition**, which is that a pin bump makes the fixture stop going red, and which that script
+   reports by name rather than passing quietly.
 
 On the operator's familiarity argument — an ML-family model of an ML-family kernel — the finding is
 that it held: the model is the F# with `Set` spelled as `list` and `Result` spelled as `outcome`,
@@ -602,7 +632,13 @@ pwsh ./proofs/check.ps1 -Strict    # turn a cost finding (below) from a warning 
 pwsh ./proofs/check.ps1 -NoFloor   # do not enforce the per-module time floors (below)
 pwsh ./proofs/check.ps1 -CacheDir <dir>   # put the checked-module cache somewhere you name
 pwsh ./verify.ps1 -Proofs          # the whole repo gate plus the proof leg
+pwsh ./proofs/kit/extraction-post-pass.tests.ps1   # the extraction post-pass's go-red proof (finding 7)
 ```
+
+The last one is deliberately **not** part of the leg — `check.ps1` prints exactly what it printed
+before the post-pass existed, and a proof about the pass is not a proof about the models. Run it
+when the pass changes, when the prover pin moves, or when you want the retirement condition
+answered.
 
 Every model in the script's `$modules` list goes through all three steps, and `-Runs N` means N
 cold-cache verifications of all of them; adding a model is adding its name to that list and a

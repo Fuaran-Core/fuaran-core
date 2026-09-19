@@ -40,6 +40,9 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 | `templates/proofs.json` | The claims ladder: the closed level set, what each level means, and the host family that holds the rows to the tree. Goes at the **repository root**, not in `proofs/`. | copy and edit |
 | `templates/ci-proofs-job.yml` | The CI job, with the cache key that hashes the pin file — which is the whole mechanism by which a pin bump reaches CI with no second edit. | copy and edit |
 | `templates/Instance.fst.template` | The instantiation template (Phase 175): `../Skeleton.fst` with fourteen named holes. Drop the preamble, fill the holes, and the result is a domain's fold-confluence composite; the one obligation is `{{DIAMOND}}`, a proof of `independence_diamond` at the domain's own footprint and apply. Held to `../Skeleton.fst` byte for byte by the `Proofs.Kit` family, so the template and its first instance cannot drift apart. | copy and instantiate |
+| `extraction-post-pass.ps1` | **The extraction post-pass** (Phase 169): two functions, dot-sourced by the engine's EXTRACT stage, that re-indent a mutual type group's `and` to the column F\# expects and touch nothing else. See "The extraction post-pass" below. | copy verbatim |
+| `extraction-post-pass.tests.ps1` | Its go-red proof: four arms, two of which need the pinned prover and `dotnet` and are reported NOT RUN where either is absent. Also the machinery that answers the retirement condition. | copy verbatim |
+| `templates/MutualTypes.fst` | The post-pass's fixture — the smallest model that makes the backend emit a mutual type group. **Not a template to instantiate**, and not to be registered in `$modules`: it earns no committed oracle. | copy verbatim |
 
 The rest of what an adopter needs is **not duplicated here**, deliberately, and lives where it is
 actually used:
@@ -99,6 +102,64 @@ not, and it should not take scrolling to find that out.
 **Every prover invocation's whole output is teed** to `<WorkDir>/logs/<module>[.retry].<step>.log`,
 and each verdict names the transcript it was read from, so a post-mortem reads the classification's
 own evidence rather than a scrollback that is gone.
+
+## The extraction post-pass (Phase 169)
+
+**F\*'s F\# backend emits a mutual TYPE group that F\# 10 will not parse**, so an extraction carrying
+one does not compile in the oracle project and the leg's step 2 holds the oracle to text nothing can
+build. The backend breaks the group at the space before each `and`, which leaves the previous
+declaration's last line with a trailing space and the `and` line with **one leading space**:
+
+```fsharp
+type node =
+| Leaf of Prims.string
+| Branch of attr          // <- trailing space
+ and attr =               // <- one leading space; F# rejects this
+| Flag of Prims.bool
+| Nested of node
+```
+
+F\# reports `error FS0010: Unexpected keyword 'and' in member definition`, and it reports it **even
+under the oracle project's `--strict-indentation-`** — which is the whole reason this is a separate
+defect from the pre-F\#-8 match-arm layout that flag was relaxed for, and the reason a reader who
+knows about the flag will otherwise assume it is covered.
+
+So the engine runs a normalisation step between the extraction and the byte diff: every line whose
+first token is the keyword `and` is re-indented to column 0, and **nothing else changes** — not the
+trailing space on the line above it, not a line ending, not a byte anywhere else. The committed
+oracles are the normalised text, so step 2's contract ("byte-identical to a fresh extraction") is
+unchanged in meaning.
+
+| | |
+|---|---|
+| **Observed on** | F\* **v2026.09.06** / Z3 4.13.3 — the release `../fstar-pin.json` declares |
+| **Scope** | mutual type groups only: DU groups and record groups both, at any name length, always one space |
+| **Not in scope** | a value `and`. The backend **hoists local mutual recursion to the top level**, so `let rec f … and g …` written inside an F\* function body extracts as two top-level bindings joined by a column-0 `and`, which the pass never sees |
+| **Identity today** | no model in `proofs/` has a mutual type group yet — the three `$proofOnly` vocabulary models do, and are never extracted — so the pass moves no byte in any committed oracle. That is checked rather than claimed (arm B below) |
+| **When it fires** | the leg prints a named line saying which module and how many lines. A silent rewrite between an extraction and the artefact it is diffed against is exactly the step that must never be invisible |
+
+**The retirement condition, and how you will hear about it.** The pass exists because of an upstream
+defect in a particular prover release. Bump the pin, run
+`pwsh ./proofs/kit/extraction-post-pass.tests.ps1`, and arm C answers the question: if a fresh
+extraction of `templates/MutualTypes.fst` no longer carries the defect, the script **fails by name**
+with the retirement instruction rather than going quietly green — a go-red fixture that can no
+longer go red is the signal to delete the machinery it guards. Retiring it means deleting the helper,
+its call in the engine's EXTRACT stage, the fixture and that script, and re-extracting every oracle.
+
+**Its four arms**, each named for the direction it can fail in:
+
+| Arm | What it proves | Needs |
+|---|---|---|
+| **A. unit** | the pass repairs the bytes the backend emits, and leaves a column-0 `and`, an `and_then`, an `and` inside a literal, CRLF endings and trailing whitespace alone | nothing |
+| **B. identity** | the pass is the identity on **every** committed oracle | nothing |
+| **C. go red** | the RAW extraction of the fixture fails to compile, **with FS0010 at the `and` line** — a failure for the wrong reason is not evidence | the pinned prover, `dotnet` |
+| **D. go green** | the same extraction, with the pass run over it, compiles | the pinned prover, `dotnet` |
+
+C and D compile against a scratch project **derived from the oracle project itself** — its target
+framework, its `NoWarn`, its `--strict-indentation-` and its package references, with only the
+compile list rewritten — so what they prove is a statement about your oracle project and not about a
+second one that resembles it. Where the prover or `dotnet` is absent they are reported **NOT RUN**
+with the remedy, never skipped quietly: "nothing to check" must not read as "everything checked".
 
 ## Adopting it
 

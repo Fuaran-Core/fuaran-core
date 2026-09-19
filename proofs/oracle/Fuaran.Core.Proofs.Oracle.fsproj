@@ -16,6 +16,15 @@
     <!-- The F# backend emits pre-F#-8 layout (match arms at column 1 inside a parenthesised
          lambda), which F# 10's strict indentation rejects outright. Relaxed for THIS project only;
          the finding is recorded in ../README.md. -->
+    <!-- WHAT THIS FLAG DOES NOT COVER (Phase 169, ../README.md finding 7). The backend also emits
+         a mutual TYPE group with the `and` one space in, and F# rejects THAT with FS0010 whether
+         or not this relaxation is in force — so an extraction carrying a mutual type group would
+         not compile here however far the flag were pushed. It is handled a step earlier instead:
+         the leg's EXTRACT stage runs ../kit/extraction-post-pass.ps1 over each fresh extraction
+         before the byte diff, so the committed oracles are text this project can build. Nothing
+         below is affected today (no model here has a mutual type group), and the pass is the
+         identity on every file in this directory — ../kit/extraction-post-pass.tests.ps1 checks
+         that, and carries the condition under which the pass is retired. -->
     <OtherFlags>$(OtherFlags) --strict-indentation-</OtherFlags>
   </PropertyGroup>
   <ItemGroup>
