@@ -2240,13 +2240,22 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.26.1 (draft)
+## 0.27.0 (draft)
 
-**This slot is a DRAFT.** `<Version>` reads `0.26.1` and no `v0.26.1` tag exists, so an additive or
+**This slot is a DRAFT.** `<Version>` reads `0.27.0` and no `v0.27.0` tag exists, so an additive or
 behaviour-identical change may ride it: append its entry here rather than opening another slot. A
 change of a higher class than the entries below carry advances the number, because the number is
-what tells a consumer what adopting it costs. The slot was opened rather than ridden because
-`0.26.0` is tagged and released.
+what tells a consumer what adopting it costs.
+
+**This slot was ADVANCED from a `0.26.1` draft, and the two entries below it come forward with it.**
+`0.26.1` was opened by Phase 206 (because `0.26.0` is tagged) and ridden by Phase 186, both
+BEHAVIOUR-IDENTICAL or ADDITIVE with no public surface moved. No `v0.26.1` tag was ever cut, so
+nothing was published under that number and no consumer can be pinned to it — the slot was a draft
+in the strict sense. Phase 198 then made a BREAKING change to a published seam, which the draft-slot
+rule says advances rather than rides: a number that reads "additive" over a retyped public member
+tells a consumer the wrong thing about what adopting it costs. So `0.26.1` is not a slot this
+repository will ever release, and the work that was riding it ships in `0.27.0`. Pre-1.0 breaking is
+a MINOR bump, per the precedent the `0.19.0` and `0.20.0` entries in this document set.
 
 ### Linear-time row access (Phase 206) — BEHAVIOUR-IDENTICAL, no public surface moves
 
@@ -2330,6 +2339,62 @@ one fact the agreement theorem needs of it — `Order` holds no id twice — is 
 every generated graph and proved nowhere (`propagation-order-distinct`). And no behaviour changed: a
 resolver restricted to declared reads, which would make the evaluator contract hold by construction,
 is its own phase.
+
+### The Query seam carries the `Deferred` envelope (Phase 198) — BREAKING: a public return type moves
+
+**The class.** `retype`, on two members of `Fuaran.Core.Query`, and it is a Phase 183 gate output
+rather than a claim. The family reported it verbatim as `Fuaran.Core.Query — retype (4 move(s))`:
+two `retype` and two `additive`, one package, with the headline naming the most informative of them.
+The two retyped members:
+
+| member | was | is |
+|---|---|---|
+| `Query.invoke` | `resolve: Query -> Result<QueryResult, string>` → `Result<QueryResult, QueryError>` | `resolve: Query -> Deferred<QueryResult>` → `Result<Deferred<QueryResult>, QueryError>` |
+| `QueryRegistry.dispatch` | the same resolver and the same return | the same move |
+
+Additive beside them: `QueryCodec.encodeDeferredResult` / `decodeDeferredResult`, the wire codec for
+the new result type, which reuses the shipped envelope encoding (`"$type"`-tagged `pending` /
+`ready` / `failed`) rather than minting a second spelling of the same three cases. Nothing else
+moves: `Query`, `QueryParam`, `QueryResult`, `QueryRegistry` and `QueryError` keep every field, case
+and position, `validateParams` and `invocationKey` keep their signatures, and no encoded byte of a
+declaration or a result changes.
+
+**What a consumer pays.** Every caller of `Query.invoke` or `QueryRegistry.dispatch` adapts twice:
+its resolver returns `Ready r` where it returned `Ok r` and `Failed m` where it returned `Error m`,
+and its own match on the result handles `Ok(Ready r)` and `Ok Pending` where it handled `Ok r`.
+Refusals are unchanged — every `QueryError` a caller matches today arrives exactly as it did,
+including a resolver failure, which is still `ExecutionFailed(m, [])`. A caller with no use for
+`Pending` writes one line: `Deferred.toResult` projects the envelope back to a `Result`, which is
+what the envelope has shipped for since Phase 32.
+
+**Why the seam gains an axis rather than a wrapper.** The boundary previously had no way to say *not
+yet*. A fetch in flight had to be reported as a failure, or the host had to invent its own
+three-state shape above the seam and wrap every call in it — which is the drift a seam exists to
+prevent, and this repository's own comment on the seam recorded it as the expected practice. The
+envelope for exactly this has been in `Fuaran.Core.Function` since Phase 32 and the seam did not use
+it. So the async axis now rides `Deferred` and the error axis stays typed, which is the split that
+lets both be true at once.
+
+**The fourth case is unreachable, and that is a certified law rather than a comment.** `Deferred`'s
+failure is a rendered `string` by deliberate design — one type parameter, serialisable — so letting
+a resolver's `Failed` ride out of the seam would have traded the enumerated `QueryError` for a
+message. It does not: `invoke` projects `Failed m` into `ExecutionFailed(m, [])`, so a dispatch has
+exactly three outcomes — SETTLED `Ok(Ready r)`, PENDING `Ok Pending`, REFUSED `Error e` — and
+`Ok(Failed _)` cannot occur. `Conformance.queryLaws` gained three laws for it: the
+`Deferred<QueryResult>` wire round-trip over all three cases, the three-outcome property (with the
+refusal shown to precede the resolver), and the typed-failure invariant. Its four existing laws are
+unchanged in verdict, and every other family is untouched.
+
+**What this deliberately did NOT do, stated because the phase's own brief asked for it.** It did not
+change `Capability`. `Capability.invoke` returns a plain `Result<'v, InvokeError>` and still does, so
+the two seams are NOT symmetric after this change — `Query` is the first to carry the envelope, not
+the second. The phase was framed as reconciling a disagreement between the seams, and the
+disagreement measured the other way: both returned a plain `Result`, and neither carried the
+envelope. Giving `Capability` the same shape retypes a surface Phase 177 models and proves, so the
+model would move in the same change-set; that is its own phase. It also did not put a handle on
+`Pending`: that is a union-widening on a type this repository's codec, `deferredLaws` and every
+adopting host already read, and a pending fetch is correlated by `invocationKey`, which is a function
+of the declaration and the validated arguments alone.
 
 ## 0.26.0 — released 2026-09-17 as `v0.26.0`
 

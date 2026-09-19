@@ -1580,12 +1580,22 @@ module Conformance =
     /// (in-type accepts; wrong-type + unknown reject), a non-deterministic query replays
     /// byte-identically through the Phase 27 capture seam, registry enumeration is id-stable, and the
     /// declaration + result round-trip the codec. Mirrors `capabilityLaws`.
+    ///
+    /// Since Phase 198 it also certifies the seam's `Deferred` envelope: the
+    /// `Deferred&lt;QueryResult&gt;` wire round-trip, that a dispatch has exactly the three outcomes
+    /// SETTLED / PENDING / typed-REFUSED, and that a resolver's untyped `Failed` never rides out of
+    /// the seam — it becomes the enumerated `ExecutionFailed`, so `Ok(Failed _)` is unreachable. The
+    /// three shapes MIRROR `deferredLaws` rather than delegating to it: that family takes no witness
+    /// (it is self-contained at an `int` payload), so there is nothing to instantiate over a query.
     let queryLaws (seed: int) (iterations: int) : LawResult list =
         let mutable rng = ConfRng.ofSeed seed
         let mutable validation = None
         let mutable replay = None
         let mutable enumeration = None
         let mutable roundtrip = None
+        let mutable envelope = None
+        let mutable asyncAxis = None
+        let mutable typedFailure = None
 
         // value-codec for the captured realized result (the QueryResult itself, rendered canonically).
         let encodeV (qr: QueryResult) : string = QueryCodec.encodeResult qr
@@ -1695,6 +1705,77 @@ module Conformance =
                  if roundtrip.IsNone then
                      roundtrip <- Some(sprintf "seed=%d iter=%d: result decode failed: %A" seed i m))
 
+            // ---- the Deferred envelope on the seam (Phase 198) ----
+
+            // the envelope round-trips the wire for all three cases, at a QueryResult payload.
+            for d in [ Pending; Ready realized; Failed("resolver-" + string i) ] do
+                match QueryCodec.decodeDeferredResult (QueryCodec.encodeDeferredResult d) with
+                | Ok d2 ->
+                    if d2 <> d && envelope.IsNone then
+                        envelope <- Some(sprintf "seed=%d iter=%d: Deferred<QueryResult> ≠ round-trip (%A)" seed i d)
+                | Error e ->
+                    if envelope.IsNone then
+                        envelope <- Some(sprintf "seed=%d iter=%d: Deferred<QueryResult> decode failed: %A" seed i e)
+
+            // a dispatch has exactly three outcomes, and the refusals stay typed and pre-resolver.
+            let reg =
+                QueryRegistry.empty |> QueryRegistry.register q |> Result.toOption |> Option.get
+
+            let goodArgs = [ "p0", Int 42 ]
+
+            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Ready realized) with
+             | Ok(Ready r) when r = realized -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <- Some(sprintf "seed=%d iter=%d: a settled resolver did not settle: %A" seed i other))
+
+            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Pending) with
+             | Ok Pending -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <-
+                         Some(sprintf "seed=%d iter=%d: a pending resolver did not stay pending: %A" seed i other))
+
+            let ran = ref false
+
+            (match
+                QueryRegistry.dispatch reg q.Id [ "p0", Str "nope" ] (fun _ ->
+                    ran.Value <- true
+                    Ready realized)
+             with
+             | Error(ParamTypeMismatch _) when not ran.Value -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: refusal not typed-before-resolve (%A; resolver ran: %b)"
+                                 seed
+                                 i
+                                 other
+                                 ran.Value
+                         ))
+
+            (match QueryRegistry.dispatch reg "no-such-query" goodArgs (fun _ -> Ready realized) with
+             | Error(NoSuchQuery _) -> ()
+             | other ->
+                 if asyncAxis.IsNone then
+                     asyncAxis <- Some(sprintf "seed=%d iter=%d: an unregistered id was not refused: %A" seed i other))
+
+            // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
+            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
+             | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> ()
+             | other ->
+                 if typedFailure.IsNone then
+                     typedFailure <-
+                         Some(
+                             sprintf
+                                 "seed=%d iter=%d: a resolver failure did not become ExecutionFailed: %A"
+                                 seed
+                                 i
+                                 other
+                         ))
+
         [ { Law = "param-validation accepts in-type + rejects type-mismatch / unknown params"
             Passed = validation.IsNone
             Counterexample = validation }
@@ -1706,7 +1787,16 @@ module Conformance =
             Counterexample = enumeration }
           { Law = "query declaration + result round-trip through the codec"
             Passed = roundtrip.IsNone
-            Counterexample = roundtrip } ]
+            Counterexample = roundtrip }
+          { Law = "the query envelope round-trips the wire for Pending / Ready / Failed"
+            Passed = envelope.IsNone
+            Counterexample = envelope }
+          { Law = "dispatch settles, stays pending, or refuses typed before the resolver runs"
+            Passed = asyncAxis.IsNone
+            Counterexample = asyncAxis }
+          { Law = "a resolver failure is a typed ExecutionFailed, never Ok(Failed _)"
+            Passed = typedFailure.IsNone
+            Counterexample = typedFailure } ]
 
     /// The composition sample (Phase 47) a domain supplies per draw to certify cross-witness
     /// `composeAcross`. `Outer` is an `'A`-function carrying TWO independent typed slots (`SlotA`,

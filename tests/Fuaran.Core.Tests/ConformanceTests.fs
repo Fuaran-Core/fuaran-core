@@ -482,11 +482,15 @@ let tests =
               // seed-replay determinism
               Expect.equal (Conformance.capabilityLaws 4242 200) results "same seed ⇒ identical report"
 
-          // Phase 46 — the data-acquisition Query laws.
-          testCase "queryLaws certify param-validation + replay + enumeration + round-trip (Phase 46)"
+          // Phase 46 — the data-acquisition Query laws; Phase 198 added the three envelope laws.
+          testCase "queryLaws certify param-validation + replay + enumeration + round-trip + envelope (Phase 46)"
           <| fun _ ->
               let results = Conformance.queryLaws 4242 200
-              Expect.equal (List.length results) 4 "validation + replay + enumeration + round-trip laws reported"
+
+              Expect.equal
+                  (List.length results)
+                  7
+                  "validation + replay + enumeration + round-trip + the three envelope laws reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

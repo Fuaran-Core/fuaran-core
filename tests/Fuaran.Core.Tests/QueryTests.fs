@@ -20,6 +20,25 @@ let private sampleQuery: Query =
       TimeoutMs = Some 5000
       PageSize = Some 100 }
 
+let private sampleResult: QueryResult =
+    { Rows =
+        { Schema = [ "region", StringType; "revenue", FloatType ]
+          Columns =
+            [ { Name = "region"
+                Type = StringType
+                Cells = [ Str "UK"; Str "US" ] }
+              { Name = "revenue"
+                Type = FloatType
+                Cells = [ Float 1234.5; Null ] } ] }
+      PageNum = 0
+      TotalRowCount = Some 2
+      NextPageToken = Some "tok-1" }
+
+let private registered =
+    QueryRegistry.register sampleQuery QueryRegistry.empty
+    |> Result.toOption
+    |> Option.get
+
 [<Tests>]
 let tests =
     testList
@@ -52,7 +71,7 @@ let tests =
 
           testCase "registry is default-deny: an unregistered id is NoSuchQuery"
           <| fun _ ->
-              let resolve (_: Query) = Ok Unchecked.defaultof<QueryResult>
+              let resolve (_: Query) = Ready Unchecked.defaultof<QueryResult>
 
               match QueryRegistry.dispatch QueryRegistry.empty "nope" [] resolve with
               | Error(NoSuchQuery("nope", _)) -> ()
@@ -89,7 +108,7 @@ let tests =
 
               let resolve (_: Query) =
                   ran <- true
-                  Ok Unchecked.defaultof<QueryResult>
+                  Ready Unchecked.defaultof<QueryResult>
 
               let r =
                   QueryRegistry.register sampleQuery QueryRegistry.empty
@@ -132,4 +151,41 @@ let tests =
               let k2 = Query.invocationKey sampleQuery [ "region", Str "UK"; "year", Int 2026 ]
               let k3 = Query.invocationKey sampleQuery [ "year", Int 2025; "region", Str "UK" ]
               Expect.equal k1 k2 "order-independent"
-              Expect.notEqual k1 k3 "arg-sensitive" ]
+              Expect.notEqual k1 k3 "arg-sensitive"
+
+          // ---- the Deferred envelope on the seam (Phase 198) ----
+          // The seam's three outcomes, one case each, plus the invariant that makes the fourth
+          // unreachable. `Ok(Failed _)` has no test because it cannot be produced — the typed-refusal
+          // case below is what asserts that, and it is the assertion that would go red if `invoke`
+          // ever passed a resolver's `Failed` through.
+
+          testCase "a settled resolver settles: dispatch returns Ok(Ready result)"
+          <| fun _ ->
+              match
+                  QueryRegistry.dispatch registered "sales-by-region" [ "year", Int 2026 ] (fun _ -> Ready sampleResult)
+              with
+              | Ok(Ready r) -> Expect.equal r sampleResult "the resolver's rows ride the envelope unchanged"
+              | other -> failtestf "expected Ok(Ready _), got %A" other
+
+          testCase "a pending resolver stays pending: the host expresses 'not yet' in Core's vocabulary"
+          <| fun _ ->
+              match QueryRegistry.dispatch registered "sales-by-region" [ "year", Int 2026 ] (fun _ -> Pending) with
+              | Ok Pending -> ()
+              | other -> failtestf "expected Ok Pending, got %A" other
+
+          testCase "a resolver failure is REFUSED typed: ExecutionFailed, never Ok(Failed _)"
+          <| fun _ ->
+              match
+                  QueryRegistry.dispatch registered "sales-by-region" [ "year", Int 2026 ] (fun _ ->
+                      Failed "source unreachable")
+              with
+              | Error(ExecutionFailed("source unreachable", recoverable)) ->
+                  Expect.isEmpty recoverable "no recoverable alternatives are invented for the host"
+              | other -> failtestf "expected Error(ExecutionFailed _), got %A" other
+
+          testCase "the query envelope round-trips the wire for Pending / Ready / Failed"
+          <| fun _ ->
+              for d in [ Pending; Ready sampleResult; Failed "source unreachable" ] do
+                  match QueryCodec.decodeDeferredResult (QueryCodec.encodeDeferredResult d) with
+                  | Ok d2 -> Expect.equal d2 d "deferred query result round-trip"
+                  | Error e -> failtestf "decode failed for %A: %A" d e ]

@@ -20,9 +20,27 @@ namespace Fuaran.Core
 //      query replays byte-identically;
 //    * Fable-clean canonical codec (`Json`/`Decode`, FSharp.Core only).
 //
-//  The async envelope (Phase 32 `Deferred`) is not yet shipped, so the Core
-//  boundary returns a plain `Result`; the host wraps it in its own async at the
-//  resolver boundary. See the fuaran-side consumer (fuaran#323).
+//  The async axis rides the shipped `Deferred<'T>` envelope (Phase 32, in
+//  `Fuaran.Core.Function`): the host resolver returns `Deferred<QueryResult>`,
+//  so "not yet" is expressible in the substrate's own vocabulary instead of
+//  each adopter inventing one at the resolver boundary (Phase 198). The ERROR
+//  axis stays typed — `invoke` returns `Result<Deferred<QueryResult>,
+//  QueryError>`, and a resolver's `Failed` is projected into the enumerated
+//  `ExecutionFailed`. So a dispatch has exactly three outcomes — SETTLED
+//  (`Ok(Ready r)`), PENDING (`Ok Pending`) and REFUSED (`Error e`, typed) — and
+//  `Ok(Failed _)` is unreachable by construction, which `queryLaws` certifies
+//  rather than this comment merely asserting.
+//
+//  What this deliberately is NOT: an async runtime. `Deferred` is data;
+//  scheduling, polling and completion stay the host's. `Pending` carries no
+//  handle — the host correlates a pending fetch by `invocationKey`, which is a
+//  function of the declaration and the validated args alone.
+//
+//  NOTE the asymmetry, so a reader is not misled by the sibling framing above:
+//  `Capability.invoke` returns a plain `Result<'v, InvokeError>` and does not
+//  carry the envelope. `Query` is the first seam to, not the second — giving
+//  `Capability` the same shape retypes a surface the proof leg models, and is
+//  its own change.
 // ============================================================================
 
 /// A typed parameter a query expects at invocation — the data-acquisition analogue of a
@@ -147,20 +165,27 @@ module Query =
                 Error(RequiredParamsUnbound unbound))
 
     /// Invoke a query: validate the params, then run the host `resolve` (which performs the actual
-    /// fetch per the query's source + effect/placement). A resolver failure is a named
-    /// `ExecutionFailed`, never a throw. Deterministic queries re-evaluate freely; for a
-    /// non-`Deterministic` query the caller journals the realized result via `OpStream.captureEffect`
-    /// keyed by `invocationKey` + `determinismTag` (Phase 27), so the query replays exactly.
+    /// fetch per the query's source + effect/placement). The resolver answers in the shipped
+    /// `Deferred` envelope, so a fetch it has not completed is `Pending` rather than a failure or a
+    /// host-invented shape; a resolver failure is the named `ExecutionFailed`, never a throw and
+    /// never an untyped `Failed` riding out of the seam. Deterministic queries re-evaluate freely;
+    /// for a non-`Deterministic` query the caller journals the realized result (the `Ready` payload —
+    /// `Pending` is not captured, replay re-issues) via `OpStream.captureEffect` keyed by
+    /// `invocationKey` + `determinismTag` (Phase 27), so the query replays exactly.
+    ///
+    /// The three outcomes, exhaustively: `Ok(Ready r)` settled · `Ok Pending` in flight · `Error e`
+    /// refused, typed. `Ok(Failed _)` cannot occur — certified by `queryLaws`.
     let invoke
         (q: Query)
         (args: (string * Cell) list)
-        (resolve: Query -> Result<QueryResult, string>)
-        : Result<QueryResult, QueryError> =
+        (resolve: Query -> Deferred<QueryResult>)
+        : Result<Deferred<QueryResult>, QueryError> =
         validateParams q args
         |> Result.bind (fun () ->
             match resolve q with
-            | Ok r -> Ok r
-            | Error m -> Error(ExecutionFailed(m, [])))
+            | Ready r -> Ok(Ready r)
+            | Pending -> Ok Pending
+            | Failed m -> Error(ExecutionFailed(m, [])))
 
 /// A typed query registry — the discovery surface an agent enumerates (the data-acquisition analogue
 /// of node-introspection / capability discovery): "what data may I acquire, with what typed params,
@@ -188,13 +213,14 @@ module QueryRegistry =
 
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered id
     /// is `NoSuchQuery`), then `Query.invoke`. The host resolver is supplied by the caller per the
-    /// resolved query's source + placement.
+    /// resolved query's source + placement, and answers in the `Deferred` envelope — so the same
+    /// three outcomes `Query.invoke` documents are what a registry dispatch returns.
     let dispatch
         (r: QueryRegistry)
         (id: string)
         (args: (string * Cell) list)
-        (resolve: Query -> Result<QueryResult, string>)
-        : Result<QueryResult, QueryError> =
+        (resolve: Query -> Deferred<QueryResult>)
+        : Result<Deferred<QueryResult>, QueryError> =
         match Map.tryFind id r.Queries with
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
         | Some q -> Query.invoke q args resolve
@@ -428,3 +454,24 @@ module QueryCodec =
         match Decode.parse s with
         | Error m -> Error(ExecutionFailed("parse: " + m, []))
         | Ok el -> resultOf el
+
+    // ---- deferred query result (Phase 198) ----
+    // The seam's result type is now `Deferred<QueryResult>`, so it has to cross the wire like every
+    // other Query type — a host that answers `Pending` over a transport has nothing to send
+    // otherwise. This reuses the shipped envelope codec (`CapabilityCodec.deferredJson` /
+    // `deferredOf`, `"$type"`-tagged `pending` / `ready` / `failed`) rather than minting a second
+    // encoding of the same three cases: one envelope, one wire shape, both seams.
+
+    let internal deferredResultJson (d: Deferred<QueryResult>) : JVal =
+        CapabilityCodec.deferredJson resultJson d
+
+    let encodeDeferredResult (d: Deferred<QueryResult>) : string = Canon.render (deferredResultJson d)
+
+    let internal deferredResultOf (el: JVal) : Result<Deferred<QueryResult>, QueryError> =
+        CapabilityCodec.deferredOf (fun e -> resultOf e |> Result.mapError (fun _ -> "queryResult")) el
+        |> Result.mapError (fun m -> ExecutionFailed("decode: " + m, []))
+
+    let decodeDeferredResult (s: string) : Result<Deferred<QueryResult>, QueryError> =
+        match Decode.parse s with
+        | Error m -> Error(ExecutionFailed("parse: " + m, []))
+        | Ok el -> deferredResultOf el
