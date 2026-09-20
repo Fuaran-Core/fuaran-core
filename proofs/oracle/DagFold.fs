@@ -1001,5 +1001,166 @@ let drain = (fun ( policy  :  dangling_policy ) ( lt  :  Prims.string  ->  Prims
      end))
 
 
+let rec walk_ok = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( id  :  Prims.string ) -> (match (fuel) with
+| [] -> begin
+     (match ((lookup d.nodes id)) with
+| Missing -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| (uu___)::fuel' -> begin
+     (match ((lookup d.nodes id)) with
+| Missing -> begin
+     true
+     end
+| Found (n) -> begin
+     (walk_all_ok d fuel' n.nparents)
+     end)
+     end))
+and walk_all_ok = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( ids  :  Prims.list<Prims.string> ) -> (match (ids) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     ((walk_ok d fuel p) && (walk_all_ok d fuel t))
+     end))
+
+
+let rec at_least = (fun ( big  :  Prims.list<'a> ) ( small  :  Prims.list<'a> ) -> (match (small) with
+| [] -> begin
+     true
+     end
+| (uu___)::s -> begin
+     (match (big) with
+| [] -> begin
+     false
+     end
+| (uu___1)::b -> begin
+     (at_least b s)
+     end)
+     end))
+
+
+let rec closure_nodes = (fun ( ns  :  Prims.list<node<'op>> ) ( closure  :  Prims.list<Prims.string> ) -> (match (ns) with
+| [] -> begin
+     []
+     end
+| (n)::t -> begin
+      
+if (mem n.nid closure) then begin
+     (n)::(closure_nodes t closure)
+     end else begin
+     (closure_nodes t closure)
+     end
+     end))
+
+
+let topo_drain = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( head  :  Prims.string ) -> (drain_order lt kfuel (closure_nodes d.nodes (ancestors_of d fuel head))))
+
+
+let between_drained = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (between_ordered d fuel base_id (topo_drain lt kfuel d fuel head)))
+
+
+let between_ops_drained = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( head  :  Prims.string ) -> (ops_of (between_drained lt kfuel d fuel base_id head)))
+
+
+let head_drains = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( kfuel  :  Prims.list<node<'op>> ) ( head  :  Prims.string ) ( w  :  Prims.list<Prims.string> ) -> (
+
+let cn = (closure_nodes d.nodes (ancestors_of d fuel head))
+in ((covers kfuel (ids_of cn)) && (is_topo_enum cn w))))
+
+
+let rec deltas_of_drained = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( heads  :  Prims.list<Prims.string> ) -> (match (heads) with
+| [] -> begin
+     []
+     end
+| (h)::t -> begin
+     ((between_ops_drained lt kfuel d fuel base_id h))::(deltas_of_drained lt kfuel d fuel base_id t)
+     end))
+
+
+let reconcile_many_drained = (fun ( fp  :  'op  ->  footprint ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( heads  :  Prims.list<Prims.string> ) -> (reconcile_many fp (deltas_of_drained lt kfuel d fuel base_id heads)))
+
+
+let fold_once_drained = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( fp  :  'op  ->  footprint ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( base_id  :  Prims.string ) ( s0  :  'state ) ( heads  :  Prims.list<Prims.string> ) -> (fold_once apply fp s0 (deltas_of_drained lt kfuel d fuel base_id heads)))
+
+
+let rec dedup : Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+      
+if (mem x t) then begin
+     (dedup t)
+     end else begin
+     (x)::(dedup t)
+     end
+     end))
+
+
+let rec shorter = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'b> ) -> (match (m) with
+| [] -> begin
+     false
+     end
+| (uu___)::mt -> begin
+     (match (l) with
+| [] -> begin
+     true
+     end
+| (uu___1)::lt' -> begin
+     (shorter lt' mt)
+     end)
+     end))
+
+
+let closure_set = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( id  :  Prims.string ) -> (dedup (ancestors_of d fuel id)))
+
+
+let deeper = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( x  :  Prims.string ) ( y  :  Prims.string ) -> (
+
+let cx = (closure_set d fuel x)
+in (
+
+let cy = (closure_set d fuel y)
+in  
+if (shorter cy cx) then begin
+     true
+     end else begin
+      
+if (shorter cx cy) then begin
+     false
+     end else begin
+     (lt y x)
+     end
+     end)))
+
+
+let rec max_by : (Prims.string  ->  Prims.string  ->  Prims.bool)  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.string = (fun ( better  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( best  :  Prims.string ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     best
+     end
+| (x)::t -> begin
+      
+if (better x best) then begin
+     (max_by better x t)
+     end else begin
+     (max_by better best t)
+     end
+     end))
+
+
+let merge_base = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( left  :  Prims.string ) ( right  :  Prims.string ) -> (match ((inter (ancestors_of d fuel left) (ancestors_of d fuel right))) with
+| [] -> begin
+     Missing
+     end
+| (c)::t -> begin
+     Found ((max_by (deeper lt d fuel) c t))
+     end))
+
+
 
 
