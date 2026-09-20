@@ -825,7 +825,8 @@ let fold_confluence #op #state #rej apply fp s0 ls1 ls2 p =
 
    WHAT IS NOT MODELLED, and the one boundary worth reading twice. Hashing itself (above).
    `Dag.mergeBase`, which is not on this path at all — `foldOnce` hands `reconcileMany` the base
-   node's id directly. And **how the topological order is CHOSEN**: production's `topoOrder` is
+   node's id directly (it is modelled since Phase 158, in section 14, for the shape where a
+   divergence point does have to be located). And **how the topological order is CHOSEN**: production's `topoOrder` is
    Kahn's algorithm draining a ready frontier smallest-id-first, and `topo_of` below is the
    reverse of the parent walk. On the base-plus-N-chains shape the head's closure is a spine,
    every pair of its members is comparable under the ancestor relation, and a spine therefore
@@ -1352,6 +1353,8 @@ let fold_confluence_dag #op #state #rej apply fp s0 d fuel base_id hs1 hs2 p =
    WHAT IS STILL NOT CLAIMED. The general topological order over a MERGE DAG, where a node has two
    parents, the frontier genuinely widens and the choice is genuinely a choice. `Dag.mergeBase`,
    which is not on this path at all. Both stay where Phase 134's own statement put them.
+   (Both have since been taken: the order by section 13, Phase 156; `Dag.mergeBase` and the
+   recovery over a merged head by section 14, Phase 158.)
    ====================================================================================== *)
 
 (* ---- 12.1 what a topological order IS, as a property of a list ---- *)
@@ -2007,6 +2010,8 @@ let fold_once_dag_ordered_eq (#op:eqtype) (#state #rej:Type)
    parent list) and the model's subject is the ORDER. `Dag.mergeBase`, still. And any consumer's
    instantiation of this theorem for its own total order, which is that consumer's work and not
    this module's.
+   (`Dag.mergeBase`, and the delta recovery over a merged head that this drain is the order
+   FOR, are section 14 — Phase 158.)
 
    NO SMT PATTERNS, for section 11's reason: `rev`, `app`, `ids_of`, `remove_first` and
    `remove_id` rewrite into one another, and left to fire on their own they turn these queries
@@ -2865,3 +2870,867 @@ let spine_drain_is_append_order (#op:eqtype) (lt:string -> string -> bool)
           (ensures drain_order lt kfuel (bn :: ns) == bn.nid :: ids_of ns)
   = pick_min_is_a_tie_break lt;
     kahn_drain_is_such_an_enumeration (pick_min lt) kfuel bn ns
+
+(* ======================================================================================
+   14. Delta recovery over a MERGED HEAD (Phase 158).
+
+   Section 11 proves `Dag.between` for ONE base node and N chains off it, and sections 12 and 13
+   prove the order beneath it. The shape a clone holds after it has folded once and pulled again
+   is not that one: the lanes of the second round hang off a node whose own closure is the whole
+   first round — a merge node with N parents, every first-round lane beneath it, and the original
+   base beneath those. A head's closure there is no spine, its topological order is a genuine
+   choice, and the base the fold runs from is a divergence point that has to be LOCATED. This
+   section is that shape, claimed at a rung.
+
+   THE SHAPE IS ABSTRACT WHERE IT CAN BE. `m` is any node the DAG holds; NOTHING is asked of what
+   lies beneath it — no `bn.nparents == []`, no lanes, no base — beyond its closure being acyclic
+   (section 13's premise, in section 13's witness form). The lanes hanging off it are section 11's
+   own `lane_nodes` / `lane_head`, rooted at `m.nid` rather than at a parentless base. So "a merged
+   head" here means every node a fold can leave behind, and section 11's base is the instance
+   whose closure is itself.
+
+   THE ORDER IS SECTION 13'S DRAIN, by name. `topo_drain` is `drain_order` — the id-ordered Kahn
+   drain — over the head's closure taken as a node set (`closure_nodes`), which is F#'s
+   `topoCore`: the ancestor closure first, then the frontier loop over exactly those nodes.
+   `between_drained` is section 12's `between_ordered` at that order. Nothing is re-modelled, so
+   the three drain theorems apply as they stand, and `lt` and the drain's fuel stay the
+   parameters they were.
+
+   THE TWO THEOREMS, and the one beside them.
+     - `between_merged` — over a merged head, `Dag.between m head` returns the head's OWN lane
+       nodes in append order and nothing else: not the first round beneath `m`, and nothing from
+       a sibling lane. The drain's order over the first round is a real choice and the theorem
+       does not care which way it went, because the difference against `m`'s closure deletes
+       every node the choice was about; what survives is a spine, and on a spine a
+       parent-respecting order is forced (section 12's `spine_ids_forced`, consumed here over the
+       difference rather than over the closure). `between_ops_merged` is the ops.
+     - `reconcile_many_merged_eq` / `fold_once_merged_eq` — `Dag.reconcileMany` and
+       `FoldConfluence.foldOnce` FROM the merged DAG equal the deltas-first fold on the lanes that
+       were appended, as section 11 proved them over a spine.
+     - `merge_base_is_divergence` — `Dag.mergeBase` of two second-round heads is `m`: the
+       divergence point, not the original base and not anything else they share. `merge_base` is
+       production's function clause for clause — the intersection of the two closures, then the
+       maximum by (closure SIZE, id). The size comparison is `shorter` over the de-duplicated
+       closures, so the oracle still holds no integer; that `m` wins is production's own docstring
+       sentence ("a node strictly deeper than any of its own ancestors has a strictly larger
+       closure"), PROVED: the closure is transitive (`anc_trans`), `m` is in no proper ancestor's
+       closure (`off_cycle`), and a distinct list strictly inside another is `shorter`
+       (`pigeon`). The id tie-break is therefore UNEXERCISED on this shape — the maximum is
+       strict — and the theorem holds for every `lt` whatsoever, total order or not.
+
+   THE PREMISES, which are sections 11 and 13's and no new one.
+     - ID DISTINCTNESS, exactly as Phase 134 states it and read at this shape's granularity
+       (`merged_recovers`, `lane_ids_distinct`): every lane node is the node the DAG holds under
+       its own id, and no lane id is an id in `m`'s closure. Phase 134's third clause — "the
+       base's id is not one of the lane's" — is this clause at a base whose closure is itself.
+       `merge_base_is_divergence` also asks that the two lanes' ids be disjoint, which is what
+       `foldOnce` folds the actor into every node id FOR.
+     - ACYCLICITY, as section 13 takes it: a topological enumeration supplied as a witness, per
+       head for the drain (`head_drains`) and of `m`'s closure for `mergeBase`.
+       `merge_base_is_divergence` consumes it in the form it actually uses — `off_cycle`, "`m` is
+       not its own proper ancestor" — and `off_cycle_of_witness` DERIVES that form from the
+       witness (an ancestor stands before its descendant in any topological enumeration,
+       `anc_before`), exactly as `resolves_of_distinct` bridges section 11's premise.
+       `merge_base_is_divergence_acyclic` is the theorem with the bridge applied.
+     - FUEL. `ancestors_of` walks with a list as fuel, and over a merged head the walk from a lane
+       head reaches `m` with LESS of it than a walk that starts at `m`. `walk_ok` says a walk never
+       ran out; `anc_stable` proves such a walk is the same list under any longer fuel. So the fuel
+       premise is "the walk below the lane completed" and the two closures the recovery compares
+       are one list. Production's work-list has no fuel; this is the model's bound, discharged.
+
+   WHAT IS STILL NOT CLAIMED. Second-round lanes that themselves MERGE before the fold — a head
+   whose own delta contains a two-parent node; the delta there is not a spine and its order is the
+   drain's choice, which section 13 makes deterministic but which no theorem here identifies with
+   an append order, because there is none. `Dag.mergeBase` over heads with SEVERAL maximal common
+   ancestors (a criss-cross merge), where the (size, id) tie-break decides and what it decides is
+   a policy rather than a fact. Hashing, still: distinctness is the premise.
+
+   NO SMT PATTERNS, for section 11's reason. Every lemma below is called by name.
+   ====================================================================================== *)
+
+(* ---- 14.1 fuel: a walk that never ran out is the same walk under any longer fuel ---- *)
+
+(* `ancestors_of` never reached its empty-fuel arm on a node the DAG holds. F#: nothing — the
+   production work-list is unbounded. This is the statement that the model's bound did not bite,
+   and it is computable, so the differential host evaluates it on every DAG it builds. *)
+
+let rec walk_ok (#op:eqtype) (d:dag op) (fuel:list (node op)) (id:string)
+  : Tot bool (decreases %[fuel; (0 <: nat); ([] <: list string)]) =
+  match fuel with
+  | [] -> Missing? (lookup d.nodes id)
+  | _ :: fuel' ->
+    (match lookup d.nodes id with
+     | Missing -> true
+     | Found n -> walk_all_ok d fuel' n.nparents)
+
+and walk_all_ok (#op:eqtype) (d:dag op) (fuel:list (node op)) (ids:list string)
+  : Tot bool (decreases %[fuel; (1 <: nat); ids]) =
+  match ids with
+  | [] -> true
+  | p :: t -> walk_ok d fuel p && walk_all_ok d fuel t
+
+(* `big` is at least as long as `small`. The walk reads its fuel's LENGTH and nothing else, so this
+   is the whole relation between two fuels that matters — spelled structurally, without integers. *)
+let rec at_least (#a:Type) (big small:list a) : Tot bool (decreases small) =
+  match small with
+  | [] -> true
+  | _ :: s -> (match big with | [] -> false | _ :: b -> at_least b s)
+
+let rec at_least_refl (#a:Type) (l:list a) : Lemma (ensures at_least l l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> at_least_refl t
+
+let rec at_least_tail (#a:Type) (big small:list a)
+  : Lemma (requires at_least big small /\ Cons? small)
+          (ensures at_least big (Cons?.tl small))
+          (decreases small)
+  = match small with
+    | [ _ ] -> ()
+    | _ :: s ->
+      (match big with
+       | [] -> ()
+       | _ :: b -> at_least_tail b s)
+
+let rec at_least_cons (#a:Type) (x:a) (f small:list a)
+  : Lemma (requires at_least f small) (ensures at_least (x :: f) small) (decreases small)
+  = match small with
+    | [] -> ()
+    | _ :: s ->
+      (match f with
+       | [] -> ()
+       | y :: f' -> at_least_cons y f' s)
+
+let rec at_least_drop (#a #b:Type) (fuel:list a) (l:list b)
+  : Lemma (ensures at_least fuel (drop_by fuel l)) (decreases l)
+  = match l with
+    | [] -> at_least_refl fuel
+    | _ :: t ->
+      (match fuel with
+       | [] -> ()
+       | x :: f ->
+         at_least_drop f t;
+         at_least_cons x f (drop_by f t))
+
+(* THE FUEL LEMMA. A completed walk is the same list, and still complete, under any longer fuel. *)
+let rec anc_stable (#op:eqtype) (d:dag op) (f big:list (node op)) (id:string)
+  : Lemma (requires walk_ok d f id /\ at_least big f)
+          (ensures ancestors_of d big id == ancestors_of d f id /\ walk_ok d big id)
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = match f with
+    | [] -> (match big with | [] -> () | _ :: _ -> ())
+    | _ :: f' ->
+      (match big with
+       | [] -> ()
+       | _ :: big' ->
+         (match lookup d.nodes id with
+          | Missing -> ()
+          | Found n -> anc_all_stable d f' big' n.nparents))
+
+and anc_all_stable (#op:eqtype) (d:dag op) (f big:list (node op)) (ids:list string)
+  : Lemma (requires walk_all_ok d f ids /\ at_least big f)
+          (ensures ancestors_all d big ids == ancestors_all d f ids /\ walk_all_ok d big ids)
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t ->
+      anc_stable d f big p;
+      anc_all_stable d f big t
+
+(* ---- 14.2 the closure as a node set, and the delta under the drain ---- *)
+
+(* F#: the `anc` set of `topoCore`, as the nodes it names — the set the frontier loop runs over. *)
+let rec closure_nodes (#op:eqtype) (ns:list (node op)) (closure:list string)
+  : Tot (list (node op)) =
+  match ns with
+  | [] -> []
+  | n :: t -> if mem n.nid closure then n :: closure_nodes t closure else closure_nodes t closure
+
+(* F#: `topoOrder dag head` — the closure, then section 13's drain over exactly that node set. *)
+let topo_drain (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
+  (d:dag op) (fuel:list (node op)) (head:string) : Tot (list string) =
+  drain_order lt kfuel (closure_nodes d.nodes (ancestors_of d fuel head))
+
+(* F#: `Dag.between`, with the order production actually computes rather than section 11's
+   parent-walk reversal. `between` is this function wherever the closure is a spine
+   (`spine_drain_is_the_parent_walk`); over a merged head only this one is production's. *)
+let between_drained (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
+  (d:dag op) (fuel:list (node op)) (base_id:string) (head:string) : Tot (list (node op)) =
+  between_ordered d fuel base_id (topo_drain lt kfuel d fuel head)
+
+(* F#: `Dag.betweenOps`. *)
+let between_ops_drained (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
+  (d:dag op) (fuel:list (node op)) (base_id:string) (head:string) : Tot (list op) =
+  ops_of (between_drained lt kfuel d fuel base_id head)
+
+let rec mem_closure_nodes (#op:eqtype) (ns:list (node op)) (closure:list string) (n:node op)
+  : Lemma (ensures mem n (closure_nodes ns closure) == (mem n ns && mem n.nid closure))
+  = match ns with
+    | [] -> ()
+    | _ :: t -> mem_closure_nodes t closure n
+
+let rec mem_ids_closure_nodes (#op:eqtype) (ns:list (node op)) (closure:list string) (x:string)
+  : Lemma (ensures mem x (ids_of (closure_nodes ns closure)) == (mem x (ids_of ns) && mem x closure))
+  = match ns with
+    | [] -> ()
+    | _ :: t -> mem_ids_closure_nodes t closure x
+
+let rec distinct_closure_nodes (#op:eqtype) (ns:list (node op)) (closure:list string)
+  : Lemma (requires distinct (ids_of ns)) (ensures distinct (ids_of (closure_nodes ns closure)))
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      distinct_closure_nodes t closure;
+      mem_ids_closure_nodes t closure n.nid
+
+let rec lookup_found (#op:eqtype) (ns:list (node op)) (id:string) (n:node op)
+  : Lemma (requires lookup ns id == Found n)
+          (ensures n.nid == id /\ mem n ns /\ mem id (ids_of ns))
+  = match ns with
+    | [] -> ()
+    | m :: t -> if m.nid = id then () else lookup_found t id n
+
+(* ---- 14.3 list facts: `before` and `distinct` survive the difference ---- *)
+
+let rec before_diff (x y:string) (ord a:list string)
+  : Lemma (requires before x y ord /\ not (mem x a) /\ not (mem y a))
+          (ensures before x y (diff ord a))
+          (decreases ord)
+  = match ord with
+    | [] -> ()
+    | h :: t ->
+      if h = x then mem_diff y t a
+      else if h = y then ()
+      else before_diff x y t a
+
+let rec distinct_diff (ord a:list string)
+  : Lemma (requires distinct ord) (ensures distinct (diff ord a)) (decreases ord)
+  = match ord with
+    | [] -> ()
+    | h :: t ->
+      distinct_diff t a;
+      mem_diff h t a
+
+let rec follows_spine_diff (r:string) (ids ord a:list string)
+  : Lemma (requires follows_spine r ids ord /\ not (mem r a) /\
+                    (forall (x:string). mem x ids ==> not (mem x a)))
+          (ensures follows_spine r ids (diff ord a))
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | x :: t ->
+      before_diff r x ord a;
+      follows_spine_diff x t ord a
+
+(* A spine whose nodes and root all lie in the drained set follows its parents in any topological
+   enumeration of that set. *)
+let rec spine_follows_in (#op:eqtype) (cn:list (node op)) (ns:list (node op)) (r:string)
+  (ord:list string)
+  : Lemma (requires parents_chain ns r /\ mem r (ids_of cn) /\
+                    (forall (n:node op). mem n ns ==> mem n cn) /\
+                    follows_parents_in cn (ids_of cn) ord)
+          (ensures follows_spine r (ids_of ns) ord)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t ->
+      assert (mem n cn);
+      follows_mem cn (ids_of cn) [] ord n;
+      mem_ids_of n cn;
+      spine_follows_in cn t n.nid ord
+
+(* ---- 14.4 THE THEOREM: `between_merged` ---- *)
+
+(* What the recovery needs of content addressing per lane — `lane_recovers`, read at a merged head.
+   Clauses one and two are section 11's. Clause three is the fuel premise (14.1). Clause four is
+   section 11's "the base id is not one of the lane's", at a base whose closure is more than
+   itself: no lane id is an id the merged head's closure already holds. *)
+let merged_recovers (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (m:node op) (fuel:list (node op)) (ln:lane op) : prop =
+  resolves d (chain_rev mint ln.lactor m.nid (rev ln.lops)) /\
+  covers fuel (rev ln.lops) /\
+  walk_ok d (drop_by fuel (rev ln.lops)) m.nid /\
+  (forall (x:string). mem x (ids_of (lane_nodes mint ln.lactor m.nid ln.lops))
+                      ==> not (mem x (ancestors_of d fuel m.nid)))
+
+(* The head's closure is the lane, newest first, then the merged head's closure at FULL fuel. *)
+let merged_head_closure (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (actor:string) (m:node op) (l:list op) (fuel:list (node op))
+  : Lemma (requires merged_recovers d mint m fuel ({ lactor = actor; lops = l }))
+          (ensures ancestors_of d fuel (lane_head mint actor m.nid l)
+                   == app (ids_of (chain_rev mint actor m.nid (rev l)))
+                          (ancestors_of d fuel m.nid))
+  = let rl = rev l in
+    ancestors_chain d mint actor m.nid rl fuel;
+    at_least_drop fuel rl;
+    anc_stable d (drop_by fuel rl) fuel m.nid
+
+(* THEOREM. `Dag.between` from a merged head to a lane head hanging off it is that lane's nodes, in
+   append order — under production's own drain, whatever it chose beneath `m`.
+
+   Read it as the calculation it is: the head's closure is the lane then `m`'s closure
+   (`merged_head_closure`); the drain over it is total and parent-respecting
+   (`drain_total_on_acyclic`); every lane node is in the drained set, so the lane's ids follow one
+   another in the drain's order (`spine_follows_in`); the difference against `m`'s closure keeps
+   the lane's ids and only those, and keeps their order (`follows_spine_diff`, `distinct_diff`);
+   a distinct parent-respecting enumeration of a spine is forced (`spine_ids_forced`, with `m.nid`
+   put back at the front as its root); and the lookup returns the nodes (`nodes_for_ids`). *)
+#push-options "--z3rlimit 150"
+let between_merged (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (mint:string -> string -> op -> string) (actor:string) (m:node op) (l:list op)
+  (fuel kfuel:list (node op)) (w:list string)
+  : Lemma (requires distinct_ids d /\ lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    merged_recovers d mint m fuel ({ lactor = actor; lops = l }) /\
+                    lane_ids_distinct mint m ({ lactor = actor; lops = l }) /\
+                    (let cn = closure_nodes d.nodes
+                                (ancestors_of d fuel (lane_head mint actor m.nid l)) in
+                     covers kfuel (ids_of cn) /\ is_topo_enum cn w))
+          (ensures between_drained lt kfuel d fuel m.nid (lane_head mint actor m.nid l)
+                   == lane_nodes mint actor m.nid l)
+  = let q = m.nid in
+    let rl = rev l in
+    let c = chain_rev mint actor q rl in
+    let lns = lane_nodes mint actor q l in
+    let h = lane_head mint actor q l in
+    let a = ancestors_of d fuel q in
+    let hc = ancestors_of d fuel h in
+    let cn = closure_nodes d.nodes hc in
+    let ord = drain_order lt kfuel cn in
+    let ids = ids_of lns in
+    merged_head_closure d mint actor m l fuel;
+    ids_of_rev c;
+    distinct_closure_nodes d.nodes hc;
+    drain_total_on_acyclic lt kfuel cn w;
+    (* every lane node, and the merged head, is in the drained set *)
+    lookup_found d.nodes q m;
+    assert (mem q a);
+    mem_ids_closure_nodes d.nodes hc q;
+    let aux_n (n:node op) : Lemma (mem n lns ==> mem n cn) =
+      if mem n lns then begin
+        assert (mem n c);
+        lookup_found d.nodes n.nid n;
+        mem_ids_of n c;
+        mem_closure_nodes d.nodes hc n
+      end
+    in
+    FStar.Classical.forall_intro aux_n;
+    parents_chain_lane mint actor q l;
+    spine_follows_in cn lns q ord;
+    (* the difference keeps exactly the lane's ids *)
+    let dl = diff ord a in
+    let aux_m (x:string) : Lemma (mem x (q :: dl) == mem x (q :: ids)) =
+      mem_ids_closure_nodes d.nodes hc x;
+      if mem x ids then begin
+        lookup_of_mem_ids lns x;
+        let n = Found?._0 (lookup lns x) in
+        assert (mem n c);
+        lookup_found d.nodes n.nid n
+      end
+    in
+    FStar.Classical.forall_intro aux_m;
+    distinct_diff ord a;
+    (match ids with
+     | [] -> ()
+     | x1 :: t ->
+       follows_spine_diff x1 t ord a;
+       follows_spine_cons q x1 t dl);
+    spine_ids_forced q ids (q :: dl);
+    nodes_for_ids d lns
+#pop-options
+
+(* Section 13's premises for one head's drain: fuel for the closure, and an acyclicity witness. *)
+let head_drains (#op:eqtype) (d:dag op) (fuel kfuel:list (node op)) (head:string)
+  (w:list string) : Tot bool =
+  let cn = closure_nodes d.nodes (ancestors_of d fuel head) in
+  covers kfuel (ids_of cn) && is_topo_enum cn w
+
+#push-options "--z3rlimit 100"
+let between_ops_merged (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (mint:string -> string -> op -> string) (actor:string) (m:node op) (l:list op)
+  (fuel kfuel:list (node op)) (w:list string)
+  : Lemma (requires distinct_ids d /\ lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    merged_recovers d mint m fuel ({ lactor = actor; lops = l }) /\
+                    lane_ids_distinct mint m ({ lactor = actor; lops = l }) /\
+                    head_drains d fuel kfuel (lane_head mint actor m.nid l) w)
+          (ensures between_ops_drained lt kfuel d fuel m.nid (lane_head mint actor m.nid l) == l)
+  = between_merged lt d mint actor m l fuel kfuel w;
+    ops_of_rev (chain_rev mint actor m.nid (rev l));
+    ops_of_chain_rev mint actor m.nid (rev l);
+    rev_rev l
+#pop-options
+
+(* ---- 14.5 the fold over a merged head ---- *)
+
+let rec deltas_of_drained (#op:eqtype) (lt:string -> string -> bool) (kfuel:list (node op))
+  (d:dag op) (fuel:list (node op)) (base_id:string) (heads:list string)
+  : Tot (list (list op)) =
+  match heads with
+  | [] -> []
+  | h :: t -> between_ops_drained lt kfuel d fuel base_id h
+              :: deltas_of_drained lt kfuel d fuel base_id t
+
+let reconcile_many_drained (#op:eqtype) (fp:op -> footprint) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (base_id:string) (heads:list string)
+  : Tot (outcome (list op) (list (conflict op))) =
+  reconcile_many fp (deltas_of_drained lt kfuel d fuel base_id heads)
+
+let fold_once_drained (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (base_id:string) (s0:state)
+  (heads:list string) : Tot (lane_outcome op state rej) =
+  fold_once apply fp s0 (deltas_of_drained lt kfuel d fuel base_id heads)
+
+(* Every second-round lane recovers, and every head drains — one witness per head, in order. *)
+let rec lanes_merged_ok (#op:eqtype) (d:dag op) (mint:string -> string -> op -> string)
+  (m:node op) (fuel kfuel:list (node op)) (lanes:list (lane op)) (ws:list (list string))
+  : Tot prop (decreases lanes) =
+  match lanes with
+  | [] -> (match ws with | [] -> True | _ :: _ -> False)
+  | ln :: lt' ->
+    (match ws with
+     | [] -> False
+     | w :: wt ->
+       merged_recovers d mint m fuel ln /\
+       lane_ids_distinct mint m ln /\
+       head_drains d fuel kfuel (lane_head mint ln.lactor m.nid ln.lops) w /\
+       lanes_merged_ok d mint m fuel kfuel lt' wt)
+
+let rec deltas_of_merged_lanes (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (mint:string -> string -> op -> string) (m:node op) (fuel kfuel:list (node op))
+  (lanes:list (lane op)) (ws:list (list string))
+  : Lemma (requires distinct_ids d /\ lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    lanes_merged_ok d mint m fuel kfuel lanes ws)
+          (ensures deltas_of_drained lt kfuel d fuel m.nid (lane_heads mint m.nid lanes)
+                   == lane_ops lanes)
+          (decreases lanes)
+  = match lanes with
+    | [] -> ()
+    | ln :: lt' ->
+      (match ws with
+       | [] -> ()
+       | w :: wt ->
+         between_ops_merged lt d mint ln.lactor m ln.lops fuel kfuel w;
+         deltas_of_merged_lanes lt d mint m fuel kfuel lt' wt)
+
+(* THEOREM. `Dag.reconcileMany` FROM a merged head equals the deltas-first `reconcile_many` on the
+   lanes that were appended — section 11's `reconcile_many_dag_eq`, over the shape a clone folds
+   after a pull, under the drain production runs. *)
+let reconcile_many_merged_eq (#op:eqtype) (fp:op -> footprint) (lt:string -> string -> bool)
+  (d:dag op) (mint:string -> string -> op -> string) (m:node op) (fuel kfuel:list (node op))
+  (lanes:list (lane op)) (ws:list (list string))
+  : Lemma (requires distinct_ids d /\ lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    lanes_merged_ok d mint m fuel kfuel lanes ws)
+          (ensures reconcile_many_drained fp lt kfuel d fuel m.nid (lane_heads mint m.nid lanes)
+                   == reconcile_many fp (lane_ops lanes))
+  = deltas_of_merged_lanes lt d mint m fuel kfuel lanes ws
+
+let fold_once_merged_eq (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (lt:string -> string -> bool)
+  (s0:state) (d:dag op) (mint:string -> string -> op -> string) (m:node op)
+  (fuel kfuel:list (node op)) (lanes:list (lane op)) (ws:list (list string))
+  : Lemma (requires distinct_ids d /\ lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    lanes_merged_ok d mint m fuel kfuel lanes ws)
+          (ensures fold_once_drained apply fp lt kfuel d fuel m.nid s0
+                     (lane_heads mint m.nid lanes)
+                   == fold_once apply fp s0 (lane_ops lanes))
+  = deltas_of_merged_lanes lt d mint m fuel kfuel lanes ws
+
+(* ---- 14.6 `Dag.mergeBase` ---- *)
+
+(* F#: a `Set<string>` holds each id once; the model's closure is a walk and holds an id once per
+   path to it. De-duplicated, its length is `Set.count`. *)
+let rec dedup (l:list string) : Tot (list string) =
+  match l with
+  | [] -> []
+  | x :: t -> if mem x t then dedup t else x :: dedup t
+
+(* F#: `Set.count a < Set.count b`, as a comparison of two lists' lengths with no integer in it. *)
+let rec shorter (#a #b:Type) (l:list a) (m:list b) : Tot bool (decreases m) =
+  match m with
+  | [] -> false
+  | _ :: mt -> (match l with | [] -> true | _ :: lt' -> shorter lt' mt)
+
+let closure_set (#op:eqtype) (d:dag op) (fuel:list (node op)) (id:string) : Tot (list string) =
+  dedup (ancestors_of d fuel id)
+
+(* F#: the `List.maxBy` key `(Set.count (ancestorsOf dag id), id)`, as the strict comparison
+   "x's key is greater than y's" — closure size first, the id order second. *)
+let deeper (#op:eqtype) (lt:string -> string -> bool) (d:dag op) (fuel:list (node op))
+  (x y:string) : Tot bool =
+  let cx = closure_set d fuel x in
+  let cy = closure_set d fuel y in
+  if shorter cy cx then true
+  else if shorter cx cy then false
+  else lt y x
+
+(* F#: `List.maxBy`. Keys are distinct wherever ids are, so first-of-equals is never consulted. *)
+let rec max_by (better:string -> string -> bool) (best:string) (l:list string)
+  : Tot string (decreases l) =
+  match l with
+  | [] -> best
+  | x :: t -> if better x best then max_by better x t else max_by better best t
+
+(* F#: `Dag.mergeBase`, clause for clause. `None` is `Missing`. *)
+let merge_base (#op:eqtype) (lt:string -> string -> bool) (d:dag op) (fuel:list (node op))
+  (left right:string) : Tot (found string) =
+  match inter (ancestors_of d fuel left) (ancestors_of d fuel right) with
+  | [] -> Missing
+  | c :: t -> Found (max_by (deeper lt d fuel) c t)
+
+let rec mem_dedup (l:list string) (x:string)
+  : Lemma (ensures mem x (dedup l) == mem x l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> mem_dedup t x
+
+let rec distinct_dedup (l:list string) : Lemma (ensures distinct (dedup l))
+  = match l with
+    | [] -> ()
+    | x :: t -> distinct_dedup t; mem_dedup t x
+
+let rec shorter_asym (#a #b:Type) (l:list a) (m:list b)
+  : Lemma (requires shorter l m) (ensures not (shorter m l)) (decreases m)
+  = match m with
+    | [] -> ()
+    | _ :: mt -> (match l with | [] -> () | _ :: lt' -> shorter_asym lt' mt)
+
+let rec shorter_remove_first_cons (x h:string) (t mt:list string)
+  : Lemma (requires mem x mt)
+          (ensures shorter t (h :: remove_first x mt) == shorter t mt)
+          (decreases t)
+  = match t with
+    | [] -> ()
+    | _ :: t' ->
+      (match mt with
+       | [] -> ()
+       | h2 :: mt2 -> if h2 = x then () else shorter_remove_first_cons x h2 t' mt2)
+
+(* A distinct list strictly inside another is strictly shorter — the counting step of "a strictly
+   deeper node has a strictly larger closure", with `remove_first` standing in for subtraction. *)
+let rec pigeon (l m:list string) (y:string)
+  : Lemma (requires distinct l /\ distinct m /\ (forall (x:string). mem x l ==> mem x m) /\
+                    mem y m /\ not (mem y l))
+          (ensures shorter l m)
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | x :: t ->
+      let m' = remove_first x m in
+      distinct_remove_first m x;
+      let aux (z:string) : Lemma (mem z m' == (mem z m && not (z = x))) = mem_remove_first m x z in
+      FStar.Classical.forall_intro aux;
+      pigeon t m' y;
+      (match m with
+       | [] -> ()
+       | h :: mt -> if h = x then () else shorter_remove_first_cons x h t mt)
+
+let rec max_by_is (better:string -> string -> bool) (best:string) (l:list string) (q:string)
+  : Lemma (requires mem q (best :: l) /\
+                    (forall (y:string). mem y (best :: l) /\ y =!= q ==>
+                                        (better q y /\ not (better y q))))
+          (ensures max_by better best l == q)
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | x :: t ->
+      if better x best then max_by_is better x t q
+      else max_by_is better best t q
+
+(* The closure is TRANSITIVE: an ancestor's ancestors are ancestors. Stated across two fuels,
+   because the inner walk starts higher up than the outer one reached it. *)
+let rec anc_trans (#op:eqtype) (d:dag op) (f big:list (node op)) (id x y:string)
+  : Lemma (requires walk_ok d f id /\ at_least big f /\ mem x (ancestors_of d f id) /\
+                    mem y (ancestors_of d big x))
+          (ensures mem y (ancestors_of d f id))
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match lookup d.nodes id with
+       | Missing -> ()
+       | Found n ->
+         if x = id then anc_stable d f big id
+         else begin
+           at_least_tail big f;
+           anc_all_trans d f' big n.nparents x y
+         end)
+
+and anc_all_trans (#op:eqtype) (d:dag op) (f big:list (node op)) (ids:list string) (x y:string)
+  : Lemma (requires walk_all_ok d f ids /\ at_least big f /\ mem x (ancestors_all d f ids) /\
+                    mem y (ancestors_of d big x))
+          (ensures mem y (ancestors_all d f ids))
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t ->
+      if mem x (ancestors_of d f p) then anc_trans d f big p x y
+      else anc_all_trans d f big t x y
+
+(* ACYCLICITY in the form `mergeBase` consumes: the merged head is not its own proper ancestor.
+   `off_cycle_of_witness` (14.7) derives it from section 13's witness. *)
+let off_cycle (#op:eqtype) (d:dag op) (fuel:list (node op)) (m:node op) : prop =
+  forall (x:string). mem x (ancestors_of d fuel m.nid) /\ x =!= m.nid
+                     ==> not (mem m.nid (ancestors_of d fuel x))
+
+(* Production's docstring sentence, proved: every proper ancestor of `m` has a strictly smaller
+   closure than `m`, so `m`'s key beats it on the FIRST component and the id order is not reached. *)
+let strictly_deeper (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (fuel:list (node op)) (m:node op) (y:string)
+  : Lemma (requires lookup d.nodes m.nid == Found m /\ Cons? fuel /\ walk_ok d fuel m.nid /\
+                    off_cycle d fuel m /\ mem y (ancestors_of d fuel m.nid) /\ y =!= m.nid)
+          (ensures deeper lt d fuel m.nid y /\ not (deeper lt d fuel y m.nid))
+  = let q = m.nid in
+    let s = ancestors_of d fuel y in
+    let mm = ancestors_of d fuel q in
+    at_least_refl fuel;
+    let aux (z:string) : Lemma (mem z (dedup s) ==> mem z (dedup mm)) =
+      mem_dedup s z;
+      mem_dedup mm z;
+      if mem z s then anc_trans d fuel fuel q y z
+    in
+    FStar.Classical.forall_intro aux;
+    distinct_dedup s;
+    distinct_dedup mm;
+    mem_dedup s q;
+    mem_dedup mm q;
+    assert (mem q mm);
+    pigeon (dedup s) (dedup mm) q;
+    shorter_asym (dedup s) (dedup mm)
+
+(* THEOREM. `Dag.mergeBase` of two lane heads off a merged head is that merged head — the
+   divergence point. The common ancestors of the two heads are exactly `m`'s closure (the lanes
+   share no id with each other or with it), and `m` is strictly the deepest of them. *)
+#push-options "--z3rlimit 150"
+let merge_base_is_divergence (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (mint:string -> string -> op -> string) (m:node op) (fuel:list (node op))
+  (ln1 ln2:lane op)
+  : Lemma (requires lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    merged_recovers d mint m fuel ln1 /\ merged_recovers d mint m fuel ln2 /\
+                    off_cycle d fuel m /\
+                    (forall (x:string).
+                       mem x (ids_of (lane_nodes mint ln1.lactor m.nid ln1.lops)) ==>
+                       not (mem x (ids_of (lane_nodes mint ln2.lactor m.nid ln2.lops)))))
+          (ensures merge_base lt d fuel (lane_head mint ln1.lactor m.nid ln1.lops)
+                                        (lane_head mint ln2.lactor m.nid ln2.lops)
+                   == Found m.nid)
+  = let q = m.nid in
+    let a = ancestors_of d fuel q in
+    let c1 = chain_rev mint ln1.lactor q (rev ln1.lops) in
+    let c2 = chain_rev mint ln2.lactor q (rev ln2.lops) in
+    let h1 = ancestors_of d fuel (lane_head mint ln1.lactor q ln1.lops) in
+    let h2 = ancestors_of d fuel (lane_head mint ln2.lactor q ln2.lops) in
+    merged_head_closure d mint ln1.lactor m ln1.lops fuel;
+    merged_head_closure d mint ln2.lactor m ln2.lops fuel;
+    ids_of_rev c1;
+    ids_of_rev c2;
+    at_least_drop fuel (rev ln1.lops);
+    anc_stable d (drop_by fuel (rev ln1.lops)) fuel q;
+    let common = inter h1 h2 in
+    let aux_c (x:string) : Lemma (mem x common == mem x a) = () in
+    FStar.Classical.forall_intro aux_c;
+    assert (mem q a);
+    assert (mem q common);
+    (match common with
+     | [] -> ()
+     | c :: t ->
+       let aux_d (y:string)
+         : Lemma (mem y (c :: t) /\ y =!= q ==>
+                  (deeper lt d fuel q y /\ not (deeper lt d fuel y q))) =
+         if mem y (c :: t) && y <> q then strictly_deeper lt d fuel m y
+       in
+       FStar.Classical.forall_intro aux_d;
+       max_by_is (deeper lt d fuel) c t q)
+#pop-options
+
+(* ---- 14.7 the bridge: an acyclicity WITNESS puts the merged head off every cycle ---- *)
+
+let rec before_trans (x y z:string) (l:list string)
+  : Lemma (requires before x y l /\ before y z l /\ distinct l) (ensures before x z l)
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t ->
+      if h = x then before_mem_snd y z t
+      else if h = y then ()
+      else if h = z then ()
+      else before_trans x y z t
+
+let rec before_asym (x y:string) (l:list string)
+  : Lemma (requires before x y l /\ before y x l /\ distinct l) (ensures False) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t ->
+      if h = x then ()
+      else if h = y then ()
+      else before_asym x y t
+
+let rec all_before_mem (ps:list string) (child:string) (ord:list string) (p:string)
+  : Lemma (requires all_before_or_emitted ps child [] ord /\ mem p ps)
+          (ensures before p child ord)
+          (decreases ps)
+  = match ps with
+    | [] -> ()
+    | h :: t -> if h = p then () else all_before_mem t child ord p
+
+let rec mem_parents_in (ps closure:list string) (p:string)
+  : Lemma (ensures mem p (parents_in ps closure) == (mem p ps && mem p closure))
+  = match ps with
+    | [] -> ()
+    | _ :: t -> mem_parents_in t closure p
+
+let rec anc_all_incl (#op:eqtype) (d:dag op) (f:list (node op)) (ids:list string) (p y:string)
+  : Lemma (requires mem p ids /\ mem y (ancestors_of d f p))
+          (ensures mem y (ancestors_all d f ids))
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | h :: t -> if h = p then () else anc_all_incl d f t p y
+
+let rec walk_ok_anc (#op:eqtype) (d:dag op) (f big:list (node op)) (id x:string)
+  : Lemma (requires walk_ok d f id /\ at_least big f /\ mem x (ancestors_of d f id))
+          (ensures walk_ok d big x)
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match lookup d.nodes id with
+       | Missing -> ()
+       | Found n ->
+         if x = id then anc_stable d f big id
+         else begin
+           at_least_tail big f;
+           walk_ok_anc_all d f' big n.nparents x
+         end)
+
+and walk_ok_anc_all (#op:eqtype) (d:dag op) (f big:list (node op)) (ids:list string) (x:string)
+  : Lemma (requires walk_all_ok d f ids /\ at_least big f /\ mem x (ancestors_all d f ids))
+          (ensures walk_ok d big x)
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t ->
+      if mem x (ancestors_of d f p) then walk_ok_anc d f big p x
+      else walk_ok_anc_all d f big t x
+
+let rec walk_all_ok_mem (#op:eqtype) (d:dag op) (f:list (node op)) (ids:list string) (p:string)
+  : Lemma (requires walk_all_ok d f ids /\ mem p ids) (ensures walk_ok d f p) (decreases ids)
+  = match ids with
+    | [] -> ()
+    | h :: t -> if h = p then () else walk_all_ok_mem d f t p
+
+(* What `anc_before` carries unchanged down its walk: `m`'s closure walked to completion, and a
+   distinct parent-respecting enumeration of it. *)
+let witness_ctx (#op:eqtype) (d:dag op) (fuel:list (node op)) (q:string) (wm:list string)
+  : prop =
+  walk_ok d fuel q /\ distinct wm /\
+  (let cnm = closure_nodes d.nodes (ancestors_of d fuel q) in
+   follows_parents_in cnm (ids_of cnm) wm)
+
+(* An ancestor stands BEFORE its descendant in any topological enumeration of a closure that holds
+   them both: one `follows_parents_in` step per edge of the walk, chained by `before_trans`. *)
+#push-options "--z3rlimit 200 --fuel 2 --ifuel 2"
+let rec anc_before (#op:eqtype) (d:dag op) (fuel f:list (node op)) (q:string)
+  (wm:list string) (id z:string)
+  : Lemma (requires witness_ctx d fuel q wm /\ walk_ok d f id /\ at_least fuel f /\
+                    mem id (ancestors_of d fuel q) /\ mem z (ancestors_of d f id) /\ z =!= id)
+          (ensures before z id wm)
+          (decreases %[f; (0 <: nat); ([] <: list string)])
+  = match f with
+    | [] -> ()
+    | _ :: f' ->
+      (match lookup d.nodes id with
+       | Missing -> ()
+       | Found n ->
+         lookup_found d.nodes id n;
+         anc_stable d f fuel id;
+         at_least_tail fuel f;
+         anc_all_before d fuel f' q wm n n.nparents z)
+
+and anc_all_before (#op:eqtype) (d:dag op) (fuel f:list (node op)) (q:string)
+  (wm:list string) (n:node op) (ids:list string) (z:string)
+  : Lemma (requires witness_ctx d fuel q wm /\ lookup d.nodes n.nid == Found n /\
+                    mem n.nid (ancestors_of d fuel q) /\ walk_ok d fuel n.nid /\
+                    (forall (p:string). mem p ids ==> mem p n.nparents) /\
+                    walk_all_ok d f ids /\ at_least fuel f /\
+                    mem z (ancestors_all d f ids))
+          (ensures before z n.nid wm)
+          (decreases %[f; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t ->
+      if mem z (ancestors_of d f p) then begin
+        let a = ancestors_of d fuel q in
+        let cnm = closure_nodes d.nodes a in
+        (match f with
+         | [] -> ()
+         | _ :: _ ->
+           (match lookup d.nodes p with
+            | Missing -> ()
+            | Found pn ->
+              lookup_found d.nodes p pn;
+              (match fuel with
+               | [] -> ()
+               | _ :: fuel' ->
+                 assert (walk_all_ok d fuel' n.nparents);
+                 walk_all_ok_mem d fuel' n.nparents p;
+                 (match fuel' with
+                  | [] -> ()
+                  | _ :: _ ->
+                    assert (mem p (ancestors_of d fuel' p));
+                    anc_all_incl d fuel' n.nparents p p));
+              assert (mem p (ancestors_of d fuel n.nid));
+              at_least_refl fuel;
+              anc_trans d fuel fuel q n.nid p;
+              mem_ids_closure_nodes d.nodes a p;
+              lookup_found d.nodes n.nid n;
+              mem_closure_nodes d.nodes a n;
+              follows_mem cnm (ids_of cnm) [] wm n;
+              mem_parents_in n.nparents (ids_of cnm) p;
+              all_before_mem (parents_in n.nparents (ids_of cnm)) n.nid wm p;
+              if z = p then ()
+              else begin
+                anc_before d fuel f q wm p z;
+                before_trans z p n.nid wm
+              end))
+      end
+      else anc_all_before d fuel f q wm n t z
+#pop-options
+
+(* THE BRIDGE. Section 13's acyclicity witness gives `off_cycle`: were `m` a proper ancestor of one
+   of its own ancestors, each would stand before the other in a distinct list. *)
+let off_cycle_of_witness (#op:eqtype) (d:dag op) (fuel:list (node op)) (m:node op)
+  (wm:list string)
+  : Lemma (requires walk_ok d fuel m.nid /\
+                    is_topo_enum (closure_nodes d.nodes (ancestors_of d fuel m.nid)) wm)
+          (ensures off_cycle d fuel m)
+  = let q = m.nid in
+    at_least_refl fuel;
+    let aux (x:string)
+      : Lemma (mem x (ancestors_of d fuel q) /\ x =!= q ==> not (mem q (ancestors_of d fuel x))) =
+      if mem x (ancestors_of d fuel q) && x <> q && mem q (ancestors_of d fuel x) then begin
+        anc_before d fuel fuel q wm q x;
+        walk_ok_anc d fuel fuel q x;
+        anc_before d fuel fuel q wm x q;
+        before_asym x q wm
+      end
+    in
+    FStar.Classical.forall_intro aux
+
+(* THEOREM, with the bridge applied: `mergeBase` finds the divergence point on sections 11 and
+   13's premises alone. *)
+let merge_base_is_divergence_acyclic (#op:eqtype) (lt:string -> string -> bool) (d:dag op)
+  (mint:string -> string -> op -> string) (m:node op) (fuel:list (node op))
+  (ln1 ln2:lane op) (wm:list string)
+  : Lemma (requires lookup d.nodes m.nid == Found m /\ Cons? fuel /\
+                    merged_recovers d mint m fuel ln1 /\ merged_recovers d mint m fuel ln2 /\
+                    is_topo_enum (closure_nodes d.nodes (ancestors_of d fuel m.nid)) wm /\
+                    (forall (x:string).
+                       mem x (ids_of (lane_nodes mint ln1.lactor m.nid ln1.lops)) ==>
+                       not (mem x (ids_of (lane_nodes mint ln2.lactor m.nid ln2.lops)))))
+          (ensures merge_base lt d fuel (lane_head mint ln1.lactor m.nid ln1.lops)
+                                        (lane_head mint ln2.lactor m.nid ln2.lops)
+                   == Found m.nid)
+  = at_least_drop fuel (rev ln1.lops);
+    anc_stable d (drop_by fuel (rev ln1.lops)) fuel m.nid;
+    off_cycle_of_witness d fuel m wm;
+    merge_base_is_divergence lt d mint m fuel ln1 ln2
