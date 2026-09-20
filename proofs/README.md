@@ -499,6 +499,7 @@ over-read.
 | `tree-algebra-well-formed-states` | `domain-obligation` | `Conformance.opAlgebra` |
 | `content-id-determines-content` | `premise` | — |
 | `chain-walk-order-is-productions` | `model-bridge` | `permanent` |
+| `signature-binds-one-head` | `domain-obligation` | `Conformance.attestationLaws` |
 | `parser-float-readback-opaque` | `model-bridge` | `permanent` |
 | `parser-alphabet-bridge` | `model-bridge` | `permanent` |
 | `lawful-abstract-witness` | `domain-obligation` | `Conformance.witnessLaws` |
@@ -2203,9 +2204,11 @@ prefix-free hypothesis reddens `splice_split`; dropping the appeal to the op cod
 4. **Not claimed.**
    - **A REWRITE.** A tamper that also re-mints the tampered node's id and then every descendant's
      produces a structure that is intact by construction, and no walker will ever find it. What
-     catches it is a signed head, which is a composition this theorem says nothing about — it lives
-     with the signing composition, on the coordination plane's own side.
-   - **Anything about signatures.** `Attestation` and `IAttestationSink` are outside the model.
+     catches it is a signed head, which is a composition THIS theorem says nothing about. Since
+     Phase 193 it is a theorem of its own for the LINEAR chain — see "The signed head binds the
+     chain it seals" below; for the DAG it is still not claimed.
+   - **Anything about signatures**, in the Phase 136 sections. `Attestation` and `IAttestationSink`
+     entered the model with Phase 193, as two parameters and one named premise, and only there.
    - **Re-ordering a node's parents.** Not merely unproved: proved NOT detected
      (`parent_reorder_undetected`), because the pre-image is sorted. It is the price of the
      convergence `merge_id_parent_order_independent` buys, and it is stated as a theorem so a reader
@@ -2350,6 +2353,150 @@ was not the seed.
    - **The JSONL snapshot lines** (`snapshotToJsonl`, `fromJsonlWithSnapshots`). Loading is not
      verifying, as for the chain itself.
    - **`EffectCapture` journals and the DAG's `replayTo`.** A different stream and a different walk.
+
+### The signed head binds the chain it seals — signing composition as a theorem (Phase 193)
+
+Theorem 3 finds a tampered record. It says nothing about a **rewrite** — a tamper that re-mints
+every later record's hash — because a rewrite produces a perfectly intact chain and no walker can
+fault it. What closes that is a signature over the **head**, and until this section the step from
+"the head is signed" to "the history is the one that was signed" was prose: this document's own
+"Next" list carried it as unproved, and every sentence elsewhere that says "signed" rested on it.
+Section 8 of `Chain.fst` is that step, over the linear chain model Phase 136 carries, and it is two
+theorems.
+
+- **`signed_head_binds_chain`.** Two chains that both verify from one genesis, and whose heads both
+  verify under ONE attestation, are the same chain — the same records, so the same ops in the same
+  order. It composes two facts. An attestation verifies against at most one head
+  (`signature_binds`, below). And a verified chain's head **determines the chain**:
+  `same_head_same_chain_from` is the linear chain's own injectivity, walked tip to root — the two
+  tips share a hash, so `rec_injective` makes them one record with one prev-link, which is the head
+  of what is left. A chain is told apart from its own extensions by the **sequence number in the
+  pre-image** (`head_seq_at_least`): a tip minted at index *i* cannot be the tip of a walk that
+  passed *i* + 1. Without the sequence in the payload that case would not close.
+- **`signed_head_rejects_splice`.** Replace, insert or drop ONE op and **re-mint the whole chain**
+  from genesis, so that `verifyChain` accepts the result — and it is still refused under the
+  original attestation. One theorem over a three-case `splice`, guarded by `splice_changes`, since
+  a splice that changes nothing re-mints the signed chain itself and is rightly accepted.
+  `signed_head_rejects_rewrite` is the general form beside it: ANY chain other than the one that
+  was signed is refused, however intact. This is the forgery `Conformance.attestationLaws` builds
+  with its own rehash, as a theorem rather than a sample.
+
+**The signature is a parameter, and what is assumed of it is one property.** `verify` stands for
+`IAttestationSink.Verify` and `sign` for `IAttestationSink.Sign`; nothing models an algorithm, a
+key, a keyring or its lockout rules. `signature_binds verify` says an attestation verifies against
+**at most one head** — `verify` holds only for the signed bytes — and it is a lemma-valued
+parameter, as `rec_injective` is, never an `assume`. Two things about it are worth reading twice.
+
+1. **It is binding, not unforgeability.** Both theorems are about the ONE original attestation.
+   That nobody without the key can mint a SECOND one over the rewritten head is the signature
+   scheme's own claim, and key custody's, and nothing here says it. A sink whose `Verify` merely
+   compares the attestation's recorded `Head` has the binding property by construction, with no
+   cryptography spent; what the cryptography buys is the half this model does not state.
+2. **It is classified a `domain-obligation`, not the `model-bridge` the phase was chartered with,
+   and the reason is the tree's.** Core ships **no production signer**: `OpStream.noAttestation`
+   signs nothing and verifies nothing, a real sink is host-side, and the only concrete sinks in
+   this repository are test-local. The model is handed the sink's own `Sign` and `Verify` as its
+   two parameters, so there is no gap between the model's signature and production's left to
+   bridge. What remains is a property a host's sink either has or lacks — a sink that verifies
+   everything falsifies it, and the differential measures exactly that — and the shipped kit
+   already samples it at the host's own sink: `Conformance.attestationLaws`' prefix arm and its two
+   rehashed-forgery arms are each one attestation offered two heads. By Phase 174's own definitions
+   that is an obligation a green kit run discharges, not a bridge "nothing a domain does closes".
+   Under the `noAttestation` default the law passes vacuously and these theorems say nothing, which
+   is correct: there is no signed head.
+
+**One boundary is a finding rather than a modelling choice, and it is Phase 191's finding again.**
+`OpStream.head` returns the literal `""` for the empty chain — not `cfg.Genesis` — so an
+attestation over `""` is an attestation over the empty chain, and over any chain whose tip happened
+to hash to `""`. The binding theorem therefore carries `~(chain_head rs == "")`: **the signed head
+is not the empty-chain sentinel.** That is a condition on the one head being verified, which a
+verifier can check, rather than a universal claim about the hash. It is what the DROP arm needs at
+its smallest — a one-record chain with its record dropped re-mints to the empty chain — and
+`signed_sentinel_covers_the_empty_chain` states the other side: under a signed `""`, the empty
+chain is accepted under every genesis, whatever chain the signer had in hand. Nothing shipped is
+affected; a host that signs heads should not sign an empty stream's.
+
+**What the section does not reach: a compacted stream.** `same_head_same_chain_from` is stated at an
+arbitrary boundary `(prev, i)`, so it does say that two tails verified from one boundary index with
+one head are the same tail from the same boundary hash. It says nothing about the DISCARDED prefix,
+and cannot: `compact` trusts the boundary hash it reads, so a signed head over a compaction binds
+the prefix only under `compact_verifies_iff_original`'s premise that the prefix verified before it
+was discarded. No theorem here is stated over `verify_across`. (Production's `head` of a compacted
+stream with an EMPTY tail is the `""` sentinel rather than the snapshot's boundary hash, which the
+boundary above already excludes.)
+
+**The differential** (`Proofs.Oracle`, five cases) runs the extracted model beside the
+`IAttestationSink` **seam**, driven by a test-local keyring sink — because there is no production
+signer to run beside, and it says so rather than claiming one. What is compared is `OpStream.head`,
+`attestHead`, `verifyAttestation`, and the `verifyChain && verifyAttestation` composition
+`verifyAttestation`'s own doc comment describes. The sink's `Verify` deliberately does NOT compare
+the attestation's recorded head, so binding is spent on the keyed digest rather than satisfied by
+construction.
+
+| Pool | What is compared | Vacuity guards |
+|---|---|---|
+| the work-plan domain, 40 generated streams, a generated keyring each (one to three keys, any of them active) | the head; the attestation; acceptance of the intact chain, under a verifier lacking the key, and under the signature re-labelled to each other key; then EVERY replace-op, re-attribute, replace-with-the-same, drop and insert (every position, one past the end included) of the chain's steps, each fully re-minted; then every in-place tamper | a signed chain; a multi-key ring; a verifier lacking the key; a re-labelled attestation; a refused splice of EACH of the three kinds; an accepted no-op splice; every re-mint accepted by `verifyChain`; every in-place tamper refused |
+| the reference tree witness, 30 generated streams | the same | the same |
+
+Each splice is spelled twice and **independently** — as the model's `splice`, and as a plain list
+edit of production's steps — and the two must mint the same records, record for record;
+`splice_changes` must agree with whether production's steps moved. Beside the model-against-production
+comparison, **production is held to the theorem on its own verdict**: every re-minted splice must
+pass `verifyChain` (or it is not the rewrite the theorem is about) and must be refused under the
+original attestation.
+
+The **go-red cases** are two, and a third case measures the boundary. A model handed a DIFFERENT
+hash must disagree. Under a sink that verifies **everything**, the re-minted splice is ACCEPTED — by
+production and by the model alike — so `signature_binds` is observed load-bearing rather than
+decorative, and the same forgery is shown refused by both under the keyring sink. And the sentinel
+is measured on production: a signed `""` accepts the empty chain and no chain with a head, and the
+one-record chain's drop is refused. The differential was also reddened **by hand** before it was
+trusted, by two perturbations of the extracted oracle — a `chain_head` that reads the FIRST record
+rather than the last, and a drop at zero that drops nothing — each of which failed both generated
+cases and was then restored.
+
+The **proof** was falsified the same way, on scratch copies, and each landed on the lemma that
+should have caught it: dropping the sentinel premise reddens `signed_head_binds_chain`; never
+spending `signature_binds` reddens it too; dropping `splice_changes` reddens
+`signed_head_rejects_splice`; a head read from the first record reddens `head_seq_at_least`; and
+taking the sequence out of the argument reddens `same_head_same_chain_from`, at the
+chain-against-its-own-extension case.
+
+**What it cost.** Almost nothing, and the budget stands. Section 8 is about 420 lines — thirteen
+lemmas and the two theorems — every one an induction over a list or a numeral at the default
+`--z3rlimit 40` with no scoped option, and the new proofs are short appeals to `rec_injective` and
+to section 6's characterisation rather than new case analyses. Both theorems discharged on the
+first attempt; no repair loop was spent. Three cold quaked runs of the module alone measured 22s,
+22s and 23s against the 22s recorded before the section existed; the phase's one cold pass of the
+whole leg also measured 23s, on a pass the leg itself labelled contended (x1.05), so it is not a
+seed. `modules.json` moves `measuredSeconds` to 23 and leaves the 50s budget where Phase 191 put it,
+since 2x23 rounds to it.
+
+**The claims ladder, for this section** (rows `signed-head-binds-chain`,
+`signed-head-rejects-splice`, `signature-binds-one-head`, `signed-head-differential` in
+`../proofs.json`):
+
+1. **Proved.** The two theorems, the general rewrite corollary, the linear chain's own injectivity,
+   and the sentinel boundary from both sides. No `assume`, no `admit`, `--report_assumes error` on.
+2. **Differentially tested.** As above, over those pools, never over all inputs — and beside the
+   seam, not beside a signer.
+3. **Assumed.**
+   - **`signature_binds`** — the sink's `Verify` accepts one attestation against at most one head.
+     A `domain-obligation`, discharged by sampling through `Conformance.attestationLaws` at the
+     host's own sink. New with this section.
+   - **`rec_injective`** — the linear half of theorem 3's cryptographic premise, still in its
+     bundled form, spent once per record by `same_head_same_chain_from`. Inherited, not new.
+   - Theorem 3's bridges, unchanged: a sequence number is a Peano numeral, and the extractor and
+     the F# compiler are trusted.
+4. **Not claimed.**
+   - **Unforgeability, any concrete signature algorithm, key custody, or a keyring's lockout
+     rules.** Those belong to whoever supplies the sink, and to the attested-ledger plane built on
+     this seam.
+   - **The DAG's heads.** Both theorems are over the linear chain. A content-addressed DAG's head
+     set is a different object, and nothing here signs it.
+   - **A compacted stream's discarded prefix**, per the paragraph above.
+   - **That a host signs at all.** Signing is opt-in; under `noAttestation` there is no signed
+     head and nothing to bind.
 
 ## Theorem 4 — `Json.parse` totality, bounded (Phase 146)
 
@@ -4324,13 +4471,6 @@ theorem no clause can consume costs prover budget on every run and buys nothing.
 refused pairs are known to have commuting members (move × insert, move × reorder); two are known to
 have non-commuting ones (remove × insert, move × move); three are unexamined. That is the shape of
 what widening would actually recover.
-
-**The signing composition** — the successor Phase 136 names and deliberately does not take.
-Chain integrity says a tampered node is found; it says nothing about a REWRITE, which re-mints
-every descendant's id and produces a structure no walker can fault. What closes that is a signed
-head, and the composition is the coordination plane's own — an attestation over a head, plus this
-theorem, is what makes "the history is the one that was signed" a claim rather than a hope. The
-seam is here (`Attestation` / `IAttestationSink`); the theorem is not.
 
 Interpreter budget monotonicity — the attested-stack programme's theorem 3, which is not this
 directory's numbering — is `fuaran-program`'s and follows the same shape now that the prover is

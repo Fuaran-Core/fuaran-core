@@ -651,6 +651,55 @@
       }
     },
     {
+      "id": "signed-head-binds-chain",
+      "level": "proved",
+      "claim": "The signed head binds the chain it seals: two linear chains that both verify from one genesis, and whose heads both verify under ONE attestation, are the same chain — the same records, so the same ops in the same order. It is the composition of two facts. The attestation verifies against at most one head (`signature_binds`, the row `signature-binds-one-head` below), and a verified chain's head determines the chain: `same_head_same_chain_from` is the linear chain's own injectivity, walked tip to root, spending `rec_injective` — the linear half of `content-id-determines-content`, still in its bundled Phase 136 form — once per record, with a chain told apart from its own extensions by the sequence number in the pre-image. It carries one boundary as a premise rather than hiding it: `OpStream.head` returns the literal empty string for the empty chain (not `cfg.Genesis` — Phase 191's finding again), so the theorem asks that the signed head is not that sentinel, which is a condition on the one head being verified and one a verifier can check; `signed_sentinel_covers_the_empty_chain` states the other side, that under a signed sentinel the empty chain is accepted under every genesis. What it deliberately is not: a claim about any signature algorithm, key custody or a keyring's lockout rules, and not UNFORGEABILITY — the theorem is about the one original attestation, and that nobody can mint a second one over a rewritten head is the signature scheme's own claim. Nothing is stated over a compacted stream: `compact` trusts the boundary hash it reads, so a signed head over a compaction binds the discarded prefix only under `compact-preserves-verify`'s premise. Proved with no assume and no admit under --report_assumes error.",
+      "phase": "fuaran-core#193",
+      "evidence": {
+        "theorem": "signed_head_binds_chain",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "signed-head-rejects-splice",
+      "level": "proved",
+      "claim": "Replace, insert or drop ONE op and RE-MINT the whole chain from genesis, so that `verifyChain` accepts the result, and it is still refused under the original attestation. The re-mint is the point: it is the rewrite `chain-tamper-detected` cannot see, because it produces a perfectly intact chain, and it is the forgery `Conformance.attestationLaws` builds with its own rehash. One theorem over a three-case `splice`, guarded by `splice_changes` — a replacement by a different step at an index the chain has, any insertion, a removal at an index the chain has — since a splice that changes nothing re-mints the signed chain itself and is rightly accepted. `signed_head_rejects_rewrite` is the general form beside it: ANY chain other than the one that was signed is refused, however intact. Same premises as `signed-head-binds-chain`, of which both are corollaries.",
+      "phase": "fuaran-core#193",
+      "evidence": {
+        "theorem": "signed_head_rejects_splice",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "signature-binds-one-head",
+      "level": "assumed",
+      "claim": "The signature primitive, abstract, with ONE assumed property: an attestation verifies against at most one head — `verify` holds only for the signed bytes. It is an explicit lemma-valued PARAMETER (`signature_binds`) of the two signed-head theorems rather than an assume, so which results depend on it is visible in their signatures. Classified a domain obligation rather than a model bridge, and the reason is the tree's rather than a preference: Core ships no signer (`OpStream.noAttestation` signs nothing and verifies nothing), the model is handed the sink's own `Sign` and `Verify` as its two parameters, so there is no gap between the model's signature and production's to assume — there is a property a host's `IAttestationSink` either has or lacks, and a sink that verifies everything falsifies it. `Conformance.attestationLaws` samples it at the host's own sink: its prefix arm and its two rehashed-forgery arms are each one attestation offered two heads. Under the `noAttestation` default that law passes vacuously and these theorems say nothing, which is correct — there is no signed head. It is BINDING and not unforgeability: a sink whose `Verify` compares the attestation's recorded `Head` has it by construction, and what the cryptography buys is the half no row here states.",
+      "phase": "fuaran-core#193",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.attestationLaws",
+      "evidence": {
+        "assumption": "signature_binds — the sink's Verify accepts one attestation against at most one head"
+      }
+    },
+    {
+      "id": "signed-head-differential",
+      "level": "tested",
+      "claim": "The extracted model agrees with OpStream.head, attestHead, verifyAttestation and the verifyChain-and-verifyAttestation composition over generated chains from two witnesses, generated KEYRINGS, and every replace / insert / drop splice of each chain followed by a full re-mint — beside the `IAttestationSink` SEAM driven by a test-local keyring sink, because Core ships no production signer and the differential says so rather than claiming one it cannot reach. The sink's `Verify` deliberately does not compare the attestation's recorded head, so binding is spent on the keyed digest rather than satisfied by construction. Each splice is spelled twice and independently, as the model's `splice` and as a plain list edit of production's steps, and the two must mint the same records; `splice_changes` must agree with whether production's steps moved. Beside the model-against-production comparison, PRODUCTION is held to `signed_head_rejects_splice` on its own verdict: every re-minted splice must pass verifyChain (or it is not the rewrite the theorem is about) and must be refused under the original attestation. Vacuity guards require a signed chain, a multi-key ring, a verifier lacking the key, a re-labelled attestation, a refused splice of each of the three kinds, an accepted no-op splice, and every in-place tamper refused. Three further cases: a model handed a different hash must disagree; under a sink that verifies EVERYTHING the re-minted splice is ACCEPTED, by production and by the model alike, so `signature_binds` is observed load-bearing; and the empty-chain sentinel measured on production. The differential was also reddened by hand before it was trusted, by two perturbations of the extracted oracle — a head read from the first record rather than the last, and a drop that drops nothing — each of which failed the generated cases. Agreement is over those pools, never over all inputs.",
+      "phase": "fuaran-core#193",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the signed-head oracle agrees with production over the work-plan stream, every keyring and every re-minted splice",
+          "the signed-head oracle agrees with production over the reference witness's stream, every keyring and every re-minted splice",
+          "a signed-head model handed a DIFFERENT hash disagrees with production — the comparison can lose",
+          "under a sink that verifies EVERYTHING a re-minted splice is accepted — signature_binds is load-bearing, to production and to the model alike",
+          "a signed empty-chain sentinel accepts the empty chain and no chain with a head — OpStream.head hard-wires the empty string"
+        ]
+      }
+    },
+    {
       "id": "parse-total",
       "level": "proved",
       "claim": "The recursive-descent JSON parser reaches exactly one outcome on every input — an accepted value or a CLASSIFIED refusal, never both and never neither. That it is Tot at all is the content rather than a formality: F* admits the mutual group only after showing it terminates on every input, and a recursive-descent parser over a mutable index has no syntactic reason to. Every consuming sub-parser carries the remaining input's strict decrease in its RETURN TYPE, and that refinement is the whole termination argument.",

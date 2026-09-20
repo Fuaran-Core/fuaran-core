@@ -52,10 +52,11 @@
       the third check — the record's recomputed hash — rests on the premise. That split is the
       sharpest thing the mechanisation says about the linear walker.
 
-   WHAT IS NOT MODELLED. Signatures: an `Attestation` over a head is a composition this says
-   nothing about, and it lives on the coordination plane's own side. A REWRITE — a tamper that
-   also re-mints every descendant's id — is outside every theorem here, deliberately: it produces
-   a perfectly intact structure, and what catches it is a signed head, not a walker. Cycles: a DAG
+   WHAT IS NOT MODELLED. A REWRITE — a tamper that also re-mints every descendant's id — is outside
+   every WALKER theorem here, deliberately: it produces a perfectly intact structure, and what
+   catches it is a signed head, not a walker. Since Phase 193 that composition is section 8, for
+   the LINEAR chain: the signature is two parameters and one named premise, and nothing about an
+   algorithm, a key or a keyring is modelled. The DAG's heads are not signed here. Cycles: a DAG
    whose ids all recompute cannot carry one (a node's id folds its parents', so a cycle needs a
    collision), and `Dag.isAcyclic` is a separate check on a structurally-loaded DAG. And the
    `StreamConfig` migration path (`legacyActorConfig`, `rehash`) — the model carries the canonical
