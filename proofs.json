@@ -103,6 +103,50 @@
       }
     },
     {
+      "id": "no-null-ever",
+      "level": "proved",
+      "claim": "NO `JVal` CONTAINS A NULL, at any depth — WIRE_FORMAT section 2 rule 4's value half, which was prose and a comment on the type until this phase. Stated over the one model here that HAS a null, the foreign document of the read-policy section, so it is a statement and not a tautology: every wire value, viewed as a document, is null-free and reads back as EXACTLY itself under either read policy; the strict reader accepts EXACTLY the null-free documents, an iff; and whatever EITHER reader returns is null-free — the tolerant policy erases an object-member null, it never carries one through. Proved under no hypothesis at all. The encoder's half is `no-null-rendered`. NOT claimed: anything about a host, which may hold nulls of its own in its own types; this is about what a document can contain once it is a `JVal`.",
+      "phase": "fuaran-core#153",
+      "evidence": {
+        "theorem": "no_null_ever",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "no-invokable-term",
+      "level": "proved",
+      "claim": "NO VALUE A DECODE COMBINATOR RETURNS CAN CARRY A FUNCTION, at any depth — the type half of 'a closure crosses the wire only as the string \"<closure>\"' (section 2 rule 10, section 4). The lemma is that every type a combinator or the node decoder returns, and the wire value and the foreign document model themselves, has DECIDABLE EQUALITY: F* derives `hasEq` for an inductive only when every constructor argument has it and derives it for no arrow type, so this is the prover's own certificate that the closed value type has no function-typed component. The closure sentinel is a string like any other. The control was run both ways before the lemma was believed: a type with one function-typed constructor argument cannot be declared without `noeq`, and declared with it the same lemma fails to prove. NOT claimed: anything about a HOST, a `Custom` renderer or a host-call seam — a registered function is host code the wire merely NAMES, which the UI language estate's escape-hatch inventory enumerates and these lemmas do not — nor about a decoder handed to the array walker, which is the domain's own function and not a wire value.",
+      "phase": "fuaran-core#153",
+      "evidence": {
+        "theorem": "no_invokable",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "sentinel-inert",
+      "level": "proved",
+      "claim": "NO COMBINATOR INSPECTS A STRING VALUE, so the closure sentinel is inert. Replacing one string by another throughout a document COMMUTES with every combinator — under no premise, and word for word: every refusal is the same refusal, message included (`sentinel_inert_combinators`) — and with the node decoder: the same documents decode, the same documents are refused, and the decoded node is the original with the same replacement made. The sentinel is the instance (`closure_sentinel_is_a_string`), not a special case; member KEYS are untouched, since a key is a name the decoder asks for and not a value it is handed. The phase asked for decoding to be INVARIANT under replacing the sentinel with ANY string, and that wording was wrong twice: it is EQUIVARIANT, which is the stronger and the true statement, and 'any' fails in one position — see `sentinel-tag-position-is-the-exception`. The node-level premise is exactly that neither string is one of the vocabulary's own kind tags, which the sentinel satisfies.",
+      "phase": "fuaran-core#153",
+      "evidence": {
+        "theorem": "sentinel_inert",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "sentinel-tag-position-is-the-exception",
+      "level": "proved",
+      "claim": "The premise of `sentinel-inert` is NECESSARY, and it is the vocabulary's own dispatch rather than any combinator that makes it so: a document whose `kind` member IS the sentinel is refused as an unknown kind, and rewriting the sentinel into a kind tag makes it decode — so 'replace it with any other string' is false in exactly the tag position, and the two outcomes are proved NOT related. That is a domain reading its own discriminator, not a payload being inspected, and a future session weakening the premise goes red here first.",
+      "phase": "fuaran-core#153",
+      "evidence": {
+        "theorem": "tag_position_is_the_exception",
+        "model": "proofs/WireDecode.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "decode-order-differential",
       "level": "tested",
       "claim": "Every corpus fixture and every generated document, with the members of every object reordered at every depth, seeded and replayable: production's answers on the shuffle are compared against its own answers on the original — equality for every combinator whose result carries no members, the extracted outcome_perm for getProp, whose result is itself reordered — and the oracle is compared against production on the shuffled document. This is the case the corpus structurally cannot present, every fixture in it being canonically ordered. Each pair is checked to be an instance of the extracted member_perm, duplicate-keyed documents are filtered by the extracted keys_unique_deep, and a getProp that reads the FIRST member rather than the named one is required to lose.",
@@ -1135,6 +1179,17 @@
       }
     },
     {
+      "id": "no-null-rendered",
+      "level": "proved",
+      "claim": "`Canon.render` NEVER EMITS THE TOKEN `null` — not at the root, not at any depth, for ANY value, including those outside the canonical subset the rows above are stated over. Section 2 rule 4's encoder half. The statement is LEXICAL on purpose: 'the rendering does not contain n-u-l-l' is false, since the string \"null\" renders those four characters inside a literal, so the model carries the three-state lexer every JSON reader has and proves something stronger than the absence of one token — outside a string literal the renderer emits ONLY structural punctuation, the characters of a numeral and the letters of `true` and `false`. There is no bare `n` anywhere in a rendering, hence no `null` at any position that lies outside a literal, and the grammar's own reader has no arm that accepts one (`reader_refuses_null`). Rule 6 is what carries the argument: an escaped body never closes its own literal. ONE premise, `layouts_numeric` — both of rule 5's layouts are numerals — weaker than `tok_read_ok` and recorded on `canon-numeral-layouts`. NOT claimed: `Canon.renderOrdered`, which is not modelled; JSON a host writes by any other route; or that the byte sequence never appears, which it correctly does inside strings.",
+      "phase": "fuaran-core#153",
+      "evidence": {
+        "theorem": "no_null_ever",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "wire-resource-limits",
       "level": "proved",
       "claim": "WIRE_FORMAT section 21's eight resource limits, carried as named premises in one place so that a changed limit moves one constant rather than a paragraph of prose, with the two RELATIONS between them that the section's own argument uses: every bound admits something, and the node-depth bound sits below the syntactic-depth bound with room for the worst-shaped kind — which is what makes 'a host must never report a node-depth breach as a syntax-depth breach' a fact about the table rather than a hope about it. The module models no enforcement: section 21.2's host obligations are about code it does not describe, and what a consumer gets here is a number with a caption. `canonical-form-roundtrip` takes exactly one of the eight.",
@@ -1165,12 +1220,12 @@
     {
       "id": "canon-numeral-layouts",
       "level": "assumed",
-      "claim": "The numerals are OPAQUE, as they are for the decode combinators and for the parser, and for the same reason: the F# extraction carries no floats and F*'s integers are unbounded where `JInt` is Int32. The two layouts and the numeral read-back are parameters, and the ONE premise the theorems carry about them is that the read-back inverts the layouts — which is the property `Double.ToString(\"R\")` is DEFINED by, since rule 5 pins the float layout as the shortest digit sequence that round-trips. Rule 5's injectivity lemmas are DERIVED from that premise rather than assumed beside it, because a read-back that is a function cannot return two different values for one token. What is therefore not said here is anything about the digits themselves: which decimal .NET produces for a given double is measured by the differential and by the cross-host parity vectors, not proved.",
+      "claim": "The numerals are OPAQUE, as they are for the decode combinators and for the parser, and for the same reason: the F# extraction carries no floats and F*'s integers are unbounded where `JInt` is Int32. The two layouts and the numeral read-back are parameters, and the ONE premise the theorems carry about them is that the read-back inverts the layouts — which is the property `Double.ToString(\"R\")` is DEFINED by, since rule 5 pins the float layout as the shortest digit sequence that round-trips. Rule 5's injectivity lemmas are DERIVED from that premise rather than assumed beside it, because a read-back that is a function cannot return two different values for one token. What is therefore not said here is anything about the digits themselves: which decimal .NET produces for a given double is measured by the differential and by the cross-host parity vectors, not proved. SINCE PHASE 153 one lemma, `no-null-rendered`, carries a SECOND and WEAKER premise about the same parameters — `layouts_numeric`, that every character of both layouts is a numeral character — because it speaks of every value, including the integral floats outside the canonical subset about whose layout `tok_read_ok` is silent. The canonical-form theorems still carry exactly one.",
       "phase": "fuaran-core#149",
       "class": "model-bridge",
       "closes": "permanent",
       "evidence": {
-        "assumption": "tok_read_ok — the numeral read-back inverts the integer and float layouts, which is rule 5's own definition of the float layout"
+        "assumption": "tok_read_ok — the numeral read-back inverts the integer and float layouts, which is rule 5's own definition of the float layout; and, for `no-null-rendered` alone, layouts_numeric — both layouts consist of numeral characters"
       }
     },
     {
@@ -1690,6 +1745,109 @@
       "closes": "permanent",
       "evidence": {
         "assumption": "the read witness handed to the model is the set of ids production's instrumented resolver would observe the evaluator asking for at that node"
+      }
+    },
+    {
+      "id": "query-unregistered-refused",
+      "level": "proved",
+      "claim": "`QueryRegistry.dispatch` of an id the registry does not hold is the typed refusal `NoSuchQuery id known`, naming the id and every id the registry does hold — and the result is the SAME under every host resolver, which is what \"runs no resolver\" means for a pure function without instrumenting one. `invoke` can never produce the registry's two refusals (`invoke_never_registry_refusal`), so the classes stay disjoint: a `NoSuchQuery` is always the registry's answer and never a resolver's. The resolver is the model's parameter and stays outside the claim: nothing here is a theorem about any resolver.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "unregistered_refused",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-validate-before-resolve",
+      "level": "proved",
+      "claim": "An argument set `validateParams` rejects makes `invoke` return that rejection, for every resolver alike — no resolver ran — and, at the registry, a dispatch that resolved its id still runs nothing on a set validation rejects (`dispatch_validates_first`). The converse holds too: a settled or pending result, or an `ExecutionFailed`, is reachable only past an accepted validation (`resolver_runs_only_validated`). Validation is characterised EXACTLY rather than soundly: it accepts precisely the sets whose every binding addresses a declared param with a `Null` or an in-type cell and that leave no required name unbound (`validate_params_exact`), the refusal is one of its own three classes (`validate_params_shape`), and a refusal is truthful — an `UnknownParam` names a bound name no param declares and lists the declared ones, a `ParamTypeMismatch` names a declared param, its declared type and a DIFFERENT type the bound cell really has (`refusal_is_truthful`), and a `RequiredParamsUnbound` names only declared names the args really leave out (`unbound_required_truthful`).",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "validate_before_resolve",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-envelope-three-outcomes",
+      "level": "proved",
+      "claim": "THE ENVELOPE HAS NO FOURTH OUTCOME, on this seam as on its sibling. The resolver answers in `Deferred<QueryResult>` (Phase 198), and an invocation past an accepted validation carries its `Ready` or `Pending` and nothing else: a resolver's `Failed m` crossed into the enumerated `ExecutionFailed (m, [])` at the seam, so `Ok (Failed _)` is unreachable rather than merely unproduced, for every resolver and every argument set alike (`invoke_never_ok_failed`), and through the registry, where a host actually reaches the seam (`dispatch_never_ok_failed`). `queryLaws` samples the same claim on the shipped seam over three drawn answers; this is it over all resolvers. The envelope's combinators are outside the model and stay `deferredLaws`'s.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "invoke_never_ok_failed",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-enumerate-is-registry",
+      "level": "proved",
+      "claim": "An id is in `QueryRegistry.enumerate`'s output exactly when `QueryRegistry.tryFind` resolves it, and `dispatch` raises `NoSuchQuery` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS declaration's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends by exactly one entry otherwise (`register_extends`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`), which is what makes a capture key's id prefix name ONE declaration. Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `queryLaws`'s to certify and is outside the theorem.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "enumerate_is_registry",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-invocation-key-deterministic",
+      "level": "proved",
+      "claim": "The Phase 27 capture key reads the declaration through its `Id` ALONE and the arguments through their name-sorted canonical form alone: two declarations sharing an id — whatever else they declare — and two argument lists binding the same DISTINCT names to the same cells in ANY order key identically, under any hash and any int and float renderer, given only that the name comparator is a total order. The order half rests on `sorted_unique`: two name-sorted lists with distinct names holding the same bindings are the same list. The id half needs no premise at all (`invocation_key_id_only`). That the key reads no resolver answer and no clock is NOT a lemma here and is not dressed as one: `invocationKey` is handed neither, so in a pure total function that independence is the function's type. Distinct names are a real hypothesis and not a convenience — `List.sortBy` is stable, so two bindings under ONE name keep the caller's order and the key moves with it.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "invocation_key_deterministic",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-all-null-accepted",
+      "level": "proved",
+      "claim": "THE FIRST FINDING. EVERY declaration — whatever it marks `Required` — accepts the argument set that binds each of its params to `Null`. `validateParams`'s step 1 treats a `Null` cell as type-agnostic absence and passes it; step 2 asks only whether the NAME is a key of the argument map, and it is. So `Required` constrains the presence of a name and never of a value, and a resolver is reached with its required param absent. `QueryParam`'s doc comment says a bound cell must agree with the type \"(or be `Null` when not required)\"; the code accepts it when required as well. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: this phase changes no behaviour of `Fuaran.Core.Query`, and the fix shape — step 2 counting a `Null` binding of a required param as unbound — changes what a public function accepts.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "all_null_accepted",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-key-collision",
+      "level": "proved",
+      "claim": "THE SECOND FINDING. `invocationKey`'s canonical string joins `name=cellKey` pairs with NO separator, so a string cell can spell the next binding: for one declaration (`a` required, `b` optional, both strings) the two DIFFERENT accepted argument sets `[a = \"1b=s2\"]` and `[a = \"1\"; b = \"2\"]` share the canonical string `a=s1b=s2`, and therefore share a capture key under EVERY hash — the collision is in the pre-image, before `Hash.fnv1a` is consulted. The only premise is that the comparator puts `a` before `b`. The doc comment's \"different args do not collide\" is false, and a replay keyed this way serves one invocation's captured rows for the other. `Capability.invocationKey` builds its canonical string the same way (`addr=value`, joined on the empty string) and is outside Phase 177's model; the same shape applies there. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: the fix shape — a separator no `cellKey` can emit, which `Hash.fs` already names for the content-hash folds (U+0001) — changes every existing capture key, so it is a journal-compatibility decision and not a tidy-up.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "key_collision",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-differential",
+      "level": "tested",
+      "claim": "The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so first-wins is compared, and argument sets that bind, skip, null, mistype, repeat and reverse. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and on nothing else. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets",
+          "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail",
+          "no resolver runs on a refused dispatch — `unregistered_refused` and `validate_before_resolve`, on the shipped seam",
+          "the two findings hold on the shipped seam — `all_null_accepted` and `key_collision`"
+        ]
+      }
+    },
+    {
+      "id": "query-renderers-abstract",
+      "level": "assumed",
+      "claim": "THE RENDERERS PREMISE. `invocationKey` reaches for four host functions — `string` on an `int`, `Canon.canonicalFloat`, `Hash.fnv1a`, and the ordinal string order `List.sortBy fst` compares names by — and the model takes them as a `renderers` record, with `cellKey`'s one non-ASCII literal (its rendering of a `Null`) riding beside them and a float cell crossing as an opaque carrier (its round-trip `R` text). The clause structure of `cellKey`, the stable name sort and the separator-free join are modelled; the two numeral layouts, the hash and the comparator are not. `invocation_key_deterministic` therefore states what it needs of the comparator — that it is a total order — as a hypothesis, and says nothing about whether two different canonical strings hash apart, which is a claim about FNV-1a and is not made. `key_collision` needs none of it beyond `a` sorting before `b`. The differential instantiates the record at production's own four calls, so the envelope is compared and the renderers are exercised, not modelled. Permanent: `Canon.canonicalFloat` is theorem 7's numeral-layout bridge already (`canon-numeral-layouts`), and a model of the ordinal comparator is a model of UTF-16 code-unit order.",
+      "phase": "fuaran-core#187",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the int and float renderers, the hash and the name comparator behind invocationKey are host functions the model takes as parameters; the comparator is assumed a total order where a theorem needs one"
       }
     }
   ]

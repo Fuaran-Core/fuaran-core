@@ -39,6 +39,11 @@ module ModelCap = Capability
 // `Fuaran.Core` is open.
 module ModelProp = Propagation
 
+// Phase 187 — the extracted DATA-ACQUISITION-SEAM model, bound the same way and for the same
+// reason: production's `Fuaran.Core.Query` module shares the model's name once `Fuaran.Core` is
+// open.
+module ModelQuery = Query
+
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
@@ -6932,6 +6937,593 @@ let private propDifferential
     tally
 
 
+// ------------------------------------------------------------------------------------------
+// Phase 187 — the DATA-ACQUISITION SEAM. `proofs/Query.fst` models `Fuaran.Core.Query`'s
+// `validateParams` / `invoke` / `invocationKey` and `QueryRegistry.register` / `enumerate` /
+// `tryFind` / `dispatch` clause for clause, over an abstract resolver and a `renderers` record;
+// `proofs/oracle/Query.fs` is that model extracted. This runs it BESIDE production over the
+// generator `Conformance.queryLaws` uses (`ConfRng`), WIDENED from that family's one fixed
+// declaration: registries drawn from a three-id pool (so a duplicate registration arises),
+// declarations of up to three params over all six column types with names drawn WITH
+// replacement (so a repeated param name arises, and first-wins is compared), and argument sets
+// that bind, skip, null, mistype, repeat and reverse — with an INSTRUMENTED resolver on each side
+// that must have run on both or on neither, and never past a refusal that is not its own.
+//
+// The model's result payload is abstract, so it is instantiated at production's own
+// `QueryResult` and a settled page crosses untranslated. The four renderers are production's own
+// calls: `string` on an int, `Canon.canonicalFloat`, `Hash.fnv1a`, and the ordinal order F#'s
+// `List.sortBy fst` compares strings by. A float cell crosses as its round-trip `R` text.
+// ------------------------------------------------------------------------------------------
+
+let private qColToModel (t: ColumnType) : ModelQuery.column_type =
+    match t with
+    | IntType -> ModelQuery.IntType
+    | FloatType -> ModelQuery.FloatType
+    | BoolType -> ModelQuery.BoolType
+    | StringType -> ModelQuery.StringType
+    | DateType -> ModelQuery.DateType
+    | TimestampType -> ModelQuery.TimestampType
+
+let private qColTag (t: ColumnType) : string =
+    match t with
+    | IntType -> "int"
+    | FloatType -> "float"
+    | BoolType -> "bool"
+    | StringType -> "string"
+    | DateType -> "date"
+    | TimestampType -> "timestamp"
+
+let private qModelColTag (t: ModelQuery.column_type) : string =
+    match t with
+    | ModelQuery.IntType -> "int"
+    | ModelQuery.FloatType -> "float"
+    | ModelQuery.BoolType -> "bool"
+    | ModelQuery.StringType -> "string"
+    | ModelQuery.DateType -> "date"
+    | ModelQuery.TimestampType -> "timestamp"
+
+let private qCellToModel (c: Cell) : ModelQuery.cell =
+    match c with
+    | Cell.Int v -> ModelQuery.Int(bigint v)
+    | Cell.Float v -> ModelQuery.Float(v.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+    | Cell.Bool v -> ModelQuery.Bool v
+    | Cell.Str v -> ModelQuery.Str v
+    | Cell.Date v -> ModelQuery.Date v
+    | Cell.Timestamp v -> ModelQuery.Timestamp v
+    | Cell.Null -> ModelQuery.Null
+
+let private qArgsToModel (args: (string * Cell) list) : ModelQuery.arguments =
+    args |> List.map (fun (n, c) -> n, qCellToModel c)
+
+let private qHostToModel (h: HostEffect) : ModelQuery.host_effect =
+    match h with
+    | Pure -> ModelQuery.Pure
+    | ReadsHost -> ModelQuery.ReadsHost
+    | WritesHost -> ModelQuery.WritesHost
+
+let private qDetToModel (d: DeterminismSource) : ModelQuery.determinism_source =
+    match d with
+    | Deterministic -> ModelQuery.Deterministic
+    | Clock -> ModelQuery.Clock
+    | Random -> ModelQuery.Random
+    | Network -> ModelQuery.Network
+
+/// A declaration as the model reads it. `keepRequired = false` is the FORGETFUL bridge the
+/// go-red uses: every param crosses as optional, so the model stops seeing step 2.
+let private queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query =
+    { ModelQuery.query.q_id = q.Id
+      ModelQuery.query.q_params =
+        q.Params
+        |> List.map (fun p ->
+            { ModelQuery.query_param.p_name = p.Name
+              ModelQuery.query_param.p_type = qColToModel p.Type
+              ModelQuery.query_param.p_required = keepRequired && p.Required })
+      ModelQuery.query.q_schema = q.ResultSchema |> List.map (fun (n, t) -> n, qColToModel t)
+      ModelQuery.query.q_effect =
+        { ModelQuery.effect_class.host = qHostToModel q.Effect.Host
+          ModelQuery.effect_class.determinism = qDetToModel q.Effect.Determinism }
+      ModelQuery.query.q_source = sprintf "%A" q.Source
+      ModelQuery.query.q_timeout_ms = toMOpt (Option.map (fun (n: int) -> bigint n) q.TimeoutMs)
+      ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: int) -> bigint n) q.PageSize) }
+
+let private queryToModel (q: Query) : ModelQuery.query = queryToModelWith true q
+
+/// Production's own four calls. `compare` on two F# strings is ordinal, which is what
+/// `List.sortBy fst` sorts a name by.
+let private queryRenderers: ModelQuery.renderers =
+    { ModelQuery.renderers.render_int = fun (n: bigint) -> string (int n)
+      ModelQuery.renderers.render_float =
+        fun (s: string) ->
+            Canon.canonicalFloat (System.Double.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
+      ModelQuery.renderers.hash = Hash.fnv1a
+      ModelQuery.renderers.name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
+      ModelQuery.renderers.null_key = "∅" }
+
+/// The ORDER-BLIND comparator the second go-red uses: everything is below everything, so the
+/// model's insertion sort leaves the caller's order standing.
+let private orderBlindRenderers: ModelQuery.renderers =
+    { queryRenderers with
+        name_le = fun (_: string) (_: string) -> true }
+
+let private prodQueryErrRender (e: QueryError) : string =
+    match e with
+    | NoSuchQuery(id, known) -> sprintf "NoSuchQuery(%s;%s)" id (String.concat "," (List.sort known))
+    | DuplicateQuery id -> sprintf "DuplicateQuery(%s)" id
+    | UnknownParam(name, declared) -> sprintf "UnknownParam(%s;%s)" name (String.concat "," declared)
+    | ParamTypeMismatch(name, expected, got) ->
+        sprintf "ParamTypeMismatch(%s;%s;%s)" name (qColTag expected) (qColTag got)
+    | RequiredParamsUnbound names -> sprintf "RequiredParamsUnbound(%s)" (String.concat "," names)
+    | SourceNotResolved r -> sprintf "SourceNotResolved(%s)" r
+    | ExecutionFailed(detail, recoverable) -> sprintf "ExecutionFailed(%s;%s)" detail (String.concat "," recoverable)
+    | Timeout -> "Timeout"
+
+let private modelQueryErrRender (e: ModelQuery.query_error) : string =
+    match e with
+    | ModelQuery.NoSuchQuery(id, known) -> sprintf "NoSuchQuery(%s;%s)" id (String.concat "," (List.sort known))
+    | ModelQuery.DuplicateQuery id -> sprintf "DuplicateQuery(%s)" id
+    | ModelQuery.UnknownParam(name, declared) -> sprintf "UnknownParam(%s;%s)" name (String.concat "," declared)
+    | ModelQuery.ParamTypeMismatch(name, expected, got) ->
+        sprintf "ParamTypeMismatch(%s;%s;%s)" name (qModelColTag expected) (qModelColTag got)
+    | ModelQuery.RequiredParamsUnbound names -> sprintf "RequiredParamsUnbound(%s)" (String.concat "," names)
+    | ModelQuery.SourceNotResolved r -> sprintf "SourceNotResolved(%s)" r
+    | ModelQuery.ExecutionFailed(detail, recoverable) ->
+        sprintf "ExecutionFailed(%s;%s)" detail (String.concat "," recoverable)
+    | ModelQuery.Timeout -> "Timeout"
+
+let private queryErrClass (e: QueryError) : string =
+    match e with
+    | NoSuchQuery _ -> "NoSuchQuery"
+    | DuplicateQuery _ -> "DuplicateQuery"
+    | UnknownParam _ -> "UnknownParam"
+    | ParamTypeMismatch _ -> "ParamTypeMismatch"
+    | RequiredParamsUnbound _ -> "RequiredParamsUnbound"
+    | SourceNotResolved _ -> "SourceNotResolved"
+    | ExecutionFailed _ -> "ExecutionFailed"
+    | Timeout -> "Timeout"
+
+let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
+    match d with
+    | Pending -> "Pending"
+    | Ready r -> sprintf "Ready(page %d)" r.PageNum
+    | Failed m -> sprintf "Failed(%s)" m
+
+let private modelQueryDeferredRender (d: ModelQuery.deferred<QueryResult>) : string =
+    match d with
+    | ModelQuery.Pending -> "Pending"
+    | ModelQuery.Ready r -> sprintf "Ready(page %d)" r.PageNum
+    | ModelQuery.Failed m -> sprintf "Failed(%s)" m
+
+type private QueryTally =
+    { QDiffs: string list
+      QRegistered: int
+      QDupRefused: int
+      QSettled: int
+      QStillPending: int
+      QNoSuch: int
+      QValidated: int
+      QRefused: int
+      QExecFailed: int
+      QResolverRan: int
+      QRefusedWithoutResolver: int
+      QKeys: int
+      QKeysWithNull: int
+      QKeysPermuted: int
+      QRepeatedParamDecls: int
+      QClasses: Set<string> }
+
+let private queryIdPool = [ "q-a"; "q-b"; "q-c" ]
+let private queryParamNamePool = [ "p0"; "p1"; "p2"; "when" ]
+
+let private queryTypePool =
+    [ IntType; FloatType; BoolType; StringType; DateType; TimestampType ]
+
+/// A present cell of the given type, from a small pool that reaches the key's edges: a negative
+/// and an extreme int, a negative zero and an exponent-form float, a string that SPELLS a binding
+/// (the shape `key_collision` reads off), an empty string, and the null marker as a string.
+let private genCellOf (t: ColumnType) (r: ConfRng.T) : Cell * ConfRng.T =
+    match t with
+    | IntType ->
+        let v, r1 = ConfRng.choose [ -3; 0; 42; System.Int32.MaxValue ] r
+        Cell.Int v, r1
+    | FloatType ->
+        let v, r1 = ConfRng.choose [ 0.0; -0.0; 1.5; 0.1; 1e21; -2.5e-7 ] r
+        Cell.Float v, r1
+    | BoolType ->
+        let v, r1 = ConfRng.choose [ true; false ] r
+        Cell.Bool v, r1
+    | StringType ->
+        let v, r1 = ConfRng.choose [ ""; "x"; "1b=s2"; "p1=i42"; "∅" ] r
+        Cell.Str v, r1
+    | DateType ->
+        let v, r1 = ConfRng.choose [ "2026-09-20"; "1970-01-01" ] r
+        Cell.Date v, r1
+    | TimestampType ->
+        let v, r1 = ConfRng.choose [ "2026-09-20T00:00:00Z"; "1970-01-01T00:00:00Z" ] r
+        Cell.Timestamp v, r1
+
+/// A declaration: up to three params, names drawn WITH replacement, any type, either
+/// requiredness; every determinism source reached.
+let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
+    let mutable rng = r
+    let n, r1 = ConfRng.intBelow 4 rng
+    rng <- r1
+    let ps = System.Collections.Generic.List<QueryParam>()
+
+    for _ in 1..n do
+        let name, r2 = ConfRng.choose queryParamNamePool rng
+        let ty, r3 = ConfRng.choose queryTypePool r2
+        let req, r4 = ConfRng.intBelow 2 r3
+        rng <- r4
+
+        ps.Add(
+            { Name = name
+              Type = ty
+              Required = (req = 0) }
+        )
+
+    let det, r5 = ConfRng.choose [ Deterministic; Clock; Random; Network ] rng
+    let page, r6 = ConfRng.intBelow 3 r5
+    rng <- r6
+
+    { Id = id
+      Params = List.ofSeq ps
+      ResultSchema = [ "n", IntType ]
+      Effect = { Host = ReadsHost; Determinism = det }
+      Source = Ref("src-" + id)
+      TimeoutMs = (if page = 0 then None else Some(1000 * page))
+      PageSize = (if page = 2 then Some 50 else None) },
+    rng
+
+/// An argument set against a declaration: per param, three draws in four a binding — one in six
+/// of those a `Null`, one in six a cell of ANOTHER type, the rest in type — one set in five with
+/// an undeclared name, one in eight with a binding REPEATED under its name, and one in two
+/// reversed, so the name sort is exercised against the caller's order.
+let private genQueryArgs (q: Query) (r: ConfRng.T) : (string * Cell) list * ConfRng.T =
+    let mutable rng = r
+    let args = System.Collections.Generic.List<string * Cell>()
+
+    for p in q.Params do
+        let roll, r1 = ConfRng.intBelow 4 rng
+        rng <- r1
+
+        if roll < 3 then
+            let shape, r2 = ConfRng.intBelow 6 rng
+            rng <- r2
+
+            if shape = 0 then
+                args.Add(p.Name, Cell.Null)
+            elif shape = 1 then
+                let other, r3 =
+                    ConfRng.choose (queryTypePool |> List.filter (fun t -> t <> p.Type)) rng
+
+                let c, r4 = genCellOf other r3
+                rng <- r4
+                args.Add(p.Name, c)
+            else
+                let c, r3 = genCellOf p.Type rng
+                rng <- r3
+                args.Add(p.Name, c)
+
+    let extra, r5 = ConfRng.intBelow 5 rng
+    rng <- r5
+
+    if extra = 0 then
+        args.Add("zz", Cell.Int 1)
+
+    let repeat, r6 = ConfRng.intBelow 8 rng
+    rng <- r6
+
+    if repeat = 0 && args.Count > 0 then
+        let n, _ = args[0]
+        let c, r7 = genCellOf StringType rng
+        rng <- r7
+        args.Add(n, c)
+
+    let flip, r8 = ConfRng.intBelow 2 rng
+    rng <- r8
+    let drawn = List.ofSeq args
+    (if flip = 0 then List.rev drawn else drawn), rng
+
+let private queryResultOf (page: int) : QueryResult =
+    { Rows =
+        { Schema = [ "n", IntType ]
+          Columns =
+            [ { Name = "n"
+                Type = IntType
+                Cells = [ Cell.Int page ] } ] }
+      PageNum = page
+      TotalRowCount = None
+      NextPageToken = None }
+
+let private queryProbe
+    (bridge: Query -> ModelQuery.query)
+    (rn: ModelQuery.renderers)
+    (seedTag: int)
+    (acc: QueryTally)
+    (r: ConfRng.T)
+    : QueryTally * ConfRng.T =
+    let diffs = System.Collections.Generic.List<string>()
+    let mutable rng = r
+
+    // build a registry on both sides, in the same order, with duplicates possible
+    let n, r1 = ConfRng.intBelow 4 rng
+    rng <- r1
+    let mutable preg = QueryRegistry.empty
+    let mutable mreg = ModelQuery.empty
+    let mutable registered = 0
+    let mutable dupRefused = 0
+    let mutable repeatedDecls = 0
+
+    for _ in 1..n do
+        let id, r2 = ConfRng.choose queryIdPool rng
+        let q, r3 = genQueryDecl id r2
+        rng <- r3
+
+        if (q.Params |> List.map (fun p -> p.Name) |> List.distinct |> List.length) < List.length q.Params then
+            repeatedDecls <- repeatedDecls + 1
+
+        match QueryRegistry.register q preg, ModelQuery.register (bridge q) mreg with
+        | Ok p', ModelQuery.Ok m' ->
+            preg <- p'
+            mreg <- m'
+            registered <- registered + 1
+        | Error pe, ModelQuery.Error me ->
+            dupRefused <- dupRefused + 1
+
+            if prodQueryErrRender pe <> modelQueryErrRender me then
+                diffs.Add(
+                    sprintf
+                        "seed %d: register refused differently (%s vs %s)"
+                        seedTag
+                        (prodQueryErrRender pe)
+                        (modelQueryErrRender me)
+                )
+        | _ -> diffs.Add(sprintf "seed %d: register verdict differs on %s" seedTag id)
+
+    // enumerate + tryFind agree (membership, and the entries themselves, sorted by id)
+    let penum = QueryRegistry.enumerate preg |> List.map bridge
+    let menum = ModelQuery.enumerate mreg |> List.sortBy (fun q -> q.q_id)
+
+    if penum <> menum then
+        diffs.Add(sprintf "seed %d: enumerate differs" seedTag)
+
+    for id in "q-x" :: queryIdPool do
+        let p = QueryRegistry.tryFind id preg |> Option.map bridge
+        let m = ofMOpt (ModelQuery.try_find_query id mreg)
+
+        if p <> m then
+            diffs.Add(sprintf "seed %d: tryFind %s differs" seedTag id)
+
+    let mutable settled = 0
+    let mutable stillPending = 0
+    let mutable noSuch = 0
+    let mutable validated = 0
+    let mutable refused = 0
+    let mutable execFailed = 0
+    let mutable resolverRan = 0
+    let mutable refusedWithoutResolver = 0
+    let mutable keys = 0
+    let mutable keysWithNull = 0
+    let mutable keysPermuted = 0
+    let mutable classes = acc.QClasses
+    let k, r4 = ConfRng.intBelow 4 rng
+    rng <- r4
+
+    for _ in 0..k do
+        let id, r5 = ConfRng.choose ("q-x" :: queryIdPool) rng
+        rng <- r5
+
+        let args, r6 =
+            match QueryRegistry.tryFind id preg with
+            | Some q -> genQueryArgs q rng
+            | None -> [ "p0", Cell.Int 1 ], rng
+
+        let margs = qArgsToModel args
+
+        // the resolver answers in the envelope, so the draw reaches all three of its cases:
+        // 0 fails (the typed `ExecutionFailed`), 1 is still pending, 2 and 3 settle.
+        let answer, r7 = ConfRng.intBelow 4 r6
+        rng <- r7
+        let pRan = ref false
+        let mRan = ref false
+
+        let pResolve (_: Query) =
+            pRan.Value <- true
+
+            match answer with
+            | 0 -> Failed "unreachable source"
+            | 1 -> Pending
+            | _ -> Ready(queryResultOf answer)
+
+        let mResolve (_: ModelQuery.query) =
+            mRan.Value <- true
+
+            match answer with
+            | 0 -> ModelQuery.Failed "unreachable source"
+            | 1 -> ModelQuery.Pending
+            | _ -> ModelQuery.Ready(queryResultOf answer)
+
+        let p = QueryRegistry.dispatch preg id args pResolve
+        let m = ModelQuery.dispatch mreg id margs mResolve
+
+        (match p, m with
+         | Ok pv, ModelQuery.Ok mv ->
+             (match pv with
+              | Pending -> stillPending <- stillPending + 1
+              | _ -> settled <- settled + 1)
+
+             if prodQueryDeferredRender pv <> modelQueryDeferredRender mv then
+                 diffs.Add(
+                     sprintf
+                         "seed %d: dispatch %s accepted with different envelopes\n  prod %s\n  model %s"
+                         seedTag
+                         id
+                         (prodQueryDeferredRender pv)
+                         (modelQueryDeferredRender mv)
+                 )
+
+             // and neither side ever hands an `Ok(Failed _)` out of the seam
+             // (`invoke_never_ok_failed` / `dispatch_never_ok_failed`, sampled on the shipped one).
+             match pv, mv with
+             | Failed _, _
+             | _, ModelQuery.Failed _ ->
+                 diffs.Add(sprintf "seed %d: dispatch %s accepted with an Ok(Failed _) envelope" seedTag id)
+             | _ -> ()
+         | Error pe, ModelQuery.Error me ->
+             classes <- Set.add (queryErrClass pe) classes
+
+             if prodQueryErrRender pe <> modelQueryErrRender me then
+                 diffs.Add(
+                     sprintf
+                         "seed %d: dispatch %s refused differently\n  prod %s\n  model %s"
+                         seedTag
+                         id
+                         (prodQueryErrRender pe)
+                         (modelQueryErrRender me)
+                 )
+
+             match pe with
+             | NoSuchQuery _ -> noSuch <- noSuch + 1
+             | ExecutionFailed _ -> execFailed <- execFailed + 1
+             | _ -> refused <- refused + 1
+         | Ok _, ModelQuery.Error me ->
+             diffs.Add(
+                 sprintf
+                     "seed %d: dispatch %s accepted by production, refused by the model (%s)"
+                     seedTag
+                     id
+                     (modelQueryErrRender me)
+             )
+         | Error pe, ModelQuery.Ok _ ->
+             diffs.Add(
+                 sprintf
+                     "seed %d: dispatch %s refused by production (%s), accepted by the model"
+                     seedTag
+                     id
+                     (prodQueryErrRender pe)
+             ))
+
+        // the resolver ran on both sides or on neither — and never past a refusal that is not its own
+        if pRan.Value <> mRan.Value then
+            diffs.Add(
+                sprintf
+                    "seed %d: dispatch %s ran the resolver on one side only (prod %b, model %b)"
+                    seedTag
+                    id
+                    pRan.Value
+                    mRan.Value
+            )
+
+        if pRan.Value then
+            resolverRan <- resolverRan + 1
+
+        (match p with
+         | Error(ExecutionFailed _)
+         | Ok _ -> ()
+         | Error _ ->
+             refusedWithoutResolver <- refusedWithoutResolver + 1
+
+             if pRan.Value then
+                 diffs.Add(sprintf "seed %d: dispatch %s was REFUSED and the resolver still ran" seedTag id))
+
+        // validateParams, the capture key and the determinism tag on their own, on the resolved
+        // declaration — the key for EVERY argument set, accepted or not: `invocationKey` is total
+        // and asks nothing of validation.
+        match QueryRegistry.tryFind id preg with
+        | Some q ->
+            let mq = bridge q
+
+            (match Query.validateParams q args, ModelQuery.validate_params mq margs with
+             | Ok(), ModelQuery.Ok() -> validated <- validated + 1
+             | Error pe, ModelQuery.Error me ->
+                 if prodQueryErrRender pe <> modelQueryErrRender me then
+                     diffs.Add(
+                         sprintf
+                             "seed %d: validateParams refused differently\n  prod %s\n  model %s"
+                             seedTag
+                             (prodQueryErrRender pe)
+                             (modelQueryErrRender me)
+                     )
+             | _ -> diffs.Add(sprintf "seed %d: validateParams verdict differs on %s" seedTag id))
+
+            let pKey = Query.invocationKey q args
+            let mKey = ModelQuery.invocation_key rn mq margs
+            keys <- keys + 1
+
+            if args |> List.exists (fun (_, c) -> c = Cell.Null) then
+                keysWithNull <- keysWithNull + 1
+
+            if pKey <> mKey then
+                diffs.Add(
+                    sprintf "seed %d: invocationKey differs on %s %A\n  prod %s\n  model %s" seedTag id args pKey mKey
+                )
+
+            // `invocation_key_deterministic`, sampled on the shipped seam: with distinct names the
+            // caller's order does not reach the key.
+            let names = args |> List.map fst
+
+            if List.length names > 1 && List.length (List.distinct names) = List.length names then
+                keysPermuted <- keysPermuted + 1
+
+                if Query.invocationKey q (List.rev args) <> pKey then
+                    diffs.Add(sprintf "seed %d: the shipped invocationKey moved under a reordering of %A" seedTag args)
+
+            if Query.determinismTag q <> ModelQuery.determinism_tag_of mq then
+                diffs.Add(sprintf "seed %d: determinismTag differs on %s" seedTag id)
+        | None -> ()
+
+    { QDiffs = acc.QDiffs @ List.ofSeq diffs
+      QRegistered = acc.QRegistered + registered
+      QDupRefused = acc.QDupRefused + dupRefused
+      QSettled = acc.QSettled + settled
+      QStillPending = acc.QStillPending + stillPending
+      QNoSuch = acc.QNoSuch + noSuch
+      QValidated = acc.QValidated + validated
+      QRefused = acc.QRefused + refused
+      QExecFailed = acc.QExecFailed + execFailed
+      QResolverRan = acc.QResolverRan + resolverRan
+      QRefusedWithoutResolver = acc.QRefusedWithoutResolver + refusedWithoutResolver
+      QKeys = acc.QKeys + keys
+      QKeysWithNull = acc.QKeysWithNull + keysWithNull
+      QKeysPermuted = acc.QKeysPermuted + keysPermuted
+      QRepeatedParamDecls = acc.QRepeatedParamDecls + repeatedDecls
+      QClasses = classes },
+    rng
+
+let private queryDifferential
+    (bridge: Query -> ModelQuery.query)
+    (rn: ModelQuery.renderers)
+    (seed: int)
+    (trials: int)
+    : QueryTally =
+    let mutable rng = ConfRng.ofSeed seed
+
+    let mutable tally =
+        { QDiffs = []
+          QRegistered = 0
+          QDupRefused = 0
+          QSettled = 0
+          QStillPending = 0
+          QNoSuch = 0
+          QValidated = 0
+          QRefused = 0
+          QExecFailed = 0
+          QResolverRan = 0
+          QRefusedWithoutResolver = 0
+          QKeys = 0
+          QKeysWithNull = 0
+          QKeysPermuted = 0
+          QRepeatedParamDecls = 0
+          QClasses = Set.empty }
+
+    for i in 1..trials do
+        let t, r' = queryProbe bridge rn i tally rng
+        tally <- t
+        rng <- r'
+
+    tally
+
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -10355,6 +10947,303 @@ let proofOracleTests =
                   "the model refuses the unregistered id the same way"
 
               Expect.equal (ModelCap.ids (ModelCap.enumerate mreg)) [ "cap-t" ] "and enumerates the registered one"
+
+          // ---- Phase 187: the data-acquisition seam (proofs/Query.fst) ----
+
+          testCase
+              "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets"
+          <| fun _ ->
+              let t = queryDifferential queryToModel queryRenderers 1871 300
+
+              match t.QDiffs with
+              | d :: _ -> failtestf "the query oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Measured at 300 registries: registered 337, dupRefused 87, repeated-name
+                  // declarations 89; settled 64, pending 24, noSuch 532, validated 110, refused 108,
+                  // execFailed 22, refusedWithoutResolver 640; keys 218 (40 over a Null binding, 57
+                  // held still under a reordering).
+                  Expect.isGreaterThan
+                      t.QRegistered
+                      200
+                      (sprintf "queries were registered (registered=%d)" t.QRegistered)
+
+                  Expect.isGreaterThan
+                      t.QDupRefused
+                      40
+                      (sprintf "duplicate registrations were refused (dupRefused=%d)" t.QDupRefused)
+
+                  Expect.isGreaterThan
+                      t.QRepeatedParamDecls
+                      40
+                      (sprintf
+                          "declarations repeating a param name arose, so first-wins was compared (repeated=%d)"
+                          t.QRepeatedParamDecls)
+
+                  Expect.isGreaterThan t.QSettled 30 (sprintf "dispatches settled (settled=%d)" t.QSettled)
+
+                  Expect.isGreaterThan
+                      t.QStillPending
+                      10
+                      (sprintf "dispatches stayed pending inside the Ok (pending=%d)" t.QStillPending)
+
+                  Expect.isGreaterThan t.QNoSuch 200 (sprintf "unregistered ids were refused (noSuch=%d)" t.QNoSuch)
+
+                  Expect.isGreaterThan
+                      t.QValidated
+                      50
+                      (sprintf "argument sets were accepted (validated=%d)" t.QValidated)
+
+                  Expect.isGreaterThan t.QRefused 50 (sprintf "argument sets were refused (refused=%d)" t.QRefused)
+
+                  Expect.isGreaterThan
+                      t.QExecFailed
+                      10
+                      (sprintf "resolvers failed and were named (execFailed=%d)" t.QExecFailed)
+
+                  Expect.equal
+                      t.QResolverRan
+                      (t.QSettled + t.QStillPending + t.QExecFailed)
+                      "the resolver ran exactly on the invocations validation passed"
+
+                  Expect.isGreaterThan
+                      t.QRefusedWithoutResolver
+                      300
+                      (sprintf
+                          "refusals were checked for a resolver that did not run (refusedWithoutResolver=%d)"
+                          t.QRefusedWithoutResolver)
+
+                  Expect.isGreaterThan t.QKeys 100 (sprintf "capture keys were compared (keys=%d)" t.QKeys)
+
+                  Expect.isGreaterThan
+                      t.QKeysWithNull
+                      20
+                      (sprintf "capture keys over a Null binding were compared (withNull=%d)" t.QKeysWithNull)
+
+                  Expect.isGreaterThan
+                      t.QKeysPermuted
+                      25
+                      (sprintf
+                          "the shipped key was held still under a reordering of distinct names (permuted=%d)"
+                          t.QKeysPermuted)
+
+                  for cls in
+                      [ "NoSuchQuery"
+                        "UnknownParam"
+                        "ParamTypeMismatch"
+                        "RequiredParamsUnbound"
+                        "ExecutionFailed" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.QClasses)
+                          (sprintf "the sample reached a %s refusal (reached: %A)" cls t.QClasses)
+
+                  Expect.equal (queryDifferential queryToModel queryRenderers 1871 300) t "same seed => identical tally"
+
+          testCase
+              "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail"
+          <| fun _ ->
+              // The teeth, one set per half of the model. Behind the forgetful bridge every param
+              // crosses as optional, so the model accepts what production refuses at step 2. Under
+              // the order-blind comparator the model's sort leaves the caller's order standing, so
+              // its key moves where production's does not. If either ever passes, that half of the
+              // comparison has stopped reaching the clause and the green run above certifies
+              // nothing about it.
+              let forgetful = queryDifferential (queryToModelWith false) queryRenderers 1871 80
+              Expect.isNonEmpty forgetful.QDiffs "a bridge that forgets `Required` MUST disagree with production"
+
+              Expect.isTrue
+                  (forgetful.QDiffs |> List.exists (fun d -> d.Contains "RequiredParamsUnbound"))
+                  "and the disagreement is about the required-params step, which is what the bridge forgot"
+
+              let blind = queryDifferential queryToModel orderBlindRenderers 1871 80
+              Expect.isNonEmpty blind.QDiffs "an order-blind comparator MUST disagree with production"
+
+              Expect.isTrue
+                  (blind.QDiffs |> List.forall (fun d -> d.Contains "invocationKey differs"))
+                  "and every disagreement is about the capture key — the comparator reaches nothing else"
+
+          testCase
+              "no resolver runs on a refused dispatch — `unregistered_refused` and `validate_before_resolve`, on the shipped seam"
+          <| fun _ ->
+              // The two theorems' statements instantiated on production: an unregistered id and a
+              // rejected argument set each return the typed refusal with the resolver untouched,
+              // and the result is the same under a resolver that would have failed.
+              let q: Query =
+                  { Id = "q-t"
+                    Params =
+                      [ { Name = "p0"
+                          Type = IntType
+                          Required = true } ]
+                    ResultSchema = [ "n", IntType ]
+                    Effect =
+                      { Host = ReadsHost
+                        Determinism = Network }
+                    Source = Ref "src-t"
+                    TimeoutMs = None
+                    PageSize = None }
+
+              let reg =
+                  match QueryRegistry.register q QueryRegistry.empty with
+                  | Ok r -> r
+                  | Error e -> failtestf "registration refused: %A" e
+
+              let ran = ref 0
+
+              let settling (_: Query) =
+                  ran.Value <- ran.Value + 1
+                  Ready(queryResultOf 1)
+
+              let failing (_: Query) =
+                  ran.Value <- ran.Value + 1
+                  Failed "boom"
+
+              let pending (_: Query) : Deferred<QueryResult> =
+                  ran.Value <- ran.Value + 1
+                  Pending
+
+              // `unregistered_refused`
+              for resolve in [ settling; failing; pending ] do
+                  Expect.equal
+                      (QueryRegistry.dispatch reg "q-u" [ "p0", Cell.Int 1 ] resolve)
+                      (Error(NoSuchQuery("q-u", [ "q-t" ])))
+                      "an unregistered id is NoSuchQuery, naming the id and the registry's ids, under every resolver"
+
+              // `validate_before_resolve`, one argument set per refusal class
+              for args in
+                  [ [ "p0", Cell.Str "nope" ]
+                    [ "zz", Cell.Int 1 ]
+                    []
+                    [ "p0", Cell.Int 1; "zz", Cell.Null ] ] do
+                  let refusal = Query.validateParams q args
+                  Expect.isError refusal (sprintf "validation rejects %A" args)
+
+                  for resolve in [ settling; failing; pending ] do
+                      Expect.equal
+                          (QueryRegistry.dispatch reg "q-t" args resolve)
+                          (refusal |> Result.map (fun () -> Pending))
+                          (sprintf "a rejected set %A IS validation's refusal, under every resolver" args)
+
+              Expect.equal ran.Value 0 "and no resolver ran on any of them"
+
+              // past an accepted validation the resolver's three answers ride out as the three outcomes
+              let accepted = [ "p0", Cell.Int 1 ]
+
+              Expect.equal
+                  (QueryRegistry.dispatch reg "q-t" accepted settling)
+                  (Ok(Ready(queryResultOf 1)))
+                  "a settling resolver settles"
+
+              Expect.equal
+                  (QueryRegistry.dispatch reg "q-t" accepted pending)
+                  (Ok Pending)
+                  "a pending one stays pending"
+
+              Expect.equal
+                  (QueryRegistry.dispatch reg "q-t" accepted failing)
+                  (Error(ExecutionFailed("boom", [])))
+                  "a failing resolver is the typed ExecutionFailed, never Ok(Failed _)"
+
+              Expect.equal ran.Value 3 "and each of those ran its resolver once"
+
+              // and the model says the same through the same theorems' clauses
+              let mreg =
+                  match ModelQuery.register (queryToModel q) ModelQuery.empty with
+                  | ModelQuery.Ok r -> r
+                  | ModelQuery.Error _ -> failtest "the model refused the registration"
+
+              Expect.equal
+                  (ModelQuery.dispatch mreg "q-u" (qArgsToModel accepted) (fun _ -> ModelQuery.Ready(queryResultOf 1)))
+                  (ModelQuery.Error(ModelQuery.NoSuchQuery("q-u", [ "q-t" ])))
+                  "the model refuses the unregistered id the same way"
+
+              Expect.equal (ModelQuery.ids (ModelQuery.enumerate mreg)) [ "q-t" ] "and enumerates the registered one"
+
+          testCase "the two findings hold on the shipped seam — `all_null_accepted` and `key_collision`"
+          <| fun _ ->
+              // THE FINDINGS, pinned on production so that a fix turns this case red and sends its
+              // author to the two ladder rows (`query-all-null-accepted`, `query-key-collision`)
+              // and the README's theorem 12 section, which is where each is argued.
+              let q: Query =
+                  { Id = "q-f"
+                    Params =
+                      [ { Name = "a"
+                          Type = StringType
+                          Required = true }
+                        { Name = "b"
+                          Type = StringType
+                          Required = false } ]
+                    ResultSchema = [ "n", IntType ]
+                    Effect =
+                      { Host = ReadsHost
+                        Determinism = Network }
+                    Source = Ref "src-f"
+                    TimeoutMs = None
+                    PageSize = None }
+
+              let mq = queryToModel q
+
+              Expect.equal
+                  mq.q_params
+                  ModelQuery.collision_params
+                  "the declaration IS the one the model exhibits the collision on"
+
+              // `all_null_accepted`: a REQUIRED param bound to Null passes validation, and the
+              // resolver runs — `Required` constrains the presence of a name, never of a value.
+              let nulls = [ "a", Cell.Null; "b", Cell.Null ]
+
+              Expect.equal
+                  (qArgsToModel nulls)
+                  (ModelQuery.nulls_of mq.q_params)
+                  "the argument set IS the model's `nulls_of`"
+
+              Expect.equal
+                  (Query.validateParams q nulls)
+                  (Ok())
+                  "every param bound to Null is ACCEPTED, the required one included"
+
+              Expect.equal
+                  (Query.validateParams q [ "a", Cell.Null ])
+                  (Ok())
+                  "and so is the required param bound to Null on its own"
+
+              Expect.equal
+                  (Query.validateParams q [])
+                  (Error(RequiredParamsUnbound [ "a" ]))
+                  "where leaving the same name out is refused — the two are told apart by the NAME alone"
+
+              let ran = ref false
+
+              Expect.equal
+                  (Query.invoke q [ "a", Cell.Null ] (fun _ ->
+                      ran.Value <- true
+                      Pending))
+                  (Ok Pending)
+                  "so the resolver is reached with its required param absent"
+
+              Expect.isTrue ran.Value "and it ran"
+
+              // `key_collision`: two DIFFERENT accepted argument sets, one canonical string.
+              let one = [ "a", Cell.Str "1b=s2" ]
+              let two = [ "a", Cell.Str "1"; "b", Cell.Str "2" ]
+              Expect.equal (qArgsToModel one) ModelQuery.collision_one "the first set IS the model's exhibit"
+              Expect.equal (qArgsToModel two) ModelQuery.collision_two "the second set IS the model's exhibit"
+              Expect.equal (Query.validateParams q one) (Ok()) "the first set is accepted"
+              Expect.equal (Query.validateParams q two) (Ok()) "the second set is accepted"
+              Expect.notEqual one two "they are different argument sets"
+
+              Expect.equal
+                  (Query.invocationKey q one)
+                  (Query.invocationKey q two)
+                  "and they share a capture key — the canonical string has no separator between bindings"
+
+              Expect.equal
+                  (ModelQuery.canonical queryRenderers ModelQuery.collision_one)
+                  (ModelQuery.canonical queryRenderers ModelQuery.collision_two)
+                  "because the PRE-IMAGE is already the same string, before any hash is taken"
+
+              Expect.equal
+                  (ModelQuery.invocation_key queryRenderers mq ModelQuery.collision_one)
+                  (Query.invocationKey q one)
+                  "and the model's key for it is production's"
 
           // ---- Phase 186: the incremental promise (proofs/Propagation.fst) ----
 

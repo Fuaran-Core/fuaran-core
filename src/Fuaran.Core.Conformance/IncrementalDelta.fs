@@ -477,12 +477,240 @@ module IncrementalDelta =
               GroupBy([ "b" ], [ agg "mx" Max "run"; agg "n" Count "a" ])
               Derive("mxn", Binary(Add, Col "mx", Col "n"))
               Transform.limit 3 0 ]
+        // `38`–`47` close the class Phase 208 found the hard way — a ROW-LOCAL step (`Filter`,
+        // `Derive`, `Project`) reading a column whose value for row r depends on rows OTHER than r.
+        // The corpus had ten window-bearing shapes and not one of them: in eight the window is the
+        // last step, and in the two that continue (`23`, `37`) the next step is a `GroupBy`, which
+        // re-aggregates a group from its member rows and never consults the per-row cache. So the
+        // family that exists to see that defect could not, and an evaluator carrying it passed.
+        //
+        // The census is in `docs/incremental-evaluation.md`. Two cross-row PRODUCERS append a column
+        // a later row-local step can read — a partition-global window (`cumulSum` / `rank`) and a
+        // bounded-frame one (`lag`) — against four row-local CONSUMER forms: a `Filter` on the
+        // column (row SURVIVAL moves when another row moves), a `Derive` over it (a cell moves), a
+        // `Derive` OVERWRITING it, and a `Project` RENAMING it before a later step reads it. Eight
+        // cells, all eight absent, and every one of them is shown RED under the pre-`0.28.0` cache
+        // predicate and green on the shipped one.
+        //
+        // The third producer the census names — a maintained group's aggregate column read by the
+        // group tail — was already REACHED (`7`, `32`, `33`, `36`, `37`) and is deliberately NOT
+        // regenerated here: the group table's own `Stable` is "this group's aggregates were
+        // recomputed", which is the same statement as the pre-208 predicate, so those cells cannot
+        // discriminate and adding shapes for them would grow the corpus without growing what it
+        // catches. The other two candidate producers are absent BY CONSTRUCTION: a `Limit` appends
+        // no column at all, and the only join that appends one is a combining join, which the seam
+        // declines (`31`'s neighbour, the `_` arm).
+        //
+        // Each shape carries BOTH producer classes where it can, for the reason the note on
+        // `20`–`26` records: one draw answering two demands is what lets a thin class rise without
+        // the classes that did not grow paying for it. Measured over the same 2 bounds × 300 seeds ×
+        // 100 iterations sweep `IncrementalTests` pins the 7% floor on — 60,000 samples — the two
+        // new demands are reached by 8.88% and 8.93% of samples, and every pre-existing refresh
+        // class still clears the floor, the narrowest being `declined` at 8.23% (was 10.45%).
+        // `group-tail-restricted` is the one this widening would otherwise have pushed UNDER it:
+        // 8.37% over 38 pipelines, a projected 6.62% over 48, and 8.88% as it stands, because `42`
+        // and `46` give it two new carriers. That is the same trade the note on `20`–`26` predicts,
+        // taken deliberately rather than discovered.
+        //
+        // Every one of the ten DISCRIMINATES, which is the bar a shape is admitted on: with the
+        // pre-`0.28.0` predicate reintroduced at the two sites Phase 208 changed, these ten are
+        // exactly the pipelines that disagree with the reference evaluator, 22 to 84 samples of
+        // roughly 500 each, and the other thirty-eight stay green. No shape was dropped.
+        | 38 ->
+            // A partition-global running total read by a FILTER, then a bounded frame read by a
+            // DERIVE. The headline pair, and the shape closest to the two pipelines Phase 208
+            // measured wrong: the filter's verdict on a row the delta never named moves whenever any
+            // other row of its partition does, and the lagged cell behind it moves for the same
+            // reason one row further out.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" }
+              Filter(Binary(Gt, Col "run", Lit(Int 2)))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Derive("d", Binary(Add, Col "prev", Col "a")) ]
+        | 39 ->
+            // The mirror: a BOUNDED frame read by a filter, then a partition-global rank read by a
+            // derive that OVERWRITES it. `prev` is null for the first row of each partition, so the
+            // survival verdict here is three-valued as well as stale-able — and the overwrite takes
+            // the `Derive` arm's in-place replacement branch rather than its append branch, which is
+            // the one no other shape reaches behind a window.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Filter(Binary(Ge, Col "prev", Lit(Int -5)))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Rank
+                    Of = "a"
+                    As = "rk" }
+              Derive("rk", Binary(Mul, Col "rk", Lit(Int 2))) ]
+        | 40 ->
+            // A running total read by a derive, then a lagged column RENAMED by a projection and
+            // read under its new name. The rename is the point: an implementation that answered
+            // Phase 208 by invalidating the expressions that NAME a window's output column — the
+            // obvious narrower fix — is right on every other shape here and wrong on this one.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" }
+              Derive("e", Binary(Add, Col "run", Col "a"))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Project [ "id", "id"; "prev", "v"; "e", "e" ]
+              Filter(Binary(Lt, Col "v", Lit(Int 4))) ]
+        | 41 ->
+            // The rename on the OTHER producer, and a projection that DROPS columns the later steps
+            // do not name: a rank renamed and filtered on, then a bounded frame whose own column is
+            // overwritten in place. The dropped columns matter — the cached prefix is positional, so
+            // a projection that narrows the frame is where a cache read by index rather than by row
+            // identity goes wrong quietly.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Rank
+                    Of = "a"
+                    As = "rk" }
+              Project [ "id", "id"; "a", "a"; "b", "b"; "rk", "v" ]
+              Filter(Binary(Le, Col "v", Lit(Int 2)))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Derive("prev", Binary(Add, Col "prev", Lit(Int 1))) ]
+        | 42 ->
+            // The stale SURVIVOR SET where it does the most damage: a filter on a running total
+            // deciding who is in a maintained group at all, with a tail reading the group's own
+            // count. A row wrongly kept or wrongly dropped here does not move one cell — it moves a
+            // group's membership, its aggregate, and the tail's verdict on it.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" }
+              Filter(Binary(Gt, Col "run", Lit(Int 0)))
+              GroupBy([ "b" ], [ agg "n" Count "a"; agg "s" Sum "a" ])
+              Filter(Binary(Gt, Col "n", Lit(Int 0))) ]
+        | 43 ->
+            // The same survivor set feeding a MERGED ORDER and then a CUT — the two cross-row steps
+            // `13` and `27` put behind a row-local filter, now behind one whose verdict a window can
+            // move. Which rows reach the cut is decided by a filter reading a lagged neighbour, so a
+            // stale verdict changes the window's MEMBERSHIP rather than one cell of it.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Filter(Binary(Ge, Col "prev", Lit(Int -3)))
+              Transform.sortBy [ "b", Asc ]
+              Transform.limit 2 0 ]
+        | 44 ->
+            // A ranked column read by a derive, with a merged order and a cut BEHIND the consumer:
+            // the derived cell is carried through two cross-row steps that decide membership, so a
+            // stale one is not merely a wrong cell in place — it is a wrong cell inside the window
+            // the cut keeps.
+            //
+            // The order is keyed on `b`, a SOURCE column, and that is a deliberate withholding
+            // rather than an arbitrary choice. Sorting on `d` — the derived column that reads the
+            // window's own output — is RED ON `main` TODAY, and the defect is NOT this family's to
+            // fix: `walk`'s `WSort` arm builds its reusable set from `not w.Affected`, which is the
+            // condition Phase 208 replaced with `Stable` at the two sites it found and left standing
+            // at this third one, so a merged order reuses the cached position of a row whose sort
+            // key a window has moved. Phase 212 measured it, reported it, and changed nothing under
+            // `Fuaran.Core.DataFrame`; the executable reproducer and the full diagnosis are the
+            // pending case in `IncrementalRefreshCostTests`, and the census in
+            // `docs/incremental-evaluation.md` marks the cell red rather than absent. When it is
+            // fixed, this shape's sort key moves to `d` and the pending case becomes a live one.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Rank
+                    Of = "a"
+                    As = "rk" }
+              Derive("d", Binary(Add, Col "rk", Col "a"))
+              Transform.sortBy [ "b", Asc ]
+              Transform.limit 3 0 ]
+        | 45 ->
+            // A relation verdict deciding the FRAME the window walks, then both producers read
+            // row-locally. The join is what makes this different from `38`: a row the delta never
+            // named can leave the partition because the RELATION moved, so the running total the
+            // filter reads moves for a reason the delta cannot describe at all.
+            [ Join(Embedded lookup, [ "b", "k" ], Semi)
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" }
+              Filter(Binary(Gt, Col "run", Lit(Int 1)))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Derive("d", Binary(Add, Col "prev", Lit(Int 1))) ]
+        | 46 ->
+            // A lagged column read by a derive whose column is then AGGREGATED by a maintained group
+            // and read by its tail. `23` and `37` aggregate a window's column directly; here a
+            // row-local step stands between the two, so a stale cell reaches the group as a wrong
+            // contribution from a row the group's own cache considers settled.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Derive("d", Binary(Add, Col "prev", Col "a"))
+              GroupBy([ "b" ], [ agg "mx" Max "d"; agg "n" Count "a" ])
+              Filter(Binary(Gt, Col "n", Lit(Int 0))) ]
+        | 47 ->
+            // Both producers' columns OVERWRITTEN in place, one after the other, with the second
+            // window framed over a table the first overwrite has already rewritten. It is the only
+            // shape where a window runs over a frame whose earlier window column is no longer the
+            // window's own value, so a cache that keyed reuse on "this step appended what it
+            // appended last time" rather than on the row's cells is wrong here and nowhere else.
+            [ Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = CumulSum
+                    Of = "a"
+                    As = "run" }
+              Derive("run", Binary(Add, Col "run", Lit(Int 1)))
+              Window
+                  { PartitionBy = [ "b" ]
+                    OrderBy = [ "a", Asc ]
+                    Fn = Lag
+                    Of = "a"
+                    As = "prev" }
+              Derive("prev", Binary(Mul, Col "prev", Lit(Int 2))) ]
         | _ ->
             // Phase 120 — declined by KIND: a combining join fans a left row out across its matches
             // and appends the right schema, so one source row is no longer one output row.
             [ Join(Embedded lookup, [ "b", "k" ], Inner) ]
 
-    let private pipelineCount = 38
+    let private pipelineCount = 48
 
     /// Apply one edit to the base rows, returning the new table and a tag naming the edit.
     let private editOf (k: int) (rows: (string * Cell * Cell) list) (n: int) : Table * string =
@@ -621,6 +849,86 @@ module IncrementalDelta =
     /// The shipped bound: one to nine rows (Phase 115).
     let samples (seed: int) (iterations: int) : IncrementalSample list = samplesWith 9 seed iterations
 
+    /// The columns an expression NAMES. The (producer × consumer) census cannot be read off a
+    /// step's shape alone: a row-local step is a consumer of a cross-row column only when its
+    /// expression names that column, and `Filter` / `Derive` are the only two steps that consult the
+    /// per-row cache at all.
+    let rec private colsNamed (e: ColExpr) : string list =
+        match e with
+        | Col c -> [ c ]
+        | Lit _
+        | Param _
+        | Now _ -> []
+        | Binary(_, x, y) -> colsNamed x @ colsNamed y
+        | Not x
+        | IsNull x
+        | Cast(_, x) -> colsNamed x
+        | Coalesce xs -> xs |> List.collect colsNamed
+        | Case(cs, e2) -> (cs |> List.collect (fun (c, v) -> colsNamed c @ colsNamed v)) @ colsNamed e2
+        | ApplyFn(_, xs) -> xs |> List.collect colsNamed
+        | InList(x, xs) -> colsNamed x @ (xs |> List.collect colsNamed)
+        | InParam(x, _) -> colsNamed x
+
+    /// Phase 212 — every cross-row PRODUCER class whose appended column a later ROW-LOCAL step
+    /// READS: the shape whose absence let `v0.26.0` publish a wrong answer.
+    ///
+    /// It walks the pipeline carrying the set of columns whose value for row r depends on rows other
+    /// than r, and follows that set through the two steps that move it: a `Project` carries a column
+    /// forward under a NEW NAME, and a `Derive` over a tainted column produces another one. Both are
+    /// load-bearing rather than thorough — a renamed column is the same column, so a demand that
+    /// matched the window's own output name would report `40` and `41` as not reaching the class
+    /// they exist for, and a guard that cannot see the shape it names is the failure mode this whole
+    /// module was written to stop.
+    ///
+    /// A `GroupBy` clears the set: the group table's columns are the group's own aggregates, read
+    /// through the group cache rather than the per-row one, and that cache's stability condition is
+    /// "this group's aggregates were recomputed" — which is sound, and is why the census marks those
+    /// cells reached-but-non-discriminating rather than giving them shapes.
+    let private crossRowColumnsReadRowLocally (pipeline: Transform list) : string list =
+        let rec go (tainted: (string * string) list) (acc: string list) (steps: Transform list) =
+            match steps with
+            | [] -> acc
+            | Window spec :: rest ->
+                let kind =
+                    if DataFrame.windowFrameBounded spec.Fn then
+                        "bounded-frame window read row-locally"
+                    else
+                        "partition-global window read row-locally"
+
+                go ((spec.As, kind) :: (tainted |> List.filter (fun (c, _) -> c <> spec.As))) acc rest
+            | Filter e :: rest ->
+                let named = colsNamed e
+
+                let hit =
+                    tainted |> List.filter (fun (c, _) -> List.contains c named) |> List.map snd
+
+                go tainted (acc @ hit) rest
+            | Derive(n, e) :: rest ->
+                let named = colsNamed e
+
+                let hit =
+                    tainted |> List.filter (fun (c, _) -> List.contains c named) |> List.map snd
+
+                let kept = tainted |> List.filter (fun (c, _) -> c <> n)
+
+                let tainted2 =
+                    match hit with
+                    | [] -> kept
+                    | kind :: _ -> (n, kind) :: kept
+
+                go tainted2 (acc @ hit) rest
+            | Project pairs :: rest ->
+                let carried =
+                    pairs
+                    |> List.choose (fun (src, out) ->
+                        tainted |> List.tryPick (fun (c, k) -> if c = src then Some(out, k) else None))
+
+                go carried acc rest
+            | GroupBy _ :: rest -> go [] acc rest
+            | _ :: rest -> go tainted acc rest
+
+        go [] [] pipeline |> List.distinct
+
     /// What this family's sample must contain for its laws to have been tested — the verdicts the
     /// laws branch on, and the table width the order-sensitive ones read.
     let demands: AdequacyDemand<IncrementalSample> list =
@@ -719,6 +1027,34 @@ module IncrementalDelta =
                         "top-n-restricted"
                     if carriesGroupTail && restricted then
                         "group-tail-restricted" ]
+          )
+          // Phase 212 — the demand that would go vacuous if the `Window` clause of the cache
+          // condition were reverted, stated PER PRODUCER CLASS because that is the axis the defect
+          // lives on: a bounded frame moves one neighbour's cell, a partition-global one moves every
+          // cell in the partition, and an implementation can get the first right and the second
+          // wrong. It is restricted-conditioned like every class above it — a declined or fully
+          // recomputed refresh reaches the SHAPE without ever consulting the row cache, so counting
+          // it would make the demand answerable by samples that cannot carry the defect.
+          //
+          // It is a dimension of its own rather than two more `refresh class` verdicts because it is
+          // not a refresh class: the laws do not branch on it, and the pipeline SHAPE is what it
+          // measures. Keeping it separate also keeps the 7% margin floor in the suite reading the
+          // classes it was measured for.
+          ReachesEvery(
+              "cross-row column read",
+              [ "partition-global window read row-locally"
+                "bounded-frame window read row-locally" ],
+              fun s ->
+                  let restricted =
+                      match s.Refresh.Recompute with
+                      | RowsRecomputed _
+                      | GroupsRecomputed _ -> true
+                      | _ -> false
+
+                  if restricted then
+                      crossRowColumnsReadRowLocally s.Pipeline
+                  else
+                      []
           )
           Spans("source rows", rowsTheLawsNeed, fun s -> s.Prime.SourceRows) ]
 
