@@ -513,6 +513,7 @@ over-read.
 | `propagation-order-distinct` | `model-bridge` | `unscheduled` |
 | `propagation-change-set-and-prior` | `premise` | — |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
+| `query-renderers-abstract` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -3872,6 +3873,196 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
      theorem about a set here is about membership, and the values map is compared as a map.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
+## Theorem 12 — the query seam: default-deny acquisition and a deterministic capture key (Phase 187)
+
+_(This directory's twelfth, and theorem 10's sibling. `Fuaran.Core.Query` is the data-acquisition
+seam beside `Capability`: a serialisable typed `Query` declaration, a default-deny registry,
+param-type validation before any fetch, a host-supplied resolver answering in the `Deferred`
+envelope, and the Phase 27 capture key. Theorem 10 proved the seam that INVOKES; until this phase
+the seam that FETCHES was property-tested — `queryLaws`, seven laws over one fixed declaration —
+and proved nowhere.)_
+
+The doc comments of `Query.fs` state the contract in four places and the theorems are their names:
+
+> **`QueryRegistry.dispatch` — "default-deny — an unregistered id is `NoSuchQuery`".
+> `Query.validateParams` — "the host validates this before running any resolver".
+> `QueryRegistry.enumerate` — "the discovery surface … what data may I acquire".
+> `Query.invocationKey` — "the query id + a hash of the canonical (name-sorted) param string. Same
+> args replay the same captured rows; different args do not collide."**
+
+Three of those four are theorems below. The fourth is a theorem in its first sentence and a
+FINDING in its second.
+
+`Query.fst` models the two modules a dispatch crosses clause for clause — `cellType`,
+`determinismTag`, the private `cellKey` with `invocationKey` over it, `validateParams` (its local
+`checkArgs` walk and its required-params step), `invoke`, and `QueryRegistry.empty` / `register` /
+`tryFind` / `enumerate` / `dispatch` — reusing theorem 10's registry shape whole (a
+`Map<string, _>` read as a finite map, `outcome` and `deferred` restated rather than opened). What
+is DIFFERENT from theorem 10 is what this phase proves: validation against a declared param SCHEMA
+rather than a value space, the capture key, and the resolver as a parameter. Three things are
+**parameters**: the RESOLVER, which is an argument of `invoke` and `dispatch` and stays outside
+every claim — nothing here is a theorem about any resolver, and the result payload is an abstract
+type; the four RENDERERS `invocationKey` is written through (`string` on an int,
+`Canon.canonicalFloat`, `Hash.fnv1a`, and the ordinal order `List.sortBy fst` compares names by), a
+`renderers` record exactly as theorem 10's three scalar readers are one; and a declaration's
+`Source`, an opaque carrier the seam never reads. `QueryCodec` is outside the model.
+
+### What is proved
+
+Four theorems, over any registry, any renderers and any host resolver:
+
+1. **`unregistered_refused`** — `dispatch` of an id the registry does not hold is the typed
+   `NoSuchQuery id known`, and the result is the SAME under every resolver. As in theorem 10 the
+   second clause is the content: resolver-independence is what "runs no resolver" means for a pure
+   function. `invoke` can never raise the registry's two refusals, so the classes stay disjoint.
+2. **`validate_before_resolve`** — an argument set `validateParams` rejects makes `invoke` return
+   that rejection, for every resolver alike; at the registry, a resolved id still runs nothing on
+   a set validation rejects (`dispatch_validates_first`). The converse holds
+   (`resolver_runs_only_validated`), and the envelope has no fourth outcome here either: a
+   resolver's `Failed` crossed into the typed `ExecutionFailed`, so `Ok (Failed _)` is unreachable
+   at the seam and through the registry (`invoke_never_ok_failed`, `dispatch_never_ok_failed` — the
+   claim `queryLaws` samples over three drawn answers, here over every resolver). Validation itself
+   is characterised EXACTLY, which theorem 10's was not: `validate_params_exact` says it accepts
+   precisely the sets whose every binding addresses a declared param with a `Null` or an in-type
+   cell and that leave no required name unbound — an iff, so the first finding below is read off a
+   definition rather than searched for. Refusals are truthful (`refusal_is_truthful`,
+   `unbound_required_truthful`): an `UnknownParam` names a bound name no param declares, a
+   `ParamTypeMismatch` a declared param with a DIFFERENT type the cell really has, a
+   `RequiredParamsUnbound` only declared names the args really leave out.
+3. **`enumerate_is_registry`** — an id is enumerable exactly when `tryFind` resolves it, and
+   `dispatch` raises `NoSuchQuery` exactly off the enumeration (`no_such_iff_unregistered`).
+   `register` refuses a held id and extends by exactly one entry otherwise; a registry built by it
+   holds distinct ids (`register_keeps_distinct`) — which is what makes a capture key's id prefix
+   name ONE declaration. Membership, not order, as in theorem 10: production's `Map` sorts the
+   enumeration and the id order is `queryLaws`'s to certify.
+4. **`invocation_key_deterministic`** — the capture key reads the declaration through its `Id`
+   ALONE and the arguments through their name-sorted canonical form alone: two declarations sharing
+   an id, and two argument lists binding the same DISTINCT names to the same cells in ANY order,
+   key identically — under any hash and any numeral renderer, given only that the name comparator
+   is a total order. The order half is `sorted_unique` (two name-sorted lists with distinct names
+   holding the same bindings are the same list) over a model of `List.sortBy` as the stable
+   insertion sort it is; the id half needs no premise (`invocation_key_id_only`).
+
+**What the fourth theorem deliberately does not say.** The shard asked for the key to be "a function
+of the declaration and the validated arguments alone — never of the resolver's answer or the clock".
+In a pure total function that sentence is the function's TYPE: `invocationKey` is handed no resolver
+and no clock, and a lemma `forall resolve. key q a == key q a` would be a theorem about nothing.
+So the claim with content was proved instead — WHICH parts of its two arguments the key reads — and
+the type-level half is said in prose, here and in the model's header, rather than dressed as a row.
+Distinct names are a real hypothesis: `List.sortBy` is stable, so two bindings under one name keep
+the caller's order and the key moves with it. The differential draws that case and compares it.
+
+### The findings: `Required` does not mean a value, and different args DO collide
+
+Both were read off the model, both are proved, and both are asserted on the shipped seam by the
+differential's fourth case so that a fix turns it red.
+
+**`all_null_accepted`.** EVERY declaration — whatever it marks `Required` — accepts the argument set
+binding each of its params to `Null`. Step 1 of `validateParams` treats a `Null` cell as
+"absence, type-agnostic" and passes it; step 2 asks only whether the NAME is a key of the argument
+map, and it is. So `[ "a", Null ]` is accepted where `[]` is refused with `RequiredParamsUnbound
+["a"]`, the two are told apart by the name alone, and a resolver is reached with its required param
+absent. `QueryParam`'s doc comment says a bound cell must agree with the type "(or be `Null` when
+not required)"; the code accepts it when required as well. The exactness theorem is what made this
+visible: written as an iff, the right-hand side has no clause relating `Null` to `p_required`, and
+there is nowhere for one to hide.
+
+**`key_collision`.** The canonical string joins `name=cellKey` pairs on the EMPTY string, so a
+string cell can spell the next binding. For one declaration (`a` required, `b` optional, both
+strings) the two different accepted argument sets
+
+    [ "a", Str "1b=s2" ]                 a=s1b=s2
+    [ "a", Str "1"; "b", Str "2" ]       a=s1 + b=s2  =  a=s1b=s2
+
+share a canonical string and therefore a capture key under EVERY hash — the collision is in the
+pre-image, before `Hash.fnv1a` is consulted, which is why the lemma quantifies over the renderers
+and needs only that the comparator puts `a` before `b`. The doc comment's "different args do not
+collide" is false, and a replay keyed this way serves one invocation's captured rows for the other.
+`Capability.invocationKey` builds its canonical string the same way (`addr=value`, joined on the
+empty string); it was outside theorem 10's model and the same shape applies there.
+
+Neither is fixed in this phase, per the standing rule that a gap the theorem finds is fixed by its
+own phase, and because this phase's acceptance is that `Fuaran.Core.Query`'s surface and behaviour
+are unchanged. The fix shapes, if taken: step 2 counting a `Null` binding of a required param as
+unbound (a change to what a public function accepts); and a separator no `cellKey` can emit between
+bindings — `Hash.fs` already names one for the content-hash folds, U+0001, for exactly this reason
+— which changes every existing capture key and is therefore a journal-compatibility decision
+rather than a tidy-up. Both are on the "Next" list below.
+
+### The differential
+
+`Proofs.Oracle`'s query family runs the extracted model beside production with the model's result
+payload instantiated at production's own `QueryResult`, so a settled page crosses untranslated, and
+the renderers instantiated at production's own four calls. It draws from the generator `queryLaws`
+uses (`ConfRng`), WIDENED from that family's one fixed declaration. Over 300 generated registries at
+seed 1871 — up to three declarations from a three-id pool, each with up to three params over all
+six column types, names drawn WITH replacement so a repeated param name arises and first-wins is
+compared — and up to four invocations each, one id in four unregistered, argument sets that bind,
+skip, null, mistype, repeat a name and reverse: `register`, `enumerate` (sorted on both sides),
+`tryFind`, `validateParams`, `dispatch`, `invocationKey` byte for byte for EVERY argument set
+accepted or not, and `determinismTag`, with an INSTRUMENTED resolver on each side that must have run
+on both or on neither and never past a refusal that is not its own. Measured: registered 337,
+refused 87, 89 declarations repeating a param name; settled 64, pending 24, `NoSuchQuery` 532,
+validated 110, refused 108, `ExecutionFailed` 22; 640 refusals checked for a resolver that did not
+run; 218 keys compared, 40 of them over a `Null` binding, and the SHIPPED key held still under a
+reordering of 57 distinct-name sets — theorem 4 sampled on production rather than on the model. All
+five reachable `QueryError` classes reached (`SourceNotResolved` and `Timeout` are a resolver's to
+raise and no clause of the seam produces them). The resolver-ran count equals settled plus pending
+plus failed, asserted — theorems 1 and 2 as a tally. The model agreed with production on the first
+run.
+
+Two go-reds, one per half of the model, because one perturbation cannot reach both. A FORGETFUL
+bridge crosses every param as optional and must lose on the required-params step; an ORDER-BLIND
+comparator (everything below everything, so the insertion sort leaves the caller's order standing)
+must lose on the capture key AND ON NOTHING ELSE, which is asserted — the comparator reaches no
+other clause. Seeded and replayable; the same seed reproduces the same tally, asserted.
+
+### What it cost
+
+Cold runs of the prover invoked directly on the file with the leg's own flags (rlimit 40,
+`--quake 3`, `--report_assumes error`), a fresh cache each time: **8s, 9s, 9s**, taken beside up to
+three other proof workers on the same machine. Budget **20s** (the minimum — 2 × 9 is under it) and
+floor **4s** (half of 8, rounded down), seeded per Phase 148/164's rules and recorded in
+`modules.json`. No `--ext context_pruning`: the module opens nothing. Nothing needed a scoped
+rlimit. The whole module discharged on its second run, and the first failure was not the solver's:
+`sorted_head_le` recurses on the tail while its head argument CHANGES, so the default lexicographic
+measure over the arguments in order refuses it, and `(decreases t)` says what is shrinking. The one
+proof shape that costs anything is `sorted_unique`, an induction over both lists carrying a
+quantified membership hypothesis; it is instantiated BY HAND at each head (`assert (mem_arg h s1 =
+mem_arg h s2)`) and re-established for the tails through `forall_intro` over a local lemma, rather
+than left to pattern matching — theorem 11's lesson about quantified premises, applied before it
+was needed. Theorem 10's lesson about closures was applied the same way: `find_param` is a named
+function where the F# has `List.tryFind (fun p -> ...)`. One modelling choice is about text rather
+than proof: `cellKey`'s rendering of a `Null` is a one-character non-ASCII literal, and it rides in
+the `renderers` record so the model and its extraction stay ASCII. The oracle compiles against
+`Prims.fs` and the `option` shim with nothing added.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The four theorems above plus the characterisations
+   (`invoke_never_registry_refusal`, `dispatch_validates_first`, `resolver_runs_only_validated`,
+   `validate_params_shape`, `validate_params_exact`, `refusal_is_truthful`,
+   `unbound_required_truthful`, `no_such_iff_unregistered`, `registered_dispatches`,
+   `register_refuses_duplicate`, `register_extends`, `register_keeps_distinct`, `sorted_unique`,
+   `invocation_key_id_only`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
+   `dispatch_never_ok_failed`) and the two findings (`all_null_accepted`, `key_collision`), over any
+   registry, any renderers and any host resolver. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it opens
+   nothing and restates `outcome`, `deferred` and its list helpers as `Capability.fst` does.
+2. **Differentially tested.** The extracted model agrees with the seam over the pools above, with
+   the forgetful bridge and the order-blind comparator each required to lose. Agreement is over
+   those pools, never over all inputs.
+3. **Assumed, and stated as such.**
+   - **The renderers premise** (`query-renderers-abstract`, a `model-bridge`, permanent). The int
+     and float renderers, the hash and the name comparator are parameters; a float cell crosses as
+     an opaque carrier. `invocation_key_deterministic` states the one thing it needs of them — the
+     comparator is a total order — as a hypothesis, and NOTHING here says two different canonical
+     strings hash apart: that is a claim about FNV-1a and is not made.
+   - **The resolver**, which is not a row because nothing is assumed of it: every theorem holds
+     for every resolver, and none is about one.
+   - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row.
+   - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
+
 ## Next
 
 _(**A resolver that resolves only declared reads** was the first item on this list and is DONE:
@@ -3881,6 +4072,22 @@ Phase 209. The resolver now answers for `deps[id]` and nothing else, a read outs
 `propagation-change-set-and-prior`. Theorem 11's "What Phase 209 changed here" section carries what
 it cost — one parameter, one permanent bridge — and why the projection through a data value was the
 mechanism rather than functional extensionality.)_
+
+**A separator in the capture key's canonical string** — theorem 12's second finding
+(`query-key-collision`), and the one with a data consequence. `Query.invocationKey` and
+`Capability.invocationKey` both join their `name=value` pairs on the empty string, so two different
+accepted argument sets can share a pre-image and therefore a capture key under any hash. The fix is
+one character — a separator no `cellKey` can emit, which `Hash.fs` already names for the
+content-hash folds — and its cost is not in the code: every capture key already journalled moves,
+so it needs a decision about existing journals before it needs a patch. When it lands,
+`key_collision` stops being provable, which is the point: the row is replaced by the injectivity
+of the canonical string, and the differential's fourth case is rewritten with it.
+
+**`Required` meaning a VALUE** — theorem 12's first finding (`query-all-null-accepted`).
+`validateParams` accepts a required param bound to `Null`, against `QueryParam`'s own doc comment.
+Either the code moves (step 2 counts a `Null` binding of a required param as unbound — a change to
+what a public function accepts) or the comment does; `validate_params_exact` is written as an iff
+so that whichever is chosen is one clause in one definition.
 
 **A law family generic over a DOMAIN'S evaluator** — the OTHER way theorem 11 named of narrowing its
 premise, still not taken and now worth more rather than less. Phase 209 discharged the declared-reads
