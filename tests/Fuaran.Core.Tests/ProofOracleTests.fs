@@ -4584,6 +4584,190 @@ let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundT
 let private renderCanonDiffs (diffs: string list) : string =
     diffs |> List.rev |> List.truncate 5 |> String.concat "\n"
 
+// ---- the guard (Phase 165): `WireCanon.try_render` beside `Canon.tryRender` ----
+
+/// The model names a refusal as DATA — a path of steps and the float it found — where production
+/// emits one string. This renders the model's refusal in production's spelling so the two can be
+/// compared as the `Result` a caller actually receives. The member key goes through the MODEL's
+/// own `quoted` (rule 6's escape), not through `Canon`, so the bridge hands production nothing to
+/// agree with itself about; the index crosses the `nat` → `int` width boundary here, where
+/// `oracle/Prims.fs` says such a conversion belongs.
+let private guardPathOfModel (p: WireCanon.pstep list) : string =
+    "$"
+    + (p
+       |> List.map (fun s ->
+           match s with
+           | WireCanon.PItem i -> "[" + string (int i) + "]"
+           | WireCanon.PMember k -> "[" + canonFromChs (WireCanon.quoted k) + "]")
+       |> String.concat "")
+
+let private guardModelSide (w: WireCanon.wire<int, float>) (v: JVal) : Result<string, string> =
+    match WireCanon.try_render w (canonToModel v) with
+    | WireCanon.Rendered bytes -> Result.Ok(canonFromChs bytes)
+    | WireCanon.Refused(p, f) ->
+        let tok =
+            match w.fclass f with
+            | WireCanon.FNaN -> "NaN"
+            | WireCanon.FPosInf -> "Infinity"
+            | WireCanon.FNegInf -> "-Infinity"
+            | WireCanon.FFinite -> "<the model refused a float its own wire calls finite>"
+
+        Result.Error(
+            "non-finite float has no canonical rendering of its own: "
+            + tok
+            + " at "
+            + guardPathOfModel p
+        )
+
+/// The guard's predicate, written a THIRD time and independently of both sides: does the value
+/// hold a non-finite float anywhere. "Refuses exactly" is a claim about this set, and asking
+/// either side under test to define it would make the claim circular.
+let rec private holdsNonFinite (v: JVal) : bool =
+    match v with
+    | JFloat f -> not (System.Double.IsFinite f)
+    | JArr xs -> xs |> List.exists holdsNonFinite
+    | JObj fs -> fs |> List.exists (snd >> holdsNonFinite)
+    | _ -> false
+
+type private GuardTally =
+    {
+        Docs: int
+        Diffs: string list
+        /// Documents production refused.
+        Refused: int
+        /// Refusals whose path is two or more steps deep — the scan's recursion, not its leaf arm.
+        DeepRefusals: int
+        /// Refusals naming each of the three tokens.
+        NaNs: int
+        PosInfs: int
+        NegInfs: int
+        /// ACCEPTED documents carrying a float outside the canonical subset — an integer-shaped
+        /// token or a zero — which is the set the guard must not refuse.
+        AcceptedNormalised: int
+    }
+
+let private emptyGuardTally =
+    { Docs = 0
+      Diffs = []
+      Refused = 0
+      DeepRefusals = 0
+      NaNs = 0
+      PosInfs = 0
+      NegInfs = 0
+      AcceptedNormalised = 0 }
+
+/// One document, asked of production's guard and of the model's. Three comparisons, each of which
+/// can lose on its own: the two `Result`s agree (message and path included); an `Ok` is exactly
+/// `Canon.render`'s bytes; and the verdict is `Error` precisely when the independent predicate
+/// says a non-finite float is present.
+let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: GuardTally) : GuardTally =
+    let production = Canon.tryRender v
+    let model = guardModelSide w v
+    let t = { t with Docs = t.Docs + 1 }
+
+    let diff (what: string) (t: GuardTally) =
+        { t with
+            Diffs =
+                sprintf "%s: %s\n  production: %A\n  the model:  %A" label what production model
+                :: t.Diffs }
+
+    let t =
+        if production = model then
+            t
+        else
+            diff "the guards disagree" t
+
+    match production with
+    | Result.Ok bytes ->
+        let t =
+            if bytes = Canon.render v then
+                t
+            else
+                diff "an accepted value did not render to Canon.render's bytes" t
+
+        let t =
+            if holdsNonFinite v then
+                diff "production ACCEPTED a value holding a non-finite float" t
+            else
+                t
+
+        if isCanonicalValue v then
+            t
+        else
+            { t with
+                AcceptedNormalised = t.AcceptedNormalised + 1 }
+    | Result.Error m ->
+        let t =
+            if holdsNonFinite v then
+                t
+            else
+                diff "production REFUSED a value holding no non-finite float" t
+
+        let steps = m |> Seq.filter (fun c -> c = '[') |> Seq.length
+
+        { t with
+            Refused = t.Refused + 1
+            DeepRefusals = t.DeepRefusals + (if steps >= 2 then 1 else 0)
+            NaNs = t.NaNs + (if m.Contains ": NaN at " then 1 else 0)
+            PosInfs = t.PosInfs + (if m.Contains ": Infinity at " then 1 else 0)
+            NegInfs = t.NegInfs + (if m.Contains ": -Infinity at " then 1 else 0) }
+
+/// The Phase 149 pool carries no non-finite float — it was built to measure the renderer, which
+/// has nothing to say about one. This walks a drawn value and replaces roughly one numeric leaf in
+/// three with one of the three, so the refusals land at every depth and position the pool reaches
+/// rather than only at the root.
+let private poisonCanonValue (r: int ref) (v: JVal) : JVal =
+    let draw (n: int) =
+        r.Value <- nextCanonSeed r.Value
+        r.Value % n
+
+    let rec go (v: JVal) : JVal =
+        match v with
+        | JFloat _
+        | JInt _ when draw 3 = 0 ->
+            (match draw 3 with
+             | 0 -> JFloat nan
+             | 1 -> JFloat infinity
+             | _ -> JFloat -infinity)
+        | JArr xs -> JArr(xs |> List.map go)
+        | JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, go x))
+        | other -> other
+
+    go v
+
+let private guardGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : GuardTally =
+    let r = ref seed
+    let mutable t = emptyGuardTally
+
+    for i in 1..trials do
+        let v = poisonCanonValue r (genCanonValue r 3)
+        t <- guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+    t
+
+let private guardCorpus (w: WireCanon.wire<int, float>) (family: string) : GuardTally =
+    let mutable t = emptyGuardTally
+
+    for name, text in JsonParseDiff.corpusTexts family do
+        match Json.parse text with
+        | Result.Error m -> failtestf "the corpus fixture %s/%s did not parse: %s" family name m
+        | Result.Ok v -> t <- guardProbe w (sprintf "%s/%s" family name) v t
+
+    t
+
+/// The GO-RED instrument for the guard: a wire that cannot see NaN — it classifies one as finite,
+/// so the model's scan walks past it. Every document whose FIRST non-finite float is a NaN must
+/// then disagree with production, and every other document — including one refused for an
+/// infinity — must still agree, which is what says the instrument is narrow to the predicate.
+let private guardWireGoRed: WireCanon.wire<int, float> =
+    { canonWire with
+        fclass =
+            fun f ->
+                if System.Double.IsNaN f then
+                    WireCanon.FFinite
+                else
+                    canonWire.fclass f }
+
 // ---------------------------------------------------------------------------
 //  Phase 151 — the EVOLUTION POLICY: `WireVersioning` beside `Versioning`.
 // ---------------------------------------------------------------------------
@@ -9940,9 +10124,10 @@ let proofOracleTests =
               // changes — which is the point: three of them are documented design choices that a
               // future session must not "fix" by accident, and the first is the one worth knowing.
 
-              // 1. a non-finite float is a STRING on the wire. `Json.render` has the guarded
-              //    `Json.tryRender` beside it; `Canon.render` has no guarded counterpart, so a
-              //    digest over `JFloat nan` collides with the digest over `JStr "NaN"`.
+              // 1. a non-finite float is a STRING on the wire, so a digest over `JFloat nan`
+              //    collides with the digest over `JStr "NaN"`. `Canon.render` refuses nothing and
+              //    its bytes are pinned, so this stays asserted; the guarded `Canon.tryRender`
+              //    beside it (Phase 165) is the entry point that does refuse — see its own cases.
               Expect.equal
                   (Canon.render (JFloat nan))
                   (Canon.render (JStr "NaN"))
@@ -10011,6 +10196,146 @@ let proofOracleTests =
                   (sprintf
                       "the canon oracle disagreed with production off the canonical subset:\n%s"
                       (renderCanonDiffs t.Diffs))
+
+          // ---- the guard beside the canonical encoder (Phase 165) ----
+
+          testCase "Canon.tryRender refuses exactly the non-finite alias witnesses, and names them by path"
+          <| fun _ ->
+              // Refutation 1 of the four above is the one that is not a documented design choice,
+              // and it has THREE witnesses, one per non-finite class. Each is refused, at the root.
+              Expect.equal
+                  (Canon.tryRender (JFloat nan))
+                  (Result.Error "non-finite float has no canonical rendering of its own: NaN at $")
+                  "a NaN is refused, by token and by path"
+
+              Expect.equal
+                  (Canon.tryRender (JFloat infinity))
+                  (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $")
+                  "+infinity is refused"
+
+              Expect.equal
+                  (Canon.tryRender (JFloat -infinity))
+                  (Result.Error "non-finite float has no canonical rendering of its own: -Infinity at $")
+                  "-infinity is refused"
+
+              // ... and the STRING each one aliases is a perfectly good value, and is not refused.
+              // So are refutations 2, 3 and 4 — the integer-shaped float, the two zeroes and the
+              // member order — which the format documents and the guard must therefore leave alone.
+              for v in
+                  [ JStr "NaN"
+                    JStr "Infinity"
+                    JStr "-Infinity"
+                    JFloat 2.0
+                    JInt 2
+                    JFloat -0.0
+                    JFloat 0.0
+                    JFloat 1e17
+                    JObj [ "a", JInt 1; "b", JInt 2 ]
+                    JObj [ "b", JInt 2; "a", JInt 1 ] ] do
+                  Expect.equal
+                      (Canon.tryRender v)
+                      (Result.Ok(Canon.render v))
+                      (sprintf "a value holding no non-finite float is exactly `Ok (render v)`: %A" v)
+
+              // The path: an array by index, a member by its canonically escaped key, the FIRST
+              // offender in document order — and document order is AUTHORED order, not the sorted
+              // order `render` would emit, because the scan runs before any sort.
+              Expect.equal
+                  (Canon.tryRender (JObj [ "$type", JStr "X"; "a", JArr [ JInt 1; JFloat infinity ] ]))
+                  (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $[\"a\"][1]")
+                  "a nested offender is named through the member and the index"
+
+              Expect.equal
+                  (Canon.tryRender (JObj [ "b", JFloat nan; "a", JFloat infinity ]))
+                  (Result.Error "non-finite float has no canonical rendering of its own: NaN at $[\"b\"]")
+                  "the first offender in AUTHORED order is the one named, though `a` sorts first"
+
+              Expect.equal
+                  (Canon.tryRender (JArr [ JArr []; JObj [ "k\"\u0001", JFloat -infinity ] ]))
+                  (Result.Error
+                      "non-finite float has no canonical rendering of its own: -Infinity at $[1][\"k\\\"\\u0001\"]")
+                  "a key carrying a quote and a control character is escaped as rule 6 escapes it"
+
+              // `render` is untouched: every value refused above still renders, to the aliasing bytes.
+              Expect.equal (Canon.render (JFloat nan)) "\"NaN\"" "the unguarded renderer's bytes did not move"
+
+          testCase "the guard oracle agrees with Canon.tryRender over the corpus — and refuses none of it"
+          <| fun _ ->
+              for family, floor in [ "nodes", 100; "ops", 10 ] do
+                  let t = onBigStack (fun () -> guardCorpus canonWire family)
+
+                  Expect.isEmpty
+                      t.Diffs
+                      (sprintf
+                          "the guard oracle disagreed with production on %s/:\n%s"
+                          family
+                          (renderCanonDiffs t.Diffs))
+
+                  Expect.isGreaterThan
+                      t.Docs
+                      floor
+                      (sprintf "the %s/ family was read at all (%d fixtures)" family t.Docs)
+
+                  // JSON cannot spell a non-finite float, so a parsed fixture cannot hold one: on
+                  // the corpus the guard is `Ok (render v)` everywhere, which is the acceptance's
+                  // "agrees with render on the corpus" measured rather than assumed.
+                  Expect.equal t.Refused 0 (sprintf "no %s/ fixture is refused" family)
+
+          testCase "the guard oracle agrees with Canon.tryRender over a generated pool carrying non-finite floats"
+          <| fun _ ->
+              let t = onBigStack (fun () -> guardGenerated canonWire 1650 2400)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the guard oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // adequacy — MEASURED at 2400 documents, seed 1650: 398 refused (78 of them two or
+              // more steps deep; 132 NaN, 146 +infinity, 120 -infinity) and 2002 accepted, 103 of
+              // those carrying a float outside the canonical subset. Every threshold sits under
+              // its measurement with headroom and above zero.
+              Expect.isGreaterThan t.Refused 200 (sprintf "documents the guard refused (%d)" t.Refused)
+
+              Expect.isGreaterThan
+                  (t.Docs - t.Refused)
+                  200
+                  (sprintf "documents the guard accepted (%d)" (t.Docs - t.Refused))
+
+              Expect.isGreaterThan
+                  t.DeepRefusals
+                  40
+                  (sprintf
+                      "refusals two or more steps deep — the scan's recursion, not its leaf arm (%d)"
+                      t.DeepRefusals)
+
+              Expect.isGreaterThan t.NaNs 60 (sprintf "refusals naming NaN (%d)" t.NaNs)
+              Expect.isGreaterThan t.PosInfs 60 (sprintf "refusals naming Infinity (%d)" t.PosInfs)
+              Expect.isGreaterThan t.NegInfs 60 (sprintf "refusals naming -Infinity (%d)" t.NegInfs)
+
+              Expect.isGreaterThan
+                  t.AcceptedNormalised
+                  50
+                  (sprintf
+                      "ACCEPTED documents carrying an integer-shaped float or a zero (%d) — the set the guard must not refuse"
+                      t.AcceptedNormalised)
+
+          testCase "a guard model that cannot see NaN loses — on exactly the documents a NaN decides"
+          <| fun _ ->
+              // The go-red. `tryrender_refuses_exactly_aliasing` turns on the guard's predicate
+              // being `fclass f <> FFinite`, so the instrument that must lose is one whose predicate
+              // is narrower by one class. It must disagree on every document whose FIRST non-finite
+              // float is a NaN — the model walks past it and either renders or names a later
+              // infinity — and on NO other document, a refusal for an infinity included.
+              let t = onBigStack (fun () -> guardGenerated guardWireGoRed 1650 2400)
+
+              Expect.isGreaterThan t.NaNs 60 (sprintf "the go-red run reached NaN refusals at all (%d)" t.NaNs)
+
+              Expect.equal
+                  (List.length t.Diffs)
+                  t.NaNs
+                  (sprintf
+                      "the NaN-blind model disagreed on %d documents and production named a NaN on %d — they must be the same documents"
+                      (List.length t.Diffs)
+                      t.NaNs)
 
           // ---- the evolution policy, over the envelope family and perturbed IDL pairs (Phase 151) ----
 
