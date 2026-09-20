@@ -4063,6 +4063,193 @@ the `renderers` record so the model and its extraction stay ASCII. The oracle co
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
+## Theorem 13 — arbitration: pairwise independent, maximal, deterministic (Phase 157)
+
+_(This directory's thirteenth, and theorem 2's other end. `Ops.footprint` and `Ops.independent` say
+when two scripts commute; `Arbitration.arbitrate` is the function that USES them — the deterministic
+partition every multi-session allocation settles by: which subset of N op-script proposals can land
+together against one base tree. Theorem 2 proved the relation sound. Until this phase the function
+built on it was property-tested — `arbitrationLaws`, over one generator — and proved nowhere.)_
+
+The doc comment of `Arbitration.arbitrate` makes three promises, and the theorems are their names:
+
+> **"`Accepted` is mutually independent (pairwise `Ops.independent`) … by footprint soundness its
+> scripts apply confluently in ANY order."
+> "greedy-in-pinned-order yields *a maximal* mutually-independent set — nothing rejected could be
+> added without a conflict — not *the maximum* one."
+> "Proposals are processed in ascending `Id`, so the outcome is invariant under permutation of the
+> input list. Ids are expected unique … the permutation-invariance guarantee assumes unique ids."**
+
+Each is stated with care and an honesty boundary, and the three are different kinds of claim. The
+choice of pinned ORDER is policy. That the accepted set is independent, that nothing rejected could
+join it, and that the result is a function of the proposal set are algebra — and are proved here.
+
+`Arbitrate.fst` models `src/Fuaran.Core.Ops/Arbitration.fs` clause for clause OVER theorem 2's
+model: a script is a `list TreeOps.op`, the dry run threads `TreeOps.apply`, the footprint is
+`TreeOps.fp_all`, and independence is `DagFold.independent` — the same relation the fold theorem is
+about, opened rather than restated. The five clauses are the F#'s own: `pin` (the pinned order —
+`List.sortBy (fun p -> p.Id)`, a STABLE ascending sort, and stability is observable), `can_script`
+(`Ops.canApplyAll`, failing index and envelope included), `step` and `fold_step` (the greedy pass,
+accumulating in reverse), `recite_all` (every conflict re-cited against the FULL accepted set), and
+the three fields of the result. **One simplification, named:** the F# carries each accepted
+proposal's footprint beside it so it is computed once; a footprint is a pure function of the
+script, so the model recomputes `fp_of p` where the F# reads the cached value, and the differential
+is what holds the two to the same verdicts.
+
+### What is proved
+
+Three theorems, over any base tree and any proposal list:
+
+- **`accepted_pairwise_independent`.** The accepted set is pairwise independent — with NO
+  hypothesis: duplicates, inapplicable scripts and an ill-formed base included. Pairwise is
+  POSITIONAL, every member against every LATER one. A proposal need not be independent of itself
+  (any structural write conflicts with itself), so "any two members" would be false of a list
+  carrying one value twice; the positional reading is what the greedy pass establishes, and with
+  `independent`'s symmetry it is the whole relation. **`accepted_pair_commutes`** is what it buys:
+  any two accepted proposals, read as the single ops `Batch a.script` and `Batch b.script`, both
+  apply at the base (every accepted script passed the dry run, and `can_script_is_apply_all` ties
+  the dry run to the fold a `Batch` runs), and at a well-formed base each applies after the other
+  and the two orders reach the same tree — theorem 2's `tree_independence_diamond`, reaching the
+  accepted set. That is "by footprint soundness, confluent in any order" for a pair, as a theorem.
+  The N-script statement is theorem 2's `skeleton_fold_confluence`, whose hypothesis this
+  discharges; it is not restated.
+- **`accepted_maximal`.** Every rejection is JUSTIFIED (`all_justified`), so nothing rejected could
+  be added. An `Inapplicable (i, e)` is exactly the dry run's failing index and envelope. A
+  `Conflicts ids` names a script that DOES apply, is NOT independent of the final accepted set, and
+  cites a non-empty list that is exactly the accepted ids it interferes with, in pinned order. The
+  proof has two layers because the F# decides in two passes: at decision time a conflict is known
+  only to interfere with the accepted set as it then stood (`provisional`); the accepted set only
+  grows (`provisional_grows`), so the interference survives; and the re-citation then names the
+  interferers against the full set. "Non-empty by construction", the F# comment says —
+  `interfering_nil_iff` is that sentence. The citation is SOUND
+  (`conflict_cites_an_accepted_interferer`: every cited id resolves to an accepted proposal that
+  genuinely interferes) and COMPLETE (`every_interferer_is_cited`: "the complete rebase target, not
+  just the first collision"). And the partition is total by count (`arbitrate_is_total`): accepted
+  and rejected together are as long as the input. No hypothesis about ids.
+- **`arbitrate_deterministic`.** Under every arrival order — `DagFold.perm`, the relation the fold
+  theorem quantifies over — of a proposal list whose ids are DISTINCT, the WHOLE result is equal:
+  accepted set, merged script, every rejection with its reason. `arbitrate` reads its input only
+  through `pin`, so the theorem is the sort's: two inserts under different keys commute into any
+  list at all (`insert_comm` — sortedness is not needed), and distinctness survives a permutation
+  (`perm_distinct`). `pin_sorted` says the pinned order IS ascending id.
+
+### The finding: the id-uniqueness hypothesis is NEEDED
+
+The phase was asked to state the hypothesis on `arbitrate_deterministic` and find out what the
+prover actually needs. It needs it, and the reason is a counterexample rather than a proof that
+would not close.
+
+**`arbitrate` is total on duplicate ids.** Every function of the model is total, and theorems 1
+and 2 and the partition count carry no hypothesis about ids at all. What a repeated id costs is
+invariance, and nothing else.
+
+**But invariance is FALSE without uniqueness** (`duplicate_ids_break_invariance`). Two proposals
+sharing id 1, each inserting under the same parent: they interfere — both write that parent's
+structure — so exactly one is accepted, and the stable sort leaves them in arrival order, so WHICH
+one is accepted IS the arrival order. `[a; b]` accepts `a`; `[b; a]` accepts `b`. The two lists are
+one `PSwap` apart, so this refutes the theorem with its `requires` deleted, not some stronger
+claim. Deleting the `requires` from `pin_perm` is refused by the prover at exactly the two places
+the hypothesis is used (`insert_comm`'s precondition and `perm_distinct`'s), which is the same fact
+read from the other side.
+
+**So the check shipped** (operator decision 2026-09-19, the branch that decision reserved for this
+outcome). `Arbitration.duplicateIds : OpScriptProposal list -> int list` returns the ids carried by
+more than one proposal, ascending, each once; empty exactly when the ids are unique. It is a TOTAL
+check and never an assigner — it reads `Id` and nothing else, mints nothing, renumbers nothing —
+and `arbitrate` does not call it: the function that assumes uniqueness and the callers that mint
+ids sit in different packages, so the assumption is made checkable by whoever holds the list.
+`arbitrationLaws` gains one law holding it to the hypothesis: the check is exact against an
+independent recount, it is empty on every set the permutation law is certified over, and a TWIN —
+the same id and script under another holder — makes arrival order observable on every set that
+holds an applicable self-interfering proposal, with its own vacuity guard. One wording correction
+to the phase as chartered: it asked for a law that invariance holds "exactly when" the check
+returns empty, and that biconditional is false of a single input — two proposals sharing an id, one
+of them inapplicable, arbitrate identically in either order. What is true, and what the law and the
+theorem say, is that uniqueness is SUFFICIENT for every input and that it cannot simply be
+dropped: two DIFFERENT proposals sharing an id that land in the same bucket — both accepted, both
+rejected, or one displacing the other — are listed in arrival order, and the twin is that case.
+
+### What is NOT claimed
+
+- **MAXIMUM.** Greedy-in-pinned-order returns A maximal independent set, not THE largest one, and
+  `maximal_is_not_maximum` is the witness that the difference is real: proposal 1 writes under both
+  `a` and `b`, proposals 2 and 3 under one each. The pinned order accepts 1 alone — a set of ONE,
+  both rejections justified — while `[2; 3]` is itself applicable and pairwise independent, a set
+  of TWO; renumber proposal 1 to come last and that larger set is what is accepted. Both results
+  are maximal. Only one is maximum. The ids decide which the caller gets.
+- **That ascending id is the right order.** The pinned order is a POLICY choice
+  (`arbitration-pinned-order`, the ladder's second `policy` row): pinned, documented,
+  deterministic, and argued for nowhere here. No ranking, no quality judgement and no evaluator is
+  modelled, because none ships — which proposal is *better* is the host's business.
+- **That a `Conflicts` is a real conflict.** Independence is conservative (theorem 2's "the
+  conservative footprint is the theorem's shape"): a "maybe" is a conflict, so `Conflicts` means
+  "not provably coexistent", never "wrong". Maximality is maximality with respect to
+  `Ops.independent`, not with respect to what would in fact commute.
+- **The N-script any-order statement,** which is theorem 2's and is sampled end to end by
+  `arbitrationLaws`' confluence law; `accepted_pair_commutes` is the pair.
+- **`applyContained`.** `arbitrate` dry-runs with `Ops.canApplyAll`, which consults no container
+  capability (theorem 5's `container-sequence-gap`), and so does the model.
+
+### The differential
+
+`Proofs.Oracle` runs the extracted model beside `Arbitration.arbitrate` over generated proposal
+sets against the base tree: scripts from Phase 80's lane generator (each applies at the base on its
+own, and they share parents often enough that conflicts arise without being arranged), about one in
+four corrupted into a provably inapplicable script, in two id modes — a SHUFFLE of 1..n, so the
+pinned order is not the arrival order, and ids drawn from {1, 2}, so most sets carry a repeated id
+and the stable sort's tie-break is compared too. Per set: the accepted proposals in order (id,
+holder, script), the merged script, and every rejection in order with its reason — an
+`Inapplicable`'s index exactly and its envelope by CLASS, which is what the tree model claims, and
+a `Conflicts`' citation exactly. On every set the shipped `duplicateIds` is empty exactly when the
+extracted `distinct_ids` holds, and the extracted `pairwise_independent` and `all_applicable` are
+asked of PRODUCTION's own accepted set. The case asserts that the sample reached an accepted
+proposal, an `Inapplicable`, a `Conflicts` and a repeated id.
+
+**The go-red is a model that accepts a conflicting pair**: the extracted model with the greedy
+pass's `all_independent` test removed and nothing else touched — the pinned sort, the dry run, the
+re-citation and the merged script are the oracle's own code. It must lose, on a sample shown to
+have reached a conflict; the same sample under the real model agrees. Two further cases pin the two
+witnesses on the shipped function over the model's own extracted inputs, so a fix or a regression
+turns one red and sends its reader here.
+
+### What it cost
+
+Cold runs of the prover invoked directly on the file with the leg's own flags (rlimit 40,
+`--quake 3`, `--report_assumes error`) against a cache holding only `DagFold` and `TreeOps`:
+**12s, 12s, 12s**, taken beside other proof workers on the same machine. Budget **30s** (2 × 12,
+rounded up) and floor **6s** (half of 12), seeded per Phase 148/164's rules and recorded in
+`modules.json`. It carries `--ext context_pruning` for the reason `TreeOps.fst` gives — it opens
+that module, so every membership pattern it declares is live at every query here. Nothing needed a
+scoped rlimit, an SMT pattern or a second attempt: the module discharged on its first run. That is
+worth saying plainly rather than dressing up, because the reason is structural. Every proof is an
+induction over the fold or over `perm`; the footprint cache was dropped from the model, which
+removed the one invariant (every cached footprint is its script's) that would have had to ride
+through every lemma; and the two witnesses are `assert_norm`s over trees of three nodes. The
+probe that the theorems can fail was run the other way: `pin_perm` with its `requires` deleted is
+refused.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The three theorems above plus `accepted_pair_commutes`,
+   `accepted_all_applicable`, `can_script_is_apply_all`, the citation's soundness and completeness
+   (`conflict_cites_an_accepted_interferer`, `every_interferer_is_cited`, `interfering_nil_iff`,
+   `justified_mem`), the partition count (`arbitrate_is_total`), `pin_sorted`, `insert_comm`, and
+   the two witnesses (`duplicate_ids_break_invariance`, `maximal_is_not_maximum`). F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
+   `admit`. Opens `DagFold` and `TreeOps`.
+2. **Differentially tested.** The extracted model agrees with `Arbitration.arbitrate` over the
+   pools above, with the model that accepts a conflicting pair required to lose. Agreement is over
+   those pools, never over all inputs. That the shipped `duplicateIds` decides the theorem's
+   hypothesis is at THIS level — it is asserted on every generated set, not proved: `List.countBy`
+   is not modelled.
+3. **Assumed, and stated as such.** Nothing new. The model stands on theorem 2's rows and inherits
+   them unchanged: **`tree-algebra-well-formed-states`** is `accepted_pair_commutes`'s hypothesis
+   and no other statement's here; **`sets-are-lists`**; **`lawful-abstract-witness`**; and theorem
+   1's **`extractor-and-compiler-trusted`**. Proposal ids are unbounded integers in the model and
+   `int` in the F#; ordering agrees on the whole `int` range, so nothing turns on the width.
+4. **Policy.** **`arbitration-pinned-order`** — ascending id is the order; whether it is the right
+   one is not a theorem.
+
 ## Next
 
 _(**A resolver that resolves only declared reads** was the first item on this list and is DONE:

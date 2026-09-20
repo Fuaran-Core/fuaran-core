@@ -1411,7 +1411,9 @@ accepted ids (computed against the **full** accepted set) the agent must rebase 
 are expected unique — a queue assigns them, and `AiSurface.Proposals` (Phase 59) is one such assigner,
 projecting to `OpScriptProposal` with `Proposals.toOpScript`; `arbitrate` is total on duplicate-id
 input, but the permutation-invariance guarantee assumes unique ids (only then is the pinned order a
-total order).
+total order). Since Phase 157 that assumption is a total check —
+`Arbitration.duplicateIds proposals = []` — and [`proofs/README.md`](proofs/README.md)'s theorem 13
+proves the guarantee under it and that it cannot be dropped.
 
 **It lives in `Fuaran.Core.Ops` since Phase 192** (`AiSurface.arbitrate` until then), beside
 `Ops.footprint` and `Ops.independent` — the two it is the other end of. `OpScriptProposal<'Node,'Id>`
@@ -2311,6 +2313,48 @@ refresh can return the wrong rows** — re-prime rather than refresh, or put the
 window, until the fix lands. The executable reproducer is in `IncrementalRefreshCostTests`; it fails
 the moment the defect is fixed and names the remedy. The fix belongs to the seam, not to a
 conformance-corpus phase, and was scoped out deliberately so the finding stayed a finding.
+
+### `Arbitration.duplicateIds`, and the id-uniqueness hypothesis as a law (Phase 157) — additive; one law list grows
+
+**What it is.** `Arbitration.duplicateIds : OpScriptProposal<'Node,'Id> list -> int list` in
+**`Fuaran.Core.Ops`**: the proposal ids carried by more than one proposal, ascending, each once;
+empty exactly when the ids are unique. A TOTAL check and never an assigner — it reads `Id` and
+nothing else. `arbitrate` does not call it and did not change: same partition, same order, same
+rejections, byte for byte.
+
+**Why it exists.** `arbitrate`'s doc comment has always said its permutation invariance "assumes
+unique ids". Phase 157 proved the three promises that comment makes
+([`proofs/README.md`](proofs/README.md), theorem 13) and, as chartered, found out what the prover
+needs of that assumption: **it is needed, and its absence is a counterexample rather than a gap.**
+Two proposals sharing an id that interfere with each other are accepted in ARRIVAL order — the
+stable sort breaks the tie by input position — so the same proposal set in two orders arbitrates
+differently. `arbitrate` stays total on such input, and its accepted set stays pairwise independent
+and maximal; what a repeated id costs is invariance and nothing else. Since Phase 192 the function
+that assumes uniqueness and the callers that mint ids sit in different packages, so the assumption
+is now checkable by whoever holds the list: `Arbitration.duplicateIds proposals = []` IS the
+theorem's hypothesis, and a non-empty answer names the ids to repair.
+
+**What adopting it costs.** The Phase 183 gate classes the `Fuaran.Core.Ops` baseline move
+`additive` (1 move: the new module function), so it **rides this draft slot** — it is the one
+baseline that has moved since `v0.28.0`, which the slot's opening paragraphs, written before it,
+say had not happened yet. A pinned consumer compiles either way. **One thing a consumer asserting
+law COUNTS must adjust:** `Conformance.arbitrationLaws` reports **7** results where it reported 6 —
+the new one, *id uniqueness is the invariance hypothesis*, sits before the Phase 121 adequacy row,
+which is still last. It holds `duplicateIds` to an independent recount, asserts it empty on every
+set the permutation law is certified over, and asserts that a twin — the same id and script under
+another holder — makes arrival order observable, with its own vacuity guard. No existing law moved
+in meaning, order or verdict; a consumer reading `AllPassed` or matching on `Law` changes nothing,
+exactly as when Phase 121 grew the same list from 5 to 6. A domain whose generator can never
+produce an applicable self-interfering proposal would see the new law's vacuity guard fire; every
+script holding one real skeleton op interferes with itself, so that is a generator producing only
+empty scripts, which the Phase 121 bucket guard already refuses.
+
+**What was deliberately not shipped.** An id ASSIGNER. Declined by operator decision (2026-09-19):
+there is one in-repo assigner already (`AiSurface.Proposals`), and the coordination-layer callers
+hold ids of their own, so a second way to mint them would be a second source of truth about what a
+proposal's id is. And `arbitrate` does not refuse duplicate-id input: refusing would change what a
+public function returns on input it has always accepted, and totality on that input is documented
+behaviour that the proof now states exactly.
 
 ## 0.28.0 — released 2026-09-20 as `v0.28.0`
 

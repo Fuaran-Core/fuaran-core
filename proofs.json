@@ -501,6 +501,85 @@
       }
     },
     {
+      "id": "arbitration-accepted-pairwise-independent",
+      "level": "proved",
+      "claim": "`Arbitration.arbitrate`'s accepted set is pairwise `Ops.independent`, for every base tree and every proposal list — duplicates, inapplicable scripts and all; the theorem carries no hypothesis. Pairwise is POSITIONAL (every member against every later one, which with `independent`'s symmetry is the whole relation), because a proposal need not be independent of itself and a list may carry one value twice. `accepted_pair_commutes` is what that buys: any two accepted proposals, read as the single ops `Batch a.script` and `Batch b.script`, both apply at the base, and at a well-formed base each applies after the other and the two orders reach the same tree — `tree-independence-diamond` reaching the accepted set, which is the doc comment's \"by footprint soundness, confluent in any order\" for a pair. The N-script any-order claim is `skeleton-fold-confluence`'s, whose hypothesis this discharges; it is sampled end to end by `arbitrationLaws`' confluence law and is not restated here.",
+      "phase": "fuaran-core#157",
+      "evidence": {
+        "theorem": "accepted_pairwise_independent",
+        "model": "proofs/Arbitrate.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "arbitration-accepted-maximal",
+      "level": "proved",
+      "claim": "Every rejection `arbitrate` returns is JUSTIFIED, so nothing rejected could be added to the accepted set: an `Inapplicable (i, e)` is exactly the `Ops.canApplyAll` dry run's failing index and envelope against the base, and a `Conflicts ids` names a script that DOES apply, is NOT independent of the final accepted set, and cites a non-empty list that is exactly the accepted ids it interferes with, in pinned order. The citation is sound — every cited id resolves to an accepted proposal that genuinely interferes (`conflict_cites_an_accepted_interferer`) — and complete — every accepted interferer is cited (`every_interferer_is_cited`), \"the complete rebase target, not just the first collision\". The partition is total by count: accepted and rejected together are as long as the input (`arbitrate_is_total`). No hypothesis about ids. MAXIMAL, not maximum: see `arbitration-maximal-is-not-maximum`.",
+      "phase": "fuaran-core#157",
+      "evidence": {
+        "theorem": "accepted_maximal",
+        "model": "proofs/Arbitrate.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "arbitration-deterministic",
+      "level": "proved",
+      "claim": "Under every arrival order (`DagFold.perm`) of a proposal list whose ids are DISTINCT, `arbitrate`'s whole result is equal — the accepted set, the merged script, and every rejection with its reason. `arbitrate` reads its input only through the pinned sort, so the theorem is the sort's: two inserts under different keys commute into any list at all (`insert_comm`), and distinctness survives a permutation (`perm_distinct`). The pinned order IS ascending id (`pin_sorted`). THE HYPOTHESIS IS STATED, BY NAME (`distinct_ids`), and is what the shipped total check decides: `Arbitration.duplicateIds proposals = []` holds exactly when it does, which the differential asserts on every generated set. That it cannot be dropped is `arbitration-id-uniqueness-is-needed`.",
+      "phase": "fuaran-core#157",
+      "evidence": {
+        "theorem": "arbitrate_deterministic",
+        "model": "proofs/Arbitrate.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "arbitration-id-uniqueness-is-needed",
+      "level": "proved",
+      "claim": "THE FINDING. `arbitrate` is TOTAL on duplicate ids — every function of the model is total, and pairwise independence, maximality and the partition count carry no hypothesis about ids — but permutation invariance is FALSE without id uniqueness, and not merely unproved: two proposals sharing id 1 that each insert under the same parent interfere, so exactly one is accepted, and `List.sortBy`'s stability leaves them in arrival order, so WHICH one is accepted is the arrival order. The two lists are one `PSwap` apart, so this refutes `arbitrate_deterministic` with its `requires` deleted rather than some stronger claim. What a repeated id costs is invariance and nothing else. Closed on the shipped side by `Arbitration.duplicateIds` (additive, Phase 157): a total check that names the repeated ids, never an assigner. Asserted on the shipped function over the model's own witness by the differential's third case.",
+      "phase": "fuaran-core#157",
+      "evidence": {
+        "theorem": "duplicate_ids_break_invariance",
+        "model": "proofs/Arbitrate.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "arbitration-maximal-is-not-maximum",
+      "level": "proved",
+      "claim": "Greedy-in-pinned-order does NOT return a maximum independent set, and this is the witness: proposal 1 writes under both `a` and `b`, proposals 2 and 3 under one each; in the pinned order 1 is accepted alone — an accepted set of ONE, both rejections justified — while `[2; 3]` is itself applicable and pairwise independent, a set of TWO, and renumbering proposal 1 to come last makes that larger set the accepted one. Both results are maximal; only one is maximum; the ids decide which the caller gets. A theorem about one input, stated so that the README's \"not claimed: maximum\" is a refuted claim and not an untried one. Asserted on the shipped function by the differential's fourth case.",
+      "phase": "fuaran-core#157",
+      "evidence": {
+        "theorem": "maximal_is_not_maximum",
+        "model": "proofs/Arbitrate.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "arbitration-differential",
+      "level": "tested",
+      "claim": "The extracted arbitration model agrees with the shipped `Arbitration.arbitrate` over generated proposal sets against the base tree — scripts from the Phase 80 lane generator, about one in four corrupted into a provably inapplicable script, under ids that are a SHUFFLE of 1..n (so the pinned order is not the arrival order) and, in a second mode, under ids drawn from {1, 2} (so most sets carry a repeated id and the STABLE sort's tie-break is compared too). Compared per set: the accepted proposals in order (id, holder, script), the merged script, and every rejection in order with its reason — an `Inapplicable`'s index exactly and its envelope by CLASS, which is what the tree model claims (`tree-differential`), and a `Conflicts`' citation exactly. On every set the shipped `Arbitration.duplicateIds` is empty exactly when the extracted `distinct_ids` holds, and the extracted `pairwise_independent` and `all_applicable` are asked of PRODUCTION's own accepted set. One go-red: the extracted model with the greedy pass's independence test removed and nothing else touched — a model that accepts a conflicting pair — must lose, on a sample shown to have reached a conflict. The model recomputes a footprint where the F# caches it beside the accepted proposal; the two are the same value of a pure function, and this family is what holds them to the same verdicts. Proposal ids cross as unbounded integers on the model side and `int` on production's; the generated ids are small, so the width is not exercised. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#157",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the arbitration oracle agrees with Arbitration.arbitrate over generated proposal sets",
+          "a model that ACCEPTS A CONFLICTING PAIR loses — the measurement can fail",
+          "the id-uniqueness hypothesis is NEEDED, on the shipped function — `duplicate_ids_break_invariance`",
+          "maximal is NOT maximum, on the shipped function — `maximal_is_not_maximum`"
+        ]
+      }
+    },
+    {
+      "id": "arbitration-pinned-order",
+      "level": "policy",
+      "claim": "WHICH maximal independent set `arbitrate` returns is decided by ascending proposal id. That the order is ascending id, that it makes the result a function of the proposal set, and that every result is maximal are theorems above; that ascending id is the RIGHT order — rather than arrival time, script size, or an order chosen to maximise the accepted count — is a policy choice: pinned, documented, deterministic, and argued for nowhere in this directory. No theorem addresses it, no ranking or quality judgement is modelled, and `arbitration-maximal-is-not-maximum` is the measured cost of it. The README's theorem 13 section lists MAXIMUM under \"not claimed\".",
+      "phase": "fuaran-core#157",
+      "evidence": {
+        "document": "proofs/README.md"
+      }
+    },
+    {
       "id": "chain-intact-verifies",
       "level": "proved",
       "claim": "A content-addressed DAG grown from nothing by append and merge alone, each naming parents the DAG already held, has no integrity break; and a linear hash chain grown from genesis by append alone verifies. The id half is free by construction, but the parent half is not: append does not check that the parent it is handed names a node the DAG holds, so every-parent-present is a precondition on how a DAG was grown rather than a property of the constructor, and the theorem carries it as one. Its PREMISE is the whole of nothing: `intact_verifies` takes no injectivity hypothesis of any kind — not the hash's, not the codec's, not the splices' — because append mints the id from the content it is storing, so the id cannot be wrong however weak the hash is. Phase 145 left it untouched for that reason; there was nothing there to decompose.",

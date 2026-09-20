@@ -7012,7 +7012,12 @@ module Conformance =
     /// carries exactly the `Ops.canApplyAll` envelope against the base; a `Conflicts` cites a
     /// non-empty subset of ACCEPTED ids each of which genuinely interferes); and **any-order
     /// confluence** (the accepted scripts apply green in the pinned order, its reverse, and a
-    /// random shuffle — all to the same content-hashed tree, and `MergedScript` reproduces it).
+    /// random shuffle — all to the same content-hashed tree, and `MergedScript` reproduces it);
+    /// and **id uniqueness is the invariance hypothesis** (Phase 157 — `Arbitration.duplicateIds`
+    /// names exactly the ids carried more than once, it is empty on every set the permutation
+    /// law above is certified over, and a proposal set carrying one id twice makes arrival order
+    /// OBSERVABLE: the same proposals in two orders arbitrate differently. `proofs/Arbitrate.fst`
+    /// proves the invariance under that hypothesis and that it cannot be dropped).
     /// The confluence law asserts the whole-script any-order claim directly; `concurrencyLaws`
     /// (Phase 80) is the stronger op-level-interleaving form of the same claim for independent
     /// pairs — a domain that arbitrates runs both. Seed-replayable; `'Node` needs equality.
@@ -7035,6 +7040,10 @@ module Conformance =
         let mutable independence = None
         let mutable actionability = None
         let mutable confluence = None
+        // Phase 157 — the id-uniqueness hypothesis. `twinsSeen` is its own vacuity guard: the
+        // observability half only runs on a set holding an applicable, self-interfering proposal.
+        let mutable uniqueness = None
+        let mutable twinsSeen = 0
         // Phase 121 — pairwise independence and any-order confluence are trivially true of an EMPTY
         // accepted set, and the actionability law quantifies over rejections. A sample that never
         // accepted, or never rejected, certifies those green having never applied them.
@@ -7106,6 +7115,60 @@ module Conformance =
             then
                 permutation <-
                     Some(sprintf "seed=%d iter=%d: arbitrate is not deterministic / permutation-invariant" seed i)
+
+            // Phase 157 — id uniqueness IS the permutation law's hypothesis. The check is held to
+            // an independent recount; it is empty on the set the law above just ran over; and a
+            // twin — the same id and script under another holder — makes arrival order observable.
+            let recount (ps: OpScriptProposal<'Node, 'Id> list) =
+                let ids = ps |> List.map (fun p -> p.Id)
+
+                ids
+                |> List.filter (fun x -> (ids |> List.filter (fun y -> y = x) |> List.length) > 1)
+                |> List.distinct
+                |> List.sort
+
+            if Arbitration.duplicateIds proposals <> [] && uniqueness.IsNone then
+                uniqueness <-
+                    Some(sprintf "seed=%d iter=%d: duplicateIds is non-empty on an id-unique proposal set" seed i)
+
+            let selfInterfering (p: OpScriptProposal<'Node, 'Id>) =
+                match Ops.canApplyAll nodew idw p.Ops tree with
+                | Error _ -> false
+                | Ok() ->
+                    let fp = Ops.footprint nodew idw p.Ops
+                    not (Ops.independent fp fp)
+
+            match proposals |> List.tryFind selfInterfering with
+            | None -> ()
+            | Some p ->
+                twinsSeen <- twinsSeen + 1
+                let twin = { p with Holder = p.Holder + "-twin" }
+                let twinLast = proposals @ [ twin ]
+                let twinFirst = twin :: proposals
+
+                if
+                    (Arbitration.duplicateIds twinLast <> [ p.Id ]
+                     || Arbitration.duplicateIds twinLast <> recount twinLast
+                     || Arbitration.duplicateIds twinFirst <> recount twinFirst)
+                    && uniqueness.IsNone
+                then
+                    uniqueness <-
+                        Some(
+                            sprintf "seed=%d iter=%d: duplicateIds did not name exactly the repeated id %d" seed i p.Id
+                        )
+
+                if
+                    Arbitration.arbitrate nodew idw tree twinLast = Arbitration.arbitrate nodew idw tree twinFirst
+                    && uniqueness.IsNone
+                then
+                    uniqueness <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: a repeated id (%d) left arrival order unobservable — the hypothesis would be decoration"
+                                seed
+                                i
+                                p.Id
+                        )
 
             // total partition: accepted + rejected = input, each exactly once.
             let acceptedIds = result.Accepted |> List.map (fun p -> p.Id)
@@ -7199,6 +7262,20 @@ module Conformance =
           { Law = "the accepted scripts apply confluently in any order (the whole-script any-order claim)"
             Passed = confluence.IsNone
             Counterexample = confluence }
+          { Law =
+              "id uniqueness is the invariance hypothesis (duplicateIds is exact and empty on the certified sets; a repeated id makes arrival order observable)"
+            Passed = uniqueness.IsNone && twinsSeen > 0
+            Counterexample =
+              match uniqueness with
+              | Some _ -> uniqueness
+              | None when twinsSeen = 0 ->
+                  Some(
+                      sprintf
+                          "seed=%d: %d iterations produced no applicable self-interfering proposal to twin — the observability half never ran"
+                          seed
+                          iterations
+                  )
+              | None -> None }
           SampleAdequacy.reached
               "arbitrationLaws"
               "arbitration bucket"

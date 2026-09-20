@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164, 155, 173, 176, 177 and 187).
+# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164, 155, 173, 176, 177, 187 and 157).
 #
 # THE ENGINE IS `kit/check-proof-leg.ps1` (Phase 155) and this file is the caller: it declares
 # what THIS repository has — the models, which of them are checked but not extracted, where the
@@ -117,13 +117,19 @@ $ErrorActionPreference = 'Stop'
 #                enumeration equal to the registry and the capture key's determinism proved, and
 #                two findings read off the model. Self-contained: it opens nothing, so its
 #                position is free.
+#   Arbitrate  — Phase 157, PROPOSAL ARBITRATION: `Arbitration.arbitrate` clause for clause — the
+#                stable pinned sort, the `canApplyAll` dry run, the greedy independence pass and
+#                the re-citation — with the accepted set proved pairwise independent, every
+#                rejection proved justified (maximal, NOT maximum), and the whole result proved
+#                invariant under arrival order for id-distinct input, with the witness that the
+#                hypothesis is needed. Opens DagFold and TreeOps, so it follows both.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation', 'Query')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation', 'Query', 'Arbitrate')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
