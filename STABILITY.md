@@ -2257,22 +2257,32 @@ measurement, the compat promise, and the migration route if the flip is ever wan
 
 ## 0.28.1 (draft)
 
-**This slot is a DRAFT.** `<Version>` reads `0.28.1` and no `v0.28.1` tag exists, so an additive or
-behaviour-identical change may ride it: append its entry here rather than opening another slot. A
-change of a higher class than the entries below carry advances the number, because the number is
-what tells a consumer what adopting it costs.
+**This slot is a DRAFT.** `<Version>` reads `0.28.1` and no `v0.28.1` tag exists, so an additive,
+behaviour-identical or CORRECTIVE change may ride it: append its entry here rather than opening
+another slot. A change of a higher class than the entries below carry advances the number, because
+the number is what tells a consumer what adopting it costs.
+
+**A corrective change rides a PATCH slot, and that is the rule rather than a convenience.** The
+number states what ADOPTING costs, and adopting a correction costs nothing: no source changes, no
+contract moves, and the behaviour that changes is behaviour that was wrong. What such a change owes
+the reader instead is the opposite direction — which *published* versions answer wrongly, so a
+consumer can tell whether it is on one. The entry for Phase 215 below names them, measured against
+the released packages.
 
 **This slot was OPENED rather than ridden because `0.28.0` is tagged**, and it is a PATCH rather
 than a minor because the Phase 183 surface gate reports **no baseline moved since `v0.28.0`** — the
-class is `additive`, and the rule the `0.28.0` entry states is a `0.28.1` draft for an additive or
-behaviour-identical change.
+classes are `additive` and `corrective`, and the rule the `0.28.0` entry states is a `0.28.1` draft
+for an additive or behaviour-identical change.
 
 **What adopting `0.28.1` costs, and the one consumer it can cost something.** No managed member,
 type, record field or union case moves, so no .NET or Fable consumer's source changes and nothing
-needs migrating. What changes is DELIVERED CONTENT: the `IncrementalDelta` conformance family's
-generated corpus grows by ten pipeline shapes. **A host that runs that family against its own
-incremental evaluator can go RED at this pin — and a red here is a WRONG ANSWER in your incremental
-path, not a regression in this kit.** The predicate to check is in the entry below.
+needs migrating. Two things change. **A wrong answer stops**: a merged order whose sort key reads a
+window's output column returned the wrong rows on every release from `0.18.0` to `0.28.0`, and does
+not now — if you run such a pipeline through the incremental seam, this pin is the fix and the entry
+below is the one to read first. And DELIVERED CONTENT changes: the `IncrementalDelta` conformance
+family's generated corpus grows by ten pipeline shapes. **A host that runs that family against its
+own incremental evaluator can go RED at this pin — and a red here is a WRONG ANSWER in your
+incremental path, not a regression in this kit.** The predicate to check is in the entries below.
 
 ### The incremental corpus reaches a row-local step reading a cross-row column (Phase 212) — additive; may turn an ADOPTER's conformance run red
 
@@ -2301,18 +2311,50 @@ refresh class still clears the suite's 7% reach floor. The measured shares, the 
 (producer × consumer) census and the two producers that are absent by construction are in
 [`docs/incremental-evaluation.md`](docs/incremental-evaluation.md).
 
-**A SECOND live defect, reported here and deliberately not fixed.** Adding these shapes surfaced a
-neighbouring wrong answer that is still present at `0.28.1`: **a merged order whose sort key reads a
-column a window appended returns the wrong rows.** Phase 208 replaced its cache condition at two
-sites and left a third standing — the sort's reusable set — so a merge reuses the cached position of
-a row whose sort key a window has moved. Measured in both directions: `window(rank) > sort(rk)` is
-wrong with or without a following `limit`, `window(rank) > sort(b)` on a source column is right, and
-a sort keyed on a column derived from source columns alone is right. **If you run a `Sort` whose key
-reads a `Window`'s output through this seam, on any version up to and including `0.28.1`, your
-refresh can return the wrong rows** — re-prime rather than refresh, or put the sort ahead of the
-window, until the fix lands. The executable reproducer is in `IncrementalRefreshCostTests`; it fails
-the moment the defect is fixed and names the remedy. The fix belongs to the seam, not to a
-conformance-corpus phase, and was scoped out deliberately so the finding stayed a finding.
+**A SECOND live defect, found here and fixed in this same draft slot — see the entry below.** Adding
+these shapes surfaced a neighbouring wrong answer in the merged order. Phase 212 reported it and
+deliberately left it standing, because the fix belongs to the seam rather than to a conformance-corpus
+phase and a corpus phase that quietly patches the seam is how a finding stops being a finding. Phase
+215 fixed it; the corrective entry immediately below is what it means for you.
+
+### A merged order no longer reuses the position of a row a window moved (Phase 215) — CORRECTIVE; wrong answers in `0.18.0`–`0.28.0`
+
+**What was wrong.** **A merged order whose sort key read a column a `Window` appended returned the
+wrong rows.** The seam's per-row cache condition is *this row's cells are byte-identical to the ones
+the prior evaluation held* (`Stable`), and a `Window` clears it for every row because it recomputes
+its column over the whole frame it is handed. Phase 208 (`0.27.0`) substituted that condition for the
+older *the delta did not name this row* at the two sites it found — the per-row cell cache, and a
+filtering join's cached verdict — and left a THIRD standing: the `Sort` step built its reusable set
+the old way, so a merge reused the cached POSITION of a row whose sort key a window had moved. This
+release reads the sort's reusable set on the same condition as the other two.
+
+**Which releases answer wrongly, measured rather than inferred.** A probe pinned to one published
+`Fuaran.Core.DataFrame` at a time ran `window(rank) > sort(rk)` through that package's own
+incremental seam and compared the answer with that same package's reference evaluator.
+**`0.19.0` through `0.28.0` — every released version in that span — disagree**, and so does
+`window(lag) > sort(prev)`, while the same pipeline sorting on a source column agrees. `0.16.0` and
+`0.17.0` agree: they predate the merged order (`0.18.0`, Phase 115) entirely, and they are the
+probe's falsifier. `0.18.0` itself carries the same reuse condition and admits bounded-frame windows
+only, so it is reached by the `lag` shape rather than the `rank` one; no package was published for it
+to measure. **Neither the condition nor the span is `0.26.0`-onward**, which is where the two earlier
+records placed it by analogy with the sibling defect `0.27.0` fixed.
+
+**What to do if you are on any of those releases.** Adopt `0.28.1`. Until you do: re-prime rather
+than refresh, or put the `Sort` ahead of the `Window`, for any pipeline whose sort key reads a
+window's output column — directly, through a `Derive` that reads it, or through a `Project` that
+renames it. A pipeline whose sort key reads source columns only was never affected, with or without a
+window in front of it.
+
+**What it does not change.** Nothing public moves: no managed member, type, record field or union
+case, and the Phase 183 surface gate reports no baseline moved. The seam refuses nothing new and its
+declined set is unchanged — it stops answering wrongly. A footprint can legitimately RISE for an
+affected pipeline: the reusable set is now the smaller, correct one, so a refresh behind a window
+re-sorts rows it used to merge, which is the cost of the right answer. `IncrementalDelta` shape `44`
+sorts on the window's own column now rather than withholding the key, and the pending reproducer in
+`IncrementalRefreshCostTests` — which asserted the defect's PRESENCE — is the regression test that
+asserts its absence. The per-site census of which cache condition each reuse in the seam needs, so
+that a fourth site cannot quietly be written, is in
+[`docs/incremental-evaluation.md`](docs/incremental-evaluation.md).
 
 ### `Arbitration.duplicateIds`, and the id-uniqueness hypothesis as a law (Phase 157) — additive; one law list grows
 

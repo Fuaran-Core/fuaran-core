@@ -223,12 +223,12 @@
     {
       "id": "dag-outside-the-model",
       "level": "assumed",
-      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it'. `Dag.mergeBase` is outside this path entirely — `foldOnce` hands `reconcileMany` the base node's id directly and no divergence point is ever located — so nothing is claimed about it at any level. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are no longer assumed: see `dag-delta-recovery` and `fold-from-the-dag`.",
+      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it' and by Phase 158 a second time. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is MODELLED since Phase 158, clause for clause, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`); what stays outside is `mergeBase` over heads with SEVERAL maximal common ancestors — a criss-cross merge — where the (closure size, id) tie-break decides and what it decides is a policy rather than a fact, and the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
       "phase": "fuaran-core#134",
       "class": "model-bridge",
       "closes": "unscheduled",
       "evidence": {
-        "assumption": "Dag.mergeBase, and the hash function itself, are correct"
+        "assumption": "The hash function itself is correct; and Dag.mergeBase is correct where two heads share several maximal common ancestors (a criss-cross merge), which no theorem here reaches"
       }
     },
     {
@@ -337,7 +337,7 @@
     {
       "id": "general-topological-order",
       "level": "proved",
-      "claim": "The id-ordered Kahn drain over an ABSTRACT node set — no base, no lanes, no hash — is DETERMINISTIC, a function of the node set alone and invariant under the order the nodes arrived (`drain_deterministic`, stated over the module's own permutation relation); a LINEAR EXTENSION of the parent relation over every node it places (`drain_linear_extension`); and TOTAL on an acyclic set, placing every node exactly once and producing a topological enumeration (`drain_total_on_acyclic`). Acyclicity is taken as a topological enumeration supplied as a witness list, which is the standard characterisation and is not circular — the witness is never the drain's own output — and `drain_complete_is_acyclic` gives the converse from the linear-extension theorem, so complete drain and acyclic set are an IFF, which is exactly the length comparison `Dag.isAcyclic` / `Dag.tryTopoOrder` make. This is where the smallest-id tie-break stops being decoration: `frontier` answers in the work list's order, so only an order-invariant selector survives `drain_deterministic`, and Phase 142's `pick_head` does not. The id order is a PARAMETER constrained to be a total order, so the claim is that clones sharing an order agree rather than that any particular order is production's — the differential ties it to `String.CompareOrdinal`, which is what `List.sort` gives a string list. Phase 142's spine results are corollaries at this selector. NOT claimed: the delta RECOVERY over a merge DAG, which stays at `dag-delta-recovery`'s shape; `Dag.mergeBase`; and any consumer's own instantiation.",
+      "claim": "The id-ordered Kahn drain over an ABSTRACT node set — no base, no lanes, no hash — is DETERMINISTIC, a function of the node set alone and invariant under the order the nodes arrived (`drain_deterministic`, stated over the module's own permutation relation); a LINEAR EXTENSION of the parent relation over every node it places (`drain_linear_extension`); and TOTAL on an acyclic set, placing every node exactly once and producing a topological enumeration (`drain_total_on_acyclic`). Acyclicity is taken as a topological enumeration supplied as a witness list, which is the standard characterisation and is not circular — the witness is never the drain's own output — and `drain_complete_is_acyclic` gives the converse from the linear-extension theorem, so complete drain and acyclic set are an IFF, which is exactly the length comparison `Dag.isAcyclic` / `Dag.tryTopoOrder` make. This is where the smallest-id tie-break stops being decoration: `frontier` answers in the work list's order, so only an order-invariant selector survives `drain_deterministic`, and Phase 142's `pick_head` does not. The id order is a PARAMETER constrained to be a total order, so the claim is that clones sharing an order agree rather than that any particular order is production's — the differential ties it to `String.CompareOrdinal`, which is what `List.sort` gives a string list. Phase 142's spine results are corollaries at this selector. The delta RECOVERY over a merged head, and `Dag.mergeBase`, were left unclaimed here and are PROVED since Phase 158, at `dag-delta-recovery-merged-head` and `merge-base-divergence`. NOT claimed: any consumer's own instantiation.",
       "phase": "fuaran-core#156",
       "evidence": {
         "theorem": "drain_deterministic",
@@ -370,6 +370,53 @@
           "the drain is a function of the node SET — every arrival order gives one sequence",
           "the two dangling-parent policies are the two production call sites, and differ only on a dangler",
           "a CYCLE is surfaced as a SHORT drain — the model and production read the same signal"
+        ]
+      }
+    },
+    {
+      "id": "dag-delta-recovery-merged-head",
+      "level": "proved",
+      "claim": "Delta recovery over a MERGED HEAD — the shape a clone folds after it has folded once and pulled again, which Phase 134 named as outside every level. For a lane hanging off ANY node `m` the DAG holds — a merge node with the whole first round beneath it included; nothing is asked of what lies beneath `m` beyond acyclicity — `Dag.between m head` under production's own order, section 13's id-ordered drain over the head's closure (`topo_drain`, `between_drained`), is that lane's nodes in append order and nothing else: not the first round beneath `m`, and nothing from a sibling lane (`between_merged`; the ops, `between_ops_merged`). The drain's order beneath `m` is a genuine choice and the theorem does not depend on which way it went: the difference against `m`'s closure deletes every node the choice was about, and what survives is a spine, where a parent-respecting order is forced (`spine_ids_forced`). PREMISES, and no new one: id distinctness exactly as Phase 134 states it, read at this granularity — every lane node is the node the DAG holds under its own id, and no lane id is an id in `m`'s closure, which is Phase 134's 'the base id is not one of the lane's' at a base whose closure is more than itself (`merged_recovers`, `lane_ids_distinct`; `node-ids-distinct`); acyclicity as section 13 takes it, a topological enumeration of the head's closure supplied as a witness (`head_drains`); and the model's own fuel bound, stated as a computable predicate (`walk_ok`) and discharged by `anc_stable` — a walk that never ran out is the same list under any longer fuel. NOT claimed: a second-round lane that itself merges before the fold, whose delta is no spine.",
+      "phase": "fuaran-core#158",
+      "evidence": {
+        "theorem": "between_merged",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "fold-from-a-merged-dag",
+      "level": "proved",
+      "claim": "`Dag.reconcileMany` and `FoldConfluence.foldOnce` FROM a merged head equal the deltas-first fold on the lanes that were appended off it (`reconcile_many_merged_eq`, `fold_once_merged_eq`) — `fold-from-the-dag`, over the shape a clone folds after a pull, under the drain production runs rather than the parent-walk reversal. One acyclicity witness per head (`lanes_merged_ok`); otherwise the premises of `dag-delta-recovery-merged-head` and nothing more.",
+      "phase": "fuaran-core#158",
+      "evidence": {
+        "theorem": "reconcile_many_merged_eq",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "merge-base-divergence",
+      "level": "proved",
+      "claim": "`Dag.mergeBase` of two heads whose lanes hang off one merged node `m` is `m` — the divergence point, not the original base and not anything else the two heads share (`merge_base_is_divergence`). `merge_base` is production's function clause for clause: the intersection of the two ancestor closures, then the maximum by (closure size, id), with the size comparison spelled as a length comparison of de-duplicated closures so the oracle holds no integer. That `m` wins is production's own docstring sentence — a node strictly deeper than any of its own ancestors has a strictly larger closure — PROVED rather than argued: the closure is transitive (`anc_trans`), `m` lies in no proper ancestor's closure (`off_cycle`), and a distinct list strictly inside another is strictly shorter (`pigeon`). The maximum is therefore STRICT and the id tie-break is unexercised on this shape: the theorem holds for every `lt` whatsoever. Acyclicity is consumed as `off_cycle` and DERIVED from section 13's witness form by `off_cycle_of_witness` (an ancestor stands before its descendant in any topological enumeration, `anc_before`); `merge_base_is_divergence_acyclic` is the theorem with that bridge applied. Premises: those of `dag-delta-recovery-merged-head`, plus the two lanes' ids being disjoint — which is what `foldOnce` folds the actor into every node id for. NOT claimed: heads with several maximal common ancestors, which stays at `dag-outside-the-model`.",
+      "phase": "fuaran-core#158",
+      "evidence": {
+        "theorem": "merge_base_is_divergence",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "merged-head-differential",
+      "level": "tested",
+      "claim": "The extracted recovery, fold and `merge_base`, at `String.CompareOrdinal`, run beside production's `Dag.betweenOps`, `Dag.reconcileMany` and `Dag.mergeBase` over FOLD-PULL-FOLD unions built through production's own `Dag.append` / `Dag.merge`: round one's lanes off a base, their heads folded into one convergent head, round two's lanes appended off it. Per round-two head the delta is compared three ways — production's, the model's, and the lane that was appended, which is the theorem's own right-hand side — and the model's fuel premise is EVALUATED on every DAG, so a green run is one the theorems are about. Per pair of round-two heads the merge base is compared three ways likewise: production's, the model's, and the merged head. Adequacy guards: ops were recovered, a chain was walked, a merge base was located, and the merged head really had two-parent nodes beneath it — without the last the case would re-measure Phase 134's shape. GO-RED: a locator that is the model's own `max_by` over the model's own intersection at the REVERSED key names the shallowest common ancestor — the ORIGINAL BASE rather than the divergence point — and must lose twice, on the merge base and on the delta recovered from the base it names.",
+      "phase": "fuaran-core#158",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the extracted recovery and mergeBase are production's over every FOLD-PULL-FOLD union",
+          "the fold FROM a merged head is the deltas-first fold over the round-two lanes",
+          "a model whose mergeBase returns the BASE rather than the divergence point loses"
         ]
       }
     },
@@ -688,6 +735,45 @@
       "closes": "permanent",
       "evidence": {
         "assumption": "the entry list the model is handed is Map.toList's own order"
+      }
+    },
+    {
+      "id": "snapshot-replay-equivalence",
+      "level": "proved",
+      "claim": "For every stream, every reducer, every boundary n and the (snapshot, tail) that compact produces at n, replay from the origin IS replayFrom the snapshot, READ AGAINST THE ORIGIN'S NUMBERING. The qualification is the finding: replayFrom is `replay w snap.State tail` and replay numbers from zero, so a tail op that rejects at origin index n+j is reported by replayFrom at j — the unqualified equality the phase was chartered with is true of the state and false of the rejection index, and `replay_from_snapshot_state` is the offset-free corollary for the accepted case, which is the sentence `Conformance.snapshotLaws` samples. It takes no hypothesis on the chain, the hash or the snapshot's payload: bounded replay is a fact about the fold, and it holds of a stream that does not even verify. Beside it, `compact_refusal_is_the_origins`: compact refuses an in-range boundary exactly when the origin's own replay halts inside the prefix, at the same index with the same rejection, so a refused compaction loses nothing. The reducer, the state and the rejection are parameters, so this is one theorem for every consumer's cache rather than one per domain. What it deliberately is not is a claim about any cache's on-disk format or its self-verification against a stream head, which belong to the host that keeps the cache. Proved with no assume and no admit under --report_assumes error.",
+      "phase": "fuaran-core#191",
+      "evidence": {
+        "theorem": "replay_from_snapshot_eq",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "compact-preserves-verify",
+      "level": "proved",
+      "claim": "The original stream verifies exactly when its DISCARDED PREFIX verifies and the compaction verifies across its boundary — `verifyChain rs = (verifyChain prefix && verifyAcross snap tail)`, for the snapshot compact produces, under no hypothesis on the hash at all, because it is the walker's own arithmetic. The sentence the phase was chartered with, that the compacted stream verifies exactly when the original does, is the corollary `compact_verifies_iff_original` and CARRIES A PREMISE: the prefix verified. Without it the sentence is false in the direction that matters — compact does not walk the chain, it reads `records[n-1].Hash` and trusts it, so a compaction of a stream whose prefix was tampered verifies across, and once the prefix is discarded nothing can find the tamper again. Verify, then compact. Two results sit beside it. `compacted_tail_tamper_detected` is `chain-tamper-detected`'s linear arm restated at the boundary, an appeal to it and nothing more, spending the same `rec_injective` premise. And `compact_at_zero_needs_the_empty_genesis` is a boundary production leaves open, proved rather than argued: snapshotAt hard-wires the boundary hash at sequence zero to the empty string where the walkers start from `cfg.Genesis`, so under any other genesis a compaction at zero of an intact non-empty stream does NOT verify across. Both shipped configs have the empty genesis, so nothing shipped is affected; `StreamConfig` is a public record, so the theorem carries the condition (`n == PZero ==> genesis == \"\"`) rather than hiding it. The snapshot's hash payload — state-hashed or chain-only — is a parameter neither theorem reads, so `compact` and `compactChainOnly` are two instantiations of one result.",
+      "phase": "fuaran-core#191",
+      "evidence": {
+        "theorem": "compact_preserves_verify",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "snapshot-replay-differential",
+      "level": "tested",
+      "claim": "The extracted model agrees with OpStream.compact, compactChainOnly, replayFrom, replay, verifyAcross and verifyAcrossChainOnly over generated streams from two witnesses, at EVERY boundary of each including the out-of-range one, and over every single-record tamper of each — so the streams compared include ones that do not verify and ones that do not replay, which is where the two theorems say something a green snapshotLaws run does not. A compaction is compared whole: the refusal's message verbatim, or every field of the snapshot and the tail record for record. Beside the model-against-production comparison, PRODUCTION is held to the theorems' own statements on its own values — `replay = offset n (replayFrom snap tail)` and `verifyChain rs = (verifyChain prefix && verifyAcross snap tail)` — so a model that agreed with production while both drifted from the theorem would still be caught. Nine vacuity guards require every class the theorems speak about to have been met: an accepted bounded replay, a halt past boundary zero (the only place the offset is observable), an out-of-range refusal, a prefix refusal, a verified and a rejected boundary, a prefix tamper compacted away unseen, and a detected tail tamper. Four further cases: a model handed a different hash must disagree; the offset shown load-bearing on production alone; a prefix tamper verifying across, to production and to the model alike; and the non-empty-genesis boundary measured on production under its own config. The differential was also reddened by hand before it was trusted, by two perturbations of the extracted oracle — an offset that drops n, and a boundary hash taken one record early — each of which failed the generated cases. Agreement is over those pools, never over all inputs.",
+      "phase": "fuaran-core#191",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the snapshot oracle agrees with production over the work-plan stream, every boundary and every tamper",
+          "the snapshot oracle agrees with production over the reference witness's stream, every boundary and every tamper",
+          "a snapshot model handed a DIFFERENT hash disagrees with production — the comparison can lose",
+          "replayFrom renumbers a halt from ZERO — the offset in replay_from_snapshot_eq is production's, not the model's",
+          "a tamper in the DISCARDED prefix verifies across — compact trusts the boundary hash it reads",
+          "under a NON-EMPTY genesis a compaction at sequence zero does not verify across — snapshotAt hard-wires the empty one"
+        ]
       }
     },
     {

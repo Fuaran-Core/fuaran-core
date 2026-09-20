@@ -631,17 +631,15 @@ module IncrementalDelta =
             // stale one is not merely a wrong cell in place — it is a wrong cell inside the window
             // the cut keeps.
             //
-            // The order is keyed on `b`, a SOURCE column, and that is a deliberate withholding
-            // rather than an arbitrary choice. Sorting on `d` — the derived column that reads the
-            // window's own output — is RED ON `main` TODAY, and the defect is NOT this family's to
-            // fix: `walk`'s `WSort` arm builds its reusable set from `not w.Affected`, which is the
-            // condition Phase 208 replaced with `Stable` at the two sites it found and left standing
-            // at this third one, so a merged order reuses the cached position of a row whose sort
-            // key a window has moved. Phase 212 measured it, reported it, and changed nothing under
-            // `Fuaran.Core.DataFrame`; the executable reproducer and the full diagnosis are the
-            // pending case in `IncrementalRefreshCostTests`, and the census in
-            // `docs/incremental-evaluation.md` marks the cell red rather than absent. When it is
-            // fixed, this shape's sort key moves to `d` and the pending case becomes a live one.
+            // The order is keyed on `d` — the DERIVED column that reads the window's own output —
+            // and that is what makes this shape discriminate rather than merely exercise. Phase 212
+            // had to withhold it: sorting on `d` was red on the shipped seam, whose `WSort` arm
+            // built its reusable set from "the delta did not name this row" instead of "this row's
+            // cells have not moved", so a merged order reused the cached POSITION of a row whose
+            // sort key a window had moved. Phase 215 finished Phase 208's substitution at that third
+            // site and moved the key here, where it belonged. Measured both ways at that phase: with
+            // the pre-fix predicate reintroduced this shape goes RED and sorting on `b` (a source
+            // column) does not, so the key is the whole of what discriminates.
             [ Window
                   { PartitionBy = [ "b" ]
                     OrderBy = [ "a", Asc ]
@@ -649,7 +647,7 @@ module IncrementalDelta =
                     Of = "a"
                     As = "rk" }
               Derive("d", Binary(Add, Col "rk", Col "a"))
-              Transform.sortBy [ "b", Asc ]
+              Transform.sortBy [ "d", Asc ]
               Transform.limit 3 0 ]
         | 45 ->
             // A relation verdict deciding the FRAME the window walks, then both producers read

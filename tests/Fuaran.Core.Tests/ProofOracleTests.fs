@@ -1294,6 +1294,168 @@ let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) 
     | Ok _, None -> [ sprintf "head %s: the model REFUSED a closure with no dangling parent" head ], widest
     | Error e, _ -> [ sprintf "head %s: production reports a cyclic closure it cannot have: %s" head e ], widest
 
+// ---------------------------------------------------------------------------
+//  Phase 158 — delta recovery over a MERGED HEAD, and `Dag.mergeBase`, beside production's own.
+//
+//  Section 14 of `proofs/DagFold.fst` proves that over a head whose lane hangs off an already
+//  MERGED node, `Dag.between` returns that lane's own nodes in append order (`between_merged`),
+//  that the fold above it is the deltas-first fold (`reconcile_many_merged_eq`), and that
+//  `Dag.mergeBase` of two such heads is the merged node they diverged from
+//  (`merge_base_is_divergence`). What runs here is the other half: production's OWN
+//  `Dag.mergeBase` / `Dag.betweenOps` / `Dag.reconcileMany` over the DAG a clone actually holds
+//  after it has folded, pulled and folded again — round one's lanes off a base, their heads folded
+//  into one convergent head with `Dag.merge`, and round two's lanes appended off THAT — against the
+//  extracted model on the same nodes.
+//
+//  Nothing is recomputed across the bridge: the ids are the content hashes production minted. The
+//  model's recovery runs under section 13's drain at `String.CompareOrdinal`, which is the order
+//  production's `topoCore` takes, and over this shape the drain's frontier genuinely widens — so
+//  the order beneath the merged head is a real choice, and the claim measured is that the
+//  recovered delta does not depend on it.
+// ---------------------------------------------------------------------------
+
+/// The DAG a clone holds after FOLD, PULL, FOLD: round one's lanes off one base, their heads merged
+/// into one convergent head, and round two's lanes appended off that head under their own actors.
+/// Returns the original base id, the merged head, round one's heads, round two's heads, and the DAG.
+let private foldPullFold
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (round1: 'Op list list)
+    (round2: 'Op list list)
+    : string * string * string list * string list * Dag.T<'Op> =
+    let hashFn = OpStream.defaultHash
+    let baseId, heads1, dag1 = productionDag w baseOp round1
+    let merged, dagM = mergedUnion w baseOp baseId heads1 dag1
+
+    let heads2, dag2 =
+        round2
+        |> List.indexed
+        |> List.fold
+            (fun (hs, d) (i, ops) ->
+                let actor = Human("pull-" + string i)
+
+                let head, d' =
+                    ops
+                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (merged, d)
+
+                hs @ [ head ], d')
+            ([], dagM)
+
+    baseId, merged, heads1, heads2, dag2
+
+let private foundId (r: DagFold.found<string>) : string option =
+    match r with
+    | DagFold.Found id -> Some id
+    | DagFold.Missing -> None
+
+/// The go-red instrument for `mergeBase`: the model's own function at the REVERSED key — the same
+/// intersection, the same extracted `max_by`, with `deeper` flipped — so it returns the SHALLOWEST
+/// common ancestor, which over a fold-pull-fold union is the ORIGINAL BASE rather than the
+/// divergence point. It is as well-formed a `maxBy` as the model's own; what it breaks is agreement
+/// with production, and the delta recovered from the base it names.
+let private shallowestCommon (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> list) (left: string) (right: string) =
+    match DagFold.inter (DagFold.ancestors_of model fuel left) (DagFold.ancestors_of model fuel right) with
+    | [] -> None
+    | c :: t -> Some(DagFold.max_by (fun x y -> DagFold.deeper ordLt model fuel y x) c t)
+
+type private MergedTally =
+    {
+        Failures: string list
+        /// Ops recovered across every round-two lane — the vacuity guard.
+        Recovered: int
+        /// Round-two lanes of two or more ops: a one-node lane walks no chain.
+        Chains: int
+        /// Two-parent nodes beneath the merged heads: with none, the "merged head" was a plain node
+        /// and the case re-measured Phase 134's shape under a different name.
+        MergeNodes: int
+        /// Head pairs whose merge base was located.
+        Pairs: int
+    }
+
+/// One fold-pull-fold union, compared three ways: each round-two head's recovered delta (production
+/// `betweenOps` from the merged head, the model's `between_ops_drained`, and the lane that was
+/// appended — the theorem's own right-hand side); every pair of round-two heads' merge base
+/// (production, the model, and the merged head itself); and the model's computable premises, so a
+/// green run is known to be one the theorems are ABOUT.
+let private mergedDisagreements
+    (locate: DagFold.dag<'Op> -> DagFold.node<'Op> list -> string -> string -> string option)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (round1: 'Op list list)
+    (round2: 'Op list list)
+    : MergedTally =
+    let _, merged, _, heads2, dag = foldPullFold w baseOp round1 round2
+    let model = toModelDag dag
+    let fuel = model.nodes
+    let kfuel = drainFuel model.nodes
+    let failures = ResizeArray<string>()
+    let mutable recovered = 0
+
+    for (i, (head, lane)) in List.indexed (List.zip heads2 round2) do
+        let p = Dag.betweenOps dag merged head
+        let o = DagFold.between_ops_drained ordLt kfuel model fuel merged head
+        recovered <- recovered + List.length p
+
+        if p <> o then
+            failures.Add(
+                sprintf
+                    "round-two lane %d: the recovered delta differs\n  production: [%s]\n  model:      [%s]"
+                    i
+                    (p |> List.map w.Encode |> String.concat "; ")
+                    (o |> List.map w.Encode |> String.concat "; ")
+            )
+
+        if o <> lane then
+            failures.Add(
+                sprintf
+                    "round-two lane %d: the model did not recover the lane that was appended (between_ops_merged)\n  lane:  [%s]\n  model: [%s]"
+                    i
+                    (lane |> List.map w.Encode |> String.concat "; ")
+                    (o |> List.map w.Encode |> String.concat "; ")
+            )
+
+        // The FUEL premise of `merged_recovers`, evaluated: the walk below the lane completed.
+        if not (DagFold.walk_ok model (DagFold.drop_by fuel (List.rev lane)) merged) then
+            failures.Add(sprintf "round-two lane %d: the model's walk below the lane ran out of fuel — premise unmet" i)
+
+    let mutable pairs = 0
+
+    for (i, hi) in List.indexed heads2 do
+        for (j, hj) in List.indexed heads2 do
+            if i < j then
+                pairs <- pairs + 1
+                let p = Dag.mergeBase dag hi hj
+                let o = locate model fuel hi hj
+
+                if p <> o then
+                    failures.Add(
+                        sprintf "heads %d and %d: the merge base differs\n  production: %A\n  model:      %A" i j p o
+                    )
+
+                if p <> Some merged then
+                    failures.Add(
+                        sprintf "heads %d and %d: production's merge base %A is not the merged head %s" i j p merged
+                    )
+
+    let mergeNodes =
+        let anc = Dag.ancestorsOf dag merged
+
+        dag.Nodes
+        |> Map.toList
+        |> List.filter (fun (id, n) -> Set.contains id anc && List.length n.Parents > 1)
+        |> List.length
+
+    { Failures = List.ofSeq failures
+      Recovered = recovered
+      Chains = round2 |> List.filter (fun l -> List.length l > 1) |> List.length
+      MergeNodes = mergeNodes
+      Pairs = pairs }
+
+/// The faithful locator — the extracted `merge_base` at production's id order.
+let private modelMergeBase (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> list) (l: string) (r: string) =
+    foundId (DagFold.merge_base ordLt model fuel l r)
+
+// ---------------------------------------------------------------------------
 //  Phase 133 — the TREE ALGEBRA as a third oracle.
 //
 //  `proofs/TreeOps.fst` models `Ops.apply` and `Ops.footprint` over the tree as the
@@ -2234,6 +2396,365 @@ let private opBlindHash: HashFn =
 /// — the same function with its two arguments swapped, so every recomputed id is wrong and an
 /// intact DAG must be reported as broken.
 let private swappedHash: HashFn = fun a b -> OpStream.defaultHash b a
+
+// ---------------------------------------------------------------------------
+//  Phase 191 — snapshot and bounded replay (`proofs/Chain.fst`, section 7)
+//
+//  The model's `compact` / `replay_from` / `verify_across` beside `OpStream.compact`,
+//  `compactChainOnly`, `replayFrom`, `verifyAcross` and `verifyAcrossChainOnly`, over generated
+//  streams, EVERY boundary of each (the out-of-range one included), and every single-record tamper
+//  of each — so the streams compared include ones that do not verify and ones that do not replay,
+//  which is where the two theorems say something a green `snapshotLaws` run does not.
+//
+//  Two comparisons per compaction, and they are different things. The first is the ordinary one:
+//  the extracted model against production, value for value. The second holds PRODUCTION to the
+//  theorems' own statements — `replay = offset n (replayFrom snap tail)`, and
+//  `verifyChain rs = (verifyChain prefix && verifyAcross snap tail)` — using the model only for
+//  `offset`. A model that agreed with production while both drifted from the theorem would pass
+//  the first and fail the second.
+// ---------------------------------------------------------------------------
+
+/// `OpStream.replay`'s result, as one value both sides are compared at.
+type private ReplayVerdict<'State, 'Rej> =
+    | ReplayedTo of 'State
+    | HaltedAt of index: int * rejection: 'Rej
+
+let private prodReplayVerdict (r: Result<'State, int * 'Rej>) : ReplayVerdict<'State, 'Rej> =
+    match r with
+    | Ok s -> ReplayedTo s
+    | Error(i, e) -> HaltedAt(i, e)
+
+let private modelReplayVerdict (r: Chain.replayed<'State, 'Rej>) : ReplayVerdict<'State, 'Rej> =
+    match r with
+    | Chain.Replayed s -> ReplayedTo s
+    | Chain.Halted(i, e) -> HaltedAt(intOfPos i, e)
+
+let private toModelReplayed (v: ReplayVerdict<'State, 'Rej>) : Chain.replayed<'State, 'Rej> =
+    match v with
+    | ReplayedTo s -> Chain.Replayed s
+    | HaltedAt(i, e) -> Chain.Halted(posOfInt i, e)
+
+/// The witness's reducer, as the model takes it — the ONLY thing section 7 asks of a domain.
+let private chainApply (w: StreamWitness<'Op, 'State, 'Rej>) (op: 'Op) (st: 'State) : Chain.applied<'State, 'Rej> =
+    match w.Apply op st with
+    | Ok s -> Chain.Applied s
+    | Error e -> Chain.Refused e
+
+/// Production's two compaction entry points. They differ in the snapshot's hash pre-image and in
+/// nothing else, which is why the model takes the payload as a parameter.
+type private SnapshotMode =
+    | StateHashed
+    | ChainOnly
+
+let private prodCompact
+    (mode: SnapshotMode)
+    (hashFn: HashFn)
+    (stateEnc: 'State -> string)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (state0: 'State)
+    (rs: OpRecord<'Op> list)
+    (n: int)
+    : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
+    match mode with
+    | StateHashed -> OpStream.compact hashFn stateEnc w state0 rs n
+    | ChainOnly -> OpStream.compactChainOnly hashFn w state0 rs n
+
+let private prodVerifyAcross
+    (mode: SnapshotMode)
+    (hashFn: HashFn)
+    (stateEnc: 'State -> string)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (snap: Snapshot<'State>)
+    (tail: OpRecord<'Op> list)
+    : bool =
+    match mode with
+    | StateHashed -> OpStream.verifyAcross hashFn stateEnc w snap tail
+    | ChainOnly -> OpStream.verifyAcrossChainOnly hashFn w snap tail
+
+let private modelPay (mode: SnapshotMode) (stateEnc: 'State -> string) : Chain.pos -> 'State -> string =
+    match mode with
+    | StateHashed -> Chain.snap_payload showPos stateEnc
+    | ChainOnly -> Chain.snap_payload_chain_only showPos
+
+let private toModelSnapshot (s: Snapshot<'State>) : Chain.snapshot<'State> =
+    { Chain.sseq = posOfInt s.Seq
+      Chain.sstate = s.State
+      Chain.sprev = s.PrevHash
+      Chain.shash = s.Hash }
+
+/// A compaction's whole outcome: the refusal's MESSAGE, or every field of the snapshot and the tail
+/// record for record. Compared at once, so a model that snapshotted the right state under the wrong
+/// boundary hash is as red as one that refused.
+type private CompactVerdict<'Op, 'State> =
+    | CompactedTo of seq: int * state: 'State * prevHash: string * hash: string * tail: Chain.record<'Op> list
+    | CompactRefusedWith of string
+
+let private prodCompactVerdict
+    (r: Result<Snapshot<'State> * OpRecord<'Op> list, string>)
+    : CompactVerdict<'Op, 'State> =
+    match r with
+    | Ok(s, tail) -> CompactedTo(s.Seq, s.State, s.PrevHash, s.Hash, toChainRecords tail)
+    | Error e -> CompactRefusedWith e
+
+let private modelCompactVerdict (r: Chain.compacted<'Op, 'State>) : CompactVerdict<'Op, 'State> =
+    match r with
+    | Chain.Compacted(s, tail) -> CompactedTo(intOfPos s.sseq, s.sstate, s.sprev, s.shash, tail)
+    | Chain.CompactRefused e -> CompactRefusedWith e
+
+type private SnapshotTally =
+    {
+        Failure: string option
+        /// Compactions compared, and the two refusal classes among them.
+        Compactions: int
+        OutOfRange: int
+        PrefixRefused: int
+        /// Bounded replays that reached a state, and ones that HALTED in the tail at a boundary past
+        /// zero — the only place the theorem's `offset` is observable.
+        Accepted: int
+        HaltedPastZero: int
+        /// Boundaries production verified across, and ones it rejected.
+        VerifiedAcross: int
+        RejectedAcross: int
+        /// Compactions that verify across although the ORIGINAL does not: a tamper in the discarded
+        /// prefix. `compact_verifies_iff_original`'s premise, observed being load-bearing.
+        PrefixTamperUnseen: int
+        /// Tampers of a compacted TAIL, and how many production's boundary walker found.
+        TailTampers: int
+        TailDetected: int
+    }
+
+let private emptySnapshotTally =
+    { Failure = None
+      Compactions = 0
+      OutOfRange = 0
+      PrefixRefused = 0
+      Accepted = 0
+      HaltedPastZero = 0
+      VerifiedAcross = 0
+      RejectedAcross = 0
+      PrefixTamperUnseen = 0
+      TailTampers = 0
+      TailDetected = 0 }
+
+let private snapshotDifferential
+    (label: string)
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (stateEnc: 'State -> string)
+    (otherOp: 'Op -> 'Op)
+    (gen: LaneGen<'Op, 'State>)
+    (seed: int)
+    (iterations: int)
+    : SnapshotTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable t = emptySnapshotTally
+
+    let note (why: string) =
+        if t.Failure.IsNone then
+            t <- { t with Failure = Some why }
+
+    let apply = chainApply w
+
+    for _ in 1..iterations do
+        let lanes, r' = gen.Lanes 2 rng
+        rng <- r'
+        let ops = List.concat lanes
+        let intact = chainUnder prodHash w gen.State0 (Human "writer") ops
+
+        let where (what: string) (mode: SnapshotMode) (n: int) =
+            sprintf
+                "%s: seed=%d stream=%s mode=%A atSeq=%d ops=[%s]"
+                label
+                seed
+                what
+                mode
+                n
+                (ops |> List.map w.Encode |> String.concat "; ")
+
+        let across (mode: SnapshotMode) (snap: Snapshot<'State>) (tail: OpRecord<'Op> list) : bool * bool =
+            prodVerifyAcross mode prodHash stateEnc w snap tail,
+            Chain.verify_across
+                modelHash
+                showPos
+                w.Encode
+                (modelPay mode stateEnc)
+                (toModelSnapshot snap)
+                (toChainRecords tail)
+
+        let compareAt (what: string) (rs: OpRecord<'Op> list) (mode: SnapshotMode) (n: int) =
+            let here = where what mode n
+            let p = prodCompact mode prodHash stateEnc w gen.State0 rs n
+
+            let m =
+                Chain.compact
+                    modelHash
+                    showPos
+                    (modelPay mode stateEnc)
+                    apply
+                    gen.State0
+                    (toChainRecords rs)
+                    (posOfInt n)
+
+            let pv, mv = prodCompactVerdict p, modelCompactVerdict m
+
+            t <-
+                { t with
+                    Compactions = t.Compactions + 1 }
+
+            if pv <> mv then
+                note (sprintf "%s\n  compact, production: %A\n  compact, model:      %A" here pv mv)
+
+            let pOrigin = prodReplayVerdict (OpStream.replay w gen.State0 rs)
+
+            let mOrigin = modelReplayVerdict (Chain.replay apply gen.State0 (toChainRecords rs))
+
+            if pOrigin <> mOrigin then
+                note (sprintf "%s\n  replay, production: %A\n  replay, model:      %A" here pOrigin mOrigin)
+
+            match p with
+            | Error _ ->
+                if n > List.length rs then
+                    t <- { t with OutOfRange = t.OutOfRange + 1 }
+                else
+                    t <-
+                        { t with
+                            PrefixRefused = t.PrefixRefused + 1 }
+
+                    // `compact_refusal_is_the_origins`, held of production: an in-range refusal is
+                    // the origin's own halt, inside the prefix.
+                    match pOrigin with
+                    | HaltedAt(i, _) when i < n -> ()
+                    | other ->
+                        note (
+                            sprintf "%s\n  compact refused an in-range boundary, but the origin replay is %A" here other
+                        )
+            | Ok(snap, tail) ->
+                let pFrom = prodReplayVerdict (OpStream.replayFrom w snap tail)
+
+                let mFrom =
+                    modelReplayVerdict (Chain.replay_from apply (toModelSnapshot snap) (toChainRecords tail))
+
+                if pFrom <> mFrom then
+                    note (sprintf "%s\n  replayFrom, production: %A\n  replayFrom, model:      %A" here pFrom mFrom)
+
+                // `replay_from_snapshot_eq`, held of PRODUCTION's two values.
+                let shifted = modelReplayVerdict (Chain.offset (posOfInt n) (toModelReplayed pFrom))
+
+                if shifted <> pOrigin then
+                    note (
+                        sprintf
+                            "%s\n  replay from the origin:                %A\n  replayFrom, read at the origin's index: %A"
+                            here
+                            pOrigin
+                            shifted
+                    )
+
+                match pFrom with
+                | ReplayedTo _ -> t <- { t with Accepted = t.Accepted + 1 }
+                | HaltedAt _ when n > 0 ->
+                    t <-
+                        { t with
+                            HaltedPastZero = t.HaltedPastZero + 1 }
+                | HaltedAt _ -> ()
+
+                let pAcross, mAcross = across mode snap tail
+
+                if pAcross <> mAcross then
+                    note (
+                        sprintf "%s\n  verifyAcross, production: %b\n  verify_across, model:    %b" here pAcross mAcross
+                    )
+
+                // `compact_preserves_verify`, held of PRODUCTION's three values.
+                let whole = OpStream.verifyChain prodHash w rs
+                let prefix = OpStream.verifyChain prodHash w (List.truncate n rs)
+
+                if whole <> (prefix && pAcross) then
+                    note (
+                        sprintf
+                            "%s\n  verifyChain whole=%b, but verifyChain prefix=%b and verifyAcross=%b"
+                            here
+                            whole
+                            prefix
+                            pAcross
+                    )
+
+                if pAcross then
+                    t <-
+                        { t with
+                            VerifiedAcross = t.VerifiedAcross + 1 }
+
+                    if not whole then
+                        t <-
+                            { t with
+                                PrefixTamperUnseen = t.PrefixTamperUnseen + 1 }
+                else
+                    t <-
+                        { t with
+                            RejectedAcross = t.RejectedAcross + 1 }
+
+                // Every tamper of the compacted TAIL — of the intact stream only, so a detection
+                // here is a detection of THIS tamper and not of one the stream already carried.
+                if what = "none" then
+                    for (tamper, tail') in chainTampers otherOp tail do
+                        let pT, mT = across mode snap tail'
+
+                        t <-
+                            { t with
+                                TailTampers = t.TailTampers + 1 }
+
+                        if pT <> mT then
+                            note (
+                                sprintf
+                                    "%s tail-tamper=%s\n  verifyAcross, production: %b\n  verify_across, model:    %b"
+                                    here
+                                    tamper
+                                    pT
+                                    mT
+                            )
+
+                        if not pT then
+                            t <-
+                                { t with
+                                    TailDetected = t.TailDetected + 1 }
+
+        if not (List.isEmpty intact) then
+            for (what, rs) in ("none", intact) :: chainTampers otherOp intact do
+                for mode in [ StateHashed; ChainOnly ] do
+                    for n in 0 .. List.length rs + 1 do
+                        compareAt what rs mode n
+
+    t
+
+let private expectSnapshotAgreement (label: string) (t: SnapshotTally) =
+    match t.Failure with
+    | Some why -> failtest why
+    | None ->
+        // Every class the two theorems speak about has to have been MET, or the agreement above is
+        // about less than it claims.
+        Expect.isGreaterThan t.Accepted 0 (sprintf "%s: no bounded replay reached a state" label)
+
+        Expect.isGreaterThan
+            t.HaltedPastZero
+            0
+            (sprintf "%s: no bounded replay halted past boundary zero, so the index offset was never observable" label)
+
+        Expect.isGreaterThan t.OutOfRange 0 (sprintf "%s: no out-of-range boundary was compared" label)
+        Expect.isGreaterThan t.PrefixRefused 0 (sprintf "%s: no compaction was refused on its prefix" label)
+        Expect.isGreaterThan t.VerifiedAcross 0 (sprintf "%s: no boundary verified" label)
+        Expect.isGreaterThan t.RejectedAcross 0 (sprintf "%s: no boundary was rejected" label)
+
+        Expect.isGreaterThan
+            t.PrefixTamperUnseen
+            0
+            (sprintf "%s: no prefix tamper was compacted away, so the corollary's premise was never exercised" label)
+
+        Expect.isGreaterThan t.TailTampers 0 (sprintf "%s: no tail tamper was compared" label)
+
+        Expect.isGreaterThan
+            t.TailDetected
+            0
+            (sprintf "%s: every tail tamper went undetected, so the agreement is vacuous" label)
 
 // ---- the corpus dag/ family, as a source of SHAPES ----
 
@@ -8396,6 +8917,196 @@ let proofOracleTests =
                   Expect.equal ord production "the model and production agree once the back edge is gone"
                   Expect.isTrue (DagFold.is_topo_enum ns' ord) "and the complete drain IS a topological enumeration"
               | m, p -> failtestf "the acyclic control disagreed: model=%A production=%A" m p
+          // ---- Phase 158: delta recovery over a MERGED HEAD, and mergeBase, beside production's ----
+
+          testCase "the extracted recovery and mergeBase are production's over every FOLD-PULL-FOLD union"
+          <| fun _ ->
+              // The shape section 14 is about: round one's lanes folded into one convergent head
+              // with `Dag.merge`, round two's lanes appended off it. Three comparisons per union —
+              // production's delta, the model's, and the lane that was appended; production's merge
+              // base, the model's, and the merged head — plus the model's fuel premise, evaluated.
+              // The adequacy guards are the ones a green run could otherwise hide behind: ops were
+              // recovered, a chain was walked, a merge base was located, and the head the lanes
+              // hang off really had two-parent nodes beneath it.
+              let mutable rng = ConfRng.ofSeed 1580
+              let mutable recovered = 0
+              let mutable chains = 0
+              let mutable mergeNodes = 0
+              let mutable pairs = 0
+
+              for i in 1..60 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let t = mergedDisagreements modelMergeBase planW planLaneGen.BaseOp round1 round2
+
+                  match t.Failures with
+                  | [] -> ()
+                  | d :: _ ->
+                      failtestf
+                          "work-plan domain iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                          i
+                          (renderLanes encPlanOp round1)
+                          (renderLanes encPlanOp round2)
+                          d
+
+                  recovered <- recovered + t.Recovered
+                  chains <- chains + t.Chains
+                  mergeNodes <- mergeNodes + t.MergeNodes
+                  pairs <- pairs + t.Pairs
+
+              for i in 1..30 do
+                  let round1, r1 = treeLaneGen.Lanes 4 rng
+                  let round2, r2 = treeLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let t = mergedDisagreements modelMergeBase treeW treeLaneGen.BaseOp round1 round2
+
+                  match t.Failures with
+                  | [] -> ()
+                  | d :: _ ->
+                      failtestf
+                          "reference witness iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                          i
+                          (renderLanes treeW.Encode round1)
+                          (renderLanes treeW.Encode round2)
+                          d
+
+                  recovered <- recovered + t.Recovered
+                  chains <- chains + t.Chains
+                  mergeNodes <- mergeNodes + t.MergeNodes
+                  pairs <- pairs + t.Pairs
+
+              Expect.isGreaterThan recovered 0 (sprintf "no ops were recovered at all (recovered=%d)" recovered)
+              Expect.isGreaterThan chains 0 "no round-two lane was longer than one op, so no chain was walked"
+              Expect.isGreaterThan pairs 0 "no pair of round-two heads had its merge base located"
+
+              Expect.isGreaterThan
+                  mergeNodes
+                  0
+                  "no merged head had a two-parent node beneath it, so this case re-measured Phase 134's base-plus-chains shape"
+
+          testCase "the fold FROM a merged head is the deltas-first fold over the round-two lanes"
+          <| fun _ ->
+              // `reconcile_many_merged_eq`, measured: production's `Dag.reconcileMany` from the
+              // merged head, the extracted `reconcile_many_drained` over the same DAG, and the
+              // deltas-first `reconcile_many` handed the round-two lanes directly — the theorem's
+              // own right-hand side. Scripts are compared as scripts and halts as canonical
+              // reports, exactly as the Phase 131 cases compare them.
+              let mutable rng = ConfRng.ofSeed 1581
+              let mutable folded = 0
+              let mutable halted = 0
+
+              for i in 1..60 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let _, merged, _, heads2, dag = foldPullFold planW planLaneGen.BaseOp round1 round2
+                  let model = toModelDag dag
+
+                  let production =
+                      match Dag.reconcileMany planFootprint dag merged heads2 with
+                      | Ok script -> Ok script
+                      | Error cs -> Error(FoldConfluence.canonicalConflictReport planW.Encode cs)
+
+                  let fromDag =
+                      match
+                          DagFold.reconcile_many_drained
+                              (planFootprint >> toModelFootprint)
+                              ordLt
+                              (drainFuel model.nodes)
+                              model
+                              model.nodes
+                              merged
+                              heads2
+                      with
+                      | DagFold.Ok script -> Ok script
+                      | DagFold.Error cs ->
+                          Error(FoldConfluence.canonicalConflictReport planW.Encode (cs |> List.map ofModelConflict))
+
+                  let deltasFirst = oracleScript planW planFootprint round2
+
+                  match production with
+                  | Ok _ -> folded <- folded + 1
+                  | Error _ -> halted <- halted + 1
+
+                  if production <> fromDag || fromDag <> deltasFirst then
+                      failtestf
+                          "iter %d\nround one:\n%s\nround two:\n%s\n  production:   %A\n  model (DAG):  %A\n  deltas-first: %A"
+                          i
+                          (renderLanes encPlanOp round1)
+                          (renderLanes encPlanOp round2)
+                          production
+                          fromDag
+                          deltasFirst
+
+              Expect.isGreaterThan (folded + halted) 0 "some unions were folded"
+              Expect.isGreaterThan folded 0 "no union folded clean, so no merge script was ever compared"
+
+          testCase "a model whose mergeBase returns the BASE rather than the divergence point loses"
+          <| fun _ ->
+              // The teeth. The locator is the model's own `max_by` over the model's own
+              // intersection at the REVERSED key, so it names the SHALLOWEST common ancestor — over
+              // a fold-pull-fold union, the original base. If this comes back clean, the green
+              // case above certifies nothing: it would be comparing a locator that cannot tell the
+              // divergence point from anything else the two heads share. Two things must lose —
+              // the merge base itself, and the delta recovered from the base it names, which is
+              // the whole of round one as well as the lane.
+              let mutable rng = ConfRng.ofSeed 1580
+              let mutable found = 0
+              let mutable namedTheBase = 0
+              let mutable longerDeltas = 0
+              let mutable example = ""
+
+              for _ in 1..60 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let t = mergedDisagreements shallowestCommon planW planLaneGen.BaseOp round1 round2
+
+                  match t.Failures with
+                  | [] -> ()
+                  | d :: _ ->
+                      found <- found + 1
+
+                      if example = "" then
+                          example <- d
+
+                  let baseId, merged, _, heads2, dag =
+                      foldPullFold planW planLaneGen.BaseOp round1 round2
+
+                  let model = toModelDag dag
+
+                  match heads2 with
+                  | h0 :: h1 :: _ ->
+                      match shallowestCommon model model.nodes h0 h1 with
+                      | Some wrong when wrong = baseId && baseId <> merged ->
+                          namedTheBase <- namedTheBase + 1
+
+                          let fromWrong =
+                              DagFold.between_ops_drained ordLt (drainFuel model.nodes) model model.nodes wrong h0
+
+                          if fromWrong <> Dag.betweenOps dag merged h0 then
+                              longerDeltas <- longerDeltas + 1
+                      | _ -> ()
+                  | _ -> ()
+
+              Expect.isGreaterThan
+                  found
+                  0
+                  "a locator naming the SHALLOWEST common ancestor must disagree with production — this comparison cannot lose"
+
+              Expect.stringContains example "the merge base differs" "the disagreement names what moved"
+
+              Expect.isGreaterThan
+                  namedTheBase
+                  0
+                  "the reversed locator named the ORIGINAL BASE, which is the go-red the phase asks for"
+
+              Expect.isGreaterThan
+                  longerDeltas
+                  0
+                  "a delta recovered from the base rather than the divergence point must differ from production's"
+
           // ---- Phase 133: the TREE ALGEBRA model beside Ops.apply / Ops.footprint ----
 
           testCase "the tree oracle agrees with Ops.apply and Ops.footprint over the generated pool"
@@ -9496,6 +10207,222 @@ let proofOracleTests =
               Expect.isTrue
                   (Dag.verifyDag OpStream.defaultHash lossy tampered)
                   "under a non-injective CODEC — the hash untouched — production's own walker cannot see the tamper"
+
+          // ---- Phase 191 — snapshot and bounded replay: compact, replayFrom, verifyAcross ----
+
+          testCase
+              "the snapshot oracle agrees with production over the work-plan stream, every boundary and every tamper"
+          <| fun _ ->
+              snapshotDifferential
+                  "work-plan snapshots"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  planW
+                  planHash
+                  tamperedPlanOp
+                  planLaneGen
+                  3700
+                  40
+              |> expectSnapshotAgreement "work-plan snapshots"
+
+          testCase
+              "the snapshot oracle agrees with production over the reference witness's stream, every boundary and every tamper"
+          <| fun _ ->
+              snapshotDifferential
+                  "reference snapshots"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  treeW
+                  prodTreeHash
+                  (fun _ -> RemoveNode "tampered-node")
+                  treeLaneGen
+                  3710
+                  30
+              |> expectSnapshotAgreement "reference snapshots"
+
+          testCase "a snapshot model handed a DIFFERENT hash disagrees with production — the comparison can lose"
+          <| fun _ ->
+              // The go-red for the whole differential: nothing about the streams moves, only the
+              // function the model mints the snapshot's hash and walks the tail with.
+              let t =
+                  snapshotDifferential
+                      "perturbed snapshots"
+                      OpStream.defaultHash
+                      swappedHash
+                      planW
+                      planHash
+                      tamperedPlanOp
+                      planLaneGen
+                      3720
+                      3
+
+              Expect.isSome t.Failure "a model hashing with a different function must be caught"
+
+              // And it is caught where it should be: on one intact stream, production verifies
+              // across its own compaction and the perturbed model does not.
+              let rs =
+                  chainUnder
+                      OpStream.defaultHash
+                      planW
+                      planLaneGen.State0
+                      (Human "writer")
+                      [ AddItem("s1", "one"); AddItem("s2", "two"); Retitle("s1", "uno") ]
+
+              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
+              | Error e -> failtestf "compact refused an intact stream: %s" e
+              | Ok(snap, tail) ->
+                  Expect.isTrue
+                      (OpStream.verifyAcross OpStream.defaultHash planHash planW snap tail)
+                      "production verifies across its own boundary"
+
+                  Expect.isFalse
+                      (Chain.verify_across
+                          swappedHash
+                          showPos
+                          planW.Encode
+                          (Chain.snap_payload showPos planHash)
+                          (toModelSnapshot snap)
+                          (toChainRecords tail))
+                      "and a model recomputing with a different hash does not"
+
+          testCase
+              "replayFrom renumbers a halt from ZERO — the offset in replay_from_snapshot_eq is production's, not the model's"
+          <| fun _ ->
+              // The theorem is `replay = offset n (replayFrom snap tail)`, and the offset is the
+              // part a reader would drop. Shown load-bearing on production alone: a stream whose
+              // third op rejects, compacted after its first.
+              let built =
+                  chainUnder
+                      OpStream.defaultHash
+                      planW
+                      planLaneGen.State0
+                      (Human "writer")
+                      [ AddItem("o1", "one"); AddItem("o2", "two"); Retitle("o1", "uno") ]
+
+              let rs =
+                  built
+                  |> List.mapi (fun i r ->
+                      if i = 2 then
+                          { r with
+                              Op = Retitle("missing", "uno") }
+                      else
+                          r)
+
+              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
+              | Error e -> failtestf "the prefix replays, so compact must not refuse: %s" e
+              | Ok(snap, tail) ->
+                  let origin = prodReplayVerdict (OpStream.replay planW planLaneGen.State0 rs)
+                  let bounded = prodReplayVerdict (OpStream.replayFrom planW snap tail)
+                  Expect.equal origin (HaltedAt(2, "no item missing")) "the origin halts at the third record"
+
+                  Expect.equal
+                      bounded
+                      (HaltedAt(1, "no item missing"))
+                      "and replayFrom reports the same halt at ITS index"
+
+                  Expect.notEqual bounded origin "so the unqualified equality is false of production"
+
+                  Expect.equal
+                      (modelReplayVerdict (Chain.offset (posOfInt 1) (toModelReplayed bounded)))
+                      origin
+                      "and the theorem's offset is exactly what separates them"
+
+          testCase "a tamper in the DISCARDED prefix verifies across — compact trusts the boundary hash it reads"
+          <| fun _ ->
+              // `compact_verifies_iff_original` carries a premise — the prefix verified — and this
+              // is what it is for. The op at sequence zero is changed, the stream no longer
+              // verifies, and its compaction at two verifies across all the same: to production and
+              // to the model alike. Once the prefix is gone nothing can find it. Verify, then compact.
+              let built =
+                  chainUnder
+                      OpStream.defaultHash
+                      planW
+                      planLaneGen.State0
+                      (Human "writer")
+                      [ AddItem("k1", "one"); AddItem("k2", "two"); AddItem("k3", "three") ]
+
+              // The probe built the thing it claims to be about: a rejected `AddItem` chains nothing,
+              // and a tamper of an empty stream is no tamper.
+              Expect.hasLength built 3 "all three appends were accepted"
+
+              let rs =
+                  built
+                  |> List.mapi (fun i r ->
+                      if i = 0 then
+                          { r with
+                              Op = AddItem("k1", "TAMPERED") }
+                      else
+                          r)
+
+              Expect.isFalse (OpStream.verifyChain OpStream.defaultHash planW rs) "the original does not verify"
+
+              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 2 with
+              | Error e -> failtestf "the tampered prefix still replays, so compact does not refuse: %s" e
+              | Ok(snap, tail) ->
+                  Expect.isTrue
+                      (OpStream.verifyAcross OpStream.defaultHash planHash planW snap tail)
+                      "production verifies across the boundary of a stream that does not verify"
+
+                  Expect.isTrue
+                      (Chain.verify_across
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          (Chain.snap_payload showPos planHash)
+                          (toModelSnapshot snap)
+                          (toChainRecords tail))
+                      "and so does the model — the split theorem says exactly this"
+
+                  Expect.isFalse
+                      (OpStream.verifyChain OpStream.defaultHash planW (List.truncate 2 rs))
+                      "the prefix is where the break is, which is the other conjunct of the split"
+
+          testCase
+              "under a NON-EMPTY genesis a compaction at sequence zero does not verify across — snapshotAt hard-wires the empty one"
+          <| fun _ ->
+              // `compact_at_zero_needs_the_empty_genesis`, measured on production. Both shipped
+              // configs have the empty genesis, so nothing shipped meets this; `StreamConfig` is a
+              // public record, so a domain can.
+              let cfg =
+                  { OpStream.canonicalConfig with
+                      Genesis = "g0" }
+
+              let mutable st = planLaneGen.State0
+              let mutable rs: OpRecord<PlanOp> list = OpStream.empty
+
+              for op in [ AddItem("g1", "one"); AddItem("g2", "two") ] do
+                  match OpStream.appendWith cfg OpStream.defaultHash planW (Human "writer") op st rs with
+                  | Ok(st', rs') ->
+                      st <- st'
+                      rs <- rs'
+                  | Error e -> failtestf "append refused: %s" e
+
+              Expect.isTrue
+                  (OpStream.verifyChainWith cfg OpStream.defaultHash planW rs)
+                  "the stream verifies under its own config"
+
+              let acrossAt (n: int) : bool * bool =
+                  match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs n with
+                  | Error e -> failtestf "compact refused an intact stream: %s" e
+                  | Ok(snap, tail) ->
+                      OpStream.verifyAcrossWith cfg OpStream.defaultHash planHash planW snap tail,
+                      Chain.verify_across
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          (Chain.snap_payload showPos planHash)
+                          (toModelSnapshot snap)
+                          (toChainRecords tail)
+
+              Expect.equal
+                  (acrossAt 0)
+                  (false, false)
+                  "at zero the snapshot says \"\" and the first record links to the genesis"
+
+              Expect.equal
+                  (acrossAt 1)
+                  (true, true)
+                  "past zero the boundary hash is a stored one and the genesis never reaches it"
 
           // ---- Phase 138 — the APPLY ENGINE: apply, canApply and invert against the model ----
 

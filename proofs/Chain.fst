@@ -1502,3 +1502,495 @@ let chain_tamper_detected_verify
   chain_break_none_iff h show enc_op genesis PZero rs;
   chain_tamper_detected h show enc_op inj genesis PZero rs n r r';
   chain_break_none_iff h show enc_op genesis PZero (replace_at rs n r')
+
+(* ======================================================================================
+   7. Snapshot and bounded replay (Phase 191; F#: `OpStream.replay`, `snapshotAtOpt`, `compact`,
+      `compactChainOnly`, `replayFrom`, `verifyAcrossWithOpt`).
+
+   Sections 0-6 say nothing about STATE: the domain reducer is orthogonal to the chain, and the
+   walkers never call it. Bounded replay is where the two meet — a snapshot is the folded state at
+   a boundary, bound to the boundary record's hash — so this section adds the reducer as a
+   parameter (`apply`, the witness's `Apply`) and nothing else. The state, the rejection and the
+   state encoder stay abstract: the theorems below hold for every reducer, which is the point,
+   since every consumer's cache rests on them with a different one.
+
+   Two theorems, and each came out SHARPER than the sentence it was chartered with.
+
+     - `replay_from_snapshot_eq`. "Replay from the snapshot is replay from the origin" is true of
+       the STATE and false of the REJECTION INDEX: `replayFrom` is `replay w snap.State tail`, and
+       `replay` numbers from zero, so a tail op that rejects at origin index n+j is reported by
+       `replayFrom` at j. The theorem states the equality with that offset in it (`offset n`), and
+       `replay_from_snapshot_state` is the offset-free corollary for the accepted case, which is
+       what `Conformance.snapshotLaws` samples.
+     - `compact_preserves_verify`. "The compacted stream verifies exactly when the original does"
+       is true only of a stream whose discarded PREFIX verified: `compact` does not walk the chain,
+       it reads `records[n-1].Hash` and trusts it. What holds with no such premise is the split —
+       the original verifies exactly when its prefix verifies AND the compaction verifies across
+       its boundary — and `compact_verifies_iff_original` is the chartered sentence, carrying the
+       premise it needs. `compacted_tail_tamper_detected` is section 6's tamper theorem restated
+       at the boundary: nothing about it needed the walk to start at genesis.
+
+   One boundary is a finding rather than a modelling choice. `snapshotAtOpt` hard-wires the
+   boundary hash at sequence zero to `""`, where the walkers start from `cfg.Genesis`. Both shipped
+   configs have the empty genesis, so nothing shipped is affected — but `StreamConfig` is a public
+   record, and `compact_at_zero_needs_the_empty_genesis` proves that under any OTHER genesis a
+   compaction at zero of an intact non-empty stream does not verify across. The theorem carries
+   the condition (`n == PZero ==> genesis == ""`) rather than hiding it.
+
+   Production's two entry points differ only in the snapshot's hash PAYLOAD (state-hashed or
+   chain-only), so the payload is a parameter here and the two are two instantiations
+   (`snap_payload`, `snap_payload_chain_only`). Neither theorem reads it.
+   ====================================================================================== *)
+
+(* F#: `Result<'State, 'Rej>`, as `StreamWitness.Apply` returns it. Spelled locally for the reason
+   `found` is: the extraction carries no `result`. *)
+type applied (st: Type) (rej: Type) =
+  | Applied : st -> applied st rej
+  | Refused : rej -> applied st rej
+
+(* F#: `Result<'State, int * 'Rej>`, as `OpStream.replay` returns it — the rejection, and the
+   index of the record whose op was refused. *)
+type replayed (st: Type) (rej: Type) =
+  | Replayed : st -> replayed st rej
+  | Halted : pos -> rej -> replayed st rej
+
+(* F#: `OpStream.replay`'s inner `go i st`. *)
+let rec replay_go
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (apply: op -> st -> applied st rej)
+  (i: pos)
+  (s: st)
+  (rs: list (record op))
+  : Tot (replayed st rej) (decreases rs) =
+  match rs with
+  | [] -> Replayed s
+  | r :: rest ->
+    (match apply r.rop s with
+     | Applied s' -> replay_go apply (PSucc i) s' rest
+     | Refused e -> Halted i e)
+
+(* F#: `OpStream.replay` — `go 0 state0 records`. *)
+let replay
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (apply: op -> st -> applied st rej)
+  (s0: st)
+  (rs: list (record op))
+  : Tot (replayed st rej) =
+  replay_go apply PZero s0 rs
+
+(* F#: `List.truncate n`. *)
+let rec take (#a: Type) (n: pos) (l: list a) : Tot (list a) (decreases l) =
+  match n, l with
+  | PZero, _ -> []
+  | PSucc _, [] -> []
+  | PSucc m, x :: t -> x :: take m t
+
+(* F#: `List.skip n`, which production reaches only under `within`. *)
+let rec drop (#a: Type) (n: pos) (l: list a) : Tot (list a) (decreases l) =
+  match n, l with
+  | PZero, _ -> l
+  | PSucc _, [] -> []
+  | PSucc m, _ :: t -> drop m t
+
+(* F#: `not (atSeq < 0 || atSeq > List.length records)`. A numeral is never negative, so the first
+   disjunct is outside what the bridge can carry, as a negative stored sequence is. *)
+let rec within (#a: Type) (n: pos) (l: list a) : Tot bool (decreases l) =
+  match n, l with
+  | PZero, _ -> true
+  | PSucc _, [] -> false
+  | PSucc m, _ :: t -> within m t
+
+(* F#: `if atSeq = 0 then "" else (List.item (atSeq - 1) records).Hash`, as a walk carrying the
+   running hash — called with `""`, which is production's literal and NOT `cfg.Genesis`. *)
+let rec hash_at_boundary (#op: eqtype) (prev: string) (n: pos) (rs: list (record op))
+  : Tot string (decreases rs) =
+  match n, rs with
+  | PZero, _ -> prev
+  | PSucc _, [] -> prev
+  | PSucc m, r :: t -> hash_at_boundary r.rhash m t
+
+(* F#: `Snapshot<'State>`. *)
+type snapshot (st: Type) = { sseq: pos; sstate: st; sprev: string; shash: string }
+
+(* F#: `snapPayload` — the STRICT binding, the state folded into the snapshot's hash. *)
+let snap_payload
+  (#st: Type)
+  (show: pos -> string)
+  (enc_state: st -> string)
+  (n: pos)
+  (s: st)
+  : Tot string =
+  "{\"snapshot\":true,\"seq\":" ^ show n ^ ",\"state\":" ^ enc_state s ^ "}"
+
+(* F#: `snapPayloadChainOnly` (Phase 258) — the state is NOT in the pre-image. *)
+let snap_payload_chain_only (#st: Type) (show: pos -> string) (n: pos) (_: st) : Tot string =
+  "{\"snapshot\":true,\"seq\":" ^ show n ^ ",\"stateHashed\":false}"
+
+(* F#: `Result<Snapshot<'State> * OpRecord<'Op> list, string>`, as `compact` returns it. *)
+type compacted (op: eqtype) (st: Type) =
+  | CompactRefused : string -> compacted op st
+  | Compacted : snapshot st -> list (record op) -> compacted op st
+
+(* F#: `OpStream.compact` / `compactChainOnly` over `snapshotAtOpt`, clause for clause: the range
+   check, the prefix replay, the boundary hash, the snapshot's own hash, and `List.skip` for the
+   tail. `pay` is `snapPayloadWith stateEncode` — `snap_payload show enc` or
+   `snap_payload_chain_only show`. The two refusal messages are production's, verbatim. *)
+let compact
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  : Tot (compacted op st) =
+  if not (within n rs)
+  then CompactRefused "OpStream.snapshotAt: seq out of range"
+  else
+    match replay apply s0 (take n rs) with
+    | Halted i _ -> CompactRefused ("OpStream.snapshotAt: prefix replay failed at " ^ show i)
+    | Replayed s ->
+      let prev = hash_at_boundary "" n rs in
+      Compacted ({ sseq = n; sstate = s; sprev = prev; shash = h prev (pay n s) }) (drop n rs)
+
+(* F#: `OpStream.replayFrom` — `replay w snap.State tail`, numbering from ZERO again. *)
+let replay_from
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (apply: op -> st -> applied st rej)
+  (snap: snapshot st)
+  (tail: list (record op))
+  : Tot (replayed st rej) =
+  replay apply snap.sstate tail
+
+(* F#: `OpStream.verifyAcrossWithOpt` — the snapshot's own hash, then the tail walked from the
+   snapshot's boundary. Production's inner `go` is `chain_ok_from` conjunct for conjunct, so the
+   model reuses it rather than spelling a second walker to keep in step with the first. *)
+let verify_across
+  (#op: eqtype)
+  (#st: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (pay: pos -> st -> string)
+  (snap: snapshot st)
+  (tail: list (record op))
+  : Tot bool =
+  snap.shash = h snap.sprev (pay snap.sseq snap.sstate) &&
+  chain_ok_from h show enc_op snap.sprev snap.sseq tail
+
+(* ---- the index arithmetic, which is all the numerals cost ---- *)
+
+(* `i + n`, by recursion on `n`. *)
+let rec padd (i: pos) (n: pos) : Tot pos (decreases n) =
+  match n with
+  | PZero -> i
+  | PSucc m -> PSucc (padd i m)
+
+let rec padd_zero (n: pos) : Lemma (ensures padd PZero n == n) (decreases n) =
+  match n with
+  | PZero -> ()
+  | PSucc m -> padd_zero m
+
+let rec padd_succ (i: pos) (n: pos)
+  : Lemma (ensures padd (PSucc i) n == PSucc (padd i n)) (decreases n) =
+  match n with
+  | PZero -> ()
+  | PSucc m -> padd_succ i m
+
+(* What bounded replay does to a verdict read against the ORIGIN's numbering: an accepted replay is
+   unchanged, and a halt at tail index `j` is a halt at origin index `n + j`. Extracted, because
+   the differential applies it to the model's `replay_from` before comparing with `replay`. *)
+let offset (#st: Type) (#rej: Type) (n: pos) (r: replayed st rej) : Tot (replayed st rej) =
+  match r with
+  | Replayed s -> Replayed s
+  | Halted j e -> Halted (padd n j) e
+
+let offset_step (#st: Type) (#rej: Type) (k: pos) (x: replayed st rej)
+  : Lemma (ensures offset (PSucc k) x == offset k (offset (PSucc PZero) x)) =
+  match x with
+  | Replayed _ -> ()
+  | Halted j _ ->
+    padd_succ k j;
+    padd_succ PZero j;
+    padd_zero j
+
+(* A replay started at index `k` is the replay started at zero, renumbered. *)
+let rec replay_go_offset
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (apply: op -> st -> applied st rej)
+  (k: pos)
+  (s: st)
+  (rs: list (record op))
+  : Lemma
+    (ensures replay_go apply k s rs == offset k (replay_go apply PZero s rs))
+    (decreases rs) =
+  match rs with
+  | [] -> ()
+  | r :: rest ->
+    (match apply r.rop s with
+     | Applied s' ->
+       replay_go_offset apply (PSucc k) s' rest;
+       replay_go_offset apply (PSucc PZero) s' rest;
+       offset_step k (replay_go apply PZero s' rest)
+     | Refused _ -> ())
+
+(* THE SPLIT, for replay. A replay of the whole list is decided by the replay of its first `n`
+   records: a halt there is the whole replay's halt — same index, same rejection — and an accepted
+   prefix hands its state to a replay of the rest, numbered on from where the prefix stopped. *)
+let rec replay_go_split
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (apply: op -> st -> applied st rej)
+  (i: pos)
+  (s: st)
+  (rs: list (record op))
+  (n: pos)
+  : Lemma
+    (requires within n rs)
+    (ensures
+      (match replay_go apply i s (take n rs) with
+       | Halted j e -> replay_go apply i s rs == Halted j e
+       | Replayed s' -> replay_go apply i s rs == replay_go apply (padd i n) s' (drop n rs)))
+    (decreases rs) =
+  match n, rs with
+  | PZero, _ -> ()
+  | PSucc m, r :: rest ->
+    (match apply r.rop s with
+     | Applied s' ->
+       replay_go_split apply (PSucc i) s' rest m;
+       padd_succ i m
+     | Refused _ -> ())
+
+(* THEOREM (Phase 191). For every stream, every reducer, every boundary `n` and the (snapshot,
+   tail) `compact` produces at `n`: replay from the origin IS replay from the snapshot, read
+   against the origin's numbering. No hypothesis on the chain, the hash or the payload — bounded
+   replay is a fact about the fold, and it holds of a stream that does not even verify. *)
+let replay_from_snapshot_eq
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  : Lemma
+    (requires compact h show pay apply s0 rs n == Compacted snap tail)
+    (ensures replay apply s0 rs == offset n (replay_from apply snap tail)) =
+  replay_go_split apply PZero s0 rs n;
+  padd_zero n;
+  replay_go_offset apply n snap.sstate tail
+
+(* COROLLARY — the accepted case, with no offset in it: the state `replayFrom` reaches is the
+   state `replay` reaches. This is the sentence `Conformance.snapshotLaws` samples. *)
+let replay_from_snapshot_state
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  (s: st)
+  : Lemma
+    (requires
+      compact h show pay apply s0 rs n == Compacted snap tail /\
+      replay_from apply snap tail == Replayed s)
+    (ensures replay apply s0 rs == Replayed s) =
+  replay_from_snapshot_eq h show pay apply s0 rs n snap tail
+
+(* THEOREM. `compact` refuses an in-range boundary exactly when the ORIGIN's replay halts inside
+   the prefix — and the origin halts at the same index with the same rejection. So a refused
+   compaction loses nothing: the stream it refused does not replay either. *)
+let compact_refusal_is_the_origins
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  : Lemma
+    (requires within n rs)
+    (ensures
+      (match replay apply s0 (take n rs) with
+       | Halted j e ->
+         replay apply s0 rs == Halted j e /\ CompactRefused? (compact h show pay apply s0 rs n)
+       | Replayed _ -> Compacted? (compact h show pay apply s0 rs n))) =
+  replay_go_split apply PZero s0 rs n
+
+(* ---- the boundary, and the walker across it ---- *)
+
+(* THE SPLIT, for the walker: a chain is sound exactly when its first `n` records are and the rest
+   is sound walked on from the boundary record's hash at index `i + n`. *)
+let rec chain_ok_split
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (prev: string)
+  (i: pos)
+  (rs: list (record op))
+  (n: pos)
+  : Lemma
+    (requires within n rs)
+    (ensures
+      chain_ok_from h show enc_op prev i rs ==
+      (chain_ok_from h show enc_op prev i (take n rs) &&
+       chain_ok_from h show enc_op (hash_at_boundary prev n rs) (padd i n) (drop n rs)))
+    (decreases rs) =
+  match n, rs with
+  | PZero, _ -> ()
+  | PSucc m, r :: rest ->
+    chain_ok_split h show enc_op r.rhash (PSucc i) rest m;
+    padd_succ i m
+
+(* Past sequence zero the boundary hash is a stored one, so what the walk was seeded with —
+   production's `""`, or a config's genesis — does not reach it. *)
+let boundary_ignores_the_seed
+  (#op: eqtype)
+  (p: string)
+  (q: string)
+  (n: pos)
+  (rs: list (record op))
+  : Lemma
+    (requires within n rs /\ PSucc? n)
+    (ensures hash_at_boundary p n rs == hash_at_boundary q n rs) =
+  ()
+
+(* THEOREM (Phase 191). The original verifies exactly when its discarded prefix verifies AND the
+   compaction verifies across its boundary. Nothing is assumed of the hash: this is the walker's
+   own arithmetic. The genesis condition is production's — see the section header. *)
+let compact_preserves_verify
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (genesis: string)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  : Lemma
+    (requires
+      compact h show pay apply s0 rs n == Compacted snap tail /\
+      (n == PZero ==> genesis == ""))
+    (ensures
+      verify_chain h show enc_op genesis rs ==
+      (verify_chain h show enc_op genesis (take n rs) &&
+       verify_across h show enc_op pay snap tail)) =
+  chain_break_none_iff h show enc_op genesis PZero rs;
+  chain_break_none_iff h show enc_op genesis PZero (take n rs);
+  chain_ok_split h show enc_op genesis PZero rs n;
+  padd_zero n;
+  (match n with
+   | PZero -> ()
+   | PSucc _ -> boundary_ignores_the_seed genesis "" n rs)
+
+(* COROLLARY — the chartered sentence, with the premise it needs: over a prefix that verified, the
+   compacted stream verifies exactly when the original does. Without the premise it is false, and
+   it is false in the direction that matters: `compact` reads the boundary hash and trusts it, so
+   a compaction of a stream whose PREFIX was tampered verifies across, and once the prefix is
+   discarded nothing can find the tamper again. Verify, then compact. *)
+let compact_verifies_iff_original
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (genesis: string)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  : Lemma
+    (requires
+      compact h show pay apply s0 rs n == Compacted snap tail /\
+      (n == PZero ==> genesis == "") /\
+      verify_chain h show enc_op genesis (take n rs))
+    (ensures
+      verify_across h show enc_op pay snap tail == verify_chain h show enc_op genesis rs) =
+  compact_preserves_verify h show enc_op pay apply genesis s0 rs n snap tail
+
+(* THEOREM — the boundary production leaves open. Under a genesis that is not `""`, the compaction
+   at sequence zero of an intact non-empty stream does NOT verify across: the first tail record
+   links to the genesis, and the snapshot says `""`. *)
+let compact_at_zero_needs_the_empty_genesis
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (genesis: string)
+  (s0: st)
+  (rs: list (record op))
+  (snap: snapshot st)
+  (tail: list (record op))
+  : Lemma
+    (requires
+      compact h show pay apply s0 rs PZero == Compacted snap tail /\
+      Cons? rs /\
+      verify_chain h show enc_op genesis rs /\
+      ~(genesis == ""))
+    (ensures not (verify_across h show enc_op pay snap tail)) =
+  chain_break_none_iff h show enc_op genesis PZero rs
+
+(* COROLLARY — section 6's tamper theorem, at the boundary. A compacted stream that verified
+   across, with one TAIL record's content changed and its addressing left alone, no longer does.
+   `chain_tamper_detected` never needed the walk to start at genesis, so this is an appeal to it
+   and nothing more; it spends the same premise, for the same arm. *)
+let compacted_tail_tamper_detected
+  (#op: eqtype)
+  (#st: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (pay: pos -> st -> string)
+  (inj: rec_injective op h show enc_op)
+  (snap: snapshot st)
+  (tail: list (record op))
+  (k: pos)
+  (r: record op)
+  (r': record op)
+  : Lemma
+    (requires
+      verify_across h show enc_op pay snap tail /\ record_at tail k == Found r /\
+      r'.rprev == r.rprev /\ r'.rhash == r.rhash /\ not (same_content r r'))
+    (ensures not (verify_across h show enc_op pay snap (replace_at tail k r'))) =
+  chain_tamper_detected h show enc_op inj snap.sprev snap.sseq tail k r r'
