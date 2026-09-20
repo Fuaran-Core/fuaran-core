@@ -66,13 +66,13 @@
     },
     {
       "module": "Chain",
-      "budgetSeconds": 30,
-      "measuredSeconds": 12,
+      "budgetSeconds": 50,
+      "measuredSeconds": 22,
       "floorSeconds": 0,
       "fastestSeconds": 4,
       "floorPhase": "fuaran-core#173",
-      "phase": "fuaran-core#148",
-      "note": "The two integrity walkers. Default context; 2x of 12s rounds to the floor's neighbourhood anyway. RE-SEEDED BY PHASE 173: a cold quaked run on an otherwise idle dev machine verified it in 4s against the 10s fastest this entry had recorded (DagFold 23s, WireDecode 15s and TreeOps 23s in the same leg — every module faster than its seeding run, none under its floor but this one), and the floor gate fired exactly as designed. Nothing shared the cache (per-invocation directory, no other prover process); the machine was simply faster than the seeding machine by a factor the 2x floor did not cover on a module this small. Fastest genuine cold run is therefore 4s, which is under the zeroBelowSeconds clause, so the floor is 0 — honest about covering nothing, like Skeleton's, Limits's and WireVersioning's, and covered by the per-invocation cache directory instead."
+      "phase": "fuaran-core#191",
+      "note": "The two integrity walkers. Default context; 2x of 12s rounds to the floor's neighbourhood anyway. RE-SEEDED BY PHASE 173: a cold quaked run on an otherwise idle dev machine verified it in 4s against the 10s fastest this entry had recorded (DagFold 23s, WireDecode 15s and TreeOps 23s in the same leg — every module faster than its seeding run, none under its floor but this one), and the floor gate fired exactly as designed. Nothing shared the cache (per-invocation directory, no other prover process); the machine was simply faster than the seeding machine by a factor the 2x floor did not cover on a module this small. Fastest genuine cold run is therefore 4s, which is under the zeroBelowSeconds clause, so the floor is 0 — honest about covering nothing, like Skeleton's, Limits's and WireVersioning's, and covered by the per-invocation cache directory instead. BUMPED by fuaran-core#191 from 30s/12s: section 7 added snapshot and bounded replay — about 490 lines and fourteen lemmas, every one a list induction at the default rlimit with no scoped option, so the growth is ordinary and roughly proportional to the text. Seeded from FOUR cold quaked observations of the module alone (`fstar.exe --quake 3` against an empty cache directory): 14s, then 22s, 15s and 16s with two other prover processes on the machine, so the rule's slowest observed is 22s and 2x22 rounds to 50. A FIFTH observation was deliberately NOT used: the phase's one cold pass of the whole leg measured Chain at 20s, and that pass was LABELLED contended (x1.11 over sixteen untouched modules, against the x0.80 threshold), which `contentionSeeding` says is never a seed. It agrees with the four in any case. No `contentionFactor` is recorded beside the number, because the four came from direct invocations rather than from a leg pass and a factor nobody measured is the provenance that field exists to refuse. Why re-seed at all, when 20s sat inside the old 30s: that budget was already the tightest in the file (35s and 31s against it in seven runs, before this section existed), and leaving it would have made the next contended afternoon's finding this phase's unrecorded debt. The FLOOR is deliberately left at 0/4s: the module got slower and never faster, so it stays correct, and it was covering nothing already."
     },
     {
       "module": "JsonParse",

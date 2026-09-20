@@ -29,7 +29,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `TreeOps.fst` | The third model (Phase 133): the skeleton-op tree algebra — `Ops.apply` with its `Rejection` envelope and `Ops.footprint`, over the tree as the `NodeWitness` shows it — with `tree_independence_diamond` proved, which is the fold theorem's one domain hypothesis. Unlike the two above it does NOT share only `Prims.fs`: it `open`s `DagFold`, which is what makes the composite an instantiation rather than a second model. Phase 162 added the preorder-position lemma (section 19) and the batch lift (section 20), which retired `covered` and made that diamond unconditional. |
 | `Skeleton.fst` | The composite (Phase 133): `DagFold`'s fold theorem instantiated at `TreeOps`, so `skeleton_fold_confluence` holds with no domain hypothesis left. Thin on purpose — the argument is in the two halves it joins. Since Phase 162 the op alphabet is the WHOLE of `SkeletonOp`, `Batch` included and nested to any depth; it was the four non-`Batch` ops until then. Since Phase 175 it is also the first INSTANCE of the kit's `kit/templates/Instance.fst.template`, reproduced from it byte for byte by the `Proofs.Kit` family — see the instantiation contract under Theorem 2. |
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Shares nothing with the models above but `oracle/Prims.fs`. |
+| `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Phase 191 added section 7, SNAPSHOT AND BOUNDED REPLAY: `OpStream.compact` / `replayFrom` / `verifyAcross` with the domain reducer as a parameter, `replay_from_snapshot_eq` and `compact_preserves_verify` proved, and the two places the chartered sentences were too strong stated as theorems. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact` and `error_kind_exhaustive` proved. This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/JsonParse.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -2333,6 +2333,138 @@ prefix-free hypothesis reddens `splice_split`; dropping the appeal to the op cod
      second model, and nothing here is said about the migration between them.
    - **`Json.parse`, `Dag.fromJsonl` and the JSONL scanners.** Loading is not verifying — that is
      `fromJsonlVerified`'s whole point — and the model begins at a structure that already exists.
+
+### Snapshot and bounded replay — what a compaction keeps, and the one thing it cannot (Phase 191)
+
+`OpStream.compact` / `replayFrom` are the bounded-replay path every cache in the estate rests on: a
+snapshot at sequence *n* plus the tail is meant to stand in for the whole stream.
+`Conformance.snapshotLaws` samples that. Section 7 of `Chain.fst` proves it, and both halves came out
+**sharper than the sentence they were chartered with** — which is the reason to mechanise a claim
+this short.
+
+Sections 0–6 say nothing about state: the domain reducer is orthogonal to the chain and the walkers
+never call it. Bounded replay is where the two meet, so section 7 adds the reducer as a **parameter**
+(`apply`, the witness's `Apply`) and nothing else. The state, the rejection and the state encoder
+stay abstract, so these are theorems about every reducer at once rather than one per domain. The
+snapshot's hash PAYLOAD — state-hashed (`compact`) or chain-only (`compactChainOnly`, Phase 258) —
+is a parameter too, and neither theorem reads it: the two entry points are two instantiations of one
+result.
+
+**`replay_from_snapshot_eq` — replay from the snapshot is replay from the origin, READ AGAINST THE
+ORIGIN'S NUMBERING.** For every stream, every reducer, every boundary *n* and the (snapshot, tail)
+`compact` produces there, `replay s0 rs == offset n (replayFrom snap tail)`. The `offset` is the
+finding. `replayFrom` is `replay w snap.State tail`, and `replay` numbers from zero — so a tail op
+that rejects at origin index *n + j* is reported by `replayFrom` at *j*. The unqualified equality is
+true of the STATE and false of the REJECTION INDEX, and a caller that reports a `replayFrom` halt to
+a user as "record *j*" is pointing at the wrong record by exactly the boundary.
+`replay_from_snapshot_state` is the offset-free corollary for the accepted case, and that is the
+sentence `snapshotLaws` samples. The theorem takes **no hypothesis at all** — not on the chain, not
+on the hash: bounded replay is a fact about the fold, and it holds of a stream that does not even
+verify. `compact_refusal_is_the_origins` closes the other arm: `compact` refuses an in-range
+boundary exactly when the origin's own replay halts inside the prefix, at the same index with the
+same rejection. A refused compaction loses nothing, because the stream it refused does not replay
+either.
+
+**`compact_preserves_verify` — the original verifies exactly when its discarded prefix verifies AND
+the compaction verifies across.** `verifyChain rs == (verifyChain (prefix n) && verifyAcross snap
+tail)`, under no hypothesis on the hash, because it is the walker's own arithmetic
+(`chain_ok_split`). The chartered sentence — *the compacted stream verifies exactly when the original
+does* — is the corollary `compact_verifies_iff_original`, and it **carries a premise: the prefix
+verified.** Without it the sentence is false, in the direction that matters. `compact` does not walk
+the chain; it reads `records[n-1].Hash` and trusts it. So a compaction of a stream whose PREFIX was
+tampered verifies across, and once the prefix is discarded nothing can find the tamper again. This is
+not a defect in `compact` — a function that discards a prefix cannot also be the thing that vouches
+for it — but it is an ordering obligation on every caller, and it was nowhere written down:
+**verify, then compact.** `compacted_tail_tamper_detected` is the other direction, and is an appeal
+to section 6's `chain_tamper_detected` and nothing more: that theorem never needed the walk to start
+at genesis, so a tamper of the TAIL is found across a boundary exactly as it is from the origin,
+spending the same `rec_injective` premise for the same arm.
+
+**One boundary is a finding about production rather than a modelling choice.** `snapshotAtOpt`
+hard-wires the boundary hash at sequence zero to `""`, where the walkers start from `cfg.Genesis`.
+`compact_at_zero_needs_the_empty_genesis` proves the consequence: under any OTHER genesis, a
+compaction at zero of an intact non-empty stream does **not** verify across — the first tail record
+links to the genesis and the snapshot says `""`. Both shipped configs (`canonicalConfig`,
+`legacyActorConfig`) have the empty genesis, so nothing shipped meets this. `StreamConfig` is a public
+record, so a domain can, and `compact_preserves_verify` carries the condition in its signature
+(`n == PZero ==> genesis == ""`) rather than hiding it in a modelling decision. Past sequence zero
+the boundary hash is a stored one and the genesis never reaches it (`boundary_ignores_the_seed`).
+Closing it is a one-token change in `snapshotAtOpt` — take the genesis from a config — and is a
+change to a shipped signature, so it is named here and not taken by a proof-leg phase.
+
+**The differential** runs the extracted section beside `compact`, `compactChainOnly`, `replayFrom`,
+`replay`, `verifyAcross` and `verifyAcrossChainOnly` over both witnesses' generated streams, at
+**every boundary** of each — the out-of-range one included — and over every single-record tamper of
+each, so the streams compared include ones that do not verify and ones that do not replay. That is
+the population the two theorems say something about and a green `snapshotLaws` run never draws: it
+builds only accepted appends and compares only `Ok` against `Ok`. A compaction is compared whole —
+the refusal's MESSAGE verbatim, or every field of the snapshot and the tail record for record.
+
+Two comparisons are made per compaction and they are different things. The first is the ordinary
+one, model against production. The second holds **production to the theorems' own statements, on
+its own values** — `replay = offset n (replayFrom snap tail)` and `verifyChain rs = (verifyChain
+prefix && verifyAcross snap tail)` — using the model for `offset` alone. A model that agreed with
+production while both drifted from the theorem would pass the first and fail the second.
+
+| Pool | What is asked | Classes required to have been met |
+|---|---|---|
+| the work-plan domain, 40 generated streams | every boundary × both payload modes × the intact stream and every tamper of it; then every tamper of each compacted TAIL | an accepted bounded replay; a halt PAST boundary zero; an out-of-range refusal; a prefix refusal; a verified and a rejected boundary; a prefix tamper compacted away unseen; a detected tail tamper |
+| the reference tree witness, 30 generated streams | the same | the same |
+
+The "halt past boundary zero" guard is the one that matters most: it is the only place the offset is
+observable, and a run that never met one would have certified the unqualified equality by accident.
+
+The **go-red cases** are four. A model handed a DIFFERENT hash must disagree, on the whole
+differential and on one named boundary. The offset is shown load-bearing **on production alone**: a
+stream whose third op rejects, compacted after its first, halts at 2 from the origin and at 1 from
+the snapshot, and `offset 1` is exactly what separates them. A prefix tamper verifies across, to
+production and to the model alike, while the prefix conjunct of the split is what reports it. And
+the non-empty-genesis boundary is measured on production under its own config: false at zero, true
+at one. The differential was also reddened **by hand** before it was trusted, by two perturbations
+of the extracted oracle on a scratch copy — an `offset` that drops *n*, and a boundary hash taken one
+record early — each of which failed the generated cases and was then restored.
+
+The **proof** was falsified the same way, on scratch copies, and each landed on the lemma that
+should have caught it: dropping the genesis condition reddens `compact_preserves_verify`; dropping
+the prefix-verified premise reddens `compact_verifies_iff_original`; stating the replay equality
+without the offset reddens `replay_from_snapshot_eq`, and so does a `compact` that snapshots the
+origin state instead of the folded one; dropping "the stored hash is unchanged" reddens
+`compacted_tail_tamper_detected`; and a boundary hash read from the record's `prev` rather than its
+`hash` reddens `chain_ok_split`.
+
+**What it cost.** Ordinary growth, and a budget re-seed because the old one was already the tightest
+in the file. Section 7 is about 490 lines and fourteen lemmas, every one an induction over a list
+with at most one appeal to the index arithmetic, at the default `--z3rlimit 40` with no scoped
+option. Four cold quaked runs of the module alone measured 14s, 22s, 15s and 16s (the last three
+beside two other prover processes), against 12s recorded before the section existed; the phase's one
+cold pass of the whole leg measured 20s, on a pass the leg itself labelled contended (x1.11).
+`modules.json` re-seeds the budget to 50s from the 22s by the file's own rule, and says why the 20s
+was not the seed.
+
+**The claims ladder, for this section** (rows `snapshot-replay-equivalence`,
+`compact-preserves-verify`, `snapshot-replay-differential` in `../proofs.json`):
+
+1. **Proved.** The two theorems and their corollaries above, the refusal characterisation, the tail
+   tamper at the boundary, and the zero-genesis boundary. No `assume`, no `admit`,
+   `--report_assumes error` on. The only premise spent anywhere in the section is `rec_injective`,
+   by `compacted_tail_tamper_detected`, inherited from the theorem it appeals to.
+2. **Differentially tested.** As above, over those pools, never over all inputs.
+3. **Assumed.** Nothing new. The section inherits theorem 3's bridges unchanged — a sequence number
+   and a boundary are Peano numerals, so a NEGATIVE `atSeq` (which production refuses as out of
+   range) is outside what the bridge can carry and the differential's boundaries start at zero; and
+   the extractor and the F# compiler are trusted.
+4. **Not claimed.**
+   - **Any cache's on-disk format, or its self-verification against a stream head.** Those belong to
+     the host that keeps the cache. The theorem is what such a cache may rely on once it has decided
+     its snapshot is the one `compact` produced.
+   - **The snapshot's own hash as evidence about the STATE.** `verify_across` checks
+     `snap.Hash = hashFn snap.PrevHash payload`, and the model carries that conjunct; but that a
+     swapped state is therefore DETECTED under the state-hashed payload needs the hash injective on
+     snapshot pre-images, which is a second instance of theorem 3's cryptographic premise and is not
+     stated here. Under the chain-only payload it is not detected at all, by design (Phase 258).
+   - **The JSONL snapshot lines** (`snapshotToJsonl`, `fromJsonlWithSnapshots`). Loading is not
+     verifying, as for the chain itself.
+   - **`EffectCapture` journals and the DAG's `replayTo`.** A different stream and a different walk.
 
 ## Theorem 4 — `Json.parse` totality, bounded (Phase 146)
 

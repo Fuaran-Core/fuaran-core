@@ -601,6 +601,259 @@ let rec replace_at = (fun ( rs  :  Prims.list<record<'op>> ) ( n  :  pos ) ( r' 
 
 let same_content = (fun ( r  :  record<'op> ) ( r'  :  record<'op> ) -> (((Prims.op_Equals r.rseq r'.rseq) && (Prims.op_Equals r.ractor r'.ractor)) && (Prims.op_Equals r.rop r'.rop)))
 
+type applied<'st, 'rej> =
+| Applied of 'st
+| Refused of 'rej
+
+
+let uu___is_Applied = (fun ( projectee  :  applied<'st, 'rej> ) -> (match (projectee) with
+| Applied (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Applied__item___0 = (fun ( projectee  :  applied<'st, 'rej> ) -> (match (projectee) with
+| Applied (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_Refused = (fun ( projectee  :  applied<'st, 'rej> ) -> (match (projectee) with
+| Refused (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Refused__item___0 = (fun ( projectee  :  applied<'st, 'rej> ) -> (match (projectee) with
+| Refused (_0) -> begin
+     _0
+     end))
+
+type replayed<'st, 'rej> =
+| Replayed of 'st
+| Halted of pos * 'rej
+
+
+let uu___is_Replayed = (fun ( projectee  :  replayed<'st, 'rej> ) -> (match (projectee) with
+| Replayed (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Replayed__item___0 = (fun ( projectee  :  replayed<'st, 'rej> ) -> (match (projectee) with
+| Replayed (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_Halted = (fun ( projectee  :  replayed<'st, 'rej> ) -> (match (projectee) with
+| Halted (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Halted__item___0 = (fun ( projectee  :  replayed<'st, 'rej> ) -> (match (projectee) with
+| Halted (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__Halted__item___1 = (fun ( projectee  :  replayed<'st, 'rej> ) -> (match (projectee) with
+| Halted (_0, _1) -> begin
+     _1
+     end))
+
+
+let rec replay_go = (fun ( apply  :  'op  ->  'st  ->  applied<'st, 'rej> ) ( i  :  pos ) ( s  :  'st ) ( rs  :  Prims.list<record<'op>> ) -> (match (rs) with
+| [] -> begin
+     Replayed (s)
+     end
+| (r)::rest -> begin
+     (match ((apply r.rop s)) with
+| Applied (s') -> begin
+     (replay_go apply (PSucc (i)) s' rest)
+     end
+| Refused (e) -> begin
+     Halted (i, e)
+     end)
+     end))
+
+
+let replay = (fun ( apply  :  'op  ->  'st  ->  applied<'st, 'rej> ) ( s0  :  'st ) ( rs  :  Prims.list<record<'op>> ) -> (replay_go apply PZero s0 rs))
+
+
+let rec take = (fun ( n  :  pos ) ( l  :  Prims.list<'a> ) -> (match (((n), (l))) with
+| (PZero, uu___) -> begin
+     []
+     end
+| (PSucc (uu___), []) -> begin
+     []
+     end
+| (PSucc (m), (x)::t) -> begin
+     (x)::(take m t)
+     end))
+
+
+let rec drop = (fun ( n  :  pos ) ( l  :  Prims.list<'a> ) -> (match (((n), (l))) with
+| (PZero, uu___) -> begin
+     l
+     end
+| (PSucc (uu___), []) -> begin
+     []
+     end
+| (PSucc (m), (uu___)::t) -> begin
+     (drop m t)
+     end))
+
+
+let rec within = (fun ( n  :  pos ) ( l  :  Prims.list<'a> ) -> (match (((n), (l))) with
+| (PZero, uu___) -> begin
+     true
+     end
+| (PSucc (uu___), []) -> begin
+     false
+     end
+| (PSucc (m), (uu___)::t) -> begin
+     (within m t)
+     end))
+
+
+let rec hash_at_boundary = (fun ( prev  :  Prims.string ) ( n  :  pos ) ( rs  :  Prims.list<record<'op>> ) -> (match (((n), (rs))) with
+| (PZero, uu___) -> begin
+     prev
+     end
+| (PSucc (uu___), []) -> begin
+     prev
+     end
+| (PSucc (m), (r)::t) -> begin
+     (hash_at_boundary r.rhash m t)
+     end))
+
+type snapshot<'st> = {sseq : pos; sstate : 'st; sprev : Prims.string; shash : Prims.string}
+
+
+let __proj__Mksnapshot__item__sseq = (fun ( projectee  :  snapshot<'st> ) -> (match (projectee) with
+| {sseq = sseq; sstate = sstate; sprev = sprev; shash = shash} -> begin
+     sseq
+     end))
+
+
+let __proj__Mksnapshot__item__sstate = (fun ( projectee  :  snapshot<'st> ) -> (match (projectee) with
+| {sseq = sseq; sstate = sstate; sprev = sprev; shash = shash} -> begin
+     sstate
+     end))
+
+
+let __proj__Mksnapshot__item__sprev = (fun ( projectee  :  snapshot<'st> ) -> (match (projectee) with
+| {sseq = sseq; sstate = sstate; sprev = sprev; shash = shash} -> begin
+     sprev
+     end))
+
+
+let __proj__Mksnapshot__item__shash = (fun ( projectee  :  snapshot<'st> ) -> (match (projectee) with
+| {sseq = sseq; sstate = sstate; sprev = sprev; shash = shash} -> begin
+     shash
+     end))
+
+
+let snap_payload = (fun ( show  :  pos  ->  Prims.string ) ( enc_state  :  'st  ->  Prims.string ) ( n  :  pos ) ( s  :  'st ) -> (Prims.strcat "{\"snapshot\":true,\"seq\":" (Prims.strcat (show n) (Prims.strcat ",\"state\":" (Prims.strcat (enc_state s) "}")))))
+
+
+let snap_payload_chain_only = (fun ( show  :  pos  ->  Prims.string ) ( n  :  pos ) ( uu___  :  'st ) -> (Prims.strcat "{\"snapshot\":true,\"seq\":" (Prims.strcat (show n) ",\"stateHashed\":false}")))
+
+type compacted<'op, 'st> =
+| CompactRefused of Prims.string
+| Compacted of snapshot<'st> * Prims.list<record<'op>>
+
+
+let uu___is_CompactRefused = (fun ( projectee  :  compacted<'op, 'st> ) -> (match (projectee) with
+| CompactRefused (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CompactRefused__item___0 = (fun ( projectee  :  compacted<'op, 'st> ) -> (match (projectee) with
+| CompactRefused (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_Compacted = (fun ( projectee  :  compacted<'op, 'st> ) -> (match (projectee) with
+| Compacted (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Compacted__item___0 = (fun ( projectee  :  compacted<'op, 'st> ) -> (match (projectee) with
+| Compacted (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__Compacted__item___1 = (fun ( projectee  :  compacted<'op, 'st> ) -> (match (projectee) with
+| Compacted (_0, _1) -> begin
+     _1
+     end))
+
+
+let compact = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( pay  :  pos  ->  'st  ->  Prims.string ) ( apply  :  'op  ->  'st  ->  applied<'st, 'rej> ) ( s0  :  'st ) ( rs  :  Prims.list<record<'op>> ) ( n  :  pos ) ->  
+if (not ((within n rs))) then begin
+     CompactRefused ("OpStream.snapshotAt: seq out of range")
+     end else begin
+     (match ((replay apply s0 (take n rs))) with
+| Halted (i, uu___) -> begin
+     CompactRefused ((Prims.strcat "OpStream.snapshotAt: prefix replay failed at " (show i)))
+     end
+| Replayed (s) -> begin
+     (
+
+let prev = (hash_at_boundary "" n rs)
+in Compacted ({sseq = n; sstate = s; sprev = prev; shash = (h prev (pay n s))}, (drop n rs)))
+     end)
+     end)
+
+
+let replay_from = (fun ( apply  :  'op  ->  'st  ->  applied<'st, 'rej> ) ( snap  :  snapshot<'st> ) ( tail  :  Prims.list<record<'op>> ) -> (replay apply snap.sstate tail))
+
+
+let verify_across = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( enc_op  :  'op  ->  Prims.string ) ( pay  :  pos  ->  'st  ->  Prims.string ) ( snap  :  snapshot<'st> ) ( tail  :  Prims.list<record<'op>> ) -> ((Prims.op_Equals snap.shash (h snap.sprev (pay snap.sseq snap.sstate))) && (chain_ok_from h show enc_op snap.sprev snap.sseq tail)))
+
+
+let rec padd : pos  ->  pos  ->  pos = (fun ( i  :  pos ) ( n  :  pos ) -> (match (n) with
+| PZero -> begin
+     i
+     end
+| PSucc (m) -> begin
+     PSucc ((padd i m))
+     end))
+
+
+let offset = (fun ( n  :  pos ) ( r  :  replayed<'st, 'rej> ) -> (match (r) with
+| Replayed (s) -> begin
+     Replayed (s)
+     end
+| Halted (j, e) -> begin
+     Halted ((padd n j), e)
+     end))
+
 
 
 

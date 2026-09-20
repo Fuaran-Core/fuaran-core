@@ -2164,6 +2164,365 @@ let private opBlindHash: HashFn =
 /// intact DAG must be reported as broken.
 let private swappedHash: HashFn = fun a b -> OpStream.defaultHash b a
 
+// ---------------------------------------------------------------------------
+//  Phase 191 — snapshot and bounded replay (`proofs/Chain.fst`, section 7)
+//
+//  The model's `compact` / `replay_from` / `verify_across` beside `OpStream.compact`,
+//  `compactChainOnly`, `replayFrom`, `verifyAcross` and `verifyAcrossChainOnly`, over generated
+//  streams, EVERY boundary of each (the out-of-range one included), and every single-record tamper
+//  of each — so the streams compared include ones that do not verify and ones that do not replay,
+//  which is where the two theorems say something a green `snapshotLaws` run does not.
+//
+//  Two comparisons per compaction, and they are different things. The first is the ordinary one:
+//  the extracted model against production, value for value. The second holds PRODUCTION to the
+//  theorems' own statements — `replay = offset n (replayFrom snap tail)`, and
+//  `verifyChain rs = (verifyChain prefix && verifyAcross snap tail)` — using the model only for
+//  `offset`. A model that agreed with production while both drifted from the theorem would pass
+//  the first and fail the second.
+// ---------------------------------------------------------------------------
+
+/// `OpStream.replay`'s result, as one value both sides are compared at.
+type private ReplayVerdict<'State, 'Rej> =
+    | ReplayedTo of 'State
+    | HaltedAt of index: int * rejection: 'Rej
+
+let private prodReplayVerdict (r: Result<'State, int * 'Rej>) : ReplayVerdict<'State, 'Rej> =
+    match r with
+    | Ok s -> ReplayedTo s
+    | Error(i, e) -> HaltedAt(i, e)
+
+let private modelReplayVerdict (r: Chain.replayed<'State, 'Rej>) : ReplayVerdict<'State, 'Rej> =
+    match r with
+    | Chain.Replayed s -> ReplayedTo s
+    | Chain.Halted(i, e) -> HaltedAt(intOfPos i, e)
+
+let private toModelReplayed (v: ReplayVerdict<'State, 'Rej>) : Chain.replayed<'State, 'Rej> =
+    match v with
+    | ReplayedTo s -> Chain.Replayed s
+    | HaltedAt(i, e) -> Chain.Halted(posOfInt i, e)
+
+/// The witness's reducer, as the model takes it — the ONLY thing section 7 asks of a domain.
+let private chainApply (w: StreamWitness<'Op, 'State, 'Rej>) (op: 'Op) (st: 'State) : Chain.applied<'State, 'Rej> =
+    match w.Apply op st with
+    | Ok s -> Chain.Applied s
+    | Error e -> Chain.Refused e
+
+/// Production's two compaction entry points. They differ in the snapshot's hash pre-image and in
+/// nothing else, which is why the model takes the payload as a parameter.
+type private SnapshotMode =
+    | StateHashed
+    | ChainOnly
+
+let private prodCompact
+    (mode: SnapshotMode)
+    (hashFn: HashFn)
+    (stateEnc: 'State -> string)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (state0: 'State)
+    (rs: OpRecord<'Op> list)
+    (n: int)
+    : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
+    match mode with
+    | StateHashed -> OpStream.compact hashFn stateEnc w state0 rs n
+    | ChainOnly -> OpStream.compactChainOnly hashFn w state0 rs n
+
+let private prodVerifyAcross
+    (mode: SnapshotMode)
+    (hashFn: HashFn)
+    (stateEnc: 'State -> string)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (snap: Snapshot<'State>)
+    (tail: OpRecord<'Op> list)
+    : bool =
+    match mode with
+    | StateHashed -> OpStream.verifyAcross hashFn stateEnc w snap tail
+    | ChainOnly -> OpStream.verifyAcrossChainOnly hashFn w snap tail
+
+let private modelPay (mode: SnapshotMode) (stateEnc: 'State -> string) : Chain.pos -> 'State -> string =
+    match mode with
+    | StateHashed -> Chain.snap_payload showPos stateEnc
+    | ChainOnly -> Chain.snap_payload_chain_only showPos
+
+let private toModelSnapshot (s: Snapshot<'State>) : Chain.snapshot<'State> =
+    { Chain.sseq = posOfInt s.Seq
+      Chain.sstate = s.State
+      Chain.sprev = s.PrevHash
+      Chain.shash = s.Hash }
+
+/// A compaction's whole outcome: the refusal's MESSAGE, or every field of the snapshot and the tail
+/// record for record. Compared at once, so a model that snapshotted the right state under the wrong
+/// boundary hash is as red as one that refused.
+type private CompactVerdict<'Op, 'State> =
+    | CompactedTo of seq: int * state: 'State * prevHash: string * hash: string * tail: Chain.record<'Op> list
+    | CompactRefusedWith of string
+
+let private prodCompactVerdict
+    (r: Result<Snapshot<'State> * OpRecord<'Op> list, string>)
+    : CompactVerdict<'Op, 'State> =
+    match r with
+    | Ok(s, tail) -> CompactedTo(s.Seq, s.State, s.PrevHash, s.Hash, toChainRecords tail)
+    | Error e -> CompactRefusedWith e
+
+let private modelCompactVerdict (r: Chain.compacted<'Op, 'State>) : CompactVerdict<'Op, 'State> =
+    match r with
+    | Chain.Compacted(s, tail) -> CompactedTo(intOfPos s.sseq, s.sstate, s.sprev, s.shash, tail)
+    | Chain.CompactRefused e -> CompactRefusedWith e
+
+type private SnapshotTally =
+    {
+        Failure: string option
+        /// Compactions compared, and the two refusal classes among them.
+        Compactions: int
+        OutOfRange: int
+        PrefixRefused: int
+        /// Bounded replays that reached a state, and ones that HALTED in the tail at a boundary past
+        /// zero — the only place the theorem's `offset` is observable.
+        Accepted: int
+        HaltedPastZero: int
+        /// Boundaries production verified across, and ones it rejected.
+        VerifiedAcross: int
+        RejectedAcross: int
+        /// Compactions that verify across although the ORIGINAL does not: a tamper in the discarded
+        /// prefix. `compact_verifies_iff_original`'s premise, observed being load-bearing.
+        PrefixTamperUnseen: int
+        /// Tampers of a compacted TAIL, and how many production's boundary walker found.
+        TailTampers: int
+        TailDetected: int
+    }
+
+let private emptySnapshotTally =
+    { Failure = None
+      Compactions = 0
+      OutOfRange = 0
+      PrefixRefused = 0
+      Accepted = 0
+      HaltedPastZero = 0
+      VerifiedAcross = 0
+      RejectedAcross = 0
+      PrefixTamperUnseen = 0
+      TailTampers = 0
+      TailDetected = 0 }
+
+let private snapshotDifferential
+    (label: string)
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (stateEnc: 'State -> string)
+    (otherOp: 'Op -> 'Op)
+    (gen: LaneGen<'Op, 'State>)
+    (seed: int)
+    (iterations: int)
+    : SnapshotTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable t = emptySnapshotTally
+
+    let note (why: string) =
+        if t.Failure.IsNone then
+            t <- { t with Failure = Some why }
+
+    let apply = chainApply w
+
+    for _ in 1..iterations do
+        let lanes, r' = gen.Lanes 2 rng
+        rng <- r'
+        let ops = List.concat lanes
+        let intact = chainUnder prodHash w gen.State0 (Human "writer") ops
+
+        let where (what: string) (mode: SnapshotMode) (n: int) =
+            sprintf
+                "%s: seed=%d stream=%s mode=%A atSeq=%d ops=[%s]"
+                label
+                seed
+                what
+                mode
+                n
+                (ops |> List.map w.Encode |> String.concat "; ")
+
+        let across (mode: SnapshotMode) (snap: Snapshot<'State>) (tail: OpRecord<'Op> list) : bool * bool =
+            prodVerifyAcross mode prodHash stateEnc w snap tail,
+            Chain.verify_across
+                modelHash
+                showPos
+                w.Encode
+                (modelPay mode stateEnc)
+                (toModelSnapshot snap)
+                (toChainRecords tail)
+
+        let compareAt (what: string) (rs: OpRecord<'Op> list) (mode: SnapshotMode) (n: int) =
+            let here = where what mode n
+            let p = prodCompact mode prodHash stateEnc w gen.State0 rs n
+
+            let m =
+                Chain.compact
+                    modelHash
+                    showPos
+                    (modelPay mode stateEnc)
+                    apply
+                    gen.State0
+                    (toChainRecords rs)
+                    (posOfInt n)
+
+            let pv, mv = prodCompactVerdict p, modelCompactVerdict m
+
+            t <-
+                { t with
+                    Compactions = t.Compactions + 1 }
+
+            if pv <> mv then
+                note (sprintf "%s\n  compact, production: %A\n  compact, model:      %A" here pv mv)
+
+            let pOrigin = prodReplayVerdict (OpStream.replay w gen.State0 rs)
+
+            let mOrigin = modelReplayVerdict (Chain.replay apply gen.State0 (toChainRecords rs))
+
+            if pOrigin <> mOrigin then
+                note (sprintf "%s\n  replay, production: %A\n  replay, model:      %A" here pOrigin mOrigin)
+
+            match p with
+            | Error _ ->
+                if n > List.length rs then
+                    t <- { t with OutOfRange = t.OutOfRange + 1 }
+                else
+                    t <-
+                        { t with
+                            PrefixRefused = t.PrefixRefused + 1 }
+
+                    // `compact_refusal_is_the_origins`, held of production: an in-range refusal is
+                    // the origin's own halt, inside the prefix.
+                    match pOrigin with
+                    | HaltedAt(i, _) when i < n -> ()
+                    | other ->
+                        note (
+                            sprintf "%s\n  compact refused an in-range boundary, but the origin replay is %A" here other
+                        )
+            | Ok(snap, tail) ->
+                let pFrom = prodReplayVerdict (OpStream.replayFrom w snap tail)
+
+                let mFrom =
+                    modelReplayVerdict (Chain.replay_from apply (toModelSnapshot snap) (toChainRecords tail))
+
+                if pFrom <> mFrom then
+                    note (sprintf "%s\n  replayFrom, production: %A\n  replayFrom, model:      %A" here pFrom mFrom)
+
+                // `replay_from_snapshot_eq`, held of PRODUCTION's two values.
+                let shifted = modelReplayVerdict (Chain.offset (posOfInt n) (toModelReplayed pFrom))
+
+                if shifted <> pOrigin then
+                    note (
+                        sprintf
+                            "%s\n  replay from the origin:                %A\n  replayFrom, read at the origin's index: %A"
+                            here
+                            pOrigin
+                            shifted
+                    )
+
+                match pFrom with
+                | ReplayedTo _ -> t <- { t with Accepted = t.Accepted + 1 }
+                | HaltedAt _ when n > 0 ->
+                    t <-
+                        { t with
+                            HaltedPastZero = t.HaltedPastZero + 1 }
+                | HaltedAt _ -> ()
+
+                let pAcross, mAcross = across mode snap tail
+
+                if pAcross <> mAcross then
+                    note (
+                        sprintf "%s\n  verifyAcross, production: %b\n  verify_across, model:    %b" here pAcross mAcross
+                    )
+
+                // `compact_preserves_verify`, held of PRODUCTION's three values.
+                let whole = OpStream.verifyChain prodHash w rs
+                let prefix = OpStream.verifyChain prodHash w (List.truncate n rs)
+
+                if whole <> (prefix && pAcross) then
+                    note (
+                        sprintf
+                            "%s\n  verifyChain whole=%b, but verifyChain prefix=%b and verifyAcross=%b"
+                            here
+                            whole
+                            prefix
+                            pAcross
+                    )
+
+                if pAcross then
+                    t <-
+                        { t with
+                            VerifiedAcross = t.VerifiedAcross + 1 }
+
+                    if not whole then
+                        t <-
+                            { t with
+                                PrefixTamperUnseen = t.PrefixTamperUnseen + 1 }
+                else
+                    t <-
+                        { t with
+                            RejectedAcross = t.RejectedAcross + 1 }
+
+                // Every tamper of the compacted TAIL — of the intact stream only, so a detection
+                // here is a detection of THIS tamper and not of one the stream already carried.
+                if what = "none" then
+                    for (tamper, tail') in chainTampers otherOp tail do
+                        let pT, mT = across mode snap tail'
+
+                        t <-
+                            { t with
+                                TailTampers = t.TailTampers + 1 }
+
+                        if pT <> mT then
+                            note (
+                                sprintf
+                                    "%s tail-tamper=%s\n  verifyAcross, production: %b\n  verify_across, model:    %b"
+                                    here
+                                    tamper
+                                    pT
+                                    mT
+                            )
+
+                        if not pT then
+                            t <-
+                                { t with
+                                    TailDetected = t.TailDetected + 1 }
+
+        if not (List.isEmpty intact) then
+            for (what, rs) in ("none", intact) :: chainTampers otherOp intact do
+                for mode in [ StateHashed; ChainOnly ] do
+                    for n in 0 .. List.length rs + 1 do
+                        compareAt what rs mode n
+
+    t
+
+let private expectSnapshotAgreement (label: string) (t: SnapshotTally) =
+    match t.Failure with
+    | Some why -> failtest why
+    | None ->
+        // Every class the two theorems speak about has to have been MET, or the agreement above is
+        // about less than it claims.
+        Expect.isGreaterThan t.Accepted 0 (sprintf "%s: no bounded replay reached a state" label)
+
+        Expect.isGreaterThan
+            t.HaltedPastZero
+            0
+            (sprintf "%s: no bounded replay halted past boundary zero, so the index offset was never observable" label)
+
+        Expect.isGreaterThan t.OutOfRange 0 (sprintf "%s: no out-of-range boundary was compared" label)
+        Expect.isGreaterThan t.PrefixRefused 0 (sprintf "%s: no compaction was refused on its prefix" label)
+        Expect.isGreaterThan t.VerifiedAcross 0 (sprintf "%s: no boundary verified" label)
+        Expect.isGreaterThan t.RejectedAcross 0 (sprintf "%s: no boundary was rejected" label)
+
+        Expect.isGreaterThan
+            t.PrefixTamperUnseen
+            0
+            (sprintf "%s: no prefix tamper was compacted away, so the corollary's premise was never exercised" label)
+
+        Expect.isGreaterThan t.TailTampers 0 (sprintf "%s: no tail tamper was compared" label)
+
+        Expect.isGreaterThan
+            t.TailDetected
+            0
+            (sprintf "%s: every tail tamper went undetected, so the agreement is vacuous" label)
+
 // ---- the corpus dag/ family, as a source of SHAPES ----
 
 /// One `dag/` fixture, read for what Core can use: the parent shape, the typed actor, and the op
@@ -9462,6 +9821,222 @@ let proofOracleTests =
               Expect.isTrue
                   (Dag.verifyDag OpStream.defaultHash lossy tampered)
                   "under a non-injective CODEC — the hash untouched — production's own walker cannot see the tamper"
+
+          // ---- Phase 191 — snapshot and bounded replay: compact, replayFrom, verifyAcross ----
+
+          testCase
+              "the snapshot oracle agrees with production over the work-plan stream, every boundary and every tamper"
+          <| fun _ ->
+              snapshotDifferential
+                  "work-plan snapshots"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  planW
+                  planHash
+                  tamperedPlanOp
+                  planLaneGen
+                  3700
+                  40
+              |> expectSnapshotAgreement "work-plan snapshots"
+
+          testCase
+              "the snapshot oracle agrees with production over the reference witness's stream, every boundary and every tamper"
+          <| fun _ ->
+              snapshotDifferential
+                  "reference snapshots"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  treeW
+                  prodTreeHash
+                  (fun _ -> RemoveNode "tampered-node")
+                  treeLaneGen
+                  3710
+                  30
+              |> expectSnapshotAgreement "reference snapshots"
+
+          testCase "a snapshot model handed a DIFFERENT hash disagrees with production — the comparison can lose"
+          <| fun _ ->
+              // The go-red for the whole differential: nothing about the streams moves, only the
+              // function the model mints the snapshot's hash and walks the tail with.
+              let t =
+                  snapshotDifferential
+                      "perturbed snapshots"
+                      OpStream.defaultHash
+                      swappedHash
+                      planW
+                      planHash
+                      tamperedPlanOp
+                      planLaneGen
+                      3720
+                      3
+
+              Expect.isSome t.Failure "a model hashing with a different function must be caught"
+
+              // And it is caught where it should be: on one intact stream, production verifies
+              // across its own compaction and the perturbed model does not.
+              let rs =
+                  chainUnder
+                      OpStream.defaultHash
+                      planW
+                      planLaneGen.State0
+                      (Human "writer")
+                      [ AddItem("s1", "one"); AddItem("s2", "two"); Retitle("s1", "uno") ]
+
+              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
+              | Error e -> failtestf "compact refused an intact stream: %s" e
+              | Ok(snap, tail) ->
+                  Expect.isTrue
+                      (OpStream.verifyAcross OpStream.defaultHash planHash planW snap tail)
+                      "production verifies across its own boundary"
+
+                  Expect.isFalse
+                      (Chain.verify_across
+                          swappedHash
+                          showPos
+                          planW.Encode
+                          (Chain.snap_payload showPos planHash)
+                          (toModelSnapshot snap)
+                          (toChainRecords tail))
+                      "and a model recomputing with a different hash does not"
+
+          testCase
+              "replayFrom renumbers a halt from ZERO — the offset in replay_from_snapshot_eq is production's, not the model's"
+          <| fun _ ->
+              // The theorem is `replay = offset n (replayFrom snap tail)`, and the offset is the
+              // part a reader would drop. Shown load-bearing on production alone: a stream whose
+              // third op rejects, compacted after its first.
+              let built =
+                  chainUnder
+                      OpStream.defaultHash
+                      planW
+                      planLaneGen.State0
+                      (Human "writer")
+                      [ AddItem("o1", "one"); AddItem("o2", "two"); Retitle("o1", "uno") ]
+
+              let rs =
+                  built
+                  |> List.mapi (fun i r ->
+                      if i = 2 then
+                          { r with
+                              Op = Retitle("missing", "uno") }
+                      else
+                          r)
+
+              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
+              | Error e -> failtestf "the prefix replays, so compact must not refuse: %s" e
+              | Ok(snap, tail) ->
+                  let origin = prodReplayVerdict (OpStream.replay planW planLaneGen.State0 rs)
+                  let bounded = prodReplayVerdict (OpStream.replayFrom planW snap tail)
+                  Expect.equal origin (HaltedAt(2, "no item missing")) "the origin halts at the third record"
+
+                  Expect.equal
+                      bounded
+                      (HaltedAt(1, "no item missing"))
+                      "and replayFrom reports the same halt at ITS index"
+
+                  Expect.notEqual bounded origin "so the unqualified equality is false of production"
+
+                  Expect.equal
+                      (modelReplayVerdict (Chain.offset (posOfInt 1) (toModelReplayed bounded)))
+                      origin
+                      "and the theorem's offset is exactly what separates them"
+
+          testCase "a tamper in the DISCARDED prefix verifies across — compact trusts the boundary hash it reads"
+          <| fun _ ->
+              // `compact_verifies_iff_original` carries a premise — the prefix verified — and this
+              // is what it is for. The op at sequence zero is changed, the stream no longer
+              // verifies, and its compaction at two verifies across all the same: to production and
+              // to the model alike. Once the prefix is gone nothing can find it. Verify, then compact.
+              let built =
+                  chainUnder
+                      OpStream.defaultHash
+                      planW
+                      planLaneGen.State0
+                      (Human "writer")
+                      [ AddItem("k1", "one"); AddItem("k2", "two"); AddItem("k3", "three") ]
+
+              // The probe built the thing it claims to be about: a rejected `AddItem` chains nothing,
+              // and a tamper of an empty stream is no tamper.
+              Expect.hasLength built 3 "all three appends were accepted"
+
+              let rs =
+                  built
+                  |> List.mapi (fun i r ->
+                      if i = 0 then
+                          { r with
+                              Op = AddItem("k1", "TAMPERED") }
+                      else
+                          r)
+
+              Expect.isFalse (OpStream.verifyChain OpStream.defaultHash planW rs) "the original does not verify"
+
+              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 2 with
+              | Error e -> failtestf "the tampered prefix still replays, so compact does not refuse: %s" e
+              | Ok(snap, tail) ->
+                  Expect.isTrue
+                      (OpStream.verifyAcross OpStream.defaultHash planHash planW snap tail)
+                      "production verifies across the boundary of a stream that does not verify"
+
+                  Expect.isTrue
+                      (Chain.verify_across
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          (Chain.snap_payload showPos planHash)
+                          (toModelSnapshot snap)
+                          (toChainRecords tail))
+                      "and so does the model — the split theorem says exactly this"
+
+                  Expect.isFalse
+                      (OpStream.verifyChain OpStream.defaultHash planW (List.truncate 2 rs))
+                      "the prefix is where the break is, which is the other conjunct of the split"
+
+          testCase
+              "under a NON-EMPTY genesis a compaction at sequence zero does not verify across — snapshotAt hard-wires the empty one"
+          <| fun _ ->
+              // `compact_at_zero_needs_the_empty_genesis`, measured on production. Both shipped
+              // configs have the empty genesis, so nothing shipped meets this; `StreamConfig` is a
+              // public record, so a domain can.
+              let cfg =
+                  { OpStream.canonicalConfig with
+                      Genesis = "g0" }
+
+              let mutable st = planLaneGen.State0
+              let mutable rs: OpRecord<PlanOp> list = OpStream.empty
+
+              for op in [ AddItem("g1", "one"); AddItem("g2", "two") ] do
+                  match OpStream.appendWith cfg OpStream.defaultHash planW (Human "writer") op st rs with
+                  | Ok(st', rs') ->
+                      st <- st'
+                      rs <- rs'
+                  | Error e -> failtestf "append refused: %s" e
+
+              Expect.isTrue
+                  (OpStream.verifyChainWith cfg OpStream.defaultHash planW rs)
+                  "the stream verifies under its own config"
+
+              let acrossAt (n: int) : bool * bool =
+                  match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs n with
+                  | Error e -> failtestf "compact refused an intact stream: %s" e
+                  | Ok(snap, tail) ->
+                      OpStream.verifyAcrossWith cfg OpStream.defaultHash planHash planW snap tail,
+                      Chain.verify_across
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          (Chain.snap_payload showPos planHash)
+                          (toModelSnapshot snap)
+                          (toChainRecords tail)
+
+              Expect.equal
+                  (acrossAt 0)
+                  (false, false)
+                  "at zero the snapshot says \"\" and the first record links to the genesis"
+
+              Expect.equal
+                  (acrossAt 1)
+                  (true, true)
+                  "past zero the boundary hash is a stored one and the genesis never reaches it"
 
           // ---- Phase 138 — the APPLY ENGINE: apply, canApply and invert against the model ----
 
