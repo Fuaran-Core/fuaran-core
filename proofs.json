@@ -1288,7 +1288,7 @@
     {
       "id": "canonical-render-not-injective",
       "level": "proved",
-      "claim": "The REFUTATION, and the reason the two rows above are stated over a subset and up to member order rather than flatly. `render a == render b ==> a == b` is FALSE of the shipped encoder four ways, each proved for EVERY instantiation rather than exhibited at a contrived one: a non-finite float renders as the quoted string of its token and therefore as that STRING (`render_aliases_nan` and its two siblings); a finite float whose layout carries no point and no exponent renders as the INTEGER of that token, which is the numeric normalisation `JVal`'s own type doc names; the two zeroes are one token, by rule 5's collapse; and two objects differing only in authored member order are one byte sequence, by rule 2's sort. The fourth is not a loss but the purpose of a canonical form. The first is the finding: unlike `Json.render`, which has the guarded `Json.tryRender` beside it, `Canon` has no guarded counterpart, so a digest over a non-finite float collides with the digest over the string a reader decodes it back to and nothing refuses it.",
+      "claim": "The REFUTATION, and the reason the two rows above are stated over a subset and up to member order rather than flatly. `render a == render b ==> a == b` is FALSE of the shipped encoder four ways, each proved for EVERY instantiation rather than exhibited at a contrived one: a non-finite float renders as the quoted string of its token and therefore as that STRING (`render_aliases_nan` and its two siblings); a finite float whose layout carries no point and no exponent renders as the INTEGER of that token, which is the numeric normalisation `JVal`'s own type doc names; the two zeroes are one token, by rule 5's collapse; and two objects differing only in authored member order are one byte sequence, by rule 2's sort. The fourth is not a loss but the purpose of a canonical form. The first is the finding: unlike `Json.render`, which has the guarded `Json.tryRender` beside it, `Canon` has no guarded counterpart, so a digest over a non-finite float collides with the digest over the string a reader decodes it back to and nothing refuses it. (That last sentence was the state at Phase 149 and is still true of `Canon.render`, whose bytes did not move. Phase 165 added the guarded counterpart beside it: see `canonical-render-guard`.)",
       "phase": "fuaran-core#149",
       "evidence": {
         "theorem": "render_aliases_integral_float",
@@ -1305,6 +1305,32 @@
         "theorem": "no_null_ever",
         "model": "proofs/WireCanon.fst",
         "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canonical-render-guard",
+      "level": "proved",
+      "claim": "THE GUARD BESIDE THE RENDERER. `Canon.tryRender` is `Canon.render` with a refusal beside it, and the refusal's predicate is the FIRST clause of `float_canonical` — finiteness — and nothing else. Proved on the model, for every instantiation: wherever every float in a value is finite the guard IS the renderer (`tryrender_is_render_on_finite`), so in particular on the whole canonical subset the rows above are stated over (`tryrender_is_render_on_canonical`); the guard refuses IF AND ONLY IF some float is not finite, and what a refusal names is a float that is really at the path it gives, whose class is one of the three non-finite ones and whose own rendering is — by `render_aliases_nan` and its two siblings, restated at the class the refusal carries — byte for byte the rendering of a string it is not equal to (`tryrender_refuses_exactly_aliasing`); a non-finite float reachable by ANY path is refused, so no position in a document hides one (`nonfinite_anywhere_is_refused`); and the three aliasing families the format DOCUMENTS — an integer-shaped finite float, the two zeroes, authored member order — are accepted and rendered to `render`'s own bytes (`tryrender_keeps_the_documented_normalisations`). Path reachability is a RELATION rather than a by-key lookup because an object is an association list and a repeated key is representable. NOT proved, and said so in the model: MINIMALITY — that the path named is the first offender in document order — is modelled clause for clause and measured by `canon-guard-differential`, with no theorem that everything before it is finite; and DOCUMENT-level aliasing — that a refused document renders identically to the one with the named float replaced by its string — which is a congruence through the sort that a guard whose job is to refuse does not need. `Canon.renderOrdered` has no guarded companion and is not modelled. `Canon.render`'s bytes did not move, so `canonical-render-not-injective` stands exactly as written.",
+      "phase": "fuaran-core#165",
+      "evidence": {
+        "theorem": "tryrender_refuses_exactly_aliasing",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canon-guard-differential",
+      "level": "tested",
+      "claim": "The extracted guard agrees with the shipped `Canon.tryRender` as the `Result` a caller receives — the rendering byte for byte on an accept, the MESSAGE (token and path) on a refusal — over both corpus families and over a generated pool in which roughly one numeric leaf in three has been replaced by one of the three non-finite floats, so refusals land at every depth the pool reaches. Three comparisons per document, each able to lose alone: the two results agree; an accepted value is exactly `Canon.render`'s bytes; and the verdict is a refusal precisely when a THIRD, independent predicate finds a non-finite float in the value. Asserted REACHED: refusals, accepts, refusals two or more steps deep, each of the three tokens, and accepted documents carrying a float outside the canonical subset — the set the guard must not refuse. On the corpus the guard refuses nothing, which is the expected answer measured rather than assumed: JSON cannot spell a non-finite float. A first case pins production directly: the three non-finite witnesses are refused by token and path, the strings they alias and the three documented normalisations are not, the first offender in AUTHORED order is the one named though another sorts first, and a key carrying a quote and a control character is escaped as rule 6 escapes it. The go-red is a model wire that cannot see NaN: it must disagree on exactly the documents whose first non-finite float is a NaN and on no other, a refusal for an infinity included. The model carries a refusal as data and the host renders it in production's spelling, so the message PREFIX is the bridge's and is not independently modelled. Agreement is over the corpus and the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#165",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "Canon.tryRender refuses exactly the non-finite alias witnesses, and names them by path",
+          "the guard oracle agrees with Canon.tryRender over the corpus — and refuses none of it",
+          "the guard oracle agrees with Canon.tryRender over a generated pool carrying non-finite floats",
+          "a guard model that cannot see NaN loses — on exactly the documents a NaN decides"
+        ]
       }
     },
     {

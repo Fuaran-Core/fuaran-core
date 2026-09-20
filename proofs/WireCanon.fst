@@ -24,9 +24,9 @@
 
      1. `render_aliases_nan` / `_pos_inf` / `_neg_inf` — a non-finite float renders as the QUOTED
         STRING `"NaN"` / `"Infinity"` / `"-Infinity"` (rule 5, Wire.fs `canonicalFloat`), which is
-        byte-for-byte what the STRING of those characters renders as. Unlike `Json.render`, which
-        has the guarded `Json.tryRender` beside it naming a non-finite float as a typed `Error`,
-        `Canon.render` has no guarded counterpart — see the finding at the foot of this header.
+        byte-for-byte what the STRING of those characters renders as. At Phase 149 `Canon.render`
+        had no guarded counterpart, where `Json.render` has `Json.tryRender` beside it — see the
+        finding at the foot of this header, and section 13 for the guard Phase 165 added.
      2. `render_aliases_integral_float` — a finite float whose layout carries no `.` and no `E`
         renders exactly as the integer of the same token. This is the wire's documented numeric
         normalisation (`JVal`'s own type doc: "render (JFloat 2.0) emits 2"), not a defect.
@@ -57,6 +57,10 @@
      - `no_null_ever` — Phase 153, section 12: `render` never emits the token `null`, at any depth,
        for ANY value (not only the canonical subset). Stated lexically, because the string "null"
        legitimately renders those four characters inside a literal.
+     - `tryrender_is_render_on_finite` / `tryrender_refuses_exactly_aliasing` — Phase 165, section
+       13: the guarded `Canon.tryRender` IS the renderer wherever every float is finite, and
+       refuses exactly where one is not — naming a float whose rendering refutation 1 says is a
+       string's. The integer-shaped float of refutation 2 is proved NOT refused.
 
    THE FOUR RULE LEMMAS ARE THE PROOF'S OWN PARTS, not decoration:
      - rule 2 — `sort_is_a_canonical_choice`: under the comparator's total-order premises, sorting
@@ -110,8 +114,15 @@
    recorded here and in the README's ladder rather than repaired in this phase: a repair is a
    refusal-class change to a shipped encoder and belongs to a phase chartered for it.
 
+   THAT PHASE WAS 165, and the repair is section 13: `Canon.tryRender`, a guarded entry point
+   BESIDE `render`, whose bytes did not move. Everything above stays true of `render` itself — a
+   value that aliases under it still aliases under it — which is why the four refutations stand
+   unedited.
+
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it. Sections 0-3
-   are the model, 4 the reader, 5-6 the theorems, 7 the refutations. Helpers are defined here rather
+   are the model, 4 the reader, 5-6 the theorems, 7 the refutations. (Those are the header's own
+   groupings; the file's numbered sections run 0-13, with the refutations at 11, Phase 153's
+   no-null lemma at 12 and Phase 165's guard at 13.) Helpers are defined here rather
    than taken from `FStar.List.Tot` so that the extracted oracle depends on `Prims` alone.
 
    Apache-2.0, like everything beside it.
@@ -1181,8 +1192,9 @@ let read_render_roundtrip_within_limits (#num #flt: eqtype) (w: wire num flt) (v
    ====================================================================================== *)
 
 (* 1. A NON-FINITE FLOAT IS A STRING ON THE WIRE. `canonicalFloat` emits the QUOTED token `"NaN"`,
-      and so does the string of those three characters. Two different values, one digest. There is
-      no `Canon.tryRender` to refuse the float, where `Json.render` has `Json.tryRender`. *)
+      and so does the string of those three characters. Two different values, one digest. `render`
+      does not refuse the float; since Phase 165 `Canon.tryRender` does (section 13), and its
+      predicate is this lemma's hypothesis and its two siblings', taken together. *)
 [@@ noextract_to "FSharp"]
 let render_aliases_nan (#num #flt: eqtype) (w: wire num flt) (f: flt)
   : Lemma (requires w.fclass f == FNaN)
@@ -1440,3 +1452,357 @@ let no_null_ever (#num #flt: eqtype) (w: wire num flt) (v: jval num flt) (pre re
 let reader_refuses_null (#num #flt: eqtype) (w: wire num flt) (rest: list ch)
   : Lemma (ensures Error? (read w (app null_chars rest))) =
   assert_norm (app null_chars rest == CPlain "n" :: app [CLu; CPlain "l"; CPlain "l"] rest)
+
+(* ======================================================================================
+   13. THE GUARD (Phase 165) — `Canon.tryRender`, the refusal beside the renderer.
+
+       Section 11's first refutation is the only one of the four that is not a documented design
+       choice of the format: a non-finite float becomes a STRING on the wire, and nothing in
+       `Canon` refused it. `Canon.tryRender` is the entry point that does, in the shape
+       `Json.tryRender` gives `Json.render` — a typed refusal naming the first non-finite float
+       by path, and otherwise exactly the renderer.
+
+       WHAT IS MODELLED. `first_nonfinite` is `Canon.tryRender`'s `firstNonFinite`, clause for
+       clause: document order, an array by index (`List.indexed`'s counter is the `i` here), an
+       object's members in AUTHORED order — the scan runs before any sort, as production's does.
+       `try_render` is the two-armed match on its result. The path is carried as DATA (`pstep`)
+       rather than as production's rendered string, and the refusal carries the float rather
+       than its token, so the theorems below are about where the guard points and what it points
+       at; the host's differential renders both and compares the message production actually
+       emits.
+
+       WHAT IS PROVED.
+         - `tryrender_is_render_on_finite` — wherever every float is finite the guard IS the
+           renderer: `try_render w v == Rendered (render w v)`. `finite_all` is the FIRST clause
+           of `float_canonical` and nothing else, lifted over a value.
+         - `tryrender_is_render_on_canonical` — the corollary the acceptance asks for: the
+           canonical subset of section 5 sits inside the accepted set.
+         - `tryrender_refuses_exactly_aliasing` — the guard refuses IFF some float is not finite;
+           and a refusal's path REACHES a float in the value whose class is one of the three
+           non-finite ones and whose own rendering is, by section 11's first refutation, the
+           rendering of a string. The guard and `render_aliases_nan` / `_pos_inf` / `_neg_inf`
+           share one predicate: `w.fclass f <> FFinite`.
+         - `nonfinite_anywhere_is_refused` — the converse at depth: a non-finite float reachable
+           by ANY path is refused, so no position in a document hides one from the guard.
+         - `tryrender_keeps_the_documented_normalisations` — refutations 2, 3 and 4 are NOT
+           refused. An integer-shaped finite float, either zero, and a mis-ordered object all
+           render, to exactly `render`'s bytes. The guard must not refuse what the format
+           documents, and this is that sentence as a lemma.
+
+       WHAT IS NOT PROVED, said plainly. (a) MINIMALITY — that the path named is the FIRST
+       non-finite float in document order — is modelled (the scan is production's, clause for
+       clause) and measured by the differential, but there is no theorem that every position
+       before it is finite. (b) DOCUMENT-LEVEL aliasing — that a refused document renders
+       identically to the document with the named float replaced by its string — is not proved
+       here; it is a congruence through `sort_kvs` and is not needed by the guard, whose job is
+       to refuse. What IS proved is that the float the refusal names aliases a string on its own.
+       (c) `Canon.renderOrdered` is not modelled (header), and has no guarded companion.
+
+       The scan, the guard and the three result types EXTRACT — the differential runs them
+       beside production. Everything else below is PROOF-ONLY.
+   ====================================================================================== *)
+
+(* One step of the path the guard names. F#: `"[" + string i + "]"` for an array item and
+   `"[\"" + escape k + "\"]"` for an object member. *)
+type pstep =
+  | PItem   : i:nat -> pstep
+  | PMember : k:list ch -> pstep
+
+(* F#: `firstNonFinite`'s `option` — spelled out so the extraction stays on `Prims` alone. *)
+type scan (flt: eqtype) =
+  | AllFinite : scan flt
+  | NonFinite : path:list pstep -> f:flt -> scan flt
+
+(* F#: `Canon.tryRender`'s `Result` — the rendering, or the refusal's path and the float it names. *)
+type guarded (flt: eqtype) =
+  | Rendered : bytes:list ch -> guarded flt
+  | Refused  : path:list pstep -> f:flt -> guarded flt
+
+(* F#: `firstNonFinite`. The guard `System.Double.IsNaN f || System.Double.IsInfinity f` is
+   `w.fclass f <> FFinite` — the negation of `float_canonical`'s first clause, and of nothing more. *)
+let rec first_nonfinite (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot (scan flt) (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JFloat f -> if w.fclass f = FFinite then AllFinite else NonFinite [] f
+  | JArr xs -> first_nonfinite_items w 0 xs
+  | JObj fs -> first_nonfinite_kvs w fs
+  | _ -> AllFinite
+
+and first_nonfinite_items (#num #flt: eqtype) (w: wire num flt) (i: nat) (xs: list (jval num flt))
+  : Tot (scan flt) (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> AllFinite
+  | x :: t ->
+      (match first_nonfinite w x with
+       | NonFinite p f -> NonFinite (PItem i :: p) f
+       | AllFinite -> first_nonfinite_items w (i + 1) t)
+
+and first_nonfinite_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot (scan flt) (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> AllFinite
+  | (k, v) :: t ->
+      (match first_nonfinite w v with
+       | NonFinite p f -> NonFinite (PMember k :: p) f
+       | AllFinite -> first_nonfinite_kvs w t)
+
+(* F#: `Canon.tryRender`. `render` is called, never re-implemented: the guard adds a refusal and
+   changes no byte. *)
+let try_render (#num #flt: eqtype) (w: wire num flt) (v: jval num flt) : Tot (guarded flt) =
+  match first_nonfinite w v with
+  | NonFinite p f -> Refused p f
+  | AllFinite -> Rendered (render w v)
+
+(* ---- the predicate, stated independently of the scan ---- *)
+
+(* `float_canonical`'s FIRST clause, lifted over a value. Deliberately not `canonical`: the marker
+   clause is the documented numeric normalisation, and the guard must not refuse it. *)
+[@@ noextract_to "FSharp"]
+let rec finite_all (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot bool (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JFloat f -> w.fclass f = FFinite
+  | JArr xs -> finite_items w xs
+  | JObj fs -> finite_kvs w fs
+  | _ -> true
+
+and finite_items (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Tot bool (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> true
+  | x :: t -> finite_all w x && finite_items w t
+
+and finite_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot bool (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> true
+  | (_, v) :: t -> finite_all w v && finite_kvs w t
+
+(* What it means for a path to point at something. A RELATION rather than a lookup, on purpose:
+   `JObj` is an association LIST, a repeated key is representable, and a by-key lookup would find
+   the first member of that key where the scan may have named a later one. `reaches v p x` holds
+   when SOME walk along `p` from `v` ends at `x`. *)
+[@@ noextract_to "FSharp"]
+let rec reaches (#num #flt: eqtype) (v: jval num flt) (p: list pstep) (x: jval num flt)
+  : Tot bool (decreases %[(jsize v <: nat); 0]) =
+  match p with
+  | [] -> v = x
+  | PItem i :: r -> (match v with | JArr xs -> reaches_item xs i r x | _ -> false)
+  | PMember k :: r -> (match v with | JObj fs -> reaches_member fs k r x | _ -> false)
+
+and reaches_item (#num #flt: eqtype) (xs: list (jval num flt)) (i: nat) (r: list pstep)
+                 (x: jval num flt)
+  : Tot bool (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> false
+  | y :: t -> if i = 0 then reaches y r x else reaches_item t (i - 1) r x
+
+and reaches_member (#num #flt: eqtype) (fs: list (list ch & jval num flt)) (k: list ch)
+                   (r: list pstep) (x: jval num flt)
+  : Tot bool (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> false
+  | (k', y) :: t -> (k' = k && reaches y r x) || reaches_member t k r x
+
+(* ---- the scan decides `finite_all`, and what it names is really there ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec scan_decides_finite (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (ensures AllFinite? (first_nonfinite w v) == finite_all w v)
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> scan_items_decides_finite w 0 xs
+  | JObj fs -> scan_kvs_decides_finite w fs
+  | _ -> ()
+
+and scan_items_decides_finite (#num #flt: eqtype) (w: wire num flt) (i: nat)
+                              (xs: list (jval num flt))
+  : Lemma (ensures AllFinite? (first_nonfinite_items w i xs) == finite_items w xs)
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | x :: t -> scan_decides_finite w x; scan_items_decides_finite w (i + 1) t
+
+and scan_kvs_decides_finite (#num #flt: eqtype) (w: wire num flt)
+                            (fs: list (list ch & jval num flt))
+  : Lemma (ensures AllFinite? (first_nonfinite_kvs w fs) == finite_kvs w fs)
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (_, v) :: t -> scan_decides_finite w v; scan_kvs_decides_finite w t
+
+[@@ noextract_to "FSharp"]
+let rec scan_names_a_nonfinite_float (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (ensures (match first_nonfinite w v with
+                    | AllFinite -> True
+                    | NonFinite p f -> w.fclass f <> FFinite /\ reaches v p (JFloat f)))
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> scan_items_names_a_nonfinite_float w 0 xs
+  | JObj fs -> scan_kvs_names_a_nonfinite_float w fs
+  | _ -> ()
+
+and scan_items_names_a_nonfinite_float (#num #flt: eqtype) (w: wire num flt) (i: nat)
+                                       (xs: list (jval num flt))
+  : Lemma (ensures (match first_nonfinite_items w i xs with
+                    | AllFinite -> True
+                    | NonFinite p f ->
+                        w.fclass f <> FFinite /\
+                        (match p with
+                         | PItem n :: r -> n >= i /\ reaches_item xs (n - i) r (JFloat f)
+                         | _ -> False)))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | x :: t ->
+      scan_names_a_nonfinite_float w x;
+      scan_items_names_a_nonfinite_float w (i + 1) t
+
+and scan_kvs_names_a_nonfinite_float (#num #flt: eqtype) (w: wire num flt)
+                                     (fs: list (list ch & jval num flt))
+  : Lemma (ensures (match first_nonfinite_kvs w fs with
+                    | AllFinite -> True
+                    | NonFinite p f ->
+                        w.fclass f <> FFinite /\
+                        (match p with
+                         | PMember k :: r -> reaches_member fs k r (JFloat f)
+                         | _ -> False)))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (k0, v) :: t ->
+      scan_names_a_nonfinite_float w v;
+      scan_kvs_names_a_nonfinite_float w t;
+      (match first_nonfinite w v with
+       | NonFinite p f -> assert (reaches_member fs k0 p (JFloat f))
+       | AllFinite ->
+           (match first_nonfinite_kvs w t with
+            | NonFinite (PMember k :: r) f -> assert (reaches_member fs k r (JFloat f))
+            | _ -> ()))
+
+(* The converse at depth: a non-finite float at the end of ANY path breaks `finite_all`. *)
+[@@ noextract_to "FSharp"]
+let rec reached_nonfinite_breaks_finite (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+                                        (p: list pstep) (f: flt)
+  : Lemma (requires reaches v p (JFloat f) /\ w.fclass f <> FFinite)
+          (ensures not (finite_all w v))
+          (decreases %[(jsize v <: nat); 0]) =
+  match p with
+  | [] -> ()
+  | PItem i :: r -> (match v with | JArr xs -> reached_item_breaks_finite w xs i r f | _ -> ())
+  | PMember k :: r -> (match v with | JObj fs -> reached_member_breaks_finite w fs k r f | _ -> ())
+
+and reached_item_breaks_finite (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+                               (i: nat) (r: list pstep) (f: flt)
+  : Lemma (requires reaches_item xs i r (JFloat f) /\ w.fclass f <> FFinite)
+          (ensures not (finite_items w xs))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | y :: t ->
+      if i = 0 then reached_nonfinite_breaks_finite w y r f
+      else reached_item_breaks_finite w t (i - 1) r f
+
+and reached_member_breaks_finite (#num #flt: eqtype) (w: wire num flt)
+                                 (fs: list (list ch & jval num flt)) (k: list ch)
+                                 (r: list pstep) (f: flt)
+  : Lemma (requires reaches_member fs k r (JFloat f) /\ w.fclass f <> FFinite)
+          (ensures not (finite_kvs w fs))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (k', y) :: t ->
+      if k' = k && reaches y r (JFloat f) then reached_nonfinite_breaks_finite w y r f
+      else reached_member_breaks_finite w t k r f
+
+(* The canonical subset of section 5 is inside the accepted set: `float_canonical` is `finite`
+   AND a marker, and the guard keeps only the first conjunct. *)
+[@@ noextract_to "FSharp"]
+let rec canonical_is_finite (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (requires canonical w v) (ensures finite_all w v)
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> canonical_items_is_finite w xs
+  | JObj fs -> canonical_kvs_is_finite w fs
+  | _ -> ()
+
+and canonical_items_is_finite (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Lemma (requires canonical_items w xs) (ensures finite_items w xs)
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | x :: t -> canonical_is_finite w x; canonical_items_is_finite w t
+
+and canonical_kvs_is_finite (#num #flt: eqtype) (w: wire num flt)
+                            (fs: list (list ch & jval num flt))
+  : Lemma (requires canonical_kvs w fs) (ensures finite_kvs w fs)
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (_, v) :: t -> canonical_is_finite w v; canonical_kvs_is_finite w t
+
+(* ---- the theorems ---- *)
+
+(* The token section 11's first refutation says a non-finite float of each class renders as. *)
+[@@ noextract_to "FSharp"]
+let alias_token (c: fcls) : Tot (list ch) =
+  match c with
+  | FNaN -> nan_chars
+  | FPosInf -> inf_chars
+  | FNegInf -> neg_inf_chars
+  | FFinite -> []
+
+(* THE GUARD AGREES WITH THE RENDERER WHEREVER IT ACCEPTS — and it accepts wherever every float
+   is finite. Not "on the canonical subset": on the strictly larger set the first clause of
+   `float_canonical` describes, which is what makes the corollary below a corollary. *)
+[@@ noextract_to "FSharp"]
+let tryrender_is_render_on_finite (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (requires finite_all w v) (ensures try_render w v == Rendered (render w v)) =
+  scan_decides_finite w v
+
+[@@ noextract_to "FSharp"]
+let tryrender_is_render_on_canonical (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (requires canonical w v) (ensures try_render w v == Rendered (render w v)) =
+  canonical_is_finite w v;
+  tryrender_is_render_on_finite w v
+
+(* THE GUARD REFUSES EXACTLY THE ALIASING FLOATS. It refuses iff some float is not finite; and what
+   a refusal names is a float that is really at that path, whose class is one of the three
+   non-finite ones, and whose own rendering is — by `render_aliases_nan` / `_pos_inf` /
+   `_neg_inf`, which the last two conjuncts restate at the class the refusal carries — byte for
+   byte the rendering of a STRING it is not equal to. *)
+[@@ noextract_to "FSharp"]
+let tryrender_refuses_exactly_aliasing (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (ensures (Refused? (try_render w v) == not (finite_all w v)) /\
+                   (match try_render w v with
+                    | Rendered _ -> True
+                    | Refused p f ->
+                        w.fclass f <> FFinite /\
+                        reaches v p (JFloat f) /\
+                        render w (JFloat f) == render w (JStr (alias_token (w.fclass f))) /\
+                        ~(JFloat f == JStr #num #flt (alias_token (w.fclass f))))) =
+  scan_decides_finite w v;
+  scan_names_a_nonfinite_float w v
+
+[@@ noextract_to "FSharp"]
+let nonfinite_anywhere_is_refused (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+                                  (p: list pstep) (f: flt)
+  : Lemma (requires reaches v p (JFloat f) /\ w.fclass f <> FFinite)
+          (ensures Refused? (try_render w v)) =
+  reached_nonfinite_breaks_finite w v p f;
+  scan_decides_finite w v
+
+(* THE GUARD DOES NOT REFUSE WHAT THE FORMAT DOCUMENTS. Refutations 2, 3 and 4 of section 11, each
+   under its own hypothesis, each ACCEPTED and rendered to `render`'s own bytes: an integer-shaped
+   finite float, the two zeroes, and an object authored out of key order. *)
+[@@ noextract_to "FSharp"]
+let tryrender_keeps_the_documented_normalisations (#num #flt: eqtype) (w: wire num flt)
+                                                  (i: num) (f g: flt) (k1 k2: list ch)
+  : Lemma (ensures
+            ((w.fclass f == FFinite /\
+              w.float_str (if w.is_zero f then w.pos_zero else f) == w.int_str i) ==>
+                try_render w (JFloat f) == Rendered (render w (JInt #num #flt i))) /\
+            ((w.fclass f == FFinite /\ w.fclass g == FFinite /\ w.is_zero f /\ w.is_zero g) ==>
+                try_render w (JFloat #num #flt f) == Rendered (render w (JFloat #num #flt g))) /\
+            (try_render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)]) ==
+                Rendered (render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)])))) = ()

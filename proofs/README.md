@@ -3170,6 +3170,11 @@ shipped encoder, in the shape Phase 137 took, and belongs to a phase chartered f
 `Proofs.Oracle` case that holds the four aliases asserts them on **production**, so the finding
 goes red if the encoder ever changes.
 
+**CLOSED by Phase 165, in exactly that shape.** `Canon.tryRender` is the guarded companion, beside a
+`Canon.render` whose bytes did not move — so everything above remains true of `render`, the alias
+case still asserts it on production, and a caller that wants the refusal reaches for the new entry
+point. See "The guard" below.
+
 ### What is proved
 
 **The canonical subset is rule 5's own slot rule, read as a predicate.** A float is canonical
@@ -3205,6 +3210,64 @@ Rule 5 — `canonical_float_injective` and `int_layout_injective`, DERIVED rathe
 the ladder). Rule 4 — `absence_is_structural`: two objects that render alike carry the same keys,
 so an omitted key can never be confused with a present one, which is what makes "`None` fields are
 excluded" safe rather than merely tidy.
+
+### The guard — `Canon.tryRender` (Phase 165)
+
+`Canon.tryRender : JVal -> Result<string, string>` is `Canon.render` with a refusal beside it, in
+the shape `Json.tryRender` gives `Json.render`. Over a value holding no non-finite float it is
+exactly `Ok (render v)`; otherwise it is an `Error` naming the FIRST non-finite float in document
+order by its token and its path — `$` for the root, `[i]` for an array item, `["key"]` for an
+object member with the key under rule 6's escape, so the path is unambiguous for any key. Document
+order is AUTHORED order: the scan runs before any sort, as it must if the path is to name
+something the caller wrote.
+
+**The predicate is `float_canonical`'s FIRST clause and nothing else.** That predicate has two
+clauses because refutations 1 and 2 are its two failure modes; the guard takes the first — finite —
+and deliberately leaves the second. An integer-shaped finite float is the format's documented
+numeric normalisation, and a guard that refused `JFloat 2.0` would be refusing what rule 5 says.
+
+Section 13 of `WireCanon.fst` models the scan (`first_nonfinite`, clause for clause with
+production's `firstNonFinite`, the array index carried as `List.indexed` carries it) and the guard
+(`try_render`), and proves:
+
+- **`tryrender_is_render_on_finite`.** Wherever every float is finite, the guard IS the renderer:
+  `try_render w v == Rendered (render w v)`. The model calls `render`; it does not re-implement it,
+  so "changes no byte" is structural.
+- **`tryrender_is_render_on_canonical`.** The corollary the phase's acceptance asks for: the
+  canonical subset every theorem above is stated over sits inside the accepted set.
+- **`tryrender_refuses_exactly_aliasing`.** The guard refuses **if and only if** some float is not
+  finite. And what a refusal names is a float that is really at that path, whose class is one of
+  the three non-finite ones, and whose own rendering is byte for byte the rendering of a string it
+  is not equal to — `render_aliases_nan` / `_pos_inf` / `_neg_inf`, restated at the class the
+  refusal carries. The guard and the refutation share one predicate: `fclass f <> FFinite`.
+- **`nonfinite_anywhere_is_refused`.** The converse at depth: a non-finite float reachable by ANY
+  path is refused, so no position in a document hides one from the guard.
+- **`tryrender_keeps_the_documented_normalisations`.** Refutations 2, 3 and 4, each under its own
+  hypothesis, each ACCEPTED and rendered to `render`'s own bytes.
+
+"Really at that path" is a RELATION (`reaches`) rather than a by-key lookup, on purpose: a `JObj`
+is an association list, a repeated key is representable, and a lookup would find the first member
+of that key where the scan may have named a later one.
+
+**What is NOT proved, said plainly.** *Minimality* — that the path named is the first offender in
+document order — is modelled clause for clause and measured by the differential, but there is no
+theorem that every position before it is finite. *Document-level aliasing* — that a refused
+document renders identically to the document with the named float replaced by its string — is not
+proved either; it is a congruence through `sort_kvs`, and a guard whose job is to refuse does not
+need it. `Canon.renderOrdered` is not modelled and has no guarded companion.
+
+**One thing the shard asked for that is not there, and why.** It asked for "a guarded digest
+companion where a digest wraps the renderer". None does: `Fuaran.Core.Wire` references nothing that
+hashes, and every digest in the repository takes a STRING a caller has already rendered. The
+guarded digest is therefore `Canon.tryRender v |> Result.map digest` at the caller, with the
+caller's own hash — one line, and the only form that does not give the wire package a dependency
+it has never had. The entry point's doc comment says so where a caller will read it.
+
+**And one number the shard had wrong.** It speaks of "the four alias witnesses" the guard refuses.
+The four are the four REFUTATIONS, of which the guard's is the first alone; that refutation has
+THREE witnesses, one per non-finite class, and the other three refutations are exactly what the
+guard must not refuse. The shard's own goal and acceptance say the same, so this is a slip in one
+task line rather than a disagreement, and the differential asserts both halves.
 
 ### Why a reader, and not a second model of `Json.parse`
 
@@ -3248,11 +3311,19 @@ digest input.
 | a generated `JVal` pool | 1,200 seed-replayable documents over an alphabet carrying rule 6's three escape classes, astral and private-use keys, and rule 5's scientific layout | yes (each shape asserted reached) |
 | the four aliasing pairs | asserted on PRODUCTION, and on the model beside it | the finding, as a check that can go red |
 | the non-canonical arms | both infinities, NaN, both zeroes, the Int32 boundaries, an empty string, an empty object and array | the model is a model of the whole encoder, not only of the part the theorem covers |
+| the guard, on production directly (Phase 165) | the three non-finite witnesses refused by token and path; the strings they alias and the three documented normalisations NOT refused; the first offender in AUTHORED order named though another sorts first; a key with a quote and a control character escaped as rule 6 escapes it | the refusal, as a check that can go red |
+| the guard, over both corpus families (Phase 165) | the extracted guard beside `Canon.tryRender`, as the `Result` a caller receives | yes — and no fixture is refused, asserted: JSON cannot spell a non-finite float |
+| the guard, over a poisoned generated pool (Phase 165) | 2,400 seed-replayable documents with roughly one numeric leaf in three replaced by a non-finite float; the two results compared, an accept held to `render`'s bytes, and the verdict held to a third, independent predicate | yes (asserted reached: refusals, accepts, refusals two or more steps deep, each of the three tokens, accepted documents outside the canonical subset) |
 
 The **go-red** is rule 2's comparator REVERSED — the sort the rule mandates still runs, but orders
 keys the other way. Every object carrying two distinct keys must then disagree, and a document
 carrying none must still agree; both are asserted, so the instrument is known to be one that can
 lose *and* to be narrow to the rule it is about.
+
+The guard has its own **go-red** (Phase 165): a model wire that cannot see NaN — it classifies one
+as finite, so the scan walks past it. It must disagree with production on exactly the documents
+whose FIRST non-finite float is a NaN, and on no other document, a refusal for an infinity
+included; the test asserts the two counts are equal, not merely that one is non-zero.
 
 One thing about the host is worth knowing before anyone reads a stack trace. The extracted model is
 a **character-list interpreter** and F\*'s F# backend emits plain recursion with no tail calls, so
@@ -3268,14 +3339,22 @@ fixture it would have dropped first is the deepest one.
 1. **Proved (machine-checked, no admits).** On the model: `render_total`,
    `read_render_roundtrip`, `render_injective_up_to_key_order`, `render_deterministic`,
    `canonical_form_iff`, `render_injective_on_normal`, `read_returns_a_normal_value`, the four
-   rule lemmas, the §21 relations in `Limits.fst`, and the four refutations. F\* 2026.09.06,
+   rule lemmas, the §21 relations in `Limits.fst`, the four refutations, and (Phase 165) the
+   guard's five — `tryrender_is_render_on_finite`, `tryrender_is_render_on_canonical`,
+   `tryrender_refuses_exactly_aliasing`, `nonfinite_anywhere_is_refused` and
+   `tryrender_keeps_the_documented_normalisations`. F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
    `admit`. The module carries a scoped `--ext context_pruning` for the reason `TreeOps.fst` gives
    at the same line.
 2. **Differentially tested.** The extracted encoder agrees with `Canon.render` byte for byte over
    both corpus families and the generated pool, and the model's round trip agrees with
    `Json.parse ∘ Canon.render` over the same documents on the canonical subset. Agreement is over
-   the corpus and the pool drawn, never over all inputs. One go-red, required to lose.
+   the corpus and the pool drawn, never over all inputs. One go-red, required to lose. The guard
+   (Phase 165) is compared as the `Result` a caller receives — bytes on an accept, token and path
+   on a refusal — over both corpus families and a poisoned pool, with its own go-red. The model
+   carries a refusal as DATA and the host renders it in production's spelling, so the message's
+   fixed prefix is the bridge's and is not independently modelled; the token, the path and the
+   verdict are.
 3. **Assumed, and stated as such.**
    - **The numerals are opaque, and there is exactly ONE premise about them.** The two layouts and
      the numeral read-back are parameters, and `tok_read_ok` says the read-back inverts the
@@ -3306,8 +3385,12 @@ fixture it would have dropped first is the deepest one.
    - **`Canon.renderOrdered`.** It is the declared-key-order leg, where the ENCODER is the order
      authority and no sort runs; its canonicity rests on a different argument (the IDL's
      `WireShape.KeyOrder`), and nothing here carries to it.
-   - **That a non-finite float cannot reach `Canon.render`.** It can; nothing refuses it. See the
-     finding above.
+   - **That a non-finite float cannot reach `Canon.render`.** It can, and `render` still refuses
+     nothing — its bytes are pinned. What Phase 165 added is the entry point that DOES refuse; a
+     caller still holding `render` is exactly where it was.
+   - **That the guard names the FIRST offender, as a theorem**, or that a refused document aliases
+     at the DOCUMENT level. Both are named in "The guard" above; the first is measured, the second
+     is not needed by a refusal.
    - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
      measures — that is theorem 4's, and the boundary between the two is deliberate.
 
@@ -4547,18 +4630,12 @@ which decides the profile bump. Nothing here should be changed to close it: wide
 `Versioning.classify` would model a function this repository does not ship, and the differential
 already asserts the vacuity, so the day the answer changes this goes red rather than stale.
 
-**A guarded `Canon.tryRender`** — theorem 7's finding, and the smallest item on this list. `Json`
-has the pair: `render` formats a non-finite float into a token that is not valid JSON, and
-`tryRender` names it as a typed `Error` instead. `Canon` has only the unguarded half, and its
-failure mode is worse rather than better — a non-finite float does not produce un-parseable wire,
-it produces a `"NaN"` STRING, so the digest over `JFloat nan` equals the digest over the value a
-reader decodes those bytes back to. `render_aliases_nan` is that sentence proved, and the
-`Proofs.Oracle` alias case is it asserted on production. What it needs is a refusal-class addition
-in the shape Phase 137 took — a guarded entry point beside the existing one, not a change to what
-`render` does, since the bytes are pinned by the corpus and by four other hosts. The theorem's
-canonical subset is already the predicate such a guard would enforce, which is why this is small:
-`float_canonical`'s two clauses ARE the refusal, and the second of them (an integer-shaped float
-token) is a design choice the guard should NOT refuse, so the guard is the first clause alone.
+_(**A guarded `Canon.tryRender`** was on this list — theorem 7's finding, and the smallest item on
+it — and is DONE: Phase 165. `Canon.tryRender` sits beside an untouched `Canon.render` and names the
+first non-finite float by token and path; the guard is `float_canonical`'s first clause alone, as
+this entry said it should be, and the integer-shaped float its second clause describes is proved
+NOT refused. Theorem 7's "The guard" section carries the statements, what is deliberately not
+proved, and the differential.)_
 
 **The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
 shortest informal argument and the longest mechanisation. **This entry has been corrected by Phase

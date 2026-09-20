@@ -2284,6 +2284,11 @@ family's generated corpus grows by ten pipeline shapes. **A host that runs that 
 own incremental evaluator can go RED at this pin — and a red here is a WRONG ANSWER in your
 incremental path, not a regression in this kit.** The predicate to check is in the entries below.
 
+**One managed member HAS been added since the two paragraphs above were written, and it costs a
+pinned consumer nothing.** `Fuaran.Core.Wire` gains `Canon.tryRender` (Phase 165, below) — class
+`additive`, with `api/Fuaran.Core.Wire.txt` moved by that one line. An addition is a class this slot
+was opened to carry, so the number stands.
+
 ### The incremental corpus reaches a row-local step reading a cross-row column (Phase 212) — additive; may turn an ADOPTER's conformance run red
 
 **What it is.** `IncrementalDelta`'s enumerated corpus grows from 38 pipeline shapes to 48. The ten
@@ -2377,9 +2382,9 @@ is now checkable by whoever holds the list: `Arbitration.duplicateIds proposals 
 theorem's hypothesis, and a non-empty answer names the ids to repair.
 
 **What adopting it costs.** The Phase 183 gate classes the `Fuaran.Core.Ops` baseline move
-`additive` (1 move: the new module function), so it **rides this draft slot** — it is the one
-baseline that has moved since `v0.28.0`, which the slot's opening paragraphs, written before it,
-say had not happened yet. A pinned consumer compiles either way. **One thing a consumer asserting
+`additive` (1 move: the new module function), so it **rides this draft slot** — a baseline that
+has moved since `v0.28.0`, which the slot's opening paragraphs, written before any had, say had not
+happened yet. A pinned consumer compiles either way. **One thing a consumer asserting
 law COUNTS must adjust:** `Conformance.arbitrationLaws` reports **7** results where it reported 6 —
 the new one, *id uniqueness is the invariance hypothesis*, sits before the Phase 121 adequacy row,
 which is still last. It holds `duplicateIds` to an independent recount, asserts it empty on every
@@ -2397,6 +2402,55 @@ hold ids of their own, so a second way to mint them would be a second source of 
 proposal's id is. And `arbitrate` does not refuse duplicate-id input: refusing would change what a
 public function returns on input it has always accepted, and totality on that input is documented
 behaviour that the proof now states exactly.
+
+### A guarded `Canon.tryRender` beside the canonical renderer (Phase 165) — additive; rides this draft
+
+**What it is.** One new function in `Fuaran.Core.Wire`:
+
+```
+Canon.tryRender : JVal -> Result<string, string>
+```
+
+Over a value holding no non-finite float it is exactly `Ok (Canon.render v)`. Otherwise it is an
+`Error` naming the FIRST non-finite `JFloat` in document order — arrays by index, object members in
+AUTHORED order — by its token and its path: `$` for the root, `[i]` for an array item, `["key"]` for
+a member, the key under the canonical escape so the path is unambiguous for any key. For example
+`non-finite float has no canonical rendering of its own: Infinity at $["a"][1]`. It is the shape
+`Json.tryRender` has given `Json.render` since Phase 12.
+
+**Why it exists.** `Canon.render` spells a non-finite float as the QUOTED token `"NaN"` /
+`"Infinity"` / `"-Infinity"`, which is byte for byte what the STRING of those characters renders as.
+The wire is valid, and wrong: a digest over `JFloat nan` equals the digest over `JStr "NaN"`, the
+value a reader decodes those bytes back to. Phase 149 proved that as `render_aliases_nan` and its
+two siblings and recorded that nothing refused it. This is the refusal.
+
+**What it does NOT change — `Canon.render` is untouched.** Its bytes are pinned by the conformance
+corpus and by every other host; no conformance vector moves, and a value that aliases under `render`
+keeps aliasing under `render`. A caller that wants the refusal reaches for the new entry point; a
+caller that does not is exactly where it was. `Canon.renderOrdered` is untouched and has no guarded
+companion.
+
+**What the guard deliberately does not refuse.** Its predicate is FINITENESS and nothing else. The
+format's documented normalisations pass through unchanged — an integer-shaped finite float
+(`JFloat 2.0` renders `2`), the `-0` collapse, and the key sort — because each is what the format
+says rather than a value silently becoming another. `proofs/WireCanon.fst` section 13 proves both
+halves: the guard is the renderer wherever every float is finite
+(`tryrender_is_render_on_finite`), it refuses exactly where one is not
+(`tryrender_refuses_exactly_aliasing`), and the three documented normalisations are accepted
+(`tryrender_keeps_the_documented_normalisations`).
+
+**There is no guarded DIGEST in this package, and that is the design rather than an omission.**
+`Fuaran.Core.Wire` references nothing that hashes, and every digest in the repository takes a
+string a caller has already rendered. The guarded digest is `Canon.tryRender v |> Result.map digest`
+at the caller, with the caller's own hash.
+
+**The error message is for a human and is not a parsing contract.** The token and the path are
+stated above so a reader knows what to expect; a consumer that needs to BRANCH on a refusal branches
+on `Error`, not on the text.
+
+**Class: `additive`** — a new module function, per the Phase 183 surface gate
+(`api/Fuaran.Core.Wire.txt` moves with it, by one line). A pinned consumer compiles either way, so
+it rides this draft and moves no number.
 
 ## 0.28.0 — released 2026-09-20 as `v0.28.0`
 
