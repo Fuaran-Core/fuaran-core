@@ -1512,7 +1512,7 @@ let chain_tamper_detected_verify
    a boundary, bound to the boundary record's hash — so this section adds the reducer as a
    parameter (`apply`, the witness's `Apply`) and nothing else. The state, the rejection and the
    state encoder stay abstract: the theorems below hold for every reducer, which is the point,
-   since every side's cache rests on them with a different one.
+   since every consumer's cache rests on them with a different one.
 
    Two theorems, and each came out SHARPER than the sentence it was chartered with.
 
