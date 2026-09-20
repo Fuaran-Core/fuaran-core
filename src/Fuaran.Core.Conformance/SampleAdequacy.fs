@@ -197,8 +197,16 @@ module SampleAdequacy =
     let census: (string * AdequacyClass) list =
         [
           // ---- guarded: a law branches on something the sample can miss ----
-          "IncrementalDelta.lawsWith", Guarded [ "refresh class"; "source rows" ]
-          "IncrementalDelta.laws", Guarded [ "refresh class"; "source rows (delegates to lawsWith)" ]
+          // Phase 212 — the third dimension is the shape that let a wrong answer reach a published
+          // release: a ROW-LOCAL step reading a column a cross-row step appended, per producer
+          // class. The corpus carried ten window-bearing pipelines and not one of them, so the
+          // family that exists to see that defect certified green against an evaluator carrying it.
+          "IncrementalDelta.lawsWith", Guarded [ "refresh class"; "cross-row column read"; "source rows" ]
+          "IncrementalDelta.laws",
+          Guarded
+              [ "refresh class"
+                "cross-row column read"
+                "source rows (delegates to lawsWith)" ]
           "FoldConfluence.laneFoldLawsWith", Guarded [ "lane-fold outcome" ]
           "FoldConfluence.laneFoldLaws", Guarded [ "lane-fold outcome (delegates to laneFoldLawsWith)" ]
           "Conformance.footprintLaws", Guarded [ "script-pair independence" ]
