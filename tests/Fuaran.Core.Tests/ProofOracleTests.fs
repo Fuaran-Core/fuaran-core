@@ -2361,6 +2361,449 @@ let private expectSnapshotAgreement (label: string) (t: SnapshotTally) =
             0
             (sprintf "%s: every tail tamper went undetected, so the agreement is vacuous" label)
 
+// ---------------------------------------------------------------------------
+//  Phase 193 — the signed head (`proofs/Chain.fst`, section 8)
+//
+//  `OpStream.head`, `attestHead` and `verifyAttestation` beside the extracted model, over
+//  generated chains, generated KEYRINGS, and the three splices the theorem names — each followed
+//  by a full RE-MINT, so that `verifyChain` accepts the result and only the signature can refuse
+//  it. That re-mint is the point: it is the tamper sections 1-7 of the model cannot see.
+//
+//  CORE SHIPS NO PRODUCTION SIGNER. `OpStream.noAttestation` signs nothing, and a real sink is
+//  host-side. So "beside production signing" means beside the `IAttestationSink` SEAM, driven by
+//  the test-local keyring sink below: what is compared is the model against the seam's contract
+//  (`head`, `attestHead`, `verifyAttestation`, and the `verifyChain && verifyAttestation`
+//  composition `verifyAttestation`'s doc comment describes), never against a signer.
+// ---------------------------------------------------------------------------
+
+/// A test-local keyring: named secrets, and the one a signer signs with. NOT cryptography — the
+/// "signature" is the default hash keyed by the secret — and deliberately one whose `Verify` does
+/// NOT compare the attestation's recorded `Head`, so that `signature_binds` is spent on the keyed
+/// digest rather than satisfied by construction.
+type private Keyring =
+    { Keys: (string * string) list
+      Active: string }
+
+let private keyringSink (ring: Keyring) : IAttestationSink =
+    let secretOf (keyId: string) =
+        ring.Keys |> List.tryFind (fun (k, _) -> k = keyId) |> Option.map snd
+
+    { new IAttestationSink with
+        member _.Sign head =
+            secretOf ring.Active
+            |> Option.map (fun secret ->
+                { Head = head
+                  KeyId = ring.Active
+                  Signature = OpStream.defaultHash secret head })
+
+        member _.Verify att head =
+            match secretOf att.KeyId with
+            | Some secret -> att.Signature = OpStream.defaultHash secret head
+            | None -> false }
+
+/// A sink for which `signature_binds` is FALSE: it verifies every attestation against every head.
+let private promiscuousSink: IAttestationSink =
+    { new IAttestationSink with
+        member _.Sign head =
+            Some
+                { Head = head
+                  KeyId = "any"
+                  Signature = "yes" }
+
+        member _.Verify _ _ = true }
+
+let private toModelAtt (a: Attestation) : Chain.attestation =
+    { Chain.ahead = a.Head
+      Chain.akey = a.KeyId
+      Chain.asig = a.Signature }
+
+let private ofModelAtt (a: Chain.attestation) : Attestation =
+    { Head = a.ahead
+      KeyId = a.akey
+      Signature = a.asig }
+
+/// The sink's own `Sign` and `Verify`, handed to the model as the two parameters it takes.
+let private modelSign (sink: IAttestationSink) (head: string) : Chain.found<Chain.attestation> =
+    match sink.Sign head with
+    | Some a -> Chain.Found(toModelAtt a)
+    | None -> Chain.Missing
+
+let private modelVerify (sink: IAttestationSink) (att: Chain.attestation) (head: string) : bool =
+    sink.Verify (ofModelAtt att) head
+
+/// A full re-mint under production's own canonical payload and genesis: every record's sequence,
+/// prev-link and hash recomputed from the steps, so `verifyChain` accepts whatever it is handed.
+/// The shape of `Conformance.attestationLaws`'s forgery, spelled here over a step list because a
+/// splice changes the chain's LENGTH, which a record-for-record rehash cannot.
+let private remint (hashFn: HashFn) (encode: 'Op -> string) (steps: (Actor * 'Op) list) : OpRecord<'Op> list =
+    (([], OpStream.canonicalConfig.Genesis, 0), steps)
+    ||> List.fold (fun (acc, prev, i) (actor, op) ->
+        let h = hashFn prev (OpStream.canonicalConfig.Payload i actor (encode op))
+
+        { Seq = i
+          Actor = actor
+          Op = op
+          PrevHash = prev
+          Hash = h }
+        :: acc,
+        h,
+        i + 1)
+    |> fun (acc, _, _) -> List.rev acc
+
+/// One splice, spelled twice and INDEPENDENTLY: as the model's `splice`, and as a plain list edit
+/// of production's steps. The differential requires the two to mint the same records.
+type private SpliceCase<'Op> =
+    { Name: string
+      Model: Chain.splice<'Op>
+      Steps: (Actor * 'Op) list }
+
+let private spliceCases (otherOp: 'Op -> 'Op) (steps: (Actor * 'Op) list) : SpliceCase<'Op> list =
+    let n = List.length steps
+
+    let toStep (a: Actor, o: 'Op) : Chain.cstep<'Op> =
+        { Chain.cactor = Actor.encode a
+          Chain.cop = o }
+
+    let mallory = Human "mallory"
+
+    [ for i in 0 .. n - 1 do
+          let a, o = List.item i steps
+
+          let put (s: Actor * 'Op) =
+              steps |> List.mapi (fun j x -> if j = i then s else x)
+
+          // An op replaced; a record re-attributed; and a replacement by the SAME step, which is
+          // no splice at all and must stay accepted.
+          yield
+              { Name = sprintf "replace-op@%d" i
+                Model = Chain.Replaced(posOfInt i, toStep (a, otherOp o))
+                Steps = put (a, otherOp o) }
+
+          yield
+              { Name = sprintf "replace-actor@%d" i
+                Model = Chain.Replaced(posOfInt i, toStep (mallory, o))
+                Steps = put (mallory, o) }
+
+          yield
+              { Name = sprintf "replace-same@%d" i
+                Model = Chain.Replaced(posOfInt i, toStep (a, o))
+                Steps = steps }
+
+          yield
+              { Name = sprintf "drop@%d" i
+                Model = Chain.Dropped(posOfInt i)
+                Steps = List.removeAt i steps }
+
+      // An insertion at every position, the end and one PAST the end included — the model appends
+      // there, and so does this.
+      for i in 0 .. n + 1 do
+          let inserted = mallory, otherOp (snd (List.item (min i (n - 1)) steps))
+
+          yield
+              { Name = sprintf "insert@%d" i
+                Model = Chain.Inserted(posOfInt i, toStep inserted)
+                Steps = List.insertAt (min i n) inserted steps }
+
+      // Out of range, a replacement and a removal change nothing.
+      yield
+          { Name = "replace-out-of-range"
+            Model = Chain.Replaced(posOfInt (n + 2), toStep (mallory, otherOp (snd (List.head steps))))
+            Steps = steps }
+
+      yield
+          { Name = "drop-out-of-range"
+            Model = Chain.Dropped(posOfInt (n + 2))
+            Steps = steps } ]
+
+type private SignedTally =
+    {
+        Failure: string option
+        /// Chains signed, and keyrings drawn with more than one key.
+        Signed: int
+        MultiKey: int
+        /// A verifier whose ring lacks the signing key, and an attestation re-labelled to another
+        /// key of the same ring: both refused, on the intact chain.
+        UnknownKeyRefused: int
+        WrongKeyRefused: int
+        /// Re-minted splices compared; those the WALKER accepted (all of them, or the re-mint is
+        /// not one); those the signature refused; and the no-op ones that stayed accepted.
+        Splices: int
+        WalkerBlind: int
+        Refused: int
+        NoOpAccepted: int
+        ReplacedRefused: int
+        InsertedRefused: int
+        DroppedRefused: int
+        /// In-place tampers — no re-mint — which the walker finds before the signature is asked.
+        InPlace: int
+        InPlaceRefused: int
+    }
+
+let private emptySignedTally =
+    { Failure = None
+      Signed = 0
+      MultiKey = 0
+      UnknownKeyRefused = 0
+      WrongKeyRefused = 0
+      Splices = 0
+      WalkerBlind = 0
+      Refused = 0
+      NoOpAccepted = 0
+      ReplacedRefused = 0
+      InsertedRefused = 0
+      DroppedRefused = 0
+      InPlace = 0
+      InPlaceRefused = 0 }
+
+let private drawKeyring (rng: ConfRng.T) : Keyring * ConfRng.T =
+    let count, r1 = ConfRng.intBelow 3 rng
+    let active, r2 = ConfRng.intBelow (count + 1) r1
+    let salt, r3 = ConfRng.intBelow 1000000 r2
+
+    { Keys = [ for k in 0..count -> sprintf "key-%d" k, sprintf "secret-%d-%d" k salt ]
+      Active = sprintf "key-%d" active },
+    r3
+
+let private signedHeadDifferential
+    (label: string)
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (sinkOf: Keyring -> IAttestationSink)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (otherOp: 'Op -> 'Op)
+    (gen: LaneGen<'Op, 'State>)
+    (seed: int)
+    (iterations: int)
+    : SignedTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable t = emptySignedTally
+
+    let note (why: string) =
+        if t.Failure.IsNone then
+            t <- { t with Failure = Some why }
+
+    let writer = Human "writer"
+
+    for _ in 1..iterations do
+        let lanes, r' = gen.Lanes 2 rng
+        let ring, r'' = drawKeyring r'
+        rng <- r''
+        let sink = sinkOf ring
+        let intact = chainUnder prodHash w gen.State0 writer (List.concat lanes)
+
+        if not (List.isEmpty intact) then
+            let steps = intact |> List.map (fun r -> r.Actor, r.Op)
+
+            let cs: Chain.cstep<'Op> list =
+                steps
+                |> List.map (fun (a, o) ->
+                    { Chain.cactor = Actor.encode a
+                      Chain.cop = o })
+
+            let here (what: string) =
+                sprintf
+                    "%s: seed=%d %s keys=%d active=%s ops=[%s]"
+                    label
+                    seed
+                    what
+                    (List.length ring.Keys)
+                    ring.Active
+                    (steps |> List.map (snd >> w.Encode) |> String.concat "; ")
+
+            // `OpStream.head` against `chain_head`, and the premise the theorem carries about it.
+            let pHead = OpStream.head intact
+            let mHead = Chain.chain_head (toChainRecords intact)
+
+            if pHead <> mHead then
+                note (sprintf "%s\n  head, production: %s\n  chain_head, model: %s" (here "intact") pHead mHead)
+
+            if pHead = "" then
+                note (sprintf "%s\n  a non-empty chain's head is the empty-chain sentinel" (here "intact"))
+
+            // The model's re-mint is production's `append`, record for record.
+            let mBuilt = Chain.build_chain modelHash showPos w.Encode "" Chain.PZero cs
+
+            if mBuilt <> toChainRecords intact then
+                note (sprintf "%s\n  build_chain does not mint the records production appended" (here "intact"))
+
+            if remint prodHash w.Encode steps <> intact then
+                note (sprintf "%s\n  the test's own re-mint does not reproduce production's append" (here "intact"))
+
+            // `attestHead` against `attest_head`.
+            let pAtt = OpStream.attestHead sink intact
+            let mAtt = Chain.attest_head (modelSign sink) (toChainRecords intact)
+
+            (match pAtt, mAtt with
+             | Some p, Chain.Found m when toModelAtt p = m -> ()
+             | None, Chain.Missing -> ()
+             | _ ->
+                 note (
+                     sprintf "%s\n  attestHead, production: %A\n  attest_head, model:    %A" (here "intact") pAtt mAtt
+                 ))
+
+            match pAtt with
+            | None -> ()
+            | Some att ->
+                t <-
+                    { t with
+                        Signed = t.Signed + 1
+                        MultiKey = t.MultiKey + (if List.length ring.Keys > 1 then 1 else 0) }
+
+                let accepts (verifier: IAttestationSink) (a: Attestation) (rs: OpRecord<'Op> list) : bool * bool =
+                    (OpStream.verifyChain prodHash w rs && OpStream.verifyAttestation verifier a rs),
+                    Chain.accepts_signed
+                        modelHash
+                        showPos
+                        w.Encode
+                        ""
+                        (modelVerify verifier)
+                        (toModelAtt a)
+                        (toChainRecords rs)
+
+                let agree (what: string) (p: bool, m: bool) =
+                    if p <> m then
+                        note (sprintf "%s\n  accepted, production: %b\n  accepts_signed, model: %b" (here what) p m)
+
+                    p
+
+                // The round trip: the chain that was signed is accepted.
+                if not (agree "intact" (accepts sink att intact)) then
+                    note (
+                        sprintf "%s\n  the chain that was signed is refused under its own attestation" (here "intact")
+                    )
+
+                // KEYRINGS. A verifier that does not hold the signing key refuses; so does the same
+                // signature re-labelled to another key of the ring.
+                let stranger =
+                    sinkOf
+                        { ring with
+                            Keys = ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId) }
+
+                if not (agree "unknown-key" (accepts stranger att intact)) then
+                    t <-
+                        { t with
+                            UnknownKeyRefused = t.UnknownKeyRefused + 1 }
+
+                for (other, _) in ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId) do
+                    if not (agree ("relabelled-to-" + other) (accepts sink { att with KeyId = other } intact)) then
+                        t <-
+                            { t with
+                                WrongKeyRefused = t.WrongKeyRefused + 1 }
+
+                // THE SPLICES, each re-minted.
+                for sp in spliceCases otherOp steps do
+                    let pForged = remint prodHash w.Encode sp.Steps
+
+                    let mForged =
+                        Chain.build_chain modelHash showPos w.Encode "" Chain.PZero (Chain.apply_splice cs sp.Model)
+
+                    if toChainRecords pForged <> mForged then
+                        note (
+                            sprintf
+                                "%s\n  apply_splice + build_chain does not mint the production forgery"
+                                (here sp.Name)
+                        )
+
+                    let changes = Chain.splice_changes cs sp.Model
+
+                    if changes <> (sp.Steps <> steps) then
+                        note (
+                            sprintf
+                                "%s\n  splice_changes says %b, but the production steps %s"
+                                (here sp.Name)
+                                changes
+                                (if sp.Steps <> steps then "moved" else "did not move")
+                        )
+
+                    let walker = OpStream.verifyChain prodHash w pForged
+                    let accepted = agree sp.Name (accepts sink att pForged)
+
+                    t <-
+                        { t with
+                            Splices = t.Splices + 1
+                            WalkerBlind = t.WalkerBlind + (if walker then 1 else 0) }
+
+                    if not walker then
+                        note (
+                            sprintf
+                                "%s\n  the re-mint does not verify, so it is not the tamper the theorem is about"
+                                (here sp.Name)
+                        )
+
+                    // `signed_head_rejects_splice`, held of PRODUCTION's own verdict.
+                    if changes && accepted then
+                        note (
+                            sprintf "%s\n  a re-minted splice is ACCEPTED under the original attestation" (here sp.Name)
+                        )
+
+                    if not changes && not accepted then
+                        note (sprintf "%s\n  a splice that changes nothing is refused" (here sp.Name))
+
+                    if changes && not accepted then
+                        t <-
+                            { t with
+                                Refused = t.Refused + 1
+                                ReplacedRefused =
+                                    t.ReplacedRefused
+                                    + (match sp.Model with
+                                       | Chain.Replaced _ -> 1
+                                       | _ -> 0)
+                                InsertedRefused =
+                                    t.InsertedRefused
+                                    + (match sp.Model with
+                                       | Chain.Inserted _ -> 1
+                                       | _ -> 0)
+                                DroppedRefused =
+                                    t.DroppedRefused
+                                    + (match sp.Model with
+                                       | Chain.Dropped _ -> 1
+                                       | _ -> 0) }
+
+                    if not changes && accepted then
+                        t <-
+                            { t with
+                                NoOpAccepted = t.NoOpAccepted + 1 }
+
+                // In place, with NO re-mint: the walker's own business, and the composition must
+                // still agree.
+                for (tamper, rs') in chainTampers otherOp intact do
+                    t <- { t with InPlace = t.InPlace + 1 }
+
+                    if not (agree ("in-place " + tamper) (accepts sink att rs')) then
+                        t <-
+                            { t with
+                                InPlaceRefused = t.InPlaceRefused + 1 }
+
+    t
+
+let private expectSignedAgreement (label: string) (t: SignedTally) =
+    match t.Failure with
+    | Some why -> failtest why
+    | None ->
+        // Every class the two theorems speak about has to have been MET.
+        Expect.isGreaterThan t.Signed 0 (sprintf "%s: no chain was signed" label)
+        Expect.isGreaterThan t.MultiKey 0 (sprintf "%s: no keyring held more than one key" label)
+        Expect.isGreaterThan t.UnknownKeyRefused 0 (sprintf "%s: no verifier lacking the key was compared" label)
+        Expect.isGreaterThan t.WrongKeyRefused 0 (sprintf "%s: no re-labelled attestation was compared" label)
+        Expect.isGreaterThan t.Splices 0 (sprintf "%s: no splice was compared" label)
+
+        Expect.equal
+            t.WalkerBlind
+            t.Splices
+            (sprintf "%s: a re-minted splice failed verifyChain, so it was not the rewrite the theorem is about" label)
+
+        Expect.isGreaterThan t.ReplacedRefused 0 (sprintf "%s: no replaced op was refused" label)
+        Expect.isGreaterThan t.InsertedRefused 0 (sprintf "%s: no inserted op was refused" label)
+        Expect.isGreaterThan t.DroppedRefused 0 (sprintf "%s: no dropped op was refused" label)
+
+        Expect.isGreaterThan
+            t.NoOpAccepted
+            0
+            (sprintf "%s: no splice that changes nothing was accepted, so `splice_changes` was never load-bearing" label)
+
+        Expect.isGreaterThan t.InPlace 0 (sprintf "%s: no in-place tamper was compared" label)
+        Expect.equal t.InPlaceRefused t.InPlace (sprintf "%s: an in-place tamper was accepted" label)
+
 // ---- the corpus dag/ family, as a source of SHAPES ----
 
 /// One `dag/` fixture, read for what Core can use: the parent shape, the typed actor, and the op
@@ -9685,6 +10128,177 @@ let proofOracleTests =
                   (acrossAt 1)
                   (true, true)
                   "past zero the boundary hash is a stored one and the genesis never reaches it"
+
+          // ---- Phase 193 — the signed head: head, attestHead, verifyAttestation, and the re-mint ----
+
+          testCase
+              "the signed-head oracle agrees with production over the work-plan stream, every keyring and every re-minted splice"
+          <| fun _ ->
+              signedHeadDifferential
+                  "work-plan signed heads"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  keyringSink
+                  planW
+                  tamperedPlanOp
+                  planLaneGen
+                  3800
+                  40
+              |> expectSignedAgreement "work-plan signed heads"
+
+          testCase
+              "the signed-head oracle agrees with production over the reference witness's stream, every keyring and every re-minted splice"
+          <| fun _ ->
+              signedHeadDifferential
+                  "reference signed heads"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  keyringSink
+                  treeW
+                  (fun _ -> RemoveNode "tampered-node")
+                  treeLaneGen
+                  3810
+                  30
+              |> expectSignedAgreement "reference signed heads"
+
+          testCase "a signed-head model handed a DIFFERENT hash disagrees with production — the comparison can lose"
+          <| fun _ ->
+              // The go-red for the whole differential: nothing about the chains, the keyrings or
+              // the splices moves, only the function the model re-mints and walks with.
+              let t =
+                  signedHeadDifferential
+                      "perturbed signed heads"
+                      OpStream.defaultHash
+                      swappedHash
+                      keyringSink
+                      planW
+                      tamperedPlanOp
+                      planLaneGen
+                      3820
+                      3
+
+              Expect.isSome t.Failure "a model hashing with a different function must be caught"
+
+          testCase
+              "under a sink that verifies EVERYTHING a re-minted splice is accepted — signature_binds is load-bearing, to production and to the model alike"
+          <| fun _ ->
+              // `signature_binds` is the section's one new premise, and this is what it buys. The
+              // promiscuous sink verifies every attestation against every head, so it does NOT
+              // bind — and the theorem's conclusion fails with it, on production's own verdict.
+              let t =
+                  signedHeadDifferential
+                      "promiscuous signed heads"
+                      OpStream.defaultHash
+                      OpStream.defaultHash
+                      (fun _ -> promiscuousSink)
+                      planW
+                      tamperedPlanOp
+                      planLaneGen
+                      3830
+                      3
+
+              match t.Failure with
+              | Some why ->
+                  Expect.stringContains
+                      why
+                      "ACCEPTED under the original attestation"
+                      "the differential fails on the theorem's conclusion, not on a model/production disagreement"
+              | None -> failtest "a sink that does not bind must let a re-minted splice through"
+
+              // And it is the MODEL's verdict too: one chain, one op replaced and re-minted.
+              let steps =
+                  [ Human "writer", AddItem("s1", "one"); Human "writer", AddItem("s2", "two") ]
+
+              let signed = remint OpStream.defaultHash planW.Encode steps
+
+              let forged =
+                  remint OpStream.defaultHash planW.Encode [ List.head steps; Human "writer", AddItem("s2", "TWO") ]
+
+              match OpStream.attestHead promiscuousSink signed with
+              | None -> failtest "the promiscuous sink signs"
+              | Some att ->
+                  Expect.isTrue
+                      (OpStream.verifyChain OpStream.defaultHash planW forged
+                       && OpStream.verifyAttestation promiscuousSink att forged)
+                      "production accepts the forgery under a sink that does not bind"
+
+                  Expect.isTrue
+                      (Chain.accepts_signed
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          ""
+                          (modelVerify promiscuousSink)
+                          (toModelAtt att)
+                          (toChainRecords forged))
+                      "and so does the model"
+
+                  // Under the keyring sink the same forgery is refused by both.
+                  let sink = keyringSink { Keys = [ "k", "s" ]; Active = "k" }
+
+                  match OpStream.attestHead sink signed with
+                  | None -> failtest "the keyring sink signs"
+                  | Some bound ->
+                      Expect.isFalse
+                          (OpStream.verifyChain OpStream.defaultHash planW forged
+                           && OpStream.verifyAttestation sink bound forged)
+                          "production refuses it under a sink that binds"
+
+                      Expect.isFalse
+                          (Chain.accepts_signed
+                              OpStream.defaultHash
+                              showPos
+                              planW.Encode
+                              ""
+                              (modelVerify sink)
+                              (toModelAtt bound)
+                              (toChainRecords forged))
+                          "and so does the model"
+
+          testCase
+              "a signed empty-chain sentinel accepts the empty chain and no chain with a head — OpStream.head hard-wires the empty string"
+          <| fun _ ->
+              // `signed_sentinel_covers_the_empty_chain`, and the premise `signed_head_binds_chain`
+              // carries because of it, measured on production.
+              let sink = keyringSink { Keys = [ "k", "s" ]; Active = "k" }
+
+              let empty: OpRecord<PlanOp> list = OpStream.empty
+              Expect.equal (OpStream.head empty) "" "production's head of the empty chain is the literal empty string"
+              Expect.equal (Chain.chain_head (toChainRecords empty)) "" "and so is the model's"
+
+              let one =
+                  remint OpStream.defaultHash planW.Encode [ Human "writer", AddItem("s1", "one") ]
+
+              match OpStream.attestHead sink empty, OpStream.attestHead sink one with
+              | Some overNothing, Some overOne ->
+                  let accepts (att: Attestation) (rs: OpRecord<PlanOp> list) =
+                      (OpStream.verifyChain OpStream.defaultHash planW rs
+                       && OpStream.verifyAttestation sink att rs),
+                      Chain.accepts_signed
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          ""
+                          (modelVerify sink)
+                          (toModelAtt att)
+                          (toChainRecords rs)
+
+                  Expect.equal (accepts overNothing empty) (true, true) "a signed sentinel accepts the empty chain"
+                  Expect.equal (accepts overNothing one) (false, false) "and not a chain that has a head"
+
+                  // The DROP arm at its smallest: the one-record chain, its record dropped and the
+                  // remainder re-minted, is the empty chain — refused, because the head that was
+                  // signed is not the sentinel.
+                  Expect.equal (accepts overOne one) (true, true) "the signed one-record chain is accepted"
+                  Expect.equal (accepts overOne empty) (false, false) "and the empty chain is refused under it"
+
+                  Expect.isTrue
+                      (Chain.splice_changes
+                          [ { Chain.cactor = Actor.encode (Human "writer")
+                              Chain.cop = AddItem("s1", "one") } ]
+                          (Chain.Dropped Chain.PZero))
+                      "which is a splice the theorem speaks about"
+              | _ -> failtest "the keyring sink signs"
 
           // ---- Phase 138 — the APPLY ENGINE: apply, canApply and invert against the model ----
 
