@@ -1,5 +1,110 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-20 — D49: the dataframe algebra belongs in Core, and the reference evaluator is its MEANING rather than a runtime
+
+**Decided (Phase 213; the operator's decision of 2026-09-19, recorded here for the first time.)**
+`Fuaran.Core.DataFrame` stays in this repository. It arrived in the initial public release with no
+entry arguing its placement, and the question has been asked often enough — a declarative-compute
+layer looks like an application concern — that the silence has become the problem.
+
+**Three reasons, in the order they bind.**
+
+1. **It has several consuming domains, and none of them is above the others.** A user-interface
+   tier binds a transform pipeline to a view; a presentation tier charts the result and carries the
+   pipeline in its own wire; an application-composition tier runs one as a data-flow leg. Homing the
+   algebra in any one of them would force the other two to reference that tier's package in order to
+   describe a data pipeline — a dependency on a vocabulary they do not otherwise use, taken for a
+   type they do.
+2. **It sits on this repository's own spine and on nothing else.** `Fuaran.Core.DataFrame`
+   project-references exactly `Fuaran.Core.Column` and `Fuaran.Core.Wire`, and package-references
+   exactly `FSharp.Core`. `Column` over `Wire`, `DataFrame` over `Column`, with `Column.Ops` and the
+   incremental seam built on top: the layering is already here, and the algebra is its top course.
+3. **In the consuming tiers it is a BINDING, never a node.** Nothing in those domains' own trees has
+   a dataframe shape, so relocating the algebra into one of them would not consolidate a vocabulary —
+   it would put a vocabulary those trees do not contain inside the package that defines them.
+
+**The honest reading of the reference evaluator against the no-evaluator principle, checked rather
+than asserted.** This repository's stated rule is that the core carries no evaluator, no clock and no
+scheduler, and `DataFrame.fs` plainly contains something called an evaluator, so the entry would be
+worthless without confronting that. The reading HOLDS, and it is stronger than "it happens to be
+pure":
+
+- **`evalPipelineWithInEnv` is total in its result type** — `Result<Table, EvalError>` — and the
+  module raises nothing: there is no `failwith` and no `raise` anywhere in the file. A pipeline the
+  algebra cannot answer produces a typed refusal, which is a VALUE of the algebra.
+- **It performs no I/O and holds no host.** The three references above are the whole dependency set;
+  nothing in the module touches the filesystem, the network, the environment or a process.
+- **It does not read a clock — and it REFUSES to.** A `ColExpr.Now` is resolved by substituting a
+  caller-supplied `ClockWitness` into the pipeline BEFORE evaluation; a `Now` that reaches the
+  evaluator with no clock pinned is a named error case, not a read of the ambient time. The clock is
+  an input to a rewrite, never an effect of the fold.
+- **The one seam that could carry an effect is a PARAMETER, and its default refuses.** `resolve:
+  string -> Result<Table, EvalError>` is how a caller supplies a source a `Join` or `Union` names by
+  reference; the library's own default is `noResolve`, which errors. A caller may of course pass a
+  function that reads a database — but that is the caller's effect, at the caller's boundary, and it
+  is why the seam is a parameter rather than a capability the module holds.
+
+So what the module contains is not a runtime. A serializable algebra whose steps have no pinned
+answers is a vocabulary rather than a language: the reference fold is what `Transform` MEANS, and the
+conformance family `transformLaws` exists precisely to hold an independently-written host evaluator to
+that meaning byte for byte. Removing it would not remove an evaluator from the core; it would leave a
+wire format with no definition. The no-evaluator principle bars a core that RUNS a domain's programs
+against the world, and this runs nothing against anything.
+
+## 2026-09-20 — D48: a column-naming wire member of the dataframe algebra is spelled out, never abbreviated
+
+**Decided (Phase 213; operator, 2026-09-19.)** The naming rule the algebra follows, in one sentence:
+
+> A wire member whose only honest name is "the column" or "the columns" is spelled out in full —
+> `column` for one, `columns` for a list — and never abbreviated; every other member is named for the
+> ROLE its columns play in the step, and an abbreviation survives only as a decode alias.
+
+**What it moves, in `0.28.0`:**
+
+| object | canonical was | canonical is | decode alias |
+|---|---|---|---|
+| `project` step — the list of column renames | `cols` | **`columns`** | `cols` |
+| a `sort` key's column, and a `window`'s frame-ordering entry | `col` | **`column`** | `col` |
+
+**What it leaves, and why that is the rule rather than an exception.** The survey covers every wire
+member of `DataFrame.fs` that holds a column name or a list of them. All of the following name a
+ROLE, so the rule does not reach them and none of their aliases change: `groupBy.keys` (alias `by`),
+`sort.by` (alias `keys`), `window.partitionBy`, `window.of`, `window.as`, an aggregate entry's `of`
+(alias `column`) and `name` (alias `as`), `derive.name`, `join.on`, `pivot.index` / `on` / `values`,
+`unpivot.idVars` / `valueVars`, and the `col` expression's `name`. The flat filter shorthand's
+decode-only `column` already spells out and is consistent as it stands.
+
+**Why the singular flips too, when it would have been cheaper not to.** `column` was already admitted
+as an alias of `col` on a sort key, in the other direction to this change. Leaving that as it stood
+would have produced "singular abbreviated, plural spelled out" — a distinction no reader would guess
+and no author could apply to the next member. The choice was therefore between two rules, not between
+a rule and a smaller change, and the rule that generalises is the one that costs the same version
+bump either way.
+
+**Two things the rule deliberately does NOT reach**, recorded so they are not read as oversights:
+
+- **A `$type` tag.** The `col` EXPRESSION is `{"$type":"col","name":…}`, and `col` there names a KIND
+  of expression, not a column; the rule is about MEMBER names. Renaming the tag would move the bytes
+  of every predicate in every document — a far wider break than the one decided — for a vocabulary
+  (`groupBy`, `isNull`, `rowNumber`, `ntile`) that is not the subject of this rule. If it is ever
+  wanted it is its own decision.
+- **A pair's `a` / `b`.** `pairJson` renders both a `project` rename and a `join` key, and `a` / `b`
+  name a POSITION in a pair rather than a column. Giving them meaningful names is attractive, but one
+  naming cannot serve both uses — source/target in a rename, left/right in a join key — so it is a
+  separate design question and not part of this rule.
+
+**The alias's lifetime.** Each alias is kept until a major version says otherwise, is accepted on
+decode, and is NEVER emitted; a document carrying both spellings is refused as ambiguous rather than
+silently resolved, which is the behaviour every other aliased member of this algebra already has. A
+document written before `0.28.0` therefore keeps decoding, to the same tree, and normalises to the
+canonical spelling the first time it is re-encoded.
+
+**The cost, and why now.** The canonical encode's BYTES change, which breaks a consumer that compares
+them — a conformant host's round-trip corpus does — while breaking no decoder and moving no managed
+type, member, record field or union case. A correct name gets cheaper never: the algebra's consuming
+domains, published versions and stored documents all grow monthly, and every month of delay adds
+bytes that say the old thing. The argument is about timing, not about demand.
+
 ## 2026-09-19 — D47: the relocation-kind footprint widening is DECLINED — measured, and the one relocation kind anybody records is the kind no record can free
 
 **Decided (Phase 163; the operator's note at accept was "investigate further before building", and

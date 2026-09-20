@@ -2253,6 +2253,68 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.28.0 (draft)
+
+**This slot is a DRAFT.** `<Version>` reads `0.28.0` and no `v0.28.0` tag exists, so an additive or
+behaviour-identical change may ride it: append its entry here rather than opening another slot. A
+change of a higher class than the entries below carry advances the number, because the number is
+what tells a consumer what adopting it costs.
+
+**This slot was OPENED rather than ridden, and the reason is the rule rather than the size of the
+change.** `0.27.0` is tagged, so nothing can ride it; and the one change below is BREAKING on the
+canonical encode, which under the draft-slot rule takes a MINOR bump pre-1.0 — the precedent the
+`0.19.0`, `0.20.0` and `0.27.0` entries in this document set.
+
+**What adopting `0.28.0` costs.** One entry, one package (`Fuaran.Core.DataFrame`), and the cost
+falls on exactly one kind of consumer: a host that compares the canonical encode's BYTES. Every
+decoder is unaffected — every document written before this slot still decodes, to the same tree —
+and no .NET or Fable consumer's SOURCE changes, because no managed member, type, record field or
+union case moved. A host with a round-trip corpus of pipeline wire strings re-records it; a host
+that only decodes does nothing.
+
+### The dataframe wire spells out a column-naming member (Phase 213) — BREAKING on canonical encode, additive on decode
+
+**The rule, in one sentence** (`DECISIONS.md` D48): a wire member of the dataframe algebra whose only
+honest name is "the column" or "the columns" is spelled out in full — `column` for one, `columns` for
+a list — and never abbreviated; every other member is named for the ROLE its columns play in the step,
+and an abbreviation survives only as a decode alias.
+
+Two members move under it, and they move in opposite directions from where they stood:
+
+| object | was | is | alias kept |
+|---|---|---|---|
+| `project` step | `cols` | **`columns`** | `cols` |
+| a `sort` key, and a `window`'s frame-ordering entry | `col` (canonical), `column` (alias) | **`column`** | `col` |
+
+Nothing else moves. `groupBy.keys`, `sort.by`, `window.partitionBy` / `of` / `as`, an aggregate's
+`of` / `name`, `derive.name`, `join.on`, `pivot.index` / `on` / `values`, `unpivot.idVars` /
+`valueVars` and a pair's positional `a` / `b` all name a ROLE rather than "the column", and keep the
+names and aliases they had. The `col` EXPRESSION's `$type` tag is untouched: a `$type` names a KIND,
+not a column, and it is not a member.
+
+**What a document does.** Decode accepts either spelling through the existing `fieldAliased`
+mechanism, so nothing written before this slot stops reading; a document carrying the alias
+re-encodes with the canonical spelling; a document carrying BOTH is refused as ambiguous, by the same
+error every other aliased member raises. The alias is kept until a major version says otherwise and
+is never emitted. This is the shape of the earlier window-function tag rename, which likewise kept
+the old tags as decode-only aliases.
+
+**The class, and the honest limit of the gate that assigns it.** The Phase 183 public-surface family
+prints, for this tree, `(no baseline has moved since v0.27.0)` over `21 baseline(s) read, 0 moved` —
+so by the instrument this document normally quotes, the move is invisible. That is not the gate
+failing; it is the second of its three declared boundaries doing exactly what it says. The gate
+renders the managed assembly's IL metadata, and a wire member name is a STRING inside a function
+body: no type, member, record field or union case moved, so there is nothing for it to see. The
+breaking class here is a property of the canonical BYTES, which is the boundary the gate names as
+"not semantics" — so the version advances on the byte change, with the gate's output quoted as the
+evidence that the managed surface is NOT what moved rather than as the classification itself.
+
+**The law corpus moved, and not for the reason the change is about.** `conformance/laws/transform-laws.json`
+(and its declared copy in the shared corpus) is re-emitted: **no law's bytes carry a `project` step at
+all**, so the rename that names this entry changes none of them — what moves is the two `sort` laws'
+key members, plus the `kitVersion` stamp a version cut re-stamps. A host certifying against that file
+takes the new bytes with the new pin.
+
 ## 0.27.0 — released 2026-09-19 as `v0.27.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.27.0` and the repository holds the `v0.27.0` tag, so
