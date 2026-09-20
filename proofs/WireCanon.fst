@@ -54,6 +54,9 @@
      - `render_injective_on_sorted` — the literal `render a == render b ==> a == b`, on values
        whose object members are already in canonical key order. That is the form a consumer holding
        a re-decoded document has, since the reader returns members in that order.
+     - `no_null_ever` — Phase 153, section 12: `render` never emits the token `null`, at any depth,
+       for ANY value (not only the canonical subset). Stated lexically, because the string "null"
+       legitimately renders those four characters inside a literal.
 
    THE FOUR RULE LEMMAS ARE THE PROOF'S OWN PARTS, not decoration:
      - rule 2 — `sort_is_a_canonical_choice`: under the comparator's total-order premises, sorting
@@ -1224,3 +1227,216 @@ let render_aliases_member_order (#num #flt: eqtype) (w: wire num flt)
   : Lemma (requires key_order_ok w /\ key_lt w k1 k2)
           (ensures render w (JObj [(k1, v1); (k2, v2)]) == render w (JObj [(k2, v2); (k1, v1)]) /\
                    ~(JObj #num #flt [(k1, v1); (k2, v2)] == JObj [(k2, v2); (k1, v1)])) = ()
+
+(* ======================================================================================
+   12. NO NULL ON THE WAY OUT (Phase 153) — WIRE_FORMAT §2 rule 4, the encoder's half.
+
+       `jval` has no null constructor, so `render` has no clause that could spell one — true, and
+       until now prose. The lemma an assessor can be handed is about the BYTES: `render` never
+       emits the token `null`, at the root or at any depth, for any value whatsoever.
+
+       WHY THE STATEMENT IS LEXICAL, and not "the rendering does not contain n-u-l-l". That
+       sentence is FALSE: the string "null" renders as `"null"`, which contains those four
+       characters, and so does a member KEY spelled `null`. What JSON means by the null TOKEN is
+       those characters OUTSIDE a string literal, so the model carries the three-state lexer every
+       JSON reader has (outside a string / inside one / after a backslash) and states the claim
+       there. It then proves something stronger than the absence of one token: outside a string
+       literal `render` emits ONLY the structural punctuation, the characters of a numeral, and
+       the letters of `true` and `false` (`bare_ok`). There is no bare `n` anywhere in a
+       rendering — and therefore no `null`, no `NaN`, and no bare word of any kind a reader could
+       be asked to interpret. (The three non-finite float tokens are QUOTED; that they alias
+       strings is refutation 1 above, and is a different fact from this one.)
+
+       THE ONE PREMISE is `layouts_numeric`: rule 5's two layouts are numerals — every character
+       of `string i` and of the round-trip float layout is a digit, `-`, `+`, `.` or `E`. It is
+       WEAKER than `tok_read_ok`, which says that and more of every integer and every canonical
+       float; it is stated separately because this lemma is about EVERY value, including the
+       integral floats section 5 puts outside the canonical subset, about whose layout
+       `tok_read_ok` says nothing. The numerals themselves stay .NET's to compute, as everywhere
+       in this model.
+
+       WHAT IS NOT CLAIMED. `Canon.renderOrdered` is not modelled (header). And this is a theorem
+       about the ENCODER: a host that writes JSON by some other route is not described by it.
+
+       Every definition below is PROOF-ONLY and erased at extraction, so the oracle is unchanged.
+   ====================================================================================== *)
+
+(* A JSON lexer's string state: outside a literal, inside one, or inside one just after `\`. *)
+[@@ noextract_to "FSharp"]
+type lex =
+  | LOut | LIn | LEsc
+
+[@@ noextract_to "FSharp"]
+let lex_step (st: lex) (c: ch) : Tot lex =
+  match st with
+  | LOut -> if CQuote? c then LIn else LOut
+  | LIn -> (match c with
+            | CQuote -> LOut
+            | CBackslash -> LEsc
+            | _ -> LIn)
+  | LEsc -> LIn
+
+[@@ noextract_to "FSharp"]
+let rec lex_end (st: lex) (l: list ch) : Tot lex (decreases l) =
+  match l with
+  | [] -> st
+  | c :: t -> lex_end (lex_step st c) t
+
+(* The alphabet `render` is allowed OUTSIDE a string literal: the structural punctuation, the
+   characters of a numeral, and the letters of `true` / `false` (`t r u e f a l s` — `u` is `CLu`
+   and `e f a` are hex digits in this alphabet). Anything else verbatim is refused — in particular
+   `n`, the first character of `null` and of `NaN`. *)
+[@@ noextract_to "FSharp"]
+let bare_ok (c: ch) : Tot bool =
+  match c with
+  | CBackslash -> false
+  | CCtrl _ _ -> false
+  | CPlain s -> s = "t" || s = "r" || s = "l" || s = "s"
+  | _ -> true
+
+(* Every character OUTSIDE a string literal is in that alphabet. *)
+[@@ noextract_to "FSharp"]
+let rec bare_clean (st: lex) (l: list ch) : Tot bool (decreases l) =
+  match l with
+  | [] -> true
+  | c :: t -> (if LOut? st then bare_ok c else true) && bare_clean (lex_step st c) t
+
+(* F#: the four characters of the JSON `null` token. *)
+[@@ noextract_to "FSharp"]
+let null_chars : list ch = [CPlain "n"; CLu; CPlain "l"; CPlain "l"]
+
+(* Rule 5, the half this lemma needs: both layouts are numerals. *)
+[@@ noextract_to "FSharp"]
+let layouts_numeric (#num #flt: eqtype) (w: wire num flt) : prop =
+  (forall (i: num). all_num (w.int_str i)) /\ (forall (f: flt). all_num (w.float_str f))
+
+(* The lexer is compositional over concatenation — which is all a renderer that is "a concatenation
+   and nothing else" needs. *)
+[@@ noextract_to "FSharp"]
+let rec lex_app (st: lex) (l m: list ch)
+  : Lemma (ensures lex_end st (app l m) == lex_end (lex_end st l) m /\
+                   bare_clean st (app l m) == (bare_clean st l && bare_clean (lex_end st l) m))
+          (decreases l) =
+  match l with
+  | [] -> ()
+  | c :: t -> lex_app (lex_step st c) t m
+
+(* Rule 6 keeps a string body INSIDE the literal: the escape of any character returns the lexer to
+   the in-string state, so the only quote that closes a literal is the one `quoted` appends. *)
+[@@ noextract_to "FSharp"]
+let esc_ch_stays_inside (c: ch)
+  : Lemma (ensures lex_end LIn (esc_ch c) == LIn /\ bare_clean LIn (esc_ch c)) =
+  match c with
+  | CQuote -> assert_norm (lex_end LIn [CBackslash; CQuote] == LIn /\
+                           bare_clean LIn [CBackslash; CQuote])
+  | CBackslash -> assert_norm (lex_end LIn [CBackslash; CBackslash] == LIn /\
+                               bare_clean LIn [CBackslash; CBackslash])
+  | CCtrl hi lo ->
+      let e = [CBackslash; CLu; CHexCh HD0; CHexCh HD0; CHexCh (if hi then HD1 else HD0); CHexCh lo] in
+      assert_norm (lex_end LIn e == LIn /\ bare_clean LIn e)
+  | _ -> ()
+
+[@@ noextract_to "FSharp"]
+let rec escape_stays_inside (s: list ch)
+  : Lemma (ensures lex_end LIn (escape s) == LIn /\ bare_clean LIn (escape s)) (decreases s) =
+  match s with
+  | [] -> ()
+  | c :: t ->
+      esc_ch_stays_inside c;
+      escape_stays_inside t;
+      lex_app LIn (esc_ch c) (escape t)
+
+[@@ noextract_to "FSharp"]
+let quoted_is_one_literal (s: list ch)
+  : Lemma (ensures lex_end LOut (quoted s) == LOut /\ bare_clean LOut (quoted s)) =
+  escape_stays_inside s;
+  lex_app LIn (escape s) [CQuote]
+
+(* A numeral never opens a literal and is made of the numeric alphabet. *)
+[@@ noextract_to "FSharp"]
+let rec numeral_is_bare (t: list ch)
+  : Lemma (requires all_num t) (ensures lex_end LOut t == LOut /\ bare_clean LOut t) (decreases t) =
+  match t with
+  | [] -> ()
+  | _ :: r -> numeral_is_bare r
+
+[@@ noextract_to "FSharp"]
+let literals_are_bare (u: unit)
+  : Lemma (ensures lex_end LOut true_chars == LOut /\ bare_clean LOut true_chars /\
+                   lex_end LOut false_chars == LOut /\ bare_clean LOut false_chars) =
+  assert_norm (lex_end LOut true_chars == LOut /\ bare_clean LOut true_chars);
+  assert_norm (lex_end LOut false_chars == LOut /\ bare_clean LOut false_chars)
+
+(* The renderer, clause for clause: every rendering leaves the lexer OUTSIDE a literal and is clean. *)
+[@@ noextract_to "FSharp"]
+let rec render_is_bare_clean (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (requires layouts_numeric w)
+          (ensures lex_end LOut (render w v) == LOut /\ bare_clean LOut (render w v))
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s -> quoted_is_one_literal s
+  | JInt i -> numeral_is_bare (w.int_str i)
+  | JBool _ -> literals_are_bare ()
+  | JFloat f ->
+      (match w.fclass f with
+       | FNaN -> quoted_is_one_literal nan_chars
+       | FPosInf -> quoted_is_one_literal inf_chars
+       | FNegInf -> quoted_is_one_literal neg_inf_chars
+       | FFinite -> numeral_is_bare (w.float_str (if w.is_zero f then w.pos_zero else f)))
+  | JArr xs -> render_items_is_bare_clean w xs
+  | JObj fs -> render_kvs_is_bare_clean w (sort_kvs w fs)
+
+and render_items_is_bare_clean (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Lemma (requires layouts_numeric w)
+          (ensures lex_end LOut (render_items w xs) == LOut /\ bare_clean LOut (render_items w xs))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | [x] ->
+      render_is_bare_clean w x;
+      lex_app LOut (render w x) [CRBrack]
+  | x :: t ->
+      render_is_bare_clean w x;
+      render_items_is_bare_clean w t;
+      lex_app LOut (render w x) (CComma :: render_items w t)
+
+and render_kvs_is_bare_clean (#num #flt: eqtype) (w: wire num flt)
+                             (fs: list (list ch & jval num flt))
+  : Lemma (requires layouts_numeric w)
+          (ensures lex_end LOut (render_kvs w fs) == LOut /\ bare_clean LOut (render_kvs w fs))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | [(k, v)] ->
+      quoted_is_one_literal k;
+      render_is_bare_clean w v;
+      lex_app LOut (render w v) [CRBrace];
+      lex_app LOut (quoted k) (CColon :: app (render w v) [CRBrace])
+  | (k, v) :: t ->
+      quoted_is_one_literal k;
+      render_is_bare_clean w v;
+      render_kvs_is_bare_clean w t;
+      lex_app LOut (render w v) (CComma :: render_kvs w t);
+      lex_app LOut (quoted k) (CColon :: app (render w v) (CComma :: render_kvs w t))
+
+(* THE LEMMA (§2 rule 4, the encoder's half). For every value: the rendering is clean outside its
+   string literals, so it is not the token `null`, and it does not CONTAIN the token `null` at any
+   position that lies outside a literal — `pre` is everything before the position, and
+   `lex_end LOut pre == LOut` is what "outside a literal" means. *)
+[@@ noextract_to "FSharp"]
+let no_null_ever (#num #flt: eqtype) (w: wire num flt) (v: jval num flt) (pre rest: list ch)
+  : Lemma (requires layouts_numeric w)
+          (ensures bare_clean LOut (render w v) /\
+                   ~(render w v == null_chars) /\
+                   (lex_end LOut pre == LOut ==> ~(render w v == app pre (app null_chars rest)))) =
+  render_is_bare_clean w v;
+  assert_norm (bare_clean LOut null_chars == false);
+  lex_app LOut pre (app null_chars rest);
+  lex_app LOut null_chars rest
+
+(* … and the grammar's own reader has no arm that would accept one: the only bare word it reads
+   that opens with an ordinary letter is `true`. *)
+[@@ noextract_to "FSharp"]
+let reader_refuses_null (#num #flt: eqtype) (w: wire num flt) (rest: list ch)
+  : Lemma (ensures Error? (read w (app null_chars rest))) =
+  assert_norm (app null_chars rest == CPlain "n" :: app [CLu; CPlain "l"; CPlain "l"] rest)
