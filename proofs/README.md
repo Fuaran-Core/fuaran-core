@@ -613,7 +613,7 @@ over-read.
 | `tree-algebra-well-formed-states` | `domain-obligation` | `Conformance.opAlgebra` |
 | `content-id-determines-content` | `premise` | — |
 | `chain-walk-order-is-productions` | `model-bridge` | `permanent` |
-| `signature-binds-one-head` | `domain-obligation` | `Conformance.attestationLaws` |
+| `signature-binds-one-head` | `model-bridge` | `unscheduled` |
 | `parser-float-readback-opaque` | `model-bridge` | `permanent` |
 | `parser-alphabet-bridge` | `model-bridge` | `permanent` |
 | `lawful-abstract-witness` | `domain-obligation` | `Conformance.witnessLaws` |
@@ -2507,18 +2507,22 @@ parameter, as `rec_injective` is, never an `assume`. Two things about it are wor
    scheme's own claim, and key custody's, and nothing here says it. A sink whose `Verify` merely
    compares the attestation's recorded `Head` has the binding property by construction, with no
    cryptography spent; what the cryptography buys is the half this model does not state.
-2. **It is classified a `domain-obligation`, not the `model-bridge` the phase was chartered with,
-   and the reason is the tree's.** Core ships **no production signer**: `OpStream.noAttestation`
-   signs nothing and verifies nothing, a real sink is host-side, and the only concrete sinks in
-   this repository are test-local. The model is handed the sink's own `Sign` and `Verify` as its
-   two parameters, so there is no gap between the model's signature and production's left to
-   bridge. What remains is a property a host's sink either has or lacks — a sink that verifies
-   everything falsifies it, and the differential measures exactly that — and the shipped kit
-   already samples it at the host's own sink: `Conformance.attestationLaws`' prefix arm and its two
-   rehashed-forgery arms are each one attestation offered two heads. By Phase 174's own definitions
-   that is an obligation a green kit run discharges, not a bridge "nothing a domain does closes".
-   Under the `noAttestation` default the law passes vacuously and these theorems say nothing, which
-   is correct: there is no signed head.
+2. **It is classified a `model-bridge` that closes `unscheduled`, and the second word is the
+   finding.** Core ships **no production signer**: `OpStream.noAttestation` signs nothing and
+   verifies nothing, a real sink is host-side, and the only concrete sinks in this repository are
+   test-local. So the model's abstract `verify` is bridged to no production signature at all, which
+   is the bridge the row names. But it is not `permanent`, because something could close it and it
+   is already half-built: the property is one a host's sink either has or lacks — a sink that
+   verifies everything falsifies it, and the differential measures exactly that — and the shipped
+   kit **already samples it** at the host's own sink, since `Conformance.attestationLaws`' prefix
+   arm and its two rehashed-forgery arms are each one attestation offered two heads. By Phase 174's
+   own definitions that reads as a `domain-obligation` discharged by that law. This phase tried the
+   row that way first and the gate refused it, correctly: the discharge relation is SHIPPED data
+   (`Fuaran.Core.Families.obligations`, held to `../proofs.json` row for row by the
+   `Conformance.Families` family), so adding the pair is a change to a shipped package's source,
+   not a proof-leg artefact, and this phase is proof-leg only. Promoting the row is therefore a
+   named, unscheduled act rather than something done in passing. Under the `noAttestation` default
+   these theorems say nothing, which is correct: there is no signed head.
 
 **One boundary is a finding rather than a modelling choice, and it is Phase 191's finding again.**
 `OpStream.head` returns the literal `""` for the empty chain — not `cfg.Genesis` — so an
@@ -2577,15 +2581,16 @@ spending `signature_binds` reddens it too; dropping `splice_changes` reddens
 taking the sequence out of the argument reddens `same_head_same_chain_from`, at the
 chain-against-its-own-extension case.
 
-**What it cost.** Almost nothing, and the budget stands. Section 8 is about 420 lines — thirteen
+**What it cost.** Almost nothing in prover time, and a small budget re-seed. Section 8 is about 420 lines — thirteen
 lemmas and the two theorems — every one an induction over a list or a numeral at the default
 `--z3rlimit 40` with no scoped option, and the new proofs are short appeals to `rec_injective` and
 to section 6's characterisation rather than new case analyses. Both theorems discharged on the
-first attempt; no repair loop was spent. Three cold quaked runs of the module alone measured 22s,
-22s and 23s against the 22s recorded before the section existed; the phase's one cold pass of the
-whole leg also measured 23s, on a pass the leg itself labelled contended (x1.05), so it is not a
-seed. `modules.json` moves `measuredSeconds` to 23 and leaves the 50s budget where Phase 191 put it,
-since 2x23 rounds to it.
+first attempt; no repair loop was spent. Five cold quaked runs of the module alone measured 22s,
+22s, 23s, 27s and 23s against the 22s recorded before the section existed; the 27s was taken beside
+sibling gate runs rather than other provers, and a direct invocation carries no contention label to
+discount it by, so it is kept as the slowest observed. The phase's one cold pass of the whole leg
+measured 23s, on a pass the leg itself labelled contended (x1.05), so it is not a seed.
+`modules.json` re-seeds the budget to 60s from the 27s by the file's own rule, and says so.
 
 **The claims ladder, for this section** (rows `signed-head-binds-chain`,
 `signed-head-rejects-splice`, `signature-binds-one-head`, `signed-head-differential` in
@@ -2597,8 +2602,9 @@ since 2x23 rounds to it.
    seam, not beside a signer.
 3. **Assumed.**
    - **`signature_binds`** — the sink's `Verify` accepts one attestation against at most one head.
-     A `domain-obligation`, discharged by sampling through `Conformance.attestationLaws` at the
-     host's own sink. New with this section.
+     A `model-bridge` that closes `unscheduled`: `Conformance.attestationLaws` already samples it at
+     a host's own sink, and the ladder's discharge relation does not yet name it (above). New with
+     this section.
    - **`rec_injective`** — the linear half of theorem 3's cryptographic premise, still in its
      bundled form, spent once per record by `same_head_same_chain_from`. Inherited, not new.
    - Theorem 3's bridges, unchanged: a sequence number is a Peano numeral, and the extractor and

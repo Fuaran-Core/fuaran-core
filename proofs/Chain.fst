@@ -2029,13 +2029,13 @@ let compacted_tail_tamper_detected
       `Verify` compares the attestation's recorded `Head` against the head it is handed has the
       binding property by construction, with no cryptography spent; what the cryptography buys is
       the half this model does not state.
-   2. **It is the SINK'S, so it is a domain obligation rather than a gap in this model.** Core
-      ships no signer: `OpStream.noAttestation` signs nothing and verifies nothing, and a real
-      sink is host-side. The model is handed the sink's own `Sign` and `Verify`, so there is no
-      bridge between the model's signature and production's to assume — there is a property a
-      host's sink either has or lacks, and `Conformance.attestationLaws` samples it at that sink
-      (its prefix arm and its two rehashed-forgery arms are exactly "one attestation, two heads").
-      A sink that verifies everything falsifies it, and the differential measures that.
+   2. **It is the SINK'S, and Core ships no sink that signs.** `OpStream.noAttestation` signs
+      nothing and verifies nothing, and a real sink is host-side. The model is handed the sink's
+      own `Sign` and `Verify`, so the property is one a host's sink either has or lacks: a sink
+      that verifies everything falsifies it, and the differential measures that. The shipped kit
+      samples it at a host's sink already — `Conformance.attestationLaws`' prefix arm and its two
+      rehashed-forgery arms are exactly "one attestation, two heads" — though the claims ladder
+      does not yet name that law as this row's discharge; `proofs/README.md` says why.
 
    ONE BOUNDARY IS A FINDING rather than a modelling choice, and it is section 7's finding again.
    `OpStream.head` returns the literal `""` for the empty chain — not `cfg.Genesis` — so an
