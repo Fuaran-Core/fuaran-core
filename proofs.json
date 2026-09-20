@@ -1644,6 +1644,109 @@
       "evidence": {
         "assumption": "the read witness handed to the model is the set of ids production's instrumented resolver would observe the evaluator asking for at that node"
       }
+    },
+    {
+      "id": "query-unregistered-refused",
+      "level": "proved",
+      "claim": "`QueryRegistry.dispatch` of an id the registry does not hold is the typed refusal `NoSuchQuery id known`, naming the id and every id the registry does hold — and the result is the SAME under every host resolver, which is what \"runs no resolver\" means for a pure function without instrumenting one. `invoke` can never produce the registry's two refusals (`invoke_never_registry_refusal`), so the classes stay disjoint: a `NoSuchQuery` is always the registry's answer and never a resolver's. The resolver is the model's parameter and stays outside the claim: nothing here is a theorem about any resolver.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "unregistered_refused",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-validate-before-resolve",
+      "level": "proved",
+      "claim": "An argument set `validateParams` rejects makes `invoke` return that rejection, for every resolver alike — no resolver ran — and, at the registry, a dispatch that resolved its id still runs nothing on a set validation rejects (`dispatch_validates_first`). The converse holds too: a settled or pending result, or an `ExecutionFailed`, is reachable only past an accepted validation (`resolver_runs_only_validated`). Validation is characterised EXACTLY rather than soundly: it accepts precisely the sets whose every binding addresses a declared param with a `Null` or an in-type cell and that leave no required name unbound (`validate_params_exact`), the refusal is one of its own three classes (`validate_params_shape`), and a refusal is truthful — an `UnknownParam` names a bound name no param declares and lists the declared ones, a `ParamTypeMismatch` names a declared param, its declared type and a DIFFERENT type the bound cell really has (`refusal_is_truthful`), and a `RequiredParamsUnbound` names only declared names the args really leave out (`unbound_required_truthful`).",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "validate_before_resolve",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-envelope-three-outcomes",
+      "level": "proved",
+      "claim": "THE ENVELOPE HAS NO FOURTH OUTCOME, on this seam as on its sibling. The resolver answers in `Deferred<QueryResult>` (Phase 198), and an invocation past an accepted validation carries its `Ready` or `Pending` and nothing else: a resolver's `Failed m` crossed into the enumerated `ExecutionFailed (m, [])` at the seam, so `Ok (Failed _)` is unreachable rather than merely unproduced, for every resolver and every argument set alike (`invoke_never_ok_failed`), and through the registry, where a host actually reaches the seam (`dispatch_never_ok_failed`). `queryLaws` samples the same claim on the shipped seam over three drawn answers; this is it over all resolvers. The envelope's combinators are outside the model and stay `deferredLaws`'s.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "invoke_never_ok_failed",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-enumerate-is-registry",
+      "level": "proved",
+      "claim": "An id is in `QueryRegistry.enumerate`'s output exactly when `QueryRegistry.tryFind` resolves it, and `dispatch` raises `NoSuchQuery` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS declaration's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends by exactly one entry otherwise (`register_extends`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`), which is what makes a capture key's id prefix name ONE declaration. Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `queryLaws`'s to certify and is outside the theorem.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "enumerate_is_registry",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-invocation-key-deterministic",
+      "level": "proved",
+      "claim": "The Phase 27 capture key reads the declaration through its `Id` ALONE and the arguments through their name-sorted canonical form alone: two declarations sharing an id — whatever else they declare — and two argument lists binding the same DISTINCT names to the same cells in ANY order key identically, under any hash and any int and float renderer, given only that the name comparator is a total order. The order half rests on `sorted_unique`: two name-sorted lists with distinct names holding the same bindings are the same list. The id half needs no premise at all (`invocation_key_id_only`). That the key reads no resolver answer and no clock is NOT a lemma here and is not dressed as one: `invocationKey` is handed neither, so in a pure total function that independence is the function's type. Distinct names are a real hypothesis and not a convenience — `List.sortBy` is stable, so two bindings under ONE name keep the caller's order and the key moves with it.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "invocation_key_deterministic",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-all-null-accepted",
+      "level": "proved",
+      "claim": "THE FIRST FINDING. EVERY declaration — whatever it marks `Required` — accepts the argument set that binds each of its params to `Null`. `validateParams`'s step 1 treats a `Null` cell as type-agnostic absence and passes it; step 2 asks only whether the NAME is a key of the argument map, and it is. So `Required` constrains the presence of a name and never of a value, and a resolver is reached with its required param absent. `QueryParam`'s doc comment says a bound cell must agree with the type \"(or be `Null` when not required)\"; the code accepts it when required as well. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: this phase changes no behaviour of `Fuaran.Core.Query`, and the fix shape — step 2 counting a `Null` binding of a required param as unbound — changes what a public function accepts.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "all_null_accepted",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-key-collision",
+      "level": "proved",
+      "claim": "THE SECOND FINDING. `invocationKey`'s canonical string joins `name=cellKey` pairs with NO separator, so a string cell can spell the next binding: for one declaration (`a` required, `b` optional, both strings) the two DIFFERENT accepted argument sets `[a = \"1b=s2\"]` and `[a = \"1\"; b = \"2\"]` share the canonical string `a=s1b=s2`, and therefore share a capture key under EVERY hash — the collision is in the pre-image, before `Hash.fnv1a` is consulted. The only premise is that the comparator puts `a` before `b`. The doc comment's \"different args do not collide\" is false, and a replay keyed this way serves one invocation's captured rows for the other. `Capability.invocationKey` builds its canonical string the same way (`addr=value`, joined on the empty string) and is outside Phase 177's model; the same shape applies there. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: the fix shape — a separator no `cellKey` can emit, which `Hash.fs` already names for the content-hash folds (U+0001) — changes every existing capture key, so it is a journal-compatibility decision and not a tidy-up.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "theorem": "key_collision",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-differential",
+      "level": "tested",
+      "claim": "The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so first-wins is compared, and argument sets that bind, skip, null, mistype, repeat and reverse. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and on nothing else. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#187",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets",
+          "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail",
+          "no resolver runs on a refused dispatch — `unregistered_refused` and `validate_before_resolve`, on the shipped seam",
+          "the two findings hold on the shipped seam — `all_null_accepted` and `key_collision`"
+        ]
+      }
+    },
+    {
+      "id": "query-renderers-abstract",
+      "level": "assumed",
+      "claim": "THE RENDERERS PREMISE. `invocationKey` reaches for four host functions — `string` on an `int`, `Canon.canonicalFloat`, `Hash.fnv1a`, and the ordinal string order `List.sortBy fst` compares names by — and the model takes them as a `renderers` record, with `cellKey`'s one non-ASCII literal (its rendering of a `Null`) riding beside them and a float cell crossing as an opaque carrier (its round-trip `R` text). The clause structure of `cellKey`, the stable name sort and the separator-free join are modelled; the two numeral layouts, the hash and the comparator are not. `invocation_key_deterministic` therefore states what it needs of the comparator — that it is a total order — as a hypothesis, and says nothing about whether two different canonical strings hash apart, which is a claim about FNV-1a and is not made. `key_collision` needs none of it beyond `a` sorting before `b`. The differential instantiates the record at production's own four calls, so the envelope is compared and the renderers are exercised, not modelled. Permanent: `Canon.canonicalFloat` is theorem 7's numeral-layout bridge already (`canon-numeral-layouts`), and a model of the ordinal comparator is a model of UTF-16 code-unit order.",
+      "phase": "fuaran-core#187",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the int and float renderers, the hash and the name comparator behind invocationKey are host functions the model takes as parameters; the comparator is assumed a total order where a theorem needs one"
+      }
     }
   ]
 }

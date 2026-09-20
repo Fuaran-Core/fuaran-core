@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164, 155, 173, 176 and 177).
+# fuaran-core — the proof leg (Phases 131, 135, 136, 148, 149, 150, 151, 164, 155, 173, 176, 177 and 187).
 #
 # THE ENGINE IS `kit/check-proof-leg.ps1` (Phase 155) and this file is the caller: it declares
 # what THIS repository has — the models, which of them are checked but not extracted, where the
@@ -110,13 +110,20 @@ $ErrorActionPreference = 'Stop'
 #                `evalFrom` proved equal to `eval` under the stated evaluator contract, reuse
 #                proved minimal and an unknown change proved refused. Self-contained: it opens
 #                nothing, so its position is free.
+#   Query      — Phase 187, the DATA-ACQUISITION SEAM beside the function seam:
+#                `Fuaran.Core.Query`'s `validateParams` / `invoke` / `invocationKey` with
+#                `QueryRegistry.register` / `enumerate` / `dispatch`, clause for clause over an
+#                abstract resolver — with default-deny dispatch, validation before resolution,
+#                enumeration equal to the registry and the capture key's determinism proved, and
+#                two findings read off the model. Self-contained: it opens nothing, so its
+#                position is free.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation', 'Query')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
