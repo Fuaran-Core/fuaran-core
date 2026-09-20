@@ -568,6 +568,45 @@
       }
     },
     {
+      "id": "snapshot-replay-equivalence",
+      "level": "proved",
+      "claim": "For every stream, every reducer, every boundary n and the (snapshot, tail) that compact produces at n, replay from the origin IS replayFrom the snapshot, READ AGAINST THE ORIGIN'S NUMBERING. The qualification is the finding: replayFrom is `replay w snap.State tail` and replay numbers from zero, so a tail op that rejects at origin index n+j is reported by replayFrom at j — the unqualified equality the phase was chartered with is true of the state and false of the rejection index, and `replay_from_snapshot_state` is the offset-free corollary for the accepted case, which is the sentence `Conformance.snapshotLaws` samples. It takes no hypothesis on the chain, the hash or the snapshot's payload: bounded replay is a fact about the fold, and it holds of a stream that does not even verify. Beside it, `compact_refusal_is_the_origins`: compact refuses an in-range boundary exactly when the origin's own replay halts inside the prefix, at the same index with the same rejection, so a refused compaction loses nothing. The reducer, the state and the rejection are parameters, so this is one theorem for every side's cache rather than one per domain. What it deliberately is not is a claim about any cache's on-disk format or its self-verification against a stream head, which belong to the host that keeps the cache. Proved with no assume and no admit under --report_assumes error.",
+      "phase": "fuaran-core#191",
+      "evidence": {
+        "theorem": "replay_from_snapshot_eq",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "compact-preserves-verify",
+      "level": "proved",
+      "claim": "The original stream verifies exactly when its DISCARDED PREFIX verifies and the compaction verifies across its boundary — `verifyChain rs = (verifyChain prefix && verifyAcross snap tail)`, for the snapshot compact produces, under no hypothesis on the hash at all, because it is the walker's own arithmetic. The sentence the phase was chartered with, that the compacted stream verifies exactly when the original does, is the corollary `compact_verifies_iff_original` and CARRIES A PREMISE: the prefix verified. Without it the sentence is false in the direction that matters — compact does not walk the chain, it reads `records[n-1].Hash` and trusts it, so a compaction of a stream whose prefix was tampered verifies across, and once the prefix is discarded nothing can find the tamper again. Verify, then compact. Two results sit beside it. `compacted_tail_tamper_detected` is `chain-tamper-detected`'s linear arm restated at the boundary, an appeal to it and nothing more, spending the same `rec_injective` premise. And `compact_at_zero_needs_the_empty_genesis` is a boundary production leaves open, proved rather than argued: snapshotAt hard-wires the boundary hash at sequence zero to the empty string where the walkers start from `cfg.Genesis`, so under any other genesis a compaction at zero of an intact non-empty stream does NOT verify across. Both shipped configs have the empty genesis, so nothing shipped is affected; `StreamConfig` is a public record, so the theorem carries the condition (`n == PZero ==> genesis == \"\"`) rather than hiding it. The snapshot's hash payload — state-hashed or chain-only — is a parameter neither theorem reads, so `compact` and `compactChainOnly` are two instantiations of one result.",
+      "phase": "fuaran-core#191",
+      "evidence": {
+        "theorem": "compact_preserves_verify",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "snapshot-replay-differential",
+      "level": "tested",
+      "claim": "The extracted model agrees with OpStream.compact, compactChainOnly, replayFrom, replay, verifyAcross and verifyAcrossChainOnly over generated streams from two witnesses, at EVERY boundary of each including the out-of-range one, and over every single-record tamper of each — so the streams compared include ones that do not verify and ones that do not replay, which is where the two theorems say something a green snapshotLaws run does not. A compaction is compared whole: the refusal's message verbatim, or every field of the snapshot and the tail record for record. Beside the model-against-production comparison, PRODUCTION is held to the theorems' own statements on its own values — `replay = offset n (replayFrom snap tail)` and `verifyChain rs = (verifyChain prefix && verifyAcross snap tail)` — so a model that agreed with production while both drifted from the theorem would still be caught. Nine vacuity guards require every class the theorems speak about to have been met: an accepted bounded replay, a halt past boundary zero (the only place the offset is observable), an out-of-range refusal, a prefix refusal, a verified and a rejected boundary, a prefix tamper compacted away unseen, and a detected tail tamper. Four further cases: a model handed a different hash must disagree; the offset shown load-bearing on production alone; a prefix tamper verifying across, to production and to the model alike; and the non-empty-genesis boundary measured on production under its own config. The differential was also reddened by hand before it was trusted, by two perturbations of the extracted oracle — an offset that drops n, and a boundary hash taken one record early — each of which failed the generated cases. Agreement is over those pools, never over all inputs.",
+      "phase": "fuaran-core#191",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "tests": [
+          "the snapshot oracle agrees with production over the work-plan stream, every boundary and every tamper",
+          "the snapshot oracle agrees with production over the reference witness's stream, every boundary and every tamper",
+          "a snapshot model handed a DIFFERENT hash disagrees with production — the comparison can lose",
+          "replayFrom renumbers a halt from ZERO — the offset in replay_from_snapshot_eq is production's, not the model's",
+          "a tamper in the DISCARDED prefix verifies across — compact trusts the boundary hash it reads",
+          "under a NON-EMPTY genesis a compaction at sequence zero does not verify across — snapshotAt hard-wires the empty one"
+        ]
+      }
+    },
+    {
       "id": "parse-total",
       "level": "proved",
       "claim": "The recursive-descent JSON parser reaches exactly one outcome on every input — an accepted value or a CLASSIFIED refusal, never both and never neither. That it is Tot at all is the content rather than a formality: F* admits the mutual group only after showing it terminates on every input, and a recursive-descent parser over a mutable index has no syntactic reason to. Every consuming sub-parser carries the remaining input's strict decrease in its RETURN TYPE, and that refinement is the whole termination argument.",
