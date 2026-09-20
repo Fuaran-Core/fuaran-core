@@ -2253,12 +2253,73 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.28.0 (draft)
+## 0.28.1 (draft)
 
-**This slot is a DRAFT.** `<Version>` reads `0.28.0` and no `v0.28.0` tag exists, so an additive or
+**This slot is a DRAFT.** `<Version>` reads `0.28.1` and no `v0.28.1` tag exists, so an additive or
 behaviour-identical change may ride it: append its entry here rather than opening another slot. A
 change of a higher class than the entries below carry advances the number, because the number is
 what tells a consumer what adopting it costs.
+
+**This slot was OPENED rather than ridden because `0.28.0` is tagged**, and it is a PATCH rather
+than a minor because the Phase 183 surface gate reports **no baseline moved since `v0.28.0`** — the
+class is `additive`, and the rule the `0.28.0` entry states is a `0.28.1` draft for an additive or
+behaviour-identical change.
+
+**What adopting `0.28.1` costs, and the one consumer it can cost something.** No managed member,
+type, record field or union case moves, so no .NET or Fable consumer's source changes and nothing
+needs migrating. What changes is DELIVERED CONTENT: the `IncrementalDelta` conformance family's
+generated corpus grows by ten pipeline shapes. **A host that runs that family against its own
+incremental evaluator can go RED at this pin — and a red here is a WRONG ANSWER in your incremental
+path, not a regression in this kit.** The predicate to check is in the entry below.
+
+### The incremental corpus reaches a row-local step reading a cross-row column (Phase 212) — additive; may turn an ADOPTER's conformance run red
+
+**What it is.** `IncrementalDelta`'s enumerated corpus grows from 38 pipeline shapes to 48. The ten
+new ones are the class Phase 208 found the hard way and `v0.26.0` published: **a row-local step
+(`Filter`, `Derive`, `Project`) reading a column whose value for row *r* depends on rows other than
+*r*.** The corpus carried ten window-bearing shapes and not one of them — in eight the window was
+the last step, and in the two that continued the next step was a `GroupBy`, which re-aggregates from
+its member rows and never consults the per-row cache. So the family that exists to catch that defect
+could not, and three phases read the code without seeing it.
+
+**Why an adopter can go red, and what to do about it.** If your evaluator keys its per-row cache on
+*the delta did not name this row* rather than on *this row's cells have not moved*, these ten shapes
+are exactly the ones that expose it, and the family will now say so. That is the intended effect.
+Check that predicate first: a `Window` recomputes its column over the whole frame it is handed, so a
+row the delta never named legitimately comes out of it with a different cell, and any later step
+that reuses a cached answer computed from that row's old cells is answering a question that has
+moved. This kit's own fix was to replace the condition with *byte-identical to the cells the prior
+evaluation held for this row*, cleared for every row at a `Window` (`0.27.0`, Phase 208).
+
+**What it does not change.** No public surface moves — the Phase 183 gate reports zero baselines
+moved since `v0.28.0`. No existing shape moves in verdict; `IncrementalDelta.laws` is green over the
+whole corpus at every pinned seed. The sample-adequacy census gains a third guarded dimension,
+`cross-row column read`, with one verdict per cross-row producer class, and every pre-existing
+refresh class still clears the suite's 7% reach floor. The measured shares, the full
+(producer × consumer) census and the two producers that are absent by construction are in
+[`docs/incremental-evaluation.md`](docs/incremental-evaluation.md).
+
+**A SECOND live defect, reported here and deliberately not fixed.** Adding these shapes surfaced a
+neighbouring wrong answer that is still present at `0.28.1`: **a merged order whose sort key reads a
+column a window appended returns the wrong rows.** Phase 208 replaced its cache condition at two
+sites and left a third standing — the sort's reusable set — so a merge reuses the cached position of
+a row whose sort key a window has moved. Measured in both directions: `window(rank) > sort(rk)` is
+wrong with or without a following `limit`, `window(rank) > sort(b)` on a source column is right, and
+a sort keyed on a column derived from source columns alone is right. **If you run a `Sort` whose key
+reads a `Window`'s output through this seam, on any version up to and including `0.28.1`, your
+refresh can return the wrong rows** — re-prime rather than refresh, or put the sort ahead of the
+window, until the fix lands. The executable reproducer is in `IncrementalRefreshCostTests`; it fails
+the moment the defect is fixed and names the remedy. The fix belongs to the seam, not to a
+conformance-corpus phase, and was scoped out deliberately so the finding stayed a finding.
+
+## 0.28.0 — released 2026-09-20 as `v0.28.0`
+
+**This slot is RELEASED.** `<Version>` read `0.28.0` and the repository holds the `v0.28.0` tag, so
+this is a released contract rather than a draft and nothing further can ride it: the next
+public-contract change opens a new slot and advances `<Version>` with it — a `0.28.1` draft for an
+additive or behaviour-identical change, `0.29.0` for a breaking one. The entries below are what
+shipped in it, and the paragraph after next is the one to plan an adoption from. Entries written
+while the slot was open refer to it as the `0.28.0` draft; they are left as written.
 
 **This slot was OPENED rather than ridden, and the reason is the rule rather than the size of the
 change.** `0.27.0` is tagged, so nothing can ride it; and the one change below is BREAKING on the
