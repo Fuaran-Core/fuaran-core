@@ -1294,6 +1294,168 @@ let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) 
     | Ok _, None -> [ sprintf "head %s: the model REFUSED a closure with no dangling parent" head ], widest
     | Error e, _ -> [ sprintf "head %s: production reports a cyclic closure it cannot have: %s" head e ], widest
 
+// ---------------------------------------------------------------------------
+//  Phase 158 — delta recovery over a MERGED HEAD, and `Dag.mergeBase`, beside production's own.
+//
+//  Section 14 of `proofs/DagFold.fst` proves that over a head whose lane hangs off an already
+//  MERGED node, `Dag.between` returns that lane's own nodes in append order (`between_merged`),
+//  that the fold above it is the deltas-first fold (`reconcile_many_merged_eq`), and that
+//  `Dag.mergeBase` of two such heads is the merged node they diverged from
+//  (`merge_base_is_divergence`). What runs here is the other half: production's OWN
+//  `Dag.mergeBase` / `Dag.betweenOps` / `Dag.reconcileMany` over the DAG a clone actually holds
+//  after it has folded, pulled and folded again — round one's lanes off a base, their heads folded
+//  into one convergent head with `Dag.merge`, and round two's lanes appended off THAT — against the
+//  extracted model on the same nodes.
+//
+//  Nothing is recomputed across the bridge: the ids are the content hashes production minted. The
+//  model's recovery runs under section 13's drain at `String.CompareOrdinal`, which is the order
+//  production's `topoCore` takes, and over this shape the drain's frontier genuinely widens — so
+//  the order beneath the merged head is a real choice, and the claim measured is that the
+//  recovered delta does not depend on it.
+// ---------------------------------------------------------------------------
+
+/// The DAG a clone holds after FOLD, PULL, FOLD: round one's lanes off one base, their heads merged
+/// into one convergent head, and round two's lanes appended off that head under their own actors.
+/// Returns the original base id, the merged head, round one's heads, round two's heads, and the DAG.
+let private foldPullFold
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (round1: 'Op list list)
+    (round2: 'Op list list)
+    : string * string * string list * string list * Dag.T<'Op> =
+    let hashFn = OpStream.defaultHash
+    let baseId, heads1, dag1 = productionDag w baseOp round1
+    let merged, dagM = mergedUnion w baseOp baseId heads1 dag1
+
+    let heads2, dag2 =
+        round2
+        |> List.indexed
+        |> List.fold
+            (fun (hs, d) (i, ops) ->
+                let actor = Human("pull-" + string i)
+
+                let head, d' =
+                    ops
+                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (merged, d)
+
+                hs @ [ head ], d')
+            ([], dagM)
+
+    baseId, merged, heads1, heads2, dag2
+
+let private foundId (r: DagFold.found<string>) : string option =
+    match r with
+    | DagFold.Found id -> Some id
+    | DagFold.Missing -> None
+
+/// The go-red instrument for `mergeBase`: the model's own function at the REVERSED key — the same
+/// intersection, the same extracted `max_by`, with `deeper` flipped — so it returns the SHALLOWEST
+/// common ancestor, which over a fold-pull-fold union is the ORIGINAL BASE rather than the
+/// divergence point. It is as well-formed a `maxBy` as the model's own; what it breaks is agreement
+/// with production, and the delta recovered from the base it names.
+let private shallowestCommon (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> list) (left: string) (right: string) =
+    match DagFold.inter (DagFold.ancestors_of model fuel left) (DagFold.ancestors_of model fuel right) with
+    | [] -> None
+    | c :: t -> Some(DagFold.max_by (fun x y -> DagFold.deeper ordLt model fuel y x) c t)
+
+type private MergedTally =
+    {
+        Failures: string list
+        /// Ops recovered across every round-two lane — the vacuity guard.
+        Recovered: int
+        /// Round-two lanes of two or more ops: a one-node lane walks no chain.
+        Chains: int
+        /// Two-parent nodes beneath the merged heads: with none, the "merged head" was a plain node
+        /// and the case re-measured Phase 134's shape under a different name.
+        MergeNodes: int
+        /// Head pairs whose merge base was located.
+        Pairs: int
+    }
+
+/// One fold-pull-fold union, compared three ways: each round-two head's recovered delta (production
+/// `betweenOps` from the merged head, the model's `between_ops_drained`, and the lane that was
+/// appended — the theorem's own right-hand side); every pair of round-two heads' merge base
+/// (production, the model, and the merged head itself); and the model's computable premises, so a
+/// green run is known to be one the theorems are ABOUT.
+let private mergedDisagreements
+    (locate: DagFold.dag<'Op> -> DagFold.node<'Op> list -> string -> string -> string option)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (baseOp: 'Op)
+    (round1: 'Op list list)
+    (round2: 'Op list list)
+    : MergedTally =
+    let _, merged, _, heads2, dag = foldPullFold w baseOp round1 round2
+    let model = toModelDag dag
+    let fuel = model.nodes
+    let kfuel = drainFuel model.nodes
+    let failures = ResizeArray<string>()
+    let mutable recovered = 0
+
+    for (i, (head, lane)) in List.indexed (List.zip heads2 round2) do
+        let p = Dag.betweenOps dag merged head
+        let o = DagFold.between_ops_drained ordLt kfuel model fuel merged head
+        recovered <- recovered + List.length p
+
+        if p <> o then
+            failures.Add(
+                sprintf
+                    "round-two lane %d: the recovered delta differs\n  production: [%s]\n  model:      [%s]"
+                    i
+                    (p |> List.map w.Encode |> String.concat "; ")
+                    (o |> List.map w.Encode |> String.concat "; ")
+            )
+
+        if o <> lane then
+            failures.Add(
+                sprintf
+                    "round-two lane %d: the model did not recover the lane that was appended (between_ops_merged)\n  lane:  [%s]\n  model: [%s]"
+                    i
+                    (lane |> List.map w.Encode |> String.concat "; ")
+                    (o |> List.map w.Encode |> String.concat "; ")
+            )
+
+        // The FUEL premise of `merged_recovers`, evaluated: the walk below the lane completed.
+        if not (DagFold.walk_ok model (DagFold.drop_by fuel (List.rev lane)) merged) then
+            failures.Add(sprintf "round-two lane %d: the model's walk below the lane ran out of fuel — premise unmet" i)
+
+    let mutable pairs = 0
+
+    for (i, hi) in List.indexed heads2 do
+        for (j, hj) in List.indexed heads2 do
+            if i < j then
+                pairs <- pairs + 1
+                let p = Dag.mergeBase dag hi hj
+                let o = locate model fuel hi hj
+
+                if p <> o then
+                    failures.Add(
+                        sprintf "heads %d and %d: the merge base differs\n  production: %A\n  model:      %A" i j p o
+                    )
+
+                if p <> Some merged then
+                    failures.Add(
+                        sprintf "heads %d and %d: production's merge base %A is not the merged head %s" i j p merged
+                    )
+
+    let mergeNodes =
+        let anc = Dag.ancestorsOf dag merged
+
+        dag.Nodes
+        |> Map.toList
+        |> List.filter (fun (id, n) -> Set.contains id anc && List.length n.Parents > 1)
+        |> List.length
+
+    { Failures = List.ofSeq failures
+      Recovered = recovered
+      Chains = round2 |> List.filter (fun l -> List.length l > 1) |> List.length
+      MergeNodes = mergeNodes
+      Pairs = pairs }
+
+/// The faithful locator — the extracted `merge_base` at production's id order.
+let private modelMergeBase (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> list) (l: string) (r: string) =
+    foundId (DagFold.merge_base ordLt model fuel l r)
+
+// ---------------------------------------------------------------------------
 //  Phase 133 — the TREE ALGEBRA as a third oracle.
 //
 //  `proofs/TreeOps.fst` models `Ops.apply` and `Ops.footprint` over the tree as the
@@ -8522,6 +8684,196 @@ let proofOracleTests =
                   Expect.equal ord production "the model and production agree once the back edge is gone"
                   Expect.isTrue (DagFold.is_topo_enum ns' ord) "and the complete drain IS a topological enumeration"
               | m, p -> failtestf "the acyclic control disagreed: model=%A production=%A" m p
+          // ---- Phase 158: delta recovery over a MERGED HEAD, and mergeBase, beside production's ----
+
+          testCase "the extracted recovery and mergeBase are production's over every FOLD-PULL-FOLD union"
+          <| fun _ ->
+              // The shape section 14 is about: round one's lanes folded into one convergent head
+              // with `Dag.merge`, round two's lanes appended off it. Three comparisons per union —
+              // production's delta, the model's, and the lane that was appended; production's merge
+              // base, the model's, and the merged head — plus the model's fuel premise, evaluated.
+              // The adequacy guards are the ones a green run could otherwise hide behind: ops were
+              // recovered, a chain was walked, a merge base was located, and the head the lanes
+              // hang off really had two-parent nodes beneath it.
+              let mutable rng = ConfRng.ofSeed 1580
+              let mutable recovered = 0
+              let mutable chains = 0
+              let mutable mergeNodes = 0
+              let mutable pairs = 0
+
+              for i in 1..60 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let t = mergedDisagreements modelMergeBase planW planLaneGen.BaseOp round1 round2
+
+                  match t.Failures with
+                  | [] -> ()
+                  | d :: _ ->
+                      failtestf
+                          "work-plan domain iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                          i
+                          (renderLanes encPlanOp round1)
+                          (renderLanes encPlanOp round2)
+                          d
+
+                  recovered <- recovered + t.Recovered
+                  chains <- chains + t.Chains
+                  mergeNodes <- mergeNodes + t.MergeNodes
+                  pairs <- pairs + t.Pairs
+
+              for i in 1..30 do
+                  let round1, r1 = treeLaneGen.Lanes 4 rng
+                  let round2, r2 = treeLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let t = mergedDisagreements modelMergeBase treeW treeLaneGen.BaseOp round1 round2
+
+                  match t.Failures with
+                  | [] -> ()
+                  | d :: _ ->
+                      failtestf
+                          "reference witness iter %d\nround one:\n%s\nround two:\n%s\n%s"
+                          i
+                          (renderLanes treeW.Encode round1)
+                          (renderLanes treeW.Encode round2)
+                          d
+
+                  recovered <- recovered + t.Recovered
+                  chains <- chains + t.Chains
+                  mergeNodes <- mergeNodes + t.MergeNodes
+                  pairs <- pairs + t.Pairs
+
+              Expect.isGreaterThan recovered 0 (sprintf "no ops were recovered at all (recovered=%d)" recovered)
+              Expect.isGreaterThan chains 0 "no round-two lane was longer than one op, so no chain was walked"
+              Expect.isGreaterThan pairs 0 "no pair of round-two heads had its merge base located"
+
+              Expect.isGreaterThan
+                  mergeNodes
+                  0
+                  "no merged head had a two-parent node beneath it, so this case re-measured Phase 134's base-plus-chains shape"
+
+          testCase "the fold FROM a merged head is the deltas-first fold over the round-two lanes"
+          <| fun _ ->
+              // `reconcile_many_merged_eq`, measured: production's `Dag.reconcileMany` from the
+              // merged head, the extracted `reconcile_many_drained` over the same DAG, and the
+              // deltas-first `reconcile_many` handed the round-two lanes directly — the theorem's
+              // own right-hand side. Scripts are compared as scripts and halts as canonical
+              // reports, exactly as the Phase 131 cases compare them.
+              let mutable rng = ConfRng.ofSeed 1581
+              let mutable folded = 0
+              let mutable halted = 0
+
+              for i in 1..60 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let _, merged, _, heads2, dag = foldPullFold planW planLaneGen.BaseOp round1 round2
+                  let model = toModelDag dag
+
+                  let production =
+                      match Dag.reconcileMany planFootprint dag merged heads2 with
+                      | Ok script -> Ok script
+                      | Error cs -> Error(FoldConfluence.canonicalConflictReport planW.Encode cs)
+
+                  let fromDag =
+                      match
+                          DagFold.reconcile_many_drained
+                              (planFootprint >> toModelFootprint)
+                              ordLt
+                              (drainFuel model.nodes)
+                              model
+                              model.nodes
+                              merged
+                              heads2
+                      with
+                      | DagFold.Ok script -> Ok script
+                      | DagFold.Error cs ->
+                          Error(FoldConfluence.canonicalConflictReport planW.Encode (cs |> List.map ofModelConflict))
+
+                  let deltasFirst = oracleScript planW planFootprint round2
+
+                  match production with
+                  | Ok _ -> folded <- folded + 1
+                  | Error _ -> halted <- halted + 1
+
+                  if production <> fromDag || fromDag <> deltasFirst then
+                      failtestf
+                          "iter %d\nround one:\n%s\nround two:\n%s\n  production:   %A\n  model (DAG):  %A\n  deltas-first: %A"
+                          i
+                          (renderLanes encPlanOp round1)
+                          (renderLanes encPlanOp round2)
+                          production
+                          fromDag
+                          deltasFirst
+
+              Expect.isGreaterThan (folded + halted) 0 "some unions were folded"
+              Expect.isGreaterThan folded 0 "no union folded clean, so no merge script was ever compared"
+
+          testCase "a model whose mergeBase returns the BASE rather than the divergence point loses"
+          <| fun _ ->
+              // The teeth. The locator is the model's own `max_by` over the model's own
+              // intersection at the REVERSED key, so it names the SHALLOWEST common ancestor — over
+              // a fold-pull-fold union, the original base. If this comes back clean, the green
+              // case above certifies nothing: it would be comparing a locator that cannot tell the
+              // divergence point from anything else the two heads share. Two things must lose —
+              // the merge base itself, and the delta recovered from the base it names, which is
+              // the whole of round one as well as the lane.
+              let mutable rng = ConfRng.ofSeed 1580
+              let mutable found = 0
+              let mutable namedTheBase = 0
+              let mutable longerDeltas = 0
+              let mutable example = ""
+
+              for _ in 1..60 do
+                  let round1, r1 = planLaneGen.Lanes 3 rng
+                  let round2, r2 = planLaneGen.Lanes 3 r1
+                  rng <- r2
+                  let t = mergedDisagreements shallowestCommon planW planLaneGen.BaseOp round1 round2
+
+                  match t.Failures with
+                  | [] -> ()
+                  | d :: _ ->
+                      found <- found + 1
+
+                      if example = "" then
+                          example <- d
+
+                  let baseId, merged, _, heads2, dag =
+                      foldPullFold planW planLaneGen.BaseOp round1 round2
+
+                  let model = toModelDag dag
+
+                  match heads2 with
+                  | h0 :: h1 :: _ ->
+                      match shallowestCommon model model.nodes h0 h1 with
+                      | Some wrong when wrong = baseId && baseId <> merged ->
+                          namedTheBase <- namedTheBase + 1
+
+                          let fromWrong =
+                              DagFold.between_ops_drained ordLt (drainFuel model.nodes) model model.nodes wrong h0
+
+                          if fromWrong <> Dag.betweenOps dag merged h0 then
+                              longerDeltas <- longerDeltas + 1
+                      | _ -> ()
+                  | _ -> ()
+
+              Expect.isGreaterThan
+                  found
+                  0
+                  "a locator naming the SHALLOWEST common ancestor must disagree with production — this comparison cannot lose"
+
+              Expect.stringContains example "the merge base differs" "the disagreement names what moved"
+
+              Expect.isGreaterThan
+                  namedTheBase
+                  0
+                  "the reversed locator named the ORIGINAL BASE, which is the go-red the phase asks for"
+
+              Expect.isGreaterThan
+                  longerDeltas
+                  0
+                  "a delta recovered from the base rather than the divergence point must differ from production's"
+
           // ---- Phase 133: the TREE ALGEBRA model beside Ops.apply / Ops.footprint ----
 
           testCase "the tree oracle agrees with Ops.apply and Ops.footprint over the generated pool"
