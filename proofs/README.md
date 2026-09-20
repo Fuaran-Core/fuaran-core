@@ -1484,6 +1484,128 @@ declines to relate that pair rather than relating it and lying.
 neither is asserted. And nothing here is said about `Canon.render`'s key ordering on the way **out**
 — that is the wire-format corpus's, not this theorem's.
 
+### No null, no invokable term, an inert sentinel (Phase 153)
+
+"No code-execution surface anywhere" is the sentence every assurance artefact about this wire leads
+with, and until this phase it rested on prose and on two comments: `JVal` has no null constructor
+(WIRE_FORMAT §2 rule 4), and a closure crosses the wire only as the string `"<closure>"` (§2 rule
+10, §4), which nothing evaluates. Both are true **by the shape of the types** — which is exactly why
+they were cheap to prove and expensive to leave as prose. An assessor who asks "where is that
+proved?" can now be handed a name.
+
+| Lemma | Model | What it says |
+|---|---|---|
+| `no_null_ever` | `WireDecode.fst` §9a | No `jval` contains a null, at any depth. Stated over the one model here that HAS a null — section 7's `jvaln` — so it is a statement and not a tautology: every `jval`, viewed as a document (`embed`), is null-free and reads back as **exactly itself** under either policy; the strict reader accepts **exactly** the null-free documents (`strict_read_refuses_null`, an iff); and whatever **either** reader returns is null-free — the tolerant policy erases a member null, it never carries one through. |
+| `no_null_ever` | `WireCanon.fst` §12 | `Canon.render` never emits the token `null` — not at the root, not at any depth, for **any** value (not only theorem 7's canonical subset). |
+| `no_invokable` | `WireDecode.fst` §9b | Every type a `Decode` combinator or `decode_node` can return — and the wire value and the foreign document model themselves — has **decidable equality**. |
+| `sentinel_inert` | `WireDecode.fst` §9c | No combinator inspects a string **value**: replacing one string by another throughout a document commutes with every combinator and with the node decoder. The closure sentinel is the instance (`closure_sentinel_is_a_string`), not a special case. |
+| `tag_position_is_the_exception` | `WireDecode.fst` §9c | The refutation that fixes `sentinel_inert`'s premise — see the finding below. |
+
+**Why the render half is stated lexically.** "The rendering does not contain `n-u-l-l`" is **false**:
+the string `"null"` renders as those four characters between quotes, and so does a member key
+spelled `null`. What JSON means by the null *token* is those characters **outside a string
+literal**, so the model carries the three-state lexer every JSON reader has (outside a literal,
+inside one, just after a backslash) and the claim is made there. What is then proved is stronger
+than the absence of one token: outside a string literal `render` emits **only** the structural
+punctuation, the characters of a numeral, and the letters of `true` and `false` (`bare_ok`,
+`render_is_bare_clean`). There is no bare `n` anywhere in a rendering — so no `null`, no bare `NaN`,
+and no bare word of any kind a reader could be asked to interpret. `no_null_ever` then reads that
+off for every position: the rendering is not `pre ++ null ++ rest` for any `pre` that ends outside
+a literal. Rule 6 is what makes the lexical argument go through — `escape_stays_inside` shows an
+escaped body never closes its own literal — and `reader_refuses_null` closes the other direction:
+the grammar's own reader has no arm that accepts the token.
+
+**How "no invokable term" is a theorem and not a remark.** F\* derives `hasEq` for an inductive
+type only when **every** constructor argument has it, and derives it for no arrow type. So `hasEq
+(jval num flt)` is the prover's own certificate that no value of the type carries a function at any
+depth, and the lemma states it for each type a combinator returns: `outcome string`, `outcome num`,
+`outcome bool`, `outcome flt`, `outcome (jval …)`, `outcome (list t)` for the walker at a domain's
+own first-order `t`, and `outcome rnode` / `outcome (list rnode)` for the node decoder. The
+numeric carriers are `eqtype` parameters, as they are everywhere in this model. **The control**, run
+both ways on a scratch module before the lemma was believed: the same lemma over a three-constructor
+data type discharges; a type with one `string -> string` constructor argument cannot even be
+declared without `noeq` (Error 162, "Failed to prove hasEq (string -> string)"), and declared with
+it, `hasEq` over it fails to prove (Error 19). A lemma that could not go red would not be evidence.
+
+**The finding: the phase's own wording of `sentinel_inert` was wrong, twice, and the corrected
+statement is the theorem.** It asked that decoding be "*invariant* under replacing the sentinel with
+*any* other string".
+
+1. It is **equivariant**, not invariant. A decoded `RText` carries the string it read, so the
+   decoded tree changes exactly as the document did and in no other way — which is the stronger
+   statement and the true one. `sentinel_inert_combinators` says it per combinator **under no
+   premise at all**, and word for word: every refusal is the *same* refusal, message included,
+   because `kindName` reads a value's shape and nothing in `Decode` reads a string's content.
+2. "**Any** other string" is false in exactly one position, and
+   `tag_position_is_the_exception` proves it rather than conceding it. A domain's kind dispatch
+   compares the `"kind"` member against its own tags, so a document whose `"kind"` IS the sentinel
+   is refused, and rewriting the sentinel into `"text"` makes it decode. That is the **vocabulary
+   reading its own discriminator**, not a combinator inspecting a payload, and it is the whole of
+   the premise: `sentinel_inert` holds for any two strings neither of which is a kind tag, which
+   the sentinel satisfies (`closure_sentinel_is_not_a_tag`). At the node level the relation is
+   `inert` — the replaced node, or a refusal on both sides — and the message is deliberately not
+   part of it for one reason only: `unknown kind: <tag>` quotes the tag, which is itself a string
+   value and is replaced like any other.
+
+Member **keys** are untouched by the replacement. A key is a name the decoder asks for, not a value
+it is handed, and the sentinel only ever occupies value position.
+
+**The one premise, and where it sits on the ladder.** The render half carries `layouts_numeric`:
+rule 5's two layouts are numerals — every character of the integer layout and of the round-trip
+float layout is a digit, `-`, `+`, `.` or `E`. It is **weaker** than theorem 7's `tok_read_ok`,
+which says that and more of every integer and every *canonical* float; it is stated separately
+because this lemma speaks of **every** value, including the integral floats outside the canonical
+subset, about whose layout `tok_read_ok` is silent. It is the same assumed thing as theorem 7's
+first level-3 row — the numerals are opaque and .NET's to compute — and is recorded on that row
+(`canon-numeral-layouts`) rather than as a new one. The three `WireDecode.fst` lemmas carry **no
+hypothesis about a domain and no premise about a numeral**.
+
+**Falsified before it was trusted**, on scratch copies, per the directory's standing practice.
+Replacing `sentinel_inert`'s premise with `True` reddens every arm BENEATH the kind dispatch — ten
+obligations, the tag comparisons and everything they guard, which is where the premise pays —
+while the one arm above it, where `kindOf` itself refuses, stays green. Dropping the integer half
+of `layouts_numeric` reddens `render_is_bare_clean` at exactly the `JInt` arm and nowhere else.
+Each landed on the line that should have caught it.
+
+**What it cost.** Nothing at run time and nothing on the wire: every definition added is
+`noextract_to "FSharp"` or a `Lemma`, so both committed oracles are byte-identical and the leg's
+extraction diff says so. No file under `src/` moved, no host does anything.
+
+**The claims ladder, for these three.**
+
+1. **Proved (machine-checked, no admits).** The five rows above, plus their parts
+   (`embed_is_null_free`, `strict_read_refuses_null`, `sentinel_inert_combinators`,
+   `closure_sentinel_is_a_string`, `render_is_bare_clean`, `escape_stays_inside`,
+   `reader_refuses_null`). F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
+   `--report_assumes error` on, no `assume`, no `admit`.
+2. **Differentially tested.** Nothing new, by design: the lemmas are ghost, so there is no extracted
+   code to run beside production. What stands behind them at level 2 is what already stood there —
+   theorem 1's read-policy pool, which carries the `null` token at every position under both
+   policies, and theorem 7's byte-for-byte differential, which is where `layouts_numeric` is
+   evidenced.
+3. **Assumed, and stated as such.** `layouts_numeric`, as above; and the two bridges the models
+   already carry — `jvaln` is an assumption about what the parser's forks do at the tree
+   (`parser-null-absorption`), and a character is a constructor (`canon-character-bridge`).
+4. **Not claimed.**
+   - **Anything about a HOST.** A `Custom` renderer, a mounted guest, a host-call endpoint, a
+     registered capability or any other function a deployment installs is host code the wire merely
+     *names*. Those doors are enumerated, each with what mediates it and what is not claimed at it,
+     in the UI language estate's **escape-hatch inventory**; WIRE_FORMAT §22 (the render-time safety
+     floor) and §23 (host-declared kind admission) are its normative wire-side counterparts, and
+     theorem 10 proves the other half at the seam — dispatch is default-deny, so a named capability
+     that was never registered invokes nothing. These lemmas say the **wire** carries no invokable
+     term; they say nothing about what a host chooses to run when it reads a name.
+   - **A decoder is not a wire value.** `mapList`'s `d` is the domain's own function, and
+     `no_invokable` is about what it *returns*.
+   - **A generated vocabulary's closure slots.** The IDL's F\* backend models a wire-visible closure
+     as `unit` encoding to the fixed sentinel (above); that those generated decoders never read the
+     slot is a property of the generator's emitted text, which the `Proofs.Vocabulary` family holds
+     to a fresh generation — not something these lemmas prove.
+   - **`Canon.renderOrdered`**, which theorem 7 does not model; and any JSON a host writes by a
+     route other than `Canon.render`.
+   - **That the byte sequence `null` never appears.** It does, inside string literals, and that is
+     correct.
+
 ### What the corpus covers
 
 The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs
@@ -1578,6 +1700,14 @@ domain's vocabulary and not about any HOST's decoder. A domain runs the same gen
 own `Idl` in its own repository (`fuaran#1754` for the UI one); a host keeps its own hand-written
 decoder and is certified against its corpus. The per-kind coverage, the one reason a kind is
 outside it, and the cost are in the section above.
+
+**Phase 153 added four proved rows to clause 1 and one paragraph to clause 4.** `no_null_ever`,
+`no_invokable`, `sentinel_inert` and the refutation that fixes its premise
+(`tag_position_is_the_exception`) are proved here under no hypothesis about a domain, and their
+own section above carries their ladder — including the clause-4 entry that matters most: nothing
+in them is a claim about a HOST, a `Custom` renderer or a host-call seam, which the escape-hatch
+inventory covers and these lemmas do not.
+
 ## Theorem 2 — independence soundness for the tree algebra (Phase 133)
 
 Phase 131 proved fold confluence under one domain hypothesis, and Phase 132 established what that
@@ -2906,7 +3036,10 @@ fixture it would have dropped first is the deepest one.
      5's injectivity lemmas are **derived** from it, because a read-back that is a function cannot
      answer twice for one token. What is therefore not said is anything about the digits: which
      decimal .NET produces for a given double is the differential's and the cross-host parity
-     vectors' to measure.
+     vectors' to measure. (Phase 153's `no_null_ever` carries a second and WEAKER premise about the
+     same parameters — `layouts_numeric`, both layouts are numerals — because it speaks of every
+     value, including the integral floats outside the canonical subset; the canonical-form theorems
+     above still carry exactly one.)
    - **The comparator is a parameter constrained to be a total order.** What is proved is that a
      canonical form follows FROM a total order. That `System.String.CompareOrdinal` IS one, and
      that it is UTF-16 code-unit order rather than code-point or UTF-8-byte order, are facts about
@@ -2929,6 +3062,11 @@ fixture it would have dropped first is the deepest one.
      finding above.
    - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
      measures — that is theorem 4's, and the boundary between the two is deliberate.
+
+**Phase 153 added one proved row: `no_null_ever`** — `render` never emits the token `null`, for
+any value, stated lexically. It is WIRE_FORMAT §2 rule 4's encoder half, it is not restricted to
+the canonical subset, and it lives with its two siblings in theorem 1's section, "No null, no
+invokable term, an inert sentinel", which carries the statement, the premise and the ladder.
 
 ## Theorem 8 — evolution-policy soundness (Phase 151)
 
@@ -3281,7 +3419,7 @@ the data it edits. `Fuaran.Core.Function` is the artifact-function protocol unde
 and the invocable `Capability` registry with default-deny dispatch and arg-validated invocation.
 Its guarantees are the ones an assurance reader asks about first, and until this phase they were
 property-tested — `capabilityLaws`, `compositionLaws`, `functionVerifyLaws` — and proved nowhere.
-Phase 153 is chartered to prove the WIRE cannot carry an invokable; this proves the SEAM cannot
+Phase 153 proves the WIRE cannot carry an invokable (`no_invokable`); this proves the SEAM cannot
 invoke what was not registered.)_
 
 The doc comments of `Function.fs` state the contract in four places and the theorems are their
