@@ -201,8 +201,8 @@ let arbitrationLawTests =
 
               Expect.equal
                   (List.length results)
-                  6
-                  "determinism/partition/independence/actionability/confluence + the Phase 121 bucket adequacy guard"
+                  7
+                  "determinism/partition/independence/actionability/confluence, Phase 157's id-uniqueness hypothesis + the Phase 121 bucket adequacy guard"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

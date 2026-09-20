@@ -1708,6 +1708,239 @@ let private modelDiamondBreaks
                     | _ -> ()
 
     breaks, met
+
+// ---------------------------------------------------------------------------
+//  Phase 157 — PROPOSAL ARBITRATION as an oracle over the tree oracle.
+//
+//  `proofs/Arbitrate.fst` models `Arbitration.arbitrate` clause for clause over Phase 133's tree
+//  model — the stable pinned sort, the `canApplyAll` dry run, the greedy independence pass and the
+//  re-citation — and proves the three promises the function's doc comment makes: the accepted set
+//  is pairwise independent, every rejection is justified (maximal, NOT maximum), and the whole
+//  result is invariant under arrival order for id-distinct input. `proofs/oracle/Arbitrate.fs` is
+//  that model extracted.
+//
+//  What runs here is the model BESIDE production over generated proposal sets against the base
+//  tree: scripts from Phase 80's lane generator (each applies at the base on its own, and they
+//  frequently share a parent, so conflicts arise without being arranged), about one in four
+//  corrupted into a provably inapplicable script, under ids that are a SHUFFLE of 1..n — so the
+//  pinned order is not the arrival order — and, in a second mode, under ids drawn from {1, 2}, so
+//  that most sets carry a repeated id and the STABLE sort's tie-break is compared too. Compared
+//  per set: the accepted proposals (id, holder, script) in order; the merged script; and every
+//  rejection in order with its reason — an `Inapplicable`'s index exactly and its envelope by
+//  CLASS (which is what the tree model claims; see Phase 133's section above), a `Conflicts`'
+//  citation exactly.
+// ---------------------------------------------------------------------------
+
+type private ArbProposal = OpScriptProposal<RNode, string>
+
+let private toModelProposal (p: ArbProposal) : Arbitrate.proposal =
+    { Arbitrate.proposal.pid = bigint p.Id
+      Arbitrate.proposal.holder = p.Holder
+      Arbitrate.proposal.script = p.Ops |> List.map (toModelOpWith toModelTree) }
+
+/// Production's result in the vocabulary the comparison is made in.
+let private renderProdArbitration (a: Arbitration<RNode, string>) : string list =
+    [ for p in a.Accepted do
+          yield sprintf "accepted %d/%s %A" p.Id p.Holder (p.Ops |> List.map (toModelOpWith toModelTree))
+      yield sprintf "merged %A" (a.MergedScript |> List.map (toModelOpWith toModelTree))
+      for p, why in a.Rejected do
+          match why with
+          | Inapplicable(i, rej) ->
+              yield sprintf "rejected %d/%s inapplicable at %d (%s)" p.Id p.Holder i (prodRejClass rej)
+          | Conflicts ids -> yield sprintf "rejected %d/%s conflicts %A" p.Id p.Holder ids ]
+
+/// The model's result in the same vocabulary.
+let private renderModelArbitration (a: Arbitrate.arbitration) : string list =
+    [ for p in a.accepted do
+          yield sprintf "accepted %d/%s %A" (int p.pid) p.holder p.script
+      yield sprintf "merged %A" a.merged
+      for p, why in a.rejected do
+          match why with
+          | Arbitrate.Inapplicable(i, rej) ->
+              yield sprintf "rejected %d/%s inapplicable at %d (%s)" (int p.pid) p.holder (int i) (modelRejClass rej)
+          | Arbitrate.Conflicts ids ->
+              yield sprintf "rejected %d/%s conflicts %A" (int p.pid) p.holder (ids |> List.map int) ]
+
+/// THE GO-RED INSTRUMENT — a model that accepts a conflicting pair. It is the extracted model
+/// with exactly one clause removed: the greedy pass's `all_independent` test. Everything else —
+/// the pinned sort, the dry run, the re-citation, the merged script — is the oracle's own code,
+/// so what the comparison loses on is the independence check and nothing else.
+let private arbitrateAcceptingConflicts (baseTree: TreeOps.tree) (ps: Arbitrate.proposal list) : Arbitrate.arbitration =
+    let step (acc, rej) (p: Arbitrate.proposal) =
+        match Arbitrate.can_script System.Numerics.BigInteger.Zero p.script baseTree with
+        | DagFold.Error(i, e) -> acc, (p, Arbitrate.Inapplicable(i, e)) :: rej
+        | DagFold.Ok() -> p :: acc, rej
+
+    let accRev, rejRev = Arbitrate.pin ps |> List.fold step ([], [])
+    let accepted = DagFold.rev accRev
+
+    { Arbitrate.arbitration.accepted = accepted
+      Arbitrate.arbitration.merged = Arbitrate.collect_scripts accepted
+      Arbitrate.arbitration.rejected = Arbitrate.recite_all accepted (DagFold.rev rejRev) }
+
+type private ArbTally =
+    {
+        Diffs: string list
+        Sets: int
+        Accepted: int
+        Inapplicable: int
+        Conflicting: int
+        /// Sets carrying a repeated id — the stable sort's tie-break was compared on these.
+        Duplicated: int
+        /// Sets where the shipped `duplicateIds` and the model's `distinct_ids` disagreed.
+        HypothesisDiffs: string list
+        /// Sets where an extracted theorem predicate was FALSE of production's own result.
+        TheoremBreaks: string list
+    }
+
+let private emptyArbTally =
+    { Diffs = []
+      Sets = 0
+      Accepted = 0
+      Inapplicable = 0
+      Conflicting = 0
+      Duplicated = 0
+      HypothesisDiffs = []
+      TheoremBreaks = [] }
+
+/// One generated proposal set: `count` scripts off the base, ~1 in 4 corrupted, under `ids`.
+let private genProposalSet (uniqueIds: bool) (r0: ConfRng.T) : ArbProposal list * ConfRng.T =
+    let extra, r1 = ConfRng.intBelow 4 r0
+    let count = extra + 2
+    let scripts, r2 = treeLaneGen.Lanes count r1
+    let mutable r = r2
+
+    let ids =
+        if uniqueIds then
+            let shuffled, r' = ConfRng.shuffle [ 1..count ] r
+            r <- r'
+            shuffled
+        else
+            [ for _ in 1..count do
+                  let v, r' = ConfRng.intBelow 2 r
+                  r <- r'
+                  yield v + 1 ]
+
+    let proposals =
+        [ for k, (id, script) in List.indexed (List.zip ids scripts) do
+              let corrupt, r' = ConfRng.intBelow 4 r
+              r <- r'
+
+              let ops =
+                  if corrupt = 0 then
+                      script @ [ RemoveNode(sprintf "ghost-157-%d" k) ]
+                  else
+                      script
+
+              yield
+                  { Id = id
+                    Holder = sprintf "agent-%d" k
+                    Ops = ops } ]
+
+    proposals, r
+
+/// Production beside `modelArbitrate` over `trials` generated sets in each id mode.
+let private arbitrationDifferential
+    (modelArbitrate: TreeOps.tree -> Arbitrate.proposal list -> Arbitrate.arbitration)
+    (seed: int)
+    (trials: int)
+    : ArbTally =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable tally = emptyArbTally
+    let mbase = toModelTree treeBase
+
+    for uniqueIds in [ true; false ] do
+        for t in 1..trials do
+            let proposals, r' = genProposalSet uniqueIds r
+            r <- r'
+            let prod = Arbitration.arbitrate nodew idw treeBase proposals
+            let mps = proposals |> List.map toModelProposal
+            let p = renderProdArbitration prod
+            let m = renderModelArbitration (modelArbitrate mbase mps)
+
+            let where =
+                sprintf "seed=%d mode=%s trial=%d" seed (if uniqueIds then "unique" else "duplicated") t
+
+            let diffs =
+                if p <> m then
+                    [ sprintf
+                          "arbitration differs — %s\n  production:\n    %s\n  oracle:\n    %s"
+                          where
+                          (String.concat "\n    " p)
+                          (String.concat "\n    " m) ]
+                else
+                    []
+
+            // the shipped check IS the theorem's hypothesis, read off the extracted predicate
+            let dups = Arbitration.duplicateIds proposals
+
+            let hypothesisDiffs =
+                if List.isEmpty dups <> Arbitrate.distinct_ids mps then
+                    [ sprintf
+                          "duplicateIds = %A but the model's distinct_ids = %b — %s"
+                          dups
+                          (Arbitrate.distinct_ids mps)
+                          where ]
+                else
+                    []
+
+            // the extracted theorem predicates, asked of PRODUCTION's result bridged across
+            let prodAccepted = prod.Accepted |> List.map toModelProposal
+
+            let theoremBreaks =
+                [ if not (Arbitrate.pairwise_independent prodAccepted) then
+                      yield sprintf "pairwise_independent is FALSE of production's accepted set — %s" where
+                  if not (Arbitrate.all_applicable mbase prodAccepted) then
+                      yield sprintf "all_applicable is FALSE of production's accepted set — %s" where
+                  if List.length prod.Accepted + List.length prod.Rejected <> List.length proposals then
+                      yield sprintf "the partition is not total — %s" where ]
+
+            tally <-
+                { Diffs = tally.Diffs @ diffs
+                  Sets = tally.Sets + 1
+                  Accepted = tally.Accepted + List.length prod.Accepted
+                  Inapplicable =
+                    tally.Inapplicable
+                    + (prod.Rejected
+                       |> List.filter (fun (_, w) ->
+                           match w with
+                           | Inapplicable _ -> true
+                           | Conflicts _ -> false)
+                       |> List.length)
+                  Conflicting =
+                    tally.Conflicting
+                    + (prod.Rejected
+                       |> List.filter (fun (_, w) ->
+                           match w with
+                           | Conflicts _ -> true
+                           | Inapplicable _ -> false)
+                       |> List.length)
+                  Duplicated = tally.Duplicated + (if List.isEmpty dups then 0 else 1)
+                  HypothesisDiffs = tally.HypothesisDiffs @ hypothesisDiffs
+                  TheoremBreaks = tally.TheoremBreaks @ theoremBreaks }
+
+    tally
+
+/// The model's witness trees and proposals, as production values — so a finding proved about the
+/// model is pinned on the shipped function over the SAME inputs.
+let rec private ofModelTree (t: TreeOps.tree) : RNode =
+    match t with
+    | TreeOps.TNode(i, k, []) -> RNode.leaf i k "v"
+    | TreeOps.TNode(i, k, cs) -> RNode.node i k (cs |> List.map ofModelTree)
+
+let rec private ofModelOp (o: TreeOps.op) : SkeletonOp<RNode, string> =
+    match o with
+    | TreeOps.InsertChild(p, n) -> InsertChild(p, ofModelTree n)
+    | TreeOps.RemoveNode x -> RemoveNode x
+    | TreeOps.MoveNode(x, np) -> MoveNode(x, np)
+    | TreeOps.ReorderChildren(p, order) -> ReorderChildren(p, order)
+    | TreeOps.Batch inner -> Batch(inner |> List.map ofModelOp)
+
+let private ofModelProposal (p: Arbitrate.proposal) : ArbProposal =
+    { Id = int p.pid
+      Holder = p.holder
+      Ops = p.script |> List.map ofModelOp }
+
 // ---------------------------------------------------------------------------
 //  Phase 136 — the two INTEGRITY WALKERS as a fourth oracle.
 //
@@ -5547,6 +5780,190 @@ let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundT
 
 let private renderCanonDiffs (diffs: string list) : string =
     diffs |> List.rev |> List.truncate 5 |> String.concat "\n"
+
+// ---- the guard (Phase 165): `WireCanon.try_render` beside `Canon.tryRender` ----
+
+/// The model names a refusal as DATA — a path of steps and the float it found — where production
+/// emits one string. This renders the model's refusal in production's spelling so the two can be
+/// compared as the `Result` a caller actually receives. The member key goes through the MODEL's
+/// own `quoted` (rule 6's escape), not through `Canon`, so the bridge hands production nothing to
+/// agree with itself about; the index crosses the `nat` → `int` width boundary here, where
+/// `oracle/Prims.fs` says such a conversion belongs.
+let private guardPathOfModel (p: WireCanon.pstep list) : string =
+    "$"
+    + (p
+       |> List.map (fun s ->
+           match s with
+           | WireCanon.PItem i -> "[" + string (int i) + "]"
+           | WireCanon.PMember k -> "[" + canonFromChs (WireCanon.quoted k) + "]")
+       |> String.concat "")
+
+let private guardModelSide (w: WireCanon.wire<int, float>) (v: JVal) : Result<string, string> =
+    match WireCanon.try_render w (canonToModel v) with
+    | WireCanon.Rendered bytes -> Result.Ok(canonFromChs bytes)
+    | WireCanon.Refused(p, f) ->
+        let tok =
+            match w.fclass f with
+            | WireCanon.FNaN -> "NaN"
+            | WireCanon.FPosInf -> "Infinity"
+            | WireCanon.FNegInf -> "-Infinity"
+            | WireCanon.FFinite -> "<the model refused a float its own wire calls finite>"
+
+        Result.Error(
+            "non-finite float has no canonical rendering of its own: "
+            + tok
+            + " at "
+            + guardPathOfModel p
+        )
+
+/// The guard's predicate, written a THIRD time and independently of both sides: does the value
+/// hold a non-finite float anywhere. "Refuses exactly" is a claim about this set, and asking
+/// either side under test to define it would make the claim circular.
+let rec private holdsNonFinite (v: JVal) : bool =
+    match v with
+    | JFloat f -> not (System.Double.IsFinite f)
+    | JArr xs -> xs |> List.exists holdsNonFinite
+    | JObj fs -> fs |> List.exists (snd >> holdsNonFinite)
+    | _ -> false
+
+type private GuardTally =
+    {
+        Docs: int
+        Diffs: string list
+        /// Documents production refused.
+        Refused: int
+        /// Refusals whose path is two or more steps deep — the scan's recursion, not its leaf arm.
+        DeepRefusals: int
+        /// Refusals naming each of the three tokens.
+        NaNs: int
+        PosInfs: int
+        NegInfs: int
+        /// ACCEPTED documents carrying a float outside the canonical subset — an integer-shaped
+        /// token or a zero — which is the set the guard must not refuse.
+        AcceptedNormalised: int
+    }
+
+let private emptyGuardTally =
+    { Docs = 0
+      Diffs = []
+      Refused = 0
+      DeepRefusals = 0
+      NaNs = 0
+      PosInfs = 0
+      NegInfs = 0
+      AcceptedNormalised = 0 }
+
+/// One document, asked of production's guard and of the model's. Three comparisons, each of which
+/// can lose on its own: the two `Result`s agree (message and path included); an `Ok` is exactly
+/// `Canon.render`'s bytes; and the verdict is `Error` precisely when the independent predicate
+/// says a non-finite float is present.
+let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: GuardTally) : GuardTally =
+    let production = Canon.tryRender v
+    let model = guardModelSide w v
+    let t = { t with Docs = t.Docs + 1 }
+
+    let diff (what: string) (t: GuardTally) =
+        { t with
+            Diffs =
+                sprintf "%s: %s\n  production: %A\n  the model:  %A" label what production model
+                :: t.Diffs }
+
+    let t =
+        if production = model then
+            t
+        else
+            diff "the guards disagree" t
+
+    match production with
+    | Result.Ok bytes ->
+        let t =
+            if bytes = Canon.render v then
+                t
+            else
+                diff "an accepted value did not render to Canon.render's bytes" t
+
+        let t =
+            if holdsNonFinite v then
+                diff "production ACCEPTED a value holding a non-finite float" t
+            else
+                t
+
+        if isCanonicalValue v then
+            t
+        else
+            { t with
+                AcceptedNormalised = t.AcceptedNormalised + 1 }
+    | Result.Error m ->
+        let t =
+            if holdsNonFinite v then
+                t
+            else
+                diff "production REFUSED a value holding no non-finite float" t
+
+        let steps = m |> Seq.filter (fun c -> c = '[') |> Seq.length
+
+        { t with
+            Refused = t.Refused + 1
+            DeepRefusals = t.DeepRefusals + (if steps >= 2 then 1 else 0)
+            NaNs = t.NaNs + (if m.Contains ": NaN at " then 1 else 0)
+            PosInfs = t.PosInfs + (if m.Contains ": Infinity at " then 1 else 0)
+            NegInfs = t.NegInfs + (if m.Contains ": -Infinity at " then 1 else 0) }
+
+/// The Phase 149 pool carries no non-finite float — it was built to measure the renderer, which
+/// has nothing to say about one. This walks a drawn value and replaces roughly one numeric leaf in
+/// three with one of the three, so the refusals land at every depth and position the pool reaches
+/// rather than only at the root.
+let private poisonCanonValue (r: int ref) (v: JVal) : JVal =
+    let draw (n: int) =
+        r.Value <- nextCanonSeed r.Value
+        r.Value % n
+
+    let rec go (v: JVal) : JVal =
+        match v with
+        | JFloat _
+        | JInt _ when draw 3 = 0 ->
+            (match draw 3 with
+             | 0 -> JFloat nan
+             | 1 -> JFloat infinity
+             | _ -> JFloat -infinity)
+        | JArr xs -> JArr(xs |> List.map go)
+        | JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, go x))
+        | other -> other
+
+    go v
+
+let private guardGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : GuardTally =
+    let r = ref seed
+    let mutable t = emptyGuardTally
+
+    for i in 1..trials do
+        let v = poisonCanonValue r (genCanonValue r 3)
+        t <- guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+    t
+
+let private guardCorpus (w: WireCanon.wire<int, float>) (family: string) : GuardTally =
+    let mutable t = emptyGuardTally
+
+    for name, text in JsonParseDiff.corpusTexts family do
+        match Json.parse text with
+        | Result.Error m -> failtestf "the corpus fixture %s/%s did not parse: %s" family name m
+        | Result.Ok v -> t <- guardProbe w (sprintf "%s/%s" family name) v t
+
+    t
+
+/// The GO-RED instrument for the guard: a wire that cannot see NaN — it classifies one as finite,
+/// so the model's scan walks past it. Every document whose FIRST non-finite float is a NaN must
+/// then disagree with production, and every other document — including one refused for an
+/// infinity — must still agree, which is what says the instrument is narrow to the predicate.
+let private guardWireGoRed: WireCanon.wire<int, float> =
+    { canonWire with
+        fclass =
+            fun f ->
+                if System.Double.IsNaN f then
+                    WireCanon.FFinite
+                else
+                    canonWire.fclass f }
 
 // ---------------------------------------------------------------------------
 //  Phase 151 — the EVOLUTION POLICY: `WireVersioning` beside `Versioning`.
@@ -9634,6 +10051,159 @@ let proofOracleTests =
                    | _ -> false)
                   "both halves apply at the tree on their own — so the divergence is the pair's, not one op's"
 
+          testCase "the arbitration oracle agrees with Arbitration.arbitrate over generated proposal sets"
+          <| fun _ ->
+              // Phase 157. Accepted set, merged script and every rejection with its reason, over
+              // sets whose pinned order is NOT their arrival order and over sets carrying a
+              // repeated id. Measured at 150 trials per mode, seed 1570: 300 sets, every bucket
+              // reached and a repeated id in most of the second mode's — asserted below, because
+              // a differential that met no conflict would agree about nothing worth agreeing on.
+              let t = arbitrationDifferential Arbitrate.arbitrate 1570 150
+
+              if not (List.isEmpty t.Diffs) then
+                  failtestf
+                      "the arbitration oracle DISAGREES with production on %d of %d sets:\n%s"
+                      (List.length t.Diffs)
+                      t.Sets
+                      (t.Diffs |> List.truncate 3 |> String.concat "\n")
+
+              Expect.equal t.Sets 300 "both id modes ran"
+              Expect.isGreaterThan t.Accepted 0 "the sample accepted something"
+              Expect.isGreaterThan t.Inapplicable 0 "the sample reached an Inapplicable rejection"
+              Expect.isGreaterThan t.Conflicting 0 "the sample reached a Conflicts rejection"
+
+              Expect.isGreaterThan
+                  t.Duplicated
+                  0
+                  "the sample reached a repeated id — the stable sort's tie-break was compared"
+
+              Expect.isEmpty
+                  t.HypothesisDiffs
+                  "Arbitration.duplicateIds is empty EXACTLY when the model's distinct_ids holds — the shipped check is the theorem's hypothesis"
+
+              Expect.isEmpty
+                  t.TheoremBreaks
+                  "the extracted theorem predicates hold of production's own result, on every set, repeated ids included"
+
+          testCase "a model that ACCEPTS A CONFLICTING PAIR loses — the measurement can fail"
+          <| fun _ ->
+              // The go-red for `accepted_pairwise_independent`. The instrument is the extracted
+              // model with the greedy pass's independence test removed and nothing else touched,
+              // so every conflict production refuses is a set the two sides must disagree on.
+              let t = arbitrationDifferential arbitrateAcceptingConflicts 1570 150
+
+              Expect.isGreaterThan
+                  t.Conflicting
+                  0
+                  "the go-red run reached a conflicting pair at all — otherwise it proves nothing"
+
+              Expect.isNonEmpty t.Diffs "a model that accepts a conflicting pair DISAGREES with production"
+
+              // and it disagrees on exactly the sets that held a conflict — never on one that did not
+              let clean = arbitrationDifferential Arbitrate.arbitrate 1570 150
+              Expect.isEmpty clean.Diffs "the same sample under the real model agrees, so the loss is the instrument's"
+
+          testCase "the id-uniqueness hypothesis is NEEDED, on the shipped function — `duplicate_ids_break_invariance`"
+          <| fun _ ->
+              // THE FINDING, pinned on production over the model's own witness. Two proposals
+              // sharing an id and interfering with each other: the stable sort leaves them in
+              // arrival order, so WHICH is accepted is the arrival order. If `arbitrate` ever
+              // breaks the tie some other way this case goes red and sends its reader to
+              // `proofs/Arbitrate.fst` section 8 and to `Arbitration.duplicateIds`' doc comment.
+              let baseTree = ofModelTree Arbitrate.dup_base
+              let a = ofModelProposal Arbitrate.dup_a
+              let b = ofModelProposal Arbitrate.dup_b
+
+              let holders (r: Arbitration<RNode, string>) =
+                  r.Accepted |> List.map (fun p -> p.Holder)
+
+              Expect.equal (Arbitration.duplicateIds [ a; b ]) [ 1 ] "the shipped check names the repeated id"
+
+              Expect.isFalse
+                  (Arbitrate.distinct_ids [ Arbitrate.dup_a; Arbitrate.dup_b ])
+                  "and the model's hypothesis is false of it"
+
+              Expect.equal
+                  (holders (Arbitration.arbitrate nodew idw baseTree [ a; b ]))
+                  [ "a" ]
+                  "a arrives first, a is accepted"
+
+              Expect.equal
+                  (holders (Arbitration.arbitrate nodew idw baseTree [ b; a ]))
+                  [ "b" ]
+                  "b arrives first, b is accepted"
+
+              Expect.equal
+                  (renderProdArbitration (Arbitration.arbitrate nodew idw baseTree [ a; b ]))
+                  (renderModelArbitration (Arbitrate.arbitrate Arbitrate.dup_base [ Arbitrate.dup_a; Arbitrate.dup_b ]))
+                  "and the model agrees with production on the witness, in this order"
+
+              Expect.equal
+                  (renderProdArbitration (Arbitration.arbitrate nodew idw baseTree [ b; a ]))
+                  (renderModelArbitration (Arbitrate.arbitrate Arbitrate.dup_base [ Arbitrate.dup_b; Arbitrate.dup_a ]))
+                  "and in the other"
+
+              // what a repeated id does NOT cost: the partition is still total and still justified
+              let r = Arbitration.arbitrate nodew idw baseTree [ a; b ]
+              Expect.equal (List.length r.Accepted + List.length r.Rejected) 2 "nothing dropped"
+
+              match r.Rejected with
+              | [ (p, Conflicts [ 1 ]) ] -> Expect.equal p.Holder "b" "the loser cites the winner's id"
+              | other -> failtestf "expected one Conflicts [1] rejection, got %A" other
+
+              // the check itself: total, ascending, each repeated id once, empty on unique input
+              let prop id : ArbProposal = { Id = id; Holder = "h"; Ops = [] }
+              Expect.equal (Arbitration.duplicateIds ([]: ArbProposal list)) [] "empty input"
+              Expect.equal (Arbitration.duplicateIds [ prop 3; prop 1; prop 2 ]) [] "unique ids"
+
+              Expect.equal
+                  (Arbitration.duplicateIds [ prop 5; prop 2; prop 5; prop 2; prop 5; prop 9 ])
+                  [ 2; 5 ]
+                  "ascending, each repeated id once however often it repeats"
+
+          testCase "maximal is NOT maximum, on the shipped function — `maximal_is_not_maximum`"
+          <| fun _ ->
+              // NOT CLAIMED, and the witness that it is not. Proposal 1 writes under both `a` and
+              // `b`; 2 and 3 write under one each. The pinned order accepts 1 alone; renumbered to
+              // come last, the same three proposals accept 2 and 3. Both results are maximal. The
+              // pinned order is a policy choice, and this is what it decides.
+              let baseTree = ofModelTree Arbitrate.mx_base
+              let ids (r: Arbitration<RNode, string>) = r.Accepted |> List.map (fun p -> p.Id)
+
+              let first =
+                  Arbitration.arbitrate
+                      nodew
+                      idw
+                      baseTree
+                      ([ Arbitrate.mx_1; Arbitrate.mx_2; Arbitrate.mx_3 ] |> List.map ofModelProposal)
+
+              let last =
+                  Arbitration.arbitrate
+                      nodew
+                      idw
+                      baseTree
+                      ([ Arbitrate.mx_1_last; Arbitrate.mx_2; Arbitrate.mx_3 ]
+                       |> List.map ofModelProposal)
+
+              Expect.equal
+                  (ids first)
+                  [ 1 ]
+                  "in the pinned order the two-parent proposal wins alone — an accepted set of ONE"
+
+              Expect.equal (ids last) [ 2; 3 ] "numbered last, the same proposal loses to an accepted set of TWO"
+
+              Expect.equal
+                  (first.Rejected |> List.map snd)
+                  [ Conflicts [ 1 ]; Conflicts [ 1 ] ]
+                  "and both rejections are justified — each cites the proposal standing in its way"
+
+              Expect.equal
+                  (renderProdArbitration first)
+                  (renderModelArbitration (
+                      Arbitrate.arbitrate Arbitrate.mx_base [ Arbitrate.mx_1; Arbitrate.mx_2; Arbitrate.mx_3 ]
+                  ))
+                  "the model agrees with production on the witness"
+
           testCase "a move pair nesting into each other's subtrees is refused, and no record could free it"
           <| fun _ ->
               // The second, independent reason the refused set is not one homogeneous class waiting
@@ -11481,9 +12051,10 @@ let proofOracleTests =
               // changes — which is the point: three of them are documented design choices that a
               // future session must not "fix" by accident, and the first is the one worth knowing.
 
-              // 1. a non-finite float is a STRING on the wire. `Json.render` has the guarded
-              //    `Json.tryRender` beside it; `Canon.render` has no guarded counterpart, so a
-              //    digest over `JFloat nan` collides with the digest over `JStr "NaN"`.
+              // 1. a non-finite float is a STRING on the wire, so a digest over `JFloat nan`
+              //    collides with the digest over `JStr "NaN"`. `Canon.render` refuses nothing and
+              //    its bytes are pinned, so this stays asserted; the guarded `Canon.tryRender`
+              //    beside it (Phase 165) is the entry point that does refuse — see its own cases.
               Expect.equal
                   (Canon.render (JFloat nan))
                   (Canon.render (JStr "NaN"))
@@ -11552,6 +12123,146 @@ let proofOracleTests =
                   (sprintf
                       "the canon oracle disagreed with production off the canonical subset:\n%s"
                       (renderCanonDiffs t.Diffs))
+
+          // ---- the guard beside the canonical encoder (Phase 165) ----
+
+          testCase "Canon.tryRender refuses exactly the non-finite alias witnesses, and names them by path"
+          <| fun _ ->
+              // Refutation 1 of the four above is the one that is not a documented design choice,
+              // and it has THREE witnesses, one per non-finite class. Each is refused, at the root.
+              Expect.equal
+                  (Canon.tryRender (JFloat nan))
+                  (Result.Error "non-finite float has no canonical rendering of its own: NaN at $")
+                  "a NaN is refused, by token and by path"
+
+              Expect.equal
+                  (Canon.tryRender (JFloat infinity))
+                  (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $")
+                  "+infinity is refused"
+
+              Expect.equal
+                  (Canon.tryRender (JFloat -infinity))
+                  (Result.Error "non-finite float has no canonical rendering of its own: -Infinity at $")
+                  "-infinity is refused"
+
+              // ... and the STRING each one aliases is a perfectly good value, and is not refused.
+              // So are refutations 2, 3 and 4 — the integer-shaped float, the two zeroes and the
+              // member order — which the format documents and the guard must therefore leave alone.
+              for v in
+                  [ JStr "NaN"
+                    JStr "Infinity"
+                    JStr "-Infinity"
+                    JFloat 2.0
+                    JInt 2
+                    JFloat -0.0
+                    JFloat 0.0
+                    JFloat 1e17
+                    JObj [ "a", JInt 1; "b", JInt 2 ]
+                    JObj [ "b", JInt 2; "a", JInt 1 ] ] do
+                  Expect.equal
+                      (Canon.tryRender v)
+                      (Result.Ok(Canon.render v))
+                      (sprintf "a value holding no non-finite float is exactly `Ok (render v)`: %A" v)
+
+              // The path: an array by index, a member by its canonically escaped key, the FIRST
+              // offender in document order — and document order is AUTHORED order, not the sorted
+              // order `render` would emit, because the scan runs before any sort.
+              Expect.equal
+                  (Canon.tryRender (JObj [ "$type", JStr "X"; "a", JArr [ JInt 1; JFloat infinity ] ]))
+                  (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $[\"a\"][1]")
+                  "a nested offender is named through the member and the index"
+
+              Expect.equal
+                  (Canon.tryRender (JObj [ "b", JFloat nan; "a", JFloat infinity ]))
+                  (Result.Error "non-finite float has no canonical rendering of its own: NaN at $[\"b\"]")
+                  "the first offender in AUTHORED order is the one named, though `a` sorts first"
+
+              Expect.equal
+                  (Canon.tryRender (JArr [ JArr []; JObj [ "k\"\u0001", JFloat -infinity ] ]))
+                  (Result.Error
+                      "non-finite float has no canonical rendering of its own: -Infinity at $[1][\"k\\\"\\u0001\"]")
+                  "a key carrying a quote and a control character is escaped as rule 6 escapes it"
+
+              // `render` is untouched: every value refused above still renders, to the aliasing bytes.
+              Expect.equal (Canon.render (JFloat nan)) "\"NaN\"" "the unguarded renderer's bytes did not move"
+
+          testCase "the guard oracle agrees with Canon.tryRender over the corpus — and refuses none of it"
+          <| fun _ ->
+              for family, floor in [ "nodes", 100; "ops", 10 ] do
+                  let t = onBigStack (fun () -> guardCorpus canonWire family)
+
+                  Expect.isEmpty
+                      t.Diffs
+                      (sprintf
+                          "the guard oracle disagreed with production on %s/:\n%s"
+                          family
+                          (renderCanonDiffs t.Diffs))
+
+                  Expect.isGreaterThan
+                      t.Docs
+                      floor
+                      (sprintf "the %s/ family was read at all (%d fixtures)" family t.Docs)
+
+                  // JSON cannot spell a non-finite float, so a parsed fixture cannot hold one: on
+                  // the corpus the guard is `Ok (render v)` everywhere, which is the acceptance's
+                  // "agrees with render on the corpus" measured rather than assumed.
+                  Expect.equal t.Refused 0 (sprintf "no %s/ fixture is refused" family)
+
+          testCase "the guard oracle agrees with Canon.tryRender over a generated pool carrying non-finite floats"
+          <| fun _ ->
+              let t = onBigStack (fun () -> guardGenerated canonWire 1650 2400)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the guard oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // adequacy — MEASURED at 2400 documents, seed 1650: 398 refused (78 of them two or
+              // more steps deep; 132 NaN, 146 +infinity, 120 -infinity) and 2002 accepted, 103 of
+              // those carrying a float outside the canonical subset. Every threshold sits under
+              // its measurement with headroom and above zero.
+              Expect.isGreaterThan t.Refused 200 (sprintf "documents the guard refused (%d)" t.Refused)
+
+              Expect.isGreaterThan
+                  (t.Docs - t.Refused)
+                  200
+                  (sprintf "documents the guard accepted (%d)" (t.Docs - t.Refused))
+
+              Expect.isGreaterThan
+                  t.DeepRefusals
+                  40
+                  (sprintf
+                      "refusals two or more steps deep — the scan's recursion, not its leaf arm (%d)"
+                      t.DeepRefusals)
+
+              Expect.isGreaterThan t.NaNs 60 (sprintf "refusals naming NaN (%d)" t.NaNs)
+              Expect.isGreaterThan t.PosInfs 60 (sprintf "refusals naming Infinity (%d)" t.PosInfs)
+              Expect.isGreaterThan t.NegInfs 60 (sprintf "refusals naming -Infinity (%d)" t.NegInfs)
+
+              Expect.isGreaterThan
+                  t.AcceptedNormalised
+                  50
+                  (sprintf
+                      "ACCEPTED documents carrying an integer-shaped float or a zero (%d) — the set the guard must not refuse"
+                      t.AcceptedNormalised)
+
+          testCase "a guard model that cannot see NaN loses — on exactly the documents a NaN decides"
+          <| fun _ ->
+              // The go-red. `tryrender_refuses_exactly_aliasing` turns on the guard's predicate
+              // being `fclass f <> FFinite`, so the instrument that must lose is one whose predicate
+              // is narrower by one class. It must disagree on every document whose FIRST non-finite
+              // float is a NaN — the model walks past it and either renders or names a later
+              // infinity — and on NO other document, a refusal for an infinity included.
+              let t = onBigStack (fun () -> guardGenerated guardWireGoRed 1650 2400)
+
+              Expect.isGreaterThan t.NaNs 60 (sprintf "the go-red run reached NaN refusals at all (%d)" t.NaNs)
+
+              Expect.equal
+                  (List.length t.Diffs)
+                  t.NaNs
+                  (sprintf
+                      "the NaN-blind model disagreed on %d documents and production named a NaN on %d — they must be the same documents"
+                      (List.length t.Diffs)
+                      t.NaNs)
 
           // ---- the evolution policy, over the envelope family and perturbed IDL pairs (Phase 151) ----
 

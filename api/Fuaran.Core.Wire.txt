@@ -46,6 +46,7 @@ field Fuaran.Core.Versioning.payloadKey : System.String (literal)
 method Fuaran.Core.Canon.canonicalFloat(System.Double) : System.String
 method Fuaran.Core.Canon.render(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Canon.renderOrdered(Fuaran.Core.JVal) : System.String
+method Fuaran.Core.Canon.tryRender(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Canon.typed(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>) : Fuaran.Core.JVal
 method Fuaran.Core.Corpus.codecLaws`1(Fuaran.Core.Corpus+Codec`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.Int32, !!0>, System.Int32, System.Int32) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.Corpus.coverageGate(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Case>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>

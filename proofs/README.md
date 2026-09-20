@@ -3323,6 +3323,11 @@ shipped encoder, in the shape Phase 137 took, and belongs to a phase chartered f
 `Proofs.Oracle` case that holds the four aliases asserts them on **production**, so the finding
 goes red if the encoder ever changes.
 
+**CLOSED by Phase 165, in exactly that shape.** `Canon.tryRender` is the guarded companion, beside a
+`Canon.render` whose bytes did not move — so everything above remains true of `render`, the alias
+case still asserts it on production, and a caller that wants the refusal reaches for the new entry
+point. See "The guard" below.
+
 ### What is proved
 
 **The canonical subset is rule 5's own slot rule, read as a predicate.** A float is canonical
@@ -3358,6 +3363,64 @@ Rule 5 — `canonical_float_injective` and `int_layout_injective`, DERIVED rathe
 the ladder). Rule 4 — `absence_is_structural`: two objects that render alike carry the same keys,
 so an omitted key can never be confused with a present one, which is what makes "`None` fields are
 excluded" safe rather than merely tidy.
+
+### The guard — `Canon.tryRender` (Phase 165)
+
+`Canon.tryRender : JVal -> Result<string, string>` is `Canon.render` with a refusal beside it, in
+the shape `Json.tryRender` gives `Json.render`. Over a value holding no non-finite float it is
+exactly `Ok (render v)`; otherwise it is an `Error` naming the FIRST non-finite float in document
+order by its token and its path — `$` for the root, `[i]` for an array item, `["key"]` for an
+object member with the key under rule 6's escape, so the path is unambiguous for any key. Document
+order is AUTHORED order: the scan runs before any sort, as it must if the path is to name
+something the caller wrote.
+
+**The predicate is `float_canonical`'s FIRST clause and nothing else.** That predicate has two
+clauses because refutations 1 and 2 are its two failure modes; the guard takes the first — finite —
+and deliberately leaves the second. An integer-shaped finite float is the format's documented
+numeric normalisation, and a guard that refused `JFloat 2.0` would be refusing what rule 5 says.
+
+Section 13 of `WireCanon.fst` models the scan (`first_nonfinite`, clause for clause with
+production's `firstNonFinite`, the array index carried as `List.indexed` carries it) and the guard
+(`try_render`), and proves:
+
+- **`tryrender_is_render_on_finite`.** Wherever every float is finite, the guard IS the renderer:
+  `try_render w v == Rendered (render w v)`. The model calls `render`; it does not re-implement it,
+  so "changes no byte" is structural.
+- **`tryrender_is_render_on_canonical`.** The corollary the phase's acceptance asks for: the
+  canonical subset every theorem above is stated over sits inside the accepted set.
+- **`tryrender_refuses_exactly_aliasing`.** The guard refuses **if and only if** some float is not
+  finite. And what a refusal names is a float that is really at that path, whose class is one of
+  the three non-finite ones, and whose own rendering is byte for byte the rendering of a string it
+  is not equal to — `render_aliases_nan` / `_pos_inf` / `_neg_inf`, restated at the class the
+  refusal carries. The guard and the refutation share one predicate: `fclass f <> FFinite`.
+- **`nonfinite_anywhere_is_refused`.** The converse at depth: a non-finite float reachable by ANY
+  path is refused, so no position in a document hides one from the guard.
+- **`tryrender_keeps_the_documented_normalisations`.** Refutations 2, 3 and 4, each under its own
+  hypothesis, each ACCEPTED and rendered to `render`'s own bytes.
+
+"Really at that path" is a RELATION (`reaches`) rather than a by-key lookup, on purpose: a `JObj`
+is an association list, a repeated key is representable, and a lookup would find the first member
+of that key where the scan may have named a later one.
+
+**What is NOT proved, said plainly.** *Minimality* — that the path named is the first offender in
+document order — is modelled clause for clause and measured by the differential, but there is no
+theorem that every position before it is finite. *Document-level aliasing* — that a refused
+document renders identically to the document with the named float replaced by its string — is not
+proved either; it is a congruence through `sort_kvs`, and a guard whose job is to refuse does not
+need it. `Canon.renderOrdered` is not modelled and has no guarded companion.
+
+**One thing the shard asked for that is not there, and why.** It asked for "a guarded digest
+companion where a digest wraps the renderer". None does: `Fuaran.Core.Wire` references nothing that
+hashes, and every digest in the repository takes a STRING a caller has already rendered. The
+guarded digest is therefore `Canon.tryRender v |> Result.map digest` at the caller, with the
+caller's own hash — one line, and the only form that does not give the wire package a dependency
+it has never had. The entry point's doc comment says so where a caller will read it.
+
+**And one number the shard had wrong.** It speaks of "the four alias witnesses" the guard refuses.
+The four are the four REFUTATIONS, of which the guard's is the first alone; that refutation has
+THREE witnesses, one per non-finite class, and the other three refutations are exactly what the
+guard must not refuse. The shard's own goal and acceptance say the same, so this is a slip in one
+task line rather than a disagreement, and the differential asserts both halves.
 
 ### Why a reader, and not a second model of `Json.parse`
 
@@ -3401,11 +3464,19 @@ digest input.
 | a generated `JVal` pool | 1,200 seed-replayable documents over an alphabet carrying rule 6's three escape classes, astral and private-use keys, and rule 5's scientific layout | yes (each shape asserted reached) |
 | the four aliasing pairs | asserted on PRODUCTION, and on the model beside it | the finding, as a check that can go red |
 | the non-canonical arms | both infinities, NaN, both zeroes, the Int32 boundaries, an empty string, an empty object and array | the model is a model of the whole encoder, not only of the part the theorem covers |
+| the guard, on production directly (Phase 165) | the three non-finite witnesses refused by token and path; the strings they alias and the three documented normalisations NOT refused; the first offender in AUTHORED order named though another sorts first; a key with a quote and a control character escaped as rule 6 escapes it | the refusal, as a check that can go red |
+| the guard, over both corpus families (Phase 165) | the extracted guard beside `Canon.tryRender`, as the `Result` a caller receives | yes — and no fixture is refused, asserted: JSON cannot spell a non-finite float |
+| the guard, over a poisoned generated pool (Phase 165) | 2,400 seed-replayable documents with roughly one numeric leaf in three replaced by a non-finite float; the two results compared, an accept held to `render`'s bytes, and the verdict held to a third, independent predicate | yes (asserted reached: refusals, accepts, refusals two or more steps deep, each of the three tokens, accepted documents outside the canonical subset) |
 
 The **go-red** is rule 2's comparator REVERSED — the sort the rule mandates still runs, but orders
 keys the other way. Every object carrying two distinct keys must then disagree, and a document
 carrying none must still agree; both are asserted, so the instrument is known to be one that can
 lose *and* to be narrow to the rule it is about.
+
+The guard has its own **go-red** (Phase 165): a model wire that cannot see NaN — it classifies one
+as finite, so the scan walks past it. It must disagree with production on exactly the documents
+whose FIRST non-finite float is a NaN, and on no other document, a refusal for an infinity
+included; the test asserts the two counts are equal, not merely that one is non-zero.
 
 One thing about the host is worth knowing before anyone reads a stack trace. The extracted model is
 a **character-list interpreter** and F\*'s F# backend emits plain recursion with no tail calls, so
@@ -3421,14 +3492,22 @@ fixture it would have dropped first is the deepest one.
 1. **Proved (machine-checked, no admits).** On the model: `render_total`,
    `read_render_roundtrip`, `render_injective_up_to_key_order`, `render_deterministic`,
    `canonical_form_iff`, `render_injective_on_normal`, `read_returns_a_normal_value`, the four
-   rule lemmas, the §21 relations in `Limits.fst`, and the four refutations. F\* 2026.09.06,
+   rule lemmas, the §21 relations in `Limits.fst`, the four refutations, and (Phase 165) the
+   guard's five — `tryrender_is_render_on_finite`, `tryrender_is_render_on_canonical`,
+   `tryrender_refuses_exactly_aliasing`, `nonfinite_anywhere_is_refused` and
+   `tryrender_keeps_the_documented_normalisations`. F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
    `admit`. The module carries a scoped `--ext context_pruning` for the reason `TreeOps.fst` gives
    at the same line.
 2. **Differentially tested.** The extracted encoder agrees with `Canon.render` byte for byte over
    both corpus families and the generated pool, and the model's round trip agrees with
    `Json.parse ∘ Canon.render` over the same documents on the canonical subset. Agreement is over
-   the corpus and the pool drawn, never over all inputs. One go-red, required to lose.
+   the corpus and the pool drawn, never over all inputs. One go-red, required to lose. The guard
+   (Phase 165) is compared as the `Result` a caller receives — bytes on an accept, token and path
+   on a refusal — over both corpus families and a poisoned pool, with its own go-red. The model
+   carries a refusal as DATA and the host renders it in production's spelling, so the message's
+   fixed prefix is the bridge's and is not independently modelled; the token, the path and the
+   verdict are.
 3. **Assumed, and stated as such.**
    - **The numerals are opaque, and there is exactly ONE premise about them.** The two layouts and
      the numeral read-back are parameters, and `tok_read_ok` says the read-back inverts the
@@ -3459,8 +3538,12 @@ fixture it would have dropped first is the deepest one.
    - **`Canon.renderOrdered`.** It is the declared-key-order leg, where the ENCODER is the order
      authority and no sort runs; its canonicity rests on a different argument (the IDL's
      `WireShape.KeyOrder`), and nothing here carries to it.
-   - **That a non-finite float cannot reach `Canon.render`.** It can; nothing refuses it. See the
-     finding above.
+   - **That a non-finite float cannot reach `Canon.render`.** It can, and `render` still refuses
+     nothing — its bytes are pinned. What Phase 165 added is the entry point that DOES refuse; a
+     caller still holding `render` is exactly where it was.
+   - **That the guard names the FIRST offender, as a theorem**, or that a refused document aliases
+     at the DOCUMENT level. Both are named in "The guard" above; the first is measured, the second
+     is not needed by a refusal.
    - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
      measures — that is theorem 4's, and the boundary between the two is deliberate.
 
@@ -4463,6 +4546,193 @@ the `renderers` record so the model and its extraction stay ASCII. The oracle co
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
+## Theorem 13 — arbitration: pairwise independent, maximal, deterministic (Phase 157)
+
+_(This directory's thirteenth, and theorem 2's other end. `Ops.footprint` and `Ops.independent` say
+when two scripts commute; `Arbitration.arbitrate` is the function that USES them — the deterministic
+partition every multi-session allocation settles by: which subset of N op-script proposals can land
+together against one base tree. Theorem 2 proved the relation sound. Until this phase the function
+built on it was property-tested — `arbitrationLaws`, over one generator — and proved nowhere.)_
+
+The doc comment of `Arbitration.arbitrate` makes three promises, and the theorems are their names:
+
+> **"`Accepted` is mutually independent (pairwise `Ops.independent`) … by footprint soundness its
+> scripts apply confluently in ANY order."
+> "greedy-in-pinned-order yields *a maximal* mutually-independent set — nothing rejected could be
+> added without a conflict — not *the maximum* one."
+> "Proposals are processed in ascending `Id`, so the outcome is invariant under permutation of the
+> input list. Ids are expected unique … the permutation-invariance guarantee assumes unique ids."**
+
+Each is stated with care and an honesty boundary, and the three are different kinds of claim. The
+choice of pinned ORDER is policy. That the accepted set is independent, that nothing rejected could
+join it, and that the result is a function of the proposal set are algebra — and are proved here.
+
+`Arbitrate.fst` models `src/Fuaran.Core.Ops/Arbitration.fs` clause for clause OVER theorem 2's
+model: a script is a `list TreeOps.op`, the dry run threads `TreeOps.apply`, the footprint is
+`TreeOps.fp_all`, and independence is `DagFold.independent` — the same relation the fold theorem is
+about, opened rather than restated. The five clauses are the F#'s own: `pin` (the pinned order —
+`List.sortBy (fun p -> p.Id)`, a STABLE ascending sort, and stability is observable), `can_script`
+(`Ops.canApplyAll`, failing index and envelope included), `step` and `fold_step` (the greedy pass,
+accumulating in reverse), `recite_all` (every conflict re-cited against the FULL accepted set), and
+the three fields of the result. **One simplification, named:** the F# carries each accepted
+proposal's footprint beside it so it is computed once; a footprint is a pure function of the
+script, so the model recomputes `fp_of p` where the F# reads the cached value, and the differential
+is what holds the two to the same verdicts.
+
+### What is proved
+
+Three theorems, over any base tree and any proposal list:
+
+- **`accepted_pairwise_independent`.** The accepted set is pairwise independent — with NO
+  hypothesis: duplicates, inapplicable scripts and an ill-formed base included. Pairwise is
+  POSITIONAL, every member against every LATER one. A proposal need not be independent of itself
+  (any structural write conflicts with itself), so "any two members" would be false of a list
+  carrying one value twice; the positional reading is what the greedy pass establishes, and with
+  `independent`'s symmetry it is the whole relation. **`accepted_pair_commutes`** is what it buys:
+  any two accepted proposals, read as the single ops `Batch a.script` and `Batch b.script`, both
+  apply at the base (every accepted script passed the dry run, and `can_script_is_apply_all` ties
+  the dry run to the fold a `Batch` runs), and at a well-formed base each applies after the other
+  and the two orders reach the same tree — theorem 2's `tree_independence_diamond`, reaching the
+  accepted set. That is "by footprint soundness, confluent in any order" for a pair, as a theorem.
+  The N-script statement is theorem 2's `skeleton_fold_confluence`, whose hypothesis this
+  discharges; it is not restated.
+- **`accepted_maximal`.** Every rejection is JUSTIFIED (`all_justified`), so nothing rejected could
+  be added. An `Inapplicable (i, e)` is exactly the dry run's failing index and envelope. A
+  `Conflicts ids` names a script that DOES apply, is NOT independent of the final accepted set, and
+  cites a non-empty list that is exactly the accepted ids it interferes with, in pinned order. The
+  proof has two layers because the F# decides in two passes: at decision time a conflict is known
+  only to interfere with the accepted set as it then stood (`provisional`); the accepted set only
+  grows (`provisional_grows`), so the interference survives; and the re-citation then names the
+  interferers against the full set. "Non-empty by construction", the F# comment says —
+  `interfering_nil_iff` is that sentence. The citation is SOUND
+  (`conflict_cites_an_accepted_interferer`: every cited id resolves to an accepted proposal that
+  genuinely interferes) and COMPLETE (`every_interferer_is_cited`: "the complete rebase target, not
+  just the first collision"). And the partition is total by count (`arbitrate_is_total`): accepted
+  and rejected together are as long as the input. No hypothesis about ids.
+- **`arbitrate_deterministic`.** Under every arrival order — `DagFold.perm`, the relation the fold
+  theorem quantifies over — of a proposal list whose ids are DISTINCT, the WHOLE result is equal:
+  accepted set, merged script, every rejection with its reason. `arbitrate` reads its input only
+  through `pin`, so the theorem is the sort's: two inserts under different keys commute into any
+  list at all (`insert_comm` — sortedness is not needed), and distinctness survives a permutation
+  (`perm_distinct`). `pin_sorted` says the pinned order IS ascending id.
+
+### The finding: the id-uniqueness hypothesis is NEEDED
+
+The phase was asked to state the hypothesis on `arbitrate_deterministic` and find out what the
+prover actually needs. It needs it, and the reason is a counterexample rather than a proof that
+would not close.
+
+**`arbitrate` is total on duplicate ids.** Every function of the model is total, and theorems 1
+and 2 and the partition count carry no hypothesis about ids at all. What a repeated id costs is
+invariance, and nothing else.
+
+**But invariance is FALSE without uniqueness** (`duplicate_ids_break_invariance`). Two proposals
+sharing id 1, each inserting under the same parent: they interfere — both write that parent's
+structure — so exactly one is accepted, and the stable sort leaves them in arrival order, so WHICH
+one is accepted IS the arrival order. `[a; b]` accepts `a`; `[b; a]` accepts `b`. The two lists are
+one `PSwap` apart, so this refutes the theorem with its `requires` deleted, not some stronger
+claim. Deleting the `requires` from `pin_perm` is refused by the prover at exactly the two places
+the hypothesis is used (`insert_comm`'s precondition and `perm_distinct`'s), which is the same fact
+read from the other side.
+
+**So the check shipped** (operator decision 2026-09-19, the branch that decision reserved for this
+outcome). `Arbitration.duplicateIds : OpScriptProposal list -> int list` returns the ids carried by
+more than one proposal, ascending, each once; empty exactly when the ids are unique. It is a TOTAL
+check and never an assigner — it reads `Id` and nothing else, mints nothing, renumbers nothing —
+and `arbitrate` does not call it: the function that assumes uniqueness and the callers that mint
+ids sit in different packages, so the assumption is made checkable by whoever holds the list.
+`arbitrationLaws` gains one law holding it to the hypothesis: the check is exact against an
+independent recount, it is empty on every set the permutation law is certified over, and a TWIN —
+the same id and script under another holder — makes arrival order observable on every set that
+holds an applicable self-interfering proposal, with its own vacuity guard. One wording correction
+to the phase as chartered: it asked for a law that invariance holds "exactly when" the check
+returns empty, and that biconditional is false of a single input — two proposals sharing an id, one
+of them inapplicable, arbitrate identically in either order. What is true, and what the law and the
+theorem say, is that uniqueness is SUFFICIENT for every input and that it cannot simply be
+dropped: two DIFFERENT proposals sharing an id that land in the same bucket — both accepted, both
+rejected, or one displacing the other — are listed in arrival order, and the twin is that case.
+
+### What is NOT claimed
+
+- **MAXIMUM.** Greedy-in-pinned-order returns A maximal independent set, not THE largest one, and
+  `maximal_is_not_maximum` is the witness that the difference is real: proposal 1 writes under both
+  `a` and `b`, proposals 2 and 3 under one each. The pinned order accepts 1 alone — a set of ONE,
+  both rejections justified — while `[2; 3]` is itself applicable and pairwise independent, a set
+  of TWO; renumber proposal 1 to come last and that larger set is what is accepted. Both results
+  are maximal. Only one is maximum. The ids decide which the caller gets.
+- **That ascending id is the right order.** The pinned order is a POLICY choice
+  (`arbitration-pinned-order`, the ladder's second `policy` row): pinned, documented,
+  deterministic, and argued for nowhere here. No ranking, no quality judgement and no evaluator is
+  modelled, because none ships — which proposal is *better* is the host's business.
+- **That a `Conflicts` is a real conflict.** Independence is conservative (theorem 2's "the
+  conservative footprint is the theorem's shape"): a "maybe" is a conflict, so `Conflicts` means
+  "not provably coexistent", never "wrong". Maximality is maximality with respect to
+  `Ops.independent`, not with respect to what would in fact commute.
+- **The N-script any-order statement,** which is theorem 2's and is sampled end to end by
+  `arbitrationLaws`' confluence law; `accepted_pair_commutes` is the pair.
+- **`applyContained`.** `arbitrate` dry-runs with `Ops.canApplyAll`, which consults no container
+  capability (theorem 5's `container-sequence-gap`), and so does the model.
+
+### The differential
+
+`Proofs.Oracle` runs the extracted model beside `Arbitration.arbitrate` over generated proposal
+sets against the base tree: scripts from Phase 80's lane generator (each applies at the base on its
+own, and they share parents often enough that conflicts arise without being arranged), about one in
+four corrupted into a provably inapplicable script, in two id modes — a SHUFFLE of 1..n, so the
+pinned order is not the arrival order, and ids drawn from {1, 2}, so most sets carry a repeated id
+and the stable sort's tie-break is compared too. Per set: the accepted proposals in order (id,
+holder, script), the merged script, and every rejection in order with its reason — an
+`Inapplicable`'s index exactly and its envelope by CLASS, which is what the tree model claims, and
+a `Conflicts`' citation exactly. On every set the shipped `duplicateIds` is empty exactly when the
+extracted `distinct_ids` holds, and the extracted `pairwise_independent` and `all_applicable` are
+asked of PRODUCTION's own accepted set. The case asserts that the sample reached an accepted
+proposal, an `Inapplicable`, a `Conflicts` and a repeated id.
+
+**The go-red is a model that accepts a conflicting pair**: the extracted model with the greedy
+pass's `all_independent` test removed and nothing else touched — the pinned sort, the dry run, the
+re-citation and the merged script are the oracle's own code. It must lose, on a sample shown to
+have reached a conflict; the same sample under the real model agrees. Two further cases pin the two
+witnesses on the shipped function over the model's own extracted inputs, so a fix or a regression
+turns one red and sends its reader here.
+
+### What it cost
+
+Cold runs of the prover invoked directly on the file with the leg's own flags (rlimit 40,
+`--quake 3`, `--report_assumes error`) against a cache holding only `DagFold` and `TreeOps`:
+**12s, 12s, 12s**, taken beside other proof workers on the same machine. Budget **30s** (2 × 12,
+rounded up) and floor **6s** (half of 12), seeded per Phase 148/164's rules and recorded in
+`modules.json`. It carries `--ext context_pruning` for the reason `TreeOps.fst` gives — it opens
+that module, so every membership pattern it declares is live at every query here. Nothing needed a
+scoped rlimit, an SMT pattern or a second attempt: the module discharged on its first run. That is
+worth saying plainly rather than dressing up, because the reason is structural. Every proof is an
+induction over the fold or over `perm`; the footprint cache was dropped from the model, which
+removed the one invariant (every cached footprint is its script's) that would have had to ride
+through every lemma; and the two witnesses are `assert_norm`s over trees of three nodes. The
+probe that the theorems can fail was run the other way: `pin_perm` with its `requires` deleted is
+refused.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The three theorems above plus `accepted_pair_commutes`,
+   `accepted_all_applicable`, `can_script_is_apply_all`, the citation's soundness and completeness
+   (`conflict_cites_an_accepted_interferer`, `every_interferer_is_cited`, `interfering_nil_iff`,
+   `justified_mem`), the partition count (`arbitrate_is_total`), `pin_sorted`, `insert_comm`, and
+   the two witnesses (`duplicate_ids_break_invariance`, `maximal_is_not_maximum`). F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
+   `admit`. Opens `DagFold` and `TreeOps`.
+2. **Differentially tested.** The extracted model agrees with `Arbitration.arbitrate` over the
+   pools above, with the model that accepts a conflicting pair required to lose. Agreement is over
+   those pools, never over all inputs. That the shipped `duplicateIds` decides the theorem's
+   hypothesis is at THIS level — it is asserted on every generated set, not proved: `List.countBy`
+   is not modelled.
+3. **Assumed, and stated as such.** Nothing new. The model stands on theorem 2's rows and inherits
+   them unchanged: **`tree-algebra-well-formed-states`** is `accepted_pair_commutes`'s hypothesis
+   and no other statement's here; **`sets-are-lists`**; **`lawful-abstract-witness`**; and theorem
+   1's **`extractor-and-compiler-trusted`**. Proposal ids are unbounded integers in the model and
+   `int` in the F#; ordering agrees on the whole `int` range, so nothing turns on the width.
+4. **Policy.** **`arbitration-pinned-order`** — ascending id is the order; whether it is the right
+   one is not a theorem.
+
 ## Next
 
 _(**A resolver that resolves only declared reads** was the first item on this list and is DONE:
@@ -4513,18 +4783,12 @@ which decides the profile bump. Nothing here should be changed to close it: wide
 `Versioning.classify` would model a function this repository does not ship, and the differential
 already asserts the vacuity, so the day the answer changes this goes red rather than stale.
 
-**A guarded `Canon.tryRender`** — theorem 7's finding, and the smallest item on this list. `Json`
-has the pair: `render` formats a non-finite float into a token that is not valid JSON, and
-`tryRender` names it as a typed `Error` instead. `Canon` has only the unguarded half, and its
-failure mode is worse rather than better — a non-finite float does not produce un-parseable wire,
-it produces a `"NaN"` STRING, so the digest over `JFloat nan` equals the digest over the value a
-reader decodes those bytes back to. `render_aliases_nan` is that sentence proved, and the
-`Proofs.Oracle` alias case is it asserted on production. What it needs is a refusal-class addition
-in the shape Phase 137 took — a guarded entry point beside the existing one, not a change to what
-`render` does, since the bytes are pinned by the corpus and by four other hosts. The theorem's
-canonical subset is already the predicate such a guard would enforce, which is why this is small:
-`float_canonical`'s two clauses ARE the refusal, and the second of them (an integer-shaped float
-token) is a design choice the guard should NOT refuse, so the guard is the first clause alone.
+_(**A guarded `Canon.tryRender`** was on this list — theorem 7's finding, and the smallest item on
+it — and is DONE: Phase 165. `Canon.tryRender` sits beside an untouched `Canon.render` and names the
+first non-finite float by token and path; the guard is `float_canonical`'s first clause alone, as
+this entry said it should be, and the integer-shaped float its second clause describes is proved
+NOT refused. Theorem 7's "The guard" section carries the statements, what is deliberately not
+proved, and the differential.)_
 
 **The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
 shortest informal argument and the longest mechanisation. **This entry has been corrected by Phase
