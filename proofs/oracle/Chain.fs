@@ -855,5 +855,192 @@ let offset = (fun ( n  :  pos ) ( r  :  replayed<'st, 'rej> ) -> (match (r) with
      end))
 
 
+let rec chain_head = (fun ( rs  :  Prims.list<record<'op>> ) -> (match (rs) with
+| [] -> begin
+     ""
+     end
+| (r)::[] -> begin
+     r.rhash
+     end
+| (uu___)::t -> begin
+     (chain_head t)
+     end))
+
+type attestation = {ahead : Prims.string; akey : Prims.string; asig : Prims.string}
+
+
+let __proj__Mkattestation__item__ahead : attestation  ->  Prims.string = (fun ( projectee  :  attestation ) -> (match (projectee) with
+| {ahead = ahead; akey = akey; asig = asig} -> begin
+     ahead
+     end))
+
+
+let __proj__Mkattestation__item__akey : attestation  ->  Prims.string = (fun ( projectee  :  attestation ) -> (match (projectee) with
+| {ahead = ahead; akey = akey; asig = asig} -> begin
+     akey
+     end))
+
+
+let __proj__Mkattestation__item__asig : attestation  ->  Prims.string = (fun ( projectee  :  attestation ) -> (match (projectee) with
+| {ahead = ahead; akey = akey; asig = asig} -> begin
+     asig
+     end))
+
+
+let attest_head = (fun ( sign  :  Prims.string  ->  found<attestation> ) ( rs  :  Prims.list<record<'op>> ) -> (sign (chain_head rs)))
+
+
+let verify_attestation = (fun ( verify  :  attestation  ->  Prims.string  ->  Prims.bool ) ( att  :  attestation ) ( rs  :  Prims.list<record<'op>> ) -> (verify att (chain_head rs)))
+
+
+let accepts_signed = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( enc_op  :  'op  ->  Prims.string ) ( genesis  :  Prims.string ) ( verify  :  attestation  ->  Prims.string  ->  Prims.bool ) ( att  :  attestation ) ( rs  :  Prims.list<record<'op>> ) -> ((verify_chain h show enc_op genesis rs) && (verify_attestation verify att rs)))
+
+
+let rec step_at = (fun ( cs  :  Prims.list<cstep<'op>> ) ( n  :  pos ) -> (match (((cs), (n))) with
+| ([], uu___) -> begin
+     Missing
+     end
+| ((c)::uu___, PZero) -> begin
+     Found (c)
+     end
+| ((uu___)::t, PSucc (m)) -> begin
+     (step_at t m)
+     end))
+
+
+let rec replace_step = (fun ( cs  :  Prims.list<cstep<'op>> ) ( n  :  pos ) ( c'  :  cstep<'op> ) -> (match (((cs), (n))) with
+| ([], uu___) -> begin
+     []
+     end
+| ((uu___)::t, PZero) -> begin
+     (c')::t
+     end
+| ((c)::t, PSucc (m)) -> begin
+     (c)::(replace_step t m c')
+     end))
+
+
+let rec insert_step = (fun ( cs  :  Prims.list<cstep<'op>> ) ( n  :  pos ) ( c'  :  cstep<'op> ) -> (match (((cs), (n))) with
+| ([], uu___) -> begin
+     (c')::[]
+     end
+| (uu___, PZero) -> begin
+     (c')::cs
+     end
+| ((c)::t, PSucc (m)) -> begin
+     (c)::(insert_step t m c')
+     end))
+
+
+let rec remove_step = (fun ( cs  :  Prims.list<cstep<'op>> ) ( n  :  pos ) -> (match (((cs), (n))) with
+| ([], uu___) -> begin
+     []
+     end
+| ((uu___)::t, PZero) -> begin
+     t
+     end
+| ((c)::t, PSucc (m)) -> begin
+     (c)::(remove_step t m)
+     end))
+
+type splice<'op> =
+| Replaced of pos * cstep<'op>
+| Inserted of pos * cstep<'op>
+| Dropped of pos
+
+
+let uu___is_Replaced = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Replaced (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Replaced__item___0 = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Replaced (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__Replaced__item___1 = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Replaced (_0, _1) -> begin
+     _1
+     end))
+
+
+let uu___is_Inserted = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Inserted (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Inserted__item___0 = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Inserted (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__Inserted__item___1 = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Inserted (_0, _1) -> begin
+     _1
+     end))
+
+
+let uu___is_Dropped = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Dropped (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Dropped__item___0 = (fun ( projectee  :  splice<'op> ) -> (match (projectee) with
+| Dropped (_0) -> begin
+     _0
+     end))
+
+
+let apply_splice = (fun ( cs  :  Prims.list<cstep<'op>> ) ( sp  :  splice<'op> ) -> (match (sp) with
+| Replaced (n, c') -> begin
+     (replace_step cs n c')
+     end
+| Inserted (n, c') -> begin
+     (insert_step cs n c')
+     end
+| Dropped (n) -> begin
+     (remove_step cs n)
+     end))
+
+
+let splice_changes = (fun ( cs  :  Prims.list<cstep<'op>> ) ( sp  :  splice<'op> ) -> (match (sp) with
+| Replaced (n, c') -> begin
+     (match ((step_at cs n)) with
+| Missing -> begin
+     false
+     end
+| Found (c) -> begin
+     (not ((Prims.op_Equals c c')))
+     end)
+     end
+| Inserted (uu___, uu___1) -> begin
+     true
+     end
+| Dropped (n) -> begin
+     (match ((step_at cs n)) with
+| Missing -> begin
+     false
+     end
+| Found (uu___) -> begin
+     true
+     end)
+     end))
+
+
 
 

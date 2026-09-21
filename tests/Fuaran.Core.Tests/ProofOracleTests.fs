@@ -1708,6 +1708,239 @@ let private modelDiamondBreaks
                     | _ -> ()
 
     breaks, met
+
+// ---------------------------------------------------------------------------
+//  Phase 157 — PROPOSAL ARBITRATION as an oracle over the tree oracle.
+//
+//  `proofs/Arbitrate.fst` models `Arbitration.arbitrate` clause for clause over Phase 133's tree
+//  model — the stable pinned sort, the `canApplyAll` dry run, the greedy independence pass and the
+//  re-citation — and proves the three promises the function's doc comment makes: the accepted set
+//  is pairwise independent, every rejection is justified (maximal, NOT maximum), and the whole
+//  result is invariant under arrival order for id-distinct input. `proofs/oracle/Arbitrate.fs` is
+//  that model extracted.
+//
+//  What runs here is the model BESIDE production over generated proposal sets against the base
+//  tree: scripts from Phase 80's lane generator (each applies at the base on its own, and they
+//  frequently share a parent, so conflicts arise without being arranged), about one in four
+//  corrupted into a provably inapplicable script, under ids that are a SHUFFLE of 1..n — so the
+//  pinned order is not the arrival order — and, in a second mode, under ids drawn from {1, 2}, so
+//  that most sets carry a repeated id and the STABLE sort's tie-break is compared too. Compared
+//  per set: the accepted proposals (id, holder, script) in order; the merged script; and every
+//  rejection in order with its reason — an `Inapplicable`'s index exactly and its envelope by
+//  CLASS (which is what the tree model claims; see Phase 133's section above), a `Conflicts`'
+//  citation exactly.
+// ---------------------------------------------------------------------------
+
+type private ArbProposal = OpScriptProposal<RNode, string>
+
+let private toModelProposal (p: ArbProposal) : Arbitrate.proposal =
+    { Arbitrate.proposal.pid = bigint p.Id
+      Arbitrate.proposal.holder = p.Holder
+      Arbitrate.proposal.script = p.Ops |> List.map (toModelOpWith toModelTree) }
+
+/// Production's result in the vocabulary the comparison is made in.
+let private renderProdArbitration (a: Arbitration<RNode, string>) : string list =
+    [ for p in a.Accepted do
+          yield sprintf "accepted %d/%s %A" p.Id p.Holder (p.Ops |> List.map (toModelOpWith toModelTree))
+      yield sprintf "merged %A" (a.MergedScript |> List.map (toModelOpWith toModelTree))
+      for p, why in a.Rejected do
+          match why with
+          | Inapplicable(i, rej) ->
+              yield sprintf "rejected %d/%s inapplicable at %d (%s)" p.Id p.Holder i (prodRejClass rej)
+          | Conflicts ids -> yield sprintf "rejected %d/%s conflicts %A" p.Id p.Holder ids ]
+
+/// The model's result in the same vocabulary.
+let private renderModelArbitration (a: Arbitrate.arbitration) : string list =
+    [ for p in a.accepted do
+          yield sprintf "accepted %d/%s %A" (int p.pid) p.holder p.script
+      yield sprintf "merged %A" a.merged
+      for p, why in a.rejected do
+          match why with
+          | Arbitrate.Inapplicable(i, rej) ->
+              yield sprintf "rejected %d/%s inapplicable at %d (%s)" (int p.pid) p.holder (int i) (modelRejClass rej)
+          | Arbitrate.Conflicts ids ->
+              yield sprintf "rejected %d/%s conflicts %A" (int p.pid) p.holder (ids |> List.map int) ]
+
+/// THE GO-RED INSTRUMENT — a model that accepts a conflicting pair. It is the extracted model
+/// with exactly one clause removed: the greedy pass's `all_independent` test. Everything else —
+/// the pinned sort, the dry run, the re-citation, the merged script — is the oracle's own code,
+/// so what the comparison loses on is the independence check and nothing else.
+let private arbitrateAcceptingConflicts (baseTree: TreeOps.tree) (ps: Arbitrate.proposal list) : Arbitrate.arbitration =
+    let step (acc, rej) (p: Arbitrate.proposal) =
+        match Arbitrate.can_script System.Numerics.BigInteger.Zero p.script baseTree with
+        | DagFold.Error(i, e) -> acc, (p, Arbitrate.Inapplicable(i, e)) :: rej
+        | DagFold.Ok() -> p :: acc, rej
+
+    let accRev, rejRev = Arbitrate.pin ps |> List.fold step ([], [])
+    let accepted = DagFold.rev accRev
+
+    { Arbitrate.arbitration.accepted = accepted
+      Arbitrate.arbitration.merged = Arbitrate.collect_scripts accepted
+      Arbitrate.arbitration.rejected = Arbitrate.recite_all accepted (DagFold.rev rejRev) }
+
+type private ArbTally =
+    {
+        Diffs: string list
+        Sets: int
+        Accepted: int
+        Inapplicable: int
+        Conflicting: int
+        /// Sets carrying a repeated id — the stable sort's tie-break was compared on these.
+        Duplicated: int
+        /// Sets where the shipped `duplicateIds` and the model's `distinct_ids` disagreed.
+        HypothesisDiffs: string list
+        /// Sets where an extracted theorem predicate was FALSE of production's own result.
+        TheoremBreaks: string list
+    }
+
+let private emptyArbTally =
+    { Diffs = []
+      Sets = 0
+      Accepted = 0
+      Inapplicable = 0
+      Conflicting = 0
+      Duplicated = 0
+      HypothesisDiffs = []
+      TheoremBreaks = [] }
+
+/// One generated proposal set: `count` scripts off the base, ~1 in 4 corrupted, under `ids`.
+let private genProposalSet (uniqueIds: bool) (r0: ConfRng.T) : ArbProposal list * ConfRng.T =
+    let extra, r1 = ConfRng.intBelow 4 r0
+    let count = extra + 2
+    let scripts, r2 = treeLaneGen.Lanes count r1
+    let mutable r = r2
+
+    let ids =
+        if uniqueIds then
+            let shuffled, r' = ConfRng.shuffle [ 1..count ] r
+            r <- r'
+            shuffled
+        else
+            [ for _ in 1..count do
+                  let v, r' = ConfRng.intBelow 2 r
+                  r <- r'
+                  yield v + 1 ]
+
+    let proposals =
+        [ for k, (id, script) in List.indexed (List.zip ids scripts) do
+              let corrupt, r' = ConfRng.intBelow 4 r
+              r <- r'
+
+              let ops =
+                  if corrupt = 0 then
+                      script @ [ RemoveNode(sprintf "ghost-157-%d" k) ]
+                  else
+                      script
+
+              yield
+                  { Id = id
+                    Holder = sprintf "agent-%d" k
+                    Ops = ops } ]
+
+    proposals, r
+
+/// Production beside `modelArbitrate` over `trials` generated sets in each id mode.
+let private arbitrationDifferential
+    (modelArbitrate: TreeOps.tree -> Arbitrate.proposal list -> Arbitrate.arbitration)
+    (seed: int)
+    (trials: int)
+    : ArbTally =
+    let mutable r = ConfRng.ofSeed seed
+    let mutable tally = emptyArbTally
+    let mbase = toModelTree treeBase
+
+    for uniqueIds in [ true; false ] do
+        for t in 1..trials do
+            let proposals, r' = genProposalSet uniqueIds r
+            r <- r'
+            let prod = Arbitration.arbitrate nodew idw treeBase proposals
+            let mps = proposals |> List.map toModelProposal
+            let p = renderProdArbitration prod
+            let m = renderModelArbitration (modelArbitrate mbase mps)
+
+            let where =
+                sprintf "seed=%d mode=%s trial=%d" seed (if uniqueIds then "unique" else "duplicated") t
+
+            let diffs =
+                if p <> m then
+                    [ sprintf
+                          "arbitration differs — %s\n  production:\n    %s\n  oracle:\n    %s"
+                          where
+                          (String.concat "\n    " p)
+                          (String.concat "\n    " m) ]
+                else
+                    []
+
+            // the shipped check IS the theorem's hypothesis, read off the extracted predicate
+            let dups = Arbitration.duplicateIds proposals
+
+            let hypothesisDiffs =
+                if List.isEmpty dups <> Arbitrate.distinct_ids mps then
+                    [ sprintf
+                          "duplicateIds = %A but the model's distinct_ids = %b — %s"
+                          dups
+                          (Arbitrate.distinct_ids mps)
+                          where ]
+                else
+                    []
+
+            // the extracted theorem predicates, asked of PRODUCTION's result bridged across
+            let prodAccepted = prod.Accepted |> List.map toModelProposal
+
+            let theoremBreaks =
+                [ if not (Arbitrate.pairwise_independent prodAccepted) then
+                      yield sprintf "pairwise_independent is FALSE of production's accepted set — %s" where
+                  if not (Arbitrate.all_applicable mbase prodAccepted) then
+                      yield sprintf "all_applicable is FALSE of production's accepted set — %s" where
+                  if List.length prod.Accepted + List.length prod.Rejected <> List.length proposals then
+                      yield sprintf "the partition is not total — %s" where ]
+
+            tally <-
+                { Diffs = tally.Diffs @ diffs
+                  Sets = tally.Sets + 1
+                  Accepted = tally.Accepted + List.length prod.Accepted
+                  Inapplicable =
+                    tally.Inapplicable
+                    + (prod.Rejected
+                       |> List.filter (fun (_, w) ->
+                           match w with
+                           | Inapplicable _ -> true
+                           | Conflicts _ -> false)
+                       |> List.length)
+                  Conflicting =
+                    tally.Conflicting
+                    + (prod.Rejected
+                       |> List.filter (fun (_, w) ->
+                           match w with
+                           | Conflicts _ -> true
+                           | Inapplicable _ -> false)
+                       |> List.length)
+                  Duplicated = tally.Duplicated + (if List.isEmpty dups then 0 else 1)
+                  HypothesisDiffs = tally.HypothesisDiffs @ hypothesisDiffs
+                  TheoremBreaks = tally.TheoremBreaks @ theoremBreaks }
+
+    tally
+
+/// The model's witness trees and proposals, as production values — so a finding proved about the
+/// model is pinned on the shipped function over the SAME inputs.
+let rec private ofModelTree (t: TreeOps.tree) : RNode =
+    match t with
+    | TreeOps.TNode(i, k, []) -> RNode.leaf i k "v"
+    | TreeOps.TNode(i, k, cs) -> RNode.node i k (cs |> List.map ofModelTree)
+
+let rec private ofModelOp (o: TreeOps.op) : SkeletonOp<RNode, string> =
+    match o with
+    | TreeOps.InsertChild(p, n) -> InsertChild(p, ofModelTree n)
+    | TreeOps.RemoveNode x -> RemoveNode x
+    | TreeOps.MoveNode(x, np) -> MoveNode(x, np)
+    | TreeOps.ReorderChildren(p, order) -> ReorderChildren(p, order)
+    | TreeOps.Batch inner -> Batch(inner |> List.map ofModelOp)
+
+let private ofModelProposal (p: Arbitrate.proposal) : ArbProposal =
+    { Id = int p.pid
+      Holder = p.holder
+      Ops = p.script |> List.map ofModelOp }
+
 // ---------------------------------------------------------------------------
 //  Phase 136 — the two INTEGRITY WALKERS as a fourth oracle.
 //
@@ -2522,6 +2755,449 @@ let private expectSnapshotAgreement (label: string) (t: SnapshotTally) =
             t.TailDetected
             0
             (sprintf "%s: every tail tamper went undetected, so the agreement is vacuous" label)
+
+// ---------------------------------------------------------------------------
+//  Phase 193 — the signed head (`proofs/Chain.fst`, section 8)
+//
+//  `OpStream.head`, `attestHead` and `verifyAttestation` beside the extracted model, over
+//  generated chains, generated KEYRINGS, and the three splices the theorem names — each followed
+//  by a full RE-MINT, so that `verifyChain` accepts the result and only the signature can refuse
+//  it. That re-mint is the point: it is the tamper sections 1-7 of the model cannot see.
+//
+//  CORE SHIPS NO PRODUCTION SIGNER. `OpStream.noAttestation` signs nothing, and a real sink is
+//  host-side. So "beside production signing" means beside the `IAttestationSink` SEAM, driven by
+//  the test-local keyring sink below: what is compared is the model against the seam's contract
+//  (`head`, `attestHead`, `verifyAttestation`, and the `verifyChain && verifyAttestation`
+//  composition `verifyAttestation`'s doc comment describes), never against a signer.
+// ---------------------------------------------------------------------------
+
+/// A test-local keyring: named secrets, and the one a signer signs with. NOT cryptography — the
+/// "signature" is the default hash keyed by the secret — and deliberately one whose `Verify` does
+/// NOT compare the attestation's recorded `Head`, so that `signature_binds` is spent on the keyed
+/// digest rather than satisfied by construction.
+type private Keyring =
+    { Keys: (string * string) list
+      Active: string }
+
+let private keyringSink (ring: Keyring) : IAttestationSink =
+    let secretOf (keyId: string) =
+        ring.Keys |> List.tryFind (fun (k, _) -> k = keyId) |> Option.map snd
+
+    { new IAttestationSink with
+        member _.Sign head =
+            secretOf ring.Active
+            |> Option.map (fun secret ->
+                { Head = head
+                  KeyId = ring.Active
+                  Signature = OpStream.defaultHash secret head })
+
+        member _.Verify att head =
+            match secretOf att.KeyId with
+            | Some secret -> att.Signature = OpStream.defaultHash secret head
+            | None -> false }
+
+/// A sink for which `signature_binds` is FALSE: it verifies every attestation against every head.
+let private promiscuousSink: IAttestationSink =
+    { new IAttestationSink with
+        member _.Sign head =
+            Some
+                { Head = head
+                  KeyId = "any"
+                  Signature = "yes" }
+
+        member _.Verify _ _ = true }
+
+let private toModelAtt (a: Attestation) : Chain.attestation =
+    { Chain.ahead = a.Head
+      Chain.akey = a.KeyId
+      Chain.asig = a.Signature }
+
+let private ofModelAtt (a: Chain.attestation) : Attestation =
+    { Head = a.ahead
+      KeyId = a.akey
+      Signature = a.asig }
+
+/// The sink's own `Sign` and `Verify`, handed to the model as the two parameters it takes.
+let private modelSign (sink: IAttestationSink) (head: string) : Chain.found<Chain.attestation> =
+    match sink.Sign head with
+    | Some a -> Chain.Found(toModelAtt a)
+    | None -> Chain.Missing
+
+let private modelVerify (sink: IAttestationSink) (att: Chain.attestation) (head: string) : bool =
+    sink.Verify (ofModelAtt att) head
+
+/// A full re-mint under production's own canonical payload and genesis: every record's sequence,
+/// prev-link and hash recomputed from the steps, so `verifyChain` accepts whatever it is handed.
+/// The shape of `Conformance.attestationLaws`'s forgery, spelled here over a step list because a
+/// splice changes the chain's LENGTH, which a record-for-record rehash cannot.
+let private remint (hashFn: HashFn) (encode: 'Op -> string) (steps: (Actor * 'Op) list) : OpRecord<'Op> list =
+    (([], OpStream.canonicalConfig.Genesis, 0), steps)
+    ||> List.fold (fun (acc, prev, i) (actor, op) ->
+        let h = hashFn prev (OpStream.canonicalConfig.Payload i actor (encode op))
+
+        { Seq = i
+          Actor = actor
+          Op = op
+          PrevHash = prev
+          Hash = h }
+        :: acc,
+        h,
+        i + 1)
+    |> fun (acc, _, _) -> List.rev acc
+
+/// One splice, spelled twice and INDEPENDENTLY: as the model's `splice`, and as a plain list edit
+/// of production's steps. The differential requires the two to mint the same records.
+type private SpliceCase<'Op> =
+    { Name: string
+      Model: Chain.splice<'Op>
+      Steps: (Actor * 'Op) list }
+
+let private spliceCases (otherOp: 'Op -> 'Op) (steps: (Actor * 'Op) list) : SpliceCase<'Op> list =
+    let n = List.length steps
+
+    let toStep (a: Actor, o: 'Op) : Chain.cstep<'Op> =
+        { Chain.cactor = Actor.encode a
+          Chain.cop = o }
+
+    let mallory = Human "mallory"
+
+    [ for i in 0 .. n - 1 do
+          let a, o = List.item i steps
+
+          let put (s: Actor * 'Op) =
+              steps |> List.mapi (fun j x -> if j = i then s else x)
+
+          // An op replaced; a record re-attributed; and a replacement by the SAME step, which is
+          // no splice at all and must stay accepted.
+          yield
+              { Name = sprintf "replace-op@%d" i
+                Model = Chain.Replaced(posOfInt i, toStep (a, otherOp o))
+                Steps = put (a, otherOp o) }
+
+          yield
+              { Name = sprintf "replace-actor@%d" i
+                Model = Chain.Replaced(posOfInt i, toStep (mallory, o))
+                Steps = put (mallory, o) }
+
+          yield
+              { Name = sprintf "replace-same@%d" i
+                Model = Chain.Replaced(posOfInt i, toStep (a, o))
+                Steps = steps }
+
+          yield
+              { Name = sprintf "drop@%d" i
+                Model = Chain.Dropped(posOfInt i)
+                Steps = List.removeAt i steps }
+
+      // An insertion at every position, the end and one PAST the end included — the model appends
+      // there, and so does this.
+      for i in 0 .. n + 1 do
+          let inserted = mallory, otherOp (snd (List.item (min i (n - 1)) steps))
+
+          yield
+              { Name = sprintf "insert@%d" i
+                Model = Chain.Inserted(posOfInt i, toStep inserted)
+                Steps = List.insertAt (min i n) inserted steps }
+
+      // Out of range, a replacement and a removal change nothing.
+      yield
+          { Name = "replace-out-of-range"
+            Model = Chain.Replaced(posOfInt (n + 2), toStep (mallory, otherOp (snd (List.head steps))))
+            Steps = steps }
+
+      yield
+          { Name = "drop-out-of-range"
+            Model = Chain.Dropped(posOfInt (n + 2))
+            Steps = steps } ]
+
+type private SignedTally =
+    {
+        Failure: string option
+        /// Chains signed, and keyrings drawn with more than one key.
+        Signed: int
+        MultiKey: int
+        /// A verifier whose ring lacks the signing key, and an attestation re-labelled to another
+        /// key of the same ring: both refused, on the intact chain.
+        UnknownKeyRefused: int
+        WrongKeyRefused: int
+        /// Re-minted splices compared; those the WALKER accepted (all of them, or the re-mint is
+        /// not one); those the signature refused; and the no-op ones that stayed accepted.
+        Splices: int
+        WalkerBlind: int
+        Refused: int
+        NoOpAccepted: int
+        ReplacedRefused: int
+        InsertedRefused: int
+        DroppedRefused: int
+        /// In-place tampers — no re-mint — which the walker finds before the signature is asked.
+        InPlace: int
+        InPlaceRefused: int
+    }
+
+let private emptySignedTally =
+    { Failure = None
+      Signed = 0
+      MultiKey = 0
+      UnknownKeyRefused = 0
+      WrongKeyRefused = 0
+      Splices = 0
+      WalkerBlind = 0
+      Refused = 0
+      NoOpAccepted = 0
+      ReplacedRefused = 0
+      InsertedRefused = 0
+      DroppedRefused = 0
+      InPlace = 0
+      InPlaceRefused = 0 }
+
+let private drawKeyring (rng: ConfRng.T) : Keyring * ConfRng.T =
+    let count, r1 = ConfRng.intBelow 3 rng
+    let active, r2 = ConfRng.intBelow (count + 1) r1
+    let salt, r3 = ConfRng.intBelow 1000000 r2
+
+    { Keys = [ for k in 0..count -> sprintf "key-%d" k, sprintf "secret-%d-%d" k salt ]
+      Active = sprintf "key-%d" active },
+    r3
+
+let private signedHeadDifferential
+    (label: string)
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (sinkOf: Keyring -> IAttestationSink)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (otherOp: 'Op -> 'Op)
+    (gen: LaneGen<'Op, 'State>)
+    (seed: int)
+    (iterations: int)
+    : SignedTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable t = emptySignedTally
+
+    let note (why: string) =
+        if t.Failure.IsNone then
+            t <- { t with Failure = Some why }
+
+    let writer = Human "writer"
+
+    for _ in 1..iterations do
+        let lanes, r' = gen.Lanes 2 rng
+        let ring, r'' = drawKeyring r'
+        rng <- r''
+        let sink = sinkOf ring
+        let intact = chainUnder prodHash w gen.State0 writer (List.concat lanes)
+
+        if not (List.isEmpty intact) then
+            let steps = intact |> List.map (fun r -> r.Actor, r.Op)
+
+            let cs: Chain.cstep<'Op> list =
+                steps
+                |> List.map (fun (a, o) ->
+                    { Chain.cactor = Actor.encode a
+                      Chain.cop = o })
+
+            let here (what: string) =
+                sprintf
+                    "%s: seed=%d %s keys=%d active=%s ops=[%s]"
+                    label
+                    seed
+                    what
+                    (List.length ring.Keys)
+                    ring.Active
+                    (steps |> List.map (snd >> w.Encode) |> String.concat "; ")
+
+            // `OpStream.head` against `chain_head`, and the premise the theorem carries about it.
+            let pHead = OpStream.head intact
+            let mHead = Chain.chain_head (toChainRecords intact)
+
+            if pHead <> mHead then
+                note (sprintf "%s\n  head, production: %s\n  chain_head, model: %s" (here "intact") pHead mHead)
+
+            if pHead = "" then
+                note (sprintf "%s\n  a non-empty chain's head is the empty-chain sentinel" (here "intact"))
+
+            // The model's re-mint is production's `append`, record for record.
+            let mBuilt = Chain.build_chain modelHash showPos w.Encode "" Chain.PZero cs
+
+            if mBuilt <> toChainRecords intact then
+                note (sprintf "%s\n  build_chain does not mint the records production appended" (here "intact"))
+
+            if remint prodHash w.Encode steps <> intact then
+                note (sprintf "%s\n  the test's own re-mint does not reproduce production's append" (here "intact"))
+
+            // `attestHead` against `attest_head`.
+            let pAtt = OpStream.attestHead sink intact
+            let mAtt = Chain.attest_head (modelSign sink) (toChainRecords intact)
+
+            (match pAtt, mAtt with
+             | Some p, Chain.Found m when toModelAtt p = m -> ()
+             | None, Chain.Missing -> ()
+             | _ ->
+                 note (
+                     sprintf "%s\n  attestHead, production: %A\n  attest_head, model:    %A" (here "intact") pAtt mAtt
+                 ))
+
+            match pAtt with
+            | None -> ()
+            | Some att ->
+                t <-
+                    { t with
+                        Signed = t.Signed + 1
+                        MultiKey = t.MultiKey + (if List.length ring.Keys > 1 then 1 else 0) }
+
+                let accepts (verifier: IAttestationSink) (a: Attestation) (rs: OpRecord<'Op> list) : bool * bool =
+                    (OpStream.verifyChain prodHash w rs && OpStream.verifyAttestation verifier a rs),
+                    Chain.accepts_signed
+                        modelHash
+                        showPos
+                        w.Encode
+                        ""
+                        (modelVerify verifier)
+                        (toModelAtt a)
+                        (toChainRecords rs)
+
+                let agree (what: string) (p: bool, m: bool) =
+                    if p <> m then
+                        note (sprintf "%s\n  accepted, production: %b\n  accepts_signed, model: %b" (here what) p m)
+
+                    p
+
+                // The round trip: the chain that was signed is accepted.
+                if not (agree "intact" (accepts sink att intact)) then
+                    note (
+                        sprintf "%s\n  the chain that was signed is refused under its own attestation" (here "intact")
+                    )
+
+                // KEYRINGS. A verifier that does not hold the signing key refuses; so does the same
+                // signature re-labelled to another key of the ring.
+                let stranger =
+                    sinkOf
+                        { ring with
+                            Keys = ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId) }
+
+                if not (agree "unknown-key" (accepts stranger att intact)) then
+                    t <-
+                        { t with
+                            UnknownKeyRefused = t.UnknownKeyRefused + 1 }
+
+                for (other, _) in ring.Keys |> List.filter (fun (k, _) -> k <> att.KeyId) do
+                    if not (agree ("relabelled-to-" + other) (accepts sink { att with KeyId = other } intact)) then
+                        t <-
+                            { t with
+                                WrongKeyRefused = t.WrongKeyRefused + 1 }
+
+                // THE SPLICES, each re-minted.
+                for sp in spliceCases otherOp steps do
+                    let pForged = remint prodHash w.Encode sp.Steps
+
+                    let mForged =
+                        Chain.build_chain modelHash showPos w.Encode "" Chain.PZero (Chain.apply_splice cs sp.Model)
+
+                    if toChainRecords pForged <> mForged then
+                        note (
+                            sprintf
+                                "%s\n  apply_splice + build_chain does not mint the production forgery"
+                                (here sp.Name)
+                        )
+
+                    let changes = Chain.splice_changes cs sp.Model
+
+                    if changes <> (sp.Steps <> steps) then
+                        note (
+                            sprintf
+                                "%s\n  splice_changes says %b, but the production steps %s"
+                                (here sp.Name)
+                                changes
+                                (if sp.Steps <> steps then "moved" else "did not move")
+                        )
+
+                    let walker = OpStream.verifyChain prodHash w pForged
+                    let accepted = agree sp.Name (accepts sink att pForged)
+
+                    t <-
+                        { t with
+                            Splices = t.Splices + 1
+                            WalkerBlind = t.WalkerBlind + (if walker then 1 else 0) }
+
+                    if not walker then
+                        note (
+                            sprintf
+                                "%s\n  the re-mint does not verify, so it is not the tamper the theorem is about"
+                                (here sp.Name)
+                        )
+
+                    // `signed_head_rejects_splice`, held of PRODUCTION's own verdict.
+                    if changes && accepted then
+                        note (
+                            sprintf "%s\n  a re-minted splice is ACCEPTED under the original attestation" (here sp.Name)
+                        )
+
+                    if not changes && not accepted then
+                        note (sprintf "%s\n  a splice that changes nothing is refused" (here sp.Name))
+
+                    if changes && not accepted then
+                        t <-
+                            { t with
+                                Refused = t.Refused + 1
+                                ReplacedRefused =
+                                    t.ReplacedRefused
+                                    + (match sp.Model with
+                                       | Chain.Replaced _ -> 1
+                                       | _ -> 0)
+                                InsertedRefused =
+                                    t.InsertedRefused
+                                    + (match sp.Model with
+                                       | Chain.Inserted _ -> 1
+                                       | _ -> 0)
+                                DroppedRefused =
+                                    t.DroppedRefused
+                                    + (match sp.Model with
+                                       | Chain.Dropped _ -> 1
+                                       | _ -> 0) }
+
+                    if not changes && accepted then
+                        t <-
+                            { t with
+                                NoOpAccepted = t.NoOpAccepted + 1 }
+
+                // In place, with NO re-mint: the walker's own business, and the composition must
+                // still agree.
+                for (tamper, rs') in chainTampers otherOp intact do
+                    t <- { t with InPlace = t.InPlace + 1 }
+
+                    if not (agree ("in-place " + tamper) (accepts sink att rs')) then
+                        t <-
+                            { t with
+                                InPlaceRefused = t.InPlaceRefused + 1 }
+
+    t
+
+let private expectSignedAgreement (label: string) (t: SignedTally) =
+    match t.Failure with
+    | Some why -> failtest why
+    | None ->
+        // Every class the two theorems speak about has to have been MET.
+        Expect.isGreaterThan t.Signed 0 (sprintf "%s: no chain was signed" label)
+        Expect.isGreaterThan t.MultiKey 0 (sprintf "%s: no keyring held more than one key" label)
+        Expect.isGreaterThan t.UnknownKeyRefused 0 (sprintf "%s: no verifier lacking the key was compared" label)
+        Expect.isGreaterThan t.WrongKeyRefused 0 (sprintf "%s: no re-labelled attestation was compared" label)
+        Expect.isGreaterThan t.Splices 0 (sprintf "%s: no splice was compared" label)
+
+        Expect.equal
+            t.WalkerBlind
+            t.Splices
+            (sprintf "%s: a re-minted splice failed verifyChain, so it was not the rewrite the theorem is about" label)
+
+        Expect.isGreaterThan t.ReplacedRefused 0 (sprintf "%s: no replaced op was refused" label)
+        Expect.isGreaterThan t.InsertedRefused 0 (sprintf "%s: no inserted op was refused" label)
+        Expect.isGreaterThan t.DroppedRefused 0 (sprintf "%s: no dropped op was refused" label)
+
+        Expect.isGreaterThan
+            t.NoOpAccepted
+            0
+            (sprintf "%s: no splice that changes nothing was accepted, so `splice_changes` was never load-bearing" label)
+
+        Expect.isGreaterThan t.InPlace 0 (sprintf "%s: no in-place tamper was compared" label)
+        Expect.equal t.InPlaceRefused t.InPlace (sprintf "%s: an in-place tamper was accepted" label)
 
 // ---- the corpus dag/ family, as a source of SHAPES ----
 
@@ -5104,6 +5780,190 @@ let private canonCorpus (w: WireCanon.wire<int, float>) (family: string) (roundT
 
 let private renderCanonDiffs (diffs: string list) : string =
     diffs |> List.rev |> List.truncate 5 |> String.concat "\n"
+
+// ---- the guard (Phase 165): `WireCanon.try_render` beside `Canon.tryRender` ----
+
+/// The model names a refusal as DATA — a path of steps and the float it found — where production
+/// emits one string. This renders the model's refusal in production's spelling so the two can be
+/// compared as the `Result` a caller actually receives. The member key goes through the MODEL's
+/// own `quoted` (rule 6's escape), not through `Canon`, so the bridge hands production nothing to
+/// agree with itself about; the index crosses the `nat` → `int` width boundary here, where
+/// `oracle/Prims.fs` says such a conversion belongs.
+let private guardPathOfModel (p: WireCanon.pstep list) : string =
+    "$"
+    + (p
+       |> List.map (fun s ->
+           match s with
+           | WireCanon.PItem i -> "[" + string (int i) + "]"
+           | WireCanon.PMember k -> "[" + canonFromChs (WireCanon.quoted k) + "]")
+       |> String.concat "")
+
+let private guardModelSide (w: WireCanon.wire<int, float>) (v: JVal) : Result<string, string> =
+    match WireCanon.try_render w (canonToModel v) with
+    | WireCanon.Rendered bytes -> Result.Ok(canonFromChs bytes)
+    | WireCanon.Refused(p, f) ->
+        let tok =
+            match w.fclass f with
+            | WireCanon.FNaN -> "NaN"
+            | WireCanon.FPosInf -> "Infinity"
+            | WireCanon.FNegInf -> "-Infinity"
+            | WireCanon.FFinite -> "<the model refused a float its own wire calls finite>"
+
+        Result.Error(
+            "non-finite float has no canonical rendering of its own: "
+            + tok
+            + " at "
+            + guardPathOfModel p
+        )
+
+/// The guard's predicate, written a THIRD time and independently of both sides: does the value
+/// hold a non-finite float anywhere. "Refuses exactly" is a claim about this set, and asking
+/// either side under test to define it would make the claim circular.
+let rec private holdsNonFinite (v: JVal) : bool =
+    match v with
+    | JFloat f -> not (System.Double.IsFinite f)
+    | JArr xs -> xs |> List.exists holdsNonFinite
+    | JObj fs -> fs |> List.exists (snd >> holdsNonFinite)
+    | _ -> false
+
+type private GuardTally =
+    {
+        Docs: int
+        Diffs: string list
+        /// Documents production refused.
+        Refused: int
+        /// Refusals whose path is two or more steps deep — the scan's recursion, not its leaf arm.
+        DeepRefusals: int
+        /// Refusals naming each of the three tokens.
+        NaNs: int
+        PosInfs: int
+        NegInfs: int
+        /// ACCEPTED documents carrying a float outside the canonical subset — an integer-shaped
+        /// token or a zero — which is the set the guard must not refuse.
+        AcceptedNormalised: int
+    }
+
+let private emptyGuardTally =
+    { Docs = 0
+      Diffs = []
+      Refused = 0
+      DeepRefusals = 0
+      NaNs = 0
+      PosInfs = 0
+      NegInfs = 0
+      AcceptedNormalised = 0 }
+
+/// One document, asked of production's guard and of the model's. Three comparisons, each of which
+/// can lose on its own: the two `Result`s agree (message and path included); an `Ok` is exactly
+/// `Canon.render`'s bytes; and the verdict is `Error` precisely when the independent predicate
+/// says a non-finite float is present.
+let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal) (t: GuardTally) : GuardTally =
+    let production = Canon.tryRender v
+    let model = guardModelSide w v
+    let t = { t with Docs = t.Docs + 1 }
+
+    let diff (what: string) (t: GuardTally) =
+        { t with
+            Diffs =
+                sprintf "%s: %s\n  production: %A\n  the model:  %A" label what production model
+                :: t.Diffs }
+
+    let t =
+        if production = model then
+            t
+        else
+            diff "the guards disagree" t
+
+    match production with
+    | Result.Ok bytes ->
+        let t =
+            if bytes = Canon.render v then
+                t
+            else
+                diff "an accepted value did not render to Canon.render's bytes" t
+
+        let t =
+            if holdsNonFinite v then
+                diff "production ACCEPTED a value holding a non-finite float" t
+            else
+                t
+
+        if isCanonicalValue v then
+            t
+        else
+            { t with
+                AcceptedNormalised = t.AcceptedNormalised + 1 }
+    | Result.Error m ->
+        let t =
+            if holdsNonFinite v then
+                t
+            else
+                diff "production REFUSED a value holding no non-finite float" t
+
+        let steps = m |> Seq.filter (fun c -> c = '[') |> Seq.length
+
+        { t with
+            Refused = t.Refused + 1
+            DeepRefusals = t.DeepRefusals + (if steps >= 2 then 1 else 0)
+            NaNs = t.NaNs + (if m.Contains ": NaN at " then 1 else 0)
+            PosInfs = t.PosInfs + (if m.Contains ": Infinity at " then 1 else 0)
+            NegInfs = t.NegInfs + (if m.Contains ": -Infinity at " then 1 else 0) }
+
+/// The Phase 149 pool carries no non-finite float — it was built to measure the renderer, which
+/// has nothing to say about one. This walks a drawn value and replaces roughly one numeric leaf in
+/// three with one of the three, so the refusals land at every depth and position the pool reaches
+/// rather than only at the root.
+let private poisonCanonValue (r: int ref) (v: JVal) : JVal =
+    let draw (n: int) =
+        r.Value <- nextCanonSeed r.Value
+        r.Value % n
+
+    let rec go (v: JVal) : JVal =
+        match v with
+        | JFloat _
+        | JInt _ when draw 3 = 0 ->
+            (match draw 3 with
+             | 0 -> JFloat nan
+             | 1 -> JFloat infinity
+             | _ -> JFloat -infinity)
+        | JArr xs -> JArr(xs |> List.map go)
+        | JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, go x))
+        | other -> other
+
+    go v
+
+let private guardGenerated (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : GuardTally =
+    let r = ref seed
+    let mutable t = emptyGuardTally
+
+    for i in 1..trials do
+        let v = poisonCanonValue r (genCanonValue r 3)
+        t <- guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+    t
+
+let private guardCorpus (w: WireCanon.wire<int, float>) (family: string) : GuardTally =
+    let mutable t = emptyGuardTally
+
+    for name, text in JsonParseDiff.corpusTexts family do
+        match Json.parse text with
+        | Result.Error m -> failtestf "the corpus fixture %s/%s did not parse: %s" family name m
+        | Result.Ok v -> t <- guardProbe w (sprintf "%s/%s" family name) v t
+
+    t
+
+/// The GO-RED instrument for the guard: a wire that cannot see NaN — it classifies one as finite,
+/// so the model's scan walks past it. Every document whose FIRST non-finite float is a NaN must
+/// then disagree with production, and every other document — including one refused for an
+/// infinity — must still agree, which is what says the instrument is narrow to the predicate.
+let private guardWireGoRed: WireCanon.wire<int, float> =
+    { canonWire with
+        fclass =
+            fun f ->
+                if System.Double.IsNaN f then
+                    WireCanon.FFinite
+                else
+                    canonWire.fclass f }
 
 // ---------------------------------------------------------------------------
 //  Phase 151 — the EVOLUTION POLICY: `WireVersioning` beside `Versioning`.
@@ -9191,6 +10051,159 @@ let proofOracleTests =
                    | _ -> false)
                   "both halves apply at the tree on their own — so the divergence is the pair's, not one op's"
 
+          testCase "the arbitration oracle agrees with Arbitration.arbitrate over generated proposal sets"
+          <| fun _ ->
+              // Phase 157. Accepted set, merged script and every rejection with its reason, over
+              // sets whose pinned order is NOT their arrival order and over sets carrying a
+              // repeated id. Measured at 150 trials per mode, seed 1570: 300 sets, every bucket
+              // reached and a repeated id in most of the second mode's — asserted below, because
+              // a differential that met no conflict would agree about nothing worth agreeing on.
+              let t = arbitrationDifferential Arbitrate.arbitrate 1570 150
+
+              if not (List.isEmpty t.Diffs) then
+                  failtestf
+                      "the arbitration oracle DISAGREES with production on %d of %d sets:\n%s"
+                      (List.length t.Diffs)
+                      t.Sets
+                      (t.Diffs |> List.truncate 3 |> String.concat "\n")
+
+              Expect.equal t.Sets 300 "both id modes ran"
+              Expect.isGreaterThan t.Accepted 0 "the sample accepted something"
+              Expect.isGreaterThan t.Inapplicable 0 "the sample reached an Inapplicable rejection"
+              Expect.isGreaterThan t.Conflicting 0 "the sample reached a Conflicts rejection"
+
+              Expect.isGreaterThan
+                  t.Duplicated
+                  0
+                  "the sample reached a repeated id — the stable sort's tie-break was compared"
+
+              Expect.isEmpty
+                  t.HypothesisDiffs
+                  "Arbitration.duplicateIds is empty EXACTLY when the model's distinct_ids holds — the shipped check is the theorem's hypothesis"
+
+              Expect.isEmpty
+                  t.TheoremBreaks
+                  "the extracted theorem predicates hold of production's own result, on every set, repeated ids included"
+
+          testCase "a model that ACCEPTS A CONFLICTING PAIR loses — the measurement can fail"
+          <| fun _ ->
+              // The go-red for `accepted_pairwise_independent`. The instrument is the extracted
+              // model with the greedy pass's independence test removed and nothing else touched,
+              // so every conflict production refuses is a set the two sides must disagree on.
+              let t = arbitrationDifferential arbitrateAcceptingConflicts 1570 150
+
+              Expect.isGreaterThan
+                  t.Conflicting
+                  0
+                  "the go-red run reached a conflicting pair at all — otherwise it proves nothing"
+
+              Expect.isNonEmpty t.Diffs "a model that accepts a conflicting pair DISAGREES with production"
+
+              // and it disagrees on exactly the sets that held a conflict — never on one that did not
+              let clean = arbitrationDifferential Arbitrate.arbitrate 1570 150
+              Expect.isEmpty clean.Diffs "the same sample under the real model agrees, so the loss is the instrument's"
+
+          testCase "the id-uniqueness hypothesis is NEEDED, on the shipped function — `duplicate_ids_break_invariance`"
+          <| fun _ ->
+              // THE FINDING, pinned on production over the model's own witness. Two proposals
+              // sharing an id and interfering with each other: the stable sort leaves them in
+              // arrival order, so WHICH is accepted is the arrival order. If `arbitrate` ever
+              // breaks the tie some other way this case goes red and sends its reader to
+              // `proofs/Arbitrate.fst` section 8 and to `Arbitration.duplicateIds`' doc comment.
+              let baseTree = ofModelTree Arbitrate.dup_base
+              let a = ofModelProposal Arbitrate.dup_a
+              let b = ofModelProposal Arbitrate.dup_b
+
+              let holders (r: Arbitration<RNode, string>) =
+                  r.Accepted |> List.map (fun p -> p.Holder)
+
+              Expect.equal (Arbitration.duplicateIds [ a; b ]) [ 1 ] "the shipped check names the repeated id"
+
+              Expect.isFalse
+                  (Arbitrate.distinct_ids [ Arbitrate.dup_a; Arbitrate.dup_b ])
+                  "and the model's hypothesis is false of it"
+
+              Expect.equal
+                  (holders (Arbitration.arbitrate nodew idw baseTree [ a; b ]))
+                  [ "a" ]
+                  "a arrives first, a is accepted"
+
+              Expect.equal
+                  (holders (Arbitration.arbitrate nodew idw baseTree [ b; a ]))
+                  [ "b" ]
+                  "b arrives first, b is accepted"
+
+              Expect.equal
+                  (renderProdArbitration (Arbitration.arbitrate nodew idw baseTree [ a; b ]))
+                  (renderModelArbitration (Arbitrate.arbitrate Arbitrate.dup_base [ Arbitrate.dup_a; Arbitrate.dup_b ]))
+                  "and the model agrees with production on the witness, in this order"
+
+              Expect.equal
+                  (renderProdArbitration (Arbitration.arbitrate nodew idw baseTree [ b; a ]))
+                  (renderModelArbitration (Arbitrate.arbitrate Arbitrate.dup_base [ Arbitrate.dup_b; Arbitrate.dup_a ]))
+                  "and in the other"
+
+              // what a repeated id does NOT cost: the partition is still total and still justified
+              let r = Arbitration.arbitrate nodew idw baseTree [ a; b ]
+              Expect.equal (List.length r.Accepted + List.length r.Rejected) 2 "nothing dropped"
+
+              match r.Rejected with
+              | [ (p, Conflicts [ 1 ]) ] -> Expect.equal p.Holder "b" "the loser cites the winner's id"
+              | other -> failtestf "expected one Conflicts [1] rejection, got %A" other
+
+              // the check itself: total, ascending, each repeated id once, empty on unique input
+              let prop id : ArbProposal = { Id = id; Holder = "h"; Ops = [] }
+              Expect.equal (Arbitration.duplicateIds ([]: ArbProposal list)) [] "empty input"
+              Expect.equal (Arbitration.duplicateIds [ prop 3; prop 1; prop 2 ]) [] "unique ids"
+
+              Expect.equal
+                  (Arbitration.duplicateIds [ prop 5; prop 2; prop 5; prop 2; prop 5; prop 9 ])
+                  [ 2; 5 ]
+                  "ascending, each repeated id once however often it repeats"
+
+          testCase "maximal is NOT maximum, on the shipped function — `maximal_is_not_maximum`"
+          <| fun _ ->
+              // NOT CLAIMED, and the witness that it is not. Proposal 1 writes under both `a` and
+              // `b`; 2 and 3 write under one each. The pinned order accepts 1 alone; renumbered to
+              // come last, the same three proposals accept 2 and 3. Both results are maximal. The
+              // pinned order is a policy choice, and this is what it decides.
+              let baseTree = ofModelTree Arbitrate.mx_base
+              let ids (r: Arbitration<RNode, string>) = r.Accepted |> List.map (fun p -> p.Id)
+
+              let first =
+                  Arbitration.arbitrate
+                      nodew
+                      idw
+                      baseTree
+                      ([ Arbitrate.mx_1; Arbitrate.mx_2; Arbitrate.mx_3 ] |> List.map ofModelProposal)
+
+              let last =
+                  Arbitration.arbitrate
+                      nodew
+                      idw
+                      baseTree
+                      ([ Arbitrate.mx_1_last; Arbitrate.mx_2; Arbitrate.mx_3 ]
+                       |> List.map ofModelProposal)
+
+              Expect.equal
+                  (ids first)
+                  [ 1 ]
+                  "in the pinned order the two-parent proposal wins alone — an accepted set of ONE"
+
+              Expect.equal (ids last) [ 2; 3 ] "numbered last, the same proposal loses to an accepted set of TWO"
+
+              Expect.equal
+                  (first.Rejected |> List.map snd)
+                  [ Conflicts [ 1 ]; Conflicts [ 1 ] ]
+                  "and both rejections are justified — each cites the proposal standing in its way"
+
+              Expect.equal
+                  (renderProdArbitration first)
+                  (renderModelArbitration (
+                      Arbitrate.arbitrate Arbitrate.mx_base [ Arbitrate.mx_1; Arbitrate.mx_2; Arbitrate.mx_3 ]
+                  ))
+                  "the model agrees with production on the witness"
+
           testCase "a move pair nesting into each other's subtrees is refused, and no record could free it"
           <| fun _ ->
               // The second, independent reason the refused set is not one homogeneous class waiting
@@ -10038,6 +11051,177 @@ let proofOracleTests =
                   (true, true)
                   "past zero the boundary hash is a stored one and the genesis never reaches it"
 
+          // ---- Phase 193 — the signed head: head, attestHead, verifyAttestation, and the re-mint ----
+
+          testCase
+              "the signed-head oracle agrees with production over the work-plan stream, every keyring and every re-minted splice"
+          <| fun _ ->
+              signedHeadDifferential
+                  "work-plan signed heads"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  keyringSink
+                  planW
+                  tamperedPlanOp
+                  planLaneGen
+                  3800
+                  40
+              |> expectSignedAgreement "work-plan signed heads"
+
+          testCase
+              "the signed-head oracle agrees with production over the reference witness's stream, every keyring and every re-minted splice"
+          <| fun _ ->
+              signedHeadDifferential
+                  "reference signed heads"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  keyringSink
+                  treeW
+                  (fun _ -> RemoveNode "tampered-node")
+                  treeLaneGen
+                  3810
+                  30
+              |> expectSignedAgreement "reference signed heads"
+
+          testCase "a signed-head model handed a DIFFERENT hash disagrees with production — the comparison can lose"
+          <| fun _ ->
+              // The go-red for the whole differential: nothing about the chains, the keyrings or
+              // the splices moves, only the function the model re-mints and walks with.
+              let t =
+                  signedHeadDifferential
+                      "perturbed signed heads"
+                      OpStream.defaultHash
+                      swappedHash
+                      keyringSink
+                      planW
+                      tamperedPlanOp
+                      planLaneGen
+                      3820
+                      3
+
+              Expect.isSome t.Failure "a model hashing with a different function must be caught"
+
+          testCase
+              "under a sink that verifies EVERYTHING a re-minted splice is accepted — signature_binds is load-bearing, to production and to the model alike"
+          <| fun _ ->
+              // `signature_binds` is the section's one new premise, and this is what it buys. The
+              // promiscuous sink verifies every attestation against every head, so it does NOT
+              // bind — and the theorem's conclusion fails with it, on production's own verdict.
+              let t =
+                  signedHeadDifferential
+                      "promiscuous signed heads"
+                      OpStream.defaultHash
+                      OpStream.defaultHash
+                      (fun _ -> promiscuousSink)
+                      planW
+                      tamperedPlanOp
+                      planLaneGen
+                      3830
+                      3
+
+              match t.Failure with
+              | Some why ->
+                  Expect.stringContains
+                      why
+                      "ACCEPTED under the original attestation"
+                      "the differential fails on the theorem's conclusion, not on a model/production disagreement"
+              | None -> failtest "a sink that does not bind must let a re-minted splice through"
+
+              // And it is the MODEL's verdict too: one chain, one op replaced and re-minted.
+              let steps =
+                  [ Human "writer", AddItem("s1", "one"); Human "writer", AddItem("s2", "two") ]
+
+              let signed = remint OpStream.defaultHash planW.Encode steps
+
+              let forged =
+                  remint OpStream.defaultHash planW.Encode [ List.head steps; Human "writer", AddItem("s2", "TWO") ]
+
+              match OpStream.attestHead promiscuousSink signed with
+              | None -> failtest "the promiscuous sink signs"
+              | Some att ->
+                  Expect.isTrue
+                      (OpStream.verifyChain OpStream.defaultHash planW forged
+                       && OpStream.verifyAttestation promiscuousSink att forged)
+                      "production accepts the forgery under a sink that does not bind"
+
+                  Expect.isTrue
+                      (Chain.accepts_signed
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          ""
+                          (modelVerify promiscuousSink)
+                          (toModelAtt att)
+                          (toChainRecords forged))
+                      "and so does the model"
+
+                  // Under the keyring sink the same forgery is refused by both.
+                  let sink = keyringSink { Keys = [ "k", "s" ]; Active = "k" }
+
+                  match OpStream.attestHead sink signed with
+                  | None -> failtest "the keyring sink signs"
+                  | Some bound ->
+                      Expect.isFalse
+                          (OpStream.verifyChain OpStream.defaultHash planW forged
+                           && OpStream.verifyAttestation sink bound forged)
+                          "production refuses it under a sink that binds"
+
+                      Expect.isFalse
+                          (Chain.accepts_signed
+                              OpStream.defaultHash
+                              showPos
+                              planW.Encode
+                              ""
+                              (modelVerify sink)
+                              (toModelAtt bound)
+                              (toChainRecords forged))
+                          "and so does the model"
+
+          testCase
+              "a signed empty-chain sentinel accepts the empty chain and no chain with a head — OpStream.head hard-wires the empty string"
+          <| fun _ ->
+              // `signed_sentinel_covers_the_empty_chain`, and the premise `signed_head_binds_chain`
+              // carries because of it, measured on production.
+              let sink = keyringSink { Keys = [ "k", "s" ]; Active = "k" }
+
+              let empty: OpRecord<PlanOp> list = OpStream.empty
+              Expect.equal (OpStream.head empty) "" "production's head of the empty chain is the literal empty string"
+              Expect.equal (Chain.chain_head (toChainRecords empty)) "" "and so is the model's"
+
+              let one =
+                  remint OpStream.defaultHash planW.Encode [ Human "writer", AddItem("s1", "one") ]
+
+              match OpStream.attestHead sink empty, OpStream.attestHead sink one with
+              | Some overNothing, Some overOne ->
+                  let accepts (att: Attestation) (rs: OpRecord<PlanOp> list) =
+                      (OpStream.verifyChain OpStream.defaultHash planW rs
+                       && OpStream.verifyAttestation sink att rs),
+                      Chain.accepts_signed
+                          OpStream.defaultHash
+                          showPos
+                          planW.Encode
+                          ""
+                          (modelVerify sink)
+                          (toModelAtt att)
+                          (toChainRecords rs)
+
+                  Expect.equal (accepts overNothing empty) (true, true) "a signed sentinel accepts the empty chain"
+                  Expect.equal (accepts overNothing one) (false, false) "and not a chain that has a head"
+
+                  // The DROP arm at its smallest: the one-record chain, its record dropped and the
+                  // remainder re-minted, is the empty chain — refused, because the head that was
+                  // signed is not the sentinel.
+                  Expect.equal (accepts overOne one) (true, true) "the signed one-record chain is accepted"
+                  Expect.equal (accepts overOne empty) (false, false) "and the empty chain is refused under it"
+
+                  Expect.isTrue
+                      (Chain.splice_changes
+                          [ { Chain.cactor = Actor.encode (Human "writer")
+                              Chain.cop = AddItem("s1", "one") } ]
+                          (Chain.Dropped Chain.PZero))
+                      "which is a splice the theorem speaks about"
+              | _ -> failtest "the keyring sink signs"
+
           // ---- Phase 138 — the APPLY ENGINE: apply, canApply and invert against the model ----
 
           testCase "the preservation oracle agrees with Ops.apply over colliding and duplicated grafts"
@@ -10867,9 +12051,10 @@ let proofOracleTests =
               // changes — which is the point: three of them are documented design choices that a
               // future session must not "fix" by accident, and the first is the one worth knowing.
 
-              // 1. a non-finite float is a STRING on the wire. `Json.render` has the guarded
-              //    `Json.tryRender` beside it; `Canon.render` has no guarded counterpart, so a
-              //    digest over `JFloat nan` collides with the digest over `JStr "NaN"`.
+              // 1. a non-finite float is a STRING on the wire, so a digest over `JFloat nan`
+              //    collides with the digest over `JStr "NaN"`. `Canon.render` refuses nothing and
+              //    its bytes are pinned, so this stays asserted; the guarded `Canon.tryRender`
+              //    beside it (Phase 165) is the entry point that does refuse — see its own cases.
               Expect.equal
                   (Canon.render (JFloat nan))
                   (Canon.render (JStr "NaN"))
@@ -10938,6 +12123,146 @@ let proofOracleTests =
                   (sprintf
                       "the canon oracle disagreed with production off the canonical subset:\n%s"
                       (renderCanonDiffs t.Diffs))
+
+          // ---- the guard beside the canonical encoder (Phase 165) ----
+
+          testCase "Canon.tryRender refuses exactly the non-finite alias witnesses, and names them by path"
+          <| fun _ ->
+              // Refutation 1 of the four above is the one that is not a documented design choice,
+              // and it has THREE witnesses, one per non-finite class. Each is refused, at the root.
+              Expect.equal
+                  (Canon.tryRender (JFloat nan))
+                  (Result.Error "non-finite float has no canonical rendering of its own: NaN at $")
+                  "a NaN is refused, by token and by path"
+
+              Expect.equal
+                  (Canon.tryRender (JFloat infinity))
+                  (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $")
+                  "+infinity is refused"
+
+              Expect.equal
+                  (Canon.tryRender (JFloat -infinity))
+                  (Result.Error "non-finite float has no canonical rendering of its own: -Infinity at $")
+                  "-infinity is refused"
+
+              // ... and the STRING each one aliases is a perfectly good value, and is not refused.
+              // So are refutations 2, 3 and 4 — the integer-shaped float, the two zeroes and the
+              // member order — which the format documents and the guard must therefore leave alone.
+              for v in
+                  [ JStr "NaN"
+                    JStr "Infinity"
+                    JStr "-Infinity"
+                    JFloat 2.0
+                    JInt 2
+                    JFloat -0.0
+                    JFloat 0.0
+                    JFloat 1e17
+                    JObj [ "a", JInt 1; "b", JInt 2 ]
+                    JObj [ "b", JInt 2; "a", JInt 1 ] ] do
+                  Expect.equal
+                      (Canon.tryRender v)
+                      (Result.Ok(Canon.render v))
+                      (sprintf "a value holding no non-finite float is exactly `Ok (render v)`: %A" v)
+
+              // The path: an array by index, a member by its canonically escaped key, the FIRST
+              // offender in document order — and document order is AUTHORED order, not the sorted
+              // order `render` would emit, because the scan runs before any sort.
+              Expect.equal
+                  (Canon.tryRender (JObj [ "$type", JStr "X"; "a", JArr [ JInt 1; JFloat infinity ] ]))
+                  (Result.Error "non-finite float has no canonical rendering of its own: Infinity at $[\"a\"][1]")
+                  "a nested offender is named through the member and the index"
+
+              Expect.equal
+                  (Canon.tryRender (JObj [ "b", JFloat nan; "a", JFloat infinity ]))
+                  (Result.Error "non-finite float has no canonical rendering of its own: NaN at $[\"b\"]")
+                  "the first offender in AUTHORED order is the one named, though `a` sorts first"
+
+              Expect.equal
+                  (Canon.tryRender (JArr [ JArr []; JObj [ "k\"\u0001", JFloat -infinity ] ]))
+                  (Result.Error
+                      "non-finite float has no canonical rendering of its own: -Infinity at $[1][\"k\\\"\\u0001\"]")
+                  "a key carrying a quote and a control character is escaped as rule 6 escapes it"
+
+              // `render` is untouched: every value refused above still renders, to the aliasing bytes.
+              Expect.equal (Canon.render (JFloat nan)) "\"NaN\"" "the unguarded renderer's bytes did not move"
+
+          testCase "the guard oracle agrees with Canon.tryRender over the corpus — and refuses none of it"
+          <| fun _ ->
+              for family, floor in [ "nodes", 100; "ops", 10 ] do
+                  let t = onBigStack (fun () -> guardCorpus canonWire family)
+
+                  Expect.isEmpty
+                      t.Diffs
+                      (sprintf
+                          "the guard oracle disagreed with production on %s/:\n%s"
+                          family
+                          (renderCanonDiffs t.Diffs))
+
+                  Expect.isGreaterThan
+                      t.Docs
+                      floor
+                      (sprintf "the %s/ family was read at all (%d fixtures)" family t.Docs)
+
+                  // JSON cannot spell a non-finite float, so a parsed fixture cannot hold one: on
+                  // the corpus the guard is `Ok (render v)` everywhere, which is the acceptance's
+                  // "agrees with render on the corpus" measured rather than assumed.
+                  Expect.equal t.Refused 0 (sprintf "no %s/ fixture is refused" family)
+
+          testCase "the guard oracle agrees with Canon.tryRender over a generated pool carrying non-finite floats"
+          <| fun _ ->
+              let t = onBigStack (fun () -> guardGenerated canonWire 1650 2400)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the guard oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // adequacy — MEASURED at 2400 documents, seed 1650: 398 refused (78 of them two or
+              // more steps deep; 132 NaN, 146 +infinity, 120 -infinity) and 2002 accepted, 103 of
+              // those carrying a float outside the canonical subset. Every threshold sits under
+              // its measurement with headroom and above zero.
+              Expect.isGreaterThan t.Refused 200 (sprintf "documents the guard refused (%d)" t.Refused)
+
+              Expect.isGreaterThan
+                  (t.Docs - t.Refused)
+                  200
+                  (sprintf "documents the guard accepted (%d)" (t.Docs - t.Refused))
+
+              Expect.isGreaterThan
+                  t.DeepRefusals
+                  40
+                  (sprintf
+                      "refusals two or more steps deep — the scan's recursion, not its leaf arm (%d)"
+                      t.DeepRefusals)
+
+              Expect.isGreaterThan t.NaNs 60 (sprintf "refusals naming NaN (%d)" t.NaNs)
+              Expect.isGreaterThan t.PosInfs 60 (sprintf "refusals naming Infinity (%d)" t.PosInfs)
+              Expect.isGreaterThan t.NegInfs 60 (sprintf "refusals naming -Infinity (%d)" t.NegInfs)
+
+              Expect.isGreaterThan
+                  t.AcceptedNormalised
+                  50
+                  (sprintf
+                      "ACCEPTED documents carrying an integer-shaped float or a zero (%d) — the set the guard must not refuse"
+                      t.AcceptedNormalised)
+
+          testCase "a guard model that cannot see NaN loses — on exactly the documents a NaN decides"
+          <| fun _ ->
+              // The go-red. `tryrender_refuses_exactly_aliasing` turns on the guard's predicate
+              // being `fclass f <> FFinite`, so the instrument that must lose is one whose predicate
+              // is narrower by one class. It must disagree on every document whose FIRST non-finite
+              // float is a NaN — the model walks past it and either renders or names a later
+              // infinity — and on NO other document, a refusal for an infinity included.
+              let t = onBigStack (fun () -> guardGenerated guardWireGoRed 1650 2400)
+
+              Expect.isGreaterThan t.NaNs 60 (sprintf "the go-red run reached NaN refusals at all (%d)" t.NaNs)
+
+              Expect.equal
+                  (List.length t.Diffs)
+                  t.NaNs
+                  (sprintf
+                      "the NaN-blind model disagreed on %d documents and production named a NaN on %d — they must be the same documents"
+                      (List.length t.Diffs)
+                      t.NaNs)
 
           // ---- the evolution policy, over the envelope family and perturbed IDL pairs (Phase 151) ----
 

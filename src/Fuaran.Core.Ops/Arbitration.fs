@@ -56,6 +56,25 @@ type Arbitration<'Node, 'Id> =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Arbitration =
 
+    /// The proposal ids carried by MORE THAN ONE proposal — ascending, each listed once; empty
+    /// exactly when the ids are unique (Phase 157). A TOTAL check, never an assigner: it reads
+    /// `Id` and nothing else, mints nothing, and renumbers nothing.
+    ///
+    /// It exists because `arbitrate`'s permutation invariance is a theorem about id-UNIQUE input
+    /// and about nothing weaker (`proofs/Arbitrate.fst`, `arbitrate_deterministic`; the witness
+    /// that the hypothesis is needed is `duplicate_ids_break_invariance` beside it). The function
+    /// that assumes uniqueness and the callers that mint ids sit in different packages, so the
+    /// assumption is checkable here, by whoever holds the list: `duplicateIds proposals = []` is
+    /// the hypothesis, and a non-empty answer names the ids to repair. `arbitrate` itself stays
+    /// total either way and does NOT call this — what a duplicate costs is invariance under
+    /// arrival order, never the partition, its independence or its justifications.
+    let duplicateIds (proposals: OpScriptProposal<'Node, 'Id> list) : int list =
+        proposals
+        |> List.countBy (fun p -> p.Id)
+        |> List.filter (fun (_, n) -> n > 1)
+        |> List.map fst
+        |> List.sort
+
     /// Arbitrate N op-script proposals against one base tree (Phase 85) —
     /// decide which subset can land together. A deterministic, total partition
     /// (GP4: analysis only — the base is never mutated, and no input throws):
@@ -66,7 +85,9 @@ module Arbitration =
     ///      `Proposals.propose` discipline is one such assigner); `arbitrate`
     ///      stays total on duplicate-id input (the stable sort breaks the tie
     ///      by input order), but the permutation-invariance guarantee assumes
-    ///      unique ids.
+    ///      unique ids — `duplicateIds proposals = []` is that assumption as a
+    ///      total check, and `proofs/Arbitrate.fst` proves both the guarantee
+    ///      under it and that it cannot be dropped.
     ///   2. **Batch `canApply`.** `Ops.canApplyAll` against the base filters
     ///      the inapplicable — each rejection carries the op-algebra's own
     ///      envelope + the failing op index (GP5).

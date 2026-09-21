@@ -1278,6 +1278,169 @@ and normal_kvs = (fun ( w  :  wire<'num, 'flt> ) ( fs  :  Prims.list<(Prims.list
      ((normal w v) && (normal_kvs w t))
      end))
 
+type pstep =
+| PItem of Prims.nat
+| PMember of Prims.list<ch>
+
+
+let uu___is_PItem : pstep  ->  Prims.bool = (fun ( projectee  :  pstep ) -> (match (projectee) with
+| PItem (i) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__PItem__item__i : pstep  ->  Prims.nat = (fun ( projectee  :  pstep ) -> (match (projectee) with
+| PItem (i) -> begin
+     i
+     end))
+
+
+let uu___is_PMember : pstep  ->  Prims.bool = (fun ( projectee  :  pstep ) -> (match (projectee) with
+| PMember (k) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__PMember__item__k : pstep  ->  Prims.list<ch> = (fun ( projectee  :  pstep ) -> (match (projectee) with
+| PMember (k) -> begin
+     k
+     end))
+
+type scan<'flt> =
+| AllFinite
+| NonFinite of Prims.list<pstep> * 'flt
+
+
+let uu___is_AllFinite = (fun ( projectee  :  scan<'flt> ) -> (match (projectee) with
+| AllFinite -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_NonFinite = (fun ( projectee  :  scan<'flt> ) -> (match (projectee) with
+| NonFinite (path, f) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__NonFinite__item__path = (fun ( projectee  :  scan<'flt> ) -> (match (projectee) with
+| NonFinite (path, f) -> begin
+     path
+     end))
+
+
+let __proj__NonFinite__item__f = (fun ( projectee  :  scan<'flt> ) -> (match (projectee) with
+| NonFinite (path, f) -> begin
+     f
+     end))
+
+type guarded<'flt> =
+| Rendered of Prims.list<ch>
+| Refused of Prims.list<pstep> * 'flt
+
+
+let uu___is_Rendered = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| Rendered (bytes) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Rendered__item__bytes = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| Rendered (bytes) -> begin
+     bytes
+     end))
+
+
+let uu___is_Refused = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| Refused (path, f) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Refused__item__path = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| Refused (path, f) -> begin
+     path
+     end))
+
+
+let __proj__Refused__item__f = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| Refused (path, f) -> begin
+     f
+     end))
+
+
+let rec first_nonfinite = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (match (v) with
+| JFloat (f) -> begin
+      
+if (Prims.op_Equals (w.fclass f) FFinite) then begin
+     AllFinite
+     end else begin
+     NonFinite ([], f)
+     end
+     end
+| JArr (xs) -> begin
+     (first_nonfinite_items w (Prims.parse_int "0") xs)
+     end
+| JObj (fs) -> begin
+     (first_nonfinite_kvs w fs)
+     end
+| uu___ -> begin
+     AllFinite
+     end))
+and first_nonfinite_items = (fun ( w  :  wire<'num, 'flt> ) ( i  :  Prims.nat ) ( xs  :  Prims.list<jval<'num, 'flt>> ) -> (match (xs) with
+| [] -> begin
+     AllFinite
+     end
+| (x)::t -> begin
+     (match ((first_nonfinite w x)) with
+| NonFinite (p, f) -> begin
+     NonFinite ((PItem (i))::p, f)
+     end
+| AllFinite -> begin
+     (first_nonfinite_items w (i + (Prims.parse_int "1")) t)
+     end)
+     end))
+and first_nonfinite_kvs = (fun ( w  :  wire<'num, 'flt> ) ( fs  :  Prims.list<(Prims.list<ch> * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     AllFinite
+     end
+| ((k, v))::t -> begin
+     (match ((first_nonfinite w v)) with
+| NonFinite (p, f) -> begin
+     NonFinite ((PMember (k))::p, f)
+     end
+| AllFinite -> begin
+     (first_nonfinite_kvs w t)
+     end)
+     end))
+
+
+let try_render = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (match ((first_nonfinite w v)) with
+| NonFinite (p, f) -> begin
+     Refused (p, f)
+     end
+| AllFinite -> begin
+     Rendered ((render w v))
+     end))
+
 
 
 

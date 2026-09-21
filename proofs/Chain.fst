@@ -52,10 +52,11 @@
       the third check — the record's recomputed hash — rests on the premise. That split is the
       sharpest thing the mechanisation says about the linear walker.
 
-   WHAT IS NOT MODELLED. Signatures: an `Attestation` over a head is a composition this says
-   nothing about, and it lives on the coordination plane's own side. A REWRITE — a tamper that
-   also re-mints every descendant's id — is outside every theorem here, deliberately: it produces
-   a perfectly intact structure, and what catches it is a signed head, not a walker. Cycles: a DAG
+   WHAT IS NOT MODELLED. A REWRITE — a tamper that also re-mints every descendant's id — is outside
+   every WALKER theorem here, deliberately: it produces a perfectly intact structure, and what
+   catches it is a signed head, not a walker. Since Phase 193 that composition is section 8, for
+   the LINEAR chain: the signature is two parameters and one named premise, and nothing about an
+   algorithm, a key or a keyring is modelled. The DAG's heads are not signed here. Cycles: a DAG
    whose ids all recompute cannot carry one (a node's id folds its parents', so a cycle needs a
    collision), and `Dag.isAcyclic` is a separate check on a structurally-loaded DAG. And the
    `StreamConfig` migration path (`legacyActorConfig`, `rehash`) — the model carries the canonical
@@ -1994,3 +1995,425 @@ let compacted_tail_tamper_detected
       r'.rprev == r.rprev /\ r'.rhash == r.rhash /\ not (same_content r r'))
     (ensures not (verify_across h show enc_op pay snap (replace_at tail k r'))) =
   chain_tamper_detected h show enc_op inj snap.sprev snap.sseq tail k r r'
+
+(* ======================================================================================
+   8. The signed head (Phase 193; F#: `Attestation`, `IAttestationSink`, `OpStream.head`,
+      `attestHead`, `verifyAttestation`).
+
+   Sections 1-7 stop where the file header says they stop: a REWRITE — a tamper that re-mints every
+   later record's hash — produces a perfectly intact chain, and no walker can fault it. What closes
+   that is a signature over the HEAD, and until this section the step from "the head is signed" to
+   "the history is the one that was signed" was prose. It is two theorems now.
+
+     - `signed_head_binds_chain`. Two chains that both verify, and whose heads both verify under
+       ONE attestation, are the same chain — the same records, so the same ops in the same order.
+       It is the composition of two facts: the attestation verifies against at most one head
+       (`signature_binds`, the section's one new premise), and a verified chain's head determines
+       the chain (`same_head_same_chain_from`, which spends `rec_injective` once per record, tip
+       to root).
+     - `signed_head_rejects_splice`. Replace, insert or drop one op and RE-MINT the whole chain, so
+       that `verifyChain` accepts it — the rewrite sections 1-7 cannot see — and the original
+       attestation does not verify against the result. `signed_head_rejects_rewrite` is the general
+       form, for any chain that differs at all.
+
+   THE SIGNATURE IS A PARAMETER, and what is assumed of it is ONE property. `verify` stands for
+   `IAttestationSink.Verify` and `sign` for `IAttestationSink.Sign`; nothing here models an
+   algorithm, a key, a keyring or its lockout rules, which belong to whoever supplies the sink.
+   `signature_binds verify` says an attestation verifies against AT MOST ONE head — `verify` holds
+   only for the signed bytes. It is a lemma-valued parameter, as `rec_injective` is, never an
+   `assume`. Two things about it are worth reading twice.
+
+   1. **It is BINDING, not UNFORGEABILITY.** The theorems are about ONE attestation — the original
+      one. That nobody without the key can mint a SECOND attestation over the rewritten head is the
+      signature scheme's own claim (and key custody's), and nothing here says it. A sink whose
+      `Verify` compares the attestation's recorded `Head` against the head it is handed has the
+      binding property by construction, with no cryptography spent; what the cryptography buys is
+      the half this model does not state.
+   2. **It is the SINK'S, and Core ships no sink that signs.** `OpStream.noAttestation` signs
+      nothing and verifies nothing, and a real sink is host-side. The model is handed the sink's
+      own `Sign` and `Verify`, so the property is one a host's sink either has or lacks: a sink
+      that verifies everything falsifies it, and the differential measures that. The shipped kit
+      samples it at a host's sink already — `Conformance.attestationLaws`' prefix arm and its two
+      rehashed-forgery arms are exactly "one attestation, two heads" — though the claims ladder
+      does not yet name that law as this row's discharge; `proofs/README.md` says why.
+
+   ONE BOUNDARY IS A FINDING rather than a modelling choice, and it is section 7's finding again.
+   `OpStream.head` returns the literal `""` for the empty chain — not `cfg.Genesis` — so an
+   attestation over `""` is an attestation over the empty chain, and over any chain whose tip
+   hashed to `""`. The binding theorem therefore carries `~(chain_head rs == "")`: the signed head
+   is not the empty sentinel. That is a condition on the ONE head being verified, which a verifier
+   can check, rather than a universal claim about the hash. `signed_sentinel_covers_the_empty_chain`
+   states the other side: under a signed `""`, the empty chain is accepted under every genesis.
+
+   WHAT THIS SECTION DOES NOT REACH. A COMPACTED stream. `same_head_same_chain_from` is stated at
+   an arbitrary boundary `(prev, i)`, so it does say that two tails verified from one boundary
+   index with one head are the same tail from the same boundary hash — but it says nothing about
+   the DISCARDED prefix, and cannot: `compact` trusts the boundary hash it reads (section 7), so a
+   signed head over a compacted stream binds the prefix only under `compact_verifies_iff_original`'s
+   premise that the prefix verified before it was discarded. No theorem here is stated over
+   `verify_across`, and production's `head` of a compacted stream with an EMPTY tail is the `""`
+   sentinel rather than the snapshot's boundary hash, which the boundary above already excludes.
+   ====================================================================================== *)
+
+(* F#: `OpStream.head` — `List.tryLast`, then the record's `Hash`, or the literal `""`. *)
+let rec chain_head (#op: eqtype) (rs: list (record op)) : Tot string (decreases rs) =
+  match rs with
+  | [] -> ""
+  | [r] -> r.rhash
+  | _ :: t -> chain_head t
+
+(* F#: `Attestation`. All three fields are the host's: Core reads none of them. *)
+type attestation = { ahead: string; akey: string; asig: string }
+
+(* F#: `OpStream.attestHead sink records = sink.Sign (head records)`. `sign` is the sink's `Sign`,
+   and `Missing` is the no-op sink's `None`. *)
+let attest_head
+  (#op: eqtype)
+  (sign: string -> found attestation)
+  (rs: list (record op))
+  : Tot (found attestation) =
+  sign (chain_head rs)
+
+(* F#: `OpStream.verifyAttestation sink attestation records = sink.Verify attestation (head records)`. *)
+let verify_attestation
+  (#op: eqtype)
+  (verify: attestation -> string -> bool)
+  (att: attestation)
+  (rs: list (record op))
+  : Tot bool =
+  verify att (chain_head rs)
+
+(* What an independent verifier does, per `verifyAttestation`'s own doc comment: `verifyChain`
+   proves the chain intact, `head` reads its tip, and the signature is checked against exactly
+   that. Production ships the two halves and no single function composing them; the test host
+   composes them the same way. *)
+let accepts_signed
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (genesis: string)
+  (verify: attestation -> string -> bool)
+  (att: attestation)
+  (rs: list (record op))
+  : Tot bool =
+  verify_chain h show enc_op genesis rs && verify_attestation verify att rs
+
+(* THE PREMISE — the section's only new one. An attestation verifies against at most one head. *)
+[@@ noextract_to "FSharp"]
+let signature_binds (verify: attestation -> string -> bool) : Type =
+  att: attestation -> m1: string -> m2: string ->
+  Lemma (requires verify att m1 /\ verify att m2) (ensures m1 == m2)
+
+(* ---- the order on numerals, which is all "a longer chain has a later tip" costs ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec ple (a: pos) (b: pos) : Tot bool (decreases a) =
+  match a, b with
+  | PZero, _ -> true
+  | PSucc _, PZero -> false
+  | PSucc x, PSucc y -> ple x y
+
+let rec ple_refl (a: pos) : Lemma (ensures ple a a) (decreases a) =
+  match a with
+  | PZero -> ()
+  | PSucc x -> ple_refl x
+
+let rec ple_succ_left (a: pos) (b: pos)
+  : Lemma (requires ple (PSucc a) b) (ensures ple a b) (decreases a) =
+  match a, b with
+  | PSucc x, PSucc y -> ple_succ_left x y
+  | _, _ -> ()
+
+let rec ple_succ_self (a: pos) : Lemma (ensures not (ple (PSucc a) a)) (decreases a) =
+  match a with
+  | PZero -> ()
+  | PSucc x -> ple_succ_self x
+
+(* ---- the head determines the chain ---- *)
+
+(* The tip of a sound walk from index `i` was minted at a sequence at or after `i`. This is what
+   separates a chain from its own proper extensions: the sequence is in the pre-image. *)
+let rec head_seq_at_least
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (inj: rec_injective op h show enc_op)
+  (prev: string)
+  (i: pos)
+  (rs: list (record op))
+  (p: string)
+  (s: pos)
+  (a: string)
+  (o: op)
+  : Lemma
+    (requires
+      chain_ok_from h show enc_op prev i rs /\ Cons? rs /\
+      chain_head rs == rec_hash h show enc_op p s a o)
+    (ensures ple i s)
+    (decreases rs) =
+  match rs with
+  | [] -> ()
+  | [r] ->
+    inj prev r.rseq r.ractor r.rop p s a o;
+    ple_refl i
+  | r :: t ->
+    head_seq_at_least h show enc_op inj r.rhash (PSucc i) t p s a o;
+    ple_succ_left i s
+
+(* THE LINEAR CHAIN'S OWN INJECTIVITY. Two sound walks from one index that end at one head are the
+   same records, walked from the same predecessor hash. Tip to root: the two tips share a hash, so
+   `rec_injective` makes them the same record with the same prev-link, which is the head of what is
+   left. A chain against one of its own extensions is excluded by the sequence, through
+   `head_seq_at_least`. Stated at an arbitrary `(prev, i)` rather than at genesis, because nothing
+   in it needs the walk to start there — see the section header for what that does and does not say
+   about a compacted stream. *)
+let rec same_head_same_chain_from
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (inj: rec_injective op h show enc_op)
+  (p1: string)
+  (p2: string)
+  (i: pos)
+  (rs1: list (record op))
+  (rs2: list (record op))
+  : Lemma
+    (requires
+      chain_ok_from h show enc_op p1 i rs1 /\ chain_ok_from h show enc_op p2 i rs2 /\
+      Cons? rs1 /\ Cons? rs2 /\ chain_head rs1 == chain_head rs2)
+    (ensures rs1 == rs2 /\ p1 == p2)
+    (decreases rs1) =
+  match rs1, rs2 with
+  | [r1], [r2] -> inj p1 r1.rseq r1.ractor r1.rop p2 r2.rseq r2.ractor r2.rop
+  | [r1], r2 :: t2 ->
+    head_seq_at_least h show enc_op inj r2.rhash (PSucc i) t2 p1 r1.rseq r1.ractor r1.rop;
+    ple_succ_self i
+  | r1 :: t1, [r2] ->
+    head_seq_at_least h show enc_op inj r1.rhash (PSucc i) t1 p2 r2.rseq r2.ractor r2.rop;
+    ple_succ_self i
+  | r1 :: t1, r2 :: t2 ->
+    same_head_same_chain_from h show enc_op inj r1.rhash r2.rhash (PSucc i) t1 t2;
+    inj p1 r1.rseq r1.ractor r1.rop p2 r2.rseq r2.ractor r2.rop
+  | _, _ -> ()
+
+(* THEOREM (Phase 193). The signed head binds the chain it seals: two chains a verifier accepts
+   under one attestation are the same chain — the same records, so the same ops in the same order.
+   The premises are `rec_injective` (section 6's), `signature_binds` (this section's), and that the
+   signed head is not the empty-chain sentinel. *)
+let signed_head_binds_chain
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (inj: rec_injective op h show enc_op)
+  (verify: attestation -> string -> bool)
+  (binds: signature_binds verify)
+  (genesis: string)
+  (att: attestation)
+  (rs1: list (record op))
+  (rs2: list (record op))
+  : Lemma
+    (requires
+      accepts_signed h show enc_op genesis verify att rs1 /\
+      accepts_signed h show enc_op genesis verify att rs2 /\
+      ~(chain_head rs1 == ""))
+    (ensures rs1 == rs2) =
+  chain_break_none_iff h show enc_op genesis PZero rs1;
+  chain_break_none_iff h show enc_op genesis PZero rs2;
+  binds att (chain_head rs1) (chain_head rs2);
+  same_head_same_chain_from h show enc_op inj genesis genesis PZero rs1 rs2
+
+(* THE BOUNDARY, stated rather than hidden. `OpStream.head` of the empty chain is the literal `""`,
+   so an attestation that verifies against `""` makes the EMPTY chain acceptable — under every
+   genesis, and whatever chain the signer had in hand. *)
+let signed_sentinel_covers_the_empty_chain
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (genesis: string)
+  (verify: attestation -> string -> bool)
+  (att: attestation)
+  : Lemma
+    (requires verify att "")
+    (ensures accepts_signed #op h show enc_op genesis verify att []) =
+  ()
+
+(* COROLLARY — the rewrite sections 1-7 cannot see. ANY chain other than the one that was signed
+   is refused under the original attestation, however intact it is. *)
+let signed_head_rejects_rewrite
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (inj: rec_injective op h show enc_op)
+  (verify: attestation -> string -> bool)
+  (binds: signature_binds verify)
+  (genesis: string)
+  (att: attestation)
+  (rs: list (record op))
+  (rs': list (record op))
+  : Lemma
+    (requires
+      accepts_signed h show enc_op genesis verify att rs /\
+      ~(chain_head rs == "") /\ ~(rs' == rs))
+    (ensures not (accepts_signed h show enc_op genesis verify att rs')) =
+  if accepts_signed h show enc_op genesis verify att rs'
+  then signed_head_binds_chain h show enc_op inj verify binds genesis att rs rs'
+  else ()
+
+(* ---- the three splices, over the OPS — each followed by a full re-mint ---- *)
+
+let rec step_at (#op: eqtype) (cs: list (cstep op)) (n: pos) : Tot (found (cstep op)) (decreases cs) =
+  match cs, n with
+  | [], _ -> Missing
+  | c :: _, PZero -> Found c
+  | _ :: t, PSucc m -> step_at t m
+
+(* Out of range, a replacement changes nothing — as `replace_at` does. *)
+let rec replace_step (#op: eqtype) (cs: list (cstep op)) (n: pos) (c': cstep op)
+  : Tot (list (cstep op)) (decreases cs) =
+  match cs, n with
+  | [], _ -> []
+  | _ :: t, PZero -> c' :: t
+  | c :: t, PSucc m -> c :: replace_step t m c'
+
+(* At or past the end, an insertion appends — so an insertion always lengthens. *)
+let rec insert_step (#op: eqtype) (cs: list (cstep op)) (n: pos) (c': cstep op)
+  : Tot (list (cstep op)) (decreases cs) =
+  match cs, n with
+  | [], _ -> [c']
+  | _, PZero -> c' :: cs
+  | c :: t, PSucc m -> c :: insert_step t m c'
+
+(* Out of range, a removal changes nothing. *)
+let rec remove_step (#op: eqtype) (cs: list (cstep op)) (n: pos)
+  : Tot (list (cstep op)) (decreases cs) =
+  match cs, n with
+  | [], _ -> []
+  | _ :: t, PZero -> t
+  | c :: t, PSucc m -> c :: remove_step t m
+
+type splice (op: eqtype) =
+  | Replaced : pos -> cstep op -> splice op
+  | Inserted : pos -> cstep op -> splice op
+  | Dropped : pos -> splice op
+
+let apply_splice (#op: eqtype) (cs: list (cstep op)) (sp: splice op) : Tot (list (cstep op)) =
+  match sp with
+  | Replaced n c' -> replace_step cs n c'
+  | Inserted n c' -> insert_step cs n c'
+  | Dropped n -> remove_step cs n
+
+(* Whether the splice is one at all: a replacement by a DIFFERENT step at an index the chain has,
+   any insertion, a removal at an index the chain has. *)
+let splice_changes (#op: eqtype) (cs: list (cstep op)) (sp: splice op) : Tot bool =
+  match sp with
+  | Replaced n c' ->
+    (match step_at cs n with
+     | Missing -> false
+     | Found c -> not (c = c'))
+  | Inserted _ _ -> true
+  | Dropped n ->
+    (match step_at cs n with
+     | Missing -> false
+     | Found _ -> true)
+
+let rec cons_differs (#a: Type) (x: a) (l: list a) : Lemma (ensures ~(x :: l == l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | y :: t -> cons_differs y t
+
+let rec replace_step_differs (#op: eqtype) (cs: list (cstep op)) (n: pos) (c: cstep op) (c': cstep op)
+  : Lemma
+    (requires step_at cs n == Found c /\ ~(c == c'))
+    (ensures ~(replace_step cs n c' == cs))
+    (decreases cs) =
+  match cs, n with
+  | _ :: t, PSucc m -> replace_step_differs t m c c'
+  | _, _ -> ()
+
+let rec insert_step_differs (#op: eqtype) (cs: list (cstep op)) (n: pos) (c': cstep op)
+  : Lemma (ensures ~(insert_step cs n c' == cs)) (decreases cs) =
+  match cs, n with
+  | [], _ -> ()
+  | _, PZero -> cons_differs c' cs
+  | _ :: t, PSucc m -> insert_step_differs t m c'
+
+let rec remove_step_differs (#op: eqtype) (cs: list (cstep op)) (n: pos)
+  : Lemma
+    (requires Found? (step_at cs n))
+    (ensures ~(remove_step cs n == cs))
+    (decreases cs) =
+  match cs, n with
+  | [], _ -> ()
+  | x :: t, PZero -> cons_differs x t
+  | _ :: t, PSucc m -> remove_step_differs t m
+
+let splice_differs (#op: eqtype) (cs: list (cstep op)) (sp: splice op)
+  : Lemma (requires splice_changes cs sp) (ensures ~(apply_splice cs sp == cs)) =
+  match sp with
+  | Replaced n c' ->
+    (match step_at cs n with
+     | Missing -> ()
+     | Found c -> replace_step_differs cs n c c')
+  | Inserted n c' -> insert_step_differs cs n c'
+  | Dropped n -> remove_step_differs cs n
+
+(* A re-minted chain carries exactly the steps it was minted from — so two step lists that mint one
+   chain are one step list. Proof only. *)
+[@@ noextract_to "FSharp"]
+let rec steps_of (#op: eqtype) (rs: list (record op)) : Tot (list (cstep op)) =
+  match rs with
+  | [] -> []
+  | r :: t -> { cactor = r.ractor; cop = r.rop } :: steps_of t
+
+let rec build_chain_steps
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (prev: string)
+  (i: pos)
+  (cs: list (cstep op))
+  : Lemma (ensures steps_of (build_chain h show enc_op prev i cs) == cs) (decreases cs) =
+  match cs with
+  | [] -> ()
+  | c :: t ->
+    let r = append_rec h show enc_op prev i c.cactor c.cop in
+    build_chain_steps h show enc_op r.rhash (PSucc i) t
+
+(* THEOREM (Phase 193). Replace, insert or drop ONE op, and re-mint the whole chain from genesis so
+   that it verifies — and it is still refused under the original attestation. The re-mint is the
+   point: this is the tamper no walker finds, and the attack `Conformance.attestationLaws` forges
+   with `reforgeCanonical`. *)
+let signed_head_rejects_splice
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (inj: rec_injective op h show enc_op)
+  (verify: attestation -> string -> bool)
+  (binds: signature_binds verify)
+  (genesis: string)
+  (att: attestation)
+  (cs: list (cstep op))
+  (sp: splice op)
+  : Lemma
+    (requires
+      accepts_signed h show enc_op genesis verify att (build_chain h show enc_op genesis PZero cs) /\
+      ~(chain_head (build_chain h show enc_op genesis PZero cs) == "") /\
+      splice_changes cs sp)
+    (ensures
+      not
+        (accepts_signed h show enc_op genesis verify att
+           (build_chain h show enc_op genesis PZero (apply_splice cs sp)))) =
+  splice_differs cs sp;
+  build_chain_steps h show enc_op genesis PZero cs;
+  build_chain_steps h show enc_op genesis PZero (apply_splice cs sp);
+  signed_head_rejects_rewrite h show enc_op inj verify binds genesis att
+    (build_chain h show enc_op genesis PZero cs)
+    (build_chain h show enc_op genesis PZero (apply_splice cs sp))

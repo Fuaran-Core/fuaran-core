@@ -613,6 +613,7 @@ over-read.
 | `tree-algebra-well-formed-states` | `domain-obligation` | `Conformance.opAlgebra` |
 | `content-id-determines-content` | `premise` | — |
 | `chain-walk-order-is-productions` | `model-bridge` | `permanent` |
+| `signature-binds-one-head` | `model-bridge` | `unscheduled` |
 | `parser-float-readback-opaque` | `model-bridge` | `permanent` |
 | `parser-alphabet-bridge` | `model-bridge` | `permanent` |
 | `lawful-abstract-witness` | `domain-obligation` | `Conformance.witnessLaws` |
@@ -2318,9 +2319,11 @@ prefix-free hypothesis reddens `splice_split`; dropping the appeal to the op cod
 4. **Not claimed.**
    - **A REWRITE.** A tamper that also re-mints the tampered node's id and then every descendant's
      produces a structure that is intact by construction, and no walker will ever find it. What
-     catches it is a signed head, which is a composition this theorem says nothing about — it lives
-     with the signing composition, on the coordination plane's own side.
-   - **Anything about signatures.** `Attestation` and `IAttestationSink` are outside the model.
+     catches it is a signed head, which is a composition THIS theorem says nothing about. Since
+     Phase 193 it is a theorem of its own for the LINEAR chain — see "The signed head binds the
+     chain it seals" below; for the DAG it is still not claimed.
+   - **Anything about signatures**, in the Phase 136 sections. `Attestation` and `IAttestationSink`
+     entered the model with Phase 193, as two parameters and one named premise, and only there.
    - **Re-ordering a node's parents.** Not merely unproved: proved NOT detected
      (`parent_reorder_undetected`), because the pre-image is sorted. It is the price of the
      convergence `merge_id_parent_order_independent` buys, and it is stated as a theorem so a reader
@@ -2465,6 +2468,156 @@ was not the seed.
    - **The JSONL snapshot lines** (`snapshotToJsonl`, `fromJsonlWithSnapshots`). Loading is not
      verifying, as for the chain itself.
    - **`EffectCapture` journals and the DAG's `replayTo`.** A different stream and a different walk.
+
+### The signed head binds the chain it seals — signing composition as a theorem (Phase 193)
+
+Theorem 3 finds a tampered record. It says nothing about a **rewrite** — a tamper that re-mints
+every later record's hash — because a rewrite produces a perfectly intact chain and no walker can
+fault it. What closes that is a signature over the **head**, and until this section the step from
+"the head is signed" to "the history is the one that was signed" was prose: this document's own
+"Next" list carried it as unproved, and every sentence elsewhere that says "signed" rested on it.
+Section 8 of `Chain.fst` is that step, over the linear chain model Phase 136 carries, and it is two
+theorems.
+
+- **`signed_head_binds_chain`.** Two chains that both verify from one genesis, and whose heads both
+  verify under ONE attestation, are the same chain — the same records, so the same ops in the same
+  order. It composes two facts. An attestation verifies against at most one head
+  (`signature_binds`, below). And a verified chain's head **determines the chain**:
+  `same_head_same_chain_from` is the linear chain's own injectivity, walked tip to root — the two
+  tips share a hash, so `rec_injective` makes them one record with one prev-link, which is the head
+  of what is left. A chain is told apart from its own extensions by the **sequence number in the
+  pre-image** (`head_seq_at_least`): a tip minted at index *i* cannot be the tip of a walk that
+  passed *i* + 1. Without the sequence in the payload that case would not close.
+- **`signed_head_rejects_splice`.** Replace, insert or drop ONE op and **re-mint the whole chain**
+  from genesis, so that `verifyChain` accepts the result — and it is still refused under the
+  original attestation. One theorem over a three-case `splice`, guarded by `splice_changes`, since
+  a splice that changes nothing re-mints the signed chain itself and is rightly accepted.
+  `signed_head_rejects_rewrite` is the general form beside it: ANY chain other than the one that
+  was signed is refused, however intact. This is the forgery `Conformance.attestationLaws` builds
+  with its own rehash, as a theorem rather than a sample.
+
+**The signature is a parameter, and what is assumed of it is one property.** `verify` stands for
+`IAttestationSink.Verify` and `sign` for `IAttestationSink.Sign`; nothing models an algorithm, a
+key, a keyring or its lockout rules. `signature_binds verify` says an attestation verifies against
+**at most one head** — `verify` holds only for the signed bytes — and it is a lemma-valued
+parameter, as `rec_injective` is, never an `assume`. Two things about it are worth reading twice.
+
+1. **It is binding, not unforgeability.** Both theorems are about the ONE original attestation.
+   That nobody without the key can mint a SECOND one over the rewritten head is the signature
+   scheme's own claim, and key custody's, and nothing here says it. A sink whose `Verify` merely
+   compares the attestation's recorded `Head` has the binding property by construction, with no
+   cryptography spent; what the cryptography buys is the half this model does not state.
+2. **It is classified a `model-bridge` that closes `unscheduled`, and the second word is the
+   finding.** Core ships **no production signer**: `OpStream.noAttestation` signs nothing and
+   verifies nothing, a real sink is host-side, and the only concrete sinks in this repository are
+   test-local. So the model's abstract `verify` is bridged to no production signature at all, which
+   is the bridge the row names. But it is not `permanent`, because something could close it and it
+   is already half-built: the property is one a host's sink either has or lacks — a sink that
+   verifies everything falsifies it, and the differential measures exactly that — and the shipped
+   kit **already samples it** at the host's own sink, since `Conformance.attestationLaws`' prefix
+   arm and its two rehashed-forgery arms are each one attestation offered two heads. By Phase 174's
+   own definitions that reads as a `domain-obligation` discharged by that law. This phase tried the
+   row that way first and the gate refused it, correctly: the discharge relation is SHIPPED data
+   (`Fuaran.Core.Families.obligations`, held to `../proofs.json` row for row by the
+   `Conformance.Families` family), so adding the pair is a change to a shipped package's source,
+   not a proof-leg artefact, and this phase is proof-leg only. Promoting the row is therefore a
+   named, unscheduled act rather than something done in passing. Under the `noAttestation` default
+   these theorems say nothing, which is correct: there is no signed head.
+
+**One boundary is a finding rather than a modelling choice, and it is Phase 191's finding again.**
+`OpStream.head` returns the literal `""` for the empty chain — not `cfg.Genesis` — so an
+attestation over `""` is an attestation over the empty chain, and over any chain whose tip happened
+to hash to `""`. The binding theorem therefore carries `~(chain_head rs == "")`: **the signed head
+is not the empty-chain sentinel.** That is a condition on the one head being verified, which a
+verifier can check, rather than a universal claim about the hash. It is what the DROP arm needs at
+its smallest — a one-record chain with its record dropped re-mints to the empty chain — and
+`signed_sentinel_covers_the_empty_chain` states the other side: under a signed `""`, the empty
+chain is accepted under every genesis, whatever chain the signer had in hand. Nothing shipped is
+affected; a host that signs heads should not sign an empty stream's.
+
+**What the section does not reach: a compacted stream.** `same_head_same_chain_from` is stated at an
+arbitrary boundary `(prev, i)`, so it does say that two tails verified from one boundary index with
+one head are the same tail from the same boundary hash. It says nothing about the DISCARDED prefix,
+and cannot: `compact` trusts the boundary hash it reads, so a signed head over a compaction binds
+the prefix only under `compact_verifies_iff_original`'s premise that the prefix verified before it
+was discarded. No theorem here is stated over `verify_across`. (Production's `head` of a compacted
+stream with an EMPTY tail is the `""` sentinel rather than the snapshot's boundary hash, which the
+boundary above already excludes.)
+
+**The differential** (`Proofs.Oracle`, five cases) runs the extracted model beside the
+`IAttestationSink` **seam**, driven by a test-local keyring sink — because there is no production
+signer to run beside, and it says so rather than claiming one. What is compared is `OpStream.head`,
+`attestHead`, `verifyAttestation`, and the `verifyChain && verifyAttestation` composition
+`verifyAttestation`'s own doc comment describes. The sink's `Verify` deliberately does NOT compare
+the attestation's recorded head, so binding is spent on the keyed digest rather than satisfied by
+construction.
+
+| Pool | What is compared | Vacuity guards |
+|---|---|---|
+| the work-plan domain, 40 generated streams, a generated keyring each (one to three keys, any of them active) | the head; the attestation; acceptance of the intact chain, under a verifier lacking the key, and under the signature re-labelled to each other key; then EVERY replace-op, re-attribute, replace-with-the-same, drop and insert (every position, one past the end included) of the chain's steps, each fully re-minted; then every in-place tamper | a signed chain; a multi-key ring; a verifier lacking the key; a re-labelled attestation; a refused splice of EACH of the three kinds; an accepted no-op splice; every re-mint accepted by `verifyChain`; every in-place tamper refused |
+| the reference tree witness, 30 generated streams | the same | the same |
+
+Each splice is spelled twice and **independently** — as the model's `splice`, and as a plain list
+edit of production's steps — and the two must mint the same records, record for record;
+`splice_changes` must agree with whether production's steps moved. Beside the model-against-production
+comparison, **production is held to the theorem on its own verdict**: every re-minted splice must
+pass `verifyChain` (or it is not the rewrite the theorem is about) and must be refused under the
+original attestation.
+
+The **go-red cases** are two, and a third case measures the boundary. A model handed a DIFFERENT
+hash must disagree. Under a sink that verifies **everything**, the re-minted splice is ACCEPTED — by
+production and by the model alike — so `signature_binds` is observed load-bearing rather than
+decorative, and the same forgery is shown refused by both under the keyring sink. And the sentinel
+is measured on production: a signed `""` accepts the empty chain and no chain with a head, and the
+one-record chain's drop is refused. The differential was also reddened **by hand** before it was
+trusted, by two perturbations of the extracted oracle — a `chain_head` that reads the FIRST record
+rather than the last, and a drop at zero that drops nothing — each of which failed both generated
+cases and was then restored.
+
+The **proof** was falsified the same way, on scratch copies, and each landed on the lemma that
+should have caught it: dropping the sentinel premise reddens `signed_head_binds_chain`; never
+spending `signature_binds` reddens it too; dropping `splice_changes` reddens
+`signed_head_rejects_splice`; a head read from the first record reddens `head_seq_at_least`; and
+taking the sequence out of the argument reddens `same_head_same_chain_from`, at the
+chain-against-its-own-extension case.
+
+**What it cost.** Almost nothing in prover time, and a small budget re-seed. Section 8 is about 420 lines — thirteen
+lemmas and the two theorems — every one an induction over a list or a numeral at the default
+`--z3rlimit 40` with no scoped option, and the new proofs are short appeals to `rec_injective` and
+to section 6's characterisation rather than new case analyses. Both theorems discharged on the
+first attempt; no repair loop was spent. Five cold quaked runs of the module alone measured 22s,
+22s, 23s, 27s and 23s against the 22s recorded before the section existed; the 27s was taken beside
+sibling gate runs rather than other provers, and a direct invocation carries no contention label to
+discount it by, so it is kept as the slowest observed. The phase's one cold pass of the whole leg
+measured 23s, on a pass the leg itself labelled contended (x1.05), so it is not a seed.
+`modules.json` re-seeds the budget to 60s from the 27s by the file's own rule, and says so.
+
+**The claims ladder, for this section** (rows `signed-head-binds-chain`,
+`signed-head-rejects-splice`, `signature-binds-one-head`, `signed-head-differential` in
+`../proofs.json`):
+
+1. **Proved.** The two theorems, the general rewrite corollary, the linear chain's own injectivity,
+   and the sentinel boundary from both sides. No `assume`, no `admit`, `--report_assumes error` on.
+2. **Differentially tested.** As above, over those pools, never over all inputs — and beside the
+   seam, not beside a signer.
+3. **Assumed.**
+   - **`signature_binds`** — the sink's `Verify` accepts one attestation against at most one head.
+     A `model-bridge` that closes `unscheduled`: `Conformance.attestationLaws` already samples it at
+     a host's own sink, and the ladder's discharge relation does not yet name it (above). New with
+     this section.
+   - **`rec_injective`** — the linear half of theorem 3's cryptographic premise, still in its
+     bundled form, spent once per record by `same_head_same_chain_from`. Inherited, not new.
+   - Theorem 3's bridges, unchanged: a sequence number is a Peano numeral, and the extractor and
+     the F# compiler are trusted.
+4. **Not claimed.**
+   - **Unforgeability, any concrete signature algorithm, key custody, or a keyring's lockout
+     rules.** Those belong to whoever supplies the sink, and to the attested-ledger plane built on
+     this seam.
+   - **The DAG's heads.** Both theorems are over the linear chain. A content-addressed DAG's head
+     set is a different object, and nothing here signs it.
+   - **A compacted stream's discarded prefix**, per the paragraph above.
+   - **That a host signs at all.** Signing is opt-in; under `noAttestation` there is no signed
+     head and nothing to bind.
 
 ## Theorem 4 — `Json.parse` totality, bounded (Phase 146)
 
@@ -3170,6 +3323,11 @@ shipped encoder, in the shape Phase 137 took, and belongs to a phase chartered f
 `Proofs.Oracle` case that holds the four aliases asserts them on **production**, so the finding
 goes red if the encoder ever changes.
 
+**CLOSED by Phase 165, in exactly that shape.** `Canon.tryRender` is the guarded companion, beside a
+`Canon.render` whose bytes did not move — so everything above remains true of `render`, the alias
+case still asserts it on production, and a caller that wants the refusal reaches for the new entry
+point. See "The guard" below.
+
 ### What is proved
 
 **The canonical subset is rule 5's own slot rule, read as a predicate.** A float is canonical
@@ -3205,6 +3363,64 @@ Rule 5 — `canonical_float_injective` and `int_layout_injective`, DERIVED rathe
 the ladder). Rule 4 — `absence_is_structural`: two objects that render alike carry the same keys,
 so an omitted key can never be confused with a present one, which is what makes "`None` fields are
 excluded" safe rather than merely tidy.
+
+### The guard — `Canon.tryRender` (Phase 165)
+
+`Canon.tryRender : JVal -> Result<string, string>` is `Canon.render` with a refusal beside it, in
+the shape `Json.tryRender` gives `Json.render`. Over a value holding no non-finite float it is
+exactly `Ok (render v)`; otherwise it is an `Error` naming the FIRST non-finite float in document
+order by its token and its path — `$` for the root, `[i]` for an array item, `["key"]` for an
+object member with the key under rule 6's escape, so the path is unambiguous for any key. Document
+order is AUTHORED order: the scan runs before any sort, as it must if the path is to name
+something the caller wrote.
+
+**The predicate is `float_canonical`'s FIRST clause and nothing else.** That predicate has two
+clauses because refutations 1 and 2 are its two failure modes; the guard takes the first — finite —
+and deliberately leaves the second. An integer-shaped finite float is the format's documented
+numeric normalisation, and a guard that refused `JFloat 2.0` would be refusing what rule 5 says.
+
+Section 13 of `WireCanon.fst` models the scan (`first_nonfinite`, clause for clause with
+production's `firstNonFinite`, the array index carried as `List.indexed` carries it) and the guard
+(`try_render`), and proves:
+
+- **`tryrender_is_render_on_finite`.** Wherever every float is finite, the guard IS the renderer:
+  `try_render w v == Rendered (render w v)`. The model calls `render`; it does not re-implement it,
+  so "changes no byte" is structural.
+- **`tryrender_is_render_on_canonical`.** The corollary the phase's acceptance asks for: the
+  canonical subset every theorem above is stated over sits inside the accepted set.
+- **`tryrender_refuses_exactly_aliasing`.** The guard refuses **if and only if** some float is not
+  finite. And what a refusal names is a float that is really at that path, whose class is one of
+  the three non-finite ones, and whose own rendering is byte for byte the rendering of a string it
+  is not equal to — `render_aliases_nan` / `_pos_inf` / `_neg_inf`, restated at the class the
+  refusal carries. The guard and the refutation share one predicate: `fclass f <> FFinite`.
+- **`nonfinite_anywhere_is_refused`.** The converse at depth: a non-finite float reachable by ANY
+  path is refused, so no position in a document hides one from the guard.
+- **`tryrender_keeps_the_documented_normalisations`.** Refutations 2, 3 and 4, each under its own
+  hypothesis, each ACCEPTED and rendered to `render`'s own bytes.
+
+"Really at that path" is a RELATION (`reaches`) rather than a by-key lookup, on purpose: a `JObj`
+is an association list, a repeated key is representable, and a lookup would find the first member
+of that key where the scan may have named a later one.
+
+**What is NOT proved, said plainly.** *Minimality* — that the path named is the first offender in
+document order — is modelled clause for clause and measured by the differential, but there is no
+theorem that every position before it is finite. *Document-level aliasing* — that a refused
+document renders identically to the document with the named float replaced by its string — is not
+proved either; it is a congruence through `sort_kvs`, and a guard whose job is to refuse does not
+need it. `Canon.renderOrdered` is not modelled and has no guarded companion.
+
+**One thing the shard asked for that is not there, and why.** It asked for "a guarded digest
+companion where a digest wraps the renderer". None does: `Fuaran.Core.Wire` references nothing that
+hashes, and every digest in the repository takes a STRING a caller has already rendered. The
+guarded digest is therefore `Canon.tryRender v |> Result.map digest` at the caller, with the
+caller's own hash — one line, and the only form that does not give the wire package a dependency
+it has never had. The entry point's doc comment says so where a caller will read it.
+
+**And one number the shard had wrong.** It speaks of "the four alias witnesses" the guard refuses.
+The four are the four REFUTATIONS, of which the guard's is the first alone; that refutation has
+THREE witnesses, one per non-finite class, and the other three refutations are exactly what the
+guard must not refuse. The shard's own goal and acceptance say the same, so this is a slip in one
+task line rather than a disagreement, and the differential asserts both halves.
 
 ### Why a reader, and not a second model of `Json.parse`
 
@@ -3248,11 +3464,19 @@ digest input.
 | a generated `JVal` pool | 1,200 seed-replayable documents over an alphabet carrying rule 6's three escape classes, astral and private-use keys, and rule 5's scientific layout | yes (each shape asserted reached) |
 | the four aliasing pairs | asserted on PRODUCTION, and on the model beside it | the finding, as a check that can go red |
 | the non-canonical arms | both infinities, NaN, both zeroes, the Int32 boundaries, an empty string, an empty object and array | the model is a model of the whole encoder, not only of the part the theorem covers |
+| the guard, on production directly (Phase 165) | the three non-finite witnesses refused by token and path; the strings they alias and the three documented normalisations NOT refused; the first offender in AUTHORED order named though another sorts first; a key with a quote and a control character escaped as rule 6 escapes it | the refusal, as a check that can go red |
+| the guard, over both corpus families (Phase 165) | the extracted guard beside `Canon.tryRender`, as the `Result` a caller receives | yes — and no fixture is refused, asserted: JSON cannot spell a non-finite float |
+| the guard, over a poisoned generated pool (Phase 165) | 2,400 seed-replayable documents with roughly one numeric leaf in three replaced by a non-finite float; the two results compared, an accept held to `render`'s bytes, and the verdict held to a third, independent predicate | yes (asserted reached: refusals, accepts, refusals two or more steps deep, each of the three tokens, accepted documents outside the canonical subset) |
 
 The **go-red** is rule 2's comparator REVERSED — the sort the rule mandates still runs, but orders
 keys the other way. Every object carrying two distinct keys must then disagree, and a document
 carrying none must still agree; both are asserted, so the instrument is known to be one that can
 lose *and* to be narrow to the rule it is about.
+
+The guard has its own **go-red** (Phase 165): a model wire that cannot see NaN — it classifies one
+as finite, so the scan walks past it. It must disagree with production on exactly the documents
+whose FIRST non-finite float is a NaN, and on no other document, a refusal for an infinity
+included; the test asserts the two counts are equal, not merely that one is non-zero.
 
 One thing about the host is worth knowing before anyone reads a stack trace. The extracted model is
 a **character-list interpreter** and F\*'s F# backend emits plain recursion with no tail calls, so
@@ -3268,14 +3492,22 @@ fixture it would have dropped first is the deepest one.
 1. **Proved (machine-checked, no admits).** On the model: `render_total`,
    `read_render_roundtrip`, `render_injective_up_to_key_order`, `render_deterministic`,
    `canonical_form_iff`, `render_injective_on_normal`, `read_returns_a_normal_value`, the four
-   rule lemmas, the §21 relations in `Limits.fst`, and the four refutations. F\* 2026.09.06,
+   rule lemmas, the §21 relations in `Limits.fst`, the four refutations, and (Phase 165) the
+   guard's five — `tryrender_is_render_on_finite`, `tryrender_is_render_on_canonical`,
+   `tryrender_refuses_exactly_aliasing`, `nonfinite_anywhere_is_refused` and
+   `tryrender_keeps_the_documented_normalisations`. F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
    `admit`. The module carries a scoped `--ext context_pruning` for the reason `TreeOps.fst` gives
    at the same line.
 2. **Differentially tested.** The extracted encoder agrees with `Canon.render` byte for byte over
    both corpus families and the generated pool, and the model's round trip agrees with
    `Json.parse ∘ Canon.render` over the same documents on the canonical subset. Agreement is over
-   the corpus and the pool drawn, never over all inputs. One go-red, required to lose.
+   the corpus and the pool drawn, never over all inputs. One go-red, required to lose. The guard
+   (Phase 165) is compared as the `Result` a caller receives — bytes on an accept, token and path
+   on a refusal — over both corpus families and a poisoned pool, with its own go-red. The model
+   carries a refusal as DATA and the host renders it in production's spelling, so the message's
+   fixed prefix is the bridge's and is not independently modelled; the token, the path and the
+   verdict are.
 3. **Assumed, and stated as such.**
    - **The numerals are opaque, and there is exactly ONE premise about them.** The two layouts and
      the numeral read-back are parameters, and `tok_read_ok` says the read-back inverts the
@@ -3306,8 +3538,12 @@ fixture it would have dropped first is the deepest one.
    - **`Canon.renderOrdered`.** It is the declared-key-order leg, where the ENCODER is the order
      authority and no sort runs; its canonicity rests on a different argument (the IDL's
      `WireShape.KeyOrder`), and nothing here carries to it.
-   - **That a non-finite float cannot reach `Canon.render`.** It can; nothing refuses it. See the
-     finding above.
+   - **That a non-finite float cannot reach `Canon.render`.** It can, and `render` still refuses
+     nothing — its bytes are pinned. What Phase 165 added is the entry point that DOES refuse; a
+     caller still holding `render` is exactly where it was.
+   - **That the guard names the FIRST offender, as a theorem**, or that a refused document aliases
+     at the DOCUMENT level. Both are named in "The guard" above; the first is measured, the second
+     is not needed by a refusal.
    - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
      measures — that is theorem 4's, and the boundary between the two is deliberate.
 
@@ -4310,6 +4546,193 @@ the `renderers` record so the model and its extraction stay ASCII. The oracle co
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
+## Theorem 13 — arbitration: pairwise independent, maximal, deterministic (Phase 157)
+
+_(This directory's thirteenth, and theorem 2's other end. `Ops.footprint` and `Ops.independent` say
+when two scripts commute; `Arbitration.arbitrate` is the function that USES them — the deterministic
+partition every multi-session allocation settles by: which subset of N op-script proposals can land
+together against one base tree. Theorem 2 proved the relation sound. Until this phase the function
+built on it was property-tested — `arbitrationLaws`, over one generator — and proved nowhere.)_
+
+The doc comment of `Arbitration.arbitrate` makes three promises, and the theorems are their names:
+
+> **"`Accepted` is mutually independent (pairwise `Ops.independent`) … by footprint soundness its
+> scripts apply confluently in ANY order."
+> "greedy-in-pinned-order yields *a maximal* mutually-independent set — nothing rejected could be
+> added without a conflict — not *the maximum* one."
+> "Proposals are processed in ascending `Id`, so the outcome is invariant under permutation of the
+> input list. Ids are expected unique … the permutation-invariance guarantee assumes unique ids."**
+
+Each is stated with care and an honesty boundary, and the three are different kinds of claim. The
+choice of pinned ORDER is policy. That the accepted set is independent, that nothing rejected could
+join it, and that the result is a function of the proposal set are algebra — and are proved here.
+
+`Arbitrate.fst` models `src/Fuaran.Core.Ops/Arbitration.fs` clause for clause OVER theorem 2's
+model: a script is a `list TreeOps.op`, the dry run threads `TreeOps.apply`, the footprint is
+`TreeOps.fp_all`, and independence is `DagFold.independent` — the same relation the fold theorem is
+about, opened rather than restated. The five clauses are the F#'s own: `pin` (the pinned order —
+`List.sortBy (fun p -> p.Id)`, a STABLE ascending sort, and stability is observable), `can_script`
+(`Ops.canApplyAll`, failing index and envelope included), `step` and `fold_step` (the greedy pass,
+accumulating in reverse), `recite_all` (every conflict re-cited against the FULL accepted set), and
+the three fields of the result. **One simplification, named:** the F# carries each accepted
+proposal's footprint beside it so it is computed once; a footprint is a pure function of the
+script, so the model recomputes `fp_of p` where the F# reads the cached value, and the differential
+is what holds the two to the same verdicts.
+
+### What is proved
+
+Three theorems, over any base tree and any proposal list:
+
+- **`accepted_pairwise_independent`.** The accepted set is pairwise independent — with NO
+  hypothesis: duplicates, inapplicable scripts and an ill-formed base included. Pairwise is
+  POSITIONAL, every member against every LATER one. A proposal need not be independent of itself
+  (any structural write conflicts with itself), so "any two members" would be false of a list
+  carrying one value twice; the positional reading is what the greedy pass establishes, and with
+  `independent`'s symmetry it is the whole relation. **`accepted_pair_commutes`** is what it buys:
+  any two accepted proposals, read as the single ops `Batch a.script` and `Batch b.script`, both
+  apply at the base (every accepted script passed the dry run, and `can_script_is_apply_all` ties
+  the dry run to the fold a `Batch` runs), and at a well-formed base each applies after the other
+  and the two orders reach the same tree — theorem 2's `tree_independence_diamond`, reaching the
+  accepted set. That is "by footprint soundness, confluent in any order" for a pair, as a theorem.
+  The N-script statement is theorem 2's `skeleton_fold_confluence`, whose hypothesis this
+  discharges; it is not restated.
+- **`accepted_maximal`.** Every rejection is JUSTIFIED (`all_justified`), so nothing rejected could
+  be added. An `Inapplicable (i, e)` is exactly the dry run's failing index and envelope. A
+  `Conflicts ids` names a script that DOES apply, is NOT independent of the final accepted set, and
+  cites a non-empty list that is exactly the accepted ids it interferes with, in pinned order. The
+  proof has two layers because the F# decides in two passes: at decision time a conflict is known
+  only to interfere with the accepted set as it then stood (`provisional`); the accepted set only
+  grows (`provisional_grows`), so the interference survives; and the re-citation then names the
+  interferers against the full set. "Non-empty by construction", the F# comment says —
+  `interfering_nil_iff` is that sentence. The citation is SOUND
+  (`conflict_cites_an_accepted_interferer`: every cited id resolves to an accepted proposal that
+  genuinely interferes) and COMPLETE (`every_interferer_is_cited`: "the complete rebase target, not
+  just the first collision"). And the partition is total by count (`arbitrate_is_total`): accepted
+  and rejected together are as long as the input. No hypothesis about ids.
+- **`arbitrate_deterministic`.** Under every arrival order — `DagFold.perm`, the relation the fold
+  theorem quantifies over — of a proposal list whose ids are DISTINCT, the WHOLE result is equal:
+  accepted set, merged script, every rejection with its reason. `arbitrate` reads its input only
+  through `pin`, so the theorem is the sort's: two inserts under different keys commute into any
+  list at all (`insert_comm` — sortedness is not needed), and distinctness survives a permutation
+  (`perm_distinct`). `pin_sorted` says the pinned order IS ascending id.
+
+### The finding: the id-uniqueness hypothesis is NEEDED
+
+The phase was asked to state the hypothesis on `arbitrate_deterministic` and find out what the
+prover actually needs. It needs it, and the reason is a counterexample rather than a proof that
+would not close.
+
+**`arbitrate` is total on duplicate ids.** Every function of the model is total, and theorems 1
+and 2 and the partition count carry no hypothesis about ids at all. What a repeated id costs is
+invariance, and nothing else.
+
+**But invariance is FALSE without uniqueness** (`duplicate_ids_break_invariance`). Two proposals
+sharing id 1, each inserting under the same parent: they interfere — both write that parent's
+structure — so exactly one is accepted, and the stable sort leaves them in arrival order, so WHICH
+one is accepted IS the arrival order. `[a; b]` accepts `a`; `[b; a]` accepts `b`. The two lists are
+one `PSwap` apart, so this refutes the theorem with its `requires` deleted, not some stronger
+claim. Deleting the `requires` from `pin_perm` is refused by the prover at exactly the two places
+the hypothesis is used (`insert_comm`'s precondition and `perm_distinct`'s), which is the same fact
+read from the other side.
+
+**So the check shipped** (operator decision 2026-09-19, the branch that decision reserved for this
+outcome). `Arbitration.duplicateIds : OpScriptProposal list -> int list` returns the ids carried by
+more than one proposal, ascending, each once; empty exactly when the ids are unique. It is a TOTAL
+check and never an assigner — it reads `Id` and nothing else, mints nothing, renumbers nothing —
+and `arbitrate` does not call it: the function that assumes uniqueness and the callers that mint
+ids sit in different packages, so the assumption is made checkable by whoever holds the list.
+`arbitrationLaws` gains one law holding it to the hypothesis: the check is exact against an
+independent recount, it is empty on every set the permutation law is certified over, and a TWIN —
+the same id and script under another holder — makes arrival order observable on every set that
+holds an applicable self-interfering proposal, with its own vacuity guard. One wording correction
+to the phase as chartered: it asked for a law that invariance holds "exactly when" the check
+returns empty, and that biconditional is false of a single input — two proposals sharing an id, one
+of them inapplicable, arbitrate identically in either order. What is true, and what the law and the
+theorem say, is that uniqueness is SUFFICIENT for every input and that it cannot simply be
+dropped: two DIFFERENT proposals sharing an id that land in the same bucket — both accepted, both
+rejected, or one displacing the other — are listed in arrival order, and the twin is that case.
+
+### What is NOT claimed
+
+- **MAXIMUM.** Greedy-in-pinned-order returns A maximal independent set, not THE largest one, and
+  `maximal_is_not_maximum` is the witness that the difference is real: proposal 1 writes under both
+  `a` and `b`, proposals 2 and 3 under one each. The pinned order accepts 1 alone — a set of ONE,
+  both rejections justified — while `[2; 3]` is itself applicable and pairwise independent, a set
+  of TWO; renumber proposal 1 to come last and that larger set is what is accepted. Both results
+  are maximal. Only one is maximum. The ids decide which the caller gets.
+- **That ascending id is the right order.** The pinned order is a POLICY choice
+  (`arbitration-pinned-order`, the ladder's second `policy` row): pinned, documented,
+  deterministic, and argued for nowhere here. No ranking, no quality judgement and no evaluator is
+  modelled, because none ships — which proposal is *better* is the host's business.
+- **That a `Conflicts` is a real conflict.** Independence is conservative (theorem 2's "the
+  conservative footprint is the theorem's shape"): a "maybe" is a conflict, so `Conflicts` means
+  "not provably coexistent", never "wrong". Maximality is maximality with respect to
+  `Ops.independent`, not with respect to what would in fact commute.
+- **The N-script any-order statement,** which is theorem 2's and is sampled end to end by
+  `arbitrationLaws`' confluence law; `accepted_pair_commutes` is the pair.
+- **`applyContained`.** `arbitrate` dry-runs with `Ops.canApplyAll`, which consults no container
+  capability (theorem 5's `container-sequence-gap`), and so does the model.
+
+### The differential
+
+`Proofs.Oracle` runs the extracted model beside `Arbitration.arbitrate` over generated proposal
+sets against the base tree: scripts from Phase 80's lane generator (each applies at the base on its
+own, and they share parents often enough that conflicts arise without being arranged), about one in
+four corrupted into a provably inapplicable script, in two id modes — a SHUFFLE of 1..n, so the
+pinned order is not the arrival order, and ids drawn from {1, 2}, so most sets carry a repeated id
+and the stable sort's tie-break is compared too. Per set: the accepted proposals in order (id,
+holder, script), the merged script, and every rejection in order with its reason — an
+`Inapplicable`'s index exactly and its envelope by CLASS, which is what the tree model claims, and
+a `Conflicts`' citation exactly. On every set the shipped `duplicateIds` is empty exactly when the
+extracted `distinct_ids` holds, and the extracted `pairwise_independent` and `all_applicable` are
+asked of PRODUCTION's own accepted set. The case asserts that the sample reached an accepted
+proposal, an `Inapplicable`, a `Conflicts` and a repeated id.
+
+**The go-red is a model that accepts a conflicting pair**: the extracted model with the greedy
+pass's `all_independent` test removed and nothing else touched — the pinned sort, the dry run, the
+re-citation and the merged script are the oracle's own code. It must lose, on a sample shown to
+have reached a conflict; the same sample under the real model agrees. Two further cases pin the two
+witnesses on the shipped function over the model's own extracted inputs, so a fix or a regression
+turns one red and sends its reader here.
+
+### What it cost
+
+Cold runs of the prover invoked directly on the file with the leg's own flags (rlimit 40,
+`--quake 3`, `--report_assumes error`) against a cache holding only `DagFold` and `TreeOps`:
+**12s, 12s, 12s**, taken beside other proof workers on the same machine. Budget **30s** (2 × 12,
+rounded up) and floor **6s** (half of 12), seeded per Phase 148/164's rules and recorded in
+`modules.json`. It carries `--ext context_pruning` for the reason `TreeOps.fst` gives — it opens
+that module, so every membership pattern it declares is live at every query here. Nothing needed a
+scoped rlimit, an SMT pattern or a second attempt: the module discharged on its first run. That is
+worth saying plainly rather than dressing up, because the reason is structural. Every proof is an
+induction over the fold or over `perm`; the footprint cache was dropped from the model, which
+removed the one invariant (every cached footprint is its script's) that would have had to ride
+through every lemma; and the two witnesses are `assert_norm`s over trees of three nodes. The
+probe that the theorems can fail was run the other way: `pin_perm` with its `requires` deleted is
+refused.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The three theorems above plus `accepted_pair_commutes`,
+   `accepted_all_applicable`, `can_script_is_apply_all`, the citation's soundness and completeness
+   (`conflict_cites_an_accepted_interferer`, `every_interferer_is_cited`, `interfering_nil_iff`,
+   `justified_mem`), the partition count (`arbitrate_is_total`), `pin_sorted`, `insert_comm`, and
+   the two witnesses (`duplicate_ids_break_invariance`, `maximal_is_not_maximum`). F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
+   `admit`. Opens `DagFold` and `TreeOps`.
+2. **Differentially tested.** The extracted model agrees with `Arbitration.arbitrate` over the
+   pools above, with the model that accepts a conflicting pair required to lose. Agreement is over
+   those pools, never over all inputs. That the shipped `duplicateIds` decides the theorem's
+   hypothesis is at THIS level — it is asserted on every generated set, not proved: `List.countBy`
+   is not modelled.
+3. **Assumed, and stated as such.** Nothing new. The model stands on theorem 2's rows and inherits
+   them unchanged: **`tree-algebra-well-formed-states`** is `accepted_pair_commutes`'s hypothesis
+   and no other statement's here; **`sets-are-lists`**; **`lawful-abstract-witness`**; and theorem
+   1's **`extractor-and-compiler-trusted`**. Proposal ids are unbounded integers in the model and
+   `int` in the F#; ordering agrees on the whole `int` range, so nothing turns on the width.
+4. **Policy.** **`arbitration-pinned-order`** — ascending id is the order; whether it is the right
+   one is not a theorem.
+
 ## Next
 
 _(**A resolver that resolves only declared reads** was the first item on this list and is DONE:
@@ -4360,18 +4783,12 @@ which decides the profile bump. Nothing here should be changed to close it: wide
 `Versioning.classify` would model a function this repository does not ship, and the differential
 already asserts the vacuity, so the day the answer changes this goes red rather than stale.
 
-**A guarded `Canon.tryRender`** — theorem 7's finding, and the smallest item on this list. `Json`
-has the pair: `render` formats a non-finite float into a token that is not valid JSON, and
-`tryRender` names it as a typed `Error` instead. `Canon` has only the unguarded half, and its
-failure mode is worse rather than better — a non-finite float does not produce un-parseable wire,
-it produces a `"NaN"` STRING, so the digest over `JFloat nan` equals the digest over the value a
-reader decodes those bytes back to. `render_aliases_nan` is that sentence proved, and the
-`Proofs.Oracle` alias case is it asserted on production. What it needs is a refusal-class addition
-in the shape Phase 137 took — a guarded entry point beside the existing one, not a change to what
-`render` does, since the bytes are pinned by the corpus and by four other hosts. The theorem's
-canonical subset is already the predicate such a guard would enforce, which is why this is small:
-`float_canonical`'s two clauses ARE the refusal, and the second of them (an integer-shaped float
-token) is a design choice the guard should NOT refuse, so the guard is the first clause alone.
+_(**A guarded `Canon.tryRender`** was on this list — theorem 7's finding, and the smallest item on
+it — and is DONE: Phase 165. `Canon.tryRender` sits beside an untouched `Canon.render` and names the
+first non-finite float by token and path; the guard is `float_canonical`'s first clause alone, as
+this entry said it should be, and the integer-shaped float its second clause describes is proved
+NOT refused. Theorem 7's "The guard" section carries the statements, what is deliberately not
+proved, and the differential.)_
 
 **The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
 shortest informal argument and the longest mechanisation. **This entry has been corrected by Phase
@@ -4442,13 +4859,6 @@ theorem no clause can consume costs prover budget on every run and buys nothing.
 refused pairs are known to have commuting members (move × insert, move × reorder); two are known to
 have non-commuting ones (remove × insert, move × move); three are unexamined. That is the shape of
 what widening would actually recover.
-
-**The signing composition** — the successor Phase 136 names and deliberately does not take.
-Chain integrity says a tampered node is found; it says nothing about a REWRITE, which re-mints
-every descendant's id and produces a structure no walker can fault. What closes that is a signed
-head, and the composition is the coordination plane's own — an attestation over a head, plus this
-theorem, is what makes "the history is the one that was signed" a claim rather than a hope. The
-seam is here (`Attestation` / `IAttestationSink`); the theorem is not.
 
 Interpreter budget monotonicity — the attested-stack programme's theorem 3, which is not this
 directory's numbering — is `fuaran-program`'s and follows the same shape now that the prover is

@@ -699,6 +699,53 @@ module Canon =
                |> String.concat ",")
             + "}"
 
+    /// The GUARDED canonical render (Phase 165) — [[render]] with a refusal beside it, in the
+    /// shape `Json.tryRender` gives `Json.render`.
+    ///
+    /// [[render]] spells a non-finite float as the QUOTED token `"NaN"` / `"Infinity"` /
+    /// `"-Infinity"`, which is byte for byte what the STRING of those characters renders as. The
+    /// wire it produces is valid, and wrong: a digest over `JFloat nan` equals the digest over
+    /// `JStr "NaN"`, the value a reader decodes those bytes back to (`proofs/WireCanon.fst`,
+    /// `render_aliases_nan` / `_pos_inf` / `_neg_inf`). This entry point names the FIRST non-finite
+    /// `JFloat` in document order — arrays by index, object members in AUTHORED order — as a typed
+    /// `Error` carrying its token and its path (`$` for the root, `[i]` for an array item,
+    /// `["key"]` for a member, the key under the canonical escape so the path is unambiguous for
+    /// any key). Over a value holding no non-finite float it is exactly `Ok (render v)`.
+    ///
+    /// The predicate is FINITENESS and nothing else — the first clause of the model's
+    /// `float_canonical`. The format's documented normalisations are NOT refused: an
+    /// integer-shaped finite float (`JFloat 2.0` renders `2`), the `-0` collapse, and the key
+    /// sort all pass through unchanged, because each is what the format says rather than a value
+    /// silently becoming another.
+    ///
+    /// [[render]] is untouched, and a value that aliases under it keeps aliasing under it: its
+    /// bytes are pinned by the conformance corpus and by every other host. A caller that digests
+    /// the canonical form and wants the refusal digests THIS function's `Ok` — there is no digest
+    /// in this package to wrap (it references nothing that hashes), so the guarded digest is
+    /// `tryRender v |> Result.map digest` at the caller, with the caller's own hash.
+    let tryRender (v: JVal) : Result<string, string> =
+        let rec firstNonFinite (path: string) (v: JVal) : (string * float) option =
+            match v with
+            | JFloat f when System.Double.IsNaN f || System.Double.IsInfinity f -> Some(path, f)
+            | JArr xs ->
+                xs
+                |> List.indexed
+                |> List.tryPick (fun (i, x) -> firstNonFinite (path + "[" + string i + "]") x)
+            | JObj fields ->
+                fields
+                |> List.tryPick (fun (k, x) -> firstNonFinite (path + "[\"" + escape k + "\"]") x)
+            | _ -> None
+
+        match firstNonFinite "$" v with
+        | Some(path, f) ->
+            let tok =
+                if System.Double.IsNaN f then "NaN"
+                elif f > 0.0 then "Infinity"
+                else "-Infinity"
+
+            Error("non-finite float has no canonical rendering of its own: " + tok + " at " + path)
+        | None -> Ok(render v)
+
     /// Render a `JVal` with the SAME canonical escaping and pinned float layout as [[render]],
     /// but object keys in AUTHORED order — no sort. The declared-key-order leg (a vocabulary
     /// whose canonical form is DECLARATION order rather than Ordinal; the IDL's
