@@ -3173,29 +3173,69 @@ theorems below. All three stand on `TreeOps.preorder_parent_first` (section 19 t
 pins that the moved node does NOT precede its destination — so the claim is an ordering fact and
 not a tautology.
 
-### What is NOT proved, and why the boundary is where it is
+### The RECONSTRUCTION, at level 1 — the boundary moved (Phase 167)
 
-`diff_reconstructs` (`applyAll (toOps b a) b = a`) and the OPERATIONAL `diff_applicable` (every
-emitted step is ACCEPTED in sequence) are **differentially tested here and not proved**.
+`diff_reconstructs` (`applyAll (toOps b a) b == Ok a`) and the OPERATIONAL `diff_applicable` (every
+emitted step is ACCEPTED in sequence, against the tree in hand at that step) were **differentially
+tested here and not proved** through Phases 141 and 162. They are **proved now**, in section 10 of
+`TreeDiff.fst`, and this section says what closed and under what hypothesis — the two paragraphs
+that used to state the boundary are kept below, because the SHAPE of that boundary is the useful
+part of the record and a reader who only sees the answer learns nothing about why it took three
+phases.
 
-**Phase 141 named the blocker as one missing positional fact, and Phase 162 proved it — and the two
-theorems are still open, which is the honest correction to make here rather than a note to bury.**
-The fact is real and the section above carries it; what it does not do is close these two, because
-they are statements about a different quantifier. `apply` validates each step against the tree IN
-HAND at that step — the before-tree with the script's earlier operations run on it — and not against
-`after`. `diff_move_destination_is_outside` says the destination is outside the moved subtree in
-`after`; what `WouldNestUnderSelf` asks is whether it is outside in the intermediate tree. Carrying
-one across to the other needs an invariant about how much of `after`'s structure each PREFIX of the
-script has already built, and that induction is the remaining work: it reasons about `ins` and
-`rem_at` over intermediate trees, in the cost class `Preservation.fst` occupies rather than the one
-this module does. Both phases were time-boxed and neither took it.
+**What the gap actually was.** `apply` validates each step against the tree IN HAND at that step —
+the before-tree with the script's earlier operations run on it — and not against `after`.
+`diff_move_destination_is_outside` says the destination is outside the moved subtree in `after`;
+what `WouldNestUnderSelf` asks is whether it is outside in the intermediate tree. Phase 141 named
+the blocker as one missing positional fact; Phase 162 proved that fact and found the two theorems
+still open, because they are statements about a different quantifier. What was left was an
+invariant about how much of `after`'s structure each PREFIX of the script has already built.
 
-What changed is the SHAPE of the gap, and it is worth naming because it is the difference between
-two kinds of open: this was a missing fact, and it is now a named induction over a proved one. The
-boundary is stated rather than smoothed over because a reader who sees "the diff is proved" and
-assumes reconstruction is proved would be wrong about the one thing they most likely care about.
+**What closed it.** Four invariants, one per pass, each a predicate over the tree in hand and the
+suffix of that pass's worklist still to run, with a `_run` lemma stepping the whole pass and a
+`_to_` lemma handing the next pass its entry condition: `inv1` (every already-placed node of
+`after` is in the tree under its after-parent, every not-yet-placed one is where `before` had it),
+`inv2` (every survivor is under its after-parent — the pass that walks `after`'s preorder, with a
+second worklist over the kid list of the parent in hand), `inv3` (every node `after` does not carry
+is gone) and `inv4` (every parent's child list is `after`'s, in `after`'s order). `diff_run` chains
+the four through `apply_all_app`, and the two theorems read off its conclusion: `diff_applicable`
+from `inv4` being reached at all, and `diff_reconstructs` through `tree_ext`, an induction over the
+TREE proving that a tree agreeing with `after` at every node on kind and on child ids IS `after`.
+The intermediate-tree lemmas the induction needs — a per-node view (`kids_at` / `kind_at`) and what
+`ins` and `rem_at` do to it — are `Preservation.fst` section 11, which is the cost class the
+paragraph this section replaced predicted for them before they were taken. `TreeDiff.fst` now
+`open`s `Preservation` for them, and the two module name spaces are collision-free in both
+directions.
 
-### The differential, and the two go-reds
+**The hypothesis, and why it is not a strengthening of what the deferrals asked for.**
+`diff_reconstructs` requires `kinds_agree b a` — a node id the two trees share names the same kind
+in both. The unrestricted form is **false**, not merely unproved: no skeleton operation edits a
+node, so a shared id whose kind differs is unreconstructible by ANY script this alphabet can
+express. `kinds_agree_is_necessary` pins a concrete such pair — two well-formed trees sharing a
+root id and differing only in the kind of one shared id — whose diff is the EMPTY script,
+applicable at every step, landing on `before`. That is the counterexample to dropping the
+hypothesis, and it is also the reason `diff_applicable` carries none: applicability survives the
+kind disagreement, and only reconstruction fails.
+
+This is the same precondition the ladder below has recorded at level 3 since Phase 141 ("the two
+trees agree on the content of every shared id") and the differential's pool has enforced since
+then; the section after this one records that it was measured before it was believed. What Phase
+167 changed is that it is now a hypothesis in a proved statement rather than a property of a
+generator — which is the direction that makes it falsifiable. `reconstruction_is_not_vacuous`
+evaluates a pair whose script carries one insert, one move, one remove and one reorder, so neither
+theorem is a statement about the empty script.
+
+**`Diff.toOpsMoved` (fuaran-core#63) did not travel with it, and is still not modelled.** The
+phase's own text made taking it conditional on the invariant lifting cheaply, and it does not lift
+at all yet for the plain reason that `toOpsMoved` **is not shipped**: there is no production
+function for a model to mirror clause for clause, so what would be written is a design and not a
+model. The four invariants are stated over `toOps`'s four passes by name, so a second emission
+strategy over the same two trees needs its own `_run` lemmas whatever it turns out to emit; what it
+would inherit is `tree_ext` and `Preservation.fst` section 11, which are about trees and not about
+any pass. It stays in "not claimed" below and off the Next list, where a model of an unshipped
+function does not belong.
+
+### The differential, and the three go-reds
 
 The pool is the widening. Two trees are drawn INDEPENDENTLY over a shared id space and share only
 what the draw gave them; nothing derives one from the other.
@@ -3209,7 +3249,10 @@ asking the wrong question. This was measured before it was believed: a first gen
 each tree's kinds independently reconstructed 1,738 of 4,000 pairs; with content keyed to the id,
 20,000 of 20,000, with no applicability refusal and no survivor removed. **The shard's own sentence
 ("for any two well-formed trees with the same root id") is therefore slightly too strong as written,
-and the sharpened form is what the theorem and the sample both use.**
+and the sharpened form is what the theorem and the sample both use.** Since Phase 167 that sentence
+is load-bearing in a second place: it is `diff_reconstructs`' `kinds_agree` hypothesis, so the pool
+and the theorem quantify over the same pairs, and go-red 3 below measures on the shipped engine what
+this paragraph used to record only as a number from a generator that no longer exists.
 
 Six comparisons per pair, and the fourth is worth naming: the extracted `script_shape` — the
 conjunction of the four block characterisations — is evaluated over PRODUCTION's own emitted script,
@@ -3228,6 +3271,18 @@ buys is correctness on the rest.
 predicate that refuses something is a proved weakening before it is a measured one. It must
 disagree, and it does.
 
+**Go-red 3, the reconstruction hypothesis (Phase 167).** `diff_reconstructs` is proved under
+`kinds_agree`, and a hypothesis nobody can see fail is indistinguishable from one that was not
+needed. The probe is the pool with that constraint deliberately broken — the `after` tree's kinds
+drawn by a SECOND function of the id rather than the same one — run against the shipped
+`Diff.toOps` and `Ops.applyAll`, with no model in the loop. It must fail to reconstruct, and it
+does: measured at 240 pairs, seed 1410, **163 pairs share a non-root id and all 163 fail to
+reconstruct**, while **none** fails APPLICABILITY — which is the asymmetry `diff_applicable`'s
+missing hypothesis predicts and `kinds_agree_is_necessary` pins in the model. Both counts are
+asserted, because "everything failed" over a pool that reached no shared id would measure nothing;
+and the probe was run in **both** directions before it was believed — restoring the constraint
+makes it 0 of 163, so it distinguishes the two cases rather than failing for any reason at all.
+
 `Conformance.diffContainedLaws` is the kit-side half: `toOpsContained`'s scripts certified through
 `applyAllWith` / `canApplyAllWith` under the witness's own predicate, which is the executor such a
 script belongs to — `diffLaws` certifies them with the PLAIN pair, which Phase 160 proved is blind
@@ -3244,30 +3299,41 @@ the container check's contribution and nothing else's.
    block theorems it discharges, `diff_contained_diff`, `diff_contained_locates`,
    `diff_contained_at_total_is_plain` and `diff_applicable_contained` — and, since Phase 162, the
    three positional facts about `after`: `diff_insert_parent_precedes`,
-   `diff_move_destination_precedes` and `diff_move_destination_is_outside`. F\* 2026.09.06,
+   `diff_move_destination_precedes` and `diff_move_destination_is_outside`. **And, since Phase 167,
+   the two this section used to carry at level 4**: the operational `diff_applicable` — every
+   emitted step ACCEPTED in sequence against the tree in hand, under no hypothesis beyond two
+   well-formed trees sharing a root id — and `diff_reconstructs` — `applyAll (toOps b a) b == Ok a`,
+   under `kinds_agree`, whose necessity is itself proved (`kinds_agree_is_necessary`). Both stand on
+   section 10's four-invariant induction (`inserts_run`, `moves_run`, `removes_run`, `reorders_run`,
+   chained by `diff_run`) and on `tree_ext`, over `Preservation.fst` section 11's intermediate-tree
+   lemmas. F\* 2026.09.06,
    Z3 4.13.3,
    every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted `to_ops` / `to_ops_contained` agree with
    `Diff.toOps` / `Diff.toOpsContained` over independently generated pairs and a drawn predicate —
    verdict, error class and the script operation for operation — and over that same pool
    RECONSTRUCTION and APPLICABILITY are checked on production, through `Tree.encodeHash` and
-   through `canApplyAll` / `canApplyAllWith`. Agreement is over the pool drawn, never over all
-   inputs, and reconstruction is at THIS level rather than level 1 for the reason stated above.
-   Two go-reds, each required to lose.
+   through `canApplyAll` / `canApplyAllWith`. Those two are proved at level 1 since Phase 167 and
+   stay measured here for the reason every differential in this directory keeps a comparison a
+   theorem covers: the theorem is about the MODEL, and this is the shipped engine. Agreement is
+   over the pool drawn, never over all inputs. Three go-reds, each required to lose.
 3. **Assumed, and stated as such.**
    - **The witness laws**, **the witness surface is the whole tree**, and **the extractor and the F#
      compiler are trusted** — the same three, in the same words, as theorem 5's.
-   - **The two trees agree on the content of every shared id.** Not an assumption the model can
-     discharge, because the model's tree carries a kind and the theorem is about structure: it is
-     the precondition under which asking for a skeleton script is a well-formed question at all.
+   - **The two trees agree on the content of every shared id.** Still here, and **no longer only an
+     assumption**: since Phase 167 it is `diff_reconstructs`' `kinds_agree` hypothesis, proved
+     necessary by `kinds_agree_is_necessary` and measured on the shipped engine by go-red 3. It
+     stays at this level because it is a precondition a CALLER owes and no theorem here discharges
+     — it is the condition under which asking for a skeleton script is a well-formed question at
+     all — and it constrains only `diff_reconstructs`; every other theorem in this section,
+     `diff_applicable` included, holds without it.
 4. **Not claimed.**
-   - **Reconstruction and operational applicability**, at level 1 — see the boundary above. They
-     were described here as "one positional lemma away"; Phase 162 proved that lemma and they are
-     still open, so what is left is the named induction relating `after`'s order to the
-     intermediate trees, not a missing fact.
    - **`Diff.toOpsMoved`** (fuaran-core#63, the move-aware diff) — not shipped, so not modelled and
      not claimed. When it lands it is a second emission strategy over the same two trees, and every
      theorem here is about `toOps`' four passes specifically rather than about diffing in general.
+     Phase 167 considered lifting section 10's invariant to it and did not: the four `_run` lemmas
+     are stated over `toOps`' four passes by name, so a different emission needs its own, and what
+     it would inherit is `tree_ext` and the intermediate-tree lemmas rather than the induction.
    - **`Ops.normalize`**, which no theorem in this directory reaches.
    - **Containment LEGALITY** — which kind may parent which. As for theorem 5: `canHold` answers
      only "can this node hold children at all", and no theorem here says a contained tree is a legal
@@ -3705,8 +3771,10 @@ substrate, and every domain's table edits replay through `Column.Ops`; until thi
 model. What `Preservation.fst` proved for trees — totality with rejection characterisation,
 all-or-nothing rejection, the dry run's agreement, the invariant preserved, `invert`'s round trip —
 `ColumnOps.fst` proves for a table with a validity mask, and adds the one clause the tree side
-left open at level 1, the diff's reconstruction, because on columns it is an induction over two
-list walks rather than over intermediate trees.)_
+then left open at level 1, the diff's reconstruction, because on columns it is an induction over
+two list walks rather than over intermediate trees. **The tree side closed it too, at Phase 167**,
+over the four-invariant induction theorem 6's "The RECONSTRUCTION, at level 1" describes — which is
+the induction over intermediate trees this sentence priced, taken.)_
 
 The doc comments of `ColumnOps.fs` state four promises and one of them is the theorem's name:
 
@@ -4789,6 +4857,19 @@ first non-finite float by token and path; the guard is `float_canonical`'s first
 this entry said it should be, and the integer-shaped float its second clause describes is proved
 NOT refused. Theorem 7's "The guard" section carries the statements, what is deliberately not
 proved, and the differential.)_
+
+_(**The diff's RECONSTRUCTION, at level 1** was the longest-standing item on this list and is DONE:
+Phase 167. `diff_applicable` and `diff_reconstructs` are proved in section 10 of `TreeDiff.fst`,
+over the four-invariant induction this entry predicted and over `Preservation.fst` section 11's
+intermediate-tree lemmas, in the cost class this entry predicted for them. The price it named was
+paid and is recorded in `modules.json`: `TreeDiff` left `Chain`'s cost class for `Preservation`'s.
+The one thing the entry did not anticipate is the hypothesis — `diff_reconstructs` holds under
+`kinds_agree`, the precondition the ladder had already recorded at level 3, now proved NECESSARY
+rather than assumed. `Diff.toOpsMoved` did NOT travel beside it, for a plainer reason than cost: it
+is not shipped, so there is no function to model. Theorem 6's "The RECONSTRUCTION, at level 1"
+section carries the statements, the hypothesis and its counterexample, and the third go-red. The
+entry as it stood, including the Phase 162 correction that was the useful part of it, is kept
+below.)_
 
 **The diff's RECONSTRUCTION, at level 1** — theorem 6's stated boundary, and the item here with the
 shortest informal argument and the longest mechanisation. **This entry has been corrected by Phase

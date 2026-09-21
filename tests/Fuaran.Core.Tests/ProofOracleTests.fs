@@ -4860,6 +4860,31 @@ let private removesFirst (ops: SkeletonOp<RNode, string> list) =
         | ReorderChildren _ -> true
         | _ -> false)
 
+/// Phase 167 — the go-red for `diff_reconstructs`' HYPOTHESIS. `diffKindOf` keys a node's content
+/// to its id, which since Phase 167 is the theorem's own `kinds_agree` precondition and not merely
+/// a property of this generator. This is a SECOND function of the same id: a shared id then names a
+/// different kind in each tree, which is the one shape no skeleton script can express, because no
+/// operation in the alphabet edits a node. `TreeDiff.kinds_agree_is_necessary` pins that
+/// counterexample in the model; the test below measures it on the shipped engine. The root is left
+/// at "doc" in both trees deliberately — a pair whose ROOTS disagree would fail to reconstruct
+/// without ever reaching a shared child, which would measure the wrong thing.
+let private diffKindShifted (i: string) =
+    if i = "root" then
+        "doc"
+    else
+        containerKinds[((int (i.Substring 1)) + 1) % List.length containerKinds]
+
+/// Re-kind every node of a generated tree through `kindOf`, leaving the shape and the ids exactly
+/// as the generator drew them — so the probe differs from the green run in the KINDS and in nothing
+/// else.
+let rec private reKind (kindOf: string -> string) (n: RNode) : RNode =
+    { n with
+        Kind = kindOf n.Id
+        Children = n.Children |> List.map (reKind kindOf) }
+
+let rec private idsOfTree (n: RNode) : string list =
+    n.Id :: (n.Children |> List.collect idsOfTree)
+
 let private prodDiffRender (r: Result<SkeletonOp<RNode, string> list, Diff.DiffError<string>>) =
     match r with
     | Ok ops -> "ok:" + (ops |> List.map renderProdOp |> String.concat ";")
@@ -11788,6 +11813,84 @@ let proofOracleTests =
                   (sprintf
                       "the disagreement is the one this phase is about — production refuses the pair up front, the unchecked one emits a script. Got:\n%s"
                       (List.head t.Diffs))
+
+          testCase "the reconstruction hypothesis is NECESSARY — a pair whose shared id changes KIND loses"
+          <| fun _ ->
+              // Phase 167's go-red, and the one this phase owes. `diff_reconstructs` is proved
+              // under `kinds_agree` — a node id the two trees share names the same kind in both —
+              // and a hypothesis nobody can see fail is indistinguishable from one that was never
+              // needed. The pool above has ENFORCED that condition since Phase 141 (a node's
+              // content is a function of its id), so the green run can never exercise it; this is
+              // the same generator, the same seed and the same shapes with the `after` tree's kinds
+              // drawn by a second function of the id.
+              //
+              // PRODUCTION ONLY — no model is in the loop. What is measured is that the SHIPPED
+              // engine cannot express the change, not that the model agrees with it about anything;
+              // the model's own counterexample is `TreeDiff.kinds_agree_is_necessary`, proved.
+              let mutable r = ConfRng.ofSeed 1410
+              let mutable shared = 0
+              let mutable lost = 0
+              let mutable refused = 0
+
+              for _ in 1..240 do
+                  let before, r1 = genPairTree r
+                  let after0, r2 = genPairTree r1
+                  // drawn and discarded, so the RNG stream matches the green run's pair for pair
+                  let _, r3 = drawCanHold r2
+                  r <- r3
+                  let after = reKind diffKindShifted after0
+
+                  let sharedIds =
+                      Set.intersect (Set.ofList (idsOfTree before)) (Set.ofList (idsOfTree after))
+                      |> Set.remove "root"
+
+                  if not (Set.isEmpty sharedIds) then
+                      shared <- shared + 1
+
+                      match Diff.toOps nodew idw before after with
+                      | Error e ->
+                          // `diff_refusals_exact` says the only refusals are a root-id mismatch and
+                          // a repeated id, and this pair has neither — a kind disagreement is not a
+                          // refusal, which is half of why it is dangerous.
+                          failtestf "toOps REFUSED a well-formed pair over a kind disagreement (%A)" e
+                      | Ok ops ->
+                          match Ops.canApplyAll nodew idw ops before with
+                          | Error _ -> refused <- refused + 1
+                          | Ok() -> ()
+
+                          match Ops.applyAll nodew idw ops before with
+                          | Ok t when prodTreeHash t = prodTreeHash after -> ()
+                          | _ -> lost <- lost + 1
+
+              // MEASURED at 240 pairs, seed 1410: 163 pairs share a non-root id, all 163 fail to
+              // reconstruct, 0 fail applicability. Run the other way — `reKind diffKindOf`, which
+              // restores the constraint — it is 0 of 163, so the probe distinguishes the two
+              // directions rather than failing for any reason at all.
+              //
+              // Adequacy first, and it is not a formality: "every pair lost" over a pool that never
+              // drew a shared id would be a green assertion measuring nothing at all.
+              Expect.isGreaterThan
+                  shared
+                  100
+                  (sprintf "pairs that share a non-root id, and so actually break `kinds_agree` (%d of 240)" shared)
+
+              Expect.equal
+                  lost
+                  shared
+                  (sprintf
+                      "EVERY pair whose shared id carries a different kind must fail to reconstruct (%d of %d) — no skeleton operation edits a node, so the survivor keeps `before`'s kind whatever the script does"
+                      lost
+                      shared)
+
+              // The asymmetry the two theorems predict: `diff_applicable` carries NO hypothesis, so
+              // applicability survives the disagreement and only reconstruction fails. If this ever
+              // counts above zero, one of the two theorems is about a different function.
+              Expect.equal
+                  refused
+                  0
+                  (sprintf
+                      "APPLICABILITY survives a kind disagreement (%d refusals) — `diff_applicable` holds without `kinds_agree`, and only `diff_reconstructs` needs it"
+                      refused)
 
           // ---- Phase 152: the decode surface under a MEMBER REORDERING ----
 

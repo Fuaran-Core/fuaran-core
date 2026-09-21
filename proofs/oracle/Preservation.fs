@@ -647,5 +647,37 @@ let rec can_apply_all_with : (TreeOps.tree  ->  Prims.bool)  ->  Prims.nat  ->  
      end))
 
 
+let kids_at : Prims.string  ->  TreeOps.tree  ->  Prims.list<Prims.string> = (fun ( q  :  Prims.string ) ( t  :  TreeOps.tree ) -> (match ((TreeOps.find_in q t)) with
+| FStar_Pervasives_Native.Some (n) -> begin
+     (TreeOps.kid_ids (TreeOps.kids_of n))
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end))
+
+
+let kind_at : Prims.string  ->  TreeOps.tree  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( q  :  Prims.string ) ( t  :  TreeOps.tree ) -> (match ((TreeOps.find_in q t)) with
+| FStar_Pervasives_Native.Some (n) -> begin
+     FStar_Pervasives_Native.Some ((TreeOps.kind_of n))
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let rec drop_id : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( x  :  Prims.string ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (h)::r -> begin
+      
+if (Prims.op_Equals h x) then begin
+     (drop_id x r)
+     end else begin
+     (h)::(drop_id x r)
+     end
+     end))
+
+
 
 
