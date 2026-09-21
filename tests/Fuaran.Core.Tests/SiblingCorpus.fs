@@ -47,6 +47,15 @@ open Fuaran.Core
 // a suite that no longer needs the corpus to certify Core's own contracts. The
 // old blanket opt-out `FUARAN_CORE_SKIP_CORPUS` is retired: with nothing left to
 // skip by default there is nothing for it to say.
+//
+// Phase 216 narrows what the ask decides, for the COPY-FRESHNESS legs only. The
+// resolution below reads the ask FIRST and consults nothing when it is unset,
+// which is right for a leg that certifies against the domain's own fixture pools
+// — a machine without the corpus genuinely cannot run it. It is wrong for a leg
+// that asks whether a copy of a file THIS repository emits is stale, because
+// that leg is then silent on a machine with the corpus sitting right there. So
+// `Freshness` at the foot of this file is decided by PRESENCE, and the ask
+// decides only whether a finding is FATAL. Everything else keeps `Resolution`.
 // ---------------------------------------------------------------------------
 
 /// Names an existing corpus checkout explicitly — the form CI uses, and the one the
@@ -54,10 +63,13 @@ open Fuaran.Core
 [<Literal>]
 let dirVariable = "FUARAN_CORE_CORPUS_DIR"
 
-/// The documented opt-IN, and the ONLY way the live-corpus legs run. Set (to anything
-/// non-blank) it asks for the comparison; unset, every leg that reads the shared corpus
-/// reports itself NOT ASKED FOR, by this name, and the suite certifies Core's own committed
-/// vectors alone. CI sets it, so every push still compares against the corpus at its `main`.
+/// The documented opt-IN. Set (to anything non-blank) it asks for the comparison; unset, every
+/// leg that reads the shared corpus THROUGH `Resolution` reports itself NOT ASKED FOR, by this
+/// name, and the suite certifies Core's own committed vectors alone. CI sets it, so every push
+/// still compares against the corpus at its `main`.
+///
+/// Since Phase 216 this is no longer what decides whether a COPY-FRESHNESS leg speaks — see
+/// `Freshness` at the foot of this file. There it decides only whether a finding is fatal.
 [<Literal>]
 let askVariable = "FUARAN_CORE_CORPUS_FRESHNESS"
 
@@ -338,3 +350,61 @@ let resolve (family: string) : Resolution =
 /// The lookup with the ask implied, from the test binary's own directory — for commands.
 let locate (family: string) : Result<string, string> =
     locateWith (env dirVariable) family AppContext.BaseDirectory
+
+// ---------------------------------------------------------------------------
+//  Phase 216 — what a COPY-FRESHNESS leg needs, which `Resolution` cannot say.
+// ---------------------------------------------------------------------------
+//  `transform-laws.json` carries a `kitVersion` stamp DERIVED from `<Version>`, and the corpus
+//  repository holds a declared byte copy of it. So EVERY move of `<Version>` restales that copy,
+//  in a different repository — and the leg that notices consulted the ask first, found it unset,
+//  and consulted nothing else. On 2026-09-21 that ran three times in one day: a version moved, the
+//  local gate was green, and `main` went red on the next push from a run belonging to someone else.
+//
+//  A leg that certifies against the domain's own fixture pools is genuinely unrunnable without the
+//  corpus, so the ask belongs in front of it. A leg that asks whether a copy of a file THIS
+//  repository emits is stale is different in kind: when the corpus is sitting beside the checkout,
+//  the comparison costs a file read and the answer is one a session needs before it pushes. So
+//  here the ask decides only FATALITY, never whether the question is asked.
+
+/// Whether a copy-freshness leg can run, and what a finding against it costs.
+type Freshness =
+    /// A corpus is present and the copy can be compared. `fatal` is the ask: set, a finding fails
+    /// the run (CI); unset, it is reported and the run continues.
+    | Compare of root: string * fatal: bool
+    /// There is no corpus to compare against — said by name, never passed over in silence (the
+    /// same rule that governs an unreachable sibling copy elsewhere in the estate: "nothing to
+    /// check" must not read as "everything checked"). `fatal` when the leg was asked for, which
+    /// is D31 unchanged: once asked for, an absent corpus FAILS.
+    | NotChecked of why: string * fatal: bool
+
+/// `Freshness` from the two variables' VALUES rather than the process environment, so both
+/// directions are provable without a test mutating the environment beside its neighbours.
+///
+/// Note the order, and that it is the reverse of `resolveWith`'s on purpose: the corpus is looked
+/// for FIRST, and the ask is consulted only to grade what was found.
+let freshnessWith (askValue: string option) (dirValue: string option) (family: string) (from: string) : Freshness =
+    let fatal =
+        match askValue with
+        | Some asked when not (String.IsNullOrWhiteSpace asked) -> true
+        | _ -> false
+
+    match locateWith dirValue family from, fatal with
+    | Ok root, _ -> Compare(root, fatal)
+    | Error why, true -> NotChecked(why, true)
+    | Error why, false ->
+        NotChecked(
+            sprintf
+                "the %s/ copy was NOT CHECKED — there is no corpus checkout to compare it against, so nothing was compared.\n%s\nThis is not a failure here: %s is unset, so an absent corpus is REPORTED. CI sets it, and there an absent corpus FAILS."
+                family
+                why
+                askVariable,
+            false
+        )
+
+/// `freshnessWith` over the process environment.
+let freshnessFrom (family: string) (from: string) : Freshness =
+    freshnessWith (env askVariable) (env dirVariable) family from
+
+/// Resolved with git asked from the test binary's own directory, as `resolve` is.
+let freshness (family: string) : Freshness =
+    freshnessFrom family AppContext.BaseDirectory

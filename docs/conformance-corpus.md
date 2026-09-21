@@ -8,7 +8,7 @@ gate.
 | Question | Who answers it | Where |
 |---|---|---|
 | **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read | `tests/Fuaran.Core.Tests/LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracleTests.fs` |
-| **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (`roadmapctl copies <workspace-root>`, warn-first, on every estate sweep); and an opt-in in-suite leg that FAILS on it where the corpus is present and asked for — CI, on every push | `copies.json`; the two `… is fresh (opt-in: FUARAN_CORE_CORPUS_FRESHNESS)` legs |
+| **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (`roadmapctl copies <workspace-root>`, warn-first, on every estate sweep); and the in-suite legs — the `laws/` one runs whenever a corpus is present and REPORTS, failing where it is asked for (CI, on every push); the `apply/` one is still opt-in | `copies.json`; the two `… is fresh …` legs in `LawVectorTests.fs` / `ApplyVectorTests.fs` |
 | **Are the hosts certified?** | each host's own certification kit, run in that host's repository against the corpus at the paths it has always read; `apply/manifest.json` records per-host adoption | not this repository's question — see [Adoption](#adoption) |
 
 ## What this repository owns
@@ -58,11 +58,60 @@ stays in the file and the file's bytes are what the copy must match. What Phase 
 WHERE a `<Version>` move goes red: the stamp lives in this repository's committed file, so a version
 cut re-emits it in the same commit and Core's own gate never crosses a repository boundary to fail.
 The corpus copy is then reported **stale by fingerprint** — on the sweep from every checkout, and by
-the opt-in leg where the corpus is present — until the copy is refreshed; that is the copy being
+the in-suite leg where the corpus is present — until the copy is refreshed; that is the copy being
 stale, named, with its remedy, rather than an unrelated phase's gate going red days later (the
 Phase 139 finding). The `apply/` family carries no stamp at all, for the reason its exporter's
 header gives: a specification whose every expectation is recomputed on each run cannot go stale for
 a reason unrelated to its content.
+
+#### Moving `<Version>`: the sequence, in one sitting
+
+The stamp is DERIVED, so **every** move of `<Version>` — a cut, a draft advance, anything — restales
+the corpus copy, in a repository this gate cannot write to. Three times on 2026-09-21 a session
+moved the version, got a green local gate, and reddened `main` on the next push from a run belonging
+to somebody else. Phase 216 moved the discovery; the sequence it discovers is this:
+
+```powershell
+# 1. move <Version> in Directory.Build.props, then re-emit the source of truth
+dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws
+
+# 2. re-stamp the corpus copy with the same exporter, pointed at the corpus checkout
+dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws ../Fuaran-UI/wire-format-fixtures
+
+# 3. commit BOTH, and push BOTH — they are two repositories, and the corpus is a public one
+```
+
+Step 1 is not optional and never was: the default suite holds the committed file to a fresh render,
+so a version move without it is red in this repository immediately. Step 2 is the one a session
+forgets, because until Phase 216 nothing here said anything about it. Now the ordinary `verify.ps1`
+run prints the copy's stamp, this kit's stamp and both commands, whenever a corpus is checked out
+beside this one — a report locally, a failure in CI. The interval between the two pushes is real and
+cannot be closed (two repositories, two permission sets), but it now starts at a moment the session
+knows about.
+
+**Two readings, and they are never merged into one sentence.** A copy whose **vectors** differ
+records answers this kit's reference evaluator no longer gives — a content divergence, on the file
+five hosts certify against. A copy whose vectors are byte-identical and whose **stamp alone** differs
+is the derived-lockstep case, which is what a version move causes and all it causes. Both are
+reported, both are fatal where the leg is asked for, and the report names which one it is — because
+a stamp move must never be able to hide a content divergence behind it, and the remedies read
+differently even though the commands are the same.
+
+#### How this differs from the cut-to-raise window
+
+The 2026-09-15 bundle ruled (C) on a different window, and the two are easy to conflate. That one is
+the gap between a Core **cut** and a **host's raise**: a host still pinning the previous Core is
+correct to certify against what it pins, its copy of a law file is right for that pin, and the gap
+is an honest signal to be documented rather than closed. It is a property of adoption, and a window
+there is always legitimate until the host raises.
+
+The stamp has **no such window**. It is not a consumer's lag; it is a value derived from `<Version>`
+inside a file this repository emits, and there is no state of the world in which the two
+repositories carrying different stamps for the same content is correct. So ruling (C) is untouched
+by anything above: it governs when a host adopts, this governs when a producer emits. What Phase
+216 also settled is that the two cannot both hold while the leg merely FAILS with one sentence —
+"accept the stale reading" and "CI is red" cannot both be true of the same report — which is why
+the readings are separated whatever else is decided.
 
 ## The opt-in live-corpus leg
 
@@ -75,7 +124,7 @@ legs reports itself **not asked for**, by that name, and says that nothing was c
 shared corpus. What the leg covers — everything in this suite that reads `wire-format-fixtures/`,
 which is exactly the set of reads that is NOT about Core's own vectors:
 
-- the two copy-freshness legs above (`laws/`, `apply/`), the registry's `fingerprint` equality;
+- the `apply/` copy-freshness leg, the registry's `fingerprint` equality;
 - the proof-oracle differentials that use the domain's fixture pools as real-document input —
   `nodes/`, `ops/`, `dag/`, `envelope/` and the pinned `idl.json` — beside their generative legs,
   which run regardless;
@@ -83,6 +132,20 @@ which is exactly the set of reads that is NOT about Core's own vectors:
 - the F\* target's partition over the pinned vocabulary and the generation diff that holds the
   committed `proofs/Vocabulary.fst` to a fresh generation from the pinned `idl.json` (the
   `Proofs.Vocabulary` step of `proofs/check.ps1`).
+
+**The `laws/` copy-freshness leg is no longer in that set (Phase 216).** It is decided by the
+corpus's PRESENCE: a corpus checked out beside this one is compared whether or not the leg was asked
+for, and `FUARAN_CORE_CORPUS_FRESHNESS` decides only whether a finding FAILS the run. With no corpus
+anywhere the leg says **NOT CHECKED**, by name — never a quiet pass, which is the same rule that
+governs an unreachable sibling copy elsewhere in the estate: a single-repository checkout has no
+siblings at all, and "nothing to check" must not read as "everything checked". A machine holding only
+this repository is still green.
+
+The asymmetry with `apply/` is deliberate rather than an oversight. The class Phase 216 closes is
+the DERIVED stamp restaling a copy on every version move, and `apply/` carries no stamp: its copy
+goes stale only when the family's own content changes, which is a thing the emitting session is
+already doing on purpose. The argument for moving it too is the general one — discover a coupling
+where it is caused — and it is a separate, smaller change than this one.
 
 **Once asked for, an absent corpus FAILS. It does not skip.** That is Phase 130's decision (D31),
 kept on the leg it was written for: a skip nobody asked for is indistinguishable in a green report
@@ -134,6 +197,10 @@ this kit and the published corpus — a stale copy, a model that no longer agree
 the domain's documents, a vocabulary that moved under the committed F\* model — surfaces on the
 change that caused it instead of on somebody else's change days later. A machine holding only this
 repository runs the default suite and is green; that is the acceptance the phase was cut for.
+
+**A stamp-only mismatch is FATAL there, by operator ruling (2026-09-21, DECISIONS D50), and the
+workflow is deliberately unchanged by Phase 216** — fatal is the status quo, so an edit to it would
+have been a change away from the ruling rather than toward it.
 
 ## The `apply/` family
 

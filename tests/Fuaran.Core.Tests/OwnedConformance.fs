@@ -1,5 +1,6 @@
 module Fuaran.Core.Tests.OwnedConformance
 
+open System
 open System.IO
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,32 @@ let dirName = "conformance"
 /// reads ITS OWN copy rather than the main tree's.
 let root () : string = Snapshots.repoFile dirName
 
+/// The lines a fingerprint compares: BOM dropped, line endings normalised, per-line trailing
+/// whitespace and trailing blank lines removed. Exposed beside `fingerprint` (Phase 216) because
+/// a reading that REFINES this equality — which of the two documents' lines differ, and is the
+/// derived `kitVersion` stamp the only one — must be taken from the registry's own normalisation
+/// rather than from a second one beside it that could drift from it.
+let fingerprintLines (text: string) : string[] =
+    // ORDINAL, and it is load-bearing: `StartsWith(string)` compares by the current culture, under
+    // which U+FEFF is an IGNORABLE character — so `"{…".StartsWith "﻿"` answers true and the
+    // culture-sensitive form silently removed the first character of every text that had no BOM
+    // (and threw on an empty one). Both sides of a comparison lost the same character, so the
+    // freshness legs were never wrong; what they had was a hole exactly one character wide in the
+    // one equality this repository's published copies are held to. Found by Phase 216's own pin.
+    let unbom =
+        if text.StartsWith("﻿", StringComparison.Ordinal) then
+            text.Substring 1
+        else
+            text
+
+    let lines =
+        unbom.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')
+        |> Array.map (fun l -> l.TrimEnd())
+
+    match lines |> Array.tryFindIndexBack (fun l -> l <> "") with
+    | Some i -> lines[..i]
+    | None -> [||]
+
 /// Content equality insensitive to a UTF-8 BOM, line endings, per-line trailing whitespace
 /// and trailing blank lines — the `fingerprint` check of the workspace copy registry
 /// (`roadmapctl copies`), restated here so the in-suite freshness leg and the estate sweep
@@ -44,15 +71,4 @@ let root () : string = Snapshots.repoFile dirName
 /// fuzzy match: two texts with the same fingerprint differ only in what a checkout's
 /// end-of-line policy is allowed to change.
 let fingerprint (text: string) : string =
-    let unbom = if text.StartsWith "﻿" then text.Substring 1 else text
-
-    let lines =
-        unbom.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')
-        |> Array.map (fun l -> l.TrimEnd())
-
-    let lastContent =
-        match lines |> Array.tryFindIndexBack (fun l -> l <> "") with
-        | Some i -> i
-        | None -> -1
-
-    String.concat "\n" lines[..lastContent]
+    String.concat "\n" (fingerprintLines text)

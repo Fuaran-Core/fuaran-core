@@ -1,5 +1,72 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-21 — D50: a stamp-only corpus mismatch stays FATAL, and the discovery moves to where the version moves
+
+**Decided (operator ruling, 2026-09-21; Phase 216).** `conformance/laws/transform-laws.json` carries
+a `kitVersion` DERIVED from `<Version>`, and the shared corpus holds a declared byte copy of it, so
+every move of `<Version>` restales that copy in a different repository. The question put was whether
+a mismatch in that stamp ALONE should stay fatal in CI, or become a warning with the vectors'
+equality being what fails. **It stays FATAL. `.github/workflows/ci.yml` is therefore unchanged** —
+fatal is the status quo, and editing the workflow would have been a move away from the ruling rather
+than toward it. It was read and confirmed to match rather than assumed to.
+
+**Why the warning was declined.** That leg is the only thing that notices the corpus has drifted at
+all. Demote it and the first mismatch nobody re-stamps becomes indistinguishable from the first
+mismatch that MATTERS — a genuine content divergence between Core's laws and the copy the conformant
+hosts certify against. That trades a noisy true signal for a silent false negative, on the one file
+whose whole job is to be the shared oracle. The residual cost is accepted and named: `main` can red
+for the interval between the Core push and the corpus push, because two repositories with two
+permission sets cannot be pushed simultaneously.
+
+**And option (A) remains declined, from earlier.** The 2026-09-15 bundle offered a stamp-INSENSITIVE
+fingerprint — teach the workspace copy registry to ignore `kitVersion`, estate-wide — and the
+operator declined it. It would buy the same quiet by making the registry structurally unable to see a
+stamp move on any copy of any file, which is a wider blast radius than the problem and removes the
+evidence rather than the noise. Phase 216 leaves the registry alone and works on the Core side of the
+coupling only; `kitVersion` is not removed either, because two hosts read it.
+
+**What the three incidents actually recorded, which is what the phase fixes.** Not that the check is
+fatal — that the re-stamp is a separate manual act, in a separate repository, discovered in CI
+minutes after the version move that caused it. On 2026-09-21 that ran three times in one day (the
+`0.28.1` draft, six consecutive red runs on `main` before anyone looked; a hand re-stamp; then the
+advance to `0.29.0`, red again on the very next commit — by a session that had predicted the coupling
+in its own deviations and still could not act on it, because nothing failed where the change was
+made). So the DISCOVERY moved:
+
+- **The `laws/` copy-freshness leg is decided by the corpus's PRESENCE, not by the ask.** A corpus
+  checked out beside this one is compared on every ordinary run and the finding is REPORTED, naming
+  the two stamps and both re-emit commands. `FUARAN_CORE_CORPUS_FRESHNESS` keeps exactly one job:
+  deciding whether a finding is fatal. With no corpus the leg says NOT CHECKED, by name, and a
+  machine holding only this repository is still green. D31 is untouched on the branch it governs —
+  asked for and absent still FAILS.
+- **The two readings are separated.** Vectors-differ and stamp-only are distinct in the classifier
+  and in the report, and a copy whose stamp AND vectors have both moved reads as the divergence — a
+  version move must never be able to hide a content divergence behind it. Both go-reds are proved in
+  the suite rather than asserted.
+- **It is reported locally and fatal only where asked.** Considered and declined: making a finding
+  fatal locally too. A local hard failure over a SECOND repository's checkout state is the "red gate
+  you did not cause" class — a contributor whose corpus clone is merely behind would be blocked on a
+  repository they may not own — and the ordinary reason a copy is behind on a developer's machine is
+  that they have not pulled it. CI is the one place that can reasonably demand both repositories be
+  in step, and it does.
+
+**The leg's equality is unchanged and is still the registry's.** The reading refines
+`roadmapctl copies`' `fingerprint` rather than inventing a neighbouring notion of freshness: a
+reading is taken only once the fingerprints have already disagreed, and it is taken from the
+registry's own normalisation. Doing that surfaced a defect in the normalisation itself, fixed here —
+`StartsWith(string)` compares by the current culture, under which U+FEFF is an IGNORABLE character,
+so the BOM test answered true for every text and quietly removed the first character of any document
+that had no BOM (and threw on an empty one). Both sides of a comparison lost the same character, so
+no freshness leg was ever wrong; what they had was a hole exactly one character wide in the one
+equality this repository's published copies are held to, and a comparison that could not tell an
+empty document from a crash.
+
+**Not in scope, deliberately.** The `apply/` copy-freshness leg stays opt-in: the class this ruling
+closes is a DERIVED stamp restaling a copy on every version move, and `apply/` carries no stamp at
+all. Making the engine's `version cut` emit the re-stamp itself — which is what would close the
+interval rather than merely announce it — is engine-side work, outside this repository, and filed
+separately.
+
 ## 2026-09-20 — D49: the dataframe algebra belongs in Core, and the reference evaluator is its MEANING rather than a runtime
 
 **Decided (Phase 213; the operator's decision of 2026-09-19, recorded here for the first time.)**
