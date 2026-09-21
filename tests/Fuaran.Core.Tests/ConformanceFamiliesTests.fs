@@ -259,6 +259,63 @@ let familiesTests =
                           (witnessOf m)
                           (sprintf "%s declares a witness list its signature does not take" f.Id)
 
+          testCase "a family is opt-in exactly when it says WHY, and the reason is checkable where it can be"
+          <| fun _ ->
+              // Phase 194. `OptIn` is DERIVED from `Reason` at every construction site in
+              // `Families`, so the first half of this cannot fail while that derivation stands —
+              // it is here to fail LOUDLY if someone ever re-introduces the two as independent
+              // fields, which is the shape that let a family be opt-in with no stated reason.
+              for f in Families.families do
+                  Expect.equal
+                      f.OptIn
+                      (Option.isSome f.Reason)
+                      (sprintf "%s: OptIn and Reason disagree — an opt-in family must say why" f.Id)
+
+              // The go-red, on the predicate rather than on the roster: the check must LOSE on a
+              // family that claims opt-in and gives no reason. Constructed here because the roster
+              // can no longer express one.
+              let unexplained: Families.LawFamily =
+                  { Id = "Conformance.unexplainedLaws"
+                    Module = "Conformance"
+                    Entry = "unexplainedLaws"
+                    Witness = []
+                    OptIn = true
+                    Reason = None
+                    Discharges = [] }
+
+              Expect.notEqual
+                  unexplained.OptIn
+                  (Option.isSome unexplained.Reason)
+                  "the check cannot fail: an opt-in family with no reason passed it"
+
+              // `NeedsWitnessCapability` is the one case the ROSTER's own data decides, so it is
+              // read back rather than trusted: a family demanding a witness outside the base run's
+              // sets is exactly that case, and a family inside them is not.
+              let baseWitnesses =
+                  Families.families
+                  |> List.filter (fun f -> not f.OptIn)
+                  |> List.collect (fun f -> f.Witness)
+                  |> Set.ofList
+
+              for f in Families.families do
+                  let beyondBase =
+                      f.Witness |> List.exists (fun w -> not (Set.contains w baseWitnesses))
+
+                  match f.Reason with
+                  | Some Families.NeedsWitnessCapability ->
+                      Expect.isTrue
+                          beyondBase
+                          (sprintf
+                              "%s claims NeedsWitnessCapability but every witness it takes is one the base run already demands"
+                              f.Id)
+                  | Some _ ->
+                      Expect.isFalse
+                          beyondBase
+                          (sprintf
+                              "%s takes a witness beyond the base run, so its reason is NeedsWitnessCapability"
+                              f.Id)
+                  | None -> ()
+
           testCase "opt-in is exactly `not folded into certify or certifyStream`"
           <| fun _ ->
               // Read off the aggregates' own bodies: a family folded into one of them without its
@@ -357,7 +414,7 @@ let familiesTests =
               let json = Families.toJson ()
 
               Expect.stringContains json "\"kind\": \"fuaran.core.conformance.families\"" "the export names its kind"
-              Expect.stringContains json "\"schema\": 1" "the export carries a schema version"
+              Expect.stringContains json "\"schema\": 2" "the export carries a schema version"
 
               Expect.stringContains
                   json
@@ -380,12 +437,13 @@ let familiesTests =
               // `LawFamily` records, it must equal `Families.families` exactly. This is the leg
               // that would catch an escaping bug, a member dropped by a renderer edit, or a
               // `witness` list silently flattened to a string.
-              let mk id m entry witness optIn discharges : Families.LawFamily =
+              let mk id m entry witness optIn reason discharges : Families.LawFamily =
                   { Id = id
                     Module = m
                     Entry = entry
                     Witness = witness
                     OptIn = optIn
+                    Reason = reason
                     Discharges = discharges }
 
               let strList v =
@@ -406,7 +464,7 @@ let familiesTests =
                       | None -> failtestf "the export carries no `%s`" name
 
                   Expect.equal (member_ "kind") (JStr "fuaran.core.conformance.families") "kind"
-                  Expect.equal (member_ "schema") (JInt 1) "schema"
+                  Expect.equal (member_ "schema") (JInt 2) "schema"
                   Expect.equal (member_ "package") (JStr "Fuaran.Core.Conformance") "package"
 
                   let rebuilt =
@@ -419,6 +477,11 @@ let familiesTests =
                                       match fields |> List.tryFind (fun (k, _) -> k = name) with
                                       | Some(_, v) -> v
                                       | None -> failtestf "a family object carries no `%s`" name
+
+                                  // Phase 194: `reason` is absent for a base-run family, so it is
+                                  // read with a lookup that tolerates absence — `get` fails on it.
+                                  let tryGet name =
+                                      fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
 
                                   let str name =
                                       match get name with
@@ -433,6 +496,14 @@ let familiesTests =
                                       (match get "optIn" with
                                        | JBool b -> b
                                        | other -> failtestf "`optIn` is not a boolean: %A" other)
+                                      // Phase 194: `reason` round-trips through its wire token, so a
+                                      // renderer that dropped or misspelled one is caught here too.
+                                      (match tryGet "reason" with
+                                       | None -> None
+                                       | Some(JStr "needs-witness-capability") -> Some Families.NeedsWitnessCapability
+                                       | Some(JStr "seam-not-every-domain-has") -> Some Families.SeamNotEveryDomainHas
+                                       | Some(JStr "stronger-promise") -> Some Families.StrongerPromise
+                                       | other -> failtestf "`reason` is not a known opt-in token: %A" other)
                                       (strList (get "discharges"))
                               | other -> failtestf "a families entry is not an object: %A" other)
                       | other -> failtestf "`families` is not an array: %A" other

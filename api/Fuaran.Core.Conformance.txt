@@ -11,7 +11,7 @@ ctor Fuaran.Core.Conformance+MemoSample`1..ctor(!0, Microsoft.FSharp.Collections
 ctor Fuaran.Core.Conformance+VerifyCounterexample`2..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Arg`1<!0>>>, Fuaran.Core.Conformance+VerifyDefect`1<!1>, System.Int32, System.Int32)
 ctor Fuaran.Core.ConformanceReport..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>, System.Boolean)
 ctor Fuaran.Core.ConstructWitness`1..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>)
-ctor Fuaran.Core.Families+LawFamily..ctor(System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+ctor Fuaran.Core.Families+LawFamily..ctor(System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+OptInReason>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.IncrementalSample..ctor(System.Int32, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Transform>, Fuaran.Core.IncrementalStrategy, Fuaran.Core.RecomputeFootprint, Fuaran.Core.RecomputeFootprint, Fuaran.Core.RecomputeFootprint, System.Boolean, System.Boolean, System.String)
 ctor Fuaran.Core.LaneGen`2..ctor(!1, !0, Microsoft.FSharp.Core.FSharpFunc`2<System.Int32, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<!0>>, Fuaran.Core.ConfRng+T>>>)
 ctor Fuaran.Core.LawResult..ctor(System.String, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
@@ -27,6 +27,9 @@ field Fuaran.Core.Conformance+VerifyCoverage+Tags.Sampled : System.Int32 (litera
 field Fuaran.Core.Conformance+VerifyDefect`1+Tags.DidNotApply : System.Int32 (literal)
 field Fuaran.Core.Conformance+VerifyDefect`1+Tags.EffectObserved : System.Int32 (literal)
 field Fuaran.Core.Conformance+VerifyDefect`1+Tags.ValidatorRejected : System.Int32 (literal)
+field Fuaran.Core.Families+OptInReason+Tags.NeedsWitnessCapability : System.Int32 (literal)
+field Fuaran.Core.Families+OptInReason+Tags.SeamNotEveryDomainHas : System.Int32 (literal)
+field Fuaran.Core.Families+OptInReason+Tags.StrongerPromise : System.Int32 (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneFolded : System.Int32 (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneHalted : System.Int32 (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneRejected : System.Int32 (literal)
@@ -105,6 +108,7 @@ method Fuaran.Core.Conformance.verifyFunctionSymbolic`2(Fuaran.Core.ArtifactWitn
 method Fuaran.Core.Conformance.verifyFunction`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, !!0, Fuaran.Core.Validator+Registry`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, Fuaran.Core.ConfRng+T>>>, System.Int32, System.Int32) : Fuaran.Core.Conformance+FunctionVerifyReport`2<!!0, !!1>
 method Fuaran.Core.Conformance.verifyHonestyLaws`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.DeterminismSource, !!0>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.DeterminismSource, !!0>, Fuaran.Core.Validator+Registry`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, Fuaran.Core.ConfRng+T>>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.witnessLaws`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
+method Fuaran.Core.Families.reasonToken(Fuaran.Core.Families+OptInReason) : System.String
 method Fuaran.Core.Families.toJson() : System.String
 method Fuaran.Core.Families.toMarkdown() : System.String
 method Fuaran.Core.Families.tryFind(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+LawFamily>
@@ -160,11 +164,12 @@ record-field Fuaran.Core.ConformanceReport.AllPassed #1 : System.Boolean
 record-field Fuaran.Core.ConformanceReport.Results #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 record-field Fuaran.Core.ConstructWitness`1.Construct #1 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>
 record-field Fuaran.Core.ConstructWitness`1.Surface #0 : System.String
-record-field Fuaran.Core.Families+LawFamily.Discharges #5 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Families+LawFamily.Discharges #6 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Families+LawFamily.Entry #2 : System.String
 record-field Fuaran.Core.Families+LawFamily.Id #0 : System.String
 record-field Fuaran.Core.Families+LawFamily.Module #1 : System.String
 record-field Fuaran.Core.Families+LawFamily.OptIn #4 : System.Boolean
+record-field Fuaran.Core.Families+LawFamily.Reason #5 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+OptInReason>
 record-field Fuaran.Core.Families+LawFamily.Witness #3 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.IncrementalSample.Edit #9 : System.String
 record-field Fuaran.Core.IncrementalSample.Equivalent #7 : System.Boolean
@@ -218,6 +223,8 @@ type Fuaran.Core.ConformanceReport (record)
 type Fuaran.Core.ConstructWitness`1 (record)
 type Fuaran.Core.Families (module)
 type Fuaran.Core.Families+LawFamily (record)
+type Fuaran.Core.Families+OptInReason (union)
+type Fuaran.Core.Families+OptInReason+Tags (type)
 type Fuaran.Core.FoldConfluence (module)
 type Fuaran.Core.IncrementalDelta (module)
 type Fuaran.Core.IncrementalSample (record)
@@ -246,6 +253,9 @@ union-case Fuaran.Core.Conformance+VerifyCoverage.NewSampled #1(System.Int32, Mi
 union-case Fuaran.Core.Conformance+VerifyDefect`1.NewDidNotApply #0(Fuaran.Core.ApplyError)
 union-case Fuaran.Core.Conformance+VerifyDefect`1.NewEffectObserved #2(Fuaran.Core.EffectClass, Fuaran.Core.EffectClass)
 union-case Fuaran.Core.Conformance+VerifyDefect`1.NewValidatorRejected #1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!0>>)
+union-case Fuaran.Core.Families+OptInReason.NeedsWitnessCapability #0()
+union-case Fuaran.Core.Families+OptInReason.SeamNotEveryDomainHas #1()
+union-case Fuaran.Core.Families+OptInReason.StrongerPromise #2()
 union-case Fuaran.Core.LaneFoldOutcome.NewLaneFolded #0(System.String)
 union-case Fuaran.Core.LaneFoldOutcome.NewLaneHalted #1(System.String)
 union-case Fuaran.Core.LaneFoldOutcome.NewLaneRejected #2(System.String)

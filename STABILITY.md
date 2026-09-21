@@ -2255,12 +2255,21 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.28.1 (draft)
+## 0.29.0 (draft)
 
-**This slot is a DRAFT.** `<Version>` reads `0.28.1` and no `v0.28.1` tag exists, so an additive,
+**This slot is a DRAFT.** `<Version>` reads `0.29.0` and no `v0.29.0` tag exists, so an additive,
 behaviour-identical or CORRECTIVE change may ride it: append its entry here rather than opening
 another slot. A change of a higher class than the entries below carry advances the number, because
 the number is what tells a consumer what adopting it costs.
+
+**This slot was `0.28.1` until Phase 194, and the number advanced under the rule in the paragraph
+above rather than by anyone's choice.** The entries below were written for a patch slot — an
+additive guarded renderer, a corrective fix to a merged order — and Phase 194 then widened a
+PUBLISHED record (`Families.LawFamily` gained `Reason`), which the surface gate classified
+`record-widening`: every full-literal construction of that record stops compiling (FS0764). That is
+a higher class than a patch slot can carry, so the slot became `0.29.0` and the entries that had
+ridden `0.28.1` ride it. No `v0.28.1` tag was ever cut, so no consumer can have pinned the old
+number.
 
 **A corrective change rides a PATCH slot, and that is the rule rather than a convenience.** The
 number states what ADOPTING costs, and adopting a correction costs nothing: no source changes, no
@@ -2270,11 +2279,14 @@ consumer can tell whether it is on one. The entry for Phase 215 below names them
 the released packages.
 
 **This slot was OPENED rather than ridden because `0.28.0` is tagged**, and it is a PATCH rather
-than a minor because the Phase 183 surface gate reports **no baseline moved since `v0.28.0`** — the
-classes are `additive` and `corrective`, and the rule the `0.28.0` entry states is a `0.28.1` draft
-for an additive or behaviour-identical change.
+than a minor because the Phase 183 surface gate reported **no baseline moved since `v0.28.0`** when
+this entry was written — the classes are `additive` and `corrective`, and the rule the `0.28.0` entry
+states is a patch draft for an additive or behaviour-identical change. _(The slot has since become
+`0.29.0`: Phase 194 widened a published record, which is a higher class than a patch slot carries.
+This entry's own class is unchanged — what moved is the number it ships under.)_
 
-**What adopting `0.28.1` costs, and the one consumer it can cost something.** No managed member,
+**What adopting this slot (`0.29.0`) costs, and the one consumer it can cost something.** For THIS
+entry no managed member,
 type, record field or union case moves, so no .NET or Fable consumer's source changes and nothing
 needs migrating. Two things change. **A wrong answer stops**: a merged order whose sort key reads a
 window's output column returned the wrong rows on every release from `0.18.0` to `0.28.0`, and does
@@ -2344,7 +2356,7 @@ only, so it is reached by the `lag` shape rather than the `rank` one; no package
 to measure. **Neither the condition nor the span is `0.26.0`-onward**, which is where the two earlier
 records placed it by analogy with the sibling defect `0.27.0` fixed.
 
-**What to do if you are on any of those releases.** Adopt `0.28.1`. Until you do: re-prime rather
+**What to do if you are on any of those releases.** Adopt `0.29.0`. Until you do: re-prime rather
 than refresh, or put the `Sort` ahead of the `Window`, for any pipeline whose sort key reads a
 window's output column — directly, through a `Derive` that reads it, or through a `Project` that
 renames it. A pipeline whose sort key reads source columns only was never affected, with or without a
@@ -2451,6 +2463,38 @@ on `Error`, not on the text.
 **Class: `additive`** — a new module function, per the Phase 183 surface gate
 (`api/Fuaran.Core.Wire.txt` moves with it, by one line). A pinned consumer compiles either way, so
 it rides this draft and moves no number.
+
+### `Families.LawFamily` gains `Reason`, and the roster says WHY a family is opt-in (Phase 194) — RECORD-WIDENING
+
+**What it is.** `Fuaran.Core.Families.LawFamily` gains `Reason: OptInReason option`, and
+`OptInReason` is a new closed union — `NeedsWitnessCapability`, `SeamNotEveryDomainHas`,
+`StrongerPromise`. Every one of the roster's 58 opt-in families now states which it is; the five
+families `certify` and `certifyStream` are built from carry `None`. `Families.reasonToken` renders
+a case to its wire spelling.
+
+**The class, and why it is not additive.** The Phase 183 surface gate classified this
+`record-widening`: a field added to a record the baseline published, so every FULL-LITERAL
+construction of `LawFamily` stops compiling with FS0764. In this repository exactly one such
+construction existed — a test helper — and it was updated in the same commit. A consumer that only
+READS the roster is unaffected; a consumer that constructs a `LawFamily` adds `Reason = None`.
+The shard called the change additive; the gate disagreed, and the gate decides (D45).
+
+**`OptIn` did not move, and is now derived.** It remains a published `bool`, and every construction
+site in `Families` computes it as `Reason.IsSome` — so a family cannot be declared opt-in without
+saying why, and a base-run family cannot carry a reason. That invariant is structural rather than
+test-enforced; the suite additionally fails loudly if the two are ever re-introduced as independent
+fields, and holds `NeedsWitnessCapability` to the roster's OWN data (a family claiming it must take
+a witness the base run does not).
+
+**The generated export moved with it.** `docs/conformance-families.json` carries a `reason` member
+and its `schema` reads **2**. The member is **present only for an opt-in family** — this wire model
+has no null, so absence is how the format spells "not applicable"; rendering `null` produced a
+document the kit's own parser refuses, which is `no_null_ever` (Phase 153) doing its job.
+`docs/conformance-families.md` gains a `Why opt-in` column. `roadmap-engine#482`, which will replace
+that projection's roster with this file, is the coupled surface and is unstarted.
+
+**What adopting costs.** Nothing for a reader. One field for a constructor. The census a consumer
+regenerates is unaffected — no cell vocabulary moved.
 
 ## 0.28.0 — released 2026-09-20 as `v0.28.0`
 
@@ -3259,12 +3303,18 @@ dotnet run --project tests/Fuaran.Core.Tests -- --emit-families
 - [`docs/conformance-families.md`](docs/conformance-families.md) — the human-readable table.
 - [`docs/conformance-families.json`](docs/conformance-families.json) — **the machine export, and the
   one an offline reader consumes without building or running anything.** Its shape is a contract, for
-  `roadmap-engine#482`, which replaces that projection's own roster with this file:
+  `roadmap-engine#482`, which replaces that projection's own roster with this file. **`schema` reads
+  2 since Phase 194 added the `reason` member** (a string from a closed vocabulary, PRESENT ONLY for
+  an opt-in family — this wire model has no null, so absence is how it spells "not applicable") — an
+  addition, not a break, and the number was moved
+  anyway because this repository's own suite pins it, so a shape that changed under an unmoved stamp
+  would be the drift the pin exists to catch. `roadmap-engine#482` is unstarted and is the coupled
+  surface: it reads whatever ships, and a reader that keys on the number reads 2.
 
   ```json
   {
     "kind": "fuaran.core.conformance.families",
-    "schema": 1,
+    "schema": 2,
     "package": "Fuaran.Core.Conformance",
     "families": [
       {

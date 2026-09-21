@@ -36,6 +36,28 @@ namespace Fuaran.Core
 /// adding a record here in the same commit — the suite fails naming the family otherwise.
 module Families =
 
+    /// WHY a family is opt-in — the closed vocabulary, one case per reason the roster actually
+    /// carries. It is a DU rather than a string because the set is closed and a reader dispatches
+    /// on it; a free-text reason would be a second place for prose to drift from the code.
+    ///
+    /// **`NeedsSecondFixture` is deliberately absent** (Phase 194). The shard proposed it, and no
+    /// family instantiates it: the families that need nothing from the domain need NO fixture at
+    /// all rather than a second one, and they are `SeamNotEveryDomainHas`. A case no value inhabits
+    /// is a case a reader has to rule out on every encounter, so it is not declared.
+    type OptInReason =
+        /// The family demands a witness, generator or sink the BASE contract does not — an
+        /// `ArtifactWitness`, an `IAttestationSink`, a `LaneGen`. A domain that has not built that
+        /// capability cannot run it at all, so `certify` cannot fold it in.
+        | NeedsWitnessCapability
+        /// The family certifies a SEAM not every domain has — a columnar layer, a capability
+        /// registry, a lease axis. It runs from the kit's own fixtures and needs nothing from the
+        /// domain, so what makes it opt-in is relevance, never cost.
+        | SeamNotEveryDomainHas
+        /// The family takes exactly the base run's witness and asks for MORE than the base
+        /// contract promises — footprint independence, concurrent apply, arbitration. A domain
+        /// elects it; the base contract does not imply it.
+        | StrongerPromise
+
     /// One law family: a public entry point of the kit that answers with `LawResult list`.
     type LawFamily =
         {
@@ -55,7 +77,16 @@ module Families =
             /// `true` when a domain must call the family DELIBERATELY: it is not folded into
             /// `Conformance.certify` or `Conformance.certifyStream`, because it certifies a seam
             /// not every domain has. `false` for the five families an aggregate is built from.
+            ///
+            /// DERIVED from `Reason` at every construction site in this module — `OptIn` is
+            /// `Reason.IsSome` — so "opt-in with no reason" is unrepresentable here rather than
+            /// merely caught by a test. The field stays published because it is what every reader
+            /// of the roster already dispatches on.
             OptIn: bool
+            /// Why the family is opt-in, `None` for a base-run family. Phase 194: a census that
+            /// says a consumer did not run a family is only actionable if the roster says why the
+            /// family was theirs to elect.
+            Reason: OptInReason option
             /// The claims-ladder obligations (`proofs.json` row ids) whose `dischargedBy` names
             /// this family — the rows a green run of it at a domain's own witness discharges.
             /// The ladder is the other side of the same relation and the suite holds the two
@@ -66,16 +97,19 @@ module Families =
     /// Every law family the kit ships, in declaration order. Renderings sort by `Id`, so the order
     /// here is for a reader's benefit and never reaches an artefact.
     let families: LawFamily list =
-        let f m entry witness optIn discharges =
+        // `reason` is `OptInReason option`; `OptIn` is derived from it, so a family cannot be
+        // declared opt-in without saying why, and a base-run family cannot carry a reason.
+        let f m entry witness reason discharges =
             { Id = m + "." + entry
               Module = m
               Entry = entry
               Witness = witness
-              OptIn = optIn
+              OptIn = Option.isSome reason
+              Reason = reason
               Discharges = discharges }
 
-        let c entry witness optIn discharges =
-            f "Conformance" entry witness optIn discharges
+        let c entry witness reason discharges =
+            f "Conformance" entry witness reason discharges
 
         let treeWitness = [ "NodeWitness"; "IdWitness"; "OpGen" ]
         let streamWitness = [ "StreamWitness"; "StreamGen" ]
@@ -83,73 +117,73 @@ module Families =
 
         [
           // ---- the base run: what `certify` and `certifyStream` are built from ----
-          c "witnessLaws" treeWitness false [ "lawful-abstract-witness" ]
-          c "opAlgebra" treeWitness false [ "tree-algebra-well-formed-states" ]
-          c "diffLaws" treeWitness false []
-          c "streamLaws" streamWitness false []
-          c "reducer" [ "StreamGen" ] false []
+          c "witnessLaws" treeWitness None [ "lawful-abstract-witness" ]
+          c "opAlgebra" treeWitness None [ "tree-algebra-well-formed-states" ]
+          c "diffLaws" treeWitness None []
+          c "streamLaws" streamWitness None []
+          c "reducer" [ "StreamGen" ] None []
 
           // ---- opt-in: a seam not every domain has ----
-          c "diffContainedLaws" treeWitness true []
-          c "normalizeLaws" treeWitness true []
-          c "containerLaws" treeWitness true []
-          c "mergeConflictLaws" treeWitness true []
-          c "reconcileLaws" treeWitness true []
-          c "footprintLaws" treeWitness true [ "independence-diamond" ]
-          c "concurrencyLaws" treeWitness true [ "lanes-apply" ]
-          c "concurrencyLawsWith" treeWitness true []
-          c "arbitrationLaws" treeWitness true []
-          c "snapshotLaws" streamWitness true []
-          c "snapshotLawsWith" streamWitness true []
-          c "dagLaws" streamWitness true []
-          c "casLaws" streamWitness true []
-          c "idempotencyLaws" streamWitness true []
-          c "hashFnLaws" streamWitness true []
-          c "attributedLaws" streamWitness true []
-          c "codecInjectivityLaws" streamWitness true []
-          c "noAttestationVacuityLaws" streamWitness true []
-          c "attestationLaws" [ "StreamWitness"; "StreamGen"; "IAttestationSink" ] true []
-          c "compositionLaws" [ "ArtifactWitness" ] true []
-          c "compositionPilot" [ "ArtifactWitness" ] true []
-          c "memoLaws" [ "ArtifactWitness" ] true []
-          c "memoSoundnessLaws" [ "ArtifactWitness" ] true []
-          c "functionVerifyLaws" [ "ArtifactWitness" ] true []
-          c "verifyHonestyLaws" [ "ArtifactWitness" ] true []
-          c "encoderInjectivityLaws" [ "ArtifactWitness" ] true []
-          c "projectionLaws" [ "ProjectionWitness" ] true []
-          c "aiSurfaceLaws" [ "AiSurfaceWitness" ] true []
-          c "captureReplayLaws" none true []
-          c "transformLaws" none true []
-          c "constructThenEncodeLaws" none true []
-          c "hashFnAdversarialLaws" none true []
-          c "capabilityLaws" none true []
-          c "queryLaws" none true []
-          c "registryLaws" none true []
-          c "packLoadingLaws" none true []
-          c "aggregateParityLaws" none true []
-          c "columnarOpLaws" none true []
-          c "columnarOpLawsWith" none true []
-          c "columnarValidatorLaws" none true []
-          c "incrementalLaws" none true []
-          c "paramLaws" none true []
-          c "schemaWalkLaws" none true []
-          c "deferredLaws" none true []
-          c "capabilityPipelineLaws" none true []
-          c "capabilityPipelineIncrementalLaws" none true []
-          c "dirtyPropagationLaws" none true []
-          c "propagationEvalLaws" none true []
-          c "canonicalFloatLaws" none true []
-          c "leaseLaws" none true []
-          c "chainBreakReasonLaws" none true []
-          c "dagBreakReasonLaws" none true []
-          c "nowLaws" none true []
-          c "slotParamLaws" none true []
+          c "diffContainedLaws" treeWitness (Some StrongerPromise) []
+          c "normalizeLaws" treeWitness (Some StrongerPromise) []
+          c "containerLaws" treeWitness (Some StrongerPromise) []
+          c "mergeConflictLaws" treeWitness (Some StrongerPromise) []
+          c "reconcileLaws" treeWitness (Some StrongerPromise) []
+          c "footprintLaws" treeWitness (Some StrongerPromise) [ "independence-diamond" ]
+          c "concurrencyLaws" treeWitness (Some StrongerPromise) [ "lanes-apply" ]
+          c "concurrencyLawsWith" treeWitness (Some StrongerPromise) []
+          c "arbitrationLaws" treeWitness (Some StrongerPromise) []
+          c "snapshotLaws" streamWitness (Some StrongerPromise) []
+          c "snapshotLawsWith" streamWitness (Some StrongerPromise) []
+          c "dagLaws" streamWitness (Some StrongerPromise) []
+          c "casLaws" streamWitness (Some StrongerPromise) []
+          c "idempotencyLaws" streamWitness (Some StrongerPromise) []
+          c "hashFnLaws" streamWitness (Some StrongerPromise) []
+          c "attributedLaws" streamWitness (Some StrongerPromise) []
+          c "codecInjectivityLaws" streamWitness (Some StrongerPromise) []
+          c "noAttestationVacuityLaws" streamWitness (Some StrongerPromise) []
+          c "attestationLaws" [ "StreamWitness"; "StreamGen"; "IAttestationSink" ] (Some NeedsWitnessCapability) []
+          c "compositionLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
+          c "compositionPilot" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
+          c "memoLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
+          c "memoSoundnessLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
+          c "functionVerifyLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
+          c "verifyHonestyLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
+          c "encoderInjectivityLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
+          c "projectionLaws" [ "ProjectionWitness" ] (Some NeedsWitnessCapability) []
+          c "aiSurfaceLaws" [ "AiSurfaceWitness" ] (Some NeedsWitnessCapability) []
+          c "captureReplayLaws" none (Some SeamNotEveryDomainHas) []
+          c "transformLaws" none (Some SeamNotEveryDomainHas) []
+          c "constructThenEncodeLaws" none (Some SeamNotEveryDomainHas) []
+          c "hashFnAdversarialLaws" none (Some SeamNotEveryDomainHas) []
+          c "capabilityLaws" none (Some SeamNotEveryDomainHas) []
+          c "queryLaws" none (Some SeamNotEveryDomainHas) []
+          c "registryLaws" none (Some SeamNotEveryDomainHas) []
+          c "packLoadingLaws" none (Some SeamNotEveryDomainHas) []
+          c "aggregateParityLaws" none (Some SeamNotEveryDomainHas) []
+          c "columnarOpLaws" none (Some SeamNotEveryDomainHas) []
+          c "columnarOpLawsWith" none (Some SeamNotEveryDomainHas) []
+          c "columnarValidatorLaws" none (Some SeamNotEveryDomainHas) []
+          c "incrementalLaws" none (Some SeamNotEveryDomainHas) []
+          c "paramLaws" none (Some SeamNotEveryDomainHas) []
+          c "schemaWalkLaws" none (Some SeamNotEveryDomainHas) []
+          c "deferredLaws" none (Some SeamNotEveryDomainHas) []
+          c "capabilityPipelineLaws" none (Some SeamNotEveryDomainHas) []
+          c "capabilityPipelineIncrementalLaws" none (Some SeamNotEveryDomainHas) []
+          c "dirtyPropagationLaws" none (Some SeamNotEveryDomainHas) []
+          c "propagationEvalLaws" none (Some SeamNotEveryDomainHas) []
+          c "canonicalFloatLaws" none (Some SeamNotEveryDomainHas) []
+          c "leaseLaws" none (Some SeamNotEveryDomainHas) []
+          c "chainBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
+          c "dagBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
+          c "nowLaws" none (Some SeamNotEveryDomainHas) []
+          c "slotParamLaws" none (Some SeamNotEveryDomainHas) []
 
-          f "FoldConfluence" "laneFoldLaws" [ "StreamWitness"; "LaneGen" ] true []
-          f "FoldConfluence" "laneFoldLawsWith" [ "StreamWitness"; "LaneGen" ] true []
+          f "FoldConfluence" "laneFoldLaws" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) []
+          f "FoldConfluence" "laneFoldLawsWith" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) []
 
-          f "IncrementalDelta" "laws" none true []
-          f "IncrementalDelta" "lawsWith" none true [] ]
+          f "IncrementalDelta" "laws" none (Some SeamNotEveryDomainHas) []
+          f "IncrementalDelta" "lawsWith" none (Some SeamNotEveryDomainHas) [] ]
 
     /// The roster's keys, sorted — the enumeration a census, a ladder or a projection quantifies
     /// over.
@@ -189,23 +223,49 @@ module Families =
     let private jsonArray (xs: string list) : string =
         "[" + (xs |> List.map quote |> String.concat ", ") + "]"
 
+    /// The wire spelling of an opt-in reason — the JSON member and the markdown cell both use
+    /// it, so the two renderings never disagree about a family. A base-run family has none.
+    let reasonToken (r: OptInReason) : string =
+        match r with
+        | NeedsWitnessCapability -> "needs-witness-capability"
+        | SeamNotEveryDomainHas -> "seam-not-every-domain-has"
+        | StrongerPromise -> "stronger-promise"
+
     /// The roster as JSON — the machine export, and the one an offline projection reads without
     /// building or running anything (it is committed, generated, at `docs/conformance-families.json`).
     ///
     /// The shape is a CONTRACT and is documented in `STABILITY.md`: a top-level object carrying
     /// `kind`, `schema`, `package` and a `families` array sorted by `id`, each member an object
-    /// with `id`, `module`, `entry`, `witness` (array), `optIn` (boolean) and `discharges` (array).
+    /// with `id`, `module`, `entry`, `witness` (array), `optIn` (boolean), `reason` (a string from
+    /// the [[OptInReason]] vocabulary, **present only for an opt-in family** — this wire model has
+    /// no null) and `discharges` (array).
+    ///
+    /// `schema` reads 2 since Phase 194 added `reason`. The bump is free and therefore taken: a
+    /// search of the workspace found no reader of this file outside this repository's own suite,
+    /// so nothing keys on the old number, and a shape that changes under an unmoved stamp is the
+    /// drift class this estate keeps paying for elsewhere.
     /// Members are written in that order and the array is sorted, so the rendering is byte-stable
     /// across runs and a diff shows only what moved. Two spaces of indent, `\n` line endings, and
     /// a trailing newline.
     let toJson () : string =
         let family (f: LawFamily) =
+            // `reason` is OMITTED for a base-run family rather than rendered `null`: this wire
+            // model has no null (`JVal` cannot represent one, and `no_null_ever` is a proved
+            // grammar theorem over the renderer), so a null here would emit a document the kit's
+            // own parser refuses. Absence is how this format spells "not applicable".
             [ "      " + quote "id" + ": " + quote f.Id
               "      " + quote "module" + ": " + quote f.Module
               "      " + quote "entry" + ": " + quote f.Entry
               "      " + quote "witness" + ": " + jsonArray f.Witness
               "      " + quote "optIn" + ": " + (if f.OptIn then "true" else "false")
               "      " + quote "discharges" + ": " + jsonArray f.Discharges ]
+            |> fun members ->
+                match f.Reason with
+                | None -> members
+                | Some r ->
+                    // after `optIn`, before `discharges` — the documented member order
+                    let head, tail = List.splitAt 5 members
+                    head @ [ "      " + quote "reason" + ": " + quote (reasonToken r) ] @ tail
             |> String.concat ",\n"
             |> fun body -> "    {\n" + body + "\n    }"
 
@@ -223,7 +283,7 @@ module Families =
         + ",\n"
         + "  "
         + quote "schema"
-        + ": 1,\n"
+        + ": 2,\n"
         + "  "
         + quote "package"
         + ": "
@@ -246,9 +306,12 @@ module Families =
 
         let row (f: LawFamily) =
             sprintf
-                "| `%s` | %s | %s | %s |"
+                "| `%s` | %s | %s | %s | %s |"
                 f.Id
                 (if f.OptIn then "opt-in" else "base run")
+                (match f.Reason with
+                 | Some r -> "`" + reasonToken r + "`"
+                 | None -> "—")
                 (cell f.Witness)
                 (cell f.Discharges)
 
@@ -292,8 +355,8 @@ module Families =
               (List.length families)
               (modules |> List.map (fun m -> "`" + m + "`") |> String.concat ", ")
           ""
-          "| Family | Run by | Witness | Discharges |"
-          "|---|---|---|---|" ]
+          "| Family | Run by | Why opt-in | Witness | Discharges |"
+          "|---|---|---|---|---|" ]
         @ rows
         @ [ "" ]
         |> String.concat "\n"

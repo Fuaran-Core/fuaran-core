@@ -33,68 +33,68 @@ do not answer for an assumption this repository's proofs leave open.
 
 63 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
 
-| Family | Run by | Witness | Discharges |
-|---|---|---|---|
-| `Conformance.aggregateParityLaws` | opt-in | — | — |
-| `Conformance.aiSurfaceLaws` | opt-in | `AiSurfaceWitness` | — |
-| `Conformance.arbitrationLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.attestationLaws` | opt-in | `StreamWitness`, `StreamGen`, `IAttestationSink` | — |
-| `Conformance.attributedLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.canonicalFloatLaws` | opt-in | — | — |
-| `Conformance.capabilityLaws` | opt-in | — | — |
-| `Conformance.capabilityPipelineIncrementalLaws` | opt-in | — | — |
-| `Conformance.capabilityPipelineLaws` | opt-in | — | — |
-| `Conformance.captureReplayLaws` | opt-in | — | — |
-| `Conformance.casLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.chainBreakReasonLaws` | opt-in | — | — |
-| `Conformance.codecInjectivityLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.columnarOpLaws` | opt-in | — | — |
-| `Conformance.columnarOpLawsWith` | opt-in | — | — |
-| `Conformance.columnarValidatorLaws` | opt-in | — | — |
-| `Conformance.compositionLaws` | opt-in | `ArtifactWitness` | — |
-| `Conformance.compositionPilot` | opt-in | `ArtifactWitness` | — |
-| `Conformance.concurrencyLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | `lanes-apply` |
-| `Conformance.concurrencyLawsWith` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.constructThenEncodeLaws` | opt-in | — | — |
-| `Conformance.containerLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.dagBreakReasonLaws` | opt-in | — | — |
-| `Conformance.dagLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.deferredLaws` | opt-in | — | — |
-| `Conformance.diffContainedLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.diffLaws` | base run | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.dirtyPropagationLaws` | opt-in | — | — |
-| `Conformance.encoderInjectivityLaws` | opt-in | `ArtifactWitness` | — |
-| `Conformance.footprintLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | `independence-diamond` |
-| `Conformance.functionVerifyLaws` | opt-in | `ArtifactWitness` | — |
-| `Conformance.hashFnAdversarialLaws` | opt-in | — | — |
-| `Conformance.hashFnLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.idempotencyLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.incrementalLaws` | opt-in | — | — |
-| `Conformance.leaseLaws` | opt-in | — | — |
-| `Conformance.memoLaws` | opt-in | `ArtifactWitness` | — |
-| `Conformance.memoSoundnessLaws` | opt-in | `ArtifactWitness` | — |
-| `Conformance.mergeConflictLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.noAttestationVacuityLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.normalizeLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.nowLaws` | opt-in | — | — |
-| `Conformance.opAlgebra` | base run | `NodeWitness`, `IdWitness`, `OpGen` | `tree-algebra-well-formed-states` |
-| `Conformance.packLoadingLaws` | opt-in | — | — |
-| `Conformance.paramLaws` | opt-in | — | — |
-| `Conformance.projectionLaws` | opt-in | `ProjectionWitness` | — |
-| `Conformance.propagationEvalLaws` | opt-in | — | — |
-| `Conformance.queryLaws` | opt-in | — | — |
-| `Conformance.reconcileLaws` | opt-in | `NodeWitness`, `IdWitness`, `OpGen` | — |
-| `Conformance.reducer` | base run | `StreamGen` | — |
-| `Conformance.registryLaws` | opt-in | — | — |
-| `Conformance.schemaWalkLaws` | opt-in | — | — |
-| `Conformance.slotParamLaws` | opt-in | — | — |
-| `Conformance.snapshotLaws` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.snapshotLawsWith` | opt-in | `StreamWitness`, `StreamGen` | — |
-| `Conformance.streamLaws` | base run | `StreamWitness`, `StreamGen` | — |
-| `Conformance.transformLaws` | opt-in | — | — |
-| `Conformance.verifyHonestyLaws` | opt-in | `ArtifactWitness` | — |
-| `Conformance.witnessLaws` | base run | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` |
-| `FoldConfluence.laneFoldLaws` | opt-in | `StreamWitness`, `LaneGen` | — |
-| `FoldConfluence.laneFoldLawsWith` | opt-in | `StreamWitness`, `LaneGen` | — |
-| `IncrementalDelta.laws` | opt-in | — | — |
-| `IncrementalDelta.lawsWith` | opt-in | — | — |
+| Family | Run by | Why opt-in | Witness | Discharges |
+|---|---|---|---|---|
+| `Conformance.aggregateParityLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.aiSurfaceLaws` | opt-in | `needs-witness-capability` | `AiSurfaceWitness` | — |
+| `Conformance.arbitrationLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.attestationLaws` | opt-in | `needs-witness-capability` | `StreamWitness`, `StreamGen`, `IAttestationSink` | — |
+| `Conformance.attributedLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.canonicalFloatLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.capabilityLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.capabilityPipelineIncrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.capabilityPipelineLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.captureReplayLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.casLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.chainBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.codecInjectivityLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.columnarOpLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.columnarOpLawsWith` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.columnarValidatorLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.compositionLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
+| `Conformance.compositionPilot` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
+| `Conformance.concurrencyLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | `lanes-apply` |
+| `Conformance.concurrencyLawsWith` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.constructThenEncodeLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.containerLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.dagBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.dagLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.deferredLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.diffContainedLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.diffLaws` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.dirtyPropagationLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.encoderInjectivityLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
+| `Conformance.footprintLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | `independence-diamond` |
+| `Conformance.functionVerifyLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
+| `Conformance.hashFnAdversarialLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.hashFnLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.idempotencyLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.incrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.leaseLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.memoLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
+| `Conformance.memoSoundnessLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
+| `Conformance.mergeConflictLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.noAttestationVacuityLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.normalizeLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.nowLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.opAlgebra` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `tree-algebra-well-formed-states` |
+| `Conformance.packLoadingLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.paramLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.projectionLaws` | opt-in | `needs-witness-capability` | `ProjectionWitness` | — |
+| `Conformance.propagationEvalLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.queryLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.reconcileLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |
+| `Conformance.reducer` | base run | — | `StreamGen` | — |
+| `Conformance.registryLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.schemaWalkLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.slotParamLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.snapshotLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.snapshotLawsWith` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
+| `Conformance.streamLaws` | base run | — | `StreamWitness`, `StreamGen` | — |
+| `Conformance.transformLaws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `Conformance.verifyHonestyLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
+| `Conformance.witnessLaws` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` |
+| `FoldConfluence.laneFoldLaws` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — |
+| `FoldConfluence.laneFoldLawsWith` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — |
+| `IncrementalDelta.laws` | opt-in | `seam-not-every-domain-has` | — | — |
+| `IncrementalDelta.lawsWith` | opt-in | `seam-not-every-domain-has` | — | — |
