@@ -1806,3 +1806,617 @@ let tryrender_keeps_the_documented_normalisations (#num #flt: eqtype) (w: wire n
                 try_render w (JFloat #num #flt f) == Rendered (render w (JFloat #num #flt g))) /\
             (try_render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)]) ==
                 Rendered (render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)])))) = ()
+
+(* ======================================================================================
+   14. THE BRIDGE — section 6's reader and theorem 4's parser agree on the grammar
+       `render` emits (Phase 170).
+
+       WHAT THIS SECTION IS FOR. Section 6's reader is a left inverse for exactly the grammar
+       `render` emits, and its header says plainly what it is not: a second model of
+       `Json.parse`. That was the right economy for Phase 149 — injectivity needs an inverse to
+       EXIST, not a second account of production's own parser — but it left the round trip a
+       consumer actually performs (render here, parse there) measured by the differential and
+       proved nowhere. The two models have sat beside each other since Phase 146 with no lemma
+       joining them.
+
+       This is that lemma. It is a BRIDGE and not a model: nothing new is modelled, neither
+       grammar is widened, and both parsers are the ones their own phases wrote.
+
+       THE TWO MODELS DO NOT SHARE A TYPE, and that is most of the work. `WireCanon.ch` is the
+       alphabet the ENCODER distinguishes (rule 6's two escaped punctuation characters, rule 5's
+       numeric punctuation, the hex nibbles, the controls as nibble pairs); `JsonParse.ch` is the
+       alphabet the PARSER distinguishes (whitespace, the literals' letters, the short escapes'
+       letters, the hex digits). `pc` is the correspondence, one clause per class, and it is
+       total in both directions' sense: every `WireCanon.ch` denotes a character, and `pc` sends
+       it to the constructor `JsonParse` holds for that character. The two value models differ
+       too — theorem 4's parser returns a numeral's TOKEN where the encoder's model holds an
+       opaque carrier, and a decoded string as a list of `och` where the encoder holds the
+       characters — so `pv` is the corresponding translation of a value.
+
+       `pc` NEEDS NO `bridged` HYPOTHESIS, deliberately. `bridged` is the faithfulness condition
+       for the HOST's mapping (a `CPlain` must not carry a character another constructor already
+       denotes); `pc` is a function this file defines, and it sends a `CPlain` carrying a
+       reserved spelling to `COther` of it rather than to the constructor that spelling names.
+       So the theorem below holds of every value, bridged or not — it is the correspondence with
+       a real host's alphabet that `bridged` is about, and that correspondence is already an
+       assumed row.
+
+       THE ONE PREMISE, AND WHY IT IS FORCED. Both models declare the numerals OPAQUE: this one
+       takes the two layouts and the read-back as parameters (`tok_read_ok`), and theorem 4 takes
+       `System.Double.TryParse`'s verdict as `float_read`. A bridge between two opaque parameters
+       cannot do better than relate them, so `numerals_bridge` says the parser's number path
+       accepts each layout as the token the encoder emitted, on the constructor rule 5 chose. It
+       is the exact analogue of `tok_read_ok` on the other side of the bridge, and it is recorded
+       with it on `canon-numeral-layouts`. Everything else here is proved.
+   ====================================================================================== *)
+
+module JP = JsonParse
+
+(* ---- 14.1 the alphabet correspondence ---- *)
+
+(* One clause per class. `CCtrl` has no clause that can be reached from a RENDERING — rule 6
+   escapes every control character, so a control never appears verbatim in `render`'s output —
+   and its arm is `COther` of the model's own name for it, which is what `denot` already gives. *)
+[@@ noextract_to "FSharp"]
+let pc (c: ch) : Tot JP.ch =
+  match c with
+  | CQuote -> JP.CQuote
+  | CBackslash -> JP.CBackslash
+  | CLBrace -> JP.CLBrace
+  | CRBrace -> JP.CRBrace
+  | CLBrack -> JP.CLBrack
+  | CRBrack -> JP.CRBrack
+  | CColon -> JP.CColon
+  | CComma -> JP.CComma
+  | CMinus -> JP.CMinus
+  | CPlus -> JP.CPlus
+  | CDot -> JP.CDot
+  | CUpE -> JP.CUe
+  | CLu -> JP.CLu
+  | CHexCh d ->
+      (match d with
+       | HD0 -> JP.CD0 | HD1 -> JP.CD1 | HD2 -> JP.CD2 | HD3 -> JP.CD3 | HD4 -> JP.CD4
+       | HD5 -> JP.CD5 | HD6 -> JP.CD6 | HD7 -> JP.CD7 | HD8 -> JP.CD8 | HD9 -> JP.CD9
+       | HDa -> JP.CLa | HDb -> JP.CLb | HDc -> JP.CLc | HDd -> JP.CLd
+       | HDe -> JP.CLe | HDf -> JP.CLf)
+  | CCtrl hi lo -> JP.COther (denot (CCtrl hi lo))
+  | CPlain s ->
+      if s = " " then JP.CSpace
+      else if s = "\t" then JP.CTab
+      else if s = "\n" then JP.CNewline
+      else if s = "\r" then JP.CReturn
+      else if s = "/" then JP.CSlash
+      else if s = "l" then JP.CLl
+      else if s = "n" then JP.CLn
+      else if s = "r" then JP.CLr
+      else if s = "s" then JP.CLs
+      else if s = "t" then JP.CLt
+      else if s = "A" then JP.CUa
+      else if s = "B" then JP.CUb
+      else if s = "C" then JP.CUc
+      else if s = "D" then JP.CUd
+      else if s = "F" then JP.CUf
+      else JP.COther s
+
+(* The two literals rule 7 emits, in the parser's own alphabet — the bridge's first obligation,
+   and the one a string dispatch could silently get wrong. *)
+[@@ noextract_to "FSharp"]
+let pc_spells_the_literals (_: unit)
+  : Lemma (ensures pc (CPlain "t") == JP.CLt /\ pc (CPlain "r") == JP.CLr /\
+                   pc CLu == JP.CLu /\ pc (CHexCh HDe) == JP.CLe /\
+                   pc (CHexCh HDf) == JP.CLf /\ pc (CHexCh HDa) == JP.CLa /\
+                   pc (CPlain "l") == JP.CLl /\ pc (CPlain "s") == JP.CLs) = ()
+
+(* A character that is neither of rule 6's two escaped ones is an ORDINARY character to the
+   parser's string loop: it closes no literal and starts no escape. This is what makes the last
+   arm of `string_body` the one a rendered body's characters take. *)
+[@@ noextract_to "FSharp"]
+let pc_is_ordinary (c: ch)
+  : Lemma (requires ~(CQuote? c) /\ ~(CBackslash? c))
+          (ensures pc c <> JP.CQuote /\ pc c <> JP.CBackslash) = ()
+
+(* Every hex nibble is a hex digit to the parser — what the `\u00XX` arm tests before it accepts
+   the escape rule 6 emits. *)
+[@@ noextract_to "FSharp"]
+let pc_hex_is_hex (d: hexd) : Lemma (ensures JP.is_hex (pc (CHexCh d))) = ()
+
+[@@ noextract_to "FSharp"]
+let rec pcs (s: list ch) : Tot (list JP.ch) (decreases s) =
+  match s with
+  | [] -> []
+  | c :: t -> pc c :: pcs t
+
+[@@ noextract_to "FSharp"]
+let rec pcs_app (x y: list ch)
+  : Lemma (ensures pcs (app x y) == app (pcs x) (pcs y))
+          [SMTPat (pcs (app x y))]
+          (decreases x) =
+  match x with
+  | [] -> ()
+  | _ :: t -> pcs_app t y
+
+(* ---- 14.2 a rendered string literal, read by the parser's own string loop ---- *)
+
+(* The `och` each character of a string BECOMES once rule 6 has escaped it and `parseString` has
+   read it back. Rule 6's escape set is a strict subset of the parser's: the two punctuation
+   escapes land on `OEsc`, a control lands on the `\u00XX` arm as its four hex digits — never on
+   a short escape, because `Canon.escape` does not emit one — and every other character is copied
+   through. *)
+[@@ noextract_to "FSharp"]
+let po (c: ch) : Tot JP.och =
+  match c with
+  | CQuote -> JP.OEsc JP.CQuote
+  | CBackslash -> JP.OEsc JP.CBackslash
+  | CCtrl hi lo -> JP.OUni JP.CD0 JP.CD0 (if hi then JP.CD1 else JP.CD0) (pc (CHexCh lo))
+  | other -> JP.OLit (pc other)
+
+[@@ noextract_to "FSharp"]
+let rec pstr (s: list ch) : Tot (list JP.och) (decreases s) =
+  match s with
+  | [] -> []
+  | c :: t -> po c :: pstr t
+
+(* RULE 6, AS THE PARSER READS IT. The counterpart of `read_str_inverts_escape`, against the
+   other reader: an escaped body followed by its closing quote and ANY trailing context is read
+   by `parseString`'s loop as exactly that body's characters, and the loop stops at the same
+   place. The accumulator is quantified rather than fixed at `[]`, which is what lets the
+   induction step reuse the statement — `parse_string` enters the loop at `[]`. *)
+[@@ noextract_to "FSharp"]
+let rec string_body_reads_escape (s rest: list ch) (acc: list JP.och)
+  : Lemma (ensures JP.string_body acc (pcs (app (escape s) (CQuote :: rest)))
+                     == JP.POk (JP.rev_app acc (pstr s)) (pcs rest))
+          (decreases s) =
+  match s with
+  | [] -> ()
+  | c :: t ->
+      app_assoc (esc_ch c) (escape t) (CQuote :: rest);
+      (match c with
+       | CQuote -> ()
+       | CBackslash -> ()
+       | CCtrl _ lo -> pc_hex_is_hex lo
+       | other -> pc_is_ordinary other);
+      string_body_reads_escape t rest (po c :: acc)
+
+(* `parseString` whole, on a rendered string: the quote, the body, the closing quote. *)
+[@@ noextract_to "FSharp"]
+let parse_string_reads_quoted (s rest: list ch)
+  : Lemma (ensures JP.parse_string (pcs (app (quoted s) rest))
+                     == JP.POk (pstr s) (pcs rest)) =
+  app_assoc (escape s) [CQuote] rest;
+  string_body_reads_escape s rest []
+
+(* ---- 14.3 the value correspondence ---- *)
+
+(* The `JVal` theorem 4's parser returns for a value this one rendered. Three clauses differ
+   from an identity, and each is a modelling decision the other phase already took: a numeral
+   comes back as its TOKEN (theorem 4 does not compute a numeral's value, so what it holds is
+   the characters production handed to `Int32.TryParse` / `Double.TryParse`), a string comes back
+   as the `och` list `parseString` builds, and an object's members carry their keys in the same
+   decoded form. *)
+[@@ noextract_to "FSharp"]
+let rec pv (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot JP.jval (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s   -> JP.JStr (pstr s)
+  | JInt i   -> JP.JInt (pcs (w.int_str i))
+  | JBool b  -> JP.JBool b
+  | JFloat f -> JP.JFloat (pcs (canonical_float w f))
+  | JArr xs  -> JP.JArr (pvs w xs)
+  | JObj fs  -> JP.JObj (pkvs w fs)
+
+and pvs (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Tot (list JP.jval) (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> []
+  | x :: t -> pv w x :: pvs w t
+
+and pkvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot (list (list JP.och & JP.jval)) (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> []
+  | (k, v) :: t -> (pstr k, pv w v) :: pkvs w t
+
+(* ---- 14.4 the depth budget, and the trailing contexts the grammar produces ---- *)
+
+(* Theorem 4's parser carries WIRE_FORMAT §21.1's nesting cap as an exhausted `list unit` budget,
+   one element per descent (finding 2: F*'s integers do not survive the extraction). This
+   encoder's reader has no such cap — section 6 says why — so the bridge has to say what budget
+   suffices, and `fits` is that: one element for each container on the path to every leaf. It is
+   `jdepth`-shaped rather than `jdepth`-valued because the proof descends the SORTED members,
+   and a predicate the sort preserves is cheaper than a maximum the sort permutes. The
+   `jdepth` form follows in `budget_covers_depth` below. *)
+[@@ noextract_to "FSharp"]
+let rec fits (#num #flt: eqtype) (b: list unit) (v: jval num flt)
+  : Tot bool (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> (match b with [] -> false | _ :: b' -> fits_items b' xs)
+  | JObj fs -> (match b with [] -> false | _ :: b' -> fits_kvs b' fs)
+  | _ -> true
+
+and fits_items (#num #flt: eqtype) (b: list unit) (xs: list (jval num flt))
+  : Tot bool (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> true
+  | x :: t -> fits b x && fits_items b t
+
+and fits_kvs (#num #flt: eqtype) (b: list unit) (fs: list (list ch & jval num flt))
+  : Tot bool (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> true
+  | (_, v) :: t -> fits b v && fits_kvs b t
+
+(* Sorting moves members, never values, so it cannot take an object outside a budget — the same
+   sentence `insert_preserves_canonical` makes about the canonical subset, and needed here for
+   the same reason: `render` renders the SORTED members. *)
+[@@ noextract_to "FSharp"]
+let rec insert_preserves_fits (#num #flt: eqtype) (w: wire num flt) (b: list unit)
+                              (kv: (list ch & jval num flt))
+                              (l: list (list ch & jval num flt))
+  : Lemma (requires fits b (snd kv) /\ fits_kvs b l)
+          (ensures fits_kvs b (insert_kv w kv l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> insert_preserves_fits w b kv t
+
+[@@ noextract_to "FSharp"]
+let rec sort_preserves_fits (#num #flt: eqtype) (w: wire num flt) (b: list unit)
+                            (fs: list (list ch & jval num flt))
+  : Lemma (requires fits_kvs b fs)
+          (ensures fits_kvs b (sort_kvs w fs)) (decreases fs) =
+  match fs with
+  | [] -> ()
+  | kv :: t -> sort_preserves_fits w b t; insert_preserves_fits w b kv (sort_kvs w t)
+
+(* The trailing contexts the grammar itself produces after a value: a comma, a closing bracket, a
+   closing brace, or the end of the document. STRONGER than section 6's `sep_ok`, and it has to
+   be: `sep_ok` asks only that the next character cannot continue a numeric token as THIS model
+   spells one, and the parser's number scanner also continues on a lowercase `e`, which this
+   model spells `CHexCh HDe` and `num_ch` therefore does not cover. Every position `render`
+   places a value in satisfies the stronger form, and the top-level statement takes `[]`. *)
+[@@ noextract_to "FSharp"]
+let parse_sep (rest: list ch) : Tot bool =
+  match rest with
+  | [] -> true
+  | CComma :: _ -> true
+  | CRBrack :: _ -> true
+  | CRBrace :: _ -> true
+  | _ -> false
+
+(* ---- 14.5 the one premise ---- *)
+
+(* What the parser's number path must do with the two layouts. This is the bridge's ONLY
+   premise, and it is forced: both models declare the numerals opaque — the layouts and the
+   read-back are parameters here (`tok_read_ok`), `System.Double.TryParse`'s verdict is a
+   parameter there (`float_read`) — so relating them is the most a bridge can do without
+   modelling .NET's numeral formatting, which is finding 2's cost and not this theorem's.
+
+   Read clause by clause: each layout begins with a character the parser's value dispatch sends
+   to `parseNumber` (a digit or a minus sign, which is also what makes `skipWs` a no-op in front
+   of it); and in every trailing context the grammar produces, `parseNumber` scans back exactly
+   the token the encoder emitted and classifies it on the constructor rule 5 chose — `JInt` for
+   the integer layout, `JFloat` for a canonical float's. Nothing is said about WHICH digits
+   either layout produces, which is what the differential and the cross-host parity vectors
+   measure. *)
+[@@ noextract_to "FSharp"]
+let jnum_start (t: list JP.ch) : Tot bool =
+  match t with
+  | c :: _ -> c = JP.CMinus || JP.is_digit c
+  | [] -> false
+
+[@@ noextract_to "FSharp"]
+let numerals_bridge (#num #flt: eqtype) (w: wire num flt)
+                    (fr: list JP.ch -> JP.freadv) : prop =
+  (forall (i: num). jnum_start (pcs (w.int_str i))) /\
+  (forall (f: flt). float_canonical w f ==> jnum_start (pcs (canonical_float w f))) /\
+  (forall (i: num) (rest: list ch). parse_sep rest ==>
+      JP.parse_number fr (app (pcs (w.int_str i)) (pcs rest))
+        == JP.POk (JP.JInt (pcs (w.int_str i))) (pcs rest)) /\
+  (forall (f: flt) (rest: list ch). (float_canonical w f /\ parse_sep rest) ==>
+      JP.parse_number fr (app (pcs (canonical_float w f)) (pcs rest))
+        == JP.POk (JP.JFloat (pcs (canonical_float w f))) (pcs rest))
+
+(* ---- 14.6 the value dispatch ---- *)
+
+[@@ noextract_to "FSharp"]
+let pcs_head (l m: list ch)
+  : Lemma (requires Cons? l)
+          (ensures Cons? (pcs (app l m)) /\ Cons?.hd (pcs (app l m)) == pc (Cons?.hd l)) =
+  app_head l m
+
+[@@ noextract_to "FSharp"]
+let pcs_cons_inv (l: list ch)
+  : Lemma (requires Cons? (pcs l)) (ensures Cons? l /\ Cons?.hd (pcs l) == pc (Cons?.hd l)) =
+  match l with
+  | [] -> ()
+  | _ :: _ -> ()
+
+(* `render_total`'s statement, restated in the parser's alphabet and sharpened to the four facts
+   the descent turns on. A rendering never begins with whitespace, so `skipWs` is a no-op at
+   every position the grammar puts a value; it never begins with `n`, so the member loop's
+   null-erasure fork does not fire on a value this encoder emitted — which is what keeps the
+   theorem true under BOTH null policies rather than under the strict one alone; and it never
+   begins with a closing or separating character, so the container loops can tell an empty
+   container from a first element. *)
+[@@ noextract_to "FSharp"]
+let render_head_dispatches (#num #flt: eqtype) (w: wire num flt)
+                           (fr: list JP.ch -> JP.freadv) (v: jval num flt)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v)
+          (ensures Cons? (render w v) /\
+                   (let h = pc (Cons?.hd (render w v)) in
+                    ~(JP.is_ws h) /\ h <> JP.CLn /\ h <> JP.CRBrack /\
+                    h <> JP.CRBrace /\ h <> JP.CComma /\ h <> JP.CColon)) =
+  match v with
+  | JStr _ -> ()
+  | JBool _ -> ()
+  | JArr _ -> ()
+  | JObj _ -> ()
+  | JInt i -> pcs_cons_inv (w.int_str i)
+  | JFloat f -> pcs_cons_inv (canonical_float w f)
+
+(* A non-empty container's body begins where its first element does — the fact the two loops need
+   to tell an empty container from one with a first element, since `parseArray` and `parseObject`
+   both test for the closing bracket BEFORE entering their loop. *)
+[@@ noextract_to "FSharp"]
+let render_items_head (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Lemma (requires Cons? xs /\ Cons? (render w (Cons?.hd xs)))
+          (ensures Cons? (render_items w xs) /\
+                   Cons?.hd (render_items w xs) == Cons?.hd (render w (Cons?.hd xs))) =
+  match xs with
+  | [x] -> app_head (render w x) [CRBrack]
+  | x :: t -> app_head (render w x) (CComma :: render_items w t)
+
+[@@ noextract_to "FSharp"]
+let render_kvs_head (#num #flt: eqtype) (w: wire num flt)
+                    (fs: list (list ch & jval num flt))
+  : Lemma (requires Cons? fs)
+          (ensures Cons? (render_kvs w fs) /\ Cons?.hd (render_kvs w fs) == CQuote) =
+  match fs with
+  | [(k, v)] -> app_head (quoted k) (CColon :: app (render w v) [CRBrace])
+  | (k, v) :: t -> app_head (quoted k) (CColon :: app (render w v) (CComma :: render_kvs w t))
+
+(* ---- 14.7 THE BRIDGE, proved ---- *)
+
+(* The mutual induction, mirroring section 9's exactly — same three statements, same measure,
+   same trailing-context quantification — against theorem 4's parser instead of section 6's
+   reader. The two accumulator-carrying loops (`parse_items`, `parse_members`) are stated over an
+   ARBITRARY accumulator, which is what makes the step reuse the statement: production's
+   `rev (v :: acc)` is `rev_app acc [v]`, and the recursive arm's `rev_app (v :: acc) xs` is
+   `rev_app acc (v :: xs)` by one unfolding, so no reversal lemma is needed at all. *)
+[@@ noextract_to "FSharp"]
+let rec parse_reads_render (#num #flt: eqtype) (w: wire num flt)
+                           (fr: list JP.ch -> JP.freadv) (cap: string) (tol: bool)
+                           (b: list unit) (v: jval num flt) (rest: list ch)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ parse_sep rest /\ fits b v)
+          (ensures JP.parse_value fr cap tol b (pcs (app (render w v) rest))
+                     == JP.POk (pv w (normalise w v)) (pcs rest))
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s -> parse_string_reads_quoted s rest
+  | JBool _ -> ()
+  | JInt i -> pcs_cons_inv (w.int_str i); pcs_head (w.int_str i) rest
+  | JFloat f -> pcs_cons_inv (canonical_float w f); pcs_head (canonical_float w f) rest
+  | JArr xs ->
+      (match xs with
+       | [] -> ()
+       | x :: _ ->
+           render_head_dispatches w fr x;
+           render_items_head w xs;
+           pcs_head (render_items w xs) rest;
+           parse_reads_render_items w fr cap tol (Cons?.tl b) xs rest [])
+  | JObj fs ->
+      sort_preserves_canonical w fs;
+      sort_preserves_fits w (Cons?.tl b) fs;
+      (match sort_kvs w fs with
+       | [] -> ()
+       | _ :: _ ->
+           render_kvs_head w (sort_kvs w fs);
+           pcs_head (render_kvs w (sort_kvs w fs)) rest;
+           parse_reads_render_kvs w fr cap tol (Cons?.tl b) (sort_kvs w fs) rest [])
+
+and parse_reads_render_items (#num #flt: eqtype) (w: wire num flt)
+                             (fr: list JP.ch -> JP.freadv) (cap: string) (tol: bool)
+                             (b: list unit) (xs: list (jval num flt)) (rest: list ch)
+                             (acc: list JP.jval)
+  : Lemma (requires numerals_bridge w fr /\ canonical_items w xs /\ parse_sep rest /\
+                    fits_items b xs /\ Cons? xs)
+          (ensures JP.parse_items fr cap tol b acc (pcs (app (render_items w xs) rest))
+                     == JP.POk (JP.rev_app acc (pvs w (normalise_items w xs))) (pcs rest))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [x] ->
+      app_assoc (render w x) [CRBrack] rest;
+      parse_reads_render w fr cap tol b x (CRBrack :: rest)
+  | x :: t ->
+      app_assoc (render w x) (CComma :: render_items w t) rest;
+      parse_reads_render w fr cap tol b x (CComma :: app (render_items w t) rest);
+      parse_reads_render_items w fr cap tol b t rest (pv w (normalise w x) :: acc)
+
+and parse_reads_render_kvs (#num #flt: eqtype) (w: wire num flt)
+                           (fr: list JP.ch -> JP.freadv) (cap: string) (tol: bool)
+                           (b: list unit) (fs: list (list ch & jval num flt)) (rest: list ch)
+                           (acc: list (list JP.och & JP.jval))
+  : Lemma (requires numerals_bridge w fr /\ canonical_kvs w fs /\ parse_sep rest /\
+                    fits_kvs b fs /\ Cons? fs)
+          (ensures JP.parse_members fr cap tol b acc (pcs (app (render_kvs w fs) rest))
+                     == JP.POk (JP.rev_app acc (pkvs w (normalise_kvs w fs))) (pcs rest))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [(k, v)] ->
+      app_assoc (quoted k) (CColon :: app (render w v) [CRBrace]) rest;
+      parse_string_reads_quoted k (CColon :: app (app (render w v) [CRBrace]) rest);
+      app_assoc (render w v) [CRBrace] rest;
+      render_head_dispatches w fr v;
+      pcs_head (render w v) (CRBrace :: rest);
+      parse_reads_render w fr cap tol b v (CRBrace :: rest)
+  | (k, v) :: t ->
+      app_assoc (quoted k) (CColon :: app (render w v) (CComma :: render_kvs w t)) rest;
+      parse_string_reads_quoted k
+        (CColon :: app (app (render w v) (CComma :: render_kvs w t)) rest);
+      app_assoc (render w v) (CComma :: render_kvs w t) rest;
+      render_head_dispatches w fr v;
+      pcs_head (render w v) (CComma :: app (render_kvs w t) rest);
+      parse_reads_render w fr cap tol b v (CComma :: app (render_kvs w t) rest);
+      parse_reads_render_kvs w fr cap tol b t rest ((pstr k, pv w (normalise w v)) :: acc)
+
+(* ---- 14.8 the budget, in the §21 vocabulary ---- *)
+
+(* `fits` is what the descent consumes; `jdepth` is what WIRE_FORMAT §21.1 bounds. A budget at
+   least as long as the value's syntactic nesting is one the descent cannot exhaust, which is the
+   sentence that lets the theorems below carry §21's own quantity rather than the proof's. *)
+[@@ noextract_to "FSharp"]
+let rec budget_covers_depth (#num #flt: eqtype) (b: list unit) (v: jval num flt)
+  : Lemma (requires llen b >= jdepth v) (ensures fits b v)
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> budget_covers_depths (Cons?.tl b) xs
+  | JObj fs -> budget_covers_fdepth (Cons?.tl b) fs
+  | _ -> ()
+
+and budget_covers_depths (#num #flt: eqtype) (b: list unit) (xs: list (jval num flt))
+  : Lemma (requires llen b >= jdepths xs) (ensures fits_items b xs)
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | x :: t -> budget_covers_depth b x; budget_covers_depths b t
+
+and budget_covers_fdepth (#num #flt: eqtype) (b: list unit)
+                         (fs: list (list ch & jval num flt))
+  : Lemma (requires llen b >= fdepth fs) (ensures fits_kvs b fs)
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (_, v) :: t -> budget_covers_depth b v; budget_covers_fdepth b t
+
+(* ---- 14.9 the two theorems ---- *)
+
+(* THE TWO READERS AGREE ON EVERYTHING `render` EMITS. Section 6's reader and theorem 4's parser,
+   given the same bytes and any trailing context the grammar produces, accept — neither refuses —
+   and return the SAME value and the SAME remainder, up to the correspondence between the two
+   models' types. This is the lemma the two phases left unwritten: theorem 7 proved a reader
+   exists and inverts the encoder, theorem 4 proved production's parser total and classified, and
+   nothing said they were reading the same language.
+
+   It holds under BOTH null policies, which is the half that is easy to miss: the parser's
+   member-null fork can only fire on a member whose value begins with `n`, and `render_head_
+   dispatches` proves no rendering does. *)
+[@@ noextract_to "FSharp"]
+let canon_reader_agrees_with_parser (#num #flt: eqtype) (w: wire num flt)
+                                    (fr: list JP.ch -> JP.freadv) (cap: string)
+                                    (pol: JP.policy) (b: list unit)
+                                    (v: jval num flt) (rest: list ch)
+  : Lemma (requires tok_read_ok w /\ numerals_bridge w fr /\ canonical w v /\
+                    parse_sep rest /\ llen b >= jdepth v)
+          (ensures Ok? (read w (app (render w v) rest)) /\
+                   (let (u, r) = Ok?.v (read w (app (render w v) rest)) in
+                    JP.parse_value fr cap (JP.EraseMemberNull? pol) b
+                                   (pcs (app (render w v) rest))
+                      == JP.POk (pv w u) (pcs r))) =
+  budget_covers_depth b v;
+  read_render_roundtrip w v rest;
+  parse_reads_render w fr cap (JP.EraseMemberNull? pol) b v rest
+
+(* THE ROUND TRIP AGAINST PRODUCTION'S OWN PARSER, at level 1 over the canonical subset. This is
+   the statement a consumer performs — render here, parse there — and until this phase it was
+   measured by the differential over the corpus and proved nowhere. `parse` is the whole entry
+   point, trailing-input check included, so the theorem also says a canonical rendering leaves
+   nothing over. *)
+[@@ noextract_to "FSharp"]
+let parse_render_roundtrip (#num #flt: eqtype) (w: wire num flt)
+                           (fr: list JP.ch -> JP.freadv) (cap: string) (pol: JP.policy)
+                           (b: list unit) (v: jval num flt)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ llen b >= jdepth v)
+          (ensures JP.parse fr cap pol b (pcs (render w v)) == JP.ROk (pv w (normalise w v))) =
+  budget_covers_depth b v;
+  app_nil (render w v);
+  parse_reads_render w fr cap (JP.EraseMemberNull? pol) b v []
+
+(* THE POLICY IS UNOBSERVABLE ON CANONICAL OUTPUT — theorem 1's `NullPolicy` fork, which lives in
+   the member loop and nowhere else, never fires on bytes this encoder produced. A corollary of
+   the two theorems above rather than a third one, and worth stating because the two policies are
+   what a caller of `Json.parseDetailedWithPolicy` chooses between. *)
+[@@ noextract_to "FSharp"]
+let parse_render_is_policy_independent (#num #flt: eqtype) (w: wire num flt)
+                                       (fr: list JP.ch -> JP.freadv) (cap: string)
+                                       (b: list unit) (v: jval num flt)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v /\ llen b >= jdepth v)
+          (ensures JP.parse fr cap JP.RejectNull b (pcs (render w v))
+                     == JP.parse fr cap JP.EraseMemberNull b (pcs (render w v))) =
+  parse_render_roundtrip w fr cap JP.RejectNull b v;
+  parse_render_roundtrip w fr cap JP.EraseMemberNull b v
+
+(* The §21 restatement, in the shape `read_render_roundtrip_within_limits` already has: within
+   WIRE_FORMAT §21.1's nesting bound a budget of `max_json_depth` descents suffices, so a
+   conformant document's round trip needs no hypothesis about the cap at all. Production's own
+   `Json.defaultMaxDepth` is the budget this instantiates. *)
+[@@ noextract_to "FSharp"]
+let parse_render_roundtrip_within_limits (#num #flt: eqtype) (w: wire num flt)
+                                         (fr: list JP.ch -> JP.freadv) (cap: string)
+                                         (pol: JP.policy) (b: list unit) (v: jval num flt)
+  : Lemma (requires numerals_bridge w fr /\ canonical w v /\
+                    jdepth v <= max_json_depth /\ llen b >= max_json_depth)
+          (ensures JP.parse fr cap pol b (pcs (render w v)) == JP.ROk (pv w (normalise w v))) =
+  parse_render_roundtrip w fr cap pol b v
+
+(* ---- 14.10 the premise is SATISFIABLE — the theorems above are not vacuous ---- *)
+
+(* A premise nothing can satisfy makes every theorem under it true and worthless, and
+   `numerals_bridge` is a premise about two opaque parameters at once, which is exactly the shape
+   that can be contradictory without looking it. So a wire that satisfies it is exhibited rather
+   than assumed to exist: one integer layout (`7`), one float layout (`7.5`, which carries rule
+   5's marker and is therefore in the canonical subset), and a read-back that inverts them. The
+   lemma below is the check, and it is a computation rather than an argument — `parseNumber` is
+   run on those two tokens in every trailing context the grammar produces.
+
+   This is not a claim that .NET's layouts satisfy the premise; that is what the differential and
+   the cross-host parity vectors measure. It is the weaker and necessary claim that SOMETHING
+   does, so the theorems above have content. *)
+[@@ noextract_to "FSharp"]
+let witness_int_layout : list ch = [CHexCh HD7]
+
+[@@ noextract_to "FSharp"]
+let witness_float_layout : list ch = [CHexCh HD7; CDot; CHexCh HD5]
+
+[@@ noextract_to "FSharp"]
+let witness_wire : wire unit unit = {
+  int_str   = (fun _ -> witness_int_layout);
+  float_str = (fun _ -> witness_float_layout);
+  fclass    = (fun _ -> FFinite);
+  is_zero   = (fun _ -> false);
+  pos_zero  = ();
+  key_le    = (fun a b -> llen a <= llen b);
+  tok_read  = (fun t -> if t = witness_int_layout then Ok (JInt ())
+                        else if t = witness_float_layout then Ok (JFloat ())
+                        else Error "not a token this wire emits");
+}
+
+[@@ noextract_to "FSharp"]
+let witness_float_read (_: list JP.ch) : Tot JP.freadv = JP.FFinite
+
+[@@ noextract_to "FSharp"]
+let witness_int_parses (rest: list ch)
+  : Lemma (requires parse_sep rest)
+          (ensures JP.parse_number witness_float_read
+                     (app (pcs (witness_wire.int_str ())) (pcs rest))
+                     == JP.POk (JP.JInt (pcs (witness_wire.int_str ()))) (pcs rest)) = ()
+
+[@@ noextract_to "FSharp"]
+let witness_float_parses (rest: list ch)
+  : Lemma (requires parse_sep rest)
+          (ensures JP.parse_number witness_float_read
+                     (app (pcs (canonical_float witness_wire ())) (pcs rest))
+                     == JP.POk (JP.JFloat (pcs (canonical_float witness_wire ()))) (pcs rest)) = ()
+
+[@@ noextract_to "FSharp"]
+let numerals_bridge_is_satisfiable (_: unit)
+  : Lemma (ensures tok_read_ok witness_wire /\
+                   numerals_bridge witness_wire witness_float_read) =
+  introduce forall (rest: list ch). parse_sep rest ==>
+      JP.parse_number witness_float_read
+        (app (pcs (witness_wire.int_str ())) (pcs rest))
+        == JP.POk (JP.JInt (pcs (witness_wire.int_str ()))) (pcs rest)
+  with (introduce _ ==> _ with witness_int_parses rest);
+  introduce forall (rest: list ch). parse_sep rest ==>
+      JP.parse_number witness_float_read
+        (app (pcs (canonical_float witness_wire ())) (pcs rest))
+        == JP.POk (JP.JFloat (pcs (canonical_float witness_wire ()))) (pcs rest)
+  with (introduce _ ==> _ with witness_float_parses rest)

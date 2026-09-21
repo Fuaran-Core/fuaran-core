@@ -38,7 +38,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `TreeDiff.fst` | The seventh model (Phase 141): the DIFF — `Diff.toOps`'s two refusals characterised exactly, its four passes clause for clause, what each pass guarantees about the block it emits, and `Diff.toOpsContained`'s pre-emptive container refusal. Named `TreeDiff` and not `Diff` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`. It `open`s `TreeOps` (and through it `DagFold`); it is independent of `Preservation.fst`. |
 | `oracle/TreeDiff.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Limits.fst` | The WIRE_FORMAT §21 resource limits as NAMED PREMISES and nothing else (Phase 149): eight constants with their captions, and the two relations the section's own argument uses. It models no enforcement — §21.2's host obligations are about code it does not describe — and it exists so that a changed limit moves one constant rather than a paragraph of prose, and so the ladder can say which theorem depends on which bound. `WireCanon.fst` is the first consumer and takes one of the eight. |
-| `WireCanon.fst` | The eighth model (Phase 149): the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and `Canon.render` clause for clause, a READER for exactly the grammar they emit, and the canonical form proved in BOTH directions. Named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`, which already carries a `Canon`. It `open`s `Limits`; otherwise it shares nothing with the models above but `oracle/Prims.fs`. |
+| `WireCanon.fst` | The eighth model (Phase 149): the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and `Canon.render` clause for clause, a READER for exactly the grammar they emit, and the canonical form proved in BOTH directions. Named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`, which already carries a `Canon`. It `open`s `Limits`; otherwise it shares nothing with the models above but `oracle/Prims.fs`. Since Phase 170 its section 14 is the BRIDGE to `JsonParse.fst` — the alphabet and value correspondences between the two models, and the proof that section 6's reader and theorem 4's parser agree on everything `render` emits — so it also references `JsonParse`, which the leg already checks before it. The reference is proof-only: every definition in that section is `noextract_to "FSharp"`, and the extraction is unchanged. |
 | `oracle/Limits.fs`, `oracle/WireCanon.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Vocabulary.fst`, `DocVocabulary.fst`, `ScoreVocabulary.fst` and their `…Proofs.fst` | **Generated** — the other way round: not extracted FROM a model but emitted AS one, by `Fuaran.Core.Idl.Codegen`'s F\* target (Phase 150) from the three vocabularies the engine is certified on (Phase 173: `tests/Fuaran.Core.Tests/ReferenceIdl.fs`, `SecondDomainSpike.fs`, `ScoreDomainSpike.fs`). Each model carries a vocabulary's types, encoder and tag-dispatch decoder over `WireDecode`; each `…Proofs` carries the round trip `dec_node (enc_node x) == Ok x` over it. Held to a fresh generation by the `Proofs.Vocabulary` family; checked, not extracted. See theorem 1's generated-vocabulary section. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
@@ -2767,7 +2767,12 @@ run is the least-examined kind of evidence.
    - **Grammar conformance.** That the parser accepts exactly RFC 8259. It is not proved and is not
      the point: what the theorem adds is that the parser cannot fail to answer and cannot answer
      with an unclassified failure. Which inputs get which answer stays with the corpus and the
-     near-miss fixtures.
+     near-miss fixtures. **Phase 170 settled ONE sub-language of this and no more**: on the grammar
+     `Canon.render` emits, the parser accepts and returns what theorem 7's own reader returns
+     (`canon_reader_agrees_with_parser`, in `WireCanon.fst` section 14 — the bridge is stated in the
+     module that has the encoder, so nothing was added to this one). That is a statement about the
+     canonical subset of one encoder's output, not about RFC 8259, and everything outside it stays
+     exactly where this line leaves it.
    - **Anything about the `\uXXXX` transliteration**, per the boundary above.
    - **That the depth bound prevents a stack overflow ON .NET.** The model proves the bound is
      reached and named; that 512 frames of `parseValue` fit in a .NET thread's stack is an
@@ -3502,6 +3507,94 @@ inverse EXISTS, not a second account of production's own. Its behaviour on input
 emits is therefore not claimed and not tested, and the differential runs the round trip against
 `Json.parse` to tie the two together over the corpus.
 
+**Phase 170 changed the second half of that last sentence and left the first half exactly as it
+stands.** The reader is still not a second model of `Json.parse`, and nothing is claimed about its
+behaviour on input `render` never emits. What is no longer true is that the corpus is all that ties
+the two together: section 14 of `WireCanon.fst` proves it. See the section below.
+
+### The bridge to theorem 4's parser (Phase 170)
+
+Two models of the same language sat beside each other from Phase 146 with no lemma joining them.
+Theorem 7 proved that a reader for the grammar `Canon.render` emits **exists** and inverts it;
+theorem 4 proved that `Json.parseDetailedWithPolicy` is **total** and that its refusals are
+classified. Neither said they were reading the same language, so the round trip a consumer actually
+performs — render here, parse there — was measured by the differential over the corpus and proved
+nowhere. That is what "measured, not proved" meant for this row.
+
+Section 14 is that lemma. It is a **bridge and not a model**: nothing new is modelled, neither
+grammar is widened, and both readers are the ones their own phases wrote.
+
+Two theorems, and the second is the one a consumer states:
+
+- **`canon_reader_agrees_with_parser`** — on every byte sequence `render` emits, in every trailing
+  context the grammar produces, section 6's reader and theorem 4's parser both **accept** and
+  return the **same value** and the **same remainder**, up to the correspondence between the two
+  models' types.
+- **`parse_render_roundtrip`** — `Json.parse` of a canonical rendering is the value's normal form,
+  through the whole entry point, trailing-input check included. At level 1, over the canonical
+  subset, where it was at level 2 before.
+
+Two corollaries are worth naming because each answers a question the statement raises.
+`parse_render_is_policy_independent` says the two `NullPolicy` settings are **unobservable** on
+canonical output: theorem 1's member-null fork lives in the member loop and can only fire on a
+member whose value begins with `n`, and no rendering does. And
+`parse_render_roundtrip_within_limits` carries WIRE_FORMAT §21.1's bound in the shape
+`read_render_roundtrip_within_limits` already had, so a conformant document needs no hypothesis
+about the cap at all.
+
+**Most of the work is that the two models share no type.** `WireCanon.ch` is the alphabet the
+ENCODER distinguishes — rule 6's two escaped punctuation characters, rule 5's numeric punctuation,
+the hex nibbles, a control as its two nibbles. `JsonParse.ch` is the alphabet the PARSER
+distinguishes — whitespace, the letters that spell the three literals, the eight short escapes, the
+hex digits. `pc` is the correspondence and `pv` the corresponding translation of a value, which is
+not an identity in three places, each a modelling decision the other phase already took: a numeral
+comes back as its TOKEN, a string as the `och` list `parseString` builds, and an object's keys in
+that same decoded form.
+
+`pc` deliberately needs **no `bridged` hypothesis**. `bridged` is the faithfulness condition for a
+HOST's mapping — a `CPlain` must not carry a character another constructor already denotes — and
+`pc` is a function this file defines, which sends a `CPlain` carrying a reserved spelling to
+`COther` of it rather than to the constructor that spelling names. So the theorems hold of every
+value, bridged or not; what `bridged` is about is the correspondence with a real host's alphabet,
+and that is an assumed row already.
+
+**The one premise, and why it is forced.** Both models declare the numerals opaque — the two
+layouts and the read-back are parameters here (`tok_read_ok`), `System.Double.TryParse`'s verdict
+is a parameter there (`float_read`) — so a bridge between them cannot do better than relate the two
+parameters. `numerals_bridge` is that relation: each layout begins with a character the parser's
+value dispatch sends to `parseNumber`, and in every trailing context the grammar produces
+`parseNumber` scans back exactly the token the encoder emitted and classifies it on the constructor
+rule 5 chose. Nothing is said about WHICH digits either layout produces; that is the differential's
+and the cross-host parity vectors' to measure. It is recorded on `canon-numeral-layouts` beside
+`tok_read_ok`, which is its mirror on the other side of the bridge.
+
+**A premise about two opaque parameters at once is exactly the shape that can be contradictory
+without looking it**, and a contradictory premise makes every theorem under it true and worthless.
+So `numerals_bridge_is_satisfiable` exhibits a wire that satisfies it — one integer layout (`7`),
+one float layout (`7.5`, which carries rule 5's marker and is therefore inside the canonical
+subset), and a read-back that inverts them — and the lemma is a computation rather than an
+argument: `parseNumber` is run on those two tokens in every trailing context the grammar produces.
+That is not a claim that .NET's layouts satisfy the premise. It is the weaker and necessary claim
+that something does.
+
+**The budget.** Theorem 4's parser carries §21.1's nesting cap as an exhausted `list unit`, one
+element per descent; this encoder's reader has no cap at all, for the reason the section above
+gives. So the bridge has to say what budget suffices. `fits` is that predicate — one element for
+every container on the path to every leaf — and it is `jdepth`-SHAPED rather than `jdepth`-valued
+because the descent walks the SORTED members, and a predicate the sort preserves is cheaper than a
+maximum the sort permutes. `budget_covers_depth` converts it, so both theorems above are stated in
+§21's own quantity.
+
+**What is NOT claimed, and it is the same boundary theorem 4 draws.** Nothing about the parser's
+behaviour on input `render` never emits — its refusals are theorem 4's subject and the two
+theorems here are about acceptance. Nothing about `Canon.renderOrdered`, which is not modelled.
+And nothing about the digits of either numeral layout, which is the premise above.
+
+**One thing the shard asked for that does not exist**, recorded because a later reader will look
+for it: the `Next` list below carries no canonical-round-trip entry to retire. The boundary was
+written in "Why a reader, and not a second model of `Json.parse`" above and in this theorem's
+ladder under "Not claimed", and those are what Phase 170 amended.
+
 ### The §21 limits, and the one premise that reaches them
 
 `Limits.fst` carries WIRE_FORMAT §21's eight bounds as named premises, with the two relations the
@@ -3561,14 +3654,22 @@ fixture it would have dropped first is the deepest one.
    rule lemmas, the §21 relations in `Limits.fst`, the four refutations, and (Phase 165) the
    guard's five — `tryrender_is_render_on_finite`, `tryrender_is_render_on_canonical`,
    `tryrender_refuses_exactly_aliasing`, `nonfinite_anywhere_is_refused` and
-   `tryrender_keeps_the_documented_normalisations`. F\* 2026.09.06,
+   `tryrender_keeps_the_documented_normalisations`; and (Phase 170) the bridge to theorem 4's
+   parser — `canon_reader_agrees_with_parser`, `parse_render_roundtrip`, the two corollaries
+   `parse_render_is_policy_independent` and `parse_render_roundtrip_within_limits`, and
+   `numerals_bridge_is_satisfiable`, which exhibits a wire satisfying that bridge's one premise so
+   the four are known not to be vacuous. F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
    `admit`. The module carries a scoped `--ext context_pruning` for the reason `TreeOps.fst` gives
    at the same line.
 2. **Differentially tested.** The extracted encoder agrees with `Canon.render` byte for byte over
    both corpus families and the generated pool, and the model's round trip agrees with
    `Json.parse ∘ Canon.render` over the same documents on the canonical subset. Agreement is over
-   the corpus and the pool drawn, never over all inputs. One go-red, required to lose. The guard
+   the corpus and the pool drawn, never over all inputs. **Since Phase 170 that second comparison
+   is no longer the only thing tying the two readers together** — the agreement itself is proved on
+   the models (item 1) — and what it now measures is what a differential is for and a proof is not:
+   that the EXTRACTED encoder and production's own parser, in the same process over the same bytes,
+   do what the models say. One go-red, required to lose. The guard
    (Phase 165) is compared as the `Result` a caller receives — bytes on an accept, token and path
    on a refusal — over both corpus families and a poisoned pool, with its own go-red. The model
    carries a refusal as DATA and the host renders it in production's spelling, so the message's
@@ -3585,7 +3686,12 @@ fixture it would have dropped first is the deepest one.
      vectors' to measure. (Phase 153's `no_null_ever` carries a second and WEAKER premise about the
      same parameters — `layouts_numeric`, both layouts are numerals — because it speaks of every
      value, including the integral floats outside the canonical subset; the canonical-form theorems
-     above still carry exactly one.)
+     above still carry exactly one.) **Phase 170's bridge carries the same premise on the parser's
+     side of it** — `numerals_bridge`, that the parser's number path accepts each layout as the
+     token the encoder emitted, on the constructor rule 5 chose. It is forced rather than chosen:
+     theorem 4 takes `System.Double.TryParse`'s verdict as its own parameter, so a bridge between
+     two opaque parameters can only relate them. It is exhibited satisfiable rather than assumed
+     consistent (`numerals_bridge_is_satisfiable`).
    - **The comparator is a parameter constrained to be a total order.** What is proved is that a
      canonical form follows FROM a total order. That `System.String.CompareOrdinal` IS one, and
      that it is UTF-16 code-unit order rather than code-point or UTF-8-byte order, are facts about
@@ -3610,8 +3716,13 @@ fixture it would have dropped first is the deepest one.
    - **That the guard names the FIRST offender, as a theorem**, or that a refused document aliases
      at the DOCUMENT level. Both are named in "The guard" above; the first is measured, the second
      is not needed by a refusal.
-   - **Anything about `Json.parse`'s own behaviour** beyond the round trip the differential
-     measures — that is theorem 4's, and the boundary between the two is deliberate.
+   - **Anything about `Json.parse`'s own behaviour beyond ACCEPTANCE on the canonical grammar.**
+     Phase 170 moved this line and did not delete it. What is proved now is that the parser accepts
+     every byte sequence `render` emits and returns the value the encoder's own reader does; what
+     the parser does with input `render` never emits — its twelve refusal classes, its depth
+     failure, its two numeric guards — is theorem 4's subject and nothing here carries to it. The
+     boundary between the two theorems is deliberate and is unchanged; the bridge crosses it in one
+     direction only.
 
 **Phase 153 added one proved row: `no_null_ever`** — `render` never emits the token `null`, for
 any value, stated lexically. It is WIRE_FORMAT §2 rule 4's encoder half, it is not restricted to
