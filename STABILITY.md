@@ -2255,6 +2255,29 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.30.0 — draft
+
+**This slot is a DRAFT.** `<Version>` reads `0.30.0` and no `v0.30.0` tag exists, so the entries
+below describe a contract that is still being assembled and further changes may ride it. Nothing
+here is a promise to a consumer until the release gesture is made; when it is, this paragraph is
+retired and the header restated as a released one.
+
+**This slot was OPENED rather than ridden because `0.29.0` is tagged**, which is the rule the
+`0.29.0` entry states rather than a choice made here: a tagged slot is a released contract and a
+contract-moving commit cannot ride it. It is a MINOR rather than a patch because the work opening it
+is breaking. Phases 180 and 188 are both classed `breaking` on the roadmap — 180 retires the
+hardening default, taking the last UI vocabulary tokens out of Core's source, and 188 moves the
+lease algebra out to the Dispatch edge — and a patch slot states that adopting costs nothing, which
+would be false of either.
+
+**The slot was cut before any of that work landed, deliberately.** Eleven phases are in flight
+against it across the hardening, IDL and compute strands; cutting once, up front, means every branch
+already declares `0.30.0` and no individual change has to carry a version decision. Additive members
+ride this draft without moving the number, and a second breaking change rides it too — breaking over
+breaking is the same class, and the number states what adopting costs, which does not change by
+being breaking twice. A change of a HIGHER class than this slot carries would advance it again, and
+the surface gate's classification is what would decide that, not an argument here.
+
 ## 0.29.0 — released 2026-09-21 as `v0.29.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.29.0` and the repository holds the `v0.29.0` tag, so
