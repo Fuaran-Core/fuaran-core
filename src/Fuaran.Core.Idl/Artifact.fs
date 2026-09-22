@@ -485,12 +485,13 @@ module Artifact =
                                | KeyOrder.Declared -> "declared"
                            ) ] ])
             // The declared hardening vocabulary (Phase 116), emitted ALWAYS since
-            // Phase 179 — `HardenPolicy.Default` included, which used to omit it.
+            // Phase 179 — the policy the engine used to call `Default` included,
+            // which used to omit it.
             //
-            // This is step one of the two-step wire migration D40 laid out, and the
-            // reason it needs two steps is that the default was a WIRE fact rather
+            // This was step one of the two-step wire migration D40 laid out, and the
+            // reason it needed two steps is that the default was a WIRE fact rather
             // than only a source one: the block's ABSENCE meant one domain's tokens,
-            // by a promise [[readHarden]] makes to every artifact written before they
+            // by a promise [[readHarden]] made to every artifact written before they
             // were declarable, so emptying the default in place would have changed
             // what already-published bytes MEAN, silently and with a green build.
             // Emitting unconditionally makes a freshly rendered artifact declare its
@@ -498,11 +499,10 @@ module Artifact =
             // extra member a reader tolerates by `WIRE_FORMAT.md` §2.1 rule 2,
             // field-lookup-by-name) and additive on the API.
             //
-            // [[readHarden]] is deliberately UNCHANGED: an absent block still resolves
-            // through `HardenPolicy.Default`, because the artifacts written before this
-            // phase still exist and this step must not change what they mean. Retiring
-            // that reader answer is Phase 180, gated on the two published artifacts
-            // having been re-rendered under this one.
+            // Step two is Phase 180 and it is TAKEN: `HardenPolicy.Default` is gone
+            // and [[readHarden]] resolves an absent block as `Undeclared`. This writer
+            // is unchanged by it — it already emitted the block for every policy,
+            // which is exactly what made the reader flip safe.
             //
             // `transparentUnions` is the one member here a WIRE consumer must read:
             // the per-union `transparentCase` above is derived from it, and a decoder
@@ -977,19 +977,30 @@ module Artifact =
                                   NodeEnvelope = e
                                   KeyOrder = k })))))
 
-    /// The declared hardening vocabulary. Absent means [[HardenPolicy.Default]] — every
-    /// artifact written before the tokens were declarable reads back as the tokens the
-    /// engine hard-coded.
+    /// The declared hardening vocabulary. Absent means [[HardenPolicy.Undeclared]] —
+    /// an artifact that names no hardening tokens has not named them, and a hardening
+    /// run over the vocabulary it decodes to is `Trust.harden`'s typed refusal.
     ///
-    /// **Unchanged by Phase 179, deliberately.** Since that phase the PROJECTION emits
-    /// the block unconditionally, so a freshly rendered artifact never relies on this
-    /// answer; what still does is every artifact rendered before it, which is why the
-    /// answer stays. Retiring it — making an absent block mean "declared nothing" — is
-    /// Phase 180, and it is gated on the published artifacts having been re-rendered.
-    /// `IdlTrustTests`' compat family is the guard; read D40 before changing either.
+    /// **This answer was INVERTED by Phase 180, and the inversion is the whole point
+    /// of the phase.** Until then an absent block resolved through
+    /// `HardenPolicy.Default` — the five names the engine hard-coded before Phase 116
+    /// made them declarable — so the block's ABSENCE was a positive claim in one
+    /// domain's spelling. D40 refused to flip that in place, because both published
+    /// `idl.json` artifacts carried no block and the flip would have changed what
+    /// already-published bytes MEAN, silently and with a green build. The flip is safe
+    /// now and only now: Phase 179 made [[json]] emit the block for every policy,
+    /// `fuaran#1755` re-rendered `fuaran-dotnet/src/Fuaran.UI.Idl/idl.json` and the
+    /// shared cross-host corpus, and `roadmapctl copies` reports both host snapshots
+    /// of that corpus in step. So no artifact the estate publishes relies on this
+    /// answer, and one that did — rendered before Phase 179, carrying no block —
+    /// decodes to a vocabulary that refuses to harden rather than one that hardens as
+    /// a domain it never named.
+    ///
+    /// `IdlArtifactTests`' reader-flip family is the guard; read D40 before changing it
+    /// back.
     let private readHarden (root: JVal) : Result<HardenPolicy, string> =
         match atKey "harden" root with
-        | None -> Ok HardenPolicy.Default
+        | None -> Ok HardenPolicy.Undeclared
         | Some block ->
             let str name = strAt name block
 

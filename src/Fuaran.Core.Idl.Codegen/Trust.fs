@@ -122,17 +122,19 @@ module Trust =
             VUnion(case, [ field, VStr(Sanitize.scrubMarkdown s) ])
         | other -> other
 
-    /// Harden an authored `IdlValue` for the codegen boundary: gate every node of the
-    /// vocabulary's GATED kind to inert-by-default, and sanitise every declared URL /
-    /// markdown field, recursively over the whole tree. The result scaffolds / encodes
-    /// to inert-by-construction, sanitised output (Phase 321 tasks 2 + 3).
+    /// The hardening TRANSFORM, without the declaration check — the body [[harden]]
+    /// runs once [[checkHardenPolicy]] has passed.
     ///
-    /// Takes the vocabulary because the tokens it addresses by name — which kind is
-    /// gated, what the placeholder is made of, which case carries a literal — are the
-    /// vocabulary's ([[HardenPolicy]], Phase 116), while `policy` carries the caller's
-    /// trust decisions. The two are separate arguments because they have separate
-    /// owners, and only the first belongs in `idl.json`.
-    let harden (idl: Idl) (policy: Policy) (v: IdlValue) : IdlValue =
+    /// **Private, and that is the Phase 180 change.** It used to be the public
+    /// `Trust.harden`: a total function that hardened through whatever tokens the
+    /// vocabulary carried, including none, because `HardenPolicy.Default` guaranteed
+    /// there were always some. With the default retired an undeclared [[GatedKind]] is
+    /// the empty string, which matches no node tag — so an unchecked run over an
+    /// undeclared policy gates NOTHING and says nothing about it, the Phase 96
+    /// fail-open lesson in its purest form. Keeping it reachable would keep that
+    /// failure one call site away; the check is not optional any more, so neither is
+    /// the entry point that performs it.
+    let private hardenUnchecked (idl: Idl) (policy: Policy) (v: IdlValue) : IdlValue =
         let tokens = idl.Harden
 
         let rec go (v: IdlValue) : IdlValue =
@@ -182,7 +184,11 @@ module Trust =
         go v
 
     /// Refuse a vocabulary whose [[HardenPolicy]] leaves a member the run NEEDS
-    /// undeclared (empty) — Phase 178's opt-in half.
+    /// undeclared (empty) — Phase 178's opt-in half, and since Phase 180 the gate
+    /// [[harden]] runs unconditionally. It stays PUBLIC because the question it
+    /// answers is separable: a caller assembling a vocabulary can ask whether the
+    /// hardener would accept it before it has a tree to harden, and a codegen driver
+    /// can report every such refusal at the point the vocabulary is loaded.
     ///
     /// **Static in `(idl, policy)`, not in the value.** Whether a member is needed is
     /// decided by the vocabulary and the caller's trust decisions, never by which nodes
@@ -219,22 +225,39 @@ module Trust =
         | Some(name, _, need) -> Error(CodegenError.UndeclaredHardenToken(name, need))
         | None -> Ok()
 
-    /// [[harden]], refusing an undeclared policy instead of hardening through it —
-    /// Phase 178's opt-in entry point.
+    /// Harden an authored `IdlValue` for the codegen boundary: refuse a vocabulary that
+    /// leaves a needed [[HardenPolicy]] member undeclared, then gate every node of the
+    /// vocabulary's GATED kind to inert-by-default and sanitise every declared URL /
+    /// markdown field, recursively over the whole tree. The result scaffolds / encodes
+    /// to inert-by-construction, sanitised output (Phase 321 tasks 2 + 3).
     ///
-    /// **A vocabulary on [[HardenPolicy.Default]] is unaffected**: the default declares
-    /// every member, so this is `Ok` over exactly the value [[harden]] returns. The
-    /// refusal is reachable only for a vocabulary that opted in by leaving a member
-    /// undeclared ([[HardenPolicy.Undeclared]], or any policy with an empty member).
+    /// Takes the vocabulary because the tokens it addresses by name — which kind is
+    /// gated, what the placeholder is made of, which case carries a literal — are the
+    /// vocabulary's ([[HardenPolicy]], Phase 116), while `policy` carries the caller's
+    /// trust decisions. The two are separate arguments because they have separate
+    /// owners, and only the first belongs in `idl.json`.
     ///
-    /// **Why this is beside [[harden]] and not inside it.** Phase 178 was written to
-    /// make the undeclared policy the DEFAULT and `harden` itself the refusal; the
-    /// estate measurement recorded in `DECISIONS.md` D40 refuted the premise that
-    /// licensed it, so the refusal ships reachable and opt-in rather than not at all.
-    /// `harden`'s signature returns a value, and every caller of a published function
-    /// would have to change to receive a refusal only an undeclared policy can raise.
-    let hardenOrRefuse (idl: Idl) (policy: Policy) (v: IdlValue) : Result<IdlValue, CodegenError> =
-        checkHardenPolicy idl policy |> Result.map (fun () -> harden idl policy v)
+    /// **This is the CHECKED path, and Phase 180 is what made it the only one.** Phase
+    /// 178 shipped the check as [[hardenOrRefuse]] beside an unchecked `harden`,
+    /// because `HardenPolicy.Default` meant every vocabulary declared every member
+    /// whether it had said so or not, and a refusal no default could raise did not
+    /// justify a breaking signature. Retiring the default removes that guarantee: an
+    /// undeclared policy is now reachable by saying nothing, so the difference between
+    /// the two entry points is the difference between a refusal and a silent
+    /// fail-open, and the safe one has to be the one a caller reaches by default.
+    ///
+    /// BREAKING: the return type widened from `IdlValue` to `Result<_, CodegenError>`.
+    /// A caller that has measured its vocabulary and wants the value adapts with
+    /// `|> Result.mapError CodegenError.describe`, or handles the refusal.
+    let harden (idl: Idl) (policy: Policy) (v: IdlValue) : Result<IdlValue, CodegenError> =
+        checkHardenPolicy idl policy
+        |> Result.map (fun () -> hardenUnchecked idl policy v)
+
+    /// [[harden]], under the name Phase 178 shipped it as. Kept as an ALIAS rather than
+    /// deleted: it is the spelling every caller written between 178 and 180 uses, and
+    /// the two now mean the same thing, so removing it would break source for no gain
+    /// beyond having one name. New code says `harden`.
+    let hardenOrRefuse (idl: Idl) (policy: Policy) (v: IdlValue) : Result<IdlValue, CodegenError> = harden idl policy v
 
     /// Harden then scaffold an authored node to F# source (the codegen boundary
     /// end to end): the emitted source constructs an inert-by-construction,
@@ -247,5 +270,10 @@ module Trust =
         (actor: string)
         (v: IdlValue)
         : Result<string, string> =
-        Gen.fsharpValue idl TNode (harden idl policy v)
+        // Phase 180 — the hardening step can now REFUSE, so the refusal is threaded
+        // here rather than absorbed. `describe` is the adaptation, because this
+        // function's error channel is prose and every other arm of it already is.
+        harden idl policy v
+        |> Result.mapError CodegenError.describe
+        |> Result.bind (Gen.fsharpValue idl TNode)
         |> Result.map (fun body -> Gen.provenanceHeader "//" wireHash actor + "\n" + body)

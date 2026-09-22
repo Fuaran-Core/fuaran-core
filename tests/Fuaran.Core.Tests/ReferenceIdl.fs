@@ -26,7 +26,8 @@
 /// that wanted the sanitisation floor had to adopt one domain's spelling, and this file
 /// recorded that leak rather than working around it. Those tokens are declared now
 /// (`Idl.Harden`), and this vocabulary declares its OWN: it certifies against the full
-/// floor while sharing no token with `HardenPolicy.Default`. That non-overlap is
+/// floor while sharing no token with the set the engine used to hard-code (shipped as
+/// `HardenPolicy.Default` until Phase 180 retired it). That non-overlap is
 /// asserted by `IdlCertificationTests`, because "supplies its own policy" and "happens
 /// to agree with the default" are indistinguishable in a passing test otherwise.
 ///
@@ -188,9 +189,11 @@ let refIdl: Idl =
       Wire = WireShape.Default
       // Phase 116 — the vocabulary names the tokens the engine addresses, so nothing
       // here has to be spelled the way one domain spells it. Every member differs from
-      // `HardenPolicy.Default`, which is what makes this a real test of the seam rather
-      // than a rename: a policy that agreed with the default anywhere would leave that
-      // member's hard-coding uncertified.
+      // the set the engine used to hard-code — shipped as `HardenPolicy.Default` until
+      // Phase 180 deleted it, and spelled out in `IdlCertificationTests` now that
+      // nothing in the engine spells it. That is what makes this a real test of the seam
+      // rather than a rename: a policy that agreed with those tokens anywhere would leave
+      // that member's hard-coding uncertified.
       //
       // `PlaceholderField` and `TextLiteralField` differ from each other too (`body` on
       // the placeholder KIND, `text` on the literal CASE) — the two are separate members

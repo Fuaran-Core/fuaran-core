@@ -2278,6 +2278,61 @@ breaking is the same class, and the number states what adopting costs, which doe
 being breaking twice. A change of a HIGHER class than this slot carries would advance it again, and
 the surface gate's classification is what would decide that, not an argument here.
 
+### The hardening default is RETIRED — `HardenPolicy.Default` is deleted and an absent `harden` block means "declared nothing" (Phase 180) — BREAKING on the API and on what a pre-179 artifact MEANS
+
+**Three managed changes, and the second is the one that is not a compile error.**
+
+1. **`HardenPolicy.Default` is DELETED.** The static member carried the five vocabulary tokens the
+   engine hard-coded before Phase 116 made them declarable — one domain's spelling, reachable by any
+   vocabulary that said nothing. A vocabulary that declared nothing now gets
+   `HardenPolicy.Undeclared`, and the hardener refuses it by name. Every construction of
+   `HardenPolicy.Default` stops compiling; the remedy is to declare the tokens the vocabulary
+   actually uses, or `HardenPolicy.Undeclared` where it has no gated kind.
+2. **`Artifact.readHarden` resolves an absent block as `Undeclared`, where it resolved it through
+   `Default`.** This is the half that is not a compile error: an `idl.json` written before Phase 179
+   and never re-rendered now decodes to a vocabulary that REFUSES to harden, where it used to decode
+   to one that hardened as a domain it never named. No source changes; the meaning of already-written
+   bytes does.
+3. **`Trust.harden` is the CHECKED path and its return widened** from `IdlValue` to
+   `Result<IdlValue, CodegenError>` — it runs `checkHardenPolicy` and refuses an undeclared member
+   rather than gating through it. `Trust.hardenOrRefuse`, the name Phase 178 shipped that behaviour
+   under, is kept as an ALIAS of it, so code written between 178 and 180 still compiles unchanged.
+   `Trust.checkHardenPolicy` is unchanged and stays public. `Trust.scaffoldFSharp`'s signature does
+   not move — it threads the refusal into the prose error channel it already had.
+
+**Why the wire half is safe NOW and was not in Phase 178.** The default was a WIRE fact: an absent
+block MEANT four tokens, so emptying it in place would have changed what published bytes mean,
+silently and with a green build. `DECISIONS.md` D40 measured that and refused the flip, naming the
+migration instead. Both steps of that migration are taken. Phase 179 made `Artifact.render` emit the
+block for every policy, so nothing this renderer writes relies on the absent-block answer;
+`fuaran#1755` re-rendered the two published artifacts — the UI tier's `idl.json` and the shared
+cross-host corpus — and both carry the block, byte-identical to each other, with `roadmapctl copies`
+reporting the corpus and both bundled host snapshots in step. The set of artifacts whose meaning
+this flip could change is **empty in the estate**, which is the condition D40 named and the only
+thing that ever gated it.
+
+**And the direction of the change is the safe one, which is why it is the direction taken.** An
+artifact that WOULD still hit this path decodes to a vocabulary that refuses to harden — a typed
+refusal naming the member it needed — rather than one that hardens through a tag no node in it
+carries. The Phase 96 lesson applies in its purest form: the failure that costs is the silent one.
+
+**Class and slot.** BREAKING on both axes, shipping as a MINOR: this repository is pre-`1.0`, where a
+minor is what carries a breaking change, and `0.30.0` was cut for exactly this work before any of it
+landed. Adopting costs a consumer the compile fixes in (1) and (3), and — for a consumer holding
+`idl.json` bytes written before Phase 179 — a re-render, which is the same act `fuaran#1755`
+performed and is what makes (2) a non-event.
+
+**The measured consequence, rather than the asserted one.** After this phase a search of `src/` for
+`Custom`, `Markdown`, `Static` and `TextSource` as string literals returns doc comments and the
+Spike's own declared vocabulary, and nothing else — 178's original acceptance criterion, met on the
+schedule that makes it safe. The Spike names those tokens because they are ITS kinds and union cases,
+which is precisely what Phase 116 asks a vocabulary to do; what left the engine is the set it
+supplied to vocabularies that had said nothing. One further engine copy of the retired default went
+with it: `Diff`'s artifact snapshot carried its own literal for an absent block, and now walks the
+same members over an empty object, because a classifier that disagrees with the reader about what an
+artifact means is worse than either answer alone.
+
+
 ## 0.29.0 — released 2026-09-21 as `v0.29.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.29.0` and the repository holds the `v0.29.0` tag, so

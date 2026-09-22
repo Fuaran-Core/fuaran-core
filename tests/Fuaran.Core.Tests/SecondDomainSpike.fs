@@ -75,8 +75,10 @@ open Fuaran.Core.Idl
 //     `TransparentUnion` rule costs this domain nothing — and since Phase 116 it is
 //     DECLARED rather than hard-coded, so the negative result is now a property of
 //     this vocabulary's own policy rather than of a name the engine happened to know.
-//     It keeps `HardenPolicy.Default`, which names a union this vocabulary does not
-//     have, so the answer is `None` for every union either way.
+//     It declared `HardenPolicy.Default` until Phase 180, which named a union this
+//     vocabulary does not have; it now declares `Undeclared`, which names none. The
+//     answer was `None` for every union either way — what changed is that the
+//     vocabulary says so rather than inheriting somebody else's list.
 //
 //  6. NEGATIVE RESULT — enum wire-strings are NOT demanded by this vocabulary.
 //     Every closed set's wire string is already a legal F# case identifier, so
@@ -196,7 +198,7 @@ let docIdl: Idl =
         { Discriminator = "kind"
           NodeEnvelope = NodeEnvelopeShape.FlatKind
           KeyOrder = KeyOrder.Declared }
-      Harden = HardenPolicy.Default }
+      Harden = HardenPolicy.Undeclared }
 
 let private nodeTags = docIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
 

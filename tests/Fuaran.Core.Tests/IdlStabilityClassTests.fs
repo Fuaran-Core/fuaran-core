@@ -79,7 +79,7 @@ module private Fixtures =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Default }
+          Harden = HardenPolicy.Undeclared }
 
     let private withNoteFields (fields: IdlField list) : Idl =
         { baseIdl with

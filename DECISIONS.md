@@ -730,6 +730,34 @@ retires, and the tokens leave `src/`. That step is **Phase 180**, and collapsing
 one recreates exactly the hazard the measurement above refused. This entry, not the code, is what a
 session reaching for the flip should meet first.
 
+**CLOSED 2026-09-23 (Phase 180) — the route was walked and step two is taken.** The gate this entry
+set is met and was checked rather than assumed: `fuaran#1755` shipped at `bb10065`, both published
+`idl.json` artifacts carry an explicit `harden` block (line 437 of each, byte-identical to one
+another), and `roadmapctl copies` reports the shared corpus and both bundled host snapshots of it
+`ok`. So `HardenPolicy.Default` is deleted, `Artifact.readHarden` resolves an absent block as
+`Undeclared`, and `Trust.harden` is the checked entry point — with `hardenOrRefuse` kept as its
+alias, because it is the name every caller written between 178 and 180 uses and the two now mean the
+same thing. Shipped on the `0.30.0` slot, class BREAKING, `STABILITY.md` carries the entry.
+
+**What the walk found that this entry's own measurement did not.** D40's estate grep listed thirteen
+`HardenPolicy.Default` DECLARATION sites, and they were all thirteen. What it could not list is a
+CONSUMER of the default's meaning that never names the member: `Diff`'s artifact snapshot carried a
+literal second copy of the five tokens for its absent-block case, so retiring the reader answer
+without it would have left the classifier and the reader disagreeing about what an artifact MEANS —
+a disagreement with no compile error and no failing test until an artifact with no block was
+classified. It is written as a walk over the same members applied to an empty object now, so the two
+cannot drift apart again. The lesson generalises past this record: a grep for a member finds every
+site that SPELLS it, and a default's meaning can be copied without being named.
+
+**What is deliberately still true after the close.** The `src/` token criterion is met in the sense
+the flip was ever about — no engine source supplies those five names to a vocabulary that has not
+declared them — and `Fuaran.Core.Idl.Spike` still spells `Markdown`, `Static` and `TextSource`,
+because they are ITS kinds and union cases. That is a vocabulary declaring its own names, which is
+what Phase 116 exists to make possible; reading the criterion as a ban on the spike naming its own
+tokens would have required deleting the spike to satisfy it. The spike declares
+`{ HardenPolicy.Undeclared with TransparentUnions = [ "TextSource", "Literal" ] }`: the one member
+it genuinely has, and no gated kind, because it has none.
+
 ## 2026-09-15 — D39: the producer owns its conformance vectors; the shared corpus is the distribution point
 
 **Decided (Phase 172).** The two conformance families this repository EMITS — `laws/transform-laws.json`

@@ -250,7 +250,7 @@ let private probeIdl: Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Default }
+      Harden = HardenPolicy.Undeclared }
 
 let private badMapField = field "bag" (TMap TStr) (OmitDefault unrenderable)
 
@@ -874,6 +874,18 @@ let sanitisationFloor =
 
               Expect.equal (Map.toList filtered) [ "data-ok", "fine" ] "only the safe data- entry survives") ]
 
+/// `Trust.harden`, unwrapped — Phase 180 widened its return to
+/// `Result<_, CodegenError>` because the hardener now refuses an undeclared policy
+/// rather than gating nothing through it. Every case below hardens `refIdl`, which
+/// declares every member, so the refusal is unreachable here — and this helper says so
+/// by FAILING loudly rather than by pattern-matching it away at each of the seven call
+/// sites. A refusal arriving here would mean the reference vocabulary stopped declaring
+/// a token, which is a finding and not a shape to absorb.
+let private hardened (idl: Idl) (policy: Trust.Policy) (v: IdlValue) : IdlValue =
+    match Trust.harden idl policy v with
+    | Ok hardenedValue -> hardenedValue
+    | Error e -> failtestf "the reference vocabulary must not be refused by the hardener: %s" (CodegenError.describe e)
+
 [<Tests>]
 let trustBoundary =
     testList
@@ -885,19 +897,25 @@ let trustBoundary =
           // default" are indistinguishable in every test below; only this one can tell
           // them apart, and without it the floor could drift back to being hard-coded
           // while the suite stayed green.
-          testCase "the reference vocabulary shares NO hardening token with the default" (fun _ ->
-              let d = HardenPolicy.Default
+          testCase "the reference vocabulary shares NO hardening token with the RETIRED default" (fun _ ->
+              // Phase 180 — this used to read the tokens off `HardenPolicy.Default`.
+              // That member is deleted, and the tokens are spelled HERE rather than the
+              // assertion being deleted with it: what the test guards is that the
+              // hardening floor is not quietly re-hard-coded to one domain's names, and
+              // that claim outlives the record field it used to read them from. These
+              // five strings are the exact set Phase 116 declared and Phase 180
+              // retired; a future engine re-acquiring any of them reddens this case.
+              let retired =
+                  [ "gatedKind", "Custom", refIdl.Harden.GatedKind
+                    "placeholderKind", "Markdown", refIdl.Harden.PlaceholderKind
+                    "placeholderField", "text", refIdl.Harden.PlaceholderField
+                    "textLiteralCase", "Literal", refIdl.Harden.TextLiteralCase
+                    "valueLiteralCase", "Static", refIdl.Harden.ValueLiteralCase ]
+
               let r = refIdl.Harden
 
-              let distinct =
-                  [ "gatedKind", d.GatedKind, r.GatedKind
-                    "placeholderKind", d.PlaceholderKind, r.PlaceholderKind
-                    "placeholderField", d.PlaceholderField, r.PlaceholderField
-                    "textLiteralCase", d.TextLiteralCase, r.TextLiteralCase
-                    "valueLiteralCase", d.ValueLiteralCase, r.ValueLiteralCase ]
-
-              for name, engineToken, ours in distinct do
-                  Expect.notEqual ours engineToken (sprintf "'%s' still spells the default's token" name)
+              for name, engineToken, ours in retired do
+                  Expect.notEqual ours engineToken (sprintf "'%s' still spells the retired default's token" name)
 
               // The two field members are separate for a reason — a vocabulary may
               // spell the placeholder KIND's field and the literal CASE's field
@@ -909,7 +927,7 @@ let trustBoundary =
                   "the placeholder field and the literal-case field are separately declared")
 
           testCase "an unhashed gated node becomes an inert placeholder (never a live call)" (fun _ ->
-              match Trust.harden refIdl (trustPolicy [ allow "analytics" "trend-card" "whatever" ]) embed1 with
+              match hardened refIdl (trustPolicy [ allow "analytics" "trend-card" "whatever" ]) embed1 with
               | VNode(id, "Note", fields) ->
                   Expect.equal id "embed-1" "the placeholder preserves the node id"
 
@@ -922,22 +940,20 @@ let trustBoundary =
               | _ -> failtest "unexpected node")
 
           testCase "allowlisted + hash-verified gated node passes through live" (fun _ ->
-              match
-                  Trust.harden refIdl (trustPolicy [ allow "deal-flow" "QualityRing" "abc123def456" ]) embedBounded1
-              with
+              match hardened refIdl (trustPolicy [ allow "deal-flow" "QualityRing" "abc123def456" ]) embedBounded1 with
               | VNode(_, "Embed", _) -> ()
               | _ -> failtest "an allowlisted + hash-matched gated node should stay live"
 
-              match Trust.harden refIdl (trustPolicy []) embedBounded1 with
+              match hardened refIdl (trustPolicy []) embedBounded1 with
               | VNode(_, "Note", _) -> ()
               | _ -> failtest "a non-allowlisted gated node must be gated to inert")
 
           testCase "hash mismatch is inert under StrictReplay, advisory-live under AdvisoryWarning" (fun _ ->
-              match Trust.harden refIdl (trustPolicy [ allow "deal-flow" "QualityRing" "WRONG" ]) embedBounded1 with
+              match hardened refIdl (trustPolicy [ allow "deal-flow" "QualityRing" "WRONG" ]) embedBounded1 with
               | VNode(_, "Note", _) -> ()
               | _ -> failtest "a StrictReplay hash mismatch must be gated to inert"
 
-              match Trust.harden refIdl (trustPolicy [ allow "deal-flow" "TrendCard" "WRONG" ]) embedAdvisory1 with
+              match hardened refIdl (trustPolicy [ allow "deal-flow" "TrendCard" "WRONG" ]) embedAdvisory1 with
               | VNode(_, "Embed", _) -> ()
               | _ -> failtest "an AdvisoryWarning hash mismatch should stay live (advisory)")
 
@@ -951,7 +967,7 @@ let trustBoundary =
                         "onClick", VClosure ]
                   )
 
-              match Trust.harden refIdl (trustPolicy []) hostileLink |> Encode.encode refIdl with
+              match hardened refIdl (trustPolicy []) hostileLink |> Encode.encode refIdl with
               | Ok wire ->
                   Expect.isFalse (wire.Contains "javascript:") "the javascript: URL was sanitised out of the wire"
                   Expect.stringContains wire "about:blank" "replaced with the deny sentinel"
@@ -960,7 +976,7 @@ let trustBoundary =
               let hostileMd =
                   VNode("m", "Note", [ "body", VUnion("Inline", [ "text", VStr "hi <script>evil()</script>" ]) ])
 
-              match Trust.harden refIdl (trustPolicy []) hostileMd |> Encode.encode refIdl with
+              match hardened refIdl (trustPolicy []) hostileMd |> Encode.encode refIdl with
               | Ok wire -> Expect.isFalse (wire.Contains "<script") "the script tag was scrubbed"
               | Error m -> failtestf "hostile markdown encode failed: %s" m)
 
@@ -1332,8 +1348,9 @@ let declaredDefaultProperty =
           testCase
               "a DECLARED TRANSPARENT case as a default is refused by BOTH backends, and only because it is transparent"
           <| fun _ ->
-              // `HardenPolicy.Default` declares `TextSource.Literal` transparent, and `miniIdl`
-              // carries that policy — so this is the live class, not a synthetic one.
+              // `miniIdl` declares `TextSource.Literal` transparent in its own policy —
+              // since Phase 180 outright, where it used to inherit the declaration from
+              // `HardenPolicy.Default`. So this is the live class, not a synthetic one.
               let idl = Fuaran.Core.Idl.Spike.Fixtures.miniIdl
 
               Expect.equal

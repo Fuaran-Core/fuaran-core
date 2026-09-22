@@ -152,7 +152,7 @@ method Fuaran.Core.Idl.SupportArtifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSha
 method Fuaran.Core.Idl.SupportArtifact.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
 method Fuaran.Core.Idl.SupportArtifact.render(Fuaran.Core.Idl.SupportDocument) : System.String
 method Fuaran.Core.Idl.Trust.checkHardenPolicy(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Idl.CodegenError>
-method Fuaran.Core.Idl.Trust.harden(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.IdlValue) : Fuaran.Core.Idl.IdlValue
+method Fuaran.Core.Idl.Trust.harden(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Trust.hardenOrRefuse(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Trust.scaffoldFSharp(Fuaran.Core.Idl.Trust+Policy, Fuaran.Core.Idl.Idl, System.String, System.String, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 property Fuaran.Core.Idl.Diff+Owner.Describe : System.String { get }

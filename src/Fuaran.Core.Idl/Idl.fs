@@ -196,9 +196,15 @@ type WireShape =
 /// domain's vocabulary. A vocabulary that wanted the floor therefore had to adopt
 /// that domain's spelling, which is the opposite of what D14 promises.
 ///
-/// **[[Default]] is exactly the set the engine hard-coded**, so a vocabulary that
-/// declares nothing behaves byte-for-byte as it did and every pre-Phase-116
-/// `idl.json` is unchanged (the artifact omits the block at the default).
+/// **There is no default any more (Phase 180).** Phase 116 shipped a `Default`
+/// carrying exactly the five names the engine had hard-coded, so a vocabulary that
+/// declared nothing kept behaving byte-for-byte as it had. That default was a
+/// migration aid with a wire consequence — an artifact with no `harden` block read
+/// back as one domain's spelling — and it is retired now that both published
+/// artifacts declare their block explicitly (`fuaran#1755`; DECISIONS D40, step
+/// two). A vocabulary that declares nothing gets [[Undeclared]], and a hardening run
+/// over an undeclared member is the typed refusal `Trust.harden` raises, never a
+/// silent fall back to a domain's names.
 ///
 /// **What is NOT here, deliberately.** Which of a domain's `(kind, field)` pairs
 /// carry a URL or markdown was ALREADY caller-supplied (`Trust.Policy`), so moving
@@ -211,26 +217,26 @@ type HardenPolicy =
     {
         /// The kind tag the trust boundary GATES — a node that resolves a foreign
         /// component and is therefore inert unless allowlisted and hash-verified.
-        /// `"Custom"` by default.
+        /// Empty means undeclared, and the hardener refuses rather than gating
+        /// nothing; there is no default spelling since Phase 180.
         GatedKind: string
         /// The kind tag of the inert placeholder a gated-out node becomes — a
-        /// benign node that renders text and never a live call. `"Markdown"`.
+        /// benign node that renders text and never a live call.
         PlaceholderKind: string
         /// The placeholder kind's single field, which carries the label text.
-        /// `"text"`. Distinct from [[TextLiteralField]] on purpose: this names a
-        /// KIND's field, that one a UNION CASE's, and a domain may spell them
+        /// Distinct from [[TextLiteralField]] on purpose: this names a KIND's
+        /// field, that one a UNION CASE's, and a domain may spell them
         /// differently.
         PlaceholderField: string
         /// The union case carrying literal (already-resolved) TEXT — what the
         /// placeholder label is wrapped in, and what the markdown scrub matches.
-        /// `"Literal"`.
         TextLiteralCase: string
-        /// [[TextLiteralCase]]'s single field. `"text"`.
+        /// [[TextLiteralCase]]'s single field.
         TextLiteralField: string
         /// The union case carrying a literal (inline, not by-name) VALUE — what
-        /// the URL sanitiser matches on a declared URL field. `"Static"`.
+        /// the URL sanitiser matches on a declared URL field.
         ValueLiteralCase: string
-        /// [[ValueLiteralCase]]'s single field. `"value"`.
+        /// [[ValueLiteralCase]]'s single field.
         ValueLiteralField: string
         /// The unions that have a TRANSPARENT case, as `(unionName, caseTag)` —
         /// a case encoded and decoded as a BARE JSON value rather than a
@@ -244,42 +250,25 @@ type HardenPolicy =
         TransparentUnions: (string * string) list
     }
 
-    /// The tokens the engine hard-coded before they were declarable — the
-    /// Fuaran-UI vocabulary's names, which is where they came from. A vocabulary
-    /// carrying this behaves exactly as every vocabulary did before Phase 116.
-    static member Default =
-        { GatedKind = "Custom"
-          PlaceholderKind = "Markdown"
-          PlaceholderField = "text"
-          TextLiteralCase = "Literal"
-          TextLiteralField = "text"
-          ValueLiteralCase = "Static"
-          ValueLiteralField = "value"
-          TransparentUnions = [ "TextSource", "Literal" ] }
-
-    /// A policy that declares NO token — every name empty (Phase 178). A vocabulary
-    /// carrying this has said "I have not named these", which is a different claim
-    /// from [[Default]]'s "I am spelled the way the engine used to hard-code", and
-    /// `Trust.hardenOrRefuse` turns the difference into a typed refusal naming the
-    /// token it needed.
+    /// A policy that declares NO token — every name empty (Phase 178), and since
+    /// Phase 180 the only policy the engine mints. A vocabulary carrying this has
+    /// said "I have not named these", and `Trust.harden` turns that into a typed
+    /// refusal naming the token it needed rather than hardening through it.
     ///
-    /// **It is an OPT-IN beside [[Default]], not a replacement for it, and the
-    /// measurement is why (D40).** Phase 178 was written to make this the default —
-    /// flipping "declared nothing" from "hardened as the UI" to "say so" — on the
-    /// premise that every vocabulary in the estate already declares its own tokens.
-    /// Measured before the flip, that premise is false in the two places that decide
-    /// it: `Fuaran.UI.Idl/Vocabulary.fs` writes `Harden = HardenPolicy.Default`, so
-    /// the UI tier declares the FIELD and not the TOKENS; and both published
-    /// `idl.json` artifacts — including the shared cross-host corpus — carry no
-    /// `harden` block at all, which `Artifact.readHarden` resolves through [[Default]]
-    /// by a promise stated in its own doc comment. Emptying or removing [[Default]]
-    /// would therefore change what an already-published artifact MEANS, silently, for
-    /// every host that reads it.
+    /// **It is what an absent `harden` block reads back as (Phase 180).** Phase 178
+    /// shipped it as an OPT-IN beside a `Default` carrying the engine's old
+    /// hard-coded names, because at the time both published `idl.json` artifacts
+    /// carried no block and emptying the default would have changed what already
+    /// published bytes MEANT (D40). Phase 179 made the writer emit the block for
+    /// every policy, `fuaran#1755` confirmed both artifacts carry it, and this is
+    /// step two: `Default` is deleted and `Artifact.readHarden` resolves an absent
+    /// block HERE. The migration is what made the flip safe; the sequence, not the
+    /// flip, was ever the difficult part.
     ///
     /// **Empty strings rather than `string option` fields, deliberately.** Widening
-    /// the members to `option` is a retype of a published record — it is met by every
-    /// consumer whether or not it wants the refusal, which is the opposite of an
-    /// opt-in — and the absence of a name in a record whose members ARE names is
+    /// the members to `option` is a retype of a published record — every consumer
+    /// meets it, including the ones this change has nothing to say to — and the
+    /// absence of a name in a record whose members ARE names is
     /// exactly what an empty one says. What makes the absence non-silent is the
     /// refusal, not the representation: an undeclared [[GatedKind]] matches no node
     /// tag, so a hardening run over this policy would otherwise gate NOTHING and say
@@ -613,8 +602,9 @@ type Idl =
         /// The vocabulary tokens the engine addresses BY NAME (Phase 116) — the
         /// gated kind, the inert placeholder it becomes, the literal text and value
         /// cases the sanitisation floor matches, and which unions have a transparent
-        /// case. [[HardenPolicy.Default]] is the set the engine hard-coded, so a
-        /// vocabulary that declares nothing is byte-for-byte unchanged.
+        /// case. A vocabulary that declares nothing gets [[HardenPolicy.Undeclared]]
+        /// and the hardener refuses it by name (Phase 180) — there is no default
+        /// spelling to fall back to.
         ///
         /// Declared rather than hard-coded for the same reason [[NodeFields]] and
         /// [[Wire]] are: what a vocabulary CALLS the node it refuses to resolve live
@@ -786,10 +776,11 @@ module Declare =
 /// **The wart is closed since Phase 116.** The rule used to be keyed on a hard-coded
 /// vocabulary name (`TextSource`) inside an engine that is otherwise domain-generic
 /// (D14); it is now read from [[HardenPolicy.TransparentUnions]], which the vocabulary
-/// declares on its own [[Idl]] value and the artifact carries. `HardenPolicy.Default`
-/// still names that union, so a vocabulary that declares nothing encodes exactly as it
-/// did — the hard-coding became a DEFAULT rather than disappearing, which is what keeps
-/// every shipped corpus byte-identical.
+/// declares on its own [[Idl]] value and the artifact carries. Phase 116 kept the old
+/// name reachable as a DEFAULT so every shipped corpus stayed byte-identical; Phase 180
+/// deleted that default once both published artifacts declared their block, so a
+/// vocabulary that names no transparent union now has none — which is what the empty
+/// list has always said, and now the only thing it can say.
 module TransparentUnion =
     /// The transparent case tag for a union under a declared policy, or `None` if the
     /// union has none. Pass the owning vocabulary's `idl.Harden`.

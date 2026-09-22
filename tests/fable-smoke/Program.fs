@@ -348,7 +348,7 @@ let private idlTouch =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Default }
+          Harden = HardenPolicy.Undeclared }
 
     let sampled = Sample.sampleNodes vocab [ "Note"; "Box" ] 20260821 4
 

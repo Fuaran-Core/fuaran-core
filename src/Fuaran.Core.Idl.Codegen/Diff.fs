@@ -151,9 +151,10 @@ module Diff =
             /// — `"$type/nestedKind"` when the artifact predates the key or the
             /// vocabulary declares the default.
             Wire: string
-            /// The declared hardening vocabulary (Phase 116), rendered canonically —
-            /// the default block when the artifact predates the key or the vocabulary
-            /// declares the default, so the two read alike, which is what they mean.
+            /// The declared hardening vocabulary (Phase 116), rendered canonically — the
+            /// all-empty block when the artifact predates the key, since Phase 180 made
+            /// an absent block and an undeclared policy the same claim. So the two read
+            /// alike, which is what they mean.
             ///
             /// Carried as ONE string rather than a member-per-field for the reason
             /// [[Wire]] is: the classifier's job here is to say the declaration moved
@@ -377,27 +378,34 @@ module Diff =
                         + (str "keyOrder" w |> Option.defaultValue "sorted")
                     | None -> "$type/nestedKind/sorted"
                   Harden =
-                    match field "harden" artifact with
-                    | Some h ->
-                        [ "gatedKind"
-                          "placeholderKind"
-                          "placeholderField"
-                          "textLiteralCase"
-                          "textLiteralField"
-                          "valueLiteralCase"
-                          "valueLiteralField" ]
-                        |> List.map (fun k -> str k h |> Option.defaultValue "")
-                        |> String.concat "/"
-                        |> fun tokens ->
-                            tokens
-                            + "/"
-                            + (arr "transparentUnions" h
-                               |> List.map (fun e ->
-                                   (str "union" e |> Option.defaultValue "")
-                                   + "."
-                                   + (str "case" e |> Option.defaultValue ""))
-                               |> String.concat ",")
-                    | None -> "Custom/Markdown/text/Literal/text/Static/value/TextSource.Literal" }
+                    // Phase 180 — an absent block reads as the UNDECLARED policy, and it
+                    // does so by walking the SAME members over an empty object rather
+                    // than by a second answer beside them. This used to be a match whose
+                    // `None` arm carried a literal second copy of the engine's old
+                    // hard-coded default; it moved with `Artifact.readHarden`, because a
+                    // classifier that disagrees with the reader about what an artifact
+                    // MEANS is worse than either answer alone, and it is written this way
+                    // so the two cannot drift apart again.
+                    let h = field "harden" artifact |> Option.defaultValue (JObj [])
+
+                    [ "gatedKind"
+                      "placeholderKind"
+                      "placeholderField"
+                      "textLiteralCase"
+                      "textLiteralField"
+                      "valueLiteralCase"
+                      "valueLiteralField" ]
+                    |> List.map (fun k -> str k h |> Option.defaultValue "")
+                    |> String.concat "/"
+                    |> fun tokens ->
+                        tokens
+                        + "/"
+                        + (arr "transparentUnions" h
+                           |> List.map (fun e ->
+                               (str "union" e |> Option.defaultValue "")
+                               + "."
+                               + (str "case" e |> Option.defaultValue ""))
+                           |> String.concat ",") }
         | _ -> Error "idl.json: expected a JSON object at the root"
 
     /// Parse + read in one step.

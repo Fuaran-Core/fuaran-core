@@ -42,7 +42,7 @@ let private empty: Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Default }
+      Harden = HardenPolicy.Undeclared }
 
 let private kind tag fields : IdlKind =
     { Tag = tag

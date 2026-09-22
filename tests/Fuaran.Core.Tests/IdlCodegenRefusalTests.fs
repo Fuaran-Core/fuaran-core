@@ -49,7 +49,7 @@ let private baseIdl: Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Default }
+      Harden = HardenPolicy.Undeclared }
 
 let private kinds = [ "Note" ]
 
@@ -214,7 +214,7 @@ let tests =
                                     Fields = [ f "a" TStr Required; f "b" TStr Required ]
                                     Annotations = Annotations.Empty } ] } ]
                       Harden =
-                          { HardenPolicy.Default with
+                          { HardenPolicy.Undeclared with
                               TransparentUnions = [ "Src", "Pair" ] } }
 
               match expectRefusal "a two-field transparent case" (emitFs idl) with

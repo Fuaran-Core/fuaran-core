@@ -382,7 +382,17 @@ let miniIdl: Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Default }
+      // Phase 180 — this used to read `HardenPolicy.Default`, which handed the mini
+      // IDL five tokens it never named and which happened to be right for two of
+      // them. What it genuinely declares is ONE transparent case: `TextSource.Literal`
+      // encodes bare, which is wire-visible and which `Generated.fs` and the
+      // certification suite both depend on. It declares no GATED kind, because it has
+      // none — there is no `Custom` here — and so nothing in this spike calls the
+      // hardener; `Trust.harden` would refuse this vocabulary by name, which is the
+      // honest answer rather than a floor gating a tag no node carries.
+      Harden =
+        { HardenPolicy.Undeclared with
+            TransparentUnions = [ "TextSource", "Literal" ] } }
 
 /// `TextSource.Literal` — the most-used value-union, sugared.
 let lit (s: string) : IdlValue = VUnion("Literal", [ "text", VStr s ])

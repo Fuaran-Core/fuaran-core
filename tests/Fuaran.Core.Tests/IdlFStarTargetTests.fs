@@ -144,9 +144,11 @@ let private tinyIdl (fieldType: IdlType) (opt: Optionality) : Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden =
-        { HardenPolicy.Default with
-            TransparentUnions = [] } }
+      // Phase 180 — this was `{ HardenPolicy.Default with TransparentUnions = [] }`:
+      // an override that existed only to drop the default's one entry. With the
+      // default retired the override has nothing to say, and the vocabulary declares
+      // outright what it always meant — no gated kind, no transparent case.
+      Harden = HardenPolicy.Undeclared }
 
 /// Both generated files for one vocabulary, from one walk: the model and the theorems over it.
 /// Phase 150 committed only the model, because the theorems did not discharge at the UI
@@ -376,9 +378,11 @@ let private uiScaleIdl: Idl =
           field "style" TStr Optional ]
       Ops = []
       Wire = WireShape.Default
-      Harden =
-        { HardenPolicy.Default with
-            TransparentUnions = [] } }
+      // Phase 180 — this was `{ HardenPolicy.Default with TransparentUnions = [] }`:
+      // an override that existed only to drop the default's one entry. With the
+      // default retired the override has nothing to say, and the vocabulary declares
+      // outright what it always meant — no gated kind, no transparent case.
+      Harden = HardenPolicy.Undeclared }
 
 [<Tests>]
 let idlFStarTargetTests =

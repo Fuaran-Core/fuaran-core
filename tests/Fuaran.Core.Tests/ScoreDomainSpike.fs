@@ -301,7 +301,7 @@ let scoreIdl: Idl =
         { Discriminator = "kind"
           NodeEnvelope = NodeEnvelopeShape.FlatKind
           KeyOrder = KeyOrder.Declared }
-      Harden = HardenPolicy.Default }
+      Harden = HardenPolicy.Undeclared }
 
 let private nodeTags = scoreIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
 

@@ -16,18 +16,44 @@ open Fuaran.Core.Tests.ReferenceIdl
 // place would have changed what already-published bytes mean, silently, with a green
 // build — which is what Phase 178 measured and refused.
 //
-// This phase changes the WRITER only. A freshly rendered artifact now declares its
-// policy outright at every policy value, so no reader has to infer it; the READER is
-// untouched, because the artifacts written before this phase still exist. Flipping the
-// reader is Phase 180, gated on those two artifacts having been re-rendered here.
+// That phase changed the WRITER only. A freshly rendered artifact declares its policy
+// outright at every policy value, so no reader has to infer it; the READER stayed put,
+// because the artifacts written before it still existed.
 //
-// Four families below, and the fourth is the one that earns the "additive" class rather
-// than asserting it: the diff classifier is run over the old bytes and the new, and
-// reports no hardening change at all.
+// **Phase 180 flipped the reader, and this file is amended rather than rewritten.** The
+// gate D40 named is met — `fuaran#1755` re-rendered both published artifacts (`bb10065`)
+// and `roadmapctl copies` reports the corpus and both bundled host snapshots in step —
+// so `HardenPolicy.Default` is deleted and an absent `harden` block reads back as
+// `Undeclared`. Three consequences here, all of them deliberate:
 //
-// `IdlTrustTests`' compat family is the sibling guard on the reader half — it holds the
-// D40 promise itself. This file holds the writer half and the round trip.
+//   - the old `Default` fixture is now a LITERAL token set (`retiredDefaultTokens`),
+//     because the claim "the writer omits nothing, whatever the policy" outlives the
+//     record member that used to supply one of the policies;
+//   - the compat case INVERTS — a pre-179 artifact parses to `Undeclared`, and the
+//     case below says why that is safe rather than merely different;
+//   - the additive measurement re-anchors on the policy where it is still TRUE: absent
+//     and all-empty now mean the same thing, so adding the block to an artifact that
+//     declared nothing is still not a hardening change, and the falsifier beside it
+//     requires a genuine move to be reported.
+//
+// `IdlTrustTests`' family is the sibling guard on the reader half. This file holds the
+// writer half and the round trip.
 // ---------------------------------------------------------------------------
+
+/// The five tokens the engine hard-coded before Phase 116 made them declarable, shipped
+/// as `HardenPolicy.Default` between 116 and 180 and deleted by 180. Spelled out here
+/// because the tests that used to read them off that member are testing the WRITER and
+/// the CLASSIFIER, neither of which cared which names it was handed — only that a
+/// fully-declared policy including the one wire-visible member round-trips.
+let private retiredDefaultTokens: HardenPolicy =
+    { GatedKind = "Custom"
+      PlaceholderKind = "Markdown"
+      PlaceholderField = "text"
+      TextLiteralCase = "Literal"
+      TextLiteralField = "text"
+      ValueLiteralCase = "Static"
+      ValueLiteralField = "value"
+      TransparentUnions = [ "TextSource", "Literal" ] }
 
 /// The bytes a PRE-Phase-179 renderer produced for this vocabulary: the same artifact
 /// with the `harden` block dropped at the JSON level.
@@ -50,10 +76,10 @@ let private withoutHarden (idl: Idl) : string =
     | other -> failtestf "the artifact root is not a JSON object: %A" other
 
 /// Every policy value the phase has to answer for: the tokens the engine used to
-/// hard-code, the Phase-178 opt-in that declares none of them, and a vocabulary that
+/// hard-code, the Phase-178 policy that declares none of them, and a vocabulary that
 /// spells its own — including a transparent union, the one wire-visible member.
 let private policies: (string * HardenPolicy) list =
-    [ "Default", HardenPolicy.Default
+    [ "the retired default's tokens", retiredDefaultTokens
       "Undeclared", HardenPolicy.Undeclared
       "the reference vocabulary's own", refIdl.Harden
       "its own, with a transparent union",
@@ -83,11 +109,12 @@ let tests =
                             "\"harden\""
                             (sprintf "'%s': a freshly rendered artifact declares its policy outright" name))
 
-                // The `Default` case stated on its own, because it is the one that
-                // CHANGED and the one a later reader will come looking for. Before this
-                // phase the assertion beside it was `isFalse`.
-                testCase "the default is no longer the omitted case" (fun _ ->
-                    let text = Artifact.render (at HardenPolicy.Default)
+                // The case stated on its own, because it is the one Phase 179 CHANGED and
+                // the one a later reader will come looking for. Before that phase the
+                // assertion beside it was `isFalse`, and these exact tokens were the
+                // policy whose rendering was omitted.
+                testCase "the retired default's tokens are no longer the omitted case" (fun _ ->
+                    let text = Artifact.render (at retiredDefaultTokens)
 
                     Expect.stringContains
                         text
@@ -101,12 +128,13 @@ let tests =
 
           testList
               "the render of Undeclared, pinned"
-              [ // Phase 178's opt-in says "I have not named these", and on the wire that
-                // has to be the explicit empty members it is — not an absent block, which
-                // by `readHarden`'s standing promise means the exact opposite. Pinned as
-                // bytes, because this is the one policy whose rendering could plausibly
-                // be "optimised" back to an omission by someone reading empty strings as
-                // nothing to say.
+              [ // `Undeclared` says "I have not named these", and on the wire that is the
+                // explicit empty members it is. Pinned as bytes, because this is the one
+                // policy whose rendering could plausibly be "optimised" back to an
+                // omission by someone reading empty strings as nothing to say — and since
+                // Phase 180 an omission decodes to this same policy, so such an
+                // optimisation would be invisible to a round-trip test and visible only
+                // here.
                 testCase "every member renders as the empty declaration it is" (fun _ ->
                     let text = Artifact.render (at HardenPolicy.Undeclared)
 
@@ -128,12 +156,12 @@ let tests =
                     match Artifact.parse text with
                     | Error m -> failtestf "the undeclared artifact did not parse: %s" m
                     | Ok back ->
-                        Expect.equal back.Harden HardenPolicy.Undeclared "the opt-in survives the round trip"
+                        Expect.equal back.Harden HardenPolicy.Undeclared "the declaration survives the round trip"
 
                         Expect.notEqual
                             back.Harden
-                            HardenPolicy.Default
-                            "and is still a different claim from the default") ]
+                            retiredDefaultTokens
+                            "and is still a different claim from the tokens the engine used to supply") ]
 
           testList
               "render → parse → render, with the block"
@@ -152,12 +180,22 @@ let tests =
                                 policy
                                 (sprintf "'%s': the policy survived the round trip exactly" name))
 
-                // The compat law from 178, restated from THIS phase's side: the writer
-                // moved, the reader did not, so bytes written by the previous version
-                // still mean what they meant. If this goes red, every artifact published
-                // before this phase has changed meaning — see D40 before touching it.
-                testCase "an artifact rendered by the PREVIOUS version still parses to Default" (fun _ ->
-                    let old = withoutHarden (at HardenPolicy.Default)
+                // Phase 180 — the compat law from 178 is INVERTED here, on purpose, and
+                // this case is the record of it. The law was never "an absent block means
+                // the engine's old tokens"; it was "an absent block must not change
+                // meaning while artifacts relying on that meaning exist". Phase 179 made
+                // the writer emit the block always, `fuaran#1755` re-rendered the two
+                // published artifacts, and `roadmapctl copies` reports both bundled host
+                // snapshots of the shared corpus in step — so the set of artifacts the
+                // flip could change the meaning of is empty, which is the condition D40
+                // named and the only thing that ever gated it.
+                //
+                // An artifact that would still hit this path — rendered before 179 and
+                // never re-rendered — now decodes to a vocabulary that REFUSES to harden
+                // rather than one that hardens as a domain it never named. That is the
+                // safe direction of the two, which is why it is the one taken.
+                testCase "an artifact rendered by the PREVIOUS version parses to Undeclared" (fun _ ->
+                    let old = withoutHarden (at retiredDefaultTokens)
 
                     Expect.isFalse (old.Contains "\"harden\"") "the fixture is what a pre-179 renderer wrote"
 
@@ -166,19 +204,41 @@ let tests =
                     | Ok back ->
                         Expect.equal
                             back.Harden
-                            HardenPolicy.Default
-                            "an absent block still reads as Default — NOT as Undeclared"
+                            HardenPolicy.Undeclared
+                            "an absent block reads as Undeclared — Phase 180's inversion"
 
                         Expect.notEqual
                             back.Harden
-                            HardenPolicy.Undeclared
-                            "if this ever fails, every published artifact's hardening has changed meaning")
+                            retiredDefaultTokens
+                            "the tokens the engine used to supply are not supplied by anything now")
 
-                // Both directions of the migration's one step: re-rendering a pre-179
-                // artifact ADDS the block and changes nothing else. This is the shape
-                // Phase 180's gate is waiting on, asserted here rather than described.
-                testCase "re-rendering a pre-179 artifact adds the block and nothing else" (fun _ ->
-                    let idl = at HardenPolicy.Default
+                // The consequence, stated as bytes: re-rendering a pre-179 artifact is no
+                // longer the identity on meaning. It ADDS a block declaring nothing, where
+                // before 180 it added a block declaring the engine's tokens. Asserting the
+                // difference is what keeps it a decision rather than an accident — and it
+                // is exactly why `fuaran#1755` had to re-render the published artifacts
+                // BEFORE this phase, not after.
+                testCase "re-rendering a pre-179 artifact now yields the undeclared block" (fun _ ->
+                    let idl = at retiredDefaultTokens
+
+                    match Artifact.parse (withoutHarden idl) with
+                    | Error m -> failtestf "the pre-179 artifact did not parse: %s" m
+                    | Ok back ->
+                        Expect.equal
+                            (Artifact.render back)
+                            (Artifact.render (at HardenPolicy.Undeclared))
+                            "the re-render declares nothing, because the artifact declared nothing"
+
+                        Expect.notEqual
+                            (Artifact.render back)
+                            (Artifact.render idl)
+                            "and is NOT the artifact the tokens would have produced — the meaning moved, deliberately")
+
+                // The same step over an artifact that was ALREADY declaring nothing, which
+                // is the case the inversion leaves untouched: absent and all-empty now say
+                // the same thing, so the re-render is the identity on meaning.
+                testCase "re-rendering a blockless artifact of an undeclared vocabulary is stable" (fun _ ->
+                    let idl = at HardenPolicy.Undeclared
 
                     match Artifact.parse (withoutHarden idl) with
                     | Error m -> failtestf "the pre-179 artifact did not parse: %s" m
@@ -193,13 +253,20 @@ let tests =
               [ // The STABILITY entry calls this additive on the wire. The diff
                 // classifier is what the estate reads that claim through, so run it:
                 // between the bytes a pre-179 renderer wrote and the bytes this one
-                // writes, it must report NO hardening change — the block's presence at
-                // the default says exactly what its absence did.
+                // writes, it must report NO hardening change — the block's presence says
+                // exactly what its absence did.
+                //
+                // **Re-anchored by Phase 180, onto the policy where the claim is still
+                // true.** It used to run at the engine's old token set, because that was
+                // what an absent block meant; an absent block now means `Undeclared`, so
+                // that is the policy whose block adds nothing. The measurement is the same
+                // measurement — it is the definition of "absent" underneath it that moved,
+                // which is the whole content of this phase.
                 //
                 // Run in both directions, because a classifier that reported nothing
                 // for an unrelated reason would look identical from one side.
                 testCase "the diff between pre-179 and post-179 bytes reports no harden change" (fun _ ->
-                    let idl = at HardenPolicy.Default
+                    let idl = at HardenPolicy.Undeclared
                     let before = withoutHarden idl
                     let after = Artifact.render idl
 
@@ -211,13 +278,13 @@ let tests =
                         | Ok verdict ->
                             Expect.isEmpty
                                 (verdict.Changes |> List.filter hardenRow)
-                                (sprintf "'%s': adding the block at the default is not a hardening change" label))
+                                (sprintf "'%s': adding an all-empty block is not a hardening change" label))
 
                 // The falsifier for the case above: a policy that genuinely moved MUST
                 // be reported. Without this the test above passes on a classifier that
                 // reports nothing at all.
                 testCase "a policy that genuinely moved IS reported" (fun _ ->
-                    let before = Artifact.render (at HardenPolicy.Default)
+                    let before = Artifact.render (at retiredDefaultTokens)
                     let after = Artifact.render (at HardenPolicy.Undeclared)
 
                     match Diff.classifyArtifacts before after with

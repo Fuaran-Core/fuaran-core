@@ -108,7 +108,6 @@ method Fuaran.Core.Idl.Sanitize.scrubMarkdown(System.String) : System.String
 method Fuaran.Core.Idl.TransparentUnion.tag(Fuaran.Core.Idl.HardenPolicy, Fuaran.Core.Idl.IdlUnion) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 property Fuaran.Core.Idl.Annotations.Empty : Fuaran.Core.Idl.Annotations { get }
 property Fuaran.Core.Idl.Annotations.IsEmpty : System.Boolean { get }
-property Fuaran.Core.Idl.HardenPolicy.Default : Fuaran.Core.Idl.HardenPolicy { get }
 property Fuaran.Core.Idl.HardenPolicy.Undeclared : Fuaran.Core.Idl.HardenPolicy { get }
 property Fuaran.Core.Idl.IdlEnum.HasCaseAnnotations : System.Boolean { get }
 property Fuaran.Core.Idl.IdlEnum.WireCases : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
