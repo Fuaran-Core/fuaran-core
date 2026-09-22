@@ -172,6 +172,44 @@ type ConstructWitness<'T> =
     { Surface: string
       Construct: 'T -> Result<'T, string> }
 
+/// The domain-supplied KEYED-CHILDREN declaration (Phase 189): the nodes a domain holds where
+/// `NodeWitness.Children` does not report them — a case table, a fallback slot, a named
+/// alternative, an argument position — together with the domain's own full-walk id check over
+/// them.
+///
+/// **Why this is a witness of its own and not a field of `OpGen`.** `Children` is what the engine
+/// REBUILDS through, so widening the node witness to reach keyed positions would oblige every
+/// domain to re-express them as an ordered list — a large change to what a domain must model, to
+/// buy a check the domain is far better placed to make. The boundary stays where `README.md` puts
+/// it; what changes is that the obligation it leaves with the domain is now something the domain
+/// can RUN, on the `ConstructWitness` precedent: a domain opts in by supplying one, and a domain
+/// that supplies none is not silently certified.
+///
+/// **A domain with no keyed position declares the empty list**, and the family then reports
+/// vacuity BY DECLARATION rather than by silence — a green report over a witness that was never
+/// asked anything is the vacuity this kit exists to refuse.
+type KeyedWitness<'Node, 'Id> =
+    {
+        /// The domain's own id check, named as a reader of a counterexample would look for it —
+        /// name the thing an author calls ("the full walk in `Doc.validate`"), not the module it
+        /// lives in.
+        Surface: string
+        /// The ids this node holds in keyed, non-structural positions — the ones `Children` does
+        /// not report. `[]` for a node that holds none, and `fun _ -> []` for a domain that has
+        /// none at all.
+        HasKeyedChildren: 'Node -> 'Id list
+        /// Place `id` in a keyed position of this node, or `None` where this node has no keyed
+        /// position to place into. The kit BUILDS its collisions through this rather than drawing
+        /// them: a generator's contract is a fresh id, so a drawn sample can never exhibit the
+        /// defect these laws are about, and a law quantified over the drawn sample alone would
+        /// certify a check that checked nothing (`opAlgebra`'s built arm, for the same reason).
+        PlaceKeyedChild: 'Node -> 'Id -> 'Node option
+        /// The domain's own full-walk id check: `true` when this tree's ids are unique over the
+        /// domain's OWN walk, keyed positions included. This is the obligation being certified,
+        /// so it is the domain's function and never derived from the two above.
+        IdsUnique: 'Node -> bool
+    }
+
 /// The aggregate certification report.
 type ConformanceReport =
     { Results: LawResult list
@@ -8657,3 +8695,228 @@ module Conformance =
                       + string seed
                       + ": OpGen.CanHold is None, so there is no container capability to certify — a domain without one has nothing for this family to say, and answering with a green report would look like certification of a claim nobody made"
                   ) } ]
+
+    /// **The witness surface's own boundary, certified rather than assumed** (Phase 189).
+    ///
+    /// `Tree.ids` walks `NodeWitness.Children`, so a node a domain holds in a keyed,
+    /// non-structural position is invisible to the uniqueness scan, to every theorem in `proofs/`
+    /// and to the differential. Uniqueness over those positions is the domain's obligation — the
+    /// claims ladder carried it as `witness-surface-scope`, a PERMANENT premise, on the reasoning
+    /// that no kit law could discharge it. That reasoning was about the surface the kit could
+    /// SEE, and it stopped holding the moment a domain could declare those positions itself. This
+    /// family is that declaration and the three laws it buys.
+    ///
+    /// **What it does NOT do is widen the witness surface.** The engine still cannot reach a
+    /// keyed position, `Ops.apply` still refuses only what `Children` reports, and the reasons
+    /// `README.md` gives for that stand. What is certified here is the DOMAIN'S check, at the
+    /// domain's own witness, over the domain's own generator — which is what the obligation was
+    /// always about.
+    ///
+    /// Three laws, and the pair after the first is where the content is:
+    ///
+    /// - **The check ACCEPTS a walk with no repeat.** The anti-vacuity arm, and it is first
+    ///   because without it `fun _ -> false` passes everything below. Measured only where the
+    ///   kit's own walk — every id `Children` reports, plus every id a node declares keyed —
+    ///   repeats nothing, because a tree the kit can see a collision in is one the check is
+    ///   RIGHT to refuse.
+    /// - **The check REFUSES an id held in a keyed position that the witness surface also
+    ///   holds.** BUILT, never drawn: `gen.FreshNode`'s contract is an id the tree does not
+    ///   carry, so a drawn sample cannot exhibit this and a law quantified over it would certify
+    ///   a check that checked nothing. The kit builds the collision through
+    ///   `KeyedWitness.PlaceKeyedChild` and splices the rebuilt node back with `Tree.updateNode`.
+    /// - **The check REFUSES one id held in two keyed positions.** The other half, and a
+    ///   different defect: a check that walks the keyed positions but compares them only against
+    ///   the surface passes the law above and fails this one.
+    ///
+    /// **A domain that declares NO keyed position passes VACUOUSLY and the report says so** —
+    /// `HasKeyedChildren` empty everywhere and `PlaceKeyedChild` answering `None` everywhere is a
+    /// DECLARATION that there is nothing here to certify, and the adequacy line says that in
+    /// those words rather than reporting three laws nothing reached. A domain that declares keyed
+    /// positions and gives the kit no way to BUILD one is the other case entirely, and fails the
+    /// adequacy guard naming the arms: a claim to have keyed positions is a claim this family can
+    /// measure, and an unmeasurable one is not evidence.
+    ///
+    /// **Opt-in, not folded into `certify`** — the `containerLaws` shape. `certify` runs over any
+    /// `OpGen`, and a domain with no keyed positions has nothing for this family to say; folding
+    /// it in would add laws that cannot fail for most domains, and would make `certify`'s law
+    /// count depend on a witness it does not take.
+    let keyedChildrenLaws
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable accepted = None
+        let mutable surfaceClash = None
+        let mutable twiceKeyed = None
+        // the three arms, counted so an arm nothing reached is REPORTED rather than assumed
+        let mutable cleanWalks = 0
+        let mutable surfaceBuilds = 0
+        let mutable keyedBuilds = 0
+        // and the two counts that tell "declares none" apart from "declares some and hid them"
+        let mutable declaredKeyed = 0
+        let mutable placementsTaken = 0
+
+        let keyOf (n: 'Node) = idw.ToString(nodew.Id n)
+
+        let keyedKeysOf (n: 'Node) =
+            keyw.HasKeyedChildren n |> List.map idw.ToString
+
+        /// The kit's own full walk: every id the witness surface reports, plus every id a node
+        /// declares in a keyed position. It is the kit's model of the domain's walk and never the
+        /// domain's own — a law that read the domain's check for its own expectation would agree
+        /// with it by construction, which is the one thing a conformance law must not do.
+        let surfaceKeys (t: 'Node) = Tree.preorder nodew t |> List.map keyOf
+
+        let keyedKeys (t: 'Node) =
+            Tree.preorder nodew t |> List.collect keyedKeysOf
+
+        let occurrences (k: string) (ks: string list) =
+            ks |> List.filter (fun x -> x = k) |> List.length
+
+        /// Splice a rebuilt node back where it came from. `None` where the witness declined the
+        /// rebuild or moved the node's identity under it: a placement that changed the id or the
+        /// kind tag is a DECLARATION defect, and counting it as evidence here would localise it to
+        /// the wrong place — the F1 lesson `containerLaws` states at its own rebuild guard.
+        let spliceIn (original: 'Node) (rebuilt: 'Node) (t: 'Node) : 'Node option =
+            if
+                idw.Equals (nodew.Id rebuilt) (nodew.Id original)
+                && nodew.KindTag rebuilt = nodew.KindTag original
+            then
+                Tree.updateNode nodew idw (nodew.Id original) (fun _ -> rebuilt) t
+            else
+                None
+
+        /// Place `id` in a keyed position of `n`, and answer only where the placement TOOK — the
+        /// id is in the rebuilt node's own declaration. A witness that answered `Some` and placed
+        /// nothing would otherwise be measured as having exhibited a collision it does not carry.
+        let place (n: 'Node) (id: 'Id) : 'Node option =
+            match keyw.PlaceKeyedChild n id with
+            | Some rebuilt when List.contains (idw.ToString id) (keyedKeysOf rebuilt) ->
+                placementsTaken <- placementsTaken + 1
+                Some rebuilt
+            | _ -> None
+
+        for i in 0 .. iterations - 1 do
+            let tree, r1 = gen.Tree rng
+            rng <- r1
+            let nodes = Tree.preorder nodew tree
+            declaredKeyed <- declaredKeyed + List.length (keyedKeys tree)
+
+            // ---- arm 1: a full walk that repeats no id is ACCEPTED (the anti-vacuity arm) ----
+            let walk = surfaceKeys tree @ keyedKeys tree
+
+            if List.length (List.distinct walk) = List.length walk then
+                cleanWalks <- cleanWalks + 1
+
+                if not (keyw.IdsUnique tree) && accepted.IsNone then
+                    accepted <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: %s REFUSED a tree whose full walk (%d id(s), %d of them keyed) repeats nothing — a check that refuses a lawful tree certifies nothing by refusing an unlawful one, and the two laws below would pass for a check that refuses everything"
+                                seed
+                                i
+                                keyw.Surface
+                                (List.length walk)
+                                (List.length (keyedKeys tree))
+                        )
+
+            // ---- arm 2: an id held keyed AND in the witness surface is REFUSED (built) ----
+            let holder, r2 = ConfRng.choose nodes rng
+            let victim, r3 = ConfRng.choose nodes r2
+            rng <- r3
+            let victimKey = keyOf victim
+
+            match
+                place holder (nodew.Id victim)
+                |> Option.bind (fun rb -> spliceIn holder rb tree)
+            with
+            | Some clashed when
+                List.contains victimKey (surfaceKeys clashed)
+                && List.contains victimKey (keyedKeys clashed)
+                ->
+                surfaceBuilds <- surfaceBuilds + 1
+
+                if keyw.IdsUnique clashed && surfaceClash.IsNone then
+                    surfaceClash <-
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: %s ACCEPTED a tree holding %s both in the witness surface and in a keyed position of %s (kind %s) — the engine cannot see the keyed one, so nothing else will refuse it, and every theorem about this tree is then about a different tree from the one the domain holds"
+                                seed
+                                i
+                                keyw.Surface
+                                victimKey
+                                (keyOf holder)
+                                (nodew.KindTag holder)
+                        )
+            | _ -> ()
+
+            // ---- arm 3: one id held in TWO keyed positions is REFUSED (built) ----
+            let fresh, r4 = gen.FreshNode (Set.ofList walk) rng
+            rng <- r4
+            let freshId = nodew.Id fresh
+            let freshKey = idw.ToString freshId
+            let a, r5 = ConfRng.choose nodes rng
+            let b, r6 = ConfRng.choose nodes r5
+            rng <- r6
+
+            if not (idw.Equals (nodew.Id a) (nodew.Id b)) then
+                let built =
+                    place a freshId
+                    |> Option.bind (fun ra -> spliceIn a ra tree)
+                    |> Option.bind (fun t1 ->
+                        match Tree.tryFind nodew idw (nodew.Id b) t1 with
+                        | Some b1 -> place b1 freshId |> Option.bind (fun rb -> spliceIn b1 rb t1)
+                        | None -> None)
+
+                match built with
+                | Some doubled when
+                    occurrences freshKey (keyedKeys doubled) = 2
+                    && not (List.contains freshKey (surfaceKeys doubled))
+                    ->
+                    keyedBuilds <- keyedBuilds + 1
+
+                    if keyw.IdsUnique doubled && twiceKeyed.IsNone then
+                        twiceKeyed <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s ACCEPTED a tree holding %s in a keyed position of BOTH %s and %s — the id occurs nowhere in the witness surface, so a check that compares the keyed positions against the surface alone passes the law above and lets this one through"
+                                    seed
+                                    i
+                                    keyw.Surface
+                                    freshKey
+                                    (keyOf a)
+                                    (keyOf b)
+                            )
+                | _ -> ()
+
+        [ { Law = "the domain's id check accepts a tree whose full walk repeats no id"
+            Passed = accepted.IsNone
+            Counterexample = accepted }
+          { Law = "the domain's id check refuses an id held in a keyed position and in the witness surface"
+            Passed = surfaceClash.IsNone
+            Counterexample = surfaceClash }
+          { Law = "the domain's id check refuses an id held in two keyed positions"
+            Passed = twiceKeyed.IsNone
+            Counterexample = twiceKeyed }
+          (if declaredKeyed = 0 && placementsTaken = 0 then
+               // Vacuous BY DECLARATION, which is a different thing from an arm nothing reached:
+               // the witness was asked for a keyed position on every iteration and answered that
+               // it has none. Passing is the honest verdict, and saying which verdict it is — in
+               // the adequacy line every consumer's census reads — is what keeps it from looking
+               // like three laws certified.
+               { Law =
+                   "sample adequacy (Conformance.keyedChildrenLaws): the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION"
+                 Passed = true
+                 Counterexample = None }
+           else
+               SampleAdequacy.reached
+                   "Conformance.keyedChildrenLaws"
+                   "built arm"
+                   seed
+                   [ "clean full walk", cleanWalks
+                     "keyed id in the witness surface", surfaceBuilds
+                     "one id in two keyed positions", keyedBuilds ]) ]

@@ -574,7 +574,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 21 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 26 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -583,14 +583,14 @@ place together with the contract it implies.
   the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
   law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
   witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
-  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 4 rows.
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 5 rows.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
   proved, a walk order the model is handed rather than derives, a specification row the model
   covers vacuously. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 13 rows.
+  `unscheduled` where something could and nobody has. 17 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -617,7 +617,7 @@ over-read.
 | `parser-float-readback-opaque` | `model-bridge` | `permanent` |
 | `parser-alphabet-bridge` | `model-bridge` | `permanent` |
 | `lawful-abstract-witness` | `domain-obligation` | `Conformance.witnessLaws` |
-| `witness-surface-scope` | `premise` | — |
+| `witness-surface-scope` | `domain-obligation` | `Conformance.keyedChildrenLaws` |
 | `canon-numeral-layouts` | `model-bridge` | `permanent` |
 | `canon-key-comparator` | `model-bridge` | `permanent` |
 | `canon-character-bridge` | `model-bridge` | `permanent` |
@@ -639,14 +639,24 @@ Phase 158, which took `Dag.mergeBase` out of it for every shape but a criss-cros
 set of two values would have forced both into a claim of impossibility, which is a worse error than
 a third token.
 
-**Why `witness-surface-scope` is a `premise` though a domain is what owes it.** It is the one row
-whose obligation is the domain's and whose discharge no run can perform. A node a domain holds in a
+**Why `witness-surface-scope` stopped being a `premise` (Phase 189).** It was the one row whose
+obligation was the domain's and whose discharge no run could perform: a node a domain holds in a
 keyed, non-structural position is invisible to `Tree.ids`, to every theorem in this directory and
-to every law in the kit — so there is no green run to cite for it, and a `dischargedBy` naming
-one would be a citation to a run that does not look. The root [`README.md`](../README.md) states
-the same boundary from the domain's own side, "this engine cannot see those nodes and will not
-pretend to", and calls it deliberate rather than a gap waiting to be closed. The class says what
-discharges a row, which here is nothing; it does not say whose obligation it is.
+to every law in the kit, so there was no green run to cite and a `dischargedBy` would have named a
+run that does not look. That argument was about what the kit could SEE, and it stopped holding the
+moment a domain could DECLARE the positions it holds. `Conformance.keyedChildrenLaws` takes
+`KeyedWitness.HasKeyedChildren` as that declaration and certifies the domain's own full-walk id
+check against it — refusing an id held in a keyed position that the witness surface also holds, and
+one held in two keyed positions, both BUILT rather than drawn — so the row is now an obligation with
+a law like any other.
+
+**What did NOT change is the boundary itself.** The witness surface is unwidened: `Ops` still sees
+exactly what `Children` reports, and the root [`README.md`](../README.md) still says of the keyed
+positions that "this engine cannot see those nodes and will not pretend to". What is certified is
+the DOMAIN'S check, at the domain's own witness — which is what the row always said the obligation
+was. A domain that declares no keyed position runs the family and is told, in the adequacy line,
+that its report is vacuous by declaration; that is a different thing from a green run, and the
+report says which one it is.
 
 **This table is CHECKED against `../proofs.json`, row for row** — same rows, same order, same
 class, same third column — by the `contract-agrees` clause of the `Proofs.Ladder` family in
@@ -4528,7 +4538,9 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
    - **What is left of the evaluator contract** (`propagation-change-set-and-prior`, a `premise`).
      A complete change set — about results and about reads — and a `prior` that is `eval`'s own
      output over the same map. The domain's, enforced nowhere, and discharged by no run: the shipped
-     law family runs a toy evaluator, never a domain's — the `witness-surface-scope` precedent. The
+     law family runs a toy evaluator, never a domain's. That was `witness-surface-scope`'s reasoning
+     too, until Phase 189 retired it by letting a domain declare what the kit cannot see; the
+     reasoning here stands on its own rather than on that precedent. The
      contract's declared-reads clause was the third member of this list until Phase 209 and is now
      `propagation-evaluator-contract`, a PROVED row.
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row: every

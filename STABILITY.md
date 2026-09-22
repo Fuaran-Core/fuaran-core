@@ -2278,6 +2278,29 @@ breaking is the same class, and the number states what adopting costs, which doe
 being breaking twice. A change of a HIGHER class than this slot carries would advance it again, and
 the surface gate's classification is what would decide that, not an argument here.
 
+### `witness-surface-scope` becomes a domain obligation with a law (Phase 189) — additive; adds one row to a consumer's conformance census
+
+**What it is.** `Fuaran.Core.Conformance` gains `keyedChildrenLaws` and the `KeyedWitness<'Node,
+'Id>` record it takes. A domain declares which ids a node holds in keyed, non-structural positions —
+the ones `NodeWitness.Children` does not report — a way to place one there, and its own full-walk id
+check; the family then BUILDS the two trees that check exists to refuse (one id held both keyed and
+in the witness surface, and one id held in two keyed positions) and requires the check to refuse
+them. `api/Fuaran.Core.Conformance.txt` moves by those additions and nothing else.
+
+**What it costs a pinned consumer: nothing to compile.** No existing member, type, record field or
+union case moves — `OpGen` is deliberately untouched, because a field on it would stop every
+full-literal construction from compiling (FS0764) and this obligation is one most domains do not
+have. The witness surface itself is unwidened: `Ops` still sees exactly what `Children` reports.
+
+**What it does change for a consumer, and it is worth reading if you publish a conformance census.**
+The `Families` roster gains `Conformance.keyedChildrenLaws`, so a census that quantifies over the
+roster gains a row it has not answered. Answering it is cheap in both directions: a domain that holds
+nothing outside `Children` declares `HasKeyedChildren = fun _ -> []`, runs the family and is told, in
+the adequacy line, that its report is **vacuous by declaration** — which is a different verdict from a
+green run, and the report says which one it is. And the claims ladder's `witness-surface-scope` row is
+re-classed from `premise` to `domain-obligation` with this family as its `dischargedBy`: if you have
+been reading that row as one nothing could discharge, it is now one you can.
+
 ## 0.29.0 — released 2026-09-21 as `v0.29.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.29.0` and the repository holds the `v0.29.0` tag, so

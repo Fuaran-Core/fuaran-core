@@ -318,6 +318,15 @@
       "discharges": []
     },
     {
+      "id": "Conformance.keyedChildrenLaws",
+      "module": "Conformance",
+      "entry": "keyedChildrenLaws",
+      "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": ["witness-surface-scope"]
+    },
+    {
       "id": "Conformance.leaseLaws",
       "module": "Conformance",
       "entry": "leaseLaws",

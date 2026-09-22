@@ -152,6 +152,13 @@ module Families =
           c "encoderInjectivityLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
           c "projectionLaws" [ "ProjectionWitness" ] (Some NeedsWitnessCapability) []
           c "aiSurfaceLaws" [ "AiSurfaceWitness" ] (Some NeedsWitnessCapability) []
+
+          c
+              "keyedChildrenLaws"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              [ "witness-surface-scope" ]
+
           c "captureReplayLaws" none (Some SeamNotEveryDomainHas) []
           c "transformLaws" none (Some SeamNotEveryDomainHas) []
           c "constructThenEncodeLaws" none (Some SeamNotEveryDomainHas) []

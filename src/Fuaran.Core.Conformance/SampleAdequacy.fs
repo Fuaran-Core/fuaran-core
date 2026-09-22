@@ -233,6 +233,14 @@ module SampleAdequacy =
           // than claiming an unconditionality it cannot have over an arbitrary witness.
           "Conformance.containerLaws", Guarded [ "built arm (child perturbation / invariant probe / interior graft)" ]
 
+          // Phase 189 — the same shape, one axis further out: the collision arms are BUILT through
+          // the domain's own `PlaceKeyedChild`, and whether the witness honours a placement is the
+          // domain's to answer. A witness that declares NO keyed position is the one case that is
+          // not an unreached arm — it is a declaration that there is nothing to reach — and the
+          // family reports that as its adequacy line rather than as a missed verdict.
+          "Conformance.keyedChildrenLaws",
+          Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ]
+
           // ---- unconditional: every iteration builds the evidence for every branch ----
           "Conformance.witnessLaws", Unconditional "each iteration rebuilds a drawn node and re-reads every accessor"
           "Conformance.streamLaws", Unconditional "each iteration applies, replays and tampers the same chain"
