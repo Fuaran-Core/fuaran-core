@@ -99,6 +99,15 @@ node type keeps children anywhere `Children` does not report them — a case tab
 a named alternative, an argument position — then run your own id check over your own full walk
 before handing an op to `Ops.apply`; this engine cannot see those nodes and will not pretend to.
 
+**And certify that check rather than assuming it.** `Conformance.keyedChildrenLaws` takes a
+`KeyedWitness`: your declaration of which ids a node holds in keyed positions, a way to place one
+there, and the check itself. It then BUILDS the two trees the check exists to refuse — an id held
+both in a keyed position and in the witness surface, and one id held in two keyed positions — and
+requires your check to refuse them, over your own generator at your own witness. Building them is
+the point: your generator mints fresh ids, so a law quantified over what it draws would certify a
+check that checks nothing. A domain with no keyed position declares the empty list, and the report
+says it was vacuous **by declaration** rather than passing quietly.
+
 That boundary is deliberate rather than a gap waiting to be closed. `Children` is also what the
 engine **rebuilds** through, so widening the witness to reach keyed positions would oblige every
 domain to re-express them as an ordered list — a large change to what a domain must model, to buy
@@ -111,10 +120,11 @@ that broke it could not hide behind the first.
 **Which of this library's assumptions you can discharge, and which you inherit**, is one table:
 [the Core-to-domain proof contract](proofs/README.md#the-core-to-domain-proof-contract). Every
 `assumed` row of the claims ladder is classed there as a `domain-obligation` (a green
-`Conformance` law at your witness is the sampled discharge — the invariant above is one of
-them), a `model-bridge` (this repository's own model-to-production gap, which you inherit), or a
-`premise` (what nothing discharges — the witness surface boundary above is one of those). The
-table is checked against `proofs.json` row for row rather than reviewed.
+`Conformance` law at your witness is the sampled discharge — the invariant above is one of them,
+and so is the keyed-position obligation beside it), a `model-bridge` (this repository's own
+model-to-production gap, which you inherit), or a `premise` (what nothing discharges — a hash that
+does not collide, an extractor and a compiler that are correct). The table is checked against
+`proofs.json` row for row rather than reviewed.
 
 ### The container capability — what `applyContained` enforces, and the one thing it asks of you
 

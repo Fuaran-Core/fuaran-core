@@ -1116,3 +1116,274 @@ let functionVerifyTests =
                   (Conformance.verifyHonestyLaws artw mkSoundDet mkBrokenDet countReg genParamsFor 777 200)
                   results
                   "same seed ⇒ identical report" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 189 — `Conformance.keyedChildrenLaws`, certified against the reference
+//  witness EXTENDED with a keyed slot, and against the plain one that has none.
+// ---------------------------------------------------------------------------
+
+/// The reference node with one addition: a name-keyed CASE TABLE, which `Children` does not
+/// report. It is the shape `README.md` names when it says "a case table, a fallback slot, a named
+/// alternative, an argument position" — a node the domain holds and the engine cannot see. It is a
+/// type of its own rather than a field on `RNode` because every other family in this suite
+/// certifies the surface witness, and giving that witness an invisible position would change what
+/// those runs are about.
+type KNode =
+    { Id: string
+      Kind: string
+      Children: KNode list
+      Cases: (string * KNode) list }
+
+let private knodew: NodeWitness<KNode, string> =
+    { Id = fun n -> n.Id
+      KindTag = fun n -> n.Kind
+      Children = fun n -> n.Children
+      ReplaceChildren = fun n cs -> { n with Children = cs } }
+
+/// A drawn tree carries unique ids and SOMETIMES a keyed case, so the family's declaration count
+/// is exercised by the draw — but never a collision: a generator's contract is a fresh id, which
+/// is exactly why the two collision laws build their subjects instead.
+let private genKTree (rng: ConfRng.T) : KNode * ConfRng.T =
+    let mutable counter = 0
+    let mutable r = rng
+
+    let freshId () =
+        let id = sprintf "k%d" counter
+        counter <- counter + 1
+        id
+
+    let rec build depth =
+        let id = freshId ()
+
+        let kids =
+            if depth <= 0 then
+                []
+            else
+                let nKids, r1 = ConfRng.intBelow 3 r
+                r <- r1
+                [ for _ in 1..nKids -> build (depth - 1) ]
+
+        let caseRoll, r2 = ConfRng.intBelow 2 r
+        r <- r2
+
+        let cases =
+            if caseRoll = 0 then
+                []
+            else
+                let cid = freshId ()
+
+                [ "default",
+                  { Id = cid
+                    Kind = "case"
+                    Children = []
+                    Cases = [] } ]
+
+        { Id = id
+          Kind = (if List.isEmpty kids then "para" else "section")
+          Children = kids
+          Cases = cases }
+
+    build 2, r
+
+let private genKFresh (existing: Set<string>) (rng: ConfRng.T) : KNode * ConfRng.T =
+    let mutable r = rng
+
+    let rec pick () =
+        let v, r' = ConfRng.next r
+        r <- r'
+        let id = sprintf "f%d" (v % 100000)
+        if existing.Contains id then pick () else id
+
+    { Id = pick ()
+      Kind = "para"
+      Children = []
+      Cases = [] },
+    r
+
+let private kGen: OpGen<KNode, string> =
+    { Tree = genKTree
+      FreshNode = genKFresh
+      CanHold = None }
+
+/// The domain's OWN full walk: `Children` AND the case table. This is the check the claims ladder
+/// makes the domain's obligation — the one `witness-surface-scope` says no kit law could reach
+/// until this family gave the domain a way to declare the positions.
+let rec private fullWalk (n: KNode) : string list =
+    (n.Id :: (n.Children |> List.collect fullWalk))
+    @ (n.Cases |> List.collect (fun (_, c) -> fullWalk c))
+
+let private idsUnique (root: KNode) =
+    let ks = fullWalk root
+    List.length (List.distinct ks) = List.length ks
+
+/// The NEUTERED check, and it is the realistic defect rather than a strawman: the same uniqueness
+/// question asked over `Tree.ids`, which walks `Children` alone. It is what a domain writes when
+/// it reaches for the engine's own scan, and it is green on every tree this suite draws.
+let private surfaceOnlyUnique (root: KNode) =
+    let ks = Tree.ids knodew root
+    List.length (List.distinct ks) = List.length ks
+
+let private caseNode (id: string) =
+    { Id = id
+      Kind = "case"
+      Children = []
+      Cases = [] }
+
+let private keyw: KeyedWitness<KNode, string> =
+    { Surface = "the reference domain's full walk (Children + the case table)"
+      HasKeyedChildren = fun n -> n.Cases |> List.map (fun (_, c) -> c.Id)
+      PlaceKeyedChild =
+        fun n id ->
+            Some
+                { n with
+                    Cases = n.Cases @ [ id, caseNode id ] }
+      IdsUnique = idsUnique }
+
+/// The other half of the acceptance: the plain reference witness, which holds nothing anywhere
+/// `Children` does not report, declares the empty list and says so.
+let private noKeyed: KeyedWitness<RNode, string> =
+    { Surface = "Tree.ids over the reference witness"
+      HasKeyedChildren = fun _ -> []
+      PlaceKeyedChild = fun _ _ -> None
+      IdsUnique =
+        fun t ->
+            let ks = Tree.ids nodew t |> List.map idw.ToString
+            List.length (List.distinct ks) = List.length ks }
+
+let private lawNamed (prefix: string) (results: LawResult list) =
+    results |> List.find (fun r -> r.Law.StartsWith prefix)
+
+[<Tests>]
+let keyedChildrenLawTests =
+    testList
+        "Conformance.keyedChildrenLaws"
+        [ testCase "the reference witness with a keyed slot is the first certifier — every law green"
+          <| fun _ ->
+              let results = Conformance.keyedChildrenLaws keyw knodew idw kGen 1890 200
+
+              let failed = results |> List.filter (fun r -> not r.Passed)
+
+              if not (List.isEmpty failed) then
+                  let msg =
+                      failed
+                      |> List.map (fun r -> sprintf "  %s — %A" r.Law r.Counterexample)
+                      |> String.concat "\n"
+
+                  failtestf "the keyed reference witness failed keyedChildrenLaws:\n%s" msg
+
+              Expect.equal (List.length results) 4 "three laws + the adequacy guard"
+
+              Expect.equal
+                  (Conformance.keyedChildrenLaws keyw knodew idw kGen 1890 200)
+                  results
+                  "same seed ⇒ identical report"
+
+          testCase "the census calls it Guarded, and the run reports the arms it reached"
+          <| fun _ ->
+              // The half `SampleAdequacyTests` does not run for a witness-taking family — it leaves
+              // those to their own suite, and this is that suite.
+              match
+                  SampleAdequacy.census
+                  |> List.tryFind (fun (n, _) -> n = "Conformance.keyedChildrenLaws")
+              with
+              | Some(_, Guarded _) -> ()
+              | Some(_, Unconditional why) -> failtestf "censused Unconditional (%s) but it emits a guard" why
+              | None -> failtest "Conformance.keyedChildrenLaws is missing from SampleAdequacy.census"
+
+              let adequacy =
+                  Conformance.keyedChildrenLaws keyw knodew idw kGen 1890 200
+                  |> List.filter (fun r -> r.Law.StartsWith "sample adequacy")
+
+              Expect.equal (List.length adequacy) 1 "exactly one adequacy law"
+              Expect.isTrue (List.head adequacy).Passed "the reference witness reaches every arm"
+
+              Expect.stringContains
+                  (List.head adequacy).Law
+                  "the sample reached every built arm"
+                  "a witness WITH keyed positions is measured, not declared vacuous"
+
+          testCase "go-red: a check that walks only `Children` loses both collision laws"
+          <| fun _ ->
+              // The defect the family exists to catch, and the one the ladder row describes: the
+              // engine's own scan, adopted as the domain's check. It is green on every drawn tree,
+              // which is why the collision subjects are BUILT.
+              let results =
+                  Conformance.keyedChildrenLaws
+                      { keyw with
+                          IdsUnique = surfaceOnlyUnique }
+                      knodew
+                      idw
+                      kGen
+                      1890
+                      200
+
+              Expect.isTrue
+                  (lawNamed "the domain's id check accepts" results).Passed
+                  "a surface-only check still accepts a clean tree — the acceptance law is not what catches it"
+
+              let clash =
+                  lawNamed "the domain's id check refuses an id held in a keyed position and" results
+
+              Expect.isFalse clash.Passed "a surface-only check must lose the keyed-vs-surface law"
+
+              Expect.stringContains
+                  (clash.Counterexample |> Option.defaultValue "")
+                  "ACCEPTED a tree holding"
+                  "the counterexample says what was accepted"
+
+              let twice = lawNamed "the domain's id check refuses an id held in two keyed" results
+
+              Expect.isFalse twice.Passed "a surface-only check must lose the twice-keyed law too"
+
+          testCase "go-red: a check that refuses everything loses the acceptance law"
+          <| fun _ ->
+              // Without this arm the two collision laws certify `fun _ -> false`, which refuses
+              // every tree the domain will ever hold and is not a check at all.
+              let results =
+                  Conformance.keyedChildrenLaws { keyw with IdsUnique = fun _ -> false } knodew idw kGen 1890 200
+
+              let accepts = lawNamed "the domain's id check accepts" results
+              Expect.isFalse accepts.Passed "a check that refuses everything must lose the acceptance law"
+
+              Expect.stringContains
+                  (accepts.Counterexample |> Option.defaultValue "")
+                  "REFUSED a tree whose full walk"
+                  "the counterexample says what was refused"
+
+          testCase "a witness declaring no keyed position passes VACUOUSLY, and the report says so"
+          <| fun _ ->
+              let results = Conformance.keyedChildrenLaws noKeyed nodew idw opGen 1890 100
+
+              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "a domain with no keyed position is not failed"
+
+              Expect.equal (List.length results) 4 "the report keeps its shape whatever the witness declares"
+
+              let adequacy = lawNamed "sample adequacy" results
+
+              Expect.stringContains
+                  adequacy.Law
+                  "vacuous BY DECLARATION"
+                  "the adequacy line distinguishes 'nothing to certify' from 'three laws certified'"
+
+          testCase "a witness that declares keyed positions and can build none FAILS the guard"
+          <| fun _ ->
+              // The case that must not be read as the one above. Declaring keyed positions is a
+              // claim this family can measure; giving it no way to build one makes the claim
+              // unmeasurable, which is not the same as having nothing to claim.
+              let results =
+                  Conformance.keyedChildrenLaws
+                      { keyw with
+                          PlaceKeyedChild = fun _ _ -> None }
+                      knodew
+                      idw
+                      kGen
+                      1890
+                      200
+
+              let adequacy = lawNamed "sample adequacy" results
+              Expect.isFalse adequacy.Passed "an arm nothing could reach must be reported"
+
+              Expect.stringContains
+                  (adequacy.Counterexample |> Option.defaultValue "")
+                  "keyed id in the witness surface"
+                  "and it names the arm that was never built" ]
