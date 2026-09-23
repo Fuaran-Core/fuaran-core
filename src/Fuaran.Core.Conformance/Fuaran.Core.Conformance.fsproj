@@ -47,7 +47,6 @@
     <ProjectReference Include="..\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
-    <ProjectReference Include="..\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
     <!-- Phase 102 — declared explicitly for WireNullTolerance.fs. It already arrived
          transitively (via Column); a family that drives the parser directly should not
          depend on another project's reference list to keep doing so. -->

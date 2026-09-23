@@ -180,7 +180,6 @@ module Families =
           c "dirtyPropagationLaws" none (Some SeamNotEveryDomainHas) []
           c "propagationEvalLaws" none (Some SeamNotEveryDomainHas) []
           c "canonicalFloatLaws" none (Some SeamNotEveryDomainHas) []
-          c "leaseLaws" none (Some SeamNotEveryDomainHas) []
           c "chainBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
           c "dagBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
           c "nowLaws" none (Some SeamNotEveryDomainHas) []

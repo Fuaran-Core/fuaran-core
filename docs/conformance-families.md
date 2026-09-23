@@ -31,7 +31,7 @@ family with none runs against the kit's own fixtures and needs nothing but a see
 family at your own witness discharges. Most families discharge none — they certify, they
 do not answer for an assumption this repository's proofs leave open.
 
-64 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
+63 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
 
 | Family | Run by | Why opt-in | Witness | Discharges |
 |---|---|---|---|---|
@@ -71,7 +71,6 @@ do not answer for an assumption this repository's proofs leave open.
 | `Conformance.idempotencyLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — |
 | `Conformance.incrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — |
 | `Conformance.keyedChildrenLaws` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | `witness-surface-scope` |
-| `Conformance.leaseLaws` | opt-in | `seam-not-every-domain-has` | — | — |
 | `Conformance.memoLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
 | `Conformance.memoSoundnessLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — |
 | `Conformance.mergeConflictLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — |

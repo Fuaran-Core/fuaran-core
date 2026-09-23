@@ -86,7 +86,6 @@
     <Compile Include="ProjectionTests.fs" />
     <Compile Include="PropagationTests.fs" />
     <Compile Include="PropagationContractTests.fs" />
-    <Compile Include="LeaseTests.fs" />
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
     <!-- Phase 102 - the null-tolerant read: the conformance family plus the
@@ -275,7 +274,6 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
-    <ProjectReference Include="..\..\src\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
     <!-- Phase 131 — the F*-extracted oracle (never packed; see proofs/README.md). -->
     <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
   </ItemGroup>

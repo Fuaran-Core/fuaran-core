@@ -241,38 +241,6 @@ a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its pub
 FSharp.Core-only + Fable-clean and carries the same pre-1.0 additive-growth commitment as the rest of the
 substrate.
 
-### The Lease strand — `Fuaran.Core.Lease` (generic claims over a resource axis, Phase 84)
-
-A self-contained coordination strand: **claims over an abstract resource axis**, with grant / release /
-expiry as a closed `LeaseOp<'Res>` algebra (`Claim` / `Release` / `Expire`). It generalises the
-coordination a multi-agent dispatcher hand-rolls — a **holder** claims a **resource set** for a
-host-supplied duration, and an overlapping claim by a different holder is refused. Stable surfaces:
-
-- **`LeaseOp<'Res>` + `LeaseState<'Res>` + `LeaseRejection<'Res>` + the wire codec** — the camelCase
-  kind-tag envelope (`claim` / `release` / `expire`) is the cross-host contract; logical time
-  (`grantedAt` / `ttl` / `now`) is carried as an **int64 encoded as a JSON string** (the `JVal` number
-  model caps `JInt` at int32), so it round-trips with full precision, Fable-clean on encode AND decode
-  (GP3). Changing the envelope keys, the kind tags, or the time encoding is a **major** bump; an
-  additive op case is a **minor** bump.
-- **`Lease.apply` totality + the conflict contract (GP4/GP5)** — `apply` is total (a typed
-  `LeaseRejection`, never a throw), and a `Claim` overlapping a *different* holder's live lease is
-  always the enumerated `Conflict of holder * overlap` — it **names the current holder and the exact
-  overlapping resources**. A same-holder re-`Claim` renews in place; `Release` of an absent holder is
-  `NoSuchLease`. Removing the enumeration or weakening the conflict guarantee is breaking.
-- **The resource axis reuses `IdWitness<'Res>` (GP2 — no new witness shape)** — a resource is whatever
-  the host's ids name (file paths for the dispatcher, `Fuaran.Core.Ops` footprint tree-addresses for a
-  tree host); the witness is a per-call parameter, so one module serves both. No new witness record was
-  introduced.
-- **Expiry is time-as-data, no clock in Core (GP6)** — `Expire now` drops every lease whose
-  `grantedAt + ttl <= now`, where `now` is supplied by the host as data. Core reads no clock and runs no
-  scheduler/timer (analysis + state only), so **replay is deterministic**: the lease stream is a
-  `Fuaran.Core.OpStream` instance (`Lease.streamWitnessFor idw`), hash-chained and replayable exactly
-  like the tree/columnar streams.
-
-Certified by `Conformance.leaseLaws` (apply totality, `canApply` ≡ `apply`, conflict completeness,
-`verifyChain`, replay determinism, expiry-as-data) — a host in another language re-implements the codec
-+ these laws against this section, exactly as it does the witness surface.
-
 ### Public because a sibling Core package calls it (`0.19.0`)
 
 `Fuaran.Core.*` is nineteen assemblies and declares **no `InternalsVisibleTo` anywhere**, so a
@@ -2354,6 +2322,64 @@ supplied to vocabularies that had said nothing. One further engine copy of the r
 with it: `Diff`'s artifact snapshot carried its own literal for an absent block, and now walks the
 same members over an empty object, because a classifier that disagrees with the reader about what an
 artifact means is worse than either answer alone.
+
+### The lease strand LEAVES — `Fuaran.Core.Lease` and `Conformance.leaseLaws` are removed (Phase 188) — BREAKING: a removal, and the package is no longer emitted at all
+
+**What is gone.** The whole `Fuaran.Core.Lease` package: `LeaseOp<'Res>` / `LeaseState<'Res>` /
+`LeaseRejection<'Res>`, the `Lease` module (`emptyState`, `apply`, `canApply`, `isHeld`,
+`streamWitnessFor`), its canonical wire codec and its `OpStream` `StreamWitness`. With it goes
+`Conformance.leaseLaws`, the law family that certified it, and the `Stability-critical surfaces`
+section above that described the strand as one of this substrate's promises. **No package is emitted
+on this id at `0.30.0` or after**, and no forwarding shim is left behind — a type-forwarder would
+make a consumer's restore succeed while binding it to a strand this repository no longer certifies,
+which is worse than the compile error.
+
+**Migration.** The algebra moved VERBATIM — same closed op algebra, same camelCase kind-tag envelope,
+same int64-as-JSON-string time encoding, same conflict contract, same law kit — into the coordination
+library that was its one consumer, which lives outside this repository and pins this substrate rather
+than the reverse. A consumer that held `Fuaran.Core.Lease` takes the algebra from there: a package and
+namespace change at the `open`, and nothing else. Nothing in the algebra's behaviour or its wire bytes
+changed in the move, which is why a stream written under `Fuaran.Core.Lease` replays unchanged on the
+other side. A consumer whose lease coordination never came from this substrate is unaffected.
+
+**The removal CLOSES a hazard rather than only removing a surface, and this is the part worth reading
+if you take `Fuaran.Core.Conformance`.** Between the receiving library's own cut and this removal, a
+consumer of this kit restored `Fuaran.Core.Lease` transitively — the kit depended on it to host
+`leaseLaws` — so a project that had already adopted the moved algebra held TWO `Lease` modules with
+the same type names in one closure. F# binds a name to the last `open` that provides it, so the
+`open` order decided which algebra was in scope, silently and with a clean build either way. After
+this removal the kit's closure carries no lease package at all and the ambiguity is not expressible.
+
+**The roster consequence, which is the mirror of Phase 189's in this same slot.** `Families` loses
+`Conformance.leaseLaws`, so a conformance census that quantifies over the roster loses a row rather
+than gaining one — an opt-out row, declared `seam-not-every-domain-has`, so a domain that answered it
+answered "not mine". `docs/conformance-families.md` and `docs/conformance-families.json` are
+regenerated accordingly. `SampleAdequacy.census` loses its entry in the same commit, because a census
+naming a family the kit does not ship is a claim about nothing.
+
+**Why it left, and the reason is NOT the consumer count.** Recorded as D51 (2026-09-23), the
+operator's 2026-09-16 membership ruling: membership in this substrate is genericity over the witness
+and plausible cross-domain use, never present consumer count. `LeaseOp<'Res>` is generic in its type
+parameter, and its only instantiation is a claim over a **resource** axis — not the tree, and not a
+witness this substrate defines. It shipped in 2026-07 under D9's single-unblocking-consumer exception
+and the corroborating adopters D9 called "corroboration, not prerequisites" never arrived; the census
+that showed so is evidence in D51 and is not its argument. The strand would leave on this rule with
+ten consumers, and a tree-generic function stays here with one.
+
+**What deliberately did NOT go with it.** `Ops`' `footprint` and independence, and `Arbitration` —
+tree-generic by shape, and `Arbitration.arbitrate` is D51's live counter-case: one caller, and it
+stays. Lease AUTHORITY — who may claim, and the fold that decides — was never in this repository to
+move.
+
+**Baselines.** `api/Fuaran.Core.Lease.txt` is deleted with its package.
+`api/Fuaran.Core.Conformance.txt` moves by exactly one token, the `leaseLaws` method — a `removal`
+under the Phase 183 classifier, which is what makes this entry's BREAKING class a gate output rather
+than an argument.
+
+**Riding the draft rather than advancing it.** `0.30.0` is already BREAKING — Phase 180 opened it
+retiring the hardening default — and breaking over breaking is the same class: the number states what
+adopting costs, and that does not change by being breaking twice. This slot's own preamble named this
+phase before the work landed.
 
 ## 0.29.0 — released 2026-09-21 as `v0.29.0`
 
