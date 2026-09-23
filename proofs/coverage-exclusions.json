@@ -1,0 +1,71 @@
+{
+  "kind": "proofCoverageExclusions",
+  "subject": "Fuaran-Core",
+  "$comment": "Phase 203. `proofs/README.md` says this repository is \"exhaustively proved in the sense a parametric spine admits\", and until this file that sentence was prose: nothing computed it, so every survey found another packable package with no model and no record of whether it needed one, and filed a phase. The stopping rule is that COVERAGE IS TOTAL OR DECLARED — every packable package (the derived roster Phase 199 asserts) is either named by a model in `modules.json` or has an entry here. There is no third state, and a package in neither fails the `Proofs.Coverage` family. An entry is a RECORDED DECISION, not an excuse: it names the package, the closed reason, and enough prose for a later operator to disagree with it. Deleting an entry is how that operator asks for a theorem — the gate then names the gap on the next run and keeps naming it until a model exists. The check runs BOTH WAYS, on the `tests/fable-smoke/exclusions.json` precedent (Phase 185): an entry naming a package that is no longer packable, or one that has SINCE GAINED a model, fails too, because a reason that outlives the fact it describes is how the comment Phase 185 replaced came to say something untrue. Hand-authored; the reason vocabulary below is closed and every term in it is carried by at least one entry, so no term is a vocabulary nothing tests.",
+  "reasons": {
+    "facade": "The package is a surface over packages that ARE modelled and adds no semantics of its own — what a theorem here would state is its callee's theorem, restated in a second syntax. A defect in a facade is a mapping defect, which is what the certification tests it carries are for.",
+    "law-tested-by-design": "The package HAS concrete computation and the theorem has been declined in favour of a shipped `Conformance` law family, which the entry NAMES. That is a weaker claim than a proof and the entry says so: a law is sampled at a witness, a theorem is not. The named family must exist in the shipped law-family roster (`Fuaran.Core.Families`, Phase 184), so an entry cannot cite a law no census enumerates.",
+    "content-free-seam": "The package is a generic seam whose content is supplied entirely by the domain — Core owns no concrete computation here to state a theorem ABOUT. What it can promise is the shape of the seam, and that is stated where a domain meets it rather than as a theorem over a model of nothing."
+  },
+  "$reasonsNotCarried": "Phase 203 was filed naming four reasons and carries three. `tooling` (a build-time tool whose contract is the shape of what it emits) was written for `Fuaran.Core.Idl.Codegen`'s emitter, and by the time this file was cut that package HAD a model: the six generated-vocabulary modules are its F* target's own output, and `check.ps1`'s header says in as many words that what the leg proves over them is the F* BACKEND. A `tooling` entry for it would have been stale on arrival, which is exactly what this file's second direction fails. `leaving-core` was written for a `Lease` package that had already left. A closed vocabulary term with no entry is a term nothing tests — so both were dropped rather than carried, and `content-free-seam` was added for the three packages whose content is the domain's. The reasoning is recorded in `README.md` under \"Coverage is total or declared\".",
+  "exclusions": [
+    {
+      "package": "Fuaran.Core.CSharp",
+      "reason": "facade",
+      "phase": "fuaran-core#203",
+      "note": "The C# authoring facade. It constructs the same values the F# packages construct, through a syntax a .NET-only consumer can state — so every claim a theorem here would make is a claim about `Fuaran.Core.Tree` and `Fuaran.Core.Ops`, which are modelled. What is genuinely its own is the MAPPING from the fluent surface to those values, which is one line per case and is held by the certification tests rather than by a model. It is an ordinary entry rather than a project type the derivation filters out, on the Phase 185 rule: a package excused by the shape of the derivation is excused with no reason on the record."
+    },
+    {
+      "package": "Fuaran.Core.Idl.Cli",
+      "reason": "facade",
+      "phase": "fuaran-core#203",
+      "note": "A dotnet tool (`OutputType` Exe, `PackAsTool`, command `fuaran-core-idl`): argv parsing and file I/O over `Fuaran.Core.Idl.Codegen`'s generation half, which carries the six generated-vocabulary models. Nothing it computes survives a theorem that is not its callee's; what it owns — which switch reaches which backend — is checked by the codegen test families."
+    },
+    {
+      "package": "Fuaran.Core.Conformance",
+      "reason": "content-free-seam",
+      "phase": "fuaran-core#203",
+      "note": "The law kit itself. Every family it exports is stated over an ABSTRACT witness the domain supplies, so there is no concrete computation here for a theorem to be about — a model of `footprintLaws` would be a model of the statement of an obligation. What can be checked about the kit is that its roster is complete and that every family runs under `certify` or sits on a declared opt-out, and Phase 194 and `ConformanceFamiliesTests` do exactly that. The one thing this entry must not be read as saying is that the laws are unchecked: they are, by the census, at every consumer's own witness."
+    },
+    {
+      "package": "Fuaran.Core.Validator",
+      "reason": "content-free-seam",
+      "phase": "fuaran-core#203",
+      "note": "The generic BUILD-TIME rule framework: `RuleFamily` + `Registry` + `PackRule`, with every rule's content supplied by a domain pack. `Validator.runAll` walks a pure registry and aggregates what the domain's own rules return, so a theorem here would prove that a fold over a list is a fold over a list. The one strand in this package with content of its own — `ColumnValidator` — is certified by `Conformance.columnarValidatorLaws`, over a seed-replayable sample with injected faults."
+    },
+    {
+      "package": "Fuaran.Core.Observer",
+      "reason": "content-free-seam",
+      "phase": "fuaran-core#203",
+      "note": "The RUNTIME analogue of the validator framework, and content-free for the same reason it states about itself: Core owns no flag vocabulary and no input shape, so register/snapshot/derive/subscribe is plumbing around a pure derivation the domain writes. A verification pack is the monetizable unit precisely BECAUSE the content is not here. It carries no `Conformance` family today, which this entry states rather than hides — an operator who wants the seam's own promises certified deletes this entry and the gate names the gap."
+    },
+    {
+      "package": "Fuaran.Core.Projection",
+      "reason": "law-tested-by-design",
+      "family": "Conformance.projectionLaws",
+      "phase": "fuaran-core#203",
+      "note": "The read-token-lever seam. It has real computation — `Projection.project` / `render` / `parseBack` — and the family certifies the round trip, the digest's stability under presentation moves, and the compactness floor, at a domain's own `ProjectionWitness` with `wireEncode` and `applyOps` as per-call parameters. The theorem is declined rather than impossible: what it would take is a model of a domain codec this repository deliberately does not depend on, which is the same boundary the family's own parameters draw."
+    },
+    {
+      "package": "Fuaran.Core.AiSurface",
+      "reason": "law-tested-by-design",
+      "family": "Conformance.aiSurfaceLaws",
+      "phase": "fuaran-core#203",
+      "note": "The proposal surface — pattern bank, proposals, decide/submit plumbing. The family drives the decision axis itself (it substitutes its own `Decide` per draw to reach all three outcomes) so the plumbing is certified for any policy, and the domain's own `Decide` is sampled for totality beside it. The one part of this strand that IS proved is arbitration, and it is proved where it lives: `Arbitration` ships in `Fuaran.Core.Ops` and carries `proofs/Arbitrate.fst` — which is why this entry is about the surface and not about the algorithm behind it."
+    },
+    {
+      "package": "Fuaran.Core.Column",
+      "reason": "law-tested-by-design",
+      "family": "Conformance.aggregateParityLaws",
+      "phase": "fuaran-core#203",
+      "note": "Cells, column types, the table and the codec. The table algebra IS reached by a model — `proofs/ColumnOps.fst` is stated over a table with a validity mask — but that model is attributed to `Fuaran.Core.Column.Ops`, whose operations it is about, and attributing it here as well would let this package's own two gaps hide behind it. They are named instead: `Column.aggregate` is held by the family above, as the single source the DataFrame `GroupBy` calls; and `ColumnCodec` has NO theorem — its injectivity is a law (`Conformance.codecInjectivityLaws`) a domain runs, not a proof this repository carries. An operator who wants the codec proved deletes this entry."
+    },
+    {
+      "package": "Fuaran.Core.DataFrame",
+      "reason": "law-tested-by-design",
+      "family": "Conformance.incrementalLaws",
+      "phase": "fuaran-core#203",
+      "note": "The transform pipeline, its evaluator and the incremental driver. The INCREMENTAL PROMISE is proved — `proofs/Propagation.fst` proves the dirty set sound and least and `evalFrom` equal to `eval` under the stated evaluator contract — but it is proved GENERICALLY, over an abstract node evaluator, and is attributed to `Fuaran.Core.Propagation`. What this package adds is the concrete evaluator that instantiates it, and that is where the laws sit: `incrementalLaws` for change-driven and op-driven equivalence, `schemaWalkLaws` for the derived-schema soundness, `aggregateParityLaws` for the host/reference agreement. A theorem over the concrete pipeline is declined as a domain's cost, per D14."
+    }
+  ]
+}

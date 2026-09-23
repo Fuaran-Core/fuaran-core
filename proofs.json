@@ -1,7 +1,7 @@
 {
   "kind": "proofs",
   "subject": "Fuaran-Core",
-  "$comment": "This repository's claims ladder, declared as data. It is `proofs/README.md`'s own ladder — what is PROVED, what is only TESTED, what is ASSUMED — in a schema a tool can read, so the question does not have to be answered by reading prose and hoping two documents use the same words. A `not claimed` item is the ABSENCE of a row, never a row: the README enumerates those, and enumerating them here would turn a disclaimer into a claim. Levels are the closed set proved | tested | assumed | policy. Authored by hand, never generated — editing the ladder means editing this file and the README together. Since Phase 144 it is CHECKED rather than trusted: the proof leg's host step runs the `Proofs.Ladder` family (tests/Fuaran.Core.Tests/ProofsLadderTests.fs), which holds every row to the tree — a proved row's theorem is a top-level declaration of the model it names, that model is one `proofs/check.ps1` actually checks, a tested row's named cases exist in the `Proofs.Oracle` family, every checked module has a proved row, and the phase citations and levels are the closed forms. Since Phase 174 an `assumed` row also carries a `class`, from the closed set domain-obligation | model-bridge | premise, saying WHICH KIND of assumed it is: a `domain-obligation` is what a domain owes when it instantiates this substrate and carries `dischargedBy`, the `Conformance` law whose green run at that domain's own witness is the sampled discharge; a `model-bridge` is what this repository's own model has not bridged and carries `closes` — a `fuaran-core#NNN` phase, `permanent` where nothing could close it, or `unscheduled` where something could and nobody has taken it; a `premise` is what is permanently assumed and what no run of anything discharges. The same family holds every class, every law name (against the shipped kit's declared law-family roster, `Fuaran.Core.Families`, whose own completeness is held to reflection over the shipped assembly BY RETURN TYPE — Phase 184 narrowed this from the `Conformance` module's whole public static surface, so an obligation can no longer name a law that no conformance census enumerates) and every `closes` form to the tree. Row-to-tree agreement only, with ONE prose exception: the `Core-to-domain proof contract` table in `proofs/README.md` is PARSED and held to this file row for row, because a contract a domain reads and a ladder a tool reads that disagree are worse than either alone. Whether a row says the same thing as the README's surrounding prose is still a human act.",
+  "$comment": "This repository's claims ladder, declared as data. It is `proofs/README.md`'s own ladder — what is PROVED, what is only TESTED, what is ASSUMED — in a schema a tool can read, so the question does not have to be answered by reading prose and hoping two documents use the same words. A `not claimed` item is the ABSENCE of a row, never a row: the README enumerates those, and enumerating them here would turn a disclaimer into a claim. Levels are the closed set proved | tested | assumed | policy. Authored by hand, never generated — editing the ladder means editing this file and the README together. Since Phase 144 it is CHECKED rather than trusted: the proof leg's host step runs the `Proofs.Ladder` family (tests/Fuaran.Core.Tests/ProofsLadderTests.fs), which holds every row to the tree — a proved row's theorem is a top-level declaration of the model it names, that model is one `proofs/check.ps1` actually checks, a tested row's named cases exist in the `Proofs.Oracle` family, every checked module has a proved row, and the phase citations and levels are the closed forms. Since Phase 174 an `assumed` row also carries a `class`, from the closed set domain-obligation | model-bridge | premise, saying WHICH KIND of assumed it is: a `domain-obligation` is what a domain owes when it instantiates this substrate and carries `dischargedBy`, the `Conformance` law whose green run at that domain's own witness is the sampled discharge; a `model-bridge` is what this repository's own model has not bridged and carries `closes` — a `fuaran-core#NNN` phase, `permanent` where nothing could close it, or `unscheduled` where something could and nobody has taken it; a `premise` is what is permanently assumed and what no run of anything discharges. The same family holds every class, every law name (against the shipped kit's declared law-family roster, `Fuaran.Core.Families`, whose own completeness is held to reflection over the shipped assembly BY RETURN TYPE — Phase 184 narrowed this from the `Conformance` module's whole public static surface, so an obligation can no longer name a law that no conformance census enumerates) and every `closes` form to the tree. Row-to-tree agreement only, with ONE prose exception: the `Core-to-domain proof contract` table in `proofs/README.md` is PARSED and held to this file row for row, because a contract a domain reads and a ladder a tool reads that disagree are worse than either alone. Whether a row says the same thing as the README's surrounding prose is still a human act. SINCE PHASE 203 a `tested` row whose `evidence.family` is `Proofs.Oracle` also carries `evidence.model` — the model the differential runs BESIDE, in the same `proofs/<Module>.fst` form a `proved` row uses. That member exists so \"every tested row is a differential paired to a proved row\" can be COMPUTED rather than believed: the `Proofs.Coverage` family joins on it and fails a differential whose model carries no theorem. The join deliberately is NOT `phase`, which is provenance — `evolution-table-coverage` was recorded by Phase 200 and is paired to a theorem Phase 151 proved, so a phase join would have called the one row that motivated this clause unpaired and every stale row paired. A `tested` row on a `Conformance.<law>` family carries NO `model`: it is a law row, its family IS its evidence, and Phase 194 already holds that family to the shipped roster.",
   "claims": [
     {
       "id": "fold-confluence",
@@ -153,6 +153,7 @@
       "phase": "fuaran-core#152",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/WireDecode.fst",
         "tests": [
           "every combinator answers the same on every shuffle of every nodes/ fixture",
           "every combinator answers the same on every shuffle of every ops/ fixture",
@@ -168,6 +169,7 @@
       "phase": "fuaran-core#131",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/DagFold.fst",
         "tests": [
           "the oracle agrees with production over the reference witness at 3 lanes",
           "the oracle agrees with production over the reference witness at 4 lanes",
@@ -187,6 +189,7 @@
       "phase": "fuaran-core#135",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/WireDecode.fst",
         "tests": [
           "the decode oracle agrees with Wire.Decode over every nodes/ fixture",
           "the decode oracle agrees with Wire.Decode over every ops/ fixture",
@@ -305,6 +308,7 @@
       "phase": "fuaran-core#134",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/DagFold.fst",
         "tests": [
           "production's betweenOps recovers the model's delta over the reference witness",
           "production's betweenOps recovers the model's delta over the reference witness at 4 lanes",
@@ -366,6 +370,7 @@
       "phase": "fuaran-core#156",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/DagFold.fst",
         "tests": [
           "the extracted drain is production's topological order over every lane head",
           "the extracted drain is production's topological order over a MULTI-HEAD UNION",
@@ -416,6 +421,7 @@
       "phase": "fuaran-core#158",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/DagFold.fst",
         "tests": [
           "the extracted recovery and mergeBase are production's over every FOLD-PULL-FOLD union",
           "the fold FROM a merged head is the deltas-first fold over the round-two lanes",
@@ -463,6 +469,7 @@
       "phase": "fuaran-core#143",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/TreeOps.fst",
         "tests": [
           "the pinned unknown-parent clause is necessary — both classes, on the model and on production",
           "a move pair nesting into each other's subtrees is refused, and no record could free it"
@@ -498,6 +505,7 @@
       "phase": "fuaran-core#133",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/TreeOps.fst",
         "tests": [
           "the tree oracle agrees with Ops.apply and Ops.footprint over the generated pool",
           "a tree oracle handed a blind bridge DISAGREES with Ops.apply",
@@ -612,6 +620,7 @@
       "phase": "fuaran-core#157",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Arbitrate.fst",
         "tests": [
           "the arbitration oracle agrees with Arbitration.arbitrate over generated proposal sets",
           "a model that ACCEPTS A CONFLICTING PAIR loses — the measurement can fail",
@@ -680,6 +689,7 @@
       "phase": "fuaran-core#136",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Chain.fst",
         "tests": [
           "the chain oracle agrees with production over the reference witness's DAG and every tamper of it",
           "the chain oracle agrees with production over the work-plan DAG and every tamper of it",
@@ -720,6 +730,7 @@
       "phase": "fuaran-core#145",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Chain.fst",
         "tests": [
           "an actor encoding CAN carry the splice separator — Phase 136's stated reason is REFUTED",
           "Actor.encode is a PREFIX-FREE code — the premise the splice lemma actually takes",
@@ -769,6 +780,7 @@
       "phase": "fuaran-core#191",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Chain.fst",
         "tests": [
           "the snapshot oracle agrees with production over the work-plan stream, every boundary and every tamper",
           "the snapshot oracle agrees with production over the reference witness's stream, every boundary and every tamper",
@@ -819,6 +831,7 @@
       "phase": "fuaran-core#193",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Chain.fst",
         "tests": [
           "the signed-head oracle agrees with production over the work-plan stream, every keyring and every re-minted splice",
           "the signed-head oracle agrees with production over the reference witness's stream, every keyring and every re-minted splice",
@@ -901,6 +914,7 @@
       "phase": "fuaran-core#146",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/JsonParse.fst",
         "tests": [
           "the parser oracle agrees with production over the near-miss table",
           "… and under the tolerant read policy, where the member-null fork lives",
@@ -1019,6 +1033,7 @@
       "phase": "fuaran-core#138",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Preservation.fst",
         "tests": [
           "the preservation oracle agrees with Ops.apply over colliding and duplicated grafts",
           "a validator that SKIPS the subtree check loses against production — the measurement can fail",
@@ -1132,6 +1147,7 @@
       "phase": "fuaran-core#140",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Preservation.fst",
         "tests": [
           "the container oracle agrees with Ops.applyContained under a generated canHold",
           "an engine that checks canHold on insert but NOT on move loses — the measurement can fail",
@@ -1191,6 +1207,7 @@
       "phase": "fuaran-core#160",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Preservation.fst",
         "tests": [
           "the script oracle agrees with Ops.applyAllWith / canApplyAllWith under a generated canHold",
           "an engine whose sequence dry run drops the capability loses — the measurement can fail",
@@ -1293,6 +1310,7 @@
       "phase": "fuaran-core#141",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/TreeDiff.fst",
         "tests": [
           "the diff oracle agrees with Diff.toOps over INDEPENDENTLY generated pairs",
           "the four-pass ORDER is load-bearing — removes before inserts loses",
@@ -1423,6 +1441,7 @@
       "phase": "fuaran-core#165",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/WireCanon.fst",
         "tests": [
           "Canon.tryRender refuses exactly the non-finite alias witnesses, and names them by path",
           "the guard oracle agrees with Canon.tryRender over the corpus — and refuses none of it",
@@ -1449,6 +1468,7 @@
       "phase": "fuaran-core#149",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/WireCanon.fst",
         "tests": [
           "the canon oracle agrees with Canon.render over every nodes/ fixture",
           "the canon oracle agrees with Canon.render over every ops/ fixture",
@@ -1609,6 +1629,7 @@
       "phase": "fuaran-core#151",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/WireVersioning.fst",
         "tests": [
           "the versioning oracle agrees with Versioning.classify over perturbed idl.json pairs",
           "the versioning oracle agrees with production over §15.4's three field-add rows",
@@ -1624,6 +1645,7 @@
       "phase": "fuaran-core#200",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/WireVersioning.fst",
         "tests": [
           "the versioning oracle agrees with production over §15.4's three field-add rows",
           "the versioning oracle agrees with Versioning.classify over perturbed idl.json pairs"
@@ -1725,6 +1747,7 @@
       "phase": "fuaran-core#176",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/ColumnOps.fst",
         "tests": [
           "the columnar oracle agrees with ColumnOps.apply, canApply and invert over generated tables and scripts",
           "the columnar oracle agrees with ColumnOps.toOps and applyAll, and the diff reconstructs on well-formed pairs",
@@ -1861,6 +1884,7 @@
       "phase": "fuaran-core#177",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Capability.fst",
         "tests": [
           "the function oracle agrees with Function.signature, apply, curry, compose and auditEffect over generated artifacts and argument sets",
           "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations",
@@ -1942,6 +1966,7 @@
       "phase": "fuaran-core#209",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Propagation.fst",
         "tests": [
           "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval and evalFrom, over generated dependency maps and change sets",
           "a propagation oracle handed a BLIND deps bridge DISAGREES with Propagation.dirtyFromChangedIds and evalFrom — the measurement can fail",
@@ -2076,6 +2101,7 @@
       "phase": "fuaran-core#187",
       "evidence": {
         "family": "Proofs.Oracle",
+        "model": "proofs/Query.fst",
         "tests": [
           "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets",
           "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail",

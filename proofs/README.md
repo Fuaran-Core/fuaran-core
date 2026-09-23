@@ -683,6 +683,100 @@ piece of prose in this directory that the ladder family parses; everything else 
 act, per that file's own note. A domain reads this table and a tool reads that file, and two of
 them disagreeing is worse than either alone.
 
+**And since Phase 203 the four COUNTS in the sentences above are checked too** — the total in the
+opening paragraph and the "N rows." each bullet ends on, by the `contract-counts` clause of the
+`Proofs.Coverage` family. Phase 187 found them already stale and nothing looked at them: the table
+beside them was pinned and the sentences about it were not, which is the worst of the two
+arrangements, because a reader who sees a checked table has no reason to doubt the paragraph above
+it. If a rewording moves a count out of that clause's reach, the clause FAILS rather than passes —
+a count it cannot locate is a count it cannot check, and a gate that quietly stopped looking is
+what this whole section exists to make impossible.
+
+## Coverage is total or declared — the stopping rule (Phase 203)
+
+This directory's claim is that Fuaran-Core is "exhaustively proved in the sense a parametric spine
+admits". Until Phase 203 that was a sentence. Nothing computed it, so the only way to ask the
+question was to survey the tree, and every survey found another packable package with no model and
+no record of whether it needed one — and filed a phase. Thirty-three theorem phases were open the
+day that phase was written. A claim nobody can evaluate is a claim that can only grow.
+
+So the sentence is a PREDICATE now, checked in every lane by the `Proofs.Coverage` family
+(`../tests/Fuaran.Core.Tests/ProofCoverageTests.fs`, wired into `check.ps1`'s host step beside the
+other three). It reads JSON this directory already keeps and runs no prover, and it emits one line
+whatever the verdict:
+
+```
+proofs: exhaustive (11 packages modelled, 9 excluded; 24 assumed: 15 permanent, 5 domain-discharged, 4 unscheduled, 0 scheduled)
+```
+
+Three clauses stand behind it.
+
+1. **Every packable package is named by a model, or carries a declared exclusion.** The roster is
+   Phase 199's derivation, called rather than restated. `modules.json` gains a `packages`
+   member per model saying which package's production code it is about — that file is the only
+   place the model roster is enumerated, so it is the only place the join can live without
+   inventing a second roster to drift against. `coverage-exclusions.json` carries the rest. There
+   is no third state. The check runs BOTH ways, on the Phase 185 precedent: an exclusion
+   naming a package that is no longer packable, or one that has SINCE gained a model, fails too.
+2. **Every `assumed` row is accounted for by its class.** See the reading recorded below.
+3. **Every differential is paired to a theorem.** A `tested` row on `Proofs.Oracle` names the model
+   it ran beside (`evidence.model`) and that model must carry a `proved` row. A `tested` row on a
+   `Conformance.<law>` family is a LAW row, carries no model, and is checked not to.
+
+**What this is NOT is more theorems.** When that line is green the side stops filing theorem phases
+on its own initiative. A new one arrives when a consumer's failure or an operator's decision
+deletes an exclusion — at which point the gate names the gap, and keeps naming it, until the model
+exists. That is the whole mechanism: the exclusions are not a way of avoiding proofs, they are the
+list of proofs nobody has asked for, written down where deleting a line is how you ask.
+
+### The nine exclusions, and the two reasons that were not carried
+
+The nine packages with no model are `Fuaran.Core.CSharp` and `Fuaran.Core.Idl.Cli` (**`facade`** —
+surfaces over modelled packages, whose every claim is their callee's restated in a second syntax);
+`Fuaran.Core.Conformance`, `Fuaran.Core.Validator` and `Fuaran.Core.Observer`
+(**`content-free-seam`** — generic seams whose content is supplied entirely by the domain, so there
+is no concrete computation here for a theorem to be about); and `Fuaran.Core.Projection`,
+`Fuaran.Core.AiSurface`, `Fuaran.Core.Column` and `Fuaran.Core.DataFrame`
+(**`law-tested-by-design`** — real computation, theorem declined in favour of a named `Conformance`
+family, which the entry cites and the gate holds to the shipped roster). Each entry's own prose is
+in `coverage-exclusions.json`; it is the decision, and the token is only its kind.
+
+Phase 203 was filed naming four reasons and this file carries three, which is a correction and is
+recorded rather than quietly absorbed. **`tooling`** was written for `Fuaran.Core.Idl.Codegen`'s
+emitter "beyond the evolution table", and by the time the list was cut that package HAD a model:
+the six generated-vocabulary modules are its F\* target's own output, and `check.ps1`'s header says
+in as many words that what the leg proves over them is the F\* BACKEND. A `tooling` entry for it
+would have been stale on arrival — which is exactly what clause 1's second direction fails, so the
+gate would have said so on the first run. **`leaving-core`** was written for a `Lease` package that
+had already left. A closed vocabulary term no entry carries is a term nothing tests, and the family
+asserts that no such term exists, so both were dropped and **`content-free-seam`** was added for
+the three packages whose content is the domain's.
+
+### Clause 2 is about the class, not about a `closes` on every row
+
+The phase as filed asked for `closes` on every `assumed` row, including the nine that carry none.
+That reading collides with Phase 174, which is shipped and enforced: a `domain-obligation`
+carries `dischargedBy` and **no** `closes`, a `premise` carries neither, and the `Proofs.Ladder`
+family has go-red fixtures for both misplacements. Implementing the phase literally would have
+meant deleting two shipped guards and rewriting the third column of the contract table above, to
+say in a new field what each row's class already says.
+
+So the clause is about the ACCOUNT rather than the field. Every `assumed` row is accounted for by
+its class: a `premise` is closed by nothing and that is what the class means; a
+`domain-obligation` is discharged at a domain's own witness by the law it names; a `model-bridge`
+names `closes`, and where that is a phase the phase must be OPEN. The predicate's own line reports
+the four buckets separately for the reason the contract section argues at length above — rounding
+`unscheduled` into `permanent` asserts an impossibility, and `permanent` is the most expensive
+token in this directory to get wrong.
+
+**The scheduled half is vacuous on today's data, and says so.** No row carries a phase-form
+`closes`; every bridge is `permanent` or `unscheduled`. It is not vacuous as code — the go-reds
+exercise both the shipped-phase arm and the no-oracle arm — and the oracle is worth naming: the
+roadmap store for this repository's own side is not in this repository and cannot be, so the family
+reads `FUARAN_CORE_ROADMAP`. Where a row makes a scheduling claim and no oracle is configured, the
+clause FAILS. A check that reads as green without its instrument is worse than an absent one, and
+the first row to carry a phase is the row that will find out.
+
 ## Exit criteria, with evidence
 
 1. **Reproducible — met.** `check.ps1 -Runs 3` verifies the module three times from a cold

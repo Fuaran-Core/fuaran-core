@@ -253,6 +253,12 @@
          delta and not with the table. Reads no other test module (it builds its own tables), so
          it is appended at the end of the list (append-only registration). -->
     <Compile Include="IncrementalRefreshCostTests.fs" />
+    <!-- Phase 203 — "exhaustively proved" as a gate predicate: every packable package is named by
+         a model or carries a declared exclusion, every assumed row is accounted for by its class,
+         and every differential is paired to a theorem. Reads PackageRosterTests.fs above for the
+         ONE derivation of "what ships" and Snapshots.fs for the repository root, so it follows
+         both; appended at the end of the list (append-only registration). -->
+    <Compile Include="ProofCoverageTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

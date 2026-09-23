@@ -1,7 +1,7 @@
 {
   "kind": "proofModules",
   "subject": "Fuaran-Core",
-  "$comment": "What the proof leg COSTS, declared per module, so that a growth in prover time is named rather than discovered when CI times out. `proofs/check.ps1` reads this file: every green CHECK line prints the module's measured seconds beside its budget, and a run over budget prints a named COST warning — never a failure on its own, because prover time varies by machine and by load and a budget is a smoke detector rather than a gate. `check.ps1 -Strict` promotes the warnings to a red leg for a session that wants one — since Phase 171 the UNLABELLED ones only, see `contentionSeeding` below. This is NOT `proofs.json`: that file is the claims ladder — what is proved, tested and assumed, at a closed set of levels, checked row-by-row against the tree by the Proofs.Ladder family — and a wall-clock budget is a claim at none of those levels and is not per-claim but per-module. The ladder's `proof-leg` policy row points here for the cost half. Coverage is checked BOTH ways: a module the leg checks with no entry here, and an entry here for a module the leg does not check, are each a COST warning naming what to do. Hand-authored; the seeding rule below says how a number is arrived at, and bumping one is the recorded act the README's `Running it` section describes. SINCE PHASE 164 each entry also carries a `floorSeconds`, and that number is a GATE rather than a smoke detector: a module that verifies in less than its floor fails the leg on the spot, because a run faster than the module can possibly be is not evidence of speed but of a cache that was not cold. The two rules sit in `seeding` and `floorSeeding` below, and the asymmetry between warning above and failing below is argued in the second of them. SINCE PHASE 166 not every timed line in the log is a candidate measurement: an ABORTED module (the prover died with nothing to say, which is a different verdict from a refutation) is retried once in the same run, and the retry runs against a cache the aborted attempt had already half-filled. `check.ps1` compares that line to NEITHER number here and marks it `(warm cache: NOT a cold measurement)`, and the leg's closing verdict names every abort it retried. DO NOT SEED A BUDGET OR A FLOOR FROM A RETRY LINE — both rules below say `cold run` and mean it, and a budget seeded from a warm one is a ceiling nothing can reach while a floor seeded from a warm one is a red leg on the next honest machine. SINCE PHASE 171 a third block, `contentionSeeding`, says when an overshoot is about the MACHINE rather than about the module: the leg reports a per-run CONTENTION FACTOR read off the modules the tree did not change, labels every cost finding from a run above the threshold, and a labelled finding is NOT a re-seed obligation — so DO NOT SEED A BUDGET FROM A LABELLED RUN EITHER, which is the judgement `TreeOps`'s and `DocVocabularyProofs`'s notes below had to make by hand.",
+  "$comment": "What the proof leg COSTS, declared per module, so that a growth in prover time is named rather than discovered when CI times out. `proofs/check.ps1` reads this file: every green CHECK line prints the module's measured seconds beside its budget, and a run over budget prints a named COST warning — never a failure on its own, because prover time varies by machine and by load and a budget is a smoke detector rather than a gate. `check.ps1 -Strict` promotes the warnings to a red leg for a session that wants one — since Phase 171 the UNLABELLED ones only, see `contentionSeeding` below. This is NOT `proofs.json`: that file is the claims ladder — what is proved, tested and assumed, at a closed set of levels, checked row-by-row against the tree by the Proofs.Ladder family — and a wall-clock budget is a claim at none of those levels and is not per-claim but per-module. The ladder's `proof-leg` policy row points here for the cost half. Coverage is checked BOTH ways: a module the leg checks with no entry here, and an entry here for a module the leg does not check, are each a COST warning naming what to do. Hand-authored; the seeding rule below says how a number is arrived at, and bumping one is the recorded act the README's `Running it` section describes. SINCE PHASE 164 each entry also carries a `floorSeconds`, and that number is a GATE rather than a smoke detector: a module that verifies in less than its floor fails the leg on the spot, because a run faster than the module can possibly be is not evidence of speed but of a cache that was not cold. The two rules sit in `seeding` and `floorSeeding` below, and the asymmetry between warning above and failing below is argued in the second of them. SINCE PHASE 166 not every timed line in the log is a candidate measurement: an ABORTED module (the prover died with nothing to say, which is a different verdict from a refutation) is retried once in the same run, and the retry runs against a cache the aborted attempt had already half-filled. `check.ps1` compares that line to NEITHER number here and marks it `(warm cache: NOT a cold measurement)`, and the leg's closing verdict names every abort it retried. DO NOT SEED A BUDGET OR A FLOOR FROM A RETRY LINE — both rules below say `cold run` and mean it, and a budget seeded from a warm one is a ceiling nothing can reach while a floor seeded from a warm one is a red leg on the next honest machine. SINCE PHASE 171 a third block, `contentionSeeding`, says when an overshoot is about the MACHINE rather than about the module: the leg reports a per-run CONTENTION FACTOR read off the modules the tree did not change, labels every cost finding from a run above the threshold, and a labelled finding is NOT a re-seed obligation — so DO NOT SEED A BUDGET FROM A LABELLED RUN EITHER, which is the judgement `TreeOps`'s and `DocVocabularyProofs`'s notes below had to make by hand. SINCE PHASE 203 each entry also carries `packages`: the packable package(s) whose production code the model is about. That is not a cost fact and it is here for one reason — this file is the only place the model ROSTER is enumerated, so it is the only place a package can be joined to a model without inventing a second roster to drift against. It is read by the `Proofs.Coverage` family (`../tests/Fuaran.Core.Tests/ProofCoverageTests.fs`), whose first clause holds every packable package to either a model named here or an entry in `coverage-exclusions.json`. A name here that is not a packable package fails that clause, so the attribution cannot quietly outlive the package it names.",
   "seeding": {
     "rule": "budgetSeconds = max(2 x the slowest observed cold-cache run, minimumBudgetSeconds), rounded up to the next 10s.",
     "toleranceFactor": 2,
@@ -26,6 +26,7 @@
   "modules": [
     {
       "module": "DagFold",
+      "packages": [ "Fuaran.Core.OpStream.Dag" ],
       "budgetSeconds": 160,
       "measuredSeconds": 78,
       "floorSeconds": 9,
@@ -36,6 +37,7 @@
     },
     {
       "module": "WireDecode",
+      "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 70,
       "measuredSeconds": 33,
       "floorSeconds": 4,
@@ -46,6 +48,7 @@
     },
     {
       "module": "TreeOps",
+      "packages": [ "Fuaran.Core.Tree", "Fuaran.Core.Ops" ],
       "budgetSeconds": 200,
       "measuredSeconds": 99,
       "floorSeconds": 11,
@@ -56,6 +59,7 @@
     },
     {
       "module": "Skeleton",
+      "packages": [ "Fuaran.Core.OpStream.Dag", "Fuaran.Core.Ops" ],
       "budgetSeconds": 20,
       "measuredSeconds": 2,
       "floorSeconds": 0,
@@ -66,6 +70,7 @@
     },
     {
       "module": "Chain",
+      "packages": [ "Fuaran.Core.OpStream", "Fuaran.Core.OpStream.Dag" ],
       "budgetSeconds": 60,
       "measuredSeconds": 27,
       "floorSeconds": 0,
@@ -76,6 +81,7 @@
     },
     {
       "module": "JsonParse",
+      "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 220,
       "measuredSeconds": 108,
       "floorSeconds": 11,
@@ -86,6 +92,7 @@
     },
     {
       "module": "Preservation",
+      "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 190,
       "measuredSeconds": 93,
       "floorSeconds": 7,
@@ -96,6 +103,7 @@
     },
     {
       "module": "TreeDiff",
+      "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 160,
       "measuredSeconds": 77,
       "contentionFactor": 1.29,
@@ -107,6 +115,7 @@
     },
     {
       "module": "Limits",
+      "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 20,
       "measuredSeconds": 1,
       "floorSeconds": 0,
@@ -117,6 +126,7 @@
     },
     {
       "module": "WireCanon",
+      "packages": [ "Fuaran.Core.Wire" ],
       "budgetSeconds": 270,
       "measuredSeconds": 132,
       "floorSeconds": 6,
@@ -127,6 +137,7 @@
     },
     {
       "module": "WireVersioning",
+      "packages": [ "Fuaran.Core.Idl" ],
       "budgetSeconds": 20,
       "measuredSeconds": 2,
       "floorSeconds": 0,
@@ -137,6 +148,7 @@
     },
     {
       "module": "Vocabulary",
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 20,
       "measuredSeconds": 10,
       "floorSeconds": 0,
@@ -147,6 +159,7 @@
     },
     {
       "module": "VocabularyProofs",
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 30,
       "measuredSeconds": 12,
       "floorSeconds": 2,
@@ -157,6 +170,7 @@
     },
     {
       "module": "DocVocabulary",
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 30,
       "measuredSeconds": 11,
       "floorSeconds": 0,
@@ -167,6 +181,7 @@
     },
     {
       "module": "DocVocabularyProofs",
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 20,
       "measuredSeconds": 10,
       "floorSeconds": 2,
@@ -177,6 +192,7 @@
     },
     {
       "module": "ScoreVocabulary",
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 40,
       "measuredSeconds": 16,
       "floorSeconds": 4,
@@ -187,6 +203,7 @@
     },
     {
       "module": "ScoreVocabularyProofs",
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 70,
       "measuredSeconds": 32,
       "floorSeconds": 6,
@@ -197,6 +214,7 @@
     },
     {
       "module": "ColumnOps",
+      "packages": [ "Fuaran.Core.Column.Ops" ],
       "budgetSeconds": 100,
       "measuredSeconds": 47,
       "floorSeconds": 4,
@@ -207,6 +225,7 @@
     },
     {
       "module": "Capability",
+      "packages": [ "Fuaran.Core.Function" ],
       "budgetSeconds": 20,
       "measuredSeconds": 7,
       "floorSeconds": 3,
@@ -217,6 +236,7 @@
     },
     {
       "module": "Propagation",
+      "packages": [ "Fuaran.Core.Propagation" ],
       "budgetSeconds": 20,
       "measuredSeconds": 4,
       "floorSeconds": 0,
@@ -227,6 +247,7 @@
     },
     {
       "module": "Query",
+      "packages": [ "Fuaran.Core.Query" ],
       "budgetSeconds": 20,
       "measuredSeconds": 9,
       "floorSeconds": 4,
@@ -237,6 +258,7 @@
     },
     {
       "module": "Arbitrate",
+      "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 30,
       "measuredSeconds": 12,
       "floorSeconds": 6,

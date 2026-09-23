@@ -188,6 +188,14 @@ $proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabulary
 #                       verifies, and then this step reports what it is stale against.
 #   Proofs.Oracle     — the differential: each extracted model beside the production code.
 #   Proofs.Ladder     — ../proofs.json against this tree.
+#   Proofs.Coverage   — Phase 203's stopping rule, and the only family here that is about what is
+#                       NOT in this directory: every packable package is named by a model in
+#                       modules.json or carries a declared exclusion in coverage-exclusions.json,
+#                       every assumed row is accounted for by its class, and every differential is
+#                       paired to a theorem. It runs LAST because it is the only one whose subject
+#                       is the leg as a whole — the three above each say something about one
+#                       artefact, and this one says whether the set of them is the claim the README
+#                       makes. It prints the predicate line whatever the verdict.
 $hostFilters = @(
     @{
         Filter  = 'Proofs.Vocabulary'
@@ -200,6 +208,10 @@ $hostFilters = @(
     @{
         Filter  = 'Proofs.Ladder'
         Failure = 'the claims ladder (Proofs.Ladder) is RED — ../proofs.json and this tree disagree; the failing row and clause are named above'
+    }
+    @{
+        Filter  = 'Proofs.Coverage'
+        Failure = 'the coverage predicate (Proofs.Coverage) is RED — "exhaustively proved" is not met on this tree; each finding names the clause and the subject above, and the `proofs:` line says which verdict was computed'
     }
 )
 
