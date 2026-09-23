@@ -21,7 +21,7 @@
       "phase": "fuaran-core#144",
       "evidence": {
         "family": "Proofs.Oracle",
-        "tests": [
+        "cases": [
           "a fixture case"
         ]
       }

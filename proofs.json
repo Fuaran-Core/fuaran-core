@@ -154,7 +154,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/WireDecode.fst",
-        "tests": [
+        "cases": [
           "every combinator answers the same on every shuffle of every nodes/ fixture",
           "every combinator answers the same on every shuffle of every ops/ fixture",
           "the node decoder returns the SAME TREE on every shuffle — §20's one answer",
@@ -170,7 +170,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/DagFold.fst",
-        "tests": [
+        "cases": [
           "the oracle agrees with production over the reference witness at 3 lanes",
           "the oracle agrees with production over the reference witness at 4 lanes",
           "the oracle agrees with production over the work-plan domain",
@@ -190,7 +190,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/WireDecode.fst",
-        "tests": [
+        "cases": [
           "the decode oracle agrees with Wire.Decode over every nodes/ fixture",
           "the decode oracle agrees with Wire.Decode over every ops/ fixture",
           "the decode oracle agrees with Wire.Decode over a generated JVal sample",
@@ -264,7 +264,7 @@
         "theorem": "null_absorption_is_erasure",
         "model": "proofs/JsonParse.fst",
         "prover": "proofs/fstar-pin.json",
-        "tests": [
+        "cases": [
           "… and the absorption IS the erasure — Phase 190's bridge, erase-then-compare"
         ]
       }
@@ -309,7 +309,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/DagFold.fst",
-        "tests": [
+        "cases": [
           "production's betweenOps recovers the model's delta over the reference witness",
           "production's betweenOps recovers the model's delta over the reference witness at 4 lanes",
           "production's betweenOps recovers the model's delta over the work-plan domain",
@@ -371,7 +371,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/DagFold.fst",
-        "tests": [
+        "cases": [
           "the extracted drain is production's topological order over every lane head",
           "the extracted drain is production's topological order over a MULTI-HEAD UNION",
           "a model draining LARGEST-id-first loses over the same unions — the measurement can fail",
@@ -422,7 +422,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/DagFold.fst",
-        "tests": [
+        "cases": [
           "the extracted recovery and mergeBase are production's over every FOLD-PULL-FOLD union",
           "the fold FROM a merged head is the deltas-first fold over the round-two lanes",
           "a model whose mergeBase returns the BASE rather than the divergence point loses"
@@ -470,7 +470,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/TreeOps.fst",
-        "tests": [
+        "cases": [
           "the pinned unknown-parent clause is necessary — both classes, on the model and on production",
           "a move pair nesting into each other's subtrees is refused, and no record could free it"
         ]
@@ -506,7 +506,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/TreeOps.fst",
-        "tests": [
+        "cases": [
           "the tree oracle agrees with Ops.apply and Ops.footprint over the generated pool",
           "a tree oracle handed a blind bridge DISAGREES with Ops.apply",
           "the extracted tree model keeps the diamond its own theorem proves",
@@ -621,7 +621,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Arbitrate.fst",
-        "tests": [
+        "cases": [
           "the arbitration oracle agrees with Arbitration.arbitrate over generated proposal sets",
           "a model that ACCEPTS A CONFLICTING PAIR loses — the measurement can fail",
           "the id-uniqueness hypothesis is NEEDED, on the shipped function — `duplicate_ids_break_invariance`",
@@ -690,7 +690,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Chain.fst",
-        "tests": [
+        "cases": [
           "the chain oracle agrees with production over the reference witness's DAG and every tamper of it",
           "the chain oracle agrees with production over the work-plan DAG and every tamper of it",
           "the chain oracle agrees with production over the linear op-stream and every tamper of it",
@@ -731,7 +731,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Chain.fst",
-        "tests": [
+        "cases": [
           "an actor encoding CAN carry the splice separator — Phase 136's stated reason is REFUTED",
           "Actor.encode is a PREFIX-FREE code — the premise the splice lemma actually takes",
           "the actor/op splice recovers both halves over the adversarial population",
@@ -781,7 +781,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Chain.fst",
-        "tests": [
+        "cases": [
           "the snapshot oracle agrees with production over the work-plan stream, every boundary and every tamper",
           "the snapshot oracle agrees with production over the reference witness's stream, every boundary and every tamper",
           "a snapshot model handed a DIFFERENT hash disagrees with production — the comparison can lose",
@@ -832,7 +832,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Chain.fst",
-        "tests": [
+        "cases": [
           "the signed-head oracle agrees with production over the work-plan stream, every keyring and every re-minted splice",
           "the signed-head oracle agrees with production over the reference witness's stream, every keyring and every re-minted splice",
           "a signed-head model handed a DIFFERENT hash disagrees with production — the comparison can lose",
@@ -915,7 +915,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/JsonParse.fst",
-        "tests": [
+        "cases": [
           "the parser oracle agrees with production over the near-miss table",
           "… and under the tolerant read policy, where the member-null fork lives",
           "the parser oracle agrees with production over every corpus nodes/ fixture",
@@ -1034,7 +1034,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Preservation.fst",
-        "tests": [
+        "cases": [
           "the preservation oracle agrees with Ops.apply over colliding and duplicated grafts",
           "a validator that SKIPS the subtree check loses against production — the measurement can fail",
           "the retired counterexample is refused by the shipped engine, and admitted by the model of the old validator"
@@ -1148,7 +1148,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Preservation.fst",
-        "tests": [
+        "cases": [
           "the container oracle agrees with Ops.applyContained under a generated canHold",
           "an engine that checks canHold on insert but NOT on move loses — the measurement can fail",
           "canHold is consulted on the graft's INTERIOR too — the shipped engine, since Phase 161",
@@ -1208,7 +1208,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Preservation.fst",
-        "tests": [
+        "cases": [
           "the script oracle agrees with Ops.applyAllWith / canApplyAllWith under a generated canHold",
           "an engine whose sequence dry run drops the capability loses — the measurement can fail",
           "the sequence surface sees containment and the plain pair still does not — both halves"
@@ -1311,7 +1311,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/TreeDiff.fst",
-        "tests": [
+        "cases": [
           "the diff oracle agrees with Diff.toOps over INDEPENDENTLY generated pairs",
           "the four-pass ORDER is load-bearing — removes before inserts loses",
           "a contained diff that never checks the after tree loses — the measurement can fail",
@@ -1326,7 +1326,7 @@
       "phase": "fuaran-core#161",
       "evidence": {
         "family": "Conformance.containerLaws",
-        "tests": [
+        "cases": [
           "the reference witness is the first certifier — every law green",
           "the census calls it Guarded, and it emits an adequacy law",
           "a canHold that READS THE CHILD LIST fails the child-blindness law",
@@ -1442,7 +1442,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/WireCanon.fst",
-        "tests": [
+        "cases": [
           "Canon.tryRender refuses exactly the non-finite alias witnesses, and names them by path",
           "the guard oracle agrees with Canon.tryRender over the corpus — and refuses none of it",
           "the guard oracle agrees with Canon.tryRender over a generated pool carrying non-finite floats",
@@ -1469,7 +1469,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/WireCanon.fst",
-        "tests": [
+        "cases": [
           "the canon oracle agrees with Canon.render over every nodes/ fixture",
           "the canon oracle agrees with Canon.render over every ops/ fixture",
           "the canon oracle agrees with Canon.render over a generated JVal pool",
@@ -1630,7 +1630,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/WireVersioning.fst",
-        "tests": [
+        "cases": [
           "the versioning oracle agrees with Versioning.classify over perturbed idl.json pairs",
           "the versioning oracle agrees with production over §15.4's three field-add rows",
           "the versioning oracle agrees with production over every envelope/ fixture",
@@ -1646,7 +1646,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/WireVersioning.fst",
-        "tests": [
+        "cases": [
           "the versioning oracle agrees with production over §15.4's three field-add rows",
           "the versioning oracle agrees with Versioning.classify over perturbed idl.json pairs"
         ]
@@ -1748,7 +1748,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/ColumnOps.fst",
-        "tests": [
+        "cases": [
           "the columnar oracle agrees with ColumnOps.apply, canApply and invert over generated tables and scripts",
           "the columnar oracle agrees with ColumnOps.toOps and applyAll, and the diff reconstructs on well-formed pairs",
           "a columnar oracle handed a BLIND cell bridge DISAGREES with ColumnOps.apply — the measurement can fail",
@@ -1885,7 +1885,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Capability.fst",
-        "tests": [
+        "cases": [
           "the function oracle agrees with Function.signature, apply, curry, compose and auditEffect over generated artifacts and argument sets",
           "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations",
           "a capability oracle handed a BLIND int reader DISAGREES with Capability.validateArgs and Function.apply — the measurement can fail",
@@ -1967,7 +1967,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Propagation.fst",
-        "tests": [
+        "cases": [
           "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval and evalFrom, over generated dependency maps and change sets",
           "a propagation oracle handed a BLIND deps bridge DISAGREES with Propagation.dirtyFromChangedIds and evalFrom — the measurement can fail",
           "evalFrom is eval under the evaluator contract, and an undeclared read is REFUSED by both drivers — `evalfrom_agrees`, `evalfrom_minimal`, `undeclared_refused` and `evalfrom_unknown_refused`, on the shipped driver"
@@ -2102,7 +2102,7 @@
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Query.fst",
-        "tests": [
+        "cases": [
           "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets",
           "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail",
           "no resolver runs on a refused dispatch — `unregistered_refused` and `validate_before_resolve`, on the shipped seam",

@@ -259,13 +259,13 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                     if level <> Some "tested" then
                         []
                     else
-                        match ev |> Option.bind (fun e -> strArrayMember e "tests") with
+                        match ev |> Option.bind (fun e -> strArrayMember e "cases") with
                         | None
                         | Some [] ->
                             [ finding
                                   id
                                   "tested-case-exists"
-                                  "a tested row must name its cases in `evidence.tests` (a non-empty array of `Proofs.Oracle` case names) — naming the family in prose alone leaves the claim uncheckable" ]
+                                  "a tested row must name its cases in `evidence.cases` (a non-empty array of `Proofs.Oracle` case names) — naming the family in prose alone leaves the claim uncheckable" ]
                         | Some names ->
                             names
                             |> List.filter (fun n -> not (Set.contains n inputs.Cases))
@@ -273,7 +273,7 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 finding
                                     id
                                     "tested-case-exists"
-                                    (sprintf "`evidence.tests` names '%s', which is not a case in the test tree" n))
+                                    (sprintf "`evidence.cases` names '%s', which is not a case in the test tree" n))
 
                 // ---- Phase 174: which KIND of assumed an `assumed` row is ----
                 let cls = strMember row "class"

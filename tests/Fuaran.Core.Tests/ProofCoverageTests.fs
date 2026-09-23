@@ -565,7 +565,7 @@ let private fixtureLadder =
     { "id": "t1", "level": "proved", "phase": "fuaran-core#1",
       "evidence": { "theorem": "t", "model": "proofs/MA.fst" } },
     { "id": "t2", "level": "tested", "phase": "fuaran-core#1",
-      "evidence": { "family": "Proofs.Oracle", "model": "proofs/MA.fst", "tests": [ "a case" ] } },
+      "evidence": { "family": "Proofs.Oracle", "model": "proofs/MA.fst", "cases": [ "a case" ] } },
     { "id": "t3", "level": "assumed", "class": "premise", "phase": "fuaran-core#1" },
     { "id": "t4", "level": "assumed", "class": "domain-obligation", "dischargedBy": "Conformance.fixtureLaws", "phase": "fuaran-core#1" },
     { "id": "t5", "level": "assumed", "class": "model-bridge", "closes": "permanent", "phase": "fuaran-core#1" }
@@ -833,8 +833,8 @@ let proofCoverageTests =
                             { Module = "MB"
                               Packages = [ "Pkg.A" ] } ] }
                   (fixtureLadder.Replace(
-                      "\"model\": \"proofs/MA.fst\", \"tests\"",
-                      "\"model\": \"proofs/MB.fst\", \"tests\""
+                      "\"model\": \"proofs/MA.fst\", \"cases\"",
+                      "\"model\": \"proofs/MB.fst\", \"cases\""
                   ))
                   "differential-paired"
                   "t2"
@@ -844,7 +844,7 @@ let proofCoverageTests =
               expectOneFinding
                   "an unpaired differential"
                   fixtureBase
-                  (fixtureLadder.Replace("\"model\": \"proofs/MA.fst\", \"tests\"", "\"tests\""))
+                  (fixtureLadder.Replace("\"model\": \"proofs/MA.fst\", \"cases\"", "\"cases\""))
                   "differential-paired"
                   "t2"
 
