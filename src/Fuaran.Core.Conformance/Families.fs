@@ -229,6 +229,22 @@ module Families =
     let private jsonArray (xs: string list) : string =
         "[" + (xs |> List.map quote |> String.concat ", ") + "]"
 
+    /// What the `cases` cell reads for a family the caller measured nothing for — Phase 196.
+    ///
+    /// It is a THIRD state and not a synonym for `vacuous`: "this run exercised no case" and "no
+    /// run was handed to the renderer" are different facts, and collapsing them would let a
+    /// consumer that never measured anything render as a consumer whose families all ran empty.
+    /// The distinction is the whole reason the renderings take the counts rather than deriving
+    /// them — a roster cannot run a law.
+    [<Literal>]
+    let unmeasuredToken = "unmeasured"
+
+    /// The census cell for one family: the measured count, `vacuous`, or `unmeasured`.
+    let private casesCell (cases: (string * CaseCount) list) (id: string) : string =
+        match cases |> List.tryFind (fun (k, _) -> k = id) with
+        | Some(_, c) -> SampleAdequacy.renderCases c
+        | None -> unmeasuredToken
+
     /// The wire spelling of an opt-in reason — the JSON member and the markdown cell both use
     /// it, so the two renderings never disagree about a family. A base-run family has none.
     let reasonToken (r: OptInReason) : string =
@@ -244,16 +260,21 @@ module Families =
     /// `kind`, `schema`, `package` and a `families` array sorted by `id`, each member an object
     /// with `id`, `module`, `entry`, `witness` (array), `optIn` (boolean), `reason` (a string from
     /// the [[OptInReason]] vocabulary, **present only for an opt-in family** — this wire model has
-    /// no null) and `discharges` (array).
+    /// no null), `discharges` (array) and `cases` (a string: a decimal count, `vacuous`, or
+    /// `unmeasured`).
     ///
-    /// `schema` reads 2 since Phase 194 added `reason`. The bump is free and therefore taken: a
-    /// search of the workspace found no reader of this file outside this repository's own suite,
-    /// so nothing keys on the old number, and a shape that changes under an unmoved stamp is the
-    /// drift class this estate keeps paying for elsewhere.
+    /// `schema` reads 3 since Phase 196 added `cases`; it read 2 from Phase 194's `reason`. The
+    /// bump is free and therefore taken: a search of the workspace found no reader of this file
+    /// outside this repository's own suite, so nothing keys on the old number, and a shape that
+    /// changes under an unmoved stamp is the drift class this estate keeps paying for elsewhere.
     /// Members are written in that order and the array is sorted, so the rendering is byte-stable
     /// across runs and a diff shows only what moved. Two spaces of indent, `\n` line endings, and
     /// a trailing newline.
-    let toJson () : string =
+    ///
+    /// `cases` is the ONE member a roster cannot derive — a declaration cannot run a law — so it
+    /// is supplied by the caller that did run them. `toJson ()` renders `unmeasured` for every
+    /// family, which is the honest cell for a caller that measured nothing.
+    let toJsonWith (cases: (string * CaseCount) list) : string =
         let family (f: LawFamily) =
             // `reason` is OMITTED for a base-run family rather than rendered `null`: this wire
             // model has no null (`JVal` cannot represent one, and `no_null_ever` is a proved
@@ -264,7 +285,8 @@ module Families =
               "      " + quote "entry" + ": " + quote f.Entry
               "      " + quote "witness" + ": " + jsonArray f.Witness
               "      " + quote "optIn" + ": " + (if f.OptIn then "true" else "false")
-              "      " + quote "discharges" + ": " + jsonArray f.Discharges ]
+              "      " + quote "discharges" + ": " + jsonArray f.Discharges
+              "      " + quote "cases" + ": " + quote (casesCell cases f.Id) ]
             |> fun members ->
                 match f.Reason with
                 | None -> members
@@ -289,7 +311,7 @@ module Families =
         + ",\n"
         + "  "
         + quote "schema"
-        + ": 2,\n"
+        + ": 3,\n"
         + "  "
         + quote "package"
         + ": "
@@ -303,7 +325,10 @@ module Families =
 
     /// The roster as the generated `docs/conformance-families.md` — the human-readable half of the
     /// same export. Sorted by `id`, so the table is byte-stable and a diff shows only what moved.
-    let toMarkdown () : string =
+    ///
+    /// `cases` carries what a run measured, per Phase 196; the five columns beside it are rendered
+    /// exactly as they were before it existed.
+    let toMarkdownWith (cases: (string * CaseCount) list) : string =
         let cell (xs: string list) =
             if List.isEmpty xs then
                 "—"
@@ -312,7 +337,7 @@ module Families =
 
         let row (f: LawFamily) =
             sprintf
-                "| `%s` | %s | %s | %s | %s |"
+                "| `%s` | %s | %s | %s | %s | %s |"
                 f.Id
                 (if f.OptIn then "opt-in" else "base run")
                 (match f.Reason with
@@ -320,6 +345,7 @@ module Families =
                  | None -> "—")
                 (cell f.Witness)
                 (cell f.Discharges)
+                (casesCell cases f.Id)
 
         let rows = families |> List.sortBy (fun f -> f.Id) |> List.map row
 
@@ -356,13 +382,29 @@ module Families =
           "family at your own witness discharges. Most families discharge none — they certify, they"
           "do not answer for an assumption this repository's proofs leave open."
           ""
+          "**Cases.** What a RUN measured, not what the roster declares: the subject-law assertions"
+          "the family made at this repository's own reference witness. `vacuous` — never a number —"
+          "means the run certified nothing, either because it asserted nothing at all or because a"
+          "guarded dimension was starved, and the starved dimension is named in the cell. `vacuous`"
+          "is the state a family passing green while exercising nothing used to render as, which is"
+          "what this column exists to make impossible to read past. `unmeasured` means no run was"
+          "handed to the renderer, which is a different fact and deliberately a different word."
+          ""
           sprintf
               "%d families, across %s."
               (List.length families)
               (modules |> List.map (fun m -> "`" + m + "`") |> String.concat ", ")
           ""
-          "| Family | Run by | Why opt-in | Witness | Discharges |"
-          "|---|---|---|---|---|" ]
+          "| Family | Run by | Why opt-in | Witness | Discharges | Cases |"
+          "|---|---|---|---|---|---|" ]
         @ rows
         @ [ "" ]
         |> String.concat "\n"
+
+    /// The roster rendered with no run behind it — every `cases` cell reads `unmeasured`. Kept
+    /// beside the counted renderings rather than replaced by them, because a reader that wants the
+    /// DECLARATION should not have to produce a run to get it.
+    let toJson () : string = toJsonWith []
+
+    /// The markdown half of the same, with no run behind it.
+    let toMarkdown () : string = toMarkdownWith []

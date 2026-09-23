@@ -1,4 +1,4 @@
-module Fuaran.Core.Tests.ConformanceTests
+﻿module Fuaran.Core.Tests.ConformanceTests
 
 // Phase 243 — the op-algebra conformance kit, self-proven against the in-repo reference
 // witness, plus a deliberately-broken witness whose failure is reproduced from a seed.
@@ -9,7 +9,7 @@ open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.Reference2
 
 // ---- a random tree generator over the reference RNode (unique ids) ----
-let private genTree (rng: ConfRng.T) : RNode * ConfRng.T =
+let genTree (rng: ConfRng.T) : RNode * ConfRng.T =
     let mutable counter = 0
     let mutable r = rng
 
@@ -44,17 +44,17 @@ let private genFresh (existing: Set<string>) (rng: ConfRng.T) : RNode * ConfRng.
     let id = pick ()
     RNode.leaf id "para" "x", r
 
-let private opGen: OpGen<RNode, string> =
+let opGen: OpGen<RNode, string> =
     { Tree = genTree
       FreshNode = genFresh
       CanHold = None }
 
 // ---- a counter stream witness (mirrors OpStreamTests) ----
-type private CounterOp =
+type CounterOp =
     | Inc of int
     | Dec of int
 
-let private sw: StreamWitness<CounterOp, int, string> =
+let sw: StreamWitness<CounterOp, int, string> =
     { Apply =
         fun op st ->
             match op with
@@ -82,7 +82,7 @@ let private genStreamOp (rng: ConfRng.T) : CounterOp * ConfRng.T =
     let n, r2 = ConfRng.intBelow 5 r1
     (if kind = 0 then Inc n else Dec n), r2
 
-let private streamGen: StreamGen<CounterOp, int> = { State0 = 0; Op = genStreamOp }
+let streamGen: StreamGen<CounterOp, int> = { State0 = 0; Op = genStreamOp }
 
 // ---- Phase 60/65: an in-repo keyed signing sink + a wide collision-resistant HashFn stand-in ----
 // GP3: no cryptographic hash ships in Core; these live test-side. `keyedSink` is a keyed FNV/HMAC-style
@@ -100,7 +100,7 @@ let private fnv1a (s: string) : string =
 
     h.ToString("x8")
 
-let private keyedSink (key: string) : IAttestationSink =
+let keyedSink (key: string) : IAttestationSink =
     let sign (head: string) = fnv1a (key + "|" + head)
 
     { new IAttestationSink with
@@ -113,7 +113,7 @@ let private keyedSink (key: string) : IAttestationSink =
         member _.Verify att head =
             att.Head = head && att.Signature = sign head }
 
-let private wideHash: HashFn =
+let wideHash: HashFn =
     fun prev payload ->
         let s = prev + "|" + payload
 
@@ -134,7 +134,7 @@ let private wideHash: HashFn =
 // ---- a cross-witness composition generator over the reference RNode (Phase 47) ----
 // An outer with two independent `para` slots + one value hole, a closed inner, and two open inners
 // sharing the hole name "x" at distinct ids (so their re-rooted copies get distinct addresses).
-let private genComposition (rng: ConfRng.T) : Conformance.CompositionSample<RNode, RNode> * ConfRng.T =
+let genComposition (rng: ConfRng.T) : Conformance.CompositionSample<RNode, RNode> * ConfRng.T =
     let v, r1 = ConfRng.intBelow 11 rng // an in-space value for the count hole (0..10)
     let det, r2 = ConfRng.intBelow 4 r1 // vary the inner effect so the join is non-trivial
     let determinism = [ Deterministic; Clock; Random; Network ] |> List.item det
@@ -171,7 +171,7 @@ let private genComposition (rng: ConfRng.T) : Conformance.CompositionSample<RNod
 // The same outer shape as genComposition, but the inners are the second (int-id) reference witness —
 // so composeAcross + applyMemo are exercised across a genuinely-distinct witness pair. The R2 inners
 // are rooted at Tag "para" so embedToR yields RNode "para" nodes the slots accept.
-let private genComposition2 (rng: ConfRng.T) : Conformance.CompositionSample<RNode, R2Node> * ConfRng.T =
+let genComposition2 (rng: ConfRng.T) : Conformance.CompositionSample<RNode, R2Node> * ConfRng.T =
     let v, r1 = ConfRng.intBelow 11 rng
     let det, r2 = ConfRng.intBelow 4 r1
     let determinism = [ Deterministic; Clock; Random; Network ] |> List.item det
@@ -207,7 +207,7 @@ let private genComposition2 (rng: ConfRng.T) : Conformance.CompositionSample<RNo
 // ---- a memo sample generator over the reference RNode (Phase 49) ----
 // A pure template + two distinct full param-sets (count differs), and an effecting (non-deterministic)
 // variant — so applyMemo hits, misses, and bypasses are all exercised.
-let private genMemo (rng: ConfRng.T) : Conformance.MemoSample<RNode> * ConfRng.T =
+let genMemo (rng: ConfRng.T) : Conformance.MemoSample<RNode> * ConfRng.T =
     let v1, r1 = ConfRng.intBelow 11 rng // count in [0,10]
     let v2, r2 = ConfRng.intBelow 11 r1
     let alt = if v2 = v1 then (v1 + 1) % 11 else v2 // guarantee ArgsAlt ≠ Args
@@ -728,8 +728,8 @@ let tests =
 
               Expect.equal
                   (List.length results)
-                  5
-                  "round-trip + prefix + replay + op-tamper + actor-tamper laws reported"
+                  6
+                  "round-trip + prefix + replay + op-tamper + actor-tamper laws, and the Phase 196 signing-outcome guard"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -753,16 +753,41 @@ let tests =
                   results
                   "same seed ⇒ identical report"
 
-          testCase "attestationLaws pass vacuously under the noAttestation default (Phase 60)"
+          // Phase 196 inverted this case's VERDICT while keeping its subject. The observation is
+          // unchanged and was always the point — under the no-op sink the five subject laws hold
+          // over nothing — but "passes vacuously" is precisely the reading a consumer's census
+          // rendered as `adopted`, so the family now reports the vacuity instead of absorbing it.
+          // A host with no sink runs `noAttestationVacuityLaws`, which certifies the unsigned path
+          // on purpose; running THIS family there is the mistake the guard now names.
+          testCase "attestationLaws report the noAttestation default as VACUOUS, not as green (Phase 196)"
           <| fun _ ->
               let results =
                   Conformance.attestationLaws sw streamGen OpStream.noAttestation OpStream.defaultHash 4242 200
 
+              let guardOf (r: LawResult) =
+                  r.Law.StartsWith SampleAdequacy.guardOpening
+
               Expect.isTrue
-                  (results |> List.forall (fun r -> r.Passed))
+                  (results |> List.filter (guardOf >> not) |> List.forall (fun r -> r.Passed))
                   (sprintf
-                      "the no-op sink satisfies the laws vacuously: %A"
+                      "the five subject laws still hold over nothing: %A"
                       (results |> List.filter (fun r -> not r.Passed)))
+
+              let guard = results |> List.filter guardOf
+
+              Expect.equal (List.length guard) 1 "one adequacy guard is reported"
+
+              Expect.isFalse
+                  (guard |> List.forall (fun r -> r.Passed))
+                  "and it is RED — a sink that never signs leaves four of the five laws asserting nothing"
+
+              Expect.isTrue
+                  (guard
+                   |> List.forall (fun r ->
+                       match r.Counterexample with
+                       | Some cx -> cx.Contains "signed=0" && cx.Contains "falsified=0"
+                       | None -> false))
+                  "naming the counts it did reach, which is what tells a reader which way to widen"
 
           testCase "noAttestationVacuityLaws certify Sign⇒None + Verify⇒false + chain-unchanged (Phase 60)"
           <| fun _ ->
@@ -868,7 +893,7 @@ let tests =
 /// The domain validity oracle the verifier drives: any node whose Value parses as an int > 5 is a
 /// `Severity.Error` defect. The "rule" a correct-by-construction function must respect for every
 /// binding — registered into a real `Validator.Registry` so `verifyFunction` drives the framework.
-let private countReg: Validator.Registry<RNode, string> =
+let countReg: Validator.Registry<RNode, string> =
     Validator.empty
     |> Validator.register (
         Validator.perNode "count≤5" (fun _ n ->
@@ -882,7 +907,7 @@ let private countReg: Validator.Registry<RNode, string> =
     )
 
 /// A full template whose `count` hole ranges over [lo, hi]; title + body are fixed-shape holes.
-let private tplCount (lo, hi) =
+let tplCount (lo, hi) =
     { RNode.node
           "tpl"
           "template"
@@ -907,7 +932,7 @@ let private sampleInSpace (space: ValueSpace) (rng: ConfRng.T) : string * ConfRn
     | _ -> "x", rng
 
 /// A valid param-set generator: fill every data hole with an in-space value / a para slot.
-let private genParamsFor (fn: RNode) (rng: ConfRng.T) : Map<string, Arg<RNode>> * ConfRng.T =
+let genParamsFor (fn: RNode) (rng: ConfRng.T) : Map<string, Arg<RNode>> * ConfRng.T =
     let holes =
         artw.Holes fn
         |> List.filter (fun h ->
@@ -1134,7 +1159,7 @@ type KNode =
       Children: KNode list
       Cases: (string * KNode) list }
 
-let private knodew: NodeWitness<KNode, string> =
+let knodew: NodeWitness<KNode, string> =
     { Id = fun n -> n.Id
       KindTag = fun n -> n.Kind
       Children = fun n -> n.Children
@@ -1200,7 +1225,7 @@ let private genKFresh (existing: Set<string>) (rng: ConfRng.T) : KNode * ConfRng
       Cases = [] },
     r
 
-let private kGen: OpGen<KNode, string> =
+let kGen: OpGen<KNode, string> =
     { Tree = genKTree
       FreshNode = genKFresh
       CanHold = None }
@@ -1229,7 +1254,7 @@ let private caseNode (id: string) =
       Children = []
       Cases = [] }
 
-let private keyw: KeyedWitness<KNode, string> =
+let keyw: KeyedWitness<KNode, string> =
     { Surface = "the reference domain's full walk (Children + the case table)"
       HasKeyedChildren = fun n -> n.Cases |> List.map (fun (_, c) -> c.Id)
       PlaceKeyedChild =

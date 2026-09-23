@@ -1,6 +1,6 @@
 {
   "kind": "fuaran.core.conformance.families",
-  "schema": 2,
+  "schema": 3,
   "package": "Fuaran.Core.Conformance",
   "families": [
     {
@@ -10,7 +10,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "400"
     },
     {
       "id": "Conformance.aiSurfaceLaws",
@@ -19,7 +20,8 @@
       "witness": ["AiSurfaceWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.arbitrationLaws",
@@ -28,7 +30,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "1800"
     },
     {
       "id": "Conformance.attestationLaws",
@@ -37,7 +40,8 @@
       "witness": ["StreamWitness", "StreamGen", "IAttestationSink"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "1000"
     },
     {
       "id": "Conformance.attributedLaws",
@@ -46,7 +50,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.canonicalFloatLaws",
@@ -55,7 +60,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "1500"
     },
     {
       "id": "Conformance.capabilityLaws",
@@ -64,7 +70,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "1400"
     },
     {
       "id": "Conformance.capabilityPipelineIncrementalLaws",
@@ -73,7 +80,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.capabilityPipelineLaws",
@@ -82,7 +90,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.captureReplayLaws",
@@ -91,7 +100,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.casLaws",
@@ -100,7 +110,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.chainBreakReasonLaws",
@@ -109,7 +120,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.codecInjectivityLaws",
@@ -118,7 +130,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.columnarOpLaws",
@@ -127,7 +140,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "1200"
     },
     {
       "id": "Conformance.columnarOpLawsWith",
@@ -136,7 +150,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "1200"
     },
     {
       "id": "Conformance.columnarValidatorLaws",
@@ -145,7 +160,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "400"
     },
     {
       "id": "Conformance.compositionLaws",
@@ -154,7 +170,8 @@
       "witness": ["ArtifactWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.compositionPilot",
@@ -163,7 +180,8 @@
       "witness": ["ArtifactWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "1200"
     },
     {
       "id": "Conformance.concurrencyLaws",
@@ -172,7 +190,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": ["lanes-apply"]
+      "discharges": ["lanes-apply"],
+      "cases": "900"
     },
     {
       "id": "Conformance.concurrencyLawsWith",
@@ -181,7 +200,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "900"
     },
     {
       "id": "Conformance.constructThenEncodeLaws",
@@ -190,7 +210,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "12"
     },
     {
       "id": "Conformance.containerLaws",
@@ -199,7 +220,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.dagBreakReasonLaws",
@@ -208,7 +230,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "480"
     },
     {
       "id": "Conformance.dagLaws",
@@ -217,7 +240,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "400"
     },
     {
       "id": "Conformance.deferredLaws",
@@ -226,7 +250,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.diffContainedLaws",
@@ -235,7 +260,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.diffLaws",
@@ -243,7 +269,8 @@
       "entry": "diffLaws",
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": false,
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.dirtyPropagationLaws",
@@ -252,7 +279,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.encoderInjectivityLaws",
@@ -261,7 +289,8 @@
       "witness": ["ArtifactWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "200"
     },
     {
       "id": "Conformance.footprintLaws",
@@ -270,7 +299,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": ["independence-diamond"]
+      "discharges": ["independence-diamond"],
+      "cases": "900"
     },
     {
       "id": "Conformance.functionVerifyLaws",
@@ -279,7 +309,8 @@
       "witness": ["ArtifactWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.hashFnAdversarialLaws",
@@ -288,7 +319,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "1000000"
     },
     {
       "id": "Conformance.hashFnLaws",
@@ -297,7 +329,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.idempotencyLaws",
@@ -306,7 +339,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.incrementalLaws",
@@ -315,7 +349,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "400"
     },
     {
       "id": "Conformance.keyedChildrenLaws",
@@ -324,7 +359,8 @@
       "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": ["witness-surface-scope"]
+      "discharges": ["witness-surface-scope"],
+      "cases": "600"
     },
     {
       "id": "Conformance.memoLaws",
@@ -333,7 +369,8 @@
       "witness": ["ArtifactWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.memoSoundnessLaws",
@@ -342,7 +379,8 @@
       "witness": ["ArtifactWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "100"
     },
     {
       "id": "Conformance.mergeConflictLaws",
@@ -351,7 +389,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "900"
     },
     {
       "id": "Conformance.noAttestationVacuityLaws",
@@ -360,7 +399,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.normalizeLaws",
@@ -369,7 +409,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.nowLaws",
@@ -378,7 +419,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "750"
     },
     {
       "id": "Conformance.opAlgebra",
@@ -386,7 +428,8 @@
       "entry": "opAlgebra",
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": false,
-      "discharges": ["tree-algebra-well-formed-states"]
+      "discharges": ["tree-algebra-well-formed-states"],
+      "cases": "1000"
     },
     {
       "id": "Conformance.packLoadingLaws",
@@ -395,7 +438,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.paramLaws",
@@ -404,7 +448,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.projectionLaws",
@@ -413,7 +458,8 @@
       "witness": ["ProjectionWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.propagationEvalLaws",
@@ -422,7 +468,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.queryLaws",
@@ -431,7 +478,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "1400"
     },
     {
       "id": "Conformance.reconcileLaws",
@@ -440,7 +488,8 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "1200"
     },
     {
       "id": "Conformance.reducer",
@@ -448,7 +497,8 @@
       "entry": "reducer",
       "witness": ["StreamGen"],
       "optIn": false,
-      "discharges": []
+      "discharges": [],
+      "cases": "400"
     },
     {
       "id": "Conformance.registryLaws",
@@ -457,7 +507,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "800"
     },
     {
       "id": "Conformance.schemaWalkLaws",
@@ -466,7 +517,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "1200"
     },
     {
       "id": "Conformance.slotParamLaws",
@@ -475,7 +527,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "720"
     },
     {
       "id": "Conformance.snapshotLaws",
@@ -484,7 +537,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "200"
     },
     {
       "id": "Conformance.snapshotLawsWith",
@@ -493,7 +547,8 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": []
+      "discharges": [],
+      "cases": "200"
     },
     {
       "id": "Conformance.streamLaws",
@@ -501,7 +556,8 @@
       "entry": "streamLaws",
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": false,
-      "discharges": []
+      "discharges": [],
+      "cases": "600"
     },
     {
       "id": "Conformance.transformLaws",
@@ -510,7 +566,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "32"
     },
     {
       "id": "Conformance.verifyHonestyLaws",
@@ -519,7 +576,8 @@
       "witness": ["ArtifactWitness"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "400"
     },
     {
       "id": "Conformance.witnessLaws",
@@ -527,7 +585,8 @@
       "entry": "witnessLaws",
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": false,
-      "discharges": ["lawful-abstract-witness"]
+      "discharges": ["lawful-abstract-witness"],
+      "cases": "400"
     },
     {
       "id": "FoldConfluence.laneFoldLaws",
@@ -536,7 +595,8 @@
       "witness": ["StreamWitness", "LaneGen"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "360"
     },
     {
       "id": "FoldConfluence.laneFoldLawsWith",
@@ -545,7 +605,8 @@
       "witness": ["StreamWitness", "LaneGen"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": []
+      "discharges": [],
+      "cases": "360"
     },
     {
       "id": "IncrementalDelta.laws",
@@ -554,7 +615,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "420"
     },
     {
       "id": "IncrementalDelta.lawsWith",
@@ -563,7 +625,8 @@
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
-      "discharges": []
+      "discharges": [],
+      "cases": "700"
     }
   ]
 }

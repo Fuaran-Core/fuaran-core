@@ -216,6 +216,11 @@
          claims ladder's. Here rather than beside SampleAdequacyTests because it also owns the
          two generated artefacts and their `emit-families` freshness legs; it reads nothing
          from another test module, so the position is free. -->
+    <!-- Phase 196 — every law family run once at the reference witness, with the measurement
+         kept, so the roster's `cases` column is a run rather than a declaration. BEFORE
+         ConformanceFamiliesTests.fs, which renders the generated artefacts from it, and after
+         every test module whose witnesses and fixtures it reuses rather than duplicates. -->
+    <Compile Include="ConformanceVacuityTests.fs" />
     <Compile Include="ConformanceFamiliesTests.fs" />
     <!-- Phase 185 — the Fable smoke's membership derived rather than remembered: every packable
          project under src/ is compiled by tests/fable-smoke or carries an exclusions.json entry

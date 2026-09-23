@@ -5641,6 +5641,14 @@ module Conformance =
         let mutable replayEq = None
         let mutable opTamper = None
         let mutable actorTamper = None
+        // Phase 196 — the two arms whose evidence is DRAWN rather than built. Four of the five
+        // laws below run only where the sink actually signed, and `OpStream.noAttestation` signs
+        // nothing: under it this family reports five greens over zero exercised cases, which is
+        // the exact shape a consumer's census used to render as "adopted". Counting is what lets
+        // the census say `vacuous` instead, so the counters are not diagnostics — they are the
+        // measurement the family exists to be able to report.
+        let mutable signed = 0
+        let mutable falsified = 0
 
         for i in 0 .. iterations - 1 do
             let mutable state = gen.State0
@@ -5659,6 +5667,8 @@ module Conformance =
             // checkpoint round-trip: a signed head verifies against its own chain (vacuous under noAttestation).
             (match OpStream.attestHead sink recs with
              | Some att ->
+                 signed <- signed + 1
+
                  if not (OpStream.verifyAttestation sink att recs) && roundTrip.IsNone then
                      roundTrip <- Some(sprintf "seed=%d iter=%d: a signed head failed verifyAttestation" seed i)
              | None -> ())
@@ -5702,6 +5712,7 @@ module Conformance =
             | [], _
             | _, None -> ()
             | _, Some att ->
+                falsified <- falsified + 1
                 // op-tamper + full rehash: verifyChain re-accepts, verifyAttestation must reject.
                 let tIdx, r3 = ConfRng.intBelow (List.length recs) rng
                 let newOp, r4 = gen.Op r3
@@ -5760,7 +5771,18 @@ module Conformance =
             Counterexample = opTamper }
           { Law = "attestation catches a rehashed actor-re-attribution (attribution is inside the hash)"
             Passed = actorTamper.IsNone
-            Counterexample = actorTamper } ]
+            Counterexample = actorTamper }
+          // Phase 196. A sink that never signs leaves four of the five laws above asserting
+          // nothing, and every one of them still reports green — so the guard is the only thing
+          // that can tell a certified attestation seam from an unexercised one. Running this
+          // family at `OpStream.noAttestation` is therefore RED here by design: the vacuous path
+          // has its own family (`noAttestationVacuityLaws`), which is what a host with no sink
+          // should be running.
+          SampleAdequacy.reached
+              "Conformance.attestationLaws"
+              "signing outcome"
+              seed
+              [ "signed", signed; "falsified", falsified ] ]
 
     /// The `noAttestation` vacuity laws (Phase 60) — the default no-op sink issues no attestation
     /// (`attestHead noAttestation ⇒ None`) and verifies nothing (`verifyAttestation noAttestation _ ⇒

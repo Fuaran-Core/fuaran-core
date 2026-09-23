@@ -32,7 +32,7 @@ let private rParseBack (line: string) : Result<RProjOp list, string> =
         | [| id; kind; digest; value |] when digest.StartsWith "#" -> Ok [ Upsert(indent / 2, id, kind, value) ]
         | _ -> Error(sprintf "unparseable projection line: %s" line)
 
-let private pw: ProjectionWitness<RNode, string, RProjOp> =
+let pw: ProjectionWitness<RNode, string, RProjOp> =
     { Tree = nodew
       IdW = idw
       Encode = rEncode
@@ -41,7 +41,7 @@ let private pw: ProjectionWitness<RNode, string, RProjOp> =
 
 // ---- the reference re-import: preorder upserts (depth-threaded) back to a tree ----
 
-let private applyOps (ops: RProjOp list) : Result<RNode, string> =
+let applyOps (ops: RProjOp list) : Result<RNode, string> =
     let mk id kind value = RNode.leaf id kind value
 
     // stack of open frames, deepest first: (depth, node, children-reversed)
@@ -75,7 +75,7 @@ let private applyOps (ops: RProjOp list) : Result<RNode, string> =
 
 // ---- a random tree generator (values vary so the digest-iff law has bite) ----
 
-let private genTree (rng: ConfRng.T) : RNode * ConfRng.T =
+let genTree (rng: ConfRng.T) : RNode * ConfRng.T =
     let mutable counter = 0
     let mutable r = rng
 
@@ -104,7 +104,7 @@ let private genTree (rng: ConfRng.T) : RNode * ConfRng.T =
 
 // ---- the wire baseline for the compactness floor ----
 
-let rec private wireEncode (n: RNode) : string =
+let rec wireEncode (n: RNode) : string =
     sprintf
         "{\"id\":\"%s\",\"kind\":\"%s\",\"value\":\"%s\",\"children\":[%s]}"
         n.Id

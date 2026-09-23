@@ -250,7 +250,7 @@ let private genFresh (existing: Set<string>) (rng: ConfRng.T) : RNode * ConfRng.
 
     RNode.leaf (pick ()) "para" "x", r
 
-let private containerGen: OpGen<RNode, string> =
+let containerGen: OpGen<RNode, string> =
     { Tree = genTree
       FreshNode = genFresh
       CanHold = Some canHold }

@@ -11,13 +11,13 @@ open Fuaran.Core
 
 // ---- the reference domain: a note list ----
 
-type private NoteState = { Notes: (string * string) list }
+type NoteState = { Notes: (string * string) list }
 
-type private NoteOp =
+type NoteOp =
     | AddNote of id: string * text: string
     | RemoveNote of id: string
 
-type private NoteRej =
+type NoteRej =
     | DuplicateId of id: string * known: string list
     | NoSuchNote of id: string * known: string list
 
@@ -54,7 +54,7 @@ let private emitAddNote (args: (string * string) list) : Result<NoteOp list, str
     | Some text -> Ok [ AddNote("n-" + text, text) ]
     | None -> Error "add-note needs a 'text' arg"
 
-let private witness: AiSurfaceWitness<NoteState, NoteOp, NoteRej> =
+let witness: AiSurfaceWitness<NoteState, NoteOp, NoteRej> =
     { ReadTools =
         [ { Name = "listNotes"
             Description = "Every note id in order"
@@ -82,7 +82,7 @@ let private witness: AiSurfaceWitness<NoteState, NoteOp, NoteRej> =
       Apply = applyNote
       Explain = explainNote }
 
-let private state0 = { Notes = [ "n1", "hello" ] }
+let state0 = { Notes = [ "n1", "hello" ] }
 
 /// A shape-only empty witness — the GP6 boundary probe: the core must supply
 /// zero read tools, zero op kinds, zero patterns, and no guidance content.
@@ -97,7 +97,7 @@ let private emptyWitness: AiSurfaceWitness<unit, string, string> =
 
 // ---- the op generator for the laws (covers both kinds + a rejection path) ----
 
-let private genNoteOp (rng: ConfRng.T) : NoteOp * ConfRng.T =
+let genNoteOp (rng: ConfRng.T) : NoteOp * ConfRng.T =
     let k, r1 = ConfRng.intBelow 3 rng
 
     match k with
