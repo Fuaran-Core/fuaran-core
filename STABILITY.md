@@ -2223,6 +2223,27 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.30.1 — draft
+
+**This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries
+below describe a contract still being assembled and further changes may ride it. Nothing here is a
+promise to a consumer until the release gesture is made; when it is, this paragraph is retired and
+the header restated as a released one.
+
+**It is a PATCH slot because the work opening it is additive**, which is the rule the `0.30.0` entry
+states rather than a choice made here: a patch number says adopting costs nothing — no source
+changes, no contract moves — and that is true of an added law family or an added census row. A
+member of a HIGHER class advances the slot to `0.31.0` rather than riding it, and the surface gate's
+classification is what decides that, not an argument here.
+
+**The slot was cut before the work landed, and its derived copies were re-stamped in the same
+sitting.** `conformance/laws/transform-laws.json` carries a `kitVersion` derived from `<Version>`,
+and the shared corpus holds a declared byte copy of it, so a version move restales both — one a
+failing test in this repository, the other a failing gate in a repository this one cannot write to.
+Moving the number without re-emitting both is what reddened `main` on 2026-09-22 and on three
+occasions before it. The sequence is in `docs/conformance-corpus.md` and it is one sitting, not a
+handoff.
+
 ## 0.30.0 — released 2026-09-23 as `v0.30.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.30.0` and the repository holds the `v0.30.0` tag, so
