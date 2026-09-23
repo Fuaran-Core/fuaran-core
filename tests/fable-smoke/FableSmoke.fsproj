@@ -56,7 +56,6 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
-    <ProjectReference Include="..\..\src\Fuaran.Core.Lease\Fuaran.Core.Lease.fsproj" />
     <!-- Phase 97 — the MODEL half of the IDL engine joins the Fable surface. It could not
          before: the project held the source emitters too, and their `StringBuilder` +
          `CultureInfo.InvariantCulture` are the reason the exclusion note above existed. With

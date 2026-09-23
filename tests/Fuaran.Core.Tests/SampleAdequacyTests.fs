@@ -458,8 +458,7 @@ let censusTests =
                     "paramLaws", Conformance.paramLaws
                     "deferredLaws", Conformance.deferredLaws
                     "capabilityPipelineLaws", Conformance.capabilityPipelineLaws
-                    "canonicalFloatLaws", Conformance.canonicalFloatLaws
-                    "leaseLaws", Conformance.leaseLaws ] do
+                    "canonicalFloatLaws", Conformance.canonicalFloatLaws ] do
                   match SampleAdequacy.census |> List.tryFind (fun (n, _) -> n = "Conformance." + name) with
                   | Some(_, Unconditional _) ->
                       Expect.isFalse

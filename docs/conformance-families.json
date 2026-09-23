@@ -327,15 +327,6 @@
       "discharges": ["witness-surface-scope"]
     },
     {
-      "id": "Conformance.leaseLaws",
-      "module": "Conformance",
-      "entry": "leaseLaws",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": []
-    },
-    {
       "id": "Conformance.memoLaws",
       "module": "Conformance",
       "entry": "memoLaws",

@@ -301,7 +301,6 @@ module SampleAdequacy =
           Unconditional "the budget IS the sample size, and it is the caller's own declared parameter"
           "Conformance.attributedLaws",
           Unconditional "each iteration lifts, re-attributes and round-trips the same stream"
-          "Conformance.leaseLaws", Unconditional "the conflict and expiry witnesses are BUILT each iteration, not drawn"
           "Conformance.casLaws", Unconditional "each iteration appends at the true head, at a stale head, and races two"
           "Conformance.idempotencyLaws",
           Unconditional "each iteration appends a fresh key then re-sends it under both heads"

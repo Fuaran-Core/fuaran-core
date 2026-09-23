@@ -19,7 +19,6 @@
     <Project Path="src/Fuaran.Core.Projection/Fuaran.Core.Projection.fsproj" />
     <Project Path="src/Fuaran.Core.AiSurface/Fuaran.Core.AiSurface.fsproj" />
     <Project Path="src/Fuaran.Core.Propagation/Fuaran.Core.Propagation.fsproj" />
-    <Project Path="src/Fuaran.Core.Lease/Fuaran.Core.Lease.fsproj" />
     <Project Path="src/Fuaran.Core.CSharp/Fuaran.Core.CSharp.csproj" />
     <Project Path="src/Fuaran.Core.Idl.Cli/Fuaran.Core.Idl.Cli.fsproj" />
   </Folder>

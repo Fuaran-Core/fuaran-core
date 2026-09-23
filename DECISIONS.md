@@ -1,5 +1,50 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-23 — D51: membership in this substrate is genericity over the witness, never present consumer count — and D9 keeps the question it was actually answering
+
+**Decided (operator ruling, 2026-09-16; recorded by Phase 188).** The rule, verbatim:
+
+> Core membership is decided by genericity over the witness and plausible cross-domain use, never by
+> present consumer count. Generic tree functions stay with one consumer (`arbitrate` included —
+> `fuaran-dotnet` certifies `arbitrationLaws` over its own witness). `Projection` and `Propagation`
+> stay because their shape is cross-domain. A domain-specific strand goes to its domain library.
+
+**It supersedes D9's framing as the MEMBERSHIP test and leaves D9 standing as the SHIPPING test.**
+Two different questions were being answered by one sentence. *Does this shape belong in a
+witness-generic substrate* is a question about the shape; *is there enough evidence to ship it now*
+is a question about demand. A consumer count can answer the second — that is exactly what D9's
+single-unblocking-consumer exception is for — and nothing about a count can answer the first. Read as
+a membership criterion, a count says a strand earns its place here by being wanted, which would admit
+any sufficiently-wanted domain type and is the opposite of guiding principle 1.
+
+**The reading runs in both directions, which is why the rule is worth recording rather than applying
+once.** A count-based membership test is wrong when it says *out* and equally wrong when it says *in*:
+
+- It would evict a generic tree function that happens to have one consumer today. `arbitrate` is the
+  live case — one caller, and a tree-generic partition of op-script proposals that any tree host can
+  instantiate, certified over `fuaran-dotnet`'s own witness. It stays. (It changed PACKAGE at
+  `0.28.0` — `AiSurface` to the op algebra, D46 — which is a question about where a generic function
+  sits, not about whether it belongs.)
+- It would admit a strand that is over the wrong axis because enough people want it. That is the
+  case this entry pays for.
+
+**What it costs, and the cost is this entry's evidence.** `Fuaran.Core.Lease` (Phase 84) shipped under
+D9 on one concrete consumer — the coordination library that hand-rolls the claim/coordination the
+strand replaces, named in D9 in exactly those terms. On 2026-09-16 the consumer census showed the
+same single family and nothing else: the corroborating adopters D9 called "corroboration, not
+prerequisites" never arrived. Under a count test that census is the whole argument and it points at
+removal for the wrong reason — few consumers. Under this rule the census is not the argument at all.
+The argument is the axis: `LeaseOp<'Res>` is generic in its type parameter and its only instantiation
+is a claim over a **resource** axis, which is not the tree and is not a witness this substrate
+defines. It sat here because a lease PRIMITIVE is publishable where lease AUTHORITY — the fold, who
+may claim — is not, and a licensing convenience is not a genericity argument. So it leaves
+(Phase 188, `0.30.0`, BREAKING), and it would leave on this rule even if the census had shown ten
+consumers.
+
+**What deliberately does NOT move with it.** `Ops`' footprint and independence, and `Arbitration`:
+tree-generic by shape, and the whole reason this rule had to be stated separately from the count that
+was standing in for it. Lease authority was never here to move.
+
 ## 2026-09-21 — D50: a stamp-only corpus mismatch stays FATAL, and the discovery moves to where the version moves
 
 **Decided (operator ruling, 2026-09-21; Phase 216).** `conformance/laws/transform-laws.json` carries
