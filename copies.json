@@ -98,7 +98,7 @@
       "source": "proofs/WireDecode.fst",
       "check": "fingerprint",
       "regen": "copy proofs/WireDecode.fst from the fuaran-core repository",
-      "$note": "GENERIC in its carriers — decoder totality and the Phase 102 read policy (`decode_total`, `decode_node_wf`, `decode_encode_roundtrip`, `lenient_agrees_off_policy`), parametric over the numeric carriers and the int-to-float coercion `to_flt`; the node decoder is at a REFERENCE vocabulary, so a domain with its own kinds re-states that half. Asks for nothing a kit law samples; its boundary assumption is `parser-null-absorption`, a model bridge. Opens nothing."
+      "$note": "GENERIC in its carriers — decoder totality and the Phase 102 read policy (`decode_total`, `decode_node_wf`, `decode_encode_roundtrip`, `lenient_agrees_off_policy`), parametric over the numeric carriers and the int-to-float coercion `to_flt`; the node decoder is at a REFERENCE vocabulary, so a domain with its own kinds re-states that half. Asks for nothing a kit law samples; its boundary assumption WAS `parser-null-absorption`, a model bridge, and Phase 190 proved it in `JsonParse.fst` — so an adopter inherits that bridge as a theorem rather than as a gap. Opens nothing."
     },
     {
       "source": "proofs/Limits.fst",
@@ -116,7 +116,7 @@
       "source": "proofs/JsonParse.fst",
       "check": "fingerprint",
       "regen": "copy proofs/JsonParse.fst from the fuaran-core repository",
-      "$note": "GENERIC in one thing — parser totality, the exact depth bound, the int53 guard and error-kind exhaustiveness (`parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive`), parametric only in the float read-back `float_read`. Asks the domain for nothing beyond supplying that function; the `\\uXXXX` escape's value is symbolic by design. Opens nothing."
+      "$note": "GENERIC in one thing — parser totality, the exact depth bound, the int53 guard, error-kind exhaustiveness and the null-absorption bridge (`parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive`, `null_absorption_is_erasure`), parametric only in the float read-back `float_read`. Asks the domain for nothing beyond supplying that function; the `\\uXXXX` escape's value is symbolic by design. Opens nothing, and CLOSES `parser-null-absorption` — the boundary assumption `WireDecode.fst` carried (Phase 190)."
     }
   ],
   "records": [

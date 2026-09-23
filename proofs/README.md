@@ -31,7 +31,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/TreeOps.fs`, `oracle/Skeleton.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Chain.fst` | The fourth model (Phase 136): the two INTEGRITY WALKERS — `Dag.firstBreak` / `verifyDag` over the content-addressed DAG and `OpStream.firstChainBreak` / `verifyChain` over the linear chain — clause for clause, with both characterised and `intact_verifies` / `tamper_detected` proved for each under a named injective-hash premise. Phase 145 decomposed the DAG's: the two SPLICES in `nodeHash`'s pre-image are proved unambiguous, the op codec's injectivity moves to a conformance law, and what is assumed is the hash itself. Phase 191 added section 7, SNAPSHOT AND BOUNDED REPLAY: `OpStream.compact` / `replayFrom` / `verifyAcross` with the domain reducer as a parameter, `replay_from_snapshot_eq` and `compact_preserves_verify` proved, and the two places the chartered sentences were too strong stated as theorems. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact` and `error_kind_exhaustive` proved. This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
+| `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive` and `null_absorption_is_erasure` proved. This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/JsonParse.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Preservation.fst` | The sixth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. |
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -574,7 +574,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 26 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 25 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -590,7 +590,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, a specification row the model
   covers vacuously. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 17 rows.
+  `unscheduled` where something could and nobody has. 16 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -608,7 +608,6 @@ over-read.
 | `dag-outside-the-model` | `model-bridge` | `unscheduled` |
 | `extractor-and-compiler-trusted` | `premise` | — |
 | `sets-are-lists` | `model-bridge` | `permanent` |
-| `parser-null-absorption` | `model-bridge` | `unscheduled` |
 | `node-ids-distinct` | `premise` | — |
 | `tree-algebra-well-formed-states` | `domain-obligation` | `Conformance.opAlgebra` |
 | `content-id-determines-content` | `premise` | — |
@@ -630,14 +629,19 @@ over-read.
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
 
-**Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
+**Why `unscheduled` is a value rather than a rounding to `permanent`.** Four of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
-of what this document already says. Theorem 4's ladder says of `parser-null-absorption` that
-"relating two models is its own phase and was not taken. The assumption stands where it is";
-`dag-outside-the-model` has been narrowed twice already — by Phase 134, from "all of it", and by
-Phase 158, which took `Dag.mergeBase` out of it for every shape but a criss-cross merge. A closed
-set of two values would have forced both into a claim of impossibility, which is a worse error than
-a third token.
+of what this document already says. `dag-outside-the-model` has been narrowed twice already — by
+Phase 134, from "all of it", and by Phase 158, which took `Dag.mergeBase` out of it for every shape
+but a criss-cross merge. A closed set of two values would have forced those into a claim of
+impossibility, which is a worse error than a third token.
+
+**And the token has now paid for itself: `parser-null-absorption` was `unscheduled` and is
+`proved` (Phase 190).** It was this paragraph's first example, on the strength of theorem 4's own
+"relating two models is its own phase and was not taken. The assumption stands where it is" — a
+sentence that names work rather than an impossibility, which is exactly the distinction the third
+token exists to carry. Phase 190 took the work, and the row left this table rather than being
+reworded inside it. A `permanent` there would have told a reader not to look.
 
 **Why `witness-surface-scope` stopped being a `premise` (Phase 189).** It was the one row whose
 obligation was the domain's and whose discharge no run could perform: a node a domain holds in a
@@ -1563,11 +1567,16 @@ that HAS a null into the wire model that cannot carry one, which is the type-lev
   the two readers are literally the same function, message included
   (`strict_unchanged_on_null_free`) — which is the sharpest form of "the policy governs exactly one
   thing".
-- **What this ASSUMES.** That the parser's member-null absorption is equivalent to erasing member
-  nulls from the document tree the strict grammar would otherwise produce. The near-miss tokens
-  that make that an assumption rather than a theorem (`nul`, which falls through to the strict
-  arm; `nullish`, which the following `,`/`}` expectation catches) are grammar, and stay with
-  `Json.parse`. The differential below is the evidence for the assumption, not a proof of it.
+- **What this ASSUMED, and no longer does (Phase 190).** That the parser's member-null absorption
+  is equivalent to erasing member nulls from the document tree the strict grammar would otherwise
+  produce. It was `parser-null-absorption`, a `model-bridge` at level 3, and it is now a `proved`
+  row — stated where the fork is rather than where the normalisation is, because `JVal` has no null
+  to erase from a tree, so the erasure is stated on the DOCUMENT. See theorem 4's "The
+  null-absorption bridge" for the three statements and the two hypotheses they carry. The near-miss
+  tokens that motivated the assumption (`nul`, which falls through to the strict arm; `nullish`,
+  which the following `,`/`}` expectation catches) were always grammar and still stay with
+  `Json.parse`; what changed is that the equation between the two models is now checked rather than
+  evidenced.
 
 ### Key order — rule 2's decoder obligation, and §20's one answer (Phase 152)
 
@@ -1710,9 +1719,11 @@ extraction diff says so. No file under `src/` moved, no host does anything.
    theorem 1's read-policy pool, which carries the `null` token at every position under both
    policies, and theorem 7's byte-for-byte differential, which is where `layouts_numeric` is
    evidenced.
-3. **Assumed, and stated as such.** `layouts_numeric`, as above; and the two bridges the models
-   already carry — `jvaln` is an assumption about what the parser's forks do at the tree
-   (`parser-null-absorption`), and a character is a constructor (`canon-character-bridge`).
+3. **Assumed, and stated as such.** `layouts_numeric`, as above; and the one bridge the models
+   still carry — a character is a constructor (`canon-character-bridge`). What `jvaln` assumed about
+   what the parser's forks do at the tree was `parser-null-absorption`, and Phase 190 proved it;
+   theorem 4's "The null-absorption bridge" says what the statement is and what it still leaves to
+   the differential.
 4. **Not claimed.**
    - **Anything about a HOST.** A `Custom` renderer, a mounted guest, a host-call endpoint, a
      registered capability or any other function a deployment installs is host code the wire merely
@@ -2641,7 +2652,7 @@ measured 23s, on a pass the leg itself labelled contended (x1.05), so it is not 
 The claim worth having here is not a byte-level grammar proof. It is that **the parser cannot fail
 to answer, and cannot answer with an unclassified failure** — which is what the two guards are for.
 
-Four things are proved:
+Five things are proved:
 
 - **`parse_total`.** The parser reaches exactly one outcome on every input: a value or a classified
   refusal, never both and never neither. That it is `Tot` at all is the content rather than a
@@ -2665,6 +2676,10 @@ Four things are proved:
   raise them, and every one of the twelve is REACHABLE, by a named witness input. A classification
   whose cases are unreachable is closed but not exhaustive, and the difference is exactly what makes
   the differential's coverage mean anything.
+- **`null_absorption_is_erasure` (Phase 190).** The read policy's own promise: absorbing an
+  object-member null IS erasing it. Added by the phase that closed theorem 1's policy assumption,
+  which the section after the finding below is about — that assumption was this theorem's one
+  `unscheduled` ladder row and is now a row of its own at level 1.
 
 ### The finding: the int53 guard is SOUND and CONSERVATIVE, not exact
 
@@ -2717,6 +2732,63 @@ int53 test governs only the tokens Int32 refused, and decides `JFloat` against a
   model's token back with the same call production made — so a model that scanned one character more
   or less renders a different value and the differential sees it.
 
+### The null-absorption bridge — closed (Phase 190)
+
+Theorem 1 models the read policy as a document-level normalisation over a tree that HAS a null
+(`WireDecode.fst` section 7's `jvaln`), and assumed — at level 3, as `parser-null-absorption` —
+that the parser's absorption of an object-member null is equivalent to erasing member nulls from
+the tree the strict grammar would otherwise produce. That row is now **proved**, and the shape of
+the proof is worth stating because the obvious form of the statement is not available.
+
+**Why it is three statements and not one equation about trees.** `jval` is production's `JVal`, and
+`JVal` has no null constructor. So "the strict tree, with its member nulls erased" names nothing in
+this model: the strict parser does not build a tree carrying a null, it REFUSES at the token. The
+erasure therefore has to be stated where it is observable — on the DOCUMENT — and the claim becomes
+that absorbing a member null is exactly not having written it:
+
+- **`member_null_absorbed`** — the fork itself, universally. Reading `"k":null,` and dropping the
+  member leaves the parser in the state it would have been in had those characters not been there,
+  for every key, every accumulated member list, every remaining budget and every suffix. That the
+  budget and the accumulator are arbitrary is what makes this *at every depth, at any position in
+  any object*: `parse_members` with budget `b` is what runs inside an object at depth
+  `cap - llen b`, and `acc` is the members already read. `null_members_absorbed` lifts it to a run
+  of them by induction.
+- **`all_nulls_is_the_empty_object`** — the one erased shape that composition cannot reach, because
+  `{}` is read by `parse_object`'s own empty-object branch and never enters a member list. An
+  object whose members are all nulls is the empty object, over every key list and every suffix.
+- **`policies_agree_off_the_fork`** — and NOWHERE else do the two policies differ. Every outcome
+  the strict reader reaches other than a null refusal, the tolerant reader reaches identically:
+  same value, or same kind AND message AND position. Proved by a mutual induction that follows the
+  descent, one lemma per member of the parser's own recursive group.
+
+`null_absorption_is_erasure` composes them at the entry point, and it carries **two hypotheses,
+both of which were perturbed until the prover refuted them rather than taken on faith**: a budget
+of at least one — with none, the object is refused before its members are read and the two
+documents differ in length and so in the position that refusal reports — and an erased object that
+still has a member, which is the empty-object branch above. A third perturbation removed the
+refusal half's `NullNotRepresentable` carve-out and was refuted too, which is what says the
+carve-out is the fork and not a convenience. `null_absorption_is_erasure_witness` exhibits one
+document where both hypotheses hold and the strict reader ACCEPTS, so the accept half is known to
+have content: a bridge whose hypotheses nothing satisfies would verify and say nothing.
+
+**Where the composition's nulls sit, said precisely**, because it is the one thing a reader could
+over-read. `null_absorption_is_erasure` absorbs nulls in the TOP-LEVEL object; it is not, and could
+not be, "nulls at any depth" — a null nested inside the suffix makes the ERASED document's strict
+parse refuse with `NullNotRepresentable`, which is what both of its hypotheses exclude. The
+every-depth statement is `member_null_absorbed` / `null_members_absorbed`, quantified over the
+remaining budget and the accumulated member list, which is an object at any depth and any position
+in its member list. Those are the stronger claims; the composition is where a document is entered.
+
+**What the bridge does NOT say**, named rather than left to be discovered. The absorbed member is
+spelt without interior whitespace — `"k":null,` rather than `"k" : null ,`. Whitespace there is
+read by `skip_ws`, which is policy-INDEPENDENT and therefore inside `policies_agree_off_the_fork`'s
+reach rather than inside the fork's; the whitespace-bearing spellings are swept by the
+differential's erase-then-compare probe instead. The same is true of a key the model's `plain_all`
+hypothesis declines — one carrying an escape or a quote — which the probe also sweeps: that
+hypothesis is what lets the lemma unfold `parse_string` without a fact about escapes, and the
+absorption does not read the key at all. And grammar conformance to RFC 8259 stays exactly where
+the rest of this theorem leaves it.
+
 ### What the corpus covers
 
 The differential host (`Proofs.Oracle` in `../tests/Fuaran.Core.Tests/ProofOracleTests.fs`) runs the
@@ -2733,6 +2805,7 @@ why it is compared rather than described.
 | the wire corpus's `ops/` fixtures | the same | accept path |
 | generated deep and wide inputs | both nesting families at every depth 0–8 under every cap 0–8, so the BOUNDARY is compared and not merely the interior; arrays and objects of 0, 1, 2, 10 and 64 members | yes (asserted) |
 | 4,000 generated inputs | seed-replayable character soup over the parser's own alphabet, under both policies — the only pool that reaches failure positions nobody thought to write down | yes (asserted) |
+| erase-then-compare pairs (Phase 190) | the bridge's own statement, put to production AND to the extracted model: a document with member nulls read under `EraseMemberNull`, beside the document with exactly those members DELETED read under `RejectNull`. Leading, trailing, interior, run and sole nulls; the whitespace spellings and the escaped and non-ASCII keys the model's hypotheses decline; nesting; nulls inside an array of objects; and three tails the strict reader refuses. The POSITION is deliberately not compared here and nowhere else — the two documents differ in length, and the model carries a position as the input SUFFIX, which is the same list on both sides | yes (asserted) |
 
 Two **go-red** cases, because the two things this family could get wrong are different. The first is
 the one the phase asks for: a model holding a cap production has already spent accepts a document
@@ -2750,12 +2823,24 @@ lemma that should have caught it. The differential's own position comparison was
 off-by-one in the recovered index reddens three legs — because a comparison that agrees on the first
 run is the least-examined kind of evidence.
 
+Phase 190 did the same for its three statements, and found a trap in the METHOD worth writing down
+here, because it applies to every falsification pass in this directory and it fails silently. **Only
+one perturbation per run.** Two of that phase's three were first staged together; the prover reported
+the first and verified the second, which read as "that hypothesis was not load-bearing after all".
+It was: **a lemma that fails to verify is still ADMITTED into the environment**, so a deliberately
+false one makes everything after it provable, and the second perturbation had been checked against an
+inconsistent premise. Run alone, it was refuted with four errors. A falsification pass that batches
+its mutations to save prover time can therefore clear a hypothesis it never tested, and nothing in
+the output says so.
+
 ### The claims ladder, for this theorem
 
-1. **Proved (machine-checked, no admits).** On the model: the four results above, for every input,
-   under no hypothesis about a domain. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
-   `--report_assumes error` on, no `assume`, no `admit`. The module carries a scoped
-   `--ext context_pruning` (72s against 128s) for the reason `TreeOps.fst` gives at the same line.
+1. **Proved (machine-checked, no admits).** On the model: the five results above, for every input,
+   under no hypothesis about a domain — the fifth, `null_absorption_is_erasure`, under the two
+   hypotheses its own section states and shows to be load-bearing. F\* 2026.09.06, Z3 4.13.3, every
+   query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. The module
+   carries a scoped `--ext context_pruning` (72s against 128s) for the reason `TreeOps.fst` gives at
+   the same line.
 2. **Differentially tested.** The extracted model agrees with `Json.parseDetailedWithPolicy` over
    the pools above, on class, value, kind, position and message, under both policies. Agreement is
    over those pools, never over all inputs.
@@ -2787,11 +2872,13 @@ run is the least-examined kind of evidence.
    - **That the depth bound prevents a stack overflow ON .NET.** The model proves the bound is
      reached and named; that 512 frames of `parseValue` fit in a .NET thread's stack is an
      engineering judgement about a runtime, and no model here says anything about it.
-   - **Theorem 1's policy assumption is not discharged.** `WireDecode.fst` assumes, at level 3, that
-     the parser's member-null absorption is equivalent to erasing member nulls from the strict tree.
-     This model puts the fork where production puts it and the differential exercises both policies,
-     which is better evidence than that assumption had — but relating two models is its own phase and
-     was not taken. The assumption stands where it is.
+   - **~~Theorem 1's policy assumption is not discharged.~~ DONE — Phase 190.** It said that
+     relating the two models was its own phase and had not been taken, and that the assumption
+     stood where it was. The phase was taken: `parser-null-absorption` is a `proved` row, the
+     statement is in "The null-absorption bridge" above, and what is still NOT claimed is only the
+     two spellings that section names — interior whitespace at the fork, and a key carrying an
+     escape — both of which the differential sweeps and neither of which is a claim this theorem
+     ever made.
 ## Theorem 5 — apply-engine preservation (Phase 138)
 
 _(This directory's fifth; the attested-stack programme's SECOND. The heading numbers here are the
@@ -5017,12 +5104,14 @@ and is DONE: Phase 162, section 20 of `TreeOps.fst`, with `covered` deleted and 
 restated over the whole `SkeletonOp` alphabet. Theorem 2's "What was left open" section carries
 what it was and how it closed.)_
 
-**Discharging theorem 1's policy assumption** — the smallest of what is left, and now reachable.
-`WireDecode.fst` assumes the parser's member-null absorption is equivalent to erasing member nulls
-from the tree the strict grammar would produce; both sides of that equation are now modelled, in
-`JsonParse.fst` and in `WireDecode.fst`'s section 7, so what remains is a lemma relating the two
-rather than a new model. The near-miss tokens that motivated the assumption (`nul`, `nullish`) are
-grammar and are now inside a modelled parser rather than outside every model.
+_(**Discharging theorem 1's policy assumption** — "the smallest of what is left, and now
+reachable" — was an item here and is DONE: Phase 190, `JsonParse.fst` section 11, with
+`parser-null-absorption` moved from `unscheduled` to `proved`. The estimate was right about the
+size and wrong about the shape: it expected "a lemma relating the two models", and the relation
+turned out not to be statable that way, because `JVal` has no null constructor and so the strict
+model has no tree to erase from. The erasure is stated on the DOCUMENT instead — theorem 4's "The
+null-absorption bridge" carries the three statements, the two hypotheses and the two spellings that
+stay with the differential.)_
 
 **The `\uXXXX` transliteration** — the one grammar path Phase 146's time box left at level 2. It
 needs the model to compute a code point from four hex digits, which needs integers in extracted

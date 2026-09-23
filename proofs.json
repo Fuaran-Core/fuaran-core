@@ -254,13 +254,16 @@
     },
     {
       "id": "parser-null-absorption",
-      "level": "assumed",
-      "claim": "That the parser's absorption of object-member nulls is equivalent to erasing member nulls from the document tree the strict grammar would otherwise produce. The near-miss tokens that make this an assumption rather than a theorem are grammar, and stay with the parser; the differential is the evidence for it, not a proof of it.",
-      "phase": "fuaran-core#135",
-      "class": "model-bridge",
-      "closes": "unscheduled",
+      "level": "proved",
+      "claim": "The parser's absorption of an object-member null IS the erasure: reading a document under EraseMemberNull is reading the document with those members DELETED under RejectNull — the value where the strict reader accepts, and the kind and message and position where it refuses for any reason other than a null. Three statements because the one-equation form is not statable here: `jval` is production's `JVal` and has no null constructor, so 'the strict tree with its member nulls erased' names nothing (the strict reader refuses at the token rather than building a tree), and the erasure has to be stated where it is observable — on the document. `member_null_absorbed` is the fork universally, over every key, accumulated member list, remaining budget and suffix, which is what makes it 'at every depth, at any position in any object'; `all_nulls_is_the_empty_object` is the one erased shape that composition cannot reach; `policies_agree_off_the_fork` is that the policies differ NOWHERE else. Two hypotheses are carried and both are falsifiable-by-perturbation rather than decorative (Phase 190 ran each): a budget of at least one, and an erased object that still has a member. The absorbed member is spelt without interior whitespace — whitespace there is read by the policy-INDEPENDENT `skip_ws` and so sits inside the agreement statement rather than inside the fork, and the whitespace-bearing spellings, plus the escaped and non-ASCII keys the model's `plain_all` hypothesis declines, are swept by the differential's erase-then-compare probe. Grammar conformance to RFC 8259 stays unclaimed.",
+      "phase": "fuaran-core#190",
       "evidence": {
-        "assumption": "the parser's member-null fork equals erasing member nulls from the strict tree"
+        "theorem": "null_absorption_is_erasure",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json",
+        "tests": [
+          "… and the absorption IS the erasure — Phase 190's bridge, erase-then-compare"
+        ]
       }
     },
     {

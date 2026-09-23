@@ -3581,6 +3581,60 @@ module private JsonParseDiff =
 
               sprintf "soup seed=%d #%d" seed i, s ]
 
+    // ---- the ERASE-THEN-COMPARE probe (Phase 190) ----
+
+    /// A refusal rendering with the index dropped. The bridge relates two documents of DIFFERENT
+    /// lengths, and the model carries a position as the input SUFFIX — the same list on both
+    /// sides — which this host renders as an index into an input the deletion shortened. So the
+    /// kind and the message are compared and the index is not; the index is what every other
+    /// probe in this family compares, on documents that are the same bytes on both sides.
+    let withoutPosition (answer: string) : string =
+        if answer.StartsWith "ok " then
+            answer
+        else
+            System.Text.RegularExpressions.Regex.Replace(answer, " @\\d+ ", " ")
+
+    /// `k` nested objects, each carrying a member null beside a member that survives — the
+    /// every-depth half of the theorem, whose model statement quantifies over the remaining
+    /// budget rather than over a nesting family.
+    let rec nestObjNulls (k: int) : string * string =
+        if k <= 0 then
+            "0", "0"
+        else
+            let inner, erased = nestObjNulls (k - 1)
+            sprintf "{\"n\":null,\"v\":%s}" inner, sprintf "{\"v\":%s}" erased
+
+    /// Phase 190's bridge as a pool: a document carrying member nulls, beside the document with
+    /// exactly those members DELETED. `null_absorption_is_erasure` says the tolerant reading of
+    /// the first IS the strict reading of the second, so this is the theorem's own statement put
+    /// to production and to the extracted model rather than only to the prover.
+    let erasurePairs: (string * string * string) list =
+        [ "leading null", "{\"a\":null,\"b\":1}", "{\"b\":1}"
+          "trailing null", "{\"b\":1,\"a\":null}", "{\"b\":1}"
+          "interior null", "{\"b\":1,\"a\":null,\"c\":2}", "{\"b\":1,\"c\":2}"
+          "run of nulls", "{\"a\":null,\"b\":null,\"c\":3}", "{\"c\":3}"
+          "sole null", "{\"a\":null}", "{}"
+          "all nulls", "{\"a\":null,\"b\":null}", "{}"
+          // The whitespace the model's `null_member` does not spell: it is read by `skip_ws`,
+          // which is policy-independent, so this is the spelling the theorem's boundary names.
+          "whitespace around the fork", "{ \"a\" : null , \"b\" : 1 }", "{ \"b\" : 1 }"
+          "whitespace and sole null", "{ \"a\" : null }", "{ }"
+          "nested object", "{\"a\":{\"c\":null,\"d\":2}}", "{\"a\":{\"d\":2}}"
+          "null inside an array of objects", "[{\"a\":null,\"b\":1},{\"a\":null}]", "[{\"b\":1},{}]"
+          "null beside an array member", "{\"a\":null,\"b\":[1,{\"c\":null,\"d\":3}]}", "{\"b\":[1,{\"d\":3}]}"
+          // Keys the model's `plain_all` hypothesis does not admit — that hypothesis is what lets
+          // the lemma unfold `parse_string` without a fact about escapes, and the absorption does
+          // not read the key at all, so production and the oracle are asked the wider question
+          // here than the prover was asked there.
+          "escaped key", "{\"a\\nb\":null,\"c\":1}", "{\"c\":1}"
+          "unicode key", "{\"kéy\":null,\"c\":1}", "{\"c\":1}"
+          // The REFUSAL half: a tail the strict reader refuses is refused identically, by kind
+          // and message, whether or not the nulls in front of it were absorbed.
+          "refused tail — no value", "{\"a\":null,\"b\":}", "{\"b\":}"
+          "refused tail — unclosed", "{\"a\":null,\"b\":1", "{\"b\":1"
+          "refused tail — bad number", "{\"a\":null,\"b\":1e}", "{\"b\":1e}"
+          "deep nesting", fst (nestObjNulls 6), snd (nestObjNulls 6) ]
+
 // ---------------------------------------------------------------------------
 //  Phase 145 — the pre-image's two splices, measured against production's encodings
 // ---------------------------------------------------------------------------
@@ -10532,6 +10586,115 @@ let proofOracleTests =
                   (JsonParseDiff.prodAnswer RejectNull 512 "{\"a\":null,\"b\":1}")
                   (JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,\"b\":1}")
                   "and the strict policy does not — the two policies were actually distinguished"
+
+          testCase "… and the absorption IS the erasure — Phase 190's bridge, erase-then-compare"
+          <| fun _ ->
+              // The theorem, put to production and to the extracted model rather than only to the
+              // prover: reading a document under the TOLERANT policy is reading the document with
+              // its member nulls DELETED under the STRICT one. Four answers per pair, so a model
+              // that erased the wrong thing and a production that erased the wrong thing are each
+              // caught, and a shared mistake is caught by the two of them disagreeing with each
+              // other in the probes above.
+              let bad =
+                  [ for (name, absorbed, erased) in JsonParseDiff.erasurePairs do
+                        let pa =
+                            JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer EraseMemberNull 512 absorbed)
+
+                        let pe =
+                            JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 erased)
+
+                        let ma =
+                            JsonParseDiff.withoutPosition (
+                                JsonParseDiff.modelAnswer
+                                    JsonParseDiff.toChs
+                                    EraseMemberNull
+                                    512
+                                    (JsonParseDiff.budget 512)
+                                    absorbed
+                            )
+
+                        let me =
+                            JsonParseDiff.withoutPosition (
+                                JsonParseDiff.modelAnswer
+                                    JsonParseDiff.toChs
+                                    RejectNull
+                                    512
+                                    (JsonParseDiff.budget 512)
+                                    erased
+                            )
+
+                        if pa <> pe then
+                            yield
+                                sprintf
+                                    "%s: PRODUCTION does not bridge\n    tolerant %s -> %s\n    strict   %s -> %s"
+                                    name
+                                    absorbed
+                                    pa
+                                    erased
+                                    pe
+
+                        if ma <> me then
+                            yield
+                                sprintf
+                                    "%s: the MODEL does not bridge\n    tolerant %s -> %s\n    strict   %s -> %s"
+                                    name
+                                    absorbed
+                                    ma
+                                    erased
+                                    me
+
+                        if pa <> ma then
+                            yield sprintf "%s: the model and production disagree on %s: %s vs %s" name absorbed pa ma ]
+
+              if not bad.IsEmpty then
+                  failtestf
+                      "erase-then-compare: %d finding(s). First 5:\n%s"
+                      bad.Length
+                      (bad |> List.truncate 5 |> String.concat "\n")
+
+              // Both halves of the bridge were actually reached, so a green run above is not one
+              // that only ever accepted or only ever refused.
+              Expect.isTrue
+                  (JsonParseDiff.erasurePairs
+                   |> List.exists (fun (_, a, _) -> (JsonParseDiff.prodAnswer EraseMemberNull 512 a).StartsWith "ok "))
+                  "no pair was ACCEPTED — the value half of the bridge measured nothing"
+
+              Expect.isTrue
+                  (JsonParseDiff.erasurePairs
+                   |> List.exists (fun (_, a, _) ->
+                       not ((JsonParseDiff.prodAnswer EraseMemberNull 512 a).StartsWith "ok ")))
+                  "no pair was REFUSED — the classification half of the bridge measured nothing"
+
+              // THE TWO HYPOTHESES, each shown to be load-bearing on production rather than only
+              // needed by the prover. `members_follow`: a null member closed by a COMMA leaves a
+              // trailing comma behind, which is not the empty object the deletion would give.
+              Expect.notEqual
+                  (JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,}"))
+                  (JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 "{}"))
+                  "a trailing comma left by the absorption is NOT the empty object — the hypothesis the theorem carries"
+
+              // And the null carve-out: a null the tolerant policy declines to erase is refused
+              // with the SAME kind and a DIFFERENT message, which is why the refusal half of the
+              // theorem excludes `NullNotRepresentable` rather than covering it.
+              let arrA =
+                  JsonParseDiff.withoutPosition (
+                      JsonParseDiff.prodAnswer EraseMemberNull 512 "{\"a\":null,\"b\":[null]}"
+                  )
+
+              let arrE =
+                  JsonParseDiff.withoutPosition (JsonParseDiff.prodAnswer RejectNull 512 "{\"b\":[null]}")
+
+              Expect.stringContains
+                  arrA
+                  "NullNotRepresentable"
+                  "the array null is still refused under the tolerant policy"
+
+              Expect.stringContains arrE "NullNotRepresentable" "and under the strict one"
+
+              Expect.notEqual
+                  arrA
+                  arrE
+                  "the two policies word that refusal differently — the carve-out the theorem's refusal half names"
 
           testCase "the parser oracle agrees with production over every corpus nodes/ fixture"
           <| fun _ ->

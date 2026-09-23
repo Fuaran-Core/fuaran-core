@@ -988,3 +988,366 @@ let off_policy_null_still_refused (float_read: list ch -> freadv) (cap: string)
        (let r = parse float_read cap RejectNull [(); ()] doc in
         RErr? r /\ RErr?.k r == NullNotRepresentable /\ RErr?.msg r == msg_null_strict)))
   = ()
+
+(* ======================================================================================
+   11. THEOREM — THE NULL-ABSORPTION BRIDGE (Phase 190).
+
+       Section 10 put the fork where production puts it and left the bridge open: the ladder's
+       `parser-null-absorption` row ASSUMED that the member loop's absorption of an object-member
+       null is equivalent to erasing member nulls from the tree the strict grammar would otherwise
+       produce. This section discharges it, in this model's own terms, as three statements — and it
+       is three rather than one because the obvious single form is not statable here.
+
+       WHY IT CANNOT BE ONE EQUATION ABOUT TREES. `jval` is production's `JVal`, which has NO null
+       constructor (section 2), so "the strict tree, with its member nulls erased" names nothing:
+       the strict parser does not build a tree containing a null, it REFUSES at the token. The
+       erasure therefore has to be stated where it is observable — on the DOCUMENT — and the claim
+       becomes that absorbing a member null is exactly not having written it:
+
+         - `member_null_absorbed` — the fork itself, universally. Reading `"k":null,` and dropping
+           the member leaves the parser in the state it would have been in had those characters not
+           been there, for EVERY key, every accumulated member list, every remaining budget and
+           every suffix. That the budget and the accumulator are arbitrary is what makes this "at
+           every depth, at any position in any object": `parse_members` with budget `b` is exactly
+           what runs inside an object at depth `cap - llen b`, and `acc` is the members already
+           read.
+         - `all_nulls_is_the_empty_object` — the shape the first statement's composition cannot
+           reach, because `{}` is read by `parse_object`'s own empty-object branch and not by a
+           member list: an object whose members are ALL nulls is the empty object.
+         - `policies_agree_off_the_fork` — and NOWHERE ELSE do the two policies differ. Every
+           outcome the strict parser reaches other than a null refusal, the tolerant parser reaches
+           identically: same value, or same kind AND message AND position.
+
+       Together those are the row's sentence: the tolerant parse of a document is the strict parse
+       of that document with its member nulls deleted (`null_absorption_is_erasure` composes them
+       at the entry point), and the absorption changes nothing else.
+
+       THE BOUNDARY. The absorbed member is spelt without interior whitespace — `"k":null,` rather
+       than `"k" : null ,`. The whitespace a real document may carry there is read by `skip_ws`,
+       which is policy-INDEPENDENT and therefore inside `policies_agree_off_the_fork`'s reach
+       rather than inside the fork's. And the key is `plain_all` — carrying no quote and no
+       backslash — which is what lets these lemmas unfold `parse_string` without a fact about
+       escapes; the absorption does not read the key at all, so that hypothesis is a proof
+       convenience rather than a restriction on the parser. Both spellings, the whitespace-bearing
+       fork and the escaped key, are what the differential's erase-then-compare probe sweeps.
+       Grammar conformance to RFC 8259 stays unclaimed, as the phase says.
+   ====================================================================================== *)
+
+(* `skip_ws` lands past the whitespace, so running it twice is running it once. Needed because the
+   composition below meets `parse_members` at a position `parse_object` has already skipped. *)
+[@@ noextract_to "FSharp"]
+let rec skip_ws_idem (s: list ch) : Lemma (ensures skip_ws (skip_ws s) == skip_ws s) (decreases s) =
+  match s with
+  | [] -> ()
+  | c :: t -> if is_ws c then skip_ws_idem t else ()
+
+(* ---- the key, spelt out, so the absorbed member's key can be ANY key ---- *)
+
+(* A character a string literal carries through unchanged. `parse_string`'s only two structural
+   characters are the quote that ends it and the backslash that opens an escape. *)
+[@@ noextract_to "FSharp"]
+let plain (c: ch) : Tot bool = c <> CQuote && c <> CBackslash
+
+[@@ noextract_to "FSharp"]
+let rec plain_all (l: list ch) : Tot bool (decreases l) =
+  match l with
+  | [] -> true
+  | c :: t -> plain c && plain_all t
+
+(* The decoded key, accumulated exactly as `string_body` accumulates it — reversed onto the
+   accumulator, so the lemma below needs no fact about `rev` or `app` at all. *)
+[@@ noextract_to "FSharp"]
+let rec olit_onto (key: list ch) (acc: list och) : Tot (list och) (decreases key) =
+  match key with
+  | [] -> acc
+  | c :: t -> olit_onto t (OLit c :: acc)
+
+[@@ noextract_to "FSharp"]
+let rec string_body_plain (acc: list och) (key: list ch) (tail: list ch)
+  : Lemma (requires plain_all key)
+          (ensures string_body acc (app key (CQuote :: tail)) == POk (rev (olit_onto key acc)) tail)
+          (decreases key) =
+  match key with
+  | [] -> ()
+  | c :: t -> string_body_plain (OLit c :: acc) t tail
+
+[@@ noextract_to "FSharp"]
+let parse_string_plain (key: list ch) (tail: list ch)
+  : Lemma (requires plain_all key)
+          (ensures parse_string (CQuote :: app key (CQuote :: tail))
+                   == POk (rev (olit_onto key [])) tail) =
+  string_body_plain [] key tail
+
+(* ---- the fork: absorbing a member null is not having written it ---- *)
+
+(* The text of ONE member whose value is `null`, and the comma that keeps the member list going.
+   F#: the four characters `input.Substring(i, 4) = "null"` compares and the `i <- i + 4`. *)
+[@@ noextract_to "FSharp"]
+let null_member (key: list ch) (rest: list ch) : Tot (list ch) =
+  CQuote :: app key (CQuote :: CColon :: CLn :: CLu :: CLl :: CLl :: CComma :: rest)
+
+(* THE FORK, EXACTLY. For every key, every accumulated member list, every remaining budget and
+   every suffix: the member is consumed and the parser is left where it would have been had the
+   member not been written. Not "the same value" — the same RESULT, error cases included. *)
+let member_null_absorbed
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (acc: list (list och & jval)) (key: list ch) (rest: list ch)
+  : Lemma (requires plain_all key)
+          (ensures parse_members float_read cap true b acc (null_member key rest)
+                   == parse_members float_read cap true b acc rest) =
+  parse_string_plain key (CColon :: CLn :: CLu :: CLl :: CLl :: CComma :: rest)
+
+(* A RUN of them, so the erasure is not one member but every member null in an object's list. *)
+[@@ noextract_to "FSharp"]
+let rec null_members (keys: list (list ch)) (rest: list ch) : Tot (list ch) (decreases keys) =
+  match keys with
+  | [] -> rest
+  | k :: t -> null_member k (null_members t rest)
+
+[@@ noextract_to "FSharp"]
+let rec plain_keys (keys: list (list ch)) : Tot bool (decreases keys) =
+  match keys with
+  | [] -> true
+  | k :: t -> plain_all k && plain_keys t
+
+let rec null_members_absorbed
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (acc: list (list och & jval)) (keys: list (list ch)) (rest: list ch)
+  : Lemma (requires plain_keys keys)
+          (ensures parse_members float_read cap true b acc (null_members keys rest)
+                   == parse_members float_read cap true b acc rest)
+          (decreases keys) =
+  match keys with
+  | [] -> ()
+  | k :: t ->
+    member_null_absorbed float_read cap b acc k (null_members t rest);
+    null_members_absorbed float_read cap b acc t rest
+
+(* ---- and nowhere else: the two policies agree off the fork ---- *)
+
+(* The fork, named: the ONE outcome on which the two policies are permitted to differ. Everything
+   else the strict parser reaches, the tolerant parser reaches identically. *)
+[@@ noextract_to "FSharp"]
+let off_fork (#a: Type) (r: pres a) : Tot bool =
+  match r with
+  | POk _ _ -> true
+  | PErr k _ _ -> k <> NullNotRepresentable
+
+(* One lemma per member of the mutual group, in the group's own termination order — because the
+   claim is about a recursive descent and the induction has to follow the descent. The `false`
+   side is the strict reader; where it lands off the fork, the `true` side is the same result, so
+   the tolerant policy cannot change a value, a classification, a message or a position anywhere
+   except at a member null.
+
+   The `Some` case of `parse_members` is where the hypothesis does the work: the tolerant reader
+   absorbs, the strict reader hands the four characters to `parse_value`, which refuses them by
+   name — so the strict side is ON the fork there and the two are allowed to part. *)
+let rec policies_agree_value
+  (float_read: list ch -> freadv) (cap: string) (b: list unit) (s: list ch)
+  : Lemma (ensures (let rs = parse_value float_read cap false b s in
+                    off_fork rs ==> parse_value float_read cap true b s == rs))
+          (decreases %[llen s; 2]) =
+  let w = skip_ws s in
+  match w with
+  | CLBrace :: _ -> policies_agree_object float_read cap b w
+  | CLBrack :: _ -> policies_agree_array float_read cap b w
+  | _ -> ()
+
+and policies_agree_object
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures (let rs = parse_object float_read cap false b w in
+                    off_fork rs ==> parse_object float_read cap true b w == rs))
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrace w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrace :: _ -> ()
+        | _ -> policies_agree_members float_read cap b' [] t1))
+
+and policies_agree_array
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures (let rs = parse_array float_read cap false b w in
+                    off_fork rs ==> parse_array float_read cap true b w == rs))
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrack w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrack :: _ -> ()
+        | _ -> policies_agree_items float_read cap b' [] t1))
+
+and policies_agree_members
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (acc: list (list och & jval)) (s: list ch)
+  : Lemma (ensures (let rs = parse_members float_read cap false b acc s in
+                    off_fork rs ==> parse_members float_read cap true b acc s == rs))
+          (decreases %[llen s; 0]) =
+  let w = skip_ws s in
+  match parse_string w with
+  | PErr _ _ _ -> ()
+  | POk key t ->
+    let t1 = skip_ws t in
+    (match expect CColon t1 with
+     | PErr _ _ _ -> ()
+     | POk _ t2 ->
+       let t3 = skip_ws t2 in
+       (match drop_null4 t3 with
+        | Some _ -> ()
+        | None ->
+          policies_agree_value float_read cap b t3;
+          (match parse_value float_read cap false b t3 with
+           | PErr _ _ _ -> ()
+           | POk v t4 ->
+             let t5 = skip_ws t4 in
+             (match t5 with
+              | CComma :: t6 -> policies_agree_members float_read cap b ((key, v) :: acc) t6
+              | _ -> ()))))
+
+and policies_agree_items
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (acc: list jval) (s: list ch)
+  : Lemma (ensures (let rs = parse_items float_read cap false b acc s in
+                    off_fork rs ==> parse_items float_read cap true b acc s == rs))
+          (decreases %[llen s; 3]) =
+  policies_agree_value float_read cap b s;
+  (match parse_value float_read cap false b s with
+   | PErr _ _ _ -> ()
+   | POk v t ->
+     let t1 = skip_ws t in
+     (match t1 with
+      | CComma :: t2 -> policies_agree_items float_read cap b (v :: acc) t2
+      | _ -> ()))
+
+(* THE SECOND HALF, at the entry point. A document the strict reader ACCEPTS, the tolerant reader
+   accepts to the same value; a document it refuses for any reason other than a null, the tolerant
+   reader refuses with the same kind, the same message and the same position. So the tolerance is
+   a read normalisation at one position and not a second grammar. *)
+let policies_agree_off_the_fork
+  (float_read: list ch -> freadv) (cap: string) (b: list unit) (s: list ch)
+  : Lemma (ensures (let rs = parse float_read cap RejectNull b s in
+                    let rt = parse float_read cap EraseMemberNull b s in
+                    (ROk? rs ==> rt == rs) /\
+                    ((RErr? rs /\ RErr?.k rs <> NullNotRepresentable) ==> rt == rs))) =
+  policies_agree_value float_read cap b s
+
+(* ---- the shape the composition cannot reach: an object that is ALL nulls ---- *)
+
+(* The last member of an object, so the run above can be closed by the brace rather than by
+   another member. *)
+[@@ noextract_to "FSharp"]
+let null_member_last (key: list ch) (rest: list ch) : Tot (list ch) =
+  CQuote :: app key (CQuote :: CColon :: CLn :: CLu :: CLl :: CLl :: CRBrace :: rest)
+
+let member_null_last_absorbed
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (acc: list (list och & jval)) (key: list ch) (rest: list ch)
+  : Lemma (requires plain_all key)
+          (ensures parse_members float_read cap true b acc (null_member_last key rest)
+                   == POk (rev acc) rest) =
+  parse_string_plain key (CColon :: CLn :: CLu :: CLl :: CLl :: CRBrace :: rest)
+
+(* An object whose members are ALL nulls reads as the EMPTY object — the same result, to the
+   suffix, as the document `{}` under either policy. This is the one erased shape the run's
+   composition cannot express, because `{}` is read by `parse_object`'s own empty-object branch
+   and never enters a member list, so the two documents are not related by a `parse_members`
+   equation. Section 10's `member_null_erased` is its one-member witness at a concrete document;
+   this is the statement over every key list and every suffix. *)
+let all_nulls_is_the_empty_object
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (keys: list (list ch)) (key: list ch) (rest: list ch)
+  : Lemma (requires plain_keys keys /\ plain_all key /\ Cons? b)
+          (ensures parse float_read cap EraseMemberNull b
+                     (CLBrace :: null_members keys (null_member_last key rest))
+                   == parse float_read cap RejectNull b (CLBrace :: CRBrace :: rest)) =
+  match b with
+  | _ :: b' ->
+    null_members_absorbed float_read cap b' [] keys (null_member_last key rest);
+    member_null_last_absorbed float_read cap b' [] key rest
+
+(* ---- the composition: THE BRIDGE ---- *)
+
+(* The erased object must still BE an object with a member for the two documents to be related by
+   the run's equation: `{` followed by `}` is `parse_object`'s empty-object branch, which is the
+   lemma above and not this one. *)
+[@@ noextract_to "FSharp"]
+let members_follow (s: list ch) : Tot bool =
+  match skip_ws s with
+  | CRBrace :: _ -> false
+  | _ -> true
+
+(* `parse_members` skips whitespace before it reads anything, so being handed a position already
+   skipped is being handed the position. Needed because `parse_object` skips before it descends
+   and the run's equation is stated at the unskipped suffix. *)
+let parse_members_skip_ws
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (acc: list (list och & jval)) (s: list ch)
+  : Lemma (ensures parse_members float_read cap tol b acc (skip_ws s)
+                   == parse_members float_read cap tol b acc s) =
+  skip_ws_idem s
+
+(* THE BRIDGE, AT THE ENTRY POINT. For every member-null run at the head of an object whose
+   remaining member list is non-empty: the TOLERANT parse of the document is the STRICT parse of
+   the document with those members deleted — the value, or the kind and message and position,
+   whichever the strict reader reached. Which is the ladder row's sentence, with "the tree the
+   strict grammar would otherwise produce" spelt as the document that produces it, because this
+   model's value type has no null to erase from a tree (see the section header).
+
+   Both hypotheses are needed and neither is idle. `Cons? b` because with no budget at all the
+   object is refused before its members are read, and the two documents differ in length and so
+   in the position that refusal reports. `members_follow rest` because of the empty-object branch
+   above. The statement is quantified over the run, the suffix, the budget and the cap, so the
+   suffix may be anything at all — further members, nested objects, or a malformed tail the
+   strict reader refuses.
+
+   WHAT THIS ONE DOES NOT SAY, precisely, because the difference matters. The nulls it absorbs sit
+   in the TOP-LEVEL object. It does not read as "nulls at any depth", and it could not: a null
+   nested inside `rest` makes the ERASED document's strict parse refuse with
+   `NullNotRepresentable`, which is exactly what both hypotheses exclude. The every-depth
+   statement is `member_null_absorbed` and `null_members_absorbed` above — they are quantified
+   over the remaining budget `b` and the accumulated member list `acc`, which IS an object at any
+   depth and any position in its member list, and they are the stronger of the two claims for
+   that reason. This lemma is their composition at the one place a document is entered. *)
+let null_absorption_is_erasure
+  (float_read: list ch -> freadv) (cap: string) (b: list unit)
+  (keys: list (list ch)) (rest: list ch)
+  : Lemma (requires plain_keys keys /\ Cons? b /\ members_follow rest)
+          (ensures
+            (let erased = parse float_read cap RejectNull b (CLBrace :: rest) in
+             let absorbed = parse float_read cap EraseMemberNull b
+                              (CLBrace :: null_members keys rest) in
+             (ROk? erased ==> absorbed == erased) /\
+             ((RErr? erased /\ RErr?.k erased <> NullNotRepresentable) ==> absorbed == erased))) =
+  policies_agree_off_the_fork float_read cap b (CLBrace :: rest);
+  match b with
+  | _ :: b' ->
+    (match keys with
+     | [] -> ()
+     | _ ->
+       null_members_absorbed float_read cap b' [] keys rest;
+       parse_members_skip_ws float_read cap true b' [] rest)
+
+(* NON-VACUITY, exhibited rather than described — the guard the theorem above needs most, because
+   a bridge whose hypotheses nothing satisfies would verify and say nothing. One document where
+   both hypotheses hold and the strict reader ACCEPTS: `{"b":true}` erased, `{"a":null,"b":true}`
+   absorbed, at a budget of two. *)
+let null_absorption_is_erasure_witness (float_read: list ch -> freadv) (cap: string)
+  : Lemma (ensures
+      (let keys = [[CLa]] in
+       let rest = [CQuote; CLb; CQuote; CColon; CLt; CLr; CLu; CLe; CRBrace] in
+       plain_keys keys /\ members_follow rest /\
+       ROk? (parse float_read cap RejectNull [(); ()] (CLBrace :: rest)) /\
+       parse float_read cap EraseMemberNull [(); ()] (CLBrace :: null_members keys rest)
+         == parse float_read cap RejectNull [(); ()] (CLBrace :: rest))) =
+  null_absorption_is_erasure
+    float_read cap [(); ()] [[CLa]] [CQuote; CLb; CQuote; CColon; CLt; CLr; CLu; CLe; CRBrace]

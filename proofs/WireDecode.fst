@@ -39,10 +39,18 @@
        Section 7 models it there — `read : null_policy -> jvaln -> outcome jval`, from a document
        model that HAS a null into the wire model that does not, which is the type-level form of
        "tolerance is a read normalisation, never a new emission" (Wire.fs, `NullPolicy`'s doc).
-       What section 7 therefore assumes, and states rather than hides, is that the parser's
+       What section 7 ASSUMED until Phase 190, and stated rather than hid, is that the parser's
        member-null absorption is equivalent to erasing member nulls from the document tree the
-       strict grammar would otherwise produce. The near-miss tokens that make that an assumption
-       rather than a theorem (`nul`, `nullish`) are grammar, and stay with `Json.parse`.
+       strict grammar would otherwise produce. It is a THEOREM now — `null_absorption_is_erasure`,
+       `JsonParse.fst` section 11 — and the shape it took is worth knowing here, because it is not
+       the shape this paragraph predicted. It is not stated over THIS section's tree: `jval` has no
+       null constructor, so "the strict tree with its member nulls erased" names nothing, the
+       strict parser refusing at the token rather than building one. It is stated over the
+       DOCUMENT, as: absorbing a member null is exactly not having written it, at every depth and
+       any position in any object, and the two policies differ nowhere else. The near-miss tokens
+       that made it an assumption rather than a theorem (`nul`, `nullish`) are grammar and still
+       stay with `Json.parse`; an adopter copying this model inherits the bridge as a theorem
+       rather than as a gap.
 
      - `Versioning.decodeTolerant` — the shipped GENERIC instance of the kind-dispatch pattern —
        is named here and not modelled: its `requiredProfile` read goes through
