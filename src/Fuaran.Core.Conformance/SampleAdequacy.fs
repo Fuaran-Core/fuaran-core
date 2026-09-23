@@ -62,6 +62,31 @@ type AdequacyDemand<'Sample> =
     /// only the family knows. A generator whose widest draw falls short has not tested it.
     | Spans of measure: string * atLeast: int * measureOf: ('Sample -> int)
 
+/// What one law family's RUN actually exercised — Phase 196. The adequacy guard above asserts
+/// adequacy *inside* a run and then throws the measurement away, so a green family and a family
+/// that ran nothing report the same thing to anyone reading the outside. This record is that
+/// measurement, emitted.
+///
+/// `Cases` is the number of law assertions the run MADE: the subject laws it reported, times the
+/// iterations each was driven over. For an `Unconditional` family that is exactly the number of
+/// cases exercised, because every iteration builds the evidence for every branch — which is what
+/// the class asserts and what the suite holds to the tree. For a `Guarded` family it is the run's
+/// SIZE, and `Starved` is the measurement that matters there: a dimension the sample never
+/// reached is vacuity on the side the law is about, and no total can show it. That is why both
+/// fields are carried and why `isVacuous` reads both.
+type CaseCount =
+    {
+        /// The roster key — `"<Module>.<Entry>"`, the spelling a census cell uses.
+        Family: string
+        /// Subject-law assertions made: laws reported that are not the guard's own, times
+        /// iterations.
+        Cases: int
+        /// The guarded dimensions whose own adequacy law went red — the sides of the family the
+        /// sample never reached, named without their `sample adequacy (<family>): ` prefix. Empty
+        /// on a run that reached everything it declared.
+        Starved: string list
+    }
+
 /// How a law family in this kit answers "could this run's sample have missed a verdict the laws
 /// distinguish?". Every family answers it — see `SampleAdequacy.census`.
 type AdequacyClass =
@@ -81,6 +106,22 @@ module SampleAdequacy =
     let private renderCounts (counts: (string * int) list) : string =
         counts |> List.map (fun (v, n) -> v + "=" + string n) |> String.concat " "
 
+    /// The opening of every law THIS module emits, and the one structural mark that separates a
+    /// guard's own verdict from a family's subject laws. Phase 196 reads it back rather than
+    /// parsing law prose: the guard writes the opening, so the guard can recognise it.
+    ///
+    /// The recognition is on the OPENING and not on the whole `sample adequacy (<family>): `
+    /// prefix, because a delegating family emits its delegate's name — `columnarOpLaws` runs
+    /// `columnarOpLawsWith`, `IncrementalDelta.laws` runs `lawsWith`, `snapshotLaws` runs
+    /// `snapshotLawsWith` — and that guard is still the caller's own verdict, which is exactly
+    /// what the census's "(delegates to …)" rows already say. Keying on the name would read those
+    /// as subject laws and lose the starvation they report.
+    [<Literal>]
+    let guardOpening = "sample adequacy ("
+
+    /// The full opening one family's own guard laws carry.
+    let lawPrefix (family: string) : string = guardOpening + family + "): "
+
     /// The standing remedy, in the words Phase 106 had to learn: a coverage guard is satisfied by
     /// one trial in three hundred, so turning it green by re-seeding or by iterating harder leaves
     /// the law certified by that one trial.
@@ -94,9 +135,8 @@ module SampleAdequacy =
         let missed = counts |> List.filter (fun (_, n) -> n <= 0) |> List.map fst
 
         { Law =
-            "sample adequacy ("
-            + family
-            + "): the sample reached every "
+            lawPrefix family
+            + "the sample reached every "
             + dimension
             + " the laws distinguish"
           Passed = not (List.isEmpty counts) && List.isEmpty missed
@@ -127,9 +167,8 @@ module SampleAdequacy =
     /// A span law over a measure the family already keeps: the widest sample must reach `atLeast`.
     let spanned (family: string) (measure: string) (atLeast: int) (seed: int) (widest: int) (n: int) : LawResult =
         { Law =
-            "sample adequacy ("
-            + family
-            + "): the sample spans the "
+            lawPrefix family
+            + "the sample spans the "
             + measure
             + " range the laws need (at least "
             + string atLeast
@@ -177,6 +216,93 @@ module SampleAdequacy =
                 let widest = samples |> List.fold (fun acc s -> max acc (measureOf s)) 0
 
                 spanned family measure atLeast seed widest (List.length samples))
+
+    // ---- Phase 196: the measurement, emitted ---------------------------------------------------
+    //
+    //  Everything above asserts adequacy INSIDE a run and then discards what it measured. A
+    //  consumer's conformance census therefore renders the same "adopted" cell for a family that
+    //  exercised twelve hundred cases and one that exercised none, and the estate's own memory
+    //  names that class twice already. What follows is the measurement leaving the run: a family's
+    //  results and the iterations they were driven over, read through the family's OWN census
+    //  class, into one record a census can render as a column.
+    //
+    //  It is a DERIVATION and deliberately not a second registry. Nothing new declares which
+    //  families exist or what they guard — `census` above is still the only answer to both — and
+    //  nothing in a family's signature changes, which is what makes the column additive for every
+    //  consumer already pinned to this kit.
+
+    /// A plain prefix test, spelled out rather than taken from `String.StartsWith` so it behaves
+    /// identically under Fable and under .NET with no culture in the argument list.
+    let private hasPrefix (p: string) (s: string) : bool =
+        s.Length >= p.Length && s.Substring(0, p.Length) = p
+
+    /// What a census cell reads when the count is zero, or when a guarded dimension was starved.
+    /// One spelling, exported, because a consumer's census and the registry that grades it must
+    /// agree on the word without either of them inventing it.
+    [<Literal>]
+    let vacuousToken = "vacuous"
+
+    /// The cases one family's run exercised — the measurement this module has always taken and
+    /// never emitted.
+    ///
+    /// `results` is exactly what the family answered with, `iterations` the count it was driven
+    /// over (for a family whose sample is a corpus rather than a draw, the corpus size — the
+    /// caller knows which). The family's own `AdequacyClass` decides how the two are read, which
+    /// is what "built on the census, not beside it" means here: a class that changes changes this.
+    let cases (family: string) (klass: AdequacyClass) (iterations: int) (results: LawResult list) : CaseCount =
+        let isGuard (r: LawResult) = hasPrefix guardOpening r.Law
+
+        /// The guard's sentence without the `sample adequacy (<family>): ` it opens with — a
+        /// census cell wants the dimension, not the sentence it failed in. The family name inside
+        /// the parentheses is whichever entry point actually ran (see `guardOpening`), so the cut
+        /// is at the closing `): ` rather than at a name this function assumes.
+        let dimension (law: string) =
+            let at = law.IndexOf "): "
+
+            if at < 0 then law else law.Substring(at + 3)
+
+        let subject = results |> List.filter (isGuard >> not)
+
+        let starved =
+            match klass with
+            // An `Unconditional` family declares that every iteration BUILDS the evidence for
+            // every branch, and the suite holds that declaration to the tree. So the only way it
+            // can be vacuous is by running nothing at all, which `Cases` already says.
+            | Unconditional _ -> []
+            // A `Guarded` family's guard is the measurement. A red guard law names a dimension the
+            // sample never reached — vacuity on the side the law is about, which a total cannot
+            // show. The prefix is stripped because a census cell wants the dimension, not the
+            // sentence the guard failed in.
+            | Guarded _ ->
+                results
+                |> List.filter (fun r -> isGuard r && not r.Passed)
+                |> List.map (fun r -> dimension r.Law)
+
+        { Family = family
+          Cases = List.length subject * (max 0 iterations)
+          Starved = starved }
+
+    /// Did this run certify nothing? Either it made no assertion at all, or a guarded dimension
+    /// was starved — both are green runs that tested nothing on the side they exist for, and a
+    /// census that renders either as a pass is the defect this phase closes.
+    let isVacuous (c: CaseCount) : bool =
+        c.Cases <= 0 || not (List.isEmpty c.Starved)
+
+    /// One census cell. `vacuous` — never a number — when the run certified nothing, naming the
+    /// starved dimensions when it can, because "vacuous" without them sends a reader to the wrong
+    /// remedy (see `remedy` above: widen the generator, do not iterate harder).
+    ///
+    /// A `|` in a dimension name is escaped, so the cell cannot break the table it is rendered
+    /// into.
+    let renderCases (c: CaseCount) : string =
+        let escape (s: string) = s.Replace("|", "\\|")
+
+        if not (List.isEmpty c.Starved) then
+            vacuousToken + " (" + (c.Starved |> List.map escape |> String.concat "; ") + ")"
+        elif c.Cases <= 0 then
+            vacuousToken
+        else
+            string c.Cases
 
     /// Every law family this kit ships, and how it answers the adequacy question. A family that
     /// distinguishes a verdict its sample can miss is `Guarded`; one whose evidence is BUILT each
@@ -241,6 +367,15 @@ module SampleAdequacy =
           "Conformance.keyedChildrenLaws",
           Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ]
 
+          // Phase 196 — moved out of `Unconditional`, where it had sat since this census was
+          // written, and the reclassification is the finding rather than a tidy-up. "Each
+          // iteration signs a head and forges both an op and an attribution" is true of a SIGNING
+          // sink and false of `OpStream.noAttestation`, under which four of the five laws assert
+          // nothing and all five still report green. The sink is a PARAMETER, so whether the
+          // evidence is built is a property of the run — which is what `Guarded` means, and the
+          // family that certifies the unsigned path is `noAttestationVacuityLaws` beside it.
+          "Conformance.attestationLaws", Guarded [ "signing outcome" ]
+
           // ---- unconditional: every iteration builds the evidence for every branch ----
           "Conformance.witnessLaws", Unconditional "each iteration rebuilds a drawn node and re-reads every accessor"
           "Conformance.streamLaws", Unconditional "each iteration applies, replays and tampers the same chain"
@@ -292,8 +427,6 @@ module SampleAdequacy =
           "Conformance.projectionLaws", Unconditional "each iteration projects, re-imports and scopes the same tree"
           "Conformance.aiSurfaceLaws",
           Unconditional "each iteration walks the catalogue and exercises approved, denied and unknown"
-          "Conformance.attestationLaws",
-          Unconditional "each iteration signs a head and forges both an op and an attribution"
           "Conformance.noAttestationVacuityLaws",
           Unconditional "each iteration asks the no-op sink to sign and to verify"
           "Conformance.hashFnLaws", Unconditional "each iteration reorders, drops and bit-flips the same chain"

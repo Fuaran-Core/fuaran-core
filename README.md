@@ -185,6 +185,20 @@ string-id domain) — proving the generics work **without depending on any domai
 workspace**. Domain adoption (re-expressing each domain's machinery over `Fuaran.Core.*`)
 is deliberately out of scope here; it lands on each domain workspace's own roadmap.
 
+**A green law family is not the same claim as an exercised one, and the roster says which it
+is** (Phase 196). A `LawResult` records that a law HELD; it cannot record how many cases reached
+it, so a family whose evidence is drawn rather than built reports the same green whether the
+condition arose two hundred times or never. `SampleAdequacy` has guarded that inside a run since
+Phase 121 — and discarded the measurement. It is emitted now: `SampleAdequacy.cases` reads a
+family's results through its own census class into a `CaseCount`, and the generated
+[`docs/conformance-families.md`](docs/conformance-families.md) carries it as a `cases` column, per
+family, measured at this repository's own reference witness. A cell reads `vacuous` — never a
+number — when the run certified nothing, naming the starved dimension; `unmeasured` is the
+separate state of a rendering handed no run at all. Every family reaches a non-zero, non-starved
+count here, which is what lets a host read a zero in its own census as a fact about its own
+witness rather than about the kit. The instance that proves it: `attestationLaws` at
+`OpStream.noAttestation` reports five green laws over zero signed heads, and now says so.
+
 ## Adopting a domain
 
 Re-expressing a domain spine over `Fuaran.Core.*`? Start at [`docs/ADOPTION.md`](docs/ADOPTION.md) —

@@ -1,4 +1,4 @@
-module Fuaran.Core.Tests.ConformanceFamiliesTests
+﻿module Fuaran.Core.Tests.ConformanceFamiliesTests
 
 // Phase 184 — the law-family roster held to the tree.
 //
@@ -184,10 +184,17 @@ module Export =
     /// its own copy.
     let root () = Snapshots.repoFile "docs"
 
+    /// The measured half of the export — Phase 196. A roster cannot run a law, so the `cases`
+    /// column is supplied by the reference run beside it rather than derived here. One call site
+    /// for the emit and the freshness legs alike, so the committed artefacts and what the suite
+    /// compares them against cannot be rendered from different runs.
+    let cases () = ConformanceVacuityTests.cases ()
+
     let write (dir: string) =
         Directory.CreateDirectory dir |> ignore
-        File.WriteAllText(markdownPath dir, Families.toMarkdown ())
-        File.WriteAllText(jsonPath dir, Families.toJson ())
+        let measured = cases ()
+        File.WriteAllText(markdownPath dir, Families.toMarkdownWith measured)
+        File.WriteAllText(jsonPath dir, Families.toJsonWith measured)
 
 // ---------------------------------------------------------------------------
 
@@ -388,7 +395,7 @@ let familiesTests =
 
               Expect.equal
                   (OwnedConformance.fingerprint (File.ReadAllText path))
-                  (OwnedConformance.fingerprint (Families.toMarkdown ()))
+                  (OwnedConformance.fingerprint (Families.toMarkdownWith (Export.cases ())))
                   "the committed docs/conformance-families.md is not what the roster renders — re-run `--emit-families` and commit it"
 
           testCase "the generated docs/conformance-families.json is what the roster renders"
@@ -403,7 +410,7 @@ let familiesTests =
 
               Expect.equal
                   (OwnedConformance.fingerprint (File.ReadAllText path))
-                  (OwnedConformance.fingerprint (Families.toJson ()))
+                  (OwnedConformance.fingerprint (Families.toJsonWith (Export.cases ())))
                   "the committed docs/conformance-families.json is not what the roster renders — re-run `--emit-families` and commit it"
 
           testCase "the JSON export carries the documented shape, for every family"
@@ -411,10 +418,10 @@ let familiesTests =
               // The shape is a contract `STABILITY.md` documents and an offline projection reads,
               // so it is asserted rather than left to the renderer. Not a JSON parse: the point is
               // that the exact member spellings a reader keys off are present.
-              let json = Families.toJson ()
+              let json = Families.toJsonWith (Export.cases ())
 
               Expect.stringContains json "\"kind\": \"fuaran.core.conformance.families\"" "the export names its kind"
-              Expect.stringContains json "\"schema\": 2" "the export carries a schema version"
+              Expect.stringContains json "\"schema\": 3" "the export carries a schema version"
 
               Expect.stringContains
                   json
@@ -424,7 +431,13 @@ let familiesTests =
               for f in Families.families do
                   Expect.stringContains json ("\"id\": \"" + f.Id + "\"") (sprintf "%s appears in the export" f.Id)
 
-              for member_ in [ "\"module\":"; "\"entry\":"; "\"witness\":"; "\"optIn\":"; "\"discharges\":" ] do
+              for member_ in
+                  [ "\"module\":"
+                    "\"entry\":"
+                    "\"witness\":"
+                    "\"optIn\":"
+                    "\"discharges\":"
+                    "\"cases\":" ] do
                   Expect.stringContains json member_ (sprintf "the export carries %s" member_)
 
               Expect.isTrue (json.EndsWith "\n") "the export ends with a newline"
@@ -455,7 +468,7 @@ let familiesTests =
                           | other -> failtestf "expected a string in an array, got %A" other)
                   | other -> failtestf "expected an array, got %A" other
 
-              match Json.parse (Families.toJson ()) with
+              match Json.parse (Families.toJsonWith (Export.cases ())) with
               | Error e -> failtestf "the export does not parse as JSON: %s" e
               | Ok(JObj top) ->
                   let member_ name =
@@ -464,7 +477,7 @@ let familiesTests =
                       | None -> failtestf "the export carries no `%s`" name
 
                   Expect.equal (member_ "kind") (JStr "fuaran.core.conformance.families") "kind"
-                  Expect.equal (member_ "schema") (JInt 2) "schema"
+                  Expect.equal (member_ "schema") (JInt 3) "schema"
                   Expect.equal (member_ "package") (JStr "Fuaran.Core.Conformance") "package"
 
                   let rebuilt =
@@ -517,7 +530,7 @@ let familiesTests =
           testCase "both renderings are sorted by id, so a diff shows only what moved"
           <| fun _ ->
               let sorted = Families.ids
-              let md = Families.toMarkdown ()
+              let md = Families.toMarkdownWith (Export.cases ())
 
               let positions =
                   sorted
@@ -529,6 +542,7 @@ let familiesTests =
               let jsonPositions =
                   sorted
                   |> List.map (fun id ->
-                      (Families.toJson ()).IndexOf("\"id\": \"" + id + "\"", StringComparison.Ordinal))
+                      (Families.toJsonWith (Export.cases ()))
+                          .IndexOf("\"id\": \"" + id + "\"", StringComparison.Ordinal))
 
               Expect.equal jsonPositions (List.sort jsonPositions) "the JSON families array is in id order" ]

@@ -41,7 +41,7 @@ let rec private decodeNode el : Result<RNode, string> =
 let private decode (s: string) =
     Decode.parse s |> Result.bind decodeNode
 
-let private codec: Corpus.Codec<RNode> = { Encode = encode; Decode = decode }
+let codec: Corpus.Codec<RNode> = { Encode = encode; Decode = decode }
 
 // ---------------------------------------------------------------------------
 //  the authoring surfaces
@@ -85,7 +85,7 @@ let rec private constructWidened (n: RNode) : Result<RNode, string> =
 let private constructRefusing (_: RNode) : Result<RNode, string> =
     Error "a section may not be constructed without a title"
 
-let private honest: ConstructWitness<RNode> =
+let honest: ConstructWitness<RNode> =
     { Surface = "the RNode smart constructors"
       Construct = constructThrough }
 
@@ -113,7 +113,7 @@ let private rejectCase: Corpus.Case =
       Json = "{\"id\":\"x\"}"
       Tag = "reject" }
 
-let private corpus =
+let corpus =
     [ document "sample-tree" (sample ())
       document "single-leaf" (RNode.leaf "a1" "para" "x")
       document "empty-section" (RNode.node "s" "section" [ RNode.leaf "s1" "para" "" ])

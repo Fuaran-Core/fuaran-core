@@ -4,6 +4,7 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.CaseCount..ctor(System.String, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.ConfRng+T..ctor(System.UInt32)
 ctor Fuaran.Core.Conformance+CompositionSample`2..ctor(!0, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, !1, !1, !1, System.String, System.String)
 ctor Fuaran.Core.Conformance+FunctionVerifyReport`2..ctor(System.Boolean, Fuaran.Core.Conformance+VerifyCoverage, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Conformance+VerifyCounterexample`2<!0, !1>>)
@@ -31,9 +32,12 @@ field Fuaran.Core.Conformance+VerifyDefect`1+Tags.ValidatorRejected : System.Int
 field Fuaran.Core.Families+OptInReason+Tags.NeedsWitnessCapability : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.SeamNotEveryDomainHas : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.StrongerPromise : System.Int32 (literal)
+field Fuaran.Core.Families.unmeasuredToken : System.String (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneFolded : System.Int32 (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneHalted : System.Int32 (literal)
 field Fuaran.Core.LaneFoldOutcome+Tags.LaneRejected : System.Int32 (literal)
+field Fuaran.Core.SampleAdequacy.guardOpening : System.String (literal)
+field Fuaran.Core.SampleAdequacy.vacuousToken : System.String (literal)
 field Fuaran.Core.WireNullTolerance+Claim+Tags.ErasesTo : System.Int32 (literal)
 field Fuaran.Core.WireNullTolerance+Claim+Tags.NoAbsenceHere : System.Int32 (literal)
 field Fuaran.Core.WireNullTolerance+Claim+Tags.Rejected : System.Int32 (literal)
@@ -111,7 +115,9 @@ method Fuaran.Core.Conformance.verifyHonestyLaws`2(Fuaran.Core.ArtifactWitness`2
 method Fuaran.Core.Conformance.witnessLaws`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Families.reasonToken(Fuaran.Core.Families+OptInReason) : System.String
 method Fuaran.Core.Families.toJson() : System.String
+method Fuaran.Core.Families.toJsonWith(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>) : System.String
 method Fuaran.Core.Families.toMarkdown() : System.String
+method Fuaran.Core.Families.toMarkdownWith(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>) : System.String
 method Fuaran.Core.Families.tryFind(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+LawFamily>
 method Fuaran.Core.FoldConfluence.arrivalOrders(System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<System.Int32>>
 method Fuaran.Core.FoldConfluence.canonicalConflictReport`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MergeConflict`1<!!0>>) : System.String
@@ -125,8 +131,12 @@ method Fuaran.Core.IncrementalDelta.lawsWith(System.Int32, System.Int32, System.
 method Fuaran.Core.IncrementalDelta.report(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.IncrementalSample>) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.IncrementalDelta.samples(System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.IncrementalSample>
 method Fuaran.Core.IncrementalDelta.samplesWith(System.Int32, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.IncrementalSample>
+method Fuaran.Core.SampleAdequacy.cases(System.String, Fuaran.Core.AdequacyClass, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>) : Fuaran.Core.CaseCount
 method Fuaran.Core.SampleAdequacy.check`1(System.String, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.AdequacyDemand`1<!!0>>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
+method Fuaran.Core.SampleAdequacy.isVacuous(Fuaran.Core.CaseCount) : System.Boolean
+method Fuaran.Core.SampleAdequacy.lawPrefix(System.String) : System.String
 method Fuaran.Core.SampleAdequacy.reached(System.String, System.String, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.Int32>>) : Fuaran.Core.LawResult
+method Fuaran.Core.SampleAdequacy.renderCases(Fuaran.Core.CaseCount) : System.String
 method Fuaran.Core.SampleAdequacy.spanned(System.String, System.String, System.Int32, System.Int32, System.Int32, System.Int32) : Fuaran.Core.LawResult
 method Fuaran.Core.WireNullTolerance.check() : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.WireNullTolerance.run(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WireNullTolerance+Vector>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
@@ -139,6 +149,9 @@ property Fuaran.Core.FoldConfluence.permutationBound : System.Int32 { get }
 property Fuaran.Core.IncrementalDelta.demands : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.AdequacyDemand`1<Fuaran.Core.IncrementalSample>> { get }
 property Fuaran.Core.SampleAdequacy.census : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>> { get }
 property Fuaran.Core.WireNullTolerance.vectors : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WireNullTolerance+Vector> { get }
+record-field Fuaran.Core.CaseCount.Cases #1 : System.Int32
+record-field Fuaran.Core.CaseCount.Family #0 : System.String
+record-field Fuaran.Core.CaseCount.Starved #2 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.ConfRng+T.State #0 : System.UInt32
 record-field Fuaran.Core.Conformance+CompositionSample`2.ClosedInner #4 : !1
 record-field Fuaran.Core.Conformance+CompositionSample`2.OpenHoleArg #8 : System.String
@@ -208,6 +221,7 @@ type Fuaran.Core.AdequacyDemand`1 (union)
 type Fuaran.Core.AdequacyDemand`1+ReachesEvery (type)
 type Fuaran.Core.AdequacyDemand`1+Spans (type)
 type Fuaran.Core.AdequacyDemand`1+Tags (type)
+type Fuaran.Core.CaseCount (record)
 type Fuaran.Core.ConfRng (module)
 type Fuaran.Core.ConfRng+T (record)
 type Fuaran.Core.Conformance (module)

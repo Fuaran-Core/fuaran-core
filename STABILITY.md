@@ -2244,6 +2244,57 @@ Moving the number without re-emitting both is what reddened `main` on 2026-09-22
 occasions before it. The sequence is in `docs/conformance-corpus.md` and it is one sitting, not a
 handoff.
 
+### Vacuity is MEASURED — every law family reports a case count, and the roster export carries it as a `cases` column (Phase 196) — additive, with one behaviour change worth reading if you run `attestationLaws` without a signing sink
+
+**What it is.** A `LawResult` records that a law HELD. It cannot record how many cases reached it,
+so a family whose evidence is DRAWN rather than built reports the same green whether the condition
+arose two hundred times or never. `SampleAdequacy` has asserted the difference *inside* a run since
+Phase 121 and then discarded what it measured, which left the outside of a run unchanged: a
+consumer's generated conformance census renders the same cell for a family that exercised twelve
+hundred cases and one that exercised none. This ships the measurement.
+
+**The managed additions**, all new members — nothing existing moves:
+
+- `CaseCount` (`Family` / `Cases` / `Starved`) — what one family's run exercised. `Cases` is
+  subject-law assertions made (laws reported that are not the guard's own, times iterations);
+  `Starved` names the guarded dimensions whose own adequacy law went red.
+- `SampleAdequacy.cases family class iterations results` — the derivation, read through the
+  family's own `census` class rather than through a second registry. `SampleAdequacy.isVacuous`
+  and `SampleAdequacy.renderCases` answer and render it; `SampleAdequacy.vacuousToken` and
+  `SampleAdequacy.guardOpening` are the two spellings a reader keys off, exported so a host and
+  the kit cannot invent different ones.
+- `Families.toMarkdownWith` / `Families.toJsonWith`, taking `(string * CaseCount) list`.
+  `toMarkdown ()` and `toJson ()` remain and now render `Families.unmeasuredToken` in every
+  `cases` cell — which is the honest state for a caller that ran nothing, and deliberately a
+  different word from `vacuous`.
+
+**The export's shape moves, and `schema` reads 3.** Each family object gains a `cases` member (a
+string: a decimal count, `vacuous`, or `unmeasured`), written last, after `discharges`. Every
+member before it is byte-identical, and the markdown table gains a sixth column with the five
+before it unchanged. A reader keyed on `schema: 2` should expect 3; nothing else it reads has
+moved.
+
+**The one behaviour change: `Conformance.attestationLaws` is re-classed `Guarded` and emits a
+sixth law.** Its census row claimed `Unconditional` — "each iteration signs a head and forges both
+an op and an attribution" — which is true of a SIGNING sink and false of `OpStream.noAttestation`,
+under which four of its five laws assert nothing and all five still report green. The sink is a
+parameter, so whether the evidence is built is a property of the run. The family now counts signed
+heads and falsification arms and reports a `sample adequacy (Conformance.attestationLaws)` law over
+both.
+
+**What that costs you.** If you run `attestationLaws` with a real signing sink: one extra green
+`LawResult`, and a law-count assertion pinned at five needs to read six. If you run it with
+`OpStream.noAttestation`: the family is now RED, deliberately. That configuration was never
+certifying anything — `noAttestationVacuityLaws` is the family that certifies the unsigned path on
+purpose, and it is what a host with no sink should be running.
+
+**And the kit now proves the claim about itself.** `ConformanceVacuityTests` runs every family in
+the roster once at this repository's own reference witness, holds the run set equal to
+`Fuaran.Core.Families` in both directions, and asserts that every family reaches a non-zero,
+non-starved count — which is what lets you read a `vacuous` cell in your own census as a fact
+about your witness rather than about the kit. The committed
+`docs/conformance-families.{md,json}` carry that run's counts.
+
 ### One model-bridge row LEAVES the proof contract a domain inherits (Phase 200) — additive; nothing to compile
 
 **What it is.** `evolution-table-coverage` is `tested` rather than `assumed` / `model-bridge` /
