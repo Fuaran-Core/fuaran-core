@@ -2317,6 +2317,54 @@ this is a proof-leg and ladder change. `api/` is byte-identical.
 assumed rows 24 rather than 25. Nothing a domain does closed it and nothing a domain must now do —
 the row moved because the model grew, which is the only way a `model-bridge` ever leaves that table.
 
+### Defaults-fill on decode is a LAW, and the full node envelope is declared (Phase 201) — additive, and `api/` is byte-identical
+
+**What it is.** `docs/idl-inversion-spike-findings.md` carried two open items from the Phase 316
+inversion spike: defaults-fill ("feasible, not yet built") and the full node envelope ("the spike
+emits `id` + `kind` only"). Both were written about `Fuaran.Core.Idl.Spike`, and both had since been
+built in the production engine — `Optionality.OmitDefault` (Phase 124), `Idl.NodeFields` +
+`Optionality.HostOnly` (Phases 690/691/698). What was missing was not machinery but the CLAIM:
+nothing held the engine to the law the two items describe, and no vocabulary declared an envelope
+carrying all five `WIRE_FORMAT.md` §3.1 slots, so "the declaration can express the whole envelope"
+was an assertion about code rather than a property of something that exists.
+
+`tests/Fuaran.Core.Tests/IdlEnvelopeTests.fs` is that claim, stated so it can fail:
+
+- **Defaults-fill is a law, not a code path.** A member absent from a document decodes to its
+  declared default and **re-encodes ABSENT**, so the bytes are stable across the round trip; a
+  present non-default value is carried unchanged. Both halves are load-bearing and each alone is
+  trivially satisfiable — with the interpreter's restore removed, the byte-stability case stays
+  green and only the fill case goes red, which is why the pair is stated rather than either.
+- **In EVERY decoder leg the generator emits** — the kind spec, a record, a union case and the node
+  envelope, in one vocabulary, on both the F# and TypeScript backends.
+- **The five-slot envelope**: three wire-visible members and two host-only ones, generated on both
+  backends and in the JSON Schema, with a host-only member held to being on *neither* side of the
+  wire. `motion` and `extraAttributes` are declarable as `HostOnly` over a `TFn` slot — `TFn` is
+  named for its commonest use rather than its meaning (a slot whose HOST type is declared and whose
+  WIRE form is fixed, here at absence), so a map-valued host-only member needed no type-model change.
+- **The regeneration proof** extended from the reference vocabulary on one backend to all three
+  neutral vocabularies on both: each regenerates its module byte-identically from its own artifact
+  bytes. The comparison is against `Artifact.canonicalise idl`, not the authored form — an artifact
+  is canonical by construction and declaration order is emission order, so the two vendored
+  vocabularies (which are not authored canonically) would otherwise have measured their own
+  authoring order rather than the engine.
+
+**The boundary this records, because the two are one word apart.** `Idl.IdlDefault` — the root
+`Defaults` list — is an **authoring** default: what a generated smart constructor fills so a caller
+need not pass it. It deliberately does **not** fill on decode. The wire-level default is
+`Optionality.OmitDefault`, which already does, in every leg. Collapsing the two was the obvious move
+and it is not byte-stable: a `Required` member is always emitted, so a decoder that filled one from a
+declared default would re-encode it PRESENT, and two distinct byte-streams would decode to one tree.
+`decode >> encode` would stop being the identity on the wire — the property the conformance corpus
+compares, that a content digest over a tree depends on, and that a cross-host attestation rests on.
+The leniency bought is toward documents the vocabulary's own encoder cannot produce. The argument is
+carried on `IdlDefault`'s own doc comment, and a test holds the generated decoder to `dReq` rather
+than `dDef` for such a member, so the "improvement" cannot be made without meeting it.
+
+**What it costs a pinned consumer: nothing.** No public member, type or signature moves; no emitted
+byte moves. The change is one test module, one registration line, and prose on an existing type.
+`api/` is byte-identical.
+
 ## 0.30.0 — released 2026-09-23 as `v0.30.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.30.0` and the repository holds the `v0.30.0` tag, so
