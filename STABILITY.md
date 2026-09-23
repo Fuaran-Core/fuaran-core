@@ -2244,6 +2244,28 @@ Moving the number without re-emitting both is what reddened `main` on 2026-09-22
 occasions before it. The sequence is in `docs/conformance-corpus.md` and it is one sitting, not a
 handoff.
 
+### One model-bridge row LEAVES the proof contract a domain inherits (Phase 200) — additive; nothing to compile
+
+**What it is.** `evolution-table-coverage` is `tested` rather than `assumed` / `model-bridge` /
+`closes: permanent`. It recorded that one of WIRE_FORMAT §15.4's four evolution rows — an added
+optional field — was satisfied VACUOUSLY by `Versioning.classify`, and that nothing could close it
+because widening `classify` to see field sets would model a function this repository does not ship.
+The second half was wrong: `classify` takes two SUBJECT SETS rather than kind tags, and
+`Diff.evolution` is the shipped caller that builds them from an IDL diff by partitioning each row on
+the severity `Diff.classifyFieldAdd` reads off the field's optionality class, with
+`Diff.bumpProfile` carrying the result to a published profile. `proofs/WireVersioning.fst` models
+that composition and proves the row's content — an optional field moves the MINOR and leaves an old
+consumer `Behind`; a required one moves the same minor while the emitter obligation is carried
+separately; a host-only one moves nothing.
+
+**What it costs a pinned consumer: nothing to compile.** No public member, type or signature moves;
+this is a proof-leg and ladder change. `api/` is byte-identical.
+
+**What it changes if you read the ladder.** The `## The Core-to-domain proof contract` table in
+`proofs/README.md` loses a row: the model bridges a domain inherits are 15 rather than 16, and the
+assumed rows 24 rather than 25. Nothing a domain does closed it and nothing a domain must now do —
+the row moved because the model grew, which is the only way a `model-bridge` ever leaves that table.
+
 ## 0.30.0 — released 2026-09-23 as `v0.30.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.30.0` and the repository holds the `v0.30.0` tag, so

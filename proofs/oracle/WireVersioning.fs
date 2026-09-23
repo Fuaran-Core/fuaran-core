@@ -251,6 +251,121 @@ let reencode = (fun ( encode_known  :  't  ->  WireCanon.jval<'num, 'flt> ) ( d 
 
 let classify_ignoring_removals : Prims.list<Prims.list<WireCanon.ch>>  ->  Prims.list<Prims.list<WireCanon.ch>>  ->  evolution = (fun ( before  :  Prims.list<Prims.list<WireCanon.ch>> ) ( after  :  Prims.list<Prims.list<WireCanon.ch>> ) -> Additive ((diff after before)))
 
+type severity =
+| SAdditive
+| SBreakingForEmitters
+| SBreakingWire
+| SHostSurfaceOnly
+| SUnclassifiable
+
+
+let uu___is_SAdditive : severity  ->  Prims.bool = (fun ( projectee  :  severity ) -> (match (projectee) with
+| SAdditive -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_SBreakingForEmitters : severity  ->  Prims.bool = (fun ( projectee  :  severity ) -> (match (projectee) with
+| SBreakingForEmitters -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_SBreakingWire : severity  ->  Prims.bool = (fun ( projectee  :  severity ) -> (match (projectee) with
+| SBreakingWire -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_SHostSurfaceOnly : severity  ->  Prims.bool = (fun ( projectee  :  severity ) -> (match (projectee) with
+| SHostSurfaceOnly -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_SUnclassifiable : severity  ->  Prims.bool = (fun ( projectee  :  severity ) -> (match (projectee) with
+| SUnclassifiable -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let required_chars : Prims.list<WireCanon.ch> = (WireCanon.CPlain ("r"))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CPlain ("q"))::(WireCanon.CLu)::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("r"))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CHexCh (WireCanon.HDd))::[]
+
+
+let host_only_chars : Prims.list<WireCanon.ch> = (WireCanon.CPlain ("h"))::(WireCanon.CPlain ("o"))::(WireCanon.CPlain ("s"))::(WireCanon.CPlain ("t"))::(WireCanon.CPlain ("O"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("l"))::(WireCanon.CPlain ("y"))::[]
+
+
+let classify_field_add : Prims.list<WireCanon.ch>  ->  severity = (fun ( opt_class  :  Prims.list<WireCanon.ch> ) ->  
+if (Prims.op_Equals opt_class required_chars) then begin
+     SBreakingForEmitters
+     end else begin
+      
+if (Prims.op_Equals opt_class host_only_chars) then begin
+     SHostSurfaceOnly
+     end else begin
+     SAdditive
+     end
+     end)
+
+
+let retires : severity  ->  Prims.bool = (fun ( s  :  severity ) -> (match (s) with
+| SBreakingWire -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let introduces : severity  ->  Prims.bool = (fun ( s  :  severity ) -> ((match (s) with
+| SAdditive -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) || (match (s) with
+| SBreakingForEmitters -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)))
+
+
+let rec subjects : (severity  ->  Prims.bool)  ->  Prims.list<(severity * Prims.list<WireCanon.ch>)>  ->  Prims.list<Prims.list<WireCanon.ch>> = (fun ( p  :  severity  ->  Prims.bool ) ( rows  :  Prims.list<(severity * Prims.list<WireCanon.ch>)> ) -> (match (rows) with
+| [] -> begin
+     []
+     end
+| ((s, subj))::t -> begin
+      
+if (p s) then begin
+     (subj)::(subjects p t)
+     end else begin
+     (subjects p t)
+     end
+     end))
+
+
+let evolution_of : Prims.list<(severity * Prims.list<WireCanon.ch>)>  ->  evolution = (fun ( rows  :  Prims.list<(severity * Prims.list<WireCanon.ch>)> ) -> (classify (subjects retires rows) (subjects introduces rows)))
+
+
+let classify_field_add_ignoring_optionality : Prims.list<WireCanon.ch>  ->  severity = (fun ( opt_class  :  Prims.list<WireCanon.ch> ) -> SAdditive)
+
 
 
 

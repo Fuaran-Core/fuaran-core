@@ -30,9 +30,20 @@
    WHAT THIS DELIBERATELY IS NOT. It is not a change to the policy, and it is not a claim that
    the policy is COMPLETE. A row of §15.4's table this module cannot support is a finding for the
    specification's owners, recorded in `proofs/README.md`'s theorem section and raised there —
-   never a quiet rewrite of `classify` to make a theorem go through. One such row is named in
-   section 6 below: the optional-field exemption, which is invisible to the classifier and to
-   these theorems alike, and is invisible for a reason rather than by oversight.
+   never a quiet rewrite of `classify` to make a theorem go through.
+
+   ONE SUCH ROW WAS NAMED HERE AND IS NO LONGER ONE (Phase 200). The optional-field row was
+   recorded as satisfied vacuously and PERMANENTLY so, on the argument that a field addition is
+   invisible to `classify` and that widening `classify` to see fields would model a function this
+   repository does not ship. The second half of that argument was wrong, and the correction is
+   section 7: `Versioning.classify` takes two SUBJECT sets rather than kind tags, `Diff.evolution`
+   is the shipped caller that builds them from each row's SEVERITY, and `Diff.classifyFieldAdd` is
+   the shipped function that reads the optionality class. Modelling that composition needs no
+   widening of anything — `classify` is used at its own signature, over its own caller's input —
+   and the row then has content: an added optional field bumps the MINOR and leaves an old
+   consumer `Behind`, where a host-only one moves no profile at all. Section 6 keeps the other
+   half, that the tag delta alone cannot decide the row, because both halves are needed to state
+   the policy correctly.
 
    WHY THE TAG TYPE IS `list ch` AND NOT A PARAMETER. Set algebra over tags does not care what a
    tag is, so the classification half would be happier parametric — but `additive_monotone` and
@@ -399,7 +410,7 @@ let reencode_known_is_encode
   : Lemma (ensures reencode encode_known (Known #num #flt #t x) == encode_known x) = ()
 
 (* ======================================================================================
-   6. THE GO-RED, and the row the table has that this module does not.
+   6. THE GO-RED, and what the tag delta alone cannot decide.
    ====================================================================================== *)
 
 (* The instrument the differential must LOSE with: a classifier that computes the additions and
@@ -433,26 +444,182 @@ let classify_disagrees_with_the_broken_one ()
                     Breaking? (classify [tag] []) /\
                     Additive? (classify_ignoring_removals [tag] []))) = ()
 
-(* ---- THE ROW THIS MODULE DOES NOT COVER, named rather than omitted ----
+(* ---- THE TAG DELTA IS BLIND TO FIELDS, which is why section 7 exists ----
 
-   §15.4's table has a row for an ADDED OPTIONAL FIELD, and it is additive. Nothing above sees it,
-   and nothing above can: `classify` ranges over KIND TAGS, and an optional field added to an
-   existing kind changes no tag, so the delta this module classifies is empty and the verdict is
-   `Additive []` — the no-op arm. The row is satisfied vacuously and for the wrong reason.
+   §15.4's table has a row for an ADDED OPTIONAL FIELD, and it is additive. Nothing ABOVE this
+   line sees it, and nothing above it can: `classify` compares the two lists its caller hands it,
+   and a caller that hands it KIND TAGS has already discarded the field, so the delta is empty and
+   the verdict is `Additive []` — the no-op arm, reached for a reason unrelated to what the row is
+   about.
 
-   That is not a hole to be patched here. It is a consequence of rule 2's unknown-key tolerance:
-   an added optional field is invisible to the CLASSIFIER because it is invisible to the DECODER,
-   and both facts have the same cause. A model that widened `classify` to see field sets would be
-   modelling a function this repository does not ship, and the theorems would then be about that
-   function. The finding is recorded in `proofs/README.md`'s theorem section for §15.4's owners,
-   per this phase's own rule that a row the theorem cannot support is raised and not rewritten.
+   Until Phase 200 that was recorded as a permanent gap, on the argument that widening `classify`
+   to see field sets would model a function this repository does not ship. The argument was wrong
+   in one specific, checkable way, and section 7 is the correction. `Versioning.classify` is not a
+   function over kind tags at all — it is a function over two SUBJECT SETS — and which subjects a
+   revision RETIRES and which it INTRODUCES is decided by `Diff.evolution` in
+   `src/Fuaran.Core.Idl.Codegen/Diff.fs` from the SEVERITY `Diff.classifyFieldAdd` gives each row.
+   An added optional field is a subject that composition introduces, so the verdict is a NON-EMPTY
+   `Additive`, the minor moves, and `Diff.bumpProfile` carries it through `Versioning.bump` — the
+   shipped profile bump, not an advisory report. The row was never vacuous in production; it was
+   vacuous in the MODEL, because the model stopped at the tag delta.
 
-   What CAN be said within this module is said, as the vacuity made explicit: a change that adds
-   no tag and removes none classifies as the empty additive and bumps nothing, so a consumer at
-   the base profile stays `Current` and decodes with its full vocabulary. That is the row's
-   observable content on the tag delta, and it is all of it. *)
-let optional_field_addition_is_a_no_op (vocab: list (list ch)) (base_profile: profile)
+   The lemma stays, renamed for what it actually says: the tag delta alone cannot decide the row.
+   That is what makes section 7 necessary rather than decorative, and it is also the reason the
+   two sections must both be here — a reader who takes either half for the whole policy gets the
+   wrong answer, in opposite directions. *)
+let tag_delta_is_blind_to_field_additions (vocab: list (list ch)) (base_profile: profile)
   : Lemma (requires Nil? (diff vocab vocab))
           (ensures classify vocab vocab == Additive [] /\
                    bump base_profile (classify vocab vocab) == base_profile /\
                    negotiate base_profile (bump base_profile (classify vocab vocab)) == Current) = ()
+
+(* ======================================================================================
+   7. THE OPTIONAL-FIELD ROW, at the composition that actually decides it (Phase 200).
+
+      F#: `Diff.Severity` / `Diff.classifyFieldAdd` / `Diff.evolution` in
+      `src/Fuaran.Core.Idl.Codegen/Diff.fs`, and `Versioning.classify` / `bump` / `negotiate`
+      already modelled above, which is what that composition ENDS at.
+
+      Section 6 says the tag delta cannot see a field. This section models the thing that can.
+      The shape is worth stating before the definitions, because it is the whole finding: a field
+      addition is classified by its OPTIONALITY CLASS into a severity, the severity decides which
+      of two subject sets the row joins, and the two subject sets are what `classify` compares.
+      Nothing is widened and no function is merged — `classify` is used at exactly its shipped
+      signature, over exactly the input its shipped caller passes it.
+
+      The subject STRINGS stay abstract here. Production renders them with `Diff.summarise`, and
+      a theorem quantified over every subject is a theorem about the partition rather than about
+      one rendering — which is the same choice section 3 makes for the discriminator reader, and
+      for the same reason.
+   ====================================================================================== *)
+
+(* F#: `Diff.Severity`, in production's declaration order. `SUnclassifiable` is carried although
+   nothing below branches on it: it is the arm that stops the bump OUTRIGHT (`Diff.bumpProfile`
+   returns `Undecided` rather than a profile), and a severity type missing it would let a reader
+   conclude that every row this model admits produces a bump. *)
+type severity =
+  | SAdditive
+  | SBreakingForEmitters
+  | SBreakingWire
+  | SHostSurfaceOnly
+  | SUnclassifiable
+
+(* The two reserved optionality spellings `classifyFieldAdd` branches on, in theorem 7's character
+   alphabet. Written as named constants for the reason `WireCanon`'s `true_chars` and `null_chars`
+   are: a spelling the model must get exactly right is a definition, not a literal buried in a
+   guard. `"required"` and `"hostOnly"` — every other class (`optional`, `omitDefault`, and any
+   the artifact grows) falls to the default arm, which is production's `| _ ->` and is why the
+   model tests these two rather than enumerating the vocabulary. *)
+let required_chars : list ch =
+  [CPlain "r"; CHexCh HDe; CPlain "q"; CLu; CPlain "i"; CPlain "r"; CHexCh HDe; CHexCh HDd]
+
+let host_only_chars : list ch =
+  [CPlain "h"; CPlain "o"; CPlain "s"; CPlain "t"; CPlain "O"; CPlain "n"; CPlain "l"; CPlain "y"]
+
+(* F#: `Diff.classifyFieldAdd`, clause for clause, keeping only the severity — the rationale and
+   citation it also returns are prose for a report and decide nothing.
+
+   `required` is `BreakingForEmitters` and NOT `BreakingWire`: every existing document still
+   decodes, so the wire evolution is additive and the consumer is `Behind`; what breaks is the
+   EMITTER, which the verdict carries on its own axis because a minor cannot express it. That
+   split is the row an author gets wrong here in the same way a rename is the row they get wrong
+   in section 5. *)
+let classify_field_add (opt_class: list ch) : Tot severity =
+  if opt_class = required_chars then SBreakingForEmitters
+  else if opt_class = host_only_chars then SHostSurfaceOnly
+  else SAdditive
+
+(* F#: the two `subjects` predicates inside `Diff.evolution`. A severity either retires a subject,
+   introduces one, or moves neither set — and `SHostSurfaceOnly` / `SUnclassifiable` moving
+   neither is what makes the classification observable at all. *)
+let retires (s: severity) : Tot bool = SBreakingWire? s
+
+let introduces (s: severity) : Tot bool = SAdditive? s || SBreakingForEmitters? s
+
+(* F#: `cs |> List.filter pick |> List.map (fun c -> summarise c.Change) |> Set.ofList`. The model
+   holds the result as a list where production holds a `Set`, for the reason section 1 gives for
+   vocabularies — every statement below is about which subjects are present, never about their
+   order or multiplicity. *)
+let rec subjects (p: severity -> bool) (rows: list (severity & list ch))
+  : Tot (list (list ch)) (decreases rows) =
+  match rows with
+  | [] -> []
+  | (s, subj) :: t -> if p s then subj :: subjects p t else subjects p t
+
+(* F#: `Diff.evolution`. It DELEGATES to `classify` rather than restating the rule, which is the
+   whole reason this section can be written without touching section 5. *)
+let evolution_of (rows: list (severity & list ch)) : Tot evolution =
+  classify (subjects retires rows) (subjects introduces rows)
+
+(* ---- THEOREM 5 (§15.4's optional-field row, with content): the minor MOVES ----
+
+   A revision whose only change is one added optional field introduces exactly that subject and
+   retires nothing, so the verdict is `Additive [subject]` — the non-empty arm — the minor bumps,
+   the major does not, and a consumer sitting at the base profile negotiates `Behind`: it
+   tolerates the document and preserves what it does not understand, which is what §15.4's row
+   promises and what the tag delta alone could not say.
+
+   Quantified over every subject rendering and every optionality class that is neither of the two
+   reserved spellings, so it is a fact about the row and not about one field somebody added. *)
+let optional_field_addition_bumps_the_minor
+  (subj: list ch) (opt_class: list ch) (base_profile: profile) (consumer: profile)
+  : Lemma (requires opt_class <> required_chars /\ opt_class <> host_only_chars /\
+                    consumer.name == base_profile.name /\
+                    consumer.major == base_profile.major /\
+                    consumer.minor == base_profile.minor)
+          (ensures (let ev = evolution_of [(classify_field_add opt_class, subj)] in
+                    ev == Additive [subj] /\
+                    (bump base_profile ev).major == base_profile.major /\
+                    (bump base_profile ev).minor == base_profile.minor + 1 /\
+                    Behind? (negotiate consumer (bump base_profile ev)))) = ()
+
+(* The REQUIRED-field row, which reads as a contradiction until you ask whose profile it is. It
+   bumps the same minor: every document valid under the old contract is still valid, so the wire
+   evolution is additive and an old CONSUMER is `Behind` rather than `Foreign`. What moved is the
+   obligation on EMITTERS, and the verdict carries that on `BreaksEmitters` — a boolean beside the
+   profile rather than folded into it, because a major would tell every consumer to refuse
+   documents that decode perfectly. Stated here so that a reader cannot conclude from theorem 5
+   that "additive minor" means "nothing to do". *)
+let required_field_addition_is_behind_not_foreign
+  (subj: list ch) (base_profile: profile) (consumer: profile)
+  : Lemma (requires consumer.name == base_profile.name /\
+                    consumer.major == base_profile.major /\
+                    consumer.minor == base_profile.minor)
+          (ensures (let ev = evolution_of [(classify_field_add required_chars, subj)] in
+                    ev == Additive [subj] /\
+                    (bump base_profile ev).major == base_profile.major /\
+                    Behind? (negotiate consumer (bump base_profile ev)))) = ()
+
+(* And the HOST-ONLY row, which is the one that genuinely moves nothing — WIRE_FORMAT §9's
+   wire-omitted fields are on no document in either direction, so no profile can honestly move.
+   It is stated beside the two above because it is what makes them a MEASUREMENT: a model in which
+   every field addition bumped the minor would agree with production on two rows out of three and
+   would be measuring the arrival of a field rather than its optionality class. *)
+let host_only_field_addition_moves_no_profile (subj: list ch) (base_profile: profile)
+  : Lemma (ensures (let ev = evolution_of [(classify_field_add host_only_chars, subj)] in
+                    ev == Additive [] /\
+                    bump base_profile ev == base_profile /\
+                    negotiate base_profile (bump base_profile ev) == Current)) = ()
+
+(* ---- THE GO-RED for this section ----
+
+   The classifier an author writes who reads "an added field is additive" and stops: it answers
+   `SAdditive` whatever the optionality class says. It agrees with production on the optional row,
+   which is the commonest one, and it is wrong on both of the others — so a comparison that cannot
+   separate it from the real thing is measuring the arrival of a field and nothing else. *)
+let classify_field_add_ignoring_optionality (opt_class: list ch) : Tot severity = SAdditive
+
+(* And the disagreement, exhibited at the level a reader acts on rather than at the severity: on a
+   host-only field the broken classifier moves a profile that must not move. A refutation stated
+   as "the severities differ" would be a claim about an internal; this one is a claim about the
+   version somebody publishes. *)
+[@@ noextract_to "FSharp"]
+let ignoring_optionality_moves_a_profile_that_must_not (subj: list ch) (base_profile: profile)
+  : Lemma (ensures evolution_of [(classify_field_add host_only_chars, subj)] == Additive [] /\
+                   evolution_of [(classify_field_add_ignoring_optionality host_only_chars, subj)]
+                     == Additive [subj] /\
+                   bump base_profile (evolution_of [(classify_field_add host_only_chars, subj)])
+                     == base_profile /\
+                   (bump base_profile
+                      (evolution_of [(classify_field_add_ignoring_optionality host_only_chars, subj)])).minor
+                     == base_profile.minor + 1) = ()

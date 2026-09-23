@@ -574,7 +574,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 25 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 24 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -587,10 +587,10 @@ place together with the contract it implies.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
-  proved, a walk order the model is handed rather than derives, a specification row the model
-  covers vacuously. Nothing a domain does closes one. Each names a **`closes`**: a
+  proved, a walk order the model is handed rather than derives, an abstract reader the model is
+  handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 16 rows.
+  `unscheduled` where something could and nobody has. 15 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -620,7 +620,6 @@ over-read.
 | `canon-numeral-layouts` | `model-bridge` | `permanent` |
 | `canon-key-comparator` | `model-bridge` | `permanent` |
 | `canon-character-bridge` | `model-bridge` | `permanent` |
-| `evolution-table-coverage` | `model-bridge` | `permanent` |
 | `column-cell-carrier-opaque` | `model-bridge` | `permanent` |
 | `column-transform-evaluator-abstract` | `model-bridge` | `unscheduled` |
 | `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
@@ -642,6 +641,21 @@ impossibility, which is a worse error than a third token.
 sentence that names work rather than an impossibility, which is exactly the distinction the third
 token exists to carry. Phase 190 took the work, and the row left this table rather than being
 reworded inside it. A `permanent` there would have told a reader not to look.
+
+**And a `permanent` DID tell a reader not to look: `evolution-table-coverage` is `tested` now
+(Phase 200).** It carried `closes: permanent` — §15.4's optional-field row is satisfied vacuously,
+because `classify` ranges over kind tags and a field addition moves no tag — and the argument for
+the token was that widening `classify` to see field sets would model a function this repository
+does not ship. The first half was right and the second was wrong, in a way a reader who trusted
+the token would never have checked: `Versioning.classify` does not range over kind tags at all. It
+takes two SUBJECT SETS, and `Diff.evolution` is the shipped caller that builds them from an IDL
+diff by partitioning each row on the severity `Diff.classifyFieldAdd` reads off its optionality
+class, with `Diff.bumpProfile` carrying the verdict to a published profile. Modelling that needed
+no widening of anything. Two lessons, and the second is the one worth carrying: a `permanent` is a
+claim about what is POSSIBLE and is therefore the most expensive token in this table to get wrong
+— `unscheduled` invites a reader to look, `permanent` tells them not to. The argument for one
+should name the obstruction concretely enough to be refuted, which this one did, which is how it
+was.
 
 **Why `witness-surface-scope` stopped being a `premise` (Phase 189).** It was the one row whose
 obligation was the domain's and whose discharge no run could perform: a node a domain holds in a
@@ -3887,38 +3901,55 @@ The order matters — the first is what the other three stand on.
   refuses rather than mis-decoding); an additive verdict keeps the major and the same consumer is
   `Behind` (it tolerates). A soundness claim about `classify` that stopped short of `bump` would
   leave the consequence a reader acts on unproved.
+- **`classify_field_add` / `evolution_of`, and the three theorems over them (Phase 200).**
+  §15.4's FIELD rows, modelled at the composition that decides them — see the section below, which
+  is where they came from.
 
-### The finding: §15.4's optional-field row is satisfied VACUOUSLY
+### The finding that CLOSED: §15.4's optional-field row was not vacuous (Phase 200)
 
-The table has a row for an added optional field, and it is additive. **Nothing in this module sees
-it, and nothing in this module can.** `classify` ranges over KIND TAGS; an optional field added to
-an existing kind changes no tag, so the delta is empty and the verdict is `Additive []` — the no-op
-arm. The row comes out right for a reason unrelated to what it is about.
+Phase 151 recorded this section's one gap. The table has a row for an added optional field, and it
+is additive; `classify` ranges over KIND TAGS, an optional field added to an existing kind changes
+no tag, so the delta is empty and the verdict is `Additive []` — the no-op arm. The row came out
+right for a reason unrelated to what it is about. The finding was entered on the ladder as
+`evolution-table-coverage`, a `model-bridge` at `closes: permanent`, on the argument that
+**widening `classify` to see field sets would model a function this repository does not ship**.
 
-This is recorded rather than repaired, per the phase's own rule that a row the theorem cannot
-support is raised to the specification's owners and not made true by rewriting `classify`. Two
-things are worth knowing about it before anyone takes it.
+The first half of that was right and is still here (`tag_delta_is_blind_to_field_additions`). The
+second half was wrong, and the way it was wrong is the reusable part.
 
-**It is not an oversight in the classifier.** It is a consequence of rule 2's unknown-key tolerance:
-an added optional field is invisible to the CLASSIFIER because it is invisible to the DECODER, and
-both facts have the same cause. A consumer that meets a member it does not recognise ignores it and
-preserves it, so the document decodes the same either way — which is exactly the property the
-additive row promises, arrived at by a route the tag delta does not describe. The policy's verdict
-is correct; its stated reason is not the one that makes it correct.
+**`Versioning.classify` does not range over kind tags.** It takes two lists of strings and reports
+which are retired and which introduced; kind tags are what ONE caller happens to pass it.
+`Diff.evolution` in `Fuaran.Core.Idl.Codegen` is another, and it is the one an IDL diff goes
+through: it partitions each classification row into a RETIRED or an INTRODUCED subject set by the
+row's severity, and `Diff.classifyFieldAdd` is what supplies that severity, reading the field's
+optionality class. `Diff.bumpProfile` then carries the verdict through `Versioning.bump` to the
+profile a revision publishes. So the row was decided by shipped code, end to end, all along — and
+modelling that composition needs no widening of anything: `classify` appears at its own signature,
+over its own caller's input. Section 7 of the model is that composition, and the row now has
+content:
 
-**Widening `classify` here would model a function this repository does not ship.** `Diff.classify`
-in `Fuaran.Core.Idl.Codegen` DOES see field-level changes and classifies them (`classifyFieldAdd`
-reads the four-way optionality), and it is a different function with a different signature serving a
-different caller — an advisory host-strand report rather than a profile bump. A model that merged
-the two would be about neither. What the module states instead is the vacuity made explicit
-(`optional_field_addition_is_a_no_op`): a change that adds and removes no tag classifies as the
-empty additive, bumps nothing, and leaves a consumer at the base profile `Current`. That is the
-row's observable content on the tag delta, and it is all of it.
+- **`optional_field_addition_bumps_the_minor`.** An added optional field INTRODUCES a subject and
+  retires none, so the verdict is a non-empty `Additive`, the minor moves, the major does not, and
+  a consumer at the base profile is `Behind` — it tolerates the document and preserves what it
+  does not understand. That is §15.4's row, and it is what the tag delta alone could not say.
+- **`required_field_addition_is_behind_not_foreign`.** The row that reads as a contradiction until
+  you ask whose profile it is. It bumps the same minor: every document valid under the old
+  contract is still valid, so an old CONSUMER is `Behind` rather than `Foreign`. What moved is the
+  obligation on EMITTERS, and the verdict carries that on `BreaksEmitters` beside the profile
+  rather than folded into it — a major would tell every consumer to refuse documents that decode
+  perfectly.
+- **`host_only_field_addition_moves_no_profile`.** WIRE_FORMAT §9's wire-omitted fields are on no
+  document in either direction, so no profile can honestly move. This is the arm that makes the
+  other two a MEASUREMENT: a model in which every field addition bumped the minor would agree with
+  production on two rows out of three and would be measuring the arrival of a field rather than
+  its optionality class.
 
-The differential carries the same row as a perturbation of the real `idl.json`, with an assertion
-that the verdict IS `Additive []` and a failure message saying what a non-empty verdict would mean.
-So the finding goes red if the classifier ever grows field awareness, rather than quietly becoming
-stale prose.
+**What is unchanged is the other explanation, and it is still the deeper one.** An added optional
+field is invisible to the tag delta for the same reason it is harmless: rule 2's unknown-key
+tolerance. A consumer that meets a member it does not recognise ignores it and preserves it, so the
+document decodes the same either way. The tag delta's silence is not wrong, it is just not the
+whole policy — and a reader who takes either half for the whole gets the wrong answer, in opposite
+directions. Both halves are in the model for that reason.
 
 ### What the differential measures
 
@@ -3939,6 +3970,17 @@ stale prose.
   that the classifier agrees with itself over two lists somebody chose. Each of the four verdicts is
   asserted to land where §15.4 puts it, so a pass in which every pair classified alike is a failure
   rather than a green.
+- **The same artifact perturbed once per OPTIONALITY CLASS** (Phase 200), for §15.4's field rows —
+  `optional`, `required`, `hostOnly`, one added field each, read back through
+  `Diff.classifyArtifacts`. Two things are compared per perturbation: the row's SEVERITY, clause
+  for clause against `Diff.classifyFieldAdd`, and the PROFILE the revision mints, computed end to
+  end on each side — `Diff.bumpProfile` beside the model's own `classify_field_add` →
+  `evolution_of` → `bump`. The row's subject string is production's own, recovered through the
+  public `Diff.evolution` over the single row, which hands it back without presupposing which
+  partition it lands in; the partition is exactly what is being compared, so it must not be an
+  input to the comparison. The adequacy assertions require the three to mint DIFFERENT profiles —
+  minor moved, minor moved with `BreaksEmitters`, and nothing moved — so a run in which a field
+  addition always bumped the minor fails rather than passing.
 
 The **go-red** is the model's own `classify_ignoring_removals` — a classifier that computes the
 additions and never looks for removals. It is not a strawman: it is what an author writes who reads
@@ -3948,19 +3990,35 @@ the differential asserts it disagrees with production on the removal and the ren
 ELSE — which is what says the comparison is narrow to the rule it is about rather than merely
 capable of failing.
 
+The field family has its own, built the same way:
+`classify_field_add_ignoring_optionality` answers additive whatever the class says, which is what
+an author writes who reads "an added field is additive" and stops. It AGREES on the optional row —
+the row this phase is named for — so the case asserts the disagreement on the HOST-ONLY one, where
+it publishes a minor for a field that is on no document. F* exhibits the same disagreement at the
+same level in `ignoring_optionality_moves_a_profile_that_must_not`: not "the severities differ",
+which would be a claim about an internal, but "the published profile differs", which is a claim
+about a version somebody ships.
+
 ### The boundary
 
-1. **Level 1, over the shipped functions.** `classify`, `bump`, `negotiate`, `decodeTolerant` and
-   `reencode` are modelled clause for clause and the extraction is run beside production, so the
-   theorems are about the functions that ship and the differential says so over real inputs.
+1. **Level 1, over the shipped functions.** `classify`, `bump`, `negotiate`, `decodeTolerant`,
+   `reencode` and — since Phase 200 — `Diff.classifyFieldAdd` and `Diff.evolution` are modelled
+   clause for clause and the extraction is run beside production, so the theorems are about the
+   functions that ship and the differential says so over real inputs.
 2. **Level 3 premises, all `WireCanon`'s.** `preserve_exact` carries `tok_read_ok` and
    `key_order_ok` — theorem 7's two assumptions about the host's numeral reader and its key
    comparator — and rule 5's canonical-subset predicate. It inherits theorem 7's boundary exactly
    and adds none of its own.
 3. **Not claimed.**
-   - **That §15.4's table is COMPLETE.** Four rows are covered — add a kind, remove a tag, rename,
-     and the optional field (vacuously, see the finding). A row the table may grow is a row this
-     module does not have.
+   - **That §15.4's table is COMPLETE.** Four rows are covered and all four are inhabited since
+     Phase 200 — add a kind, remove a tag, rename, and the field rows at their three optionality
+     classes. A row the table may GROW is a row this module does not have.
+   - **The classification of a change that is not a field addition.** `Diff.classify` decides some
+     thirty change kinds; §15.4's table names four, and the model carries the severity TYPE in
+     full (so a reader cannot conclude that every admitted row bumps) but models only
+     `classifyFieldAdd`'s three clauses. `Diff.evolution`'s partition is modelled over an
+     arbitrary row list, so it is general; what supplies the severities for the other kinds is
+     not.
    - **Anything about the ENVELOPE's own parsing.** `Versioning.parse` / `decode` and
      `Profile.tryParse` are not modelled; the differential drives production's own parser and
      compares what happens after it. A malformed `$profile` is theorem 4's boundary, not this one.

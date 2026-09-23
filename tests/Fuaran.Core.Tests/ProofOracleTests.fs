@@ -6160,16 +6160,17 @@ let private withTag (tag: string) (k: JVal) : JVal =
     | JObj fields -> JObj(fields |> List.map (fun (n, v) -> if n = "tag" then n, JStr tag else n, v))
     | other -> other
 
-/// Give a kind one more field, declared `optional`. This is §15.4's optional-field row, and the
-/// perturbation is deliberately one that changes NO tag — which is the whole point of including
-/// it, per the model's section 6.
-let private withAnExtraOptionalField (k: JVal) : JVal =
+/// Give a kind one more field, at a named optionality class. §15.4's field rows are all this
+/// perturbation with a different class in the one slot, and the perturbation is deliberately one
+/// that changes NO tag: that is what makes it invisible to the kind-tag delta (the model's
+/// section 6) and visible to the composition that decides it (section 7).
+let private withAnExtraField (optClass: string) (k: JVal) : JVal =
     match k with
     | JObj fields ->
         let extra =
             JObj
                 [ "name", JStr "phase151ProbeField"
-                  "optionality", JObj [ "$type", JStr "optional" ]
+                  "optionality", JObj [ "$type", JStr optClass ]
                   "type", JObj [ "$type", JStr "prim"; "name", JStr "String" ] ]
 
         JObj(
@@ -6210,7 +6211,7 @@ let private idlPairs () : (string * Set<string> * Set<string>) list =
         |> mapKinds (
             List.map (fun k ->
                 if kindTag k = firstTag then
-                    withAnExtraOptionalField k
+                    withAnExtraField "optional" k
                 else
                     k)
         )
@@ -6234,6 +6235,155 @@ let private idlPairs () : (string * Set<string> * Set<string>) list =
       "add an optional field", before, kindTagsOf "optional-field-added" optionalField
       "remove a tag", before, kindTagsOf "tag-removed" removed
       "rename", before, kindTagsOf "renamed" renamed ]
+
+// ---- §15.4's FIELD rows, at the composition that decides them (Phase 200) ----------------
+//
+// The pairs above are the classify half AT THE KIND-TAG DELTA, and at that delta a field addition
+// is invisible: the "add an optional field" pair classifies `Additive []`, the no-op arm. Until
+// Phase 200 that was recorded as §15.4's optional-field row being satisfied VACUOUSLY, and
+// permanently so, on the argument that widening `classify` to see fields would model a function
+// this repository does not ship.
+//
+// The argument was wrong in one specific, checkable way. `Versioning.classify` does not take kind
+// tags — it takes two SUBJECT SETS — and the shipped caller that builds them from an IDL diff is
+// `Diff.evolution`, which partitions each row by the SEVERITY `Diff.classifyFieldAdd` gives it
+// from the field's optionality class. `Diff.bumpProfile` then carries the verdict through
+// `Versioning.bump`. The row is decided by shipped code all the way to a published profile, on a
+// path this family did not walk. Walking it is this section, and the model's section 7 is the
+// same composition proved.
+//
+// Three perturbations, one per class the classifier branches on, each adding ONE field to the
+// pinned artifact and changing no tag:
+//
+//   `optional` — §15.4's row itself. A subject is INTRODUCED, the verdict is a NON-EMPTY
+//                `Additive`, the MINOR moves, and an old consumer is `Behind` rather than blind.
+//   `required` — introduced too, and the minor is still the honest profile answer: every existing
+//                document decodes. What moved is the EMITTER's obligation, carried on
+//                `BreaksEmitters` beside the profile because a major would tell every consumer to
+//                refuse documents that decode perfectly.
+//   `hostOnly` — WIRE_FORMAT §9's wire-omitted fields: on no document in either direction, so no
+//                profile moves. This is the arm that makes the other two a MEASUREMENT rather
+//                than a constant, and it is the one the go-red gets wrong.
+
+module IdlDiff = Fuaran.Core.Idl.Diff
+
+/// The model's `severity` as production's, so the comparison is one equality over the shipped type
+/// rather than a pair of shape tests.
+let private ofModelSeverity (s: WireVersioning.severity) : IdlDiff.Severity =
+    match s with
+    | WireVersioning.SAdditive -> IdlDiff.Additive
+    | WireVersioning.SBreakingForEmitters -> IdlDiff.BreakingForEmitters
+    | WireVersioning.SBreakingWire -> IdlDiff.BreakingWire
+    | WireVersioning.SHostSurfaceOnly -> IdlDiff.HostSurfaceOnly
+    | WireVersioning.SUnclassifiable -> IdlDiff.Unclassifiable
+
+/// A model profile as the three components a publisher reads. The counters cross a width boundary
+/// in the other direction from `toModelProfile` — the model's `nat` extracts to `BigInteger` — so
+/// the conversion is here and not hidden inside a comparison.
+let private profileTriple (p: WireVersioning.profile) : string * int * int =
+    canonFromChs p.name, int p.major, int p.minor
+
+/// The SUBJECT string production renders for one classification row. `Diff.summarise` is private,
+/// so it is recovered through the public `Diff.evolution` over the single row — which hands the
+/// string back WITHOUT presupposing which partition it lands in, since either list answers. That
+/// matters: the partition is exactly what this family compares, so it must not be an input to the
+/// comparison. A row that moves neither set contributes to neither, and its subject is read by
+/// nothing.
+let private subjectOf (c: IdlDiff.Classification) : string =
+    match IdlDiff.evolution [ c ] with
+    | Versioning.Additive(s :: _) -> s
+    | Versioning.Breaking(s :: _, _) -> s
+    | Versioning.Breaking([], s :: _) -> s
+    | _ -> "<this row moves neither subject set>"
+
+/// What one field-add perturbation measures on both sides.
+type private FieldAddMeasurement =
+    {
+        /// The optionality class the perturbation declared, read back out of the artifact.
+        OptClass: string
+        ProductionSeverity: IdlDiff.Severity
+        ModelSeverity: IdlDiff.Severity
+        /// The profile `core@1.0` bumps to, as `Diff.bumpProfile` computes it.
+        ProductionProfile: string * int * int
+        /// The same, computed end to end by the model: its own `classify_field_add`, its own
+        /// `evolution_of`, its own `bump`.
+        ModelProfile: string * int * int
+        /// And by the model's GO-RED — a classifier that answers additive whatever the class says.
+        GoRedProfile: string * int * int
+        BreaksEmitters: bool
+    }
+
+let private fieldAddProbe (optClass: string) (beforeText: string) (afterText: string) : FieldAddMeasurement =
+    match IdlDiff.classifyArtifacts beforeText afterText with
+    | Result.Error m -> failtestf "the `%s` field-add perturbation did not classify: %s" optClass m
+    | Result.Ok v ->
+        let row =
+            match v.Changes with
+            | [ one ] -> one
+            | rows ->
+                failtestf
+                    "the `%s` field-add perturbation produced %d rows, not the single FieldAdded it adds — the perturbation moved something else: %A"
+                    optClass
+                    (List.length rows)
+                    (rows |> List.map (fun r -> r.Change))
+
+        let declared =
+            match row.Change with
+            | IdlDiff.FieldAdded(_, f) -> f.OptClass
+            | other -> failtestf "the `%s` perturbation's only row is %A, not a FieldAdded" optClass other
+
+        let subject = canonToChs (subjectOf row)
+        let baseProfile = toModelProfile Versioning.Profile.coreV1
+
+        let modelSeverity = WireVersioning.classify_field_add (canonToChs declared)
+
+        let goRedSeverity =
+            WireVersioning.classify_field_add_ignoring_optionality (canonToChs declared)
+
+        let modelBump (sev: WireVersioning.severity) =
+            profileTriple (WireVersioning.bump baseProfile (WireVersioning.evolution_of [ sev, subject ]))
+
+        let productionProfile =
+            match IdlDiff.bumpProfile Versioning.Profile.coreV1 v with
+            | IdlDiff.Bump.Bumped p -> p.Name, p.Major, p.Minor
+            | IdlDiff.Bump.Undecided rows ->
+                failtestf "the `%s` field-add perturbation left %d rows undecided" optClass (List.length rows)
+
+        { OptClass = declared
+          ProductionSeverity = row.Severity
+          ModelSeverity = ofModelSeverity modelSeverity
+          ProductionProfile = productionProfile
+          ModelProfile = modelBump modelSeverity
+          GoRedProfile = modelBump goRedSeverity
+          BreaksEmitters = v.BreaksEmitters }
+
+/// The three perturbations, each derived from the PINNED artifact and read back through
+/// `Diff.parse`, for the reason `idlPairs` gives: the claim is about the classifier applied to an
+/// IDL diff, and a hand-written pair would establish that it agrees with itself.
+let private fieldAddMeasurements () : FieldAddMeasurement list =
+    let text = pinnedIdlText ()
+
+    let idl =
+        match Json.parse text with
+        | Result.Error m -> failtestf "the pinned idl.json did not parse: %s" m
+        | Result.Ok v -> v
+
+    let firstTag = kindTagsOf "pinned" text |> Set.toList |> List.head
+    let before = Canon.render idl
+
+    let perturb (optClass: string) =
+        idl
+        |> mapKinds (
+            List.map (fun k ->
+                if kindTag k = firstTag then
+                    withAnExtraField optClass k
+                else
+                    k)
+        )
+        |> Canon.render
+
+    [ "optional"; "required"; "hostOnly" ]
+    |> List.map (fun c -> fieldAddProbe c before (perturb c))
 
 // ---- the envelope family ----------------------------------------------------------------
 //
@@ -12561,7 +12711,7 @@ let proofOracleTests =
               | Versioning.Additive [] -> ()
               | other ->
                   failtestf
-                      "adding an OPTIONAL FIELD moved the kind-tag set (%A) — §15.4's optional-field row is invisible to this classifier by construction, and a verdict here means the perturbation changed a tag"
+                      "adding an OPTIONAL FIELD moved the kind-tag set (%A) — a field addition is invisible AT THIS DELTA by construction, and a verdict here means the perturbation changed a tag. §15.4's optional-field row itself is measured by the field-add case below, which walks the composition that does see it"
                       other
 
               match verdictOf "remove a tag" with
@@ -12578,6 +12728,76 @@ let proofOracleTests =
                   failtestf
                       "a RENAME classified as %A — §15.4 calls it breaking, and it is the row an author gets wrong"
                       other
+
+          testCase "the versioning oracle agrees with production over §15.4's three field-add rows"
+          <| fun _ ->
+              let ms = fieldAddMeasurements ()
+
+              let byClass c =
+                  ms |> List.find (fun m -> m.OptClass = c)
+
+              let baseP = Versioning.Profile.coreV1
+
+              // 1. the SEVERITY, clause for clause against `Diff.classifyFieldAdd`.
+              for m in ms do
+                  Expect.equal
+                      m.ModelSeverity
+                      m.ProductionSeverity
+                      (sprintf "the severity of a `%s` field add" m.OptClass)
+
+              // 2. the PROFILE the revision mints, end to end: the model's own classification, its
+              //    own partition into the two subject sets, its own bump — beside
+              //    `Diff.bumpProfile`. This is §15.4's actual subject matter, since the table is a
+              //    table of BUMPS and the bump is what a publisher acts on.
+              for m in ms do
+                  Expect.equal
+                      m.ModelProfile
+                      m.ProductionProfile
+                      (sprintf "the profile `core@1.0` bumps to under a `%s` field add" m.OptClass)
+
+              // adequacy — the row is REACHED, and the three classes are told apart. A pass in
+              // which all three minted the same profile would be measuring the arrival of a field
+              // rather than its optionality class, which is the whole of what this row is about.
+              let optional = byClass "optional"
+
+              Expect.equal
+                  optional.ProductionProfile
+                  (baseP.Name, baseP.Major, baseP.Minor + 1)
+                  "§15.4's optional-field row, reached: the MINOR moves and the major does not, so an old consumer is `Behind` and tolerates rather than being told nothing happened"
+
+              Expect.isFalse optional.BreaksEmitters "an added optional field breaks no emitter"
+
+              let required = byClass "required"
+
+              Expect.equal
+                  required.ProductionProfile
+                  (baseP.Name, baseP.Major, baseP.Minor + 1)
+                  "a REQUIRED field add is still a minor on the wire — every existing document decodes"
+
+              Expect.isTrue
+                  required.BreaksEmitters
+                  "and the emitter obligation is carried BESIDE the profile, not folded into it: a major would tell every consumer to refuse documents that decode perfectly"
+
+              let hostOnly = byClass "hostOnly"
+
+              Expect.equal
+                  hostOnly.ProductionProfile
+                  (baseP.Name, baseP.Major, baseP.Minor)
+                  "a HOST-ONLY field is on no document in either direction (WIRE_FORMAT §9), so no profile may move"
+
+              // the go-red — the model's own `classify_field_add_ignoring_optionality`, which is
+              // what an author writes who reads "an added field is additive" and stops. It agrees
+              // on the row this phase is named for, which is exactly why the comparison has to
+              // reach the other two.
+              Expect.notEqual
+                  hostOnly.GoRedProfile
+                  hostOnly.ProductionProfile
+                  "a classifier that ignores the optionality class publishes a minor for a field that is on no document — the comparison can fail"
+
+              Expect.equal
+                  optional.GoRedProfile
+                  optional.ProductionProfile
+                  "and it agrees on the optional row, which is what makes it a go-red worth having rather than a strawman"
 
           testCase "the versioning oracle agrees with production over every envelope/ fixture"
           <| fun _ ->
