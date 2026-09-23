@@ -3,6 +3,16 @@
 **Status:** spike complete — **GO**. Advisory findings note for the schema-driven codegen capability
 (Phase 317) and the IDL-canonical direction (substrate-as-asset brief). Amends no shipped contract.
 
+> **This document describes `Fuaran.Core.Idl.Spike`, not the production engine** (Phase 201). Every gap it
+> records is a gap in the SPIKE, measured in 2026 against a five-kind mini IDL and an illustrative,
+> uncompiled emitter; the production `Fuaran.Core.Idl` + `Fuaran.Core.Idl.Codegen` have moved a long way
+> past it, and a §3 item still reading "not yet built" was reporting the spike's state and nothing else.
+> The two items that were genuinely open — defaults-fill and the full node envelope — are **closed below,
+> by citing the production code that built them and the tests that hold it**. Read each item's own text
+> for what shipped; nothing here is an open capability question. The doc is kept rather than deleted
+> because the *reasoning* it records (what the inversion risked, what the corpus-as-oracle migration loop
+> costs) is what a second IDL adopter meets, and that has not aged.
+
 **Artefacts:** [`src/Fuaran.Core.Idl/`](../src/Fuaran.Core.Idl/) (the IDL model + a schema-driven encoder +
 an illustrative F#-type emitter), [`src/Fuaran.Core.Idl.Spike/`](../src/Fuaran.Core.Idl.Spike/) (the mini UI
 IDL + the authored corpus trees), and `tests/Fuaran.Core.Tests/IdlSpikeTests.fs` (the gate).
@@ -49,13 +59,31 @@ ergonomic sugar — stays hand-written per host and is out of the IDL's scope by
    mismatch (`Binding<bool>` given a float) is rejected, and the type-gen leg emits a generic `type
    Binding<'T>`. Multi-parameter / higher-kinded shapes (`GridSpec<'row,'Msg>`, `Binding.Format` over a
    numeric source) remain for the full-vocabulary pass — but the hardest expressiveness question is answered.
-2. **Defaults-fill.** The spike exercises omit-on-absence (wire-visible) but not IDL-declared *default values*
-   that are emitted on absence. Same mechanism (the field carries a default; absence → emit it) — feasible,
-   not yet built.
-3. **The full node envelope.** The spike emits `id` + `kind` only (matching the minimal-node fixtures). The
-   real node adds `state` / `style` / `accessibility` / `motion` / `extraAttributes` as omit-on-default
-   slots — same mechanism, more fields. **This is where ARIA defaults become IDL-declared** (the durable
-   answer to the Phase 307 / 313 accessibility-defaults question).
+2. **Defaults-fill — done (Phase 124, held to a law by Phase 201).** `Optionality.OmitDefault d` is the
+   declaration: the encoder emits the field only when it differs from `d`, and the decoder restores `d` on
+   absence, in every leg the generator emits — the kind spec, a record, a union case and the node envelope,
+   across the interpreter (`Idl.Decode`), the F# backend (`dDef`), the TypeScript backend and the F* target.
+   The omit test and the restore render from ONE literal (`Gen.fsDefaultLit`), which is why they cannot come
+   apart. `tests/Fuaran.Core.Tests/IdlEnvelopeTests.fs` states it as a law rather than a code path: a member
+   absent from a document decodes to its declared default and **re-encodes ABSENT**, so the bytes are stable
+   across the round trip, while a present non-default value is carried unchanged.
+
+   Note the boundary, because the two are easily confused: `Idl.IdlDefault` (the root `Defaults` list) is an
+   **authoring** default — what a smart constructor fills so a caller need not pass it — and deliberately does
+   **not** fill on decode. A `Required` member is always emitted, so filling one on decode would re-encode it
+   PRESENT and `decode >> encode` would stop being the identity on the wire. The type's own doc comment carries
+   the argument.
+3. **The full node envelope — done (Phases 690 / 691 / 698, held to the five-slot shape by Phase 201).**
+   `Idl.NodeFields` is the declaration — what a node carries beside `id` and `kind` — and every emitter derives
+   from it rather than hard-coding it, because "what a node carries" is a property of the DOMAIN's tree and
+   another domain has a different envelope or none. All five slots are expressible: `state` / `style` /
+   `accessibility` as wire-visible members (omit-on-absence or omit-at-default — **this is where an ARIA
+   default becomes IDL-declared**, the durable answer to the Phase 307 / 313 question), and `motion` /
+   `extraAttributes` as `Optionality.HostOnly` over a `TFn` slot. `TFn` is named for its commonest use rather
+   than its meaning: it is a slot whose HOST type is declared and whose WIRE form is fixed — for a host-only
+   member, fixed at *absence* — so a map-valued or closure-valued host-only member needs no widening of the
+   type model. `IdlEnvelopeTests` declares an envelope carrying all five, generates it on both backends and in
+   the schema, and holds a host-only member to being on neither side of the wire.
 4. **`schema.json` emission — done (Phase 317 increment 4, `fuaran-core@7a93718`).** `Gen.jsonSchema` emits a
    Draft 2020-12 JSON Schema from the IDL (`$defs` per enum/union/kind, `oneOf` by `$type`, required +
    `additionalProperties:false`). So **one IDL now drives all three §11 mirrors** — encoder + decoder +
@@ -67,8 +95,8 @@ ergonomic sugar — stays hand-written per host and is out of the IDL's scope by
    as one `type … and …` group so the cycle resolves). It **compiles as part of the build**, and its generated
    encoder round-trips heading/badge/button/stack byte-identical. A drift guard re-runs the generator vs the
    committed file; `.fantomasignore` keeps it pristine. Still open: the **syntax-tree-API** emission form (vs
-   source-string), scaling to the **full ~40-kind real tier** + the migration (generate → diff → switch), and
-   defaults-fill / the full node envelope (items 2–3 above).
+   source-string), and scaling to the **full ~40-kind real tier** + the migration (generate → diff → switch).
+   (Defaults-fill and the full node envelope were still open when this was written; both are closed above.)
 
 ## 4. Meta-schema cost + migration path
 
@@ -98,7 +126,7 @@ NOT claimed complete:
    lives in the **Fuaran-UI** repo, so this is downstream consumer work, not Fuaran-Core spike work.
 2. **A second, independent backend** (C# or TS) — proves host-independence and **cross-host byte-identical
    hashing** (the precondition for Phase 320 attestation). A whole second emitter.
-3. **Defaults-fill + the full node envelope** (items 2–3 of §3), and the **syntax-tree-API** emission form (vs
-   source-string) the Phase 321 trust boundary may want.
+3. ~~**Defaults-fill + the full node envelope**~~ — both closed; see items 2–3 of §3. What remains of this
+   entry is the **syntax-tree-API** emission form (vs source-string) the Phase 321 trust boundary may want.
 
 These are the right shape for follow-on increments; the capability they instantiate is built and verified.

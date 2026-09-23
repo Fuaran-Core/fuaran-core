@@ -253,6 +253,13 @@
          delta and not with the table. Reads no other test module (it builds its own tables), so
          it is appended at the end of the list (append-only registration). -->
     <Compile Include="IncrementalRefreshCostTests.fs" />
+    <!-- Phase 201 — defaults-fill on decode stated as a LAW (fill on absence, re-encode
+         ABSENT, carry a present non-default), held in every decoder leg the generator
+         emits; the full `WIRE_FORMAT.md` §3.1 node envelope declared, host-only members
+         included; and the regeneration proof over the three neutral vocabularies, so it
+         reads ReferenceIdl.fs, SecondDomainSpike.fs and ScoreDomainSpike.fs and must
+         follow all three. Appended at the end of the list (append-only registration). -->
+    <Compile Include="IdlEnvelopeTests.fs" />
     <!-- Phase 203 — "exhaustively proved" as a gate predicate: every packable package is named by
          a model or carries a declared exclusion, every assumed row is accounted for by its class,
          and every differential is paired to a theorem. Reads PackageRosterTests.fs above for the

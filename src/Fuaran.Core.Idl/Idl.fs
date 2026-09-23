@@ -552,7 +552,27 @@ and IdlValue =
 
 /// A declared default for one kind field — applied by the generated smart
 /// constructors (Phase 317 increment 7). `Kind`/`Field` address the field;
-/// `Value` is the default authored value.
+/// `Value` is the default authored value. The node ENVELOPE has no kind tag, so a
+/// declared envelope default is addressed by the EMPTY `Kind` (Phase 195) — a
+/// kind's tag is its wire discriminator and can never be empty, so the address is
+/// free and unambiguous.
+///
+/// **This is an AUTHORING default, and it deliberately does not fill on decode**
+/// (Phase 201; the case that holds it is `IdlEnvelopeTests`). What it says is what
+/// a CALLER need not pass; what absence on the WIRE means is said by
+/// [[Optionality.OmitDefault]], which the encoder's omit test and every emitted
+/// decoder's restore already render from one literal.
+///
+/// The two were nearly collapsed into one. They must not be, and the reason is
+/// byte stability. A `Required` member is ALWAYS emitted, so a decoder that filled
+/// one from a declared default would re-encode it PRESENT: two distinct
+/// byte-streams would decode to one tree and `decode >> encode` would stop being
+/// the identity on the wire — the property the conformance corpus compares, that a
+/// content digest over a tree depends on, and that a cross-host attestation rests
+/// on. The leniency bought is toward documents the vocabulary's own encoder cannot
+/// produce; the price is the property everything else is built on. A vocabulary
+/// that genuinely wants absence to mean a value declares `OmitDefault`, and gets
+/// the fill in every leg.
 type IdlDefault =
     { Kind: string
       Field: string
