@@ -2223,12 +2223,21 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.30.0 — draft
+## 0.30.0 — released 2026-09-23 as `v0.30.0`
 
-**This slot is a DRAFT.** `<Version>` reads `0.30.0` and no `v0.30.0` tag exists, so the entries
-below describe a contract that is still being assembled and further changes may ride it. Nothing
-here is a promise to a consumer until the release gesture is made; when it is, this paragraph is
-retired and the header restated as a released one.
+**This slot is RELEASED.** `<Version>` reads `0.30.0` and the repository holds the `v0.30.0` tag, so
+this is a released contract rather than a draft and nothing further can ride it: the next
+public-contract change opens a new slot and advances `<Version>` with it — a `0.30.1` draft for an
+additive or behaviour-identical change, `0.31.0` for a breaking one. The entries below are what
+shipped in it. Entries written while the slot was open refer to it as the `0.30.0` draft, and to what
+may ride it; they are left as written.
+
+**It was released after four phases rather than the eleven it was cut for**, which is a deliberate
+decision and not an abandonment. The slot was opened for a campaign across the hardening, IDL and
+compute strands; 180, 189, 188 and 190 landed in it, and the remaining seven phases were released
+from it so that consumers blocked on an unpublished version could move. Those phases open the next
+slot when the first of them changes the contract. A reader comparing this entry to the cut's stated
+scope is reading the difference correctly.
 
 **This slot was OPENED rather than ridden because `0.29.0` is tagged**, which is the rule the
 `0.29.0` entry states rather than a choice made here: a tagged slot is a released contract and a
