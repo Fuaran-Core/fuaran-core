@@ -2326,6 +2326,23 @@ additive or behaviour-identical change, `0.31.0` for a breaking one. The entries
 shipped in it. Entries written while the slot was open refer to it as the `0.30.0` draft, and to what
 may ride it; they are left as written.
 
+> **If you packed `0.30.0` as a DRAFT before 2026-09-23, repack and re-run — a pin bump is not
+> enough.** This slot's contract CHANGED after it had been packed: an early draft pack still carried
+> `Fuaran.Core.Lease` and `Conformance.leaseLaws`, and Phase 188 then removed that package entirely
+> before the slot was released under the same number. Two different contracts wore one version
+> string, and which one a consumer saw was decided by its NuGet cache rather than by its pin.
+>
+> Nothing a consumer normally checks can see this. The pin is correct, the source is correct, the
+> suite is green, and a pin/feed audit reports nothing — because the version you name IS the version
+> that was emitted. Only the content moved. A green run made against the draft bytes is therefore
+> **unproven rather than wrong**, which is the worse of the two: one consumer recorded 5,126 passing
+> tests while still carrying the `leaseLaws` row that the released kit's roster test refuses.
+>
+> The remedy is a repack with a cleared cache and a re-run of every consumer, plus deleting any
+> `Fuaran.Core.Lease.0.30.0` package a draft pack left in a local feed — resolvable on that one
+> machine and nowhere else. This note exists because the draft-slot model has no way to say
+> "same number, new contract"; until it does, the release note is where a consumer is told.
+
 **It was released after four phases rather than the eleven it was cut for**, which is a deliberate
 decision and not an abandonment. The slot was opened for a campaign across the hardening, IDL and
 compute strands; 180, 189, 188 and 190 landed in it, and the remaining seven phases were released
