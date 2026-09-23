@@ -804,10 +804,97 @@ module FStarTarget =
         | SList _ -> "JArr (enc_items_" + slotName s + " " + e + ")"
         | SMap _ -> "JObj (enc_entries_" + slotName s + " " + e + ")"
 
+    /// RE-PURPOSED by Phase 182, not retired: it was the count at which the round trip was split
+    /// one lemma per presence PATTERN, and it is now the count at which the LINEAR per-member
+    /// split is used instead of proving the whole constructor in one query — and, since Phase 204,
+    /// the count at which the MODEL binds each conditional member's suffix once (8a below) rather
+    /// than writing the tail into both arms of its test. Two, so that both are exercised — and
+    /// proved to discharge — by the certification set itself (the reference vocabulary's `Embed`
+    /// and its node envelope both carry exactly two), not first met at an adopter's scale. A
+    /// constructor below it is still proved in one query, which Phase 182's k=5 measurement shows
+    /// is the cheaper shape while it holds, and still encodes inline: with one conditional member
+    /// the tail is written twice, a constant factor and not an exponent.
+    let presenceSplitAt = 2
+
+    /// Phase 204 — a constructor whose member list is emitted as bound SUFFIXES (8a below).
+    let private suffixed (ms: Member list) =
+        (ms |> List.filter (fun m -> m.Presence.IsSome) |> List.length)
+        >= presenceSplitAt
+
+    /// One conditional member's suffix: the top-level definition that conses the member onto
+    /// the rest of the list, or passes the rest through when the encoder omits it.
+    let private suffixName (typeName: string) (label: string) (m: Member) =
+        sprintf "sfx_%s__%s__%s" typeName label (snake m.Name)
+
+    /// A conditional member's encoding as an OPTION — `None` exactly when the encoder omits it —
+    /// which is what its suffix takes. The test is the one the inline form wrote: `None?` for an
+    /// optional member, equality with the default literal for an omit-at-default one.
+    let private encOption (m: Member) (v: string) =
+        match m.Presence with
+        | Some None -> sprintf "(match %s with | None -> None | Some w -> Some (%s))" v (encApplied m.Slot "w")
+        | Some(Some d) -> sprintf "(if %s = %s then None else Some (%s))" v d (encApplied m.Slot v)
+        | None -> invalidArg "m" "only a conditional member has an optional encoding"
+
+    /// One link of a suffixed member list: the local the encoder binds it to, the suffix it
+    /// applies, the conditional member it is about, and the two arguments — the member's optional
+    /// encoding and the REST, which is the always-emitted members up to the next conditional one
+    /// consed onto the next link's local (or onto `[]` for the last).
+    type private Link =
+        { Local: string
+          Suffix: string
+          Member: Member
+          Enc: string
+          Rest: string }
+
+    /// A suffixed member list as the always-emitted members BEFORE the first conditional one (in
+    /// key order, reached by `find_field` without meeting a test) and its links, outermost first.
+    let private suffixChain (typeName: string) (label: string) (sorted: Member list) (bind: Member -> string) =
+        let entry (m: Member) =
+            sprintf "(%s, %s)" (lit m.Name) (encApplied m.Slot (bind m))
+
+        let start = sorted |> List.findIndex (fun m -> m.Presence.IsSome)
+        let prefix = sorted |> List.take start
+
+        // Each conditional member opens a group; the always-emitted members after it ride in it.
+        let groups =
+            sorted
+            |> List.skip start
+            |> List.fold
+                (fun acc (m: Member) ->
+                    match m.Presence, acc with
+                    | Some _, _ -> (m, []) :: acc
+                    | None, (c, rs) :: t -> (c, rs @ [ m ]) :: t
+                    | None, [] -> failwith "unreachable: the first member after `start` is conditional")
+                []
+            |> List.rev
+
+        let n = List.length groups
+
+        let links =
+            groups
+            |> List.mapi (fun t (c, rs) ->
+                let next = if t + 1 < n then sprintf "s%d" (t + 1) else "[]"
+
+                { Local = sprintf "s%d" t
+                  Suffix = suffixName typeName label c
+                  Member = c
+                  Enc = encOption c (bind c)
+                  Rest = (rs |> List.map (fun r -> entry r + " :: ") |> String.concat "") + next })
+
+        prefix |> List.map entry, links
+
+    /// The `let` chain binding a suffixed list's links, innermost first so each can name the next.
+    let private chainLets (links: Link list) =
+        links
+        |> List.rev
+        |> List.map (fun l -> sprintf "let %s = %s #num #flt %s (%s) in" l.Local l.Suffix l.Enc l.Rest)
+
     /// The object-member list of a declared field set — an inline `match` per conditional
     /// member rather than a higher-order builder, so the whole expression stays a literal
-    /// the prover can normalise.
-    let private encMembers (ms: Member list) (lead: string list) (bind: Member -> string) =
+    /// the prover can normalise. At `presenceSplitAt` or more conditional members it is the
+    /// SUFFIX chain instead (Phase 204, section 8a): one `let` per conditional member, each
+    /// binding that member's suffix applied to the next, so no tail is written twice.
+    let private encMembers (owner: string * string) (ms: Member list) (lead: string list) (bind: Member -> string) =
         let sorted = sortMembers ms
 
         let rec go rest =
@@ -830,7 +917,18 @@ module FStarTarget =
                 | Some(Some d) ->
                     sprintf "(if %s = %s then %s else (%s, %s) :: %s)" v d tail (lit m.Name) (encApplied m.Slot v) tail
 
-        let body = go sorted
+        let body =
+            if suffixed sorted then
+                let typeName, label = owner
+                let prefix, links = suffixChain typeName label sorted bind
+
+                sprintf
+                    "(%s %s%s)"
+                    (chainLets links |> String.concat " ")
+                    (prefix |> List.map (fun e -> e + " :: ") |> String.concat "")
+                    (List.head links).Local
+            else
+                go sorted
 
         match lead with
         | [] -> body
@@ -1148,6 +1246,55 @@ module FStarTarget =
             line "   ====================================================================================== *)"
             line ""
 
+            // ---- 8a. the suffixes (Phase 204) --------------------------------
+            // A constructor at `presenceSplitAt` or more conditional members encodes its member
+            // list through one SUFFIX per conditional member, bound once by the encoder's `let`
+            // chain — where the inline form wrote the tail into both arms of every member's test
+            // and emitted 2^k text (5,318,686 characters for one kind at k=16, which the pinned
+            // prover could not load). Each suffix is top-level and NAMED, so it is a term a lemma
+            // can be stated about, and OPAQUE to the SMT solver, so no query sees through it except
+            // the three per-suffix lemmas the proof script proves by revealing it. It takes the
+            // member already ENCODED (as an option) rather than the member itself, which is what
+            // keeps it out of the recursive family: it calls nothing.
+            let suffixOwners =
+                [ yield "node", "Node", envArgs
+                  for tag, ms in c.Kinds do
+                      yield "vkind", tag, sortMembers ms
+                  for s in declared do
+                      match s with
+                      | SRecord _ ->
+                          let n = slotName s
+                          yield n, "Mk", sortMembers c.Members[n]
+                      | SUnion _ ->
+                          let n = slotName s
+
+                          for tag, ms in c.Cases[n] do
+                              match c.Transparent.TryFind n with
+                              | Some t when t = tag -> ()
+                              | _ -> yield n, tag, sortMembers ms
+                      | _ -> () ]
+                |> List.filter (fun (_, _, ms) -> suffixed ms)
+
+            if not suffixOwners.IsEmpty then
+                line "(* The member-list SUFFIXES — one per conditional member of a constructor carrying two or"
+                line "   more, bound once by the encoder below rather than written into both arms of a test."
+                line "   Opaque to the solver: only the per-suffix lemmas of the proof script look inside. *)"
+                line ""
+
+            for typeName, label, ms in suffixOwners do
+                for m in ms do
+                    if m.Presence.IsSome then
+                        line "[@@\"opaque_to_smt\"]"
+
+                        line (
+                            sprintf
+                                "let %s (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) ="
+                                (suffixName typeName label m)
+                        )
+
+                        line (sprintf "  match e with | None -> rest | Some v -> (%s, v) :: rest" (lit m.Name))
+                        line ""
+
             let disc = idl.Wire.Discriminator
             let mutable firstEnc = true
 
@@ -1160,7 +1307,7 @@ module FStarTarget =
             let bindNode = bindOf envArgs
 
             let envList =
-                encMembers envArgs [] (fun m ->
+                encMembers ("node", "Node") envArgs [] (fun m ->
                     "e" + string (List.findIndex (fun (x: Member) -> x.Name = m.Name) envArgs))
 
             let envBinders =
@@ -1194,7 +1341,13 @@ module FStarTarget =
 
                 line (sprintf "  | %s %s ->" (ctorName "vkind" tag) (String.concat " " bs))
 
-                line (sprintf "    JObj ((%s, JStr %s) :: %s)" (lit disc) (lit tag) (encMembers sorted [] bind))
+                line (
+                    sprintf
+                        "    JObj ((%s, JStr %s) :: %s)"
+                        (lit disc)
+                        (lit tag)
+                        (encMembers ("vkind", tag) sorted [] bind)
+                )
 
             line ""
 
@@ -1223,7 +1376,7 @@ module FStarTarget =
                             "  | %s %s -> JObj (%s)"
                             (ctorName n "Mk")
                             (String.concat " " bs)
-                            (encMembers ms [] bind)
+                            (encMembers (n, "Mk") ms [] bind)
                     )
 
                     line ""
@@ -1259,7 +1412,7 @@ module FStarTarget =
                                     "    JObj ((%s, JStr %s) :: %s)"
                                     (lit disc)
                                     (lit tag)
-                                    (encMembers sorted [] bind)
+                                    (encMembers (n, tag) sorted [] bind)
                             )
 
                     line ""
@@ -1631,6 +1784,15 @@ module FStarTarget =
     //         member and the encoder's own text is 2^k. That limit is the MODEL emitter's and is
     //         untouched here; see `proofs/README.md` and DECISIONS for what it costs an adopter.
     //
+    // PHASE 204 removed that limit (8a: named, opaque suffixes; the model is linear in k and loads
+    // at k=16 in 19 s) and proves each lookup as a chain of per-suffix steps. Measured on the same
+    // probe: every lookup discharges at k=5, 8 and 12 under `--z3rlimit 40`, including the k=12
+    // `__absent` Phase 182 could not prove. At k=16 the model loads and every per-suffix step
+    // discharges, but the first lookup needs ~59 units of rlimit (3.7 at k=12): the let chain the
+    // lookup BODY re-binds is a computation, and F* splits its verification condition on both
+    // arms of every `match` in it — ~2x per member, the same exponent moved into the VC. That is
+    // the open successor, recorded in `proofs/README.md` with the three remedies measured against it.
+    //
     // The load-bearing fact the linear form rests on is that `find_field name` pushes through an
     // entry with a different key, so `find_field n (if c then t else (k, v) :: t)` is `find_field
     // n t` on BOTH sides of the test and the two branches merge instead of multiplying. It needs
@@ -1643,15 +1805,6 @@ module FStarTarget =
     // are NOT in the family — they recurse on nothing — which is what lets each carry its own
     // scoped options, since a mutual family admits only one set for all of it.
     // -----------------------------------------------------------------------
-
-    /// RE-PURPOSED by Phase 182, not retired: it was the count at which the round trip was split
-    /// one lemma per presence PATTERN, and it is now the count at which the LINEAR per-member
-    /// split is used instead of proving the whole constructor in one query. Two, so that the split
-    /// is exercised — and proved to discharge — by the certification set itself (the reference
-    /// vocabulary's `Embed` and its node envelope both carry exactly two), not first met at an
-    /// adopter's scale. A constructor below it is still proved in one query, which the k=5
-    /// measurement above shows is the cheaper shape while it holds.
-    let presenceSplitAt = 2
 
     /// One conditional member of a constructor: its binder in the constructor pattern, its IDL
     /// name (for the pattern lemma's caption), and how its two shapes are told apart — `None`
@@ -1704,9 +1857,15 @@ module FStarTarget =
 
     /// The fuel one constructor's lookup lemmas need. `find_field` walks the object's entries one
     /// unfolding at a time and the default two do not reach past the second key, so the figure is
-    /// sized to the entries the walk can meet — the lead entries plus every member — with a margin
-    /// for the `Ok?` refinement `get_prop` carries out of the lookup. Scoped to the lemma rather
-    /// than set on the file: fuel the family does not need is fuel every other query pays for.
+    /// sized to the entries the walk can meet with a margin for the `Ok?` refinement `get_prop`
+    /// carries out of the lookup. Scoped to the lemma rather than set on the file: fuel the family
+    /// does not need is fuel every other query pays for. SINCE PHASE 204 the walk no longer meets
+    /// every member: a suffix is opaque and each is crossed by a cited step, so `find_field` unfolds
+    /// only over the lead entries, the always-emitted members before the first conditional one, and
+    /// the always-emitted members riding in the suffixes, and the fuel is sized to those. Measured
+    /// at k=16 (`proofs/README.md`): cutting it from Phase 182's thirty-eight to eight did NOT change
+    /// the verdict there — the cost is elsewhere, and the README names where — so this is sizing the
+    /// fuel to the walk, not a remedy.
     let private lookupFuel (leads: int) (members: int) = max 8 (2 * (leads + members + 2))
 
     /// One constructor of a modelled type, as the proof emitter sees it: the model's constructor
@@ -1753,7 +1912,10 @@ module FStarTarget =
 
             if List.length cs >= presenceSplitAt then
                 let pattern = ctorPattern c
-                let fuel = lookupFuel (List.length c.Lead) (List.length ms)
+
+                let fuel =
+                    lookupFuel (List.length c.Lead) (ms |> List.filter (fun m -> m.Presence.IsNone) |> List.length)
+
                 let start = firstConditional ms
 
                 let guarded (body: string) (fallback: string) =
@@ -1762,7 +1924,65 @@ module FStarTarget =
                     else
                         sprintf "match x with | %s -> %s" pattern body
 
-                let emit (name: string) (why: string) (requires: string option) (ensures: string) =
+                // Phase 204: the constructor's suffix chain, bound in each lookup's body exactly as
+                // the encoder binds it, so the terms the steps below are cited at ARE the encoding's.
+                let _, links = suffixChain typeName c.Label ms (bindOf ms)
+                let lets = chainLets links
+
+                let stepName (l: Link) (step: string) =
+                    "sk_" + l.Suffix.Substring 4 + "__" + step
+
+                let step (l: Link) (s: string) (key: string option) =
+                    match key with
+                    | Some k -> sprintf "%s #num #flt %s %s (%s)" (stepName l s) (lit k) l.Enc l.Rest
+                    | None -> sprintf "%s #num #flt %s (%s)" (stepName l s) l.Enc l.Rest
+
+                // The three per-suffix lemmas — the ONLY place an opaque suffix is looked inside.
+                line (
+                    sprintf "(* The suffixes of %s — each revealed once, here, and cited by name below. *)" c.CtorName
+                )
+
+                for l in links do
+                    let args = "(e: option (jval num flt)) (rest: list (string & jval num flt))"
+
+                    let reveal =
+                        sprintf "  = reveal_opaque (`%%%s) (%s #num #flt e rest)" l.Suffix l.Suffix
+
+                    line (
+                        sprintf
+                            "let %s (#num #flt: eqtype) (n: string) %s : Lemma (requires (n <> %s)) (ensures (find_field n (%s e rest) == find_field n rest))"
+                            (stepName l "skip")
+                            args
+                            (lit l.Member.Name)
+                            l.Suffix
+                    )
+
+                    line reveal
+
+                    line (
+                        sprintf
+                            "let %s (#num #flt: eqtype) %s : Lemma (requires (Some? e)) (ensures (find_field %s (%s e rest) == Ok (Some?.v e)))"
+                            (stepName l "hit")
+                            args
+                            (lit l.Member.Name)
+                            l.Suffix
+                    )
+
+                    line reveal
+
+                    line (
+                        sprintf
+                            "let %s (#num #flt: eqtype) %s : Lemma (requires (None? e)) (ensures (%s e rest == rest))"
+                            (stepName l "none")
+                            args
+                            l.Suffix
+                    )
+
+                    line reveal
+
+                line ""
+
+                let emit (name: string) (why: string) (requires: string option) (ensures: string) (calls: string list) =
                     let req =
                         match requires with
                         | Some r -> sprintf "(requires (%s)) " r
@@ -1772,22 +1992,42 @@ module FStarTarget =
                     line (sprintf "#push-options \"--fuel %d --ifuel 4\"" fuel)
 
                     line (
-                        sprintf
-                            "let %s (#num #flt: eqtype) (x: %s) : Lemma %s(ensures (%s)) = ()"
-                            name
-                            fsType
-                            req
-                            ensures
+                        sprintf "let %s (#num #flt: eqtype) (x: %s) : Lemma %s(ensures (%s)) =" name fsType req ensures
                     )
+
+                    line "  match x with"
+                    line (sprintf "  | %s ->" pattern)
+
+                    for l in lets do
+                        line (indent 2 l)
+
+                    calls
+                    |> List.iteri (fun j call ->
+                        line (indent 2 (if j + 1 < List.length calls then call + ";" else call)))
+
+                    if multi then
+                        line "  | _ -> ()"
 
                     line "#pop-options"
                     line ""
+
+                // The link a member rides in: its own for a conditional member, else that of the
+                // last conditional member before it in key order.
+                let position (m: Member) =
+                    ms |> List.findIndex (fun x -> x.Name = m.Name)
+
+                let linkOf (m: Member) =
+                    links |> List.findIndexBack (fun l -> position l.Member <= position m)
+
+                let skipsTo (t: int) (key: string) =
+                    links |> List.take t |> List.map (fun l -> step l "skip" (Some key))
 
                 ms
                 |> List.iteri (fun i m ->
                     if i >= start then
                         let lk = lookupName typeName c.Label m
                         let b = sprintf "f%d" i
+                        let t = linkOf m
 
                         let found (v: string) =
                             guarded
@@ -1805,6 +2045,7 @@ module FStarTarget =
                                 (m.Name + " — always emitted, at a position the conditionals before it move")
                                 (if multi then Some(sprintf "%s? x" c.CtorName) else None)
                                 (found b)
+                                (skipsTo (t + 1) m.Name)
                         | Some d ->
                             let cond =
                                 { Binder = b
@@ -1821,12 +2062,18 @@ module FStarTarget =
                                 (caption cond true)
                                 (Some(guarded (condition cond true) "false"))
                                 (found present)
+                                (skipsTo t m.Name @ [ step links[t] "hit" None ])
 
+                            // THE NEGATIVE LOOKUP, as a chain of k cheap steps over the named
+                            // suffixes rather than one query over the 2^(k-1) shapes after it.
                             emit
                                 (lk + "__absent")
                                 (caption cond false)
                                 (Some(guarded (condition cond false) "false"))
-                                (sprintf "Error? (get_prop %s (enc_%s #num #flt x))" (lit m.Name) typeName))
+                                (sprintf "Error? (get_prop %s (enc_%s #num #flt x))" (lit m.Name) typeName)
+                                (skipsTo t m.Name
+                                 @ [ step links[t] "none" None ]
+                                 @ (links |> List.skip (t + 1) |> List.map (fun l -> step l "skip" (Some m.Name)))))
 
     /// One type's round trip as a family of lemmas — see 8b above for the shape. `rtHead` supplies
     /// `let rec` / `and`; `line` receives the emitted text.

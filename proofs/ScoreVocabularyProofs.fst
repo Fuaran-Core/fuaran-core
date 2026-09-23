@@ -104,69 +104,226 @@ let rt_e_navigation_kind (#num #flt: eqtype) (x: e_navigation_kind) : Lemma (ens
       conditional member on — everything before that is reached without a branch.
    ====================================================================================== *)
 
+(* The suffixes of C__vkind__Score — each revealed once, here, and cited by name below. *)
+let sk_vkind__Score__composer__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "composer")) (ensures (find_field n (sfx_vkind__Score__composer e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_vkind__Score__composer) (sfx_vkind__Score__composer #num #flt e rest)
+let sk_vkind__Score__composer__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "composer" (sfx_vkind__Score__composer e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_vkind__Score__composer) (sfx_vkind__Score__composer #num #flt e rest)
+let sk_vkind__Score__composer__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Score__composer e rest == rest))
+  = reveal_opaque (`%sfx_vkind__Score__composer) (sfx_vkind__Score__composer #num #flt e rest)
+let sk_vkind__Score__title__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "title")) (ensures (find_field n (sfx_vkind__Score__title e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_vkind__Score__title) (sfx_vkind__Score__title #num #flt e rest)
+let sk_vkind__Score__title__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "title" (sfx_vkind__Score__title e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_vkind__Score__title) (sfx_vkind__Score__title #num #flt e rest)
+let sk_vkind__Score__title__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Score__title e rest == rest))
+  = reveal_opaque (`%sfx_vkind__Score__title) (sfx_vkind__Score__title #num #flt e rest)
+
 (* lk_vkind__Score__composer__present — composer present *)
-#push-options "--fuel 10 --ifuel 4"
-let lk_vkind__Score__composer__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "composer" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f1)) | _ -> True)) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Score__composer__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "composer" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f1)) | _ -> True)) =
+  match x with
+  | C__vkind__Score f0 f1 f2 ->
+    let s1 = sfx_vkind__Score__title #num #flt (match f2 with | None -> None | Some w -> Some (JStr w)) ([]) in
+    let s0 = sfx_vkind__Score__composer #num #flt (match f1 with | None -> None | Some w -> Some (JStr w)) (s1) in
+    sk_vkind__Score__composer__hit #num #flt (match f1 with | None -> None | Some w -> Some (JStr w)) (s1)
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Score__composer__absent — composer absent *)
-#push-options "--fuel 10 --ifuel 4"
-let lk_vkind__Score__composer__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 | _ -> false)) (ensures (Error? (get_prop "composer" (enc_vkind #num #flt x)))) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Score__composer__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 | _ -> false)) (ensures (Error? (get_prop "composer" (enc_vkind #num #flt x)))) =
+  match x with
+  | C__vkind__Score f0 f1 f2 ->
+    let s1 = sfx_vkind__Score__title #num #flt (match f2 with | None -> None | Some w -> Some (JStr w)) ([]) in
+    let s0 = sfx_vkind__Score__composer #num #flt (match f1 with | None -> None | Some w -> Some (JStr w)) (s1) in
+    sk_vkind__Score__composer__none #num #flt (match f1 with | None -> None | Some w -> Some (JStr w)) (s1);
+    sk_vkind__Score__title__skip #num #flt "composer" (match f2 with | None -> None | Some w -> Some (JStr w)) ([])
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Score__title__present — title present *)
-#push-options "--fuel 10 --ifuel 4"
-let lk_vkind__Score__title__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f2 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "title" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f2)) | _ -> True)) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Score__title__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f2 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "title" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f2)) | _ -> True)) =
+  match x with
+  | C__vkind__Score f0 f1 f2 ->
+    let s1 = sfx_vkind__Score__title #num #flt (match f2 with | None -> None | Some w -> Some (JStr w)) ([]) in
+    let s0 = sfx_vkind__Score__composer #num #flt (match f1 with | None -> None | Some w -> Some (JStr w)) (s1) in
+    sk_vkind__Score__composer__skip #num #flt "title" (match f1 with | None -> None | Some w -> Some (JStr w)) (s1);
+    sk_vkind__Score__title__hit #num #flt (match f2 with | None -> None | Some w -> Some (JStr w)) ([])
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Score__title__absent — title absent *)
-#push-options "--fuel 10 --ifuel 4"
-let lk_vkind__Score__title__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f2 | _ -> false)) (ensures (Error? (get_prop "title" (enc_vkind #num #flt x)))) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Score__title__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f2 | _ -> false)) (ensures (Error? (get_prop "title" (enc_vkind #num #flt x)))) =
+  match x with
+  | C__vkind__Score f0 f1 f2 ->
+    let s1 = sfx_vkind__Score__title #num #flt (match f2 with | None -> None | Some w -> Some (JStr w)) ([]) in
+    let s0 = sfx_vkind__Score__composer #num #flt (match f1 with | None -> None | Some w -> Some (JStr w)) (s1) in
+    sk_vkind__Score__composer__skip #num #flt "title" (match f1 with | None -> None | Some w -> Some (JStr w)) (s1);
+    sk_vkind__Score__title__none #num #flt (match f2 with | None -> None | Some w -> Some (JStr w)) ([])
+  | _ -> ()
 #pop-options
 
+(* The suffixes of C__vkind__Measure — each revealed once, here, and cited by name below. *)
+let sk_vkind__Measure__is_anacrusis__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "isAnacrusis")) (ensures (find_field n (sfx_vkind__Measure__is_anacrusis e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_vkind__Measure__is_anacrusis) (sfx_vkind__Measure__is_anacrusis #num #flt e rest)
+let sk_vkind__Measure__is_anacrusis__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "isAnacrusis" (sfx_vkind__Measure__is_anacrusis e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_vkind__Measure__is_anacrusis) (sfx_vkind__Measure__is_anacrusis #num #flt e rest)
+let sk_vkind__Measure__is_anacrusis__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__is_anacrusis e rest == rest))
+  = reveal_opaque (`%sfx_vkind__Measure__is_anacrusis) (sfx_vkind__Measure__is_anacrusis #num #flt e rest)
+let sk_vkind__Measure__repeat_end__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "repeatEnd")) (ensures (find_field n (sfx_vkind__Measure__repeat_end e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_vkind__Measure__repeat_end) (sfx_vkind__Measure__repeat_end #num #flt e rest)
+let sk_vkind__Measure__repeat_end__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "repeatEnd" (sfx_vkind__Measure__repeat_end e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_vkind__Measure__repeat_end) (sfx_vkind__Measure__repeat_end #num #flt e rest)
+let sk_vkind__Measure__repeat_end__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__repeat_end e rest == rest))
+  = reveal_opaque (`%sfx_vkind__Measure__repeat_end) (sfx_vkind__Measure__repeat_end #num #flt e rest)
+let sk_vkind__Measure__repeat_start__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "repeatStart")) (ensures (find_field n (sfx_vkind__Measure__repeat_start e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_vkind__Measure__repeat_start) (sfx_vkind__Measure__repeat_start #num #flt e rest)
+let sk_vkind__Measure__repeat_start__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "repeatStart" (sfx_vkind__Measure__repeat_start e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_vkind__Measure__repeat_start) (sfx_vkind__Measure__repeat_start #num #flt e rest)
+let sk_vkind__Measure__repeat_start__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__repeat_start e rest == rest))
+  = reveal_opaque (`%sfx_vkind__Measure__repeat_start) (sfx_vkind__Measure__repeat_start #num #flt e rest)
+let sk_vkind__Measure__volta__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "volta")) (ensures (find_field n (sfx_vkind__Measure__volta e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_vkind__Measure__volta) (sfx_vkind__Measure__volta #num #flt e rest)
+let sk_vkind__Measure__volta__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "volta" (sfx_vkind__Measure__volta e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_vkind__Measure__volta) (sfx_vkind__Measure__volta #num #flt e rest)
+let sk_vkind__Measure__volta__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__volta e rest == rest))
+  = reveal_opaque (`%sfx_vkind__Measure__volta) (sfx_vkind__Measure__volta #num #flt e rest)
+
 (* lk_vkind__Measure__is_anacrusis__present — isAnacrusis not at its default *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__is_anacrusis__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "isAnacrusis" (enc_vkind #num #flt x) == Ok (JBool f1) | _ -> True)) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__is_anacrusis__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "isAnacrusis" (enc_vkind #num #flt x) == Ok (JBool f1) | _ -> True)) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__hit #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1)
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__is_anacrusis__absent — isAnacrusis at its default *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__is_anacrusis__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false | _ -> false)) (ensures (Error? (get_prop "isAnacrusis" (enc_vkind #num #flt x)))) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__is_anacrusis__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false | _ -> false)) (ensures (Error? (get_prop "isAnacrusis" (enc_vkind #num #flt x)))) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__none #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1);
+    sk_vkind__Measure__repeat_end__skip #num #flt "isAnacrusis" (if f3 = false then None else Some (JBool f3)) (s2);
+    sk_vkind__Measure__repeat_start__skip #num #flt "isAnacrusis" (if f4 = false then None else Some (JBool f4)) (s3);
+    sk_vkind__Measure__volta__skip #num #flt "isAnacrusis" (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([])
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__number — number — always emitted, at a position the conditionals before it move *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__number (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "number" (enc_vkind #num #flt x) == Ok (JInt f2) | _ -> True)) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__number (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "number" (enc_vkind #num #flt x) == Ok (JInt f2) | _ -> True)) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__skip #num #flt "number" (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1)
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__repeat_end__present — repeatEnd not at its default *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__repeat_end__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f3 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatEnd" (enc_vkind #num #flt x) == Ok (JBool f3) | _ -> True)) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__repeat_end__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f3 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatEnd" (enc_vkind #num #flt x) == Ok (JBool f3) | _ -> True)) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatEnd" (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1);
+    sk_vkind__Measure__repeat_end__hit #num #flt (if f3 = false then None else Some (JBool f3)) (s2)
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__repeat_end__absent — repeatEnd at its default *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__repeat_end__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f3 = false | _ -> false)) (ensures (Error? (get_prop "repeatEnd" (enc_vkind #num #flt x)))) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__repeat_end__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f3 = false | _ -> false)) (ensures (Error? (get_prop "repeatEnd" (enc_vkind #num #flt x)))) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatEnd" (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1);
+    sk_vkind__Measure__repeat_end__none #num #flt (if f3 = false then None else Some (JBool f3)) (s2);
+    sk_vkind__Measure__repeat_start__skip #num #flt "repeatEnd" (if f4 = false then None else Some (JBool f4)) (s3);
+    sk_vkind__Measure__volta__skip #num #flt "repeatEnd" (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([])
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__repeat_start__present — repeatStart not at its default *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__repeat_start__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f4 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatStart" (enc_vkind #num #flt x) == Ok (JBool f4) | _ -> True)) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__repeat_start__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f4 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatStart" (enc_vkind #num #flt x) == Ok (JBool f4) | _ -> True)) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatStart" (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1);
+    sk_vkind__Measure__repeat_end__skip #num #flt "repeatStart" (if f3 = false then None else Some (JBool f3)) (s2);
+    sk_vkind__Measure__repeat_start__hit #num #flt (if f4 = false then None else Some (JBool f4)) (s3)
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__repeat_start__absent — repeatStart at its default *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__repeat_start__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f4 = false | _ -> false)) (ensures (Error? (get_prop "repeatStart" (enc_vkind #num #flt x)))) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__repeat_start__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f4 = false | _ -> false)) (ensures (Error? (get_prop "repeatStart" (enc_vkind #num #flt x)))) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatStart" (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1);
+    sk_vkind__Measure__repeat_end__skip #num #flt "repeatStart" (if f3 = false then None else Some (JBool f3)) (s2);
+    sk_vkind__Measure__repeat_start__none #num #flt (if f4 = false then None else Some (JBool f4)) (s3);
+    sk_vkind__Measure__volta__skip #num #flt "repeatStart" (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([])
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__volta__present — volta present *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__volta__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> Some? f5 | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "volta" (enc_vkind #num #flt x) == Ok (JArr (enc_items_l_int (Some?.v f5))) | _ -> True)) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__volta__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> Some? f5 | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "volta" (enc_vkind #num #flt x) == Ok (JArr (enc_items_l_int (Some?.v f5))) | _ -> True)) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__skip #num #flt "volta" (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1);
+    sk_vkind__Measure__repeat_end__skip #num #flt "volta" (if f3 = false then None else Some (JBool f3)) (s2);
+    sk_vkind__Measure__repeat_start__skip #num #flt "volta" (if f4 = false then None else Some (JBool f4)) (s3);
+    sk_vkind__Measure__volta__hit #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([])
+  | _ -> ()
 #pop-options
 
 (* lk_vkind__Measure__volta__absent — volta absent *)
-#push-options "--fuel 16 --ifuel 4"
-let lk_vkind__Measure__volta__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> None? f5 | _ -> false)) (ensures (Error? (get_prop "volta" (enc_vkind #num #flt x)))) = ()
+#push-options "--fuel 8 --ifuel 4"
+let lk_vkind__Measure__volta__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> None? f5 | _ -> false)) (ensures (Error? (get_prop "volta" (enc_vkind #num #flt x)))) =
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in
+    let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in
+    let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in
+    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in
+    sk_vkind__Measure__is_anacrusis__skip #num #flt "volta" (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1);
+    sk_vkind__Measure__repeat_end__skip #num #flt "volta" (if f3 = false then None else Some (JBool f3)) (s2);
+    sk_vkind__Measure__repeat_start__skip #num #flt "volta" (if f4 = false then None else Some (JBool f4)) (s3);
+    sk_vkind__Measure__volta__none #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([])
+  | _ -> ()
 #pop-options
 
 (* ======================================================================================

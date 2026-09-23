@@ -1,5 +1,66 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-23 — D52: the model's member list is bound as named, opaque SUFFIXES — the MODEL's exponential D42 named, removed; the mutual-family split is not the successor; k=16 lookups spill over
+
+**Decided (Phase 204).** A constructor with `FStarTarget.presenceSplitAt` (two) or more conditional
+members no longer encodes its member list as an inline test per conditional member with the tail
+written into BOTH arms. Each conditional member gets one top-level SUFFIX, `sfx_<T>__<Ctor>__<member>`,
+which takes that member's encoding as an option (`None` exactly when the encoder omits it) and the
+REST of the list, and conses the member onto the rest or passes the rest through. The encoder binds
+the suffixes as a `let` chain, one `let` per conditional member, innermost first, each naming the next
+— so no tail is written twice and the emitted model text is LINEAR in k. Each suffix is
+`[@@"opaque_to_smt"]`: nothing sees inside one except its three lemmas in the proof script (`__skip`: a
+different key passes through; `__hit`: a present member is found; `__none`: an absent member leaves the
+rest), each proved by revealing it once. Every `lk_*` lookup keeps its Phase 182 statement exactly — the
+round-trip family that cites them is unchanged — and is now PROVED as a chain over the named suffixes:
+a negative lookup is k steps instead of one query over the 2^(k-1) shapes of the tail behind it — each
+step cheap, and the one query that remains measured below.
+Below the threshold a constructor still encodes inline (one conditional member writes its tail twice:
+a constant factor, not an exponent) and is still proved in one query, which D42's k=5 measurement shows
+is the cheaper shape while it holds.
+
+**What it is measured to buy.** The same synthetic vocabulary as D42 (one kind carrying k optional
+string members and one always-emitted list member after them), pinned prover, `--z3rlimit 40 --quake 3`,
+this dev machine:
+
+| k | model text, Phase 182 → 204 | model check | lookups under `--z3rlimit 40` |
+|---|---|---|---|
+| 5 | 11,666 → **10,509** chars | green | all green |
+| 8 | 34,831 → **12,279** | green | all green |
+| 12 | 427,037 → **14,664** | green | all green — including the `__absent` D42 recorded as failing at fuel 30 and 60 |
+| 16 | 6,694,957 → **17,056** | **green, 19 s** (D42: `allocation failure` after 719 s) | the forty-eight per-suffix steps green; the FIRST lookup RED |
+
+**What it does NOT buy, and why that is a spillover rather than a quiet weakening.** The k=16 lookups
+do not discharge at the leg's rlimit: the first one's postcondition costs 58.6 units (3.7 at k=12,
+green at 400). The exponent MOVED — out of the model's text and into the lookup's verification
+condition: the lookup body re-binds the chain with `let`s whose arguments `match` on each member, a
+lemma body is a computation, and F* splits the VC on both arms of every such `match`. The same chain
+in a specification is a term and costs nothing (an unfold lemma stating it proves at 0.175). Seven
+remedies were measured one at a time and none discharged it — fuel, ifuel, the unfold lemma, both
+together, per-suffix quantified facts with scoped patterns (with and without the unfold lemma; the
+trigger never met the unfolded term), and `x`-indexed steps with the chain in their `ensures` — each
+recorded in the README. The lookups keep their statements and nothing is admitted; the k=16 clause is
+filed as a spillover, and the lead the diagnosis points at (an application in the argument position
+instead of a `match`: a per-slot option encoder in the family) is named there unmeasured.
+
+**Why suffixes and not the mutual-family split.** The README had named the family split as Phase 168's
+successor since Phase 168. D42 measured that it addresses the wrong quantity: the family split bounds how
+much of the mutual family each query carries, and what failed at k=12 and k=16 was the WIDTH of one
+constructor — the model's own text and one lookup's walk — inside a family of two types. Splitting a
+family of two changes nothing there. It remains the lever for a proof vocabulary widened past the node
+envelope's closure (the SCC argument in the README still holds), and is named there as that and no
+longer as this phase's successor. Nor is this Phase 150's refuted `opt_cons`: that was ONE shared helper
+with an SMT-patterned lookup law, and the pattern fired throughout the encoder. A suffix carries no SMT
+pattern and is opaque; its lemmas enter a query only where a lookup cites them by name.
+
+**What it costs, said plainly.** The proof script now grows as k^2 per wide constructor, because a
+lookup for the t-th conditional member cites t steps and re-binds the chain (147,376 characters at k=16,
+where Phase 182's shape emitted 24,829 over the same probe — and 78 MB before it). That is the price of
+making each step a separate cheap query, and at the widths an adopter has measured it is small. The
+committed certification models regenerate with suffixes at the three constructors that reach the
+threshold (the reference envelope and `Embed`; the score sample's `Measure` and `Score`); the
+second-domain sample has none, so its model is byte-identical.
+
 ## 2026-09-23 — D51: membership in this substrate is genericity over the witness, never present consumer count — and D9 keeps the question it was actually answering
 
 **Decided (operator ruling, 2026-09-16; recorded by Phase 188).** The rule, verbatim:

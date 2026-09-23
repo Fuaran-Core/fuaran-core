@@ -1554,16 +1554,73 @@ one of them was the proof shape's. The other is the MODEL emitter's, and it is n
   first conditional member's `…__absent` lemma, at fuel 30 and again at 60 — while every lookup at
   k=8 discharges.
 
-So the exhaustive-coverage ambition stays REFUTED at sixteen conditional members, and the reason is
-now named rather than symptomatic. The successor is a non-duplicating member-list emission in the
-MODEL — `let`-bound suffixes, so the emitted text is linear in k AND a suffix is a term a lemma can
-be stated about, which is what would make the negative lookup a chain of k cheap steps rather than
-one exponential query. Note what that is NOT: Phase 150 tried routing conditional members through
-an `opt_cons` helper with an SMT-patterned lookup law and measured it WORSE (below), because the
-pattern then fires throughout the encoder. A `let` binding carries no SMT pattern and is not that
-lever; the measurement does not refute it, and it is recorded here so the distinction is not lost.
+So the exhaustive-coverage ambition stayed REFUTED at sixteen conditional members at Phase 182, and
+the reason was named rather than symptomatic.
 
-**The mutual-family split, which this phase also does not take.** What the shape above fixes is the
+**Phase 204 — the model's member list as named, opaque SUFFIXES: the second exponential removed,
+measured.** A constructor at `presenceSplitAt` or more conditional members now encodes its member
+list through one top-level suffix per conditional member, `sfx_<T>__<Ctor>__<member>`, which takes
+the member's encoding as an option (`None` exactly when the encoder omits it) and the REST of the
+list. The encoder binds them as a `let` chain — one `let` per conditional member, innermost first,
+each naming the next — so no tail is written twice. Each suffix is `[@@"opaque_to_smt"]`; the proof
+script proves three steps about it by revealing it once (`sk_…__skip`, a different key passes
+through; `__hit`, a present member is found; `__none`, an absent one leaves the rest), and every
+`lk_*` lookup keeps its Phase 182 statement exactly and is proved as a chain of those steps. Below the
+threshold a constructor still encodes inline: one conditional member writes its tail twice, a
+constant factor. `IdlFStarTargetTests` pins the shape — sixteen `let`s and sixteen opaque suffixes
+for the sixteen-conditional `Grid`, its always-emitted member written ONCE, the arm's length growing
+linearly — and fails against the Phase 182 emitter (`expected: 16, actual: 0`), which is the go-red.
+
+Measured on the pinned prover, `--z3rlimit 40 --quake 3`, this dev machine, over the synthetic
+vocabulary Phase 182's probe used (one kind carrying k optional string members, plus one
+always-emitted list member after them — which is why the 182 column here reads a little above the
+5,318,686 characters its own probe recorded at k=16). The times are single cold runs taken with one
+or two other provers on the machine, so they are upper bounds, and they are not seeds for anything:
+
+| k | model text, Phase 182 emitter | model text, Phase 204 | model check | proof script (204) | proof script check |
+|---|---|---|---|---|---|
+| 5 | 11,666 chars | **10,509** | 15–17 s, green | 30,104 chars | 25–35 s, green |
+| 8 | 34,831 | **12,279** | 17 s, green | 52,151 | 47–52 s, green |
+| 12 | 427,037 | **14,664** | 17–20 s, green | 93,101 | 151–187 s, green — including the first member's `__absent`, which Phase 182 could not discharge at fuel 30 or 60 |
+| 16 | 6,694,957 | **17,056** | **19 s, green** (182: `allocation failure` after 719 s) | 147,343 | **RED** — see below |
+
+The model is linear in k and loads at every width, which is the phase's first acceptance clause,
+met. The proof script is QUADRATIC in k per wide constructor — the t-th lookup cites t steps and
+re-binds the chain — and that is the trade for making every step its own query; it is 147 KB at
+k=16 against Phase 168's 78 MB.
+
+**What is NOT met, and exactly where it stops.** At k=16 all forty-eight per-suffix steps discharge,
+and the FIRST lookup (`lk_vkind__Grid__c00__present`, a single cited step) does not: its
+postcondition exhausts the rlimit. `--query_stats` puts the goal at 3.7 units at k=12 and 58.6 at
+k=16 (green at `--z3rlimit 400`) — ~2x per member, so the exponent has MOVED rather than gone. Where
+it moved to is the lookup's BODY: it re-binds the suffix chain with `let`s whose arguments contain a
+`match` on each member, and in a lemma body those are computations, so F* splits the verification
+condition on both arms of every one of them — 2^k branch combinations in one query, though the terms
+themselves are shared. The same chain written in a SPECIFICATION is a term and costs nothing: a
+per-constructor unfold lemma stating `enc_<T> x ==` the chain proves at rlimit 0.175. Seven
+remedies were tried under the one-perturbation rule (the eighth iteration was the `--query_stats`
+diagnosis itself) and are recorded so the next attempt starts past
+them:
+
+1. lookup fuel 38 → 8 — no change (the fuel is now sized to the walk anyway; the goal is not a walk);
+2. `--ifuel 4` → `--ifuel 1` — no change;
+3. the unfold lemma above, cited first — the lookup still costs 60.6;
+4. `--fuel 2 --ifuel 1`, with and without it — 50.7 and 52.8;
+5. the steps as QUANTIFIED facts with a pattern scoped to each suffix (`{:pattern find_field n
+   (sfx e rest)}`), cited with no arguments — every step proves, the lookup fails `incomplete
+   quantifiers`: the trigger never meets the unfolded encoder's term;
+6. the same with the unfold lemma supplying that term — still `incomplete quantifiers`;
+7. steps indexed by `x` with the chain in their `ensures`, proved by revealing the unapplied suffix
+   — the step itself fails `incomplete quantifiers`.
+
+So the k=16 clause is a SPILLOVER to a successor phase, and nothing here is weakened or admitted to
+hide it: the lookups keep their statements, the generated script at k=16 is red, and it is not in
+the leg. The lead the diagnosis points at, NOT measured: take the `match` out of the argument
+position altogether — a per-slot option encoder `enc_opt_<slot>` in the mutual family, so each
+link's argument is an APPLICATION with no arms for the VC to split — which leaves the lookup bodies
+exactly as emitted now.
+
+**The mutual-family split — RETIRED as a successor (Phase 204).** What the shapes above fix is the
 WIDTH of a query; what it leaves alone is the size of the mutual family every query is checked
 inside, which is where the cost turns superlinear as the proof vocabulary widens (Phase 150: the
 whole expressible UI vocabulary did not finish a check in twenty-five minutes, and
@@ -1573,8 +1630,10 @@ groups checked separately, and the node recursion forbids it as the model is sha
 with children reaches `node`, `node` reaches every kind, so the whole vocabulary is one strongly
 connected component. Breaking it means an abstract node parameter, or a two-level model where
 kinds are proved against an interface the node satisfies — generator work of its own, sized by
-the adopter's vocabulary, and not this phase's. It was named as Phase 168's successor; at the
-widths measured above it is no longer what binds first, and the model emission is.
+the adopter's vocabulary. It was named as Phase 168's successor; Phase 182 measured that it is not
+what binds at these widths, and Phase 204 retires the note (D52): splitting a family of two types
+changes nothing about one constructor's width. It is the lever for WIDENING a proof vocabulary, and
+is named here as that and as nothing else.
 
 #### History — the UI vocabulary's measurements (Phase 150), now `fuaran#1754`'s problem
 

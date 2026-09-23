@@ -384,6 +384,43 @@ let private uiScaleIdl: Idl =
       // outright what it always meant — no gated kind, no transparent case.
       Harden = HardenPolicy.Undeclared }
 
+/// Phase 204 — the synthetic vocabulary Phase 182's probe measured the MODEL at: one kind, `Grid`,
+/// carrying `k` optional string members and one always-emitted member that sorts after them.
+/// `proofs/README.md` records the prover's verdict on it at k = 5, 8, 12, 16; the pin below is
+/// about the emitted text alone.
+let private gridAt (k: int) : Idl =
+    let field name t opt =
+        { Name = name
+          Type = t
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    { uiScaleIdl with
+        Kinds =
+            [ { Tag = "Grid"
+                Category = "Display"
+                Fields =
+                  [ for i in 0 .. k - 1 -> field (sprintf "c%02d" i) TStr Optional ]
+                  @ [ field "rows" (TList TNode) Required ]
+                Annotations = Annotations.Empty } ]
+        NodeFields = [] }
+
+/// The model text over a vocabulary, every expressible kind selected, or a failed test.
+let private modelOver (idl: Idl) : string =
+    match FStarTarget.vocabularyModule "M" idl (selection idl) with
+    | Ok text -> text
+    | Error e -> failtestf "the target refused the vocabulary: %s" (CodegenError.describe e)
+
+/// One constructor's encoder arm in a model — the line after its `| C__vkind__<Kind> …` head.
+let private encoderArm (tag: string) (model: string) : string =
+    let lines = (lf model).Split('\n')
+
+    let head =
+        lines
+        |> Array.findIndex (fun l -> l.StartsWith(sprintf "  | C__vkind__%s " tag) && l.TrimEnd().EndsWith "->")
+
+    lines[head + 1]
+
 [<Tests>]
 let idlFStarTargetTests =
     testList
@@ -898,6 +935,63 @@ let idlFStarTargetTests =
                   (bodyOf "rt_vkind__Leaf" proofs |> List.length)
                   1
                   "a kind under the threshold is proved in one query, as before"
+
+          testCase
+              "the MODEL binds one suffix per conditional member and writes no tail twice — linear in k, where Phase 182's emitter was 2^k"
+          <| fun _ ->
+              // Phase 204. Phase 182's emitter wrote the member list's tail into BOTH arms of every
+              // conditional member's test, so this kind's encoder was 2^16 tails long (5,318,686
+              // characters on its probe; the pinned prover died loading it). Each assertion below
+              // fails against that emitter — which is the go-red — and holds against this one.
+              let model = modelOver uiScaleIdl
+              let grid = encoderArm "Grid" model
+
+              Expect.equal
+                  (Regex.Matches(grid, @"\blet s[0-9]+ = sfx_vkind__Grid__c[0-9]+ ").Count)
+                  16
+                  "one `let` per conditional member, each binding that member's suffix"
+
+              Expect.equal
+                  (Regex.Matches(grid, "\"rows\"").Count)
+                  1
+                  "the always-emitted member after them is written ONCE — no tail is duplicated into both arms of a test"
+
+              Expect.equal
+                  (Regex.Matches(model, @"(?m)^let sfx_vkind__Grid__c[0-9]+ \(#num #flt: eqtype\)").Count)
+                  16
+                  "and each suffix is a top-level definition — a term a lemma can be stated about"
+
+              Expect.equal
+                  (Regex.Matches(model, @"(?m)^\[@@""opaque_to_smt""\]\r?\nlet sfx_").Count)
+                  (Regex.Matches(model, @"(?m)^let sfx_").Count)
+                  "every suffix is opaque to the solver, so no query sees through one except its own three lemmas"
+
+              // Linear, measured on the emitted text: doubling k at most doubles the arm (plus the
+              // one-character growth of the local names past s9), where 2^k squares it.
+              let arm k =
+                  (encoderArm "Grid" (modelOver (gridAt k))).Length
+
+              Expect.isLessThan
+                  (float (arm 16))
+                  (2.2 * float (arm 8))
+                  (sprintf
+                      "the Grid arm grows linearly in k (k=4: %d, k=8: %d, k=16: %d characters)"
+                      (arm 4)
+                      (arm 8)
+                      (arm 16))
+
+              let proofs = proofsOver uiScaleIdl
+
+              Expect.stringContains
+                  proofs
+                  "sk_vkind__Grid__c00__none #num #flt"
+                  "the negative lookup is a chain over the named suffixes, citing the absent member's own `none` step"
+
+              for step in [ "skip"; "hit"; "none" ] do
+                  Expect.equal
+                      (Regex.Matches(proofs, sprintf @"(?m)^let sk_vkind__Grid__c[0-9]+__%s " step).Count)
+                      16
+                      (sprintf "one `%s` step per suffix, proved by revealing it" step)
 
           testCase
               "the family recurses on a lexicographic measure, and the rlimit precedent is retired with the shape that needed it"

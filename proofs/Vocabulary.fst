@@ -138,15 +138,35 @@ and u_text (num flt: eqtype) =
       Recursion is on the MODEL value, where F*'s subterm order spans the whole family.
    ====================================================================================== *)
 
+(* The member-list SUFFIXES — one per conditional member of a constructor carrying two or
+   more, bound once by the encoder below rather than written into both arms of a test.
+   Opaque to the solver: only the per-suffix lemmas of the proof script look inside. *)
+
+[@@"opaque_to_smt"]
+let sfx_node__Node__hidden (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+  match e with | None -> rest | Some v -> ("hidden", v) :: rest
+
+[@@"opaque_to_smt"]
+let sfx_node__Node__label (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+  match e with | None -> rest | Some v -> ("label", v) :: rest
+
+[@@"opaque_to_smt"]
+let sfx_vkind__Embed__content_hash (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+  match e with | None -> rest | Some v -> ("contentHash", v) :: rest
+
+[@@"opaque_to_smt"]
+let sfx_vkind__Embed__props (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+  match e with | None -> rest | Some v -> ("props", v) :: rest
+
 let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__node__Node i k e0 e1 ->
-    JObj (("id", JStr i) :: ("kind", enc_vkind k) :: (match e0 with | None -> (match e1 with | None -> [] | Some w -> ("label", JStr w) :: []) | Some w -> ("hidden", JBool w) :: (match e1 with | None -> [] | Some w -> ("label", JStr w) :: [])))
+    JObj (("id", JStr i) :: ("kind", enc_vkind k) :: (let s1 = sfx_node__Node__label #num #flt (match e1 with | None -> None | Some w -> Some (JStr w)) ([]) in let s0 = sfx_node__Node__hidden #num #flt (match e0 with | None -> None | Some w -> Some (JBool w)) (s1) in s0))
 
 and enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
-    JObj (("$type", JStr "Embed") :: ("componentId", JStr f0) :: (match f1 with | None -> ("moduleId", JStr f2) :: (match f3 with | None -> [] | Some w -> ("props", JObj (enc_entries_m_json w)) :: []) | Some w -> ("contentHash", enc_r_content_hash w) :: ("moduleId", JStr f2) :: (match f3 with | None -> [] | Some w -> ("props", JObj (enc_entries_m_json w)) :: [])))
+    JObj (("$type", JStr "Embed") :: (let s1 = sfx_vkind__Embed__props #num #flt (match f3 with | None -> None | Some w -> Some (JObj (enc_entries_m_json w))) ([]) in let s0 = sfx_vkind__Embed__content_hash #num #flt (match f1 with | None -> None | Some w -> Some (enc_r_content_hash w)) (("moduleId", JStr f2) :: s1) in ("componentId", JStr f0) :: s0))
   | C__vkind__Group f0 f1 f2 ->
     JObj (("$type", JStr "Group") :: ("children", JArr (enc_items_l_node f0)) :: (if f1 = C__e_layout_kind__Stack then ("onSelect", JStr "<closure>") :: [] else ("layout", enc_e_layout_kind f1) :: ("onSelect", JStr "<closure>") :: []))
   | C__vkind__Link f0 f1 f2 ->
