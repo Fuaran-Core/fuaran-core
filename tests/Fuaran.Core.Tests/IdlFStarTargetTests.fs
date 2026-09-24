@@ -994,6 +994,47 @@ let idlFStarTargetTests =
                       (sprintf "one `%s` step per suffix, proved by revealing it" step)
 
           testCase
+              "every link of a suffix chain APPLIES a per-slot option encoder — no `match` or `if` sits in a chain argument for a lookup's VC to split on"
+          <| fun _ ->
+              // Phase 222. Phase 204's links carried the member's option encoding INLINE — a
+              // `match` for an optional member, an `if` for an omit-at-default one — and a lookup
+              // lemma re-binds the chain in its BODY, where each of those is a computation F*
+              // splits the verification condition on: 58.6 units of rlimit for the first k=16
+              // lookup. Each assertion below fails against that emitter (the go-red: 0 applications
+              // where 16 are expected) and holds against this one, whose k=16 lookups discharge at
+              // under half a unit.
+              let model = modelOver uiScaleIdl
+              let grid = encoderArm "Grid" model
+
+              Expect.equal
+                  (Regex.Matches(grid, @"= sfx_vkind__Grid__c[0-9]+ #num #flt \(enc_opt_str #num #flt f[0-9]+\) ").Count)
+                  16
+                  "each of the sixteen links applies `enc_opt_str` to its member"
+
+              Expect.isFalse
+                  (Regex.IsMatch(grid, @"#num #flt \((match|if) "))
+                  "and no link's argument is a `match` or an `if`"
+
+              let wide = encoderArm "Wide" model
+
+              Expect.isTrue
+                  (Regex.IsMatch(wide, @"sfx_vkind__Wide__j #num #flt \(enc_dflt_str #num #flt \(""x""\) f[0-9]+\)"))
+                  (sprintf
+                      "an omit-at-default member applies `enc_dflt_<slot>` with its default as an ARGUMENT: %s"
+                      wide)
+
+              for helper in [ "enc_opt_str"; "enc_opt_bool"; "enc_dflt_str"; "enc_dflt_bool" ] do
+                  Expect.equal
+                      (Regex.Matches(model, sprintf @"(?m)^and %s \(#num #flt: eqtype\)" helper).Count)
+                      1
+                      (sprintf "`%s` is emitted once, as a member of the encoder family" helper)
+
+              Expect.stringContains
+                  (proofsOver uiScaleIdl)
+                  "sk_vkind__Grid__c00__hit #num #flt (enc_opt_str #num #flt f0)"
+                  "and the lookups cite their steps at the same application, so the body re-binds no `match`"
+
+          testCase
               "the family recurses on a lexicographic measure, and the rlimit precedent is retired with the shape that needed it"
           <| fun _ ->
               let proofs = proofsOver ReferenceIdl.refIdl

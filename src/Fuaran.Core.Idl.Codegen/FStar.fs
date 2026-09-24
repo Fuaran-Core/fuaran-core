@@ -826,13 +826,25 @@ module FStarTarget =
     let private suffixName (typeName: string) (label: string) (m: Member) =
         sprintf "sfx_%s__%s__%s" typeName label (snake m.Name)
 
+    /// Phase 222 — the per-slot option encoders a suffixed member list applies (8a below).
+    let private optEncoderName (s: Slot) = "enc_opt_" + slotName s
+
+    let private dfltEncoderName (s: Slot) = "enc_dflt_" + slotName s
+
     /// A conditional member's encoding as an OPTION — `None` exactly when the encoder omits it —
     /// which is what its suffix takes. The test is the one the inline form wrote: `None?` for an
     /// optional member, equality with the default literal for an omit-at-default one.
+    ///
+    /// Phase 222: it is an APPLICATION of a per-slot option encoder in the mutual family —
+    /// `enc_opt_<slot>` for an optional member, `enc_dflt_<slot>` (the default passed as an
+    /// argument) for an omit-at-default one — and never the `match` / `if` itself. A lookup lemma
+    /// re-binds the suffix chain in its BODY, where a `match` in a `let`'s argument is a
+    /// computation F* splits the verification condition on, one factor of two per member: 58.6
+    /// units of rlimit for the first lookup at k=16. An application has no arms to split.
     let private encOption (m: Member) (v: string) =
         match m.Presence with
-        | Some None -> sprintf "(match %s with | None -> None | Some w -> Some (%s))" v (encApplied m.Slot "w")
-        | Some(Some d) -> sprintf "(if %s = %s then None else Some (%s))" v d (encApplied m.Slot v)
+        | Some None -> sprintf "(%s #num #flt %s)" (optEncoderName m.Slot) v
+        | Some(Some d) -> sprintf "(%s #num #flt (%s) %s)" (dfltEncoderName m.Slot) d v
         | None -> invalidArg "m" "only a conditional member has an optional encoding"
 
     /// One link of a suffixed member list: the local the encoder binds it to, the suffix it
@@ -1455,6 +1467,52 @@ module FStarTarget =
                     line ""
                 | _ -> ()
 
+            // ---- 8a'. the option encoders (Phase 222) --------------------------
+            // One per SLOT a suffixed constructor's conditional member carries, so that every
+            // link of a suffix chain applies a function to its member instead of testing it: an
+            // application where Phase 204 wrote a `match` (or an `if`, for an omit-at-default
+            // member, whose default is an ARGUMENT so one encoder serves every default). In the
+            // mutual family because the member's own encoder may be — a record, a union, a list.
+            let optionEncoders =
+                suffixOwners
+                |> List.collect (fun (_, _, ms) ->
+                    ms
+                    |> List.choose (fun m ->
+                        match m.Presence with
+                        | Some None -> Some(true, m.Slot)
+                        | Some(Some _) -> Some(false, m.Slot)
+                        | None -> None))
+                |> List.distinct
+
+            for isOpt, s in optionEncoders do
+                let ty = slotType s
+
+                if isOpt then
+                    line (
+                        encHead (
+                            sprintf
+                                "%s (#num #flt: eqtype) (o: option (%s)) : Tot (option (jval num flt)) (decreases o) ="
+                                (optEncoderName s)
+                                ty
+                        )
+                    )
+
+                    line (sprintf "  match o with | None -> None | Some w -> Some (%s)" (encApplied s "w"))
+                else
+                    line (
+                        encHead (
+                            sprintf
+                                "%s (#num #flt: eqtype) (d: %s) (v: %s) : Tot (option (jval num flt)) (decreases v) ="
+                                (dfltEncoderName s)
+                                ty
+                                ty
+                        )
+                    )
+
+                    line (sprintf "  if v = d then None else Some (%s)" (encApplied s "v"))
+
+                line ""
+
             // ---- decoders ----------------------------------------------------
             line "(* ======================================================================================"
             line "   4. The tag-dispatch decoder. Every cross-type call goes through `get_prop`, whose"
@@ -1790,8 +1848,13 @@ module FStarTarget =
     // `__absent` Phase 182 could not prove. At k=16 the model loads and every per-suffix step
     // discharges, but the first lookup needs ~59 units of rlimit (3.7 at k=12): the let chain the
     // lookup BODY re-binds is a computation, and F* splits its verification condition on both
-    // arms of every `match` in it — ~2x per member, the same exponent moved into the VC. That is
-    // the open successor, recorded in `proofs/README.md` with the three remedies measured against it.
+    // arms of every `match` in it — ~2x per member, the same exponent moved into the VC.
+    //
+    // PHASE 222 closed that: each link's argument is an APPLICATION of a per-slot option encoder
+    // (8a'), not a `match`, so the body has no arms to split. Same probe: every k=16 lookup
+    // discharges at under half a unit (the first: 58.6 -> 0.15). What remains at k=16 is the
+    // ROUND-TRIP arm (345 units; 24.4 at k=12), and it is NOT the body's split — an arm citing
+    // matchless per-member lemmas still costs 271. See `proofs/README.md` and DECISIONS D54.
     //
     // The load-bearing fact the linear form rests on is that `find_field name` pushes through an
     // entry with a different key, so `find_field n (if c then t else (k, v) :: t)` is `find_field

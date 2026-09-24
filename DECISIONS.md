@@ -1,5 +1,56 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-24 — D54: a suffix chain's argument is an APPLICATION, not a `match` — the k=16 lookups discharge; the round trip is the next wall, and it is not the same mechanism (continues D52)
+
+**Decided (Phase 222).** Every link of a suffixed member list (D52) now passes its member to its
+suffix through a per-slot option encoder in the encoder's mutual family: `enc_opt_<slot> v` for an
+optional member, `enc_dflt_<slot> (d) v` for an omit-at-default one (the default is an ARGUMENT, so
+one encoder serves every default of a slot). Phase 204 wrote the `match` / `if` inline in that
+position. The lookup lemmas keep their statements and their shape: they re-bind the same chain and
+cite the same steps, now at the application. Only the slots a suffixed constructor's conditional
+members carry get an encoder, so a vocabulary with no suffixes emits byte-identical text.
+
+**What it is measured to buy.** D52's synthetic probe (one kind, k optional string members, one
+always-emitted list member after them), pinned prover, one perturbation per run, `--query_stats`:
+
+| k | first lookup, 204 → 222 | every lookup under `--z3rlimit 40` (222) | the round-trip arm (222) |
+|---|---|---|---|
+| 5 | — | green, max 0.19 | 1.12 |
+| 8 | — | green, max 0.24 | 2.92 |
+| 12 | 3.7 → — | green, max 0.34 | 24.4 (204's emitter: 27.6) |
+| 16 | **58.6 → 0.150** | **green, max 0.446** (114 queries) | **345** (204's emitter: red at 400) |
+
+The mechanism D52 named is CONFIRMED rather than merely consistent: the first measurement was the
+one change alone, hand-applied to 204's k=16 output (a top-level transparent `enc_opt_s`), and it
+moved the postcondition from canceled-at-40 to 0.150. The emitter's version (the encoder inside the
+family) was then measured separately and matches it. The k=16 LOOKUP clause of Phase 204's task 2
+is met: nothing was admitted, no statement weakened, the rlimit is still 40.
+
+**What it does NOT buy: the round trip at k=16, which is a SECOND wall and not this one.** 204
+stopped at the first red lookup and so never reached the round-trip arm. With the lookups green,
+the k=16 probe script is red on one query, the Grid arm of `rt_vkind`, at every fuel/ifuel retry.
+It is pre-existing: 204's emitter fails it at rlimit 400. The growth is ~1.7x per member (1.12 /
+2.92 / 24.4 / 345 at k = 5 / 8 / 12 / 16). Two perturbations were measured against it, and
+neither is the fix:
+
+1. the arm's sixteen two-way `match fN` replaced by applications of a per-member lemma whose
+   ENSURES carries the presence match: the query goes from 50 goals to 2, and it is still
+   canceled at 40;
+2. the same, with each per-member lemma stating the DECODER's own read of that member equals
+   `Ok fN` (no presence case in the statement): 271 at k=16, against 345.
+
+So this wall is NOT the body's VC split, which is the mechanism this entry removes from the
+lookups. The cost is in the solver working through the decoder's 17-deep `outcome` nest over the
+inlined member reads, even when it is handed each read's value. **The next candidate, unmeasured:**
+the move D52 made for the encoder, applied to the DECODER. Each member read becomes a named,
+top-level, opaque reader, with one lemma per reader stating its value off the encoded object. The
+round trip then threads 17 opaque applications instead of 17 inlined reads. Whether the k=16
+round-trip clause is worth that generator work, or should be retired as an acceptance criterion
+at this width, is the operator's call. This phase does not retire it.
+
+**Not re-proposed.** The seven remedies in D52's list stay refuted; none of them is used here.
+The round-trip arm's two perturbations above join that list.
+
 ## 2026-09-24 — D53: the wire surface gets a committed baseline of its own, over a DERIVED document set — not a view over the law corpus
 
 **Decided (Phase 214).** Each wire-bearing package commits `api/wire/<package>.txt`, beside the

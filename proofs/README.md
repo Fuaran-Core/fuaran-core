@@ -1692,6 +1692,39 @@ position altogether — a per-slot option encoder `enc_opt_<slot>` in the mutual
 link's argument is an APPLICATION with no arms for the VC to split — which leaves the lookup bodies
 exactly as emitted now.
 
+**Phase 222 — the chain's argument is an APPLICATION: the k=16 lookups discharge, measured.** Each
+link of a suffix chain now passes its member through a per-slot option encoder in the encoder
+family, `enc_opt_<slot>` (optional) or `enc_dflt_<slot> (d)` (omit-at-default, with the default as an
+argument), where 204 wrote the `match` / `if` inline. The lookups keep their statements and their
+chain-of-steps proofs, and cite the steps at the application. `IdlFStarTargetTests` pins the shape:
+sixteen `enc_opt_str` applications in `Grid`'s chain, no `match` or `if` in any link's argument, and
+`enc_dflt_str ("x")` for `Wide`'s omit-at-default member. It fails against 204's emitter, which is
+the go-red. Same probe, same flags, `--query_stats`, one perturbation per run:
+
+| k | lookups at `--z3rlimit 40` | slowest lookup | round-trip arm (`rt_vkind`, Grid) |
+|---|---|---|---|
+| 5 | green | 0.19 | 1.12 |
+| 8 | green | 0.24 | 2.92 |
+| 12 | green | 0.34 | 24.4 (204's emitter: 27.6) |
+| 16 | **green, 114 queries** | **0.446** — the first lookup 58.6 → **0.150** | **345**: RED at 40 (204's emitter: red at 400) |
+
+The first k=16 figure is from the change ALONE, hand-applied to 204's output. It is what confirms
+the diagnosis above, not merely something consistent with it. The emitter's version was measured
+separately and agrees. **The k=16 lookup clause is met.**
+
+**What is still RED at k=16, and why it is a different wall.** 204 stopped at the first lookup, so
+the round-trip arm had never been reached at this width. It is the one failing query in the k=16
+probe script. It grows ~1.7x per member, and it is not the body split. The arm's sixteen presence
+`match`es were replaced with applications of per-member lemmas: 50 goals became 2, and the query
+was still canceled at 40. Those lemmas were then restated as "the decoder's read of this member is
+`Ok fN`": 271, against 345. The solver is paying for the decoder's 17-deep `outcome` nest over the
+inlined member reads, even when it is given each read's value. The next candidate (NOT measured):
+204's move applied to the decoder. Each member read becomes a named, opaque top-level reader with
+one lemma giving its value off the encoded object, so the round trip threads applications instead
+of inlined reads. Whether that is worth building, or the k=16 round-trip clause is retired at this
+width, is an operator decision (DECISIONS D54). Nothing is admitted or weakened, and the k=16 probe
+is not in the leg.
+
 **The mutual-family split — RETIRED as a successor (Phase 204).** What the shapes above fix is the
 WIDTH of a query; what it leaves alone is the size of the mutual family every query is checked
 inside, which is where the cost turns superlinear as the proof vocabulary widens (Phase 150: the
