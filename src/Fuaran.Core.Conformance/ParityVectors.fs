@@ -1,23 +1,32 @@
-module FableSmoke.ParityVectors
-
-// The cross-pipeline VALUE table (Phase 118). One list of `label -> bytes`, computed by calling the
-// public surfaces, compiled into BOTH pipelines: `tests/Fuaran.Core.Tests/ParityVectorTests.fs`
-// asserts it against a committed table of expected bytes, and `tests/fable-smoke/parity.ps1` runs
-// this same table under `node` and byte-compares it against the .NET run. The two assertions are
-// different claims and neither implies the other — the committed table says the .NET values have
-// not moved, the node diff says the transpiled values agree with them.
-//
-// WHY THE TABLE IS COMPUTED HERE RATHER THAN IN THE TEST. A vector only the .NET suite can reach
-// cannot be part of a cross-pipeline claim, and the Fable-compile gate beside this file is a
-// COMPILE gate — it proves a construct transpiles, never that the transpiled code computes the same
-// number. `fnv1a` sat divergent behind that gate until 0.6.0, and `Json.render`'s float case threw
-// outright under Fable until Phase 118, both with the gate green.
-//
-// EVERY EMITTED VALUE IS ASCII BY CONSTRUCTION — hex digests, canonical numeric layouts, and JSON
-// whose non-ASCII content is folded through a digest rather than echoed. The two runtimes do not
-// agree about how to write a lone surrogate to a terminal, and a leg that reported a console
-// encoding difference as a value divergence would be worse than no leg. Non-ASCII INPUTS are here
-// in force; they simply leave as hex.
+/// The cross-pipeline VALUE table — the vectors a Fable-compiled consumer runs on BOTH pipelines
+/// and byte-compares (Phase 118; public since Phase 217).
+///
+/// One list of `label -> bytes`, computed by calling the public surfaces. Two claims rest on it and
+/// neither implies the other. This repository's suite (`tests/Fuaran.Core.Tests/ParityVectorTests.fs`)
+/// pins the table against committed expected bytes, so a change that moves a .NET value is a failing
+/// test naming the vector. A consumer that owns a Fable toolchain compiles THIS module from the
+/// package's `fable/` sources, runs `lines ()` under a JS runtime and under .NET, and diffs the two:
+/// that is the claim that the transpiled code computes the same bytes. A defect that moves both
+/// pipelines identically passes the diff and fails the pin; one that moves only the transpiled side
+/// does the reverse.
+///
+/// WHY THE TABLE SHIPS AS CODE, NOT AS DATA. The transpiled side has to COMPUTE the vectors — a
+/// committed table of expected bytes cannot be evaluated under Fable — and the consumer sees this
+/// repository only as packages at the version it pins. Shipping the table inside the conformance kit
+/// makes it version-coherent with the surfaces it measures by construction: the vectors a consumer
+/// runs are always the ones for the Core it compiled.
+///
+/// WHY A COMPILE GATE IS NOT ENOUGH. A compile proves a construct transpiles, never that it computes
+/// the same number. `Hash.fnv1a` sat divergent behind a green compile until 0.6.0, `Json.render`
+/// threw under Fable for any float until Phase 118, and the `ConfRng` LCG before 0.20.0 drew zeros
+/// under Fable — each with every compile green.
+///
+/// EVERY EMITTED VALUE IS ASCII BY CONSTRUCTION — hex digests, canonical numeric layouts, and JSON
+/// whose non-ASCII content is folded through a digest rather than echoed. The two runtimes do not
+/// agree about how to write a lone surrogate to a terminal, and a leg that reported a console
+/// encoding difference as a value divergence would be worse than no leg. Non-ASCII INPUTS are here
+/// in force; they simply leave as hex.
+module Fuaran.Core.ParityVectors
 
 open Fuaran.Core
 
@@ -179,7 +188,7 @@ let vectors: (string * string) list =
       // can recover them. Under node every draw after the first collapsed to zero, so a
       // self-contained `(seed, iterations)` family run drew a degenerate sample — a guarded family
       // reddened on its adequacy demand, an unguarded one passed vacuously green. Nothing in the
-      // .NET suite could see it, and the compile gate beside this file never could.
+      // .NET suite could see it, and no compile gate ever could.
       // Seed 0 is here because it is the state xorshift must never reach, and -1 because it is the
       // seed whose `uint32` conversion differs most between the two runtimes.
       "confRng/seed-0", drawsOf 0
@@ -187,8 +196,70 @@ let vectors: (string * string) list =
       "confRng/seed-neg-1", drawsOf -1
       "confRng/seed-1488", drawsOf 1488 ]
 
-/// Emit the table, one `VEC <label> <value>` line per vector — the byte-comparable form
-/// `parity.ps1` diffs between the two pipelines. The `VEC ` prefix is what lets the runner filter
-/// out anything a runtime writes around the program.
-let emit () =
-    vectors |> List.iter (fun (k, v) -> printfn "VEC %s %s" k v)
+/// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
+/// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather
+/// than by hand. Empty and single characters, the multi-byte UTF-8 classes, a surrogate pair and a
+/// ZWJ sequence, control bytes including the `Hash.foldSep` byte, every length 0..80 (so no carry
+/// pattern is missed), and lengths straddling SHA-256's 55/56/119/120 padding boundaries and its
+/// multi-block threshold. Written with escapes, so the corpus survives any checkout encoding.
+let private sweepInputs: string list =
+    [ ""
+      "a"
+      "b"
+      "c"
+      "ab"
+      "abc"
+      "abcd"
+      "foobar"
+      "message digest"
+      "The quick brown fox jumps over the lazy dog"
+      "0"
+      "1"
+      "9"
+      " "
+      // NUL, built rather than written: a raw NUL byte in the source makes git classify the file as
+      // binary, which silently disables end-of-line normalisation for it.
+      string (char 0)
+      "\u0001"
+      "a\u0001b"
+      "\u007F"
+      "\u0080"
+      "ÿ"
+      "café"
+      "日本語"
+      "😀" // U+1F600 as a surrogate pair
+      "👩‍💻" // ZWJ sequence
+      "�"
+      "￿"
+      "smoke" ]
+    @ [ for n in 0..80 -> String.replicate n "a" ]
+    @ [ for n in [ 1; 2; 3; 55; 56; 57; 63; 64; 65; 119; 120; 127; 128; 129; 256; 1000 ] -> String.replicate n "xy" ]
+
+/// A `Schema` built from a sweep input, so `Column`'s private FNV-1a copy is exercised over the same
+/// inputs as the other two — including the non-ASCII ones, where a code-unit-vs-byte fold would show.
+let private schemaOf (s: string) : Schema =
+    [ (if s = "" then "c" else s), IntType; "n" + s, FloatType ]
+
+/// The hash sweep: one row per input, `hashSweep/NNN` (the input's index) to FOUR values joined by
+/// `/`, one per FNV-1a implementation the spine actually ships plus the digest beside them — the
+/// canonical `Hash.fnv1a`, `Hash.sha256Hex`, `OpStream`'s copy (through `defaultHash`, the op-stream
+/// CHAIN hash) and `Column`'s copy (through `Schema.fingerprint`). INDEXED rather than echoed, so the
+/// comparison never turns on console encoding. Probing only the canonical implementation is what let
+/// the chain hash stay divergent after the canonical one was fixed, which is why all three are here.
+let hashSweep: (string * string) list =
+    sweepInputs
+    |> List.mapi (fun i s ->
+        sprintf "hashSweep/%03d" i,
+        String.concat
+            "/"
+            [ Hash.fnv1a s
+              Hash.sha256Hex s
+              OpStream.defaultHash "deadbeef" s
+              Schema.fingerprint (schemaOf s) ])
+
+/// Every vector as the line a runner compares: `VEC <label> <value>`, the named table first and the
+/// sweep after it. Order is part of the comparison. The `VEC ` prefix is what lets a runner filter
+/// out anything a runtime writes around the program; a label never contains a space, so the line
+/// splits on its first one.
+let lines () : string list =
+    vectors @ hashSweep |> List.map (fun (k, v) -> sprintf "VEC %s %s" k v)

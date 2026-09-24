@@ -26,12 +26,12 @@ module Hash =
     /// the same reason: a compile cannot disagree about a number. Reverting this to a plain `a * b`
     /// leaves the whole .NET suite green — measured — while 120 of a 124-entry corpus diverge. The
     /// .NET half is pinned by the `fnv1a` vectors and the independent 64-bit reference in
-    /// `HashTests`; the cross-pipeline half is bought twice — `tests/fable-smoke/parity.ps1`, the
-    /// GATE leg (Phase 118), which carries `fnv1a` vectors including the non-ASCII and `foldSep`
-    /// cases and fails rather than skips when no JS runtime is present, and
-    /// `tests/hash-parity-probe/run-parity-probe.ps1`, the by-hand probe, whose 124-entry corpus and
-    /// per-implementation columns are wider than a gate leg should be. **Run the probe too if you
-    /// touch this** — the leg will catch a divergence, the probe says how far it reaches.
+    /// `HashTests`; the cross-pipeline half is the parity leg (Phase 118; run by the Fable consumer
+    /// since Phase 217 — STABILITY.md "Fable cleanliness"), which runs `ParityVectors` on both
+    /// pipelines: the `fnv1a/*` vectors including the non-ASCII and `foldSep` cases, and the
+    /// `hashSweep/*` rows — the 124-entry corpus of the retired by-hand probe, one column per
+    /// implementation — so a divergence is caught AND its reach is shown in one run. It fails
+    /// rather than skips when no JS runtime is present.
     let inline private mul32 (a: uint32) (b: uint32) : uint32 =
         let aLo = a &&& 0xFFFFu
         let aHi = a >>> 16
@@ -176,7 +176,7 @@ module Hash =
     /// zeros.
     ///
     /// **A GATE GUARDS IT NOW (Phase 118), and the guard is a runtime cross-pipeline comparison
-    /// rather than a review.** `tests/fable-smoke/parity.ps1` runs the vector table on both
+    /// rather than a review.** The parity leg runs the `ParityVectors` table on both
     /// pipelines and byte-compares; its `sha256/two-block` vector is the 56-byte FIPS message,
     /// chosen because it is the shortest input that reaches a SECOND compression block, which is
     /// where the working variables first pass 2^53. Re-measured 2026-09-02 with the mask removed:

@@ -90,8 +90,8 @@ module JVal =
 /// `"{0:R}"` on a Fable-targeted surface compiles cleanly and throws in the browser. The re-lay
 /// below reproduces that layout from JS's own shortest-round-trip digits, so both pipelines emit
 /// the same bytes (WIRE_FORMAT §2 rule 5). Certified rather than asserted since Phase 118:
-/// `tests/fable-smoke/parity.ps1` runs the vector table under `node` and byte-compares it against
-/// the .NET run.
+/// the Fable consumer's parity leg runs `ParityVectors` under a JS runtime and byte-compares it
+/// against the .NET run (STABILITY.md "Fable cleanliness").
 module internal FloatLayout =
 
 #if FABLE_COMPILER

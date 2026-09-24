@@ -12,6 +12,15 @@ Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Publi
 `fuaran-ui` GitHub Packages NuGet feed. The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
 
+**Every version cut cites a green run of the Core Fable gate against the candidate (Phase 217,
+DECISIONS.md D55).** This repository runs no Fable compiler, so before the release gesture the
+candidate packages are packed to a folder and `fuaran-dotnet`'s
+`pwsh ./tests/core-fable/core-fable.ps1 -CoreVersion <candidate> -CoreFeed <folder>` is run against
+them, and the release record names that run. It is the compile leg and the value leg at the
+candidate — the value leg REQUIRED — so a Fable divergence is caught at the cut, before any consumer
+can pin it, rather than when `fuaran-dotnet` next raises its pin. A cut whose run is red is not
+released.
+
 **Every released slot from `0.25.0` up has an entry header naming it, and the gate refuses a tag
 that has none** — the `Package roster` family reads `git tag` and holds this document to the set of
 releases the repository actually made, rather than to the standing `<Version>` alone. **`0.25.0` is
@@ -520,17 +529,16 @@ migration note below.
 transpiles, not that it computes the same number, so nothing in the repo had reason to report the
 divergence for as long as it existed. Two guards replace it, and neither is a compile: the `fnv1a`
 vectors and an independent 64-bit reference comparison in `HashTests` pin the .NET half, and the
-cross-pipeline half is `tests/hash-parity-probe/run-parity-probe.ps1`, which compiles a 124-entry
-corpus both ways and byte-compares. Both were taken go-red before being trusted. **Anyone touching
-either multiply-safe helper (`mul32`, `.+.`) must re-run that probe**; a green .NET suite is not
-evidence about the other pipeline, and reintroducing the naive multiply was measured to leave the
-suite fully green while 120 of the 124 entries diverged. The probe is deliberately **not** in
-`./verify.ps1` — it needs a Node runtime and the default gate stays dependency-free — which means
-nothing runs it for you. Since Phase 118 a narrower cross-pipeline check IS a gate leg
-(`tests/fable-smoke/parity.ps1`, "The value leg" under Fable cleanliness): it carries `fnv1a`,
-`sha256*` and `OpStream.defaultHash` vectors and fails rather than skips without `node`. Run the
-probe as well when you touch either multiply-safe helper — the leg says a divergence exists, the
-124-entry corpus says how far it reaches.
+cross-pipeline half is the value leg ("The value leg" under Fable cleanliness), which runs
+`ParityVectors` on both pipelines and byte-compares. Since Phase 217 that table carries the
+124-entry corpus of the retired by-hand probe as its `hashSweep/*` rows — one column each for the
+canonical `fnv1a`, `sha256Hex`, and the two deliberate copies in `OpStream` and `Column` — so one run
+says both that a divergence exists and how far it reaches. Both guards were taken go-red before
+being trusted: reintroducing the naive multiply was measured to leave the suite fully green while
+120 of the 124 entries diverged. **Anyone touching either multiply-safe helper (`mul32`, `.+.`) runs
+the value leg against a candidate pack** — `fuaran-dotnet`'s
+`tests/core-fable/core-fable.ps1 -CoreVersion <v> -CoreFeed <folder>` — because a green .NET suite
+is not evidence about the other pipeline, and nothing in THIS repository runs the transpiled side.
 
 **Migration (`0.6.0`).** No action is needed for a value minted on .NET: those are unchanged, so
 every persisted chain, content hash and staleness stamp written by a .NET process re-verifies
@@ -799,9 +807,12 @@ commits to rather than by size.
   `Artifact.version` pins the ENCODING; a consumer pins that, not the contents. The law is
   `parse (render idl) = canonicalise idl`, pinned over every vocabulary the suite declares —
   see "The artifact reads back" below.
-- **Fable-cleanliness**, gated rather than asserted: `tests/fable-smoke` compiles the whole of
-  this package, so every one of the above reaches a browser. That is the reason the split exists
-  — see "Fable cleanliness" below.
+- **Fable-cleanliness**, gated rather than asserted: the Core Fable gate (`fuaran-dotnet`'s
+  `tests/core-fable/`, since Phase 217) compiles the whole of this package, so every one of the
+  above reaches a browser. That is the reason the split exists — see "Fable cleanliness" below. No
+  Fable consumer compiles this package today (measured 2026-09-24); the gate references it for no
+  reason but to keep the claim checked, and that was decided rather than drifted into (DECISIONS.md
+  D55).
 
 **`Fuaran.Core.Idl.Codegen` — the generation half.** `Gen` (the F# structural-layer emitter and
 its declared-support channel, the TypeScript encoder backend, the JSON-schema emitter, the
@@ -1238,23 +1249,43 @@ canonical wire JSON. The Fuaran wire `JVal` model has no `null`; a bare `null` t
 rejected by name on decode (and see "Null-tolerant read" below for the opt-in, read-side-only
 tolerance that lets a foreign document spell an absent member `null` without the model gaining one).
 
-**Enforced, not asserted (Phase 54).** `./verify.ps1` includes a **Fable-compile gate**: the
-`tests/fable-smoke/` project references every public package and is compiled with `dotnet fable`, so a
-construct that is not Fable-clean fails the green gate in-repo rather than surfacing downstream.
-`Fuaran.Core.Idl` joined that set at `0.8.0` — it was the one `src/` package absent from it, which
+**Enforced, not asserted — in `fuaran-dotnet`, since Phase 217.** This repository runs no Fable
+compiler: the compiler belongs where a Fable toolchain already lives, so the gate that enforces this
+claim is **`fuaran-dotnet`'s `tests/core-fable/`** — run by that repository's Fable stage
+(`tests/fable-laws/fable-check.ps1`) and by its CI's `fable-portability` job. It has two legs. The
+**compile leg** references every public package, touches each one's encode/decode surface, and
+checks that every reference was actually transpiled; a construct that is not Fable-clean fails
+there. The **value leg** is "The value leg" below. Until Phase 217 both ran here, in `./verify.ps1`
+(Phase 54 and Phase 118); DECISIONS.md D55 records why they moved and why neither was retired.
+
+**The cost of the move, and the rule that pays it.** That gate sees this repository at the version
+`fuaran-dotnet` pins, so on its own it fires when the pin is raised — a release after a divergence
+was introduced. So **every version cut of this repository cites a green run of that gate against
+the candidate packages** before the release gesture (see "Versioning policy"). The cut-time run
+restores every `Fuaran.Core.*` package from the candidate folder alone, into an isolated package
+cache so a same-version repack is never served stale, derives the surface from what the candidate
+ships, and REQUIRES the value leg.
+
+`Fuaran.Core.Idl` joined the surface at `0.8.0` — it was the one `src/` package absent from it, which
 made its portability an unprovable claim rather than a certified one. What had blocked it was not the
 model but the emitters sharing its project; splitting them into `Fuaran.Core.Idl.Codegen` (Phase 97)
 removed the obstacle rather than working around it.
 
-**Since Phase 185 the claim above is CHECKED for every packable package, not asserted over them.**
+**Since Phase 185 the surface is CHECKED for every packable package, not asserted over them — and
+since Phase 217 that half stays here, because it needs no Fable.**
 `Fuaran.Core.Tests.FableSmokeCompletenessTests` derives the packable set from the tree — every
 project under `src/` whose own `IsPackable` is not `false`, honouring `Directory.Build.props` — and
-fails naming any that is neither referenced by `tests/fable-smoke/FableSmoke.fsproj` nor listed in
-[`tests/fable-smoke/exclusions.json`](tests/fable-smoke/exclusions.json), the data file that replaced
-the hand-written exclusion comment this paragraph used to be. The exclusions are
+fails naming any that neither ships the `fable/` source distribution (the `Directory.Build.props`
+convention, which is what a Fable consumer compiles and so is the act of making the claim) nor is
+listed in [`fable-exclusions.json`](fable-exclusions.json). The exclusions are
 `{ "package", "reason", "phase" }` — what is off the surface, why, and which phase decided — and the
-check runs in both directions, so an entry whose project has since joined the smoke fails as loudly
-as a package covered by neither. Off the surface today: `Idl.Codegen` and `Idl.Cli` (build-time and
+check runs in both directions, so an entry whose package ships the `fable/` sources anyway fails as
+loudly as a package covered by neither. The receiving gate holds its own completeness check against
+the same entries, over its pins and over a candidate's packages. The same test family checks the
+rest of Phase 217 rather than asserting it: no script or workflow here invokes `dotnet fable`, the
+tool manifest does not carry the compiler, and the only authored `Fable.Core` reference is
+`Fuaran.Core.Wire`'s — which powers Wire's own `#if FABLE_COMPILER` float layout, the fix for the
+`Json.render` defect below, and is the one sanctioned library reference (D55). Off the surface today: `Idl.Codegen` and `Idl.Cli` (build-time and
 .NET-only — they emit source or are a console tool, and neither ships the `fable/` source
 distribution), and `Fuaran.Core.CSharp` (a C# assembly is not Fable-compiled; listed rather than
 filtered out by project type, so the excusal is on the record). `Idl.Spike` needs no entry — it is
@@ -1266,35 +1297,33 @@ parse invariantly, which is a benign warning, not a gate failure.)
 **A compile gate is not a VALUE gate, and the difference has cost real defects here.** It proves a
 construct transpiles; it cannot notice that the transpiled code computes a different number. That is
 exactly how `fnv1a` sat divergent behind a green gate until `0.6.0` (see "Hash-chain integrity
-posture"). Where a value must agree across pipelines, the claim is bought by a **probe** —
-`tests/hash-parity-probe/run-parity-probe.ps1`, which compiles a corpus both ways and byte-compares —
-and by an independent in-suite reference implementation on the .NET side. Both hashes are certified
-that way; anything new making a cross-pipeline value claim should be too. Since Phase 118 that claim
-also has a GATE leg rather than only a by-hand probe — see "The value leg" below, and add the vector
-there when a new surface makes the claim.
+posture"). Where a value must agree across pipelines, the claim is bought by the value leg below and
+by an independent in-suite reference implementation on the .NET side. Anything new making a
+cross-pipeline value claim adds its vector to `ParityVectors` — see "The value leg".
 
 ### The value leg (Phase 118, `0.18.0`)
 
-**The compile gate now has a VALUE leg beside it.** `tests/fable-smoke/parity.ps1` runs a committed
-vector table — `Hash.fnv1a`, `Hash.sha256Hex` / `sha256HexOfBytes` / `utf8Bytes`,
-`Wire.Canon.canonicalFloat`, `Wire.Json.render`'s own float layout, encode + decode of a reference
-witness document through both renderers, and `OpStream.defaultHash` over a two-op chain — on **both**
-pipelines and byte-compares the output. The table is one source
-(`tests/fable-smoke/ParityVectors.fs`), compiled into the Fable smoke and LINKED into
-`Fuaran.Core.Tests`, so the two sides cannot be measuring different things; the .NET half is pinned
-against committed expected bytes by `ParityVectorTests`. Those are two claims and neither implies the
-other: a change that moves both pipelines identically fails the pinned table and passes the diff, and
-one that moves only the transpiled side does the reverse. The leg runs standalone
-(`pwsh ./tests/fable-smoke/parity.ps1`) and is written to sit on the line after `./verify.ps1`'s
-Fable compile, reusing that emitted output (`-UseFreshlyEmitted tests/fable-smoke/out`) so the gate
-transpiles once.
+**The compile gate has a VALUE leg beside it.** A committed vector table — `Hash.fnv1a`,
+`Hash.sha256Hex` / `sha256HexOfBytes` / `utf8Bytes`, `Wire.Canon.canonicalFloat`,
+`Wire.Json.render`'s own float layout, encode + decode of a reference witness document through both
+renderers, `OpStream.defaultHash` over a two-op chain, `ConfRng`'s draw stream, and (since Phase 217)
+the 124-row `hashSweep/*` corpus — runs on **both** pipelines and the output is byte-compared.
+**The table is PUBLIC since Phase 217: `Fuaran.Core.ParityVectors`, in `Fuaran.Core.Conformance`**
+(additive, `0.31.0`). It ships as code rather than data because the transpiled side has to COMPUTE
+it, and a consumer sees this repository only as packages. `fuaran-dotnet`'s `tests/core-fable/`
+compiles it from the package's `fable/` sources with the rest of the surface and diffs
+`ParityVectors.lines ()` between .NET and node. The .NET half is pinned here against committed
+expected bytes by `ParityVectorTests` (the sweep by row count and digest). Those are two claims and
+neither implies the other: a change that moves both pipelines identically fails the pinned table and
+passes the diff, and one that moves only the transpiled side does the reverse.
 
-**It FAILS without a JS runtime; it never skips.** The older by-hand probe
-(`tests/hash-parity-probe/run-parity-probe.ps1`) skips green when `node` is absent, which is right
-for something run deliberately and wrong for a gate leg — a check that reports success on a machine
-where it did not run asserts exactly what was not checked. The probe is kept: its 124-entry corpus
-and per-implementation columns are wider than a gate leg should be, and it answers "how far does the
-agreement reach" where the leg answers "did it break".
+**It FAILS without a JS runtime; it never skips a leg it can run.** A check that reports success on
+a machine where it did not run asserts exactly what was not checked. The one case it cannot run is
+STATED rather than skipped: at a `fuaran-dotnet` pin below `0.31.0` the restored Conformance package
+has no table, so that gate says so on every run and names the cut-time rule that covers the gap —
+and it FAILS if a pin at or above `0.31.0` restores a package without the table. The by-hand probe
+that used to sit beside the leg (`tests/hash-parity-probe/`, retired by Phase 217) is absorbed: its
+corpus is the `hashSweep/*` rows.
 
 **What the leg found on its first run, and what changed as a result.** `Wire.Json.render` — a public
 encode surface — **threw under Fable for any `JFloat`**. Its float case was
@@ -1315,11 +1344,15 @@ green **and** the committed .NET vector table green — the mask is a no-op on .
 it — while the parity leg reddens on exactly the two-block SHA-256 vectors (the 56-byte FIPS message
 and the byte-form vector over it) and leaves every single-block vector untouched. That is the class
 this leg exists for, and it is now measured on the gate's own vectors rather than in a scratch probe.
+**Re-taken in the receiving gate (Phase 217.E):** the same perturbation, packed as a `0.31.0`
+candidate and run through `fuaran-dotnet`'s cut-time mode, reported 40 of 164 vectors divergent —
+`sha256/two-block` first, then the multi-block `hashSweep/*` rows — and the clean candidate 164/164.
 
-### The portability set — what `tests/fable-smoke/` reaches is PROMISED (`0.19.0`)
+### The portability set — what the Core Fable smoke reaches is PROMISED (`0.19.0`)
 
-The gate above compiles that project against every public package, and what it touches it touches
-deliberately. A member reached from there therefore carries a **portability guarantee to Fable
+The gate above compiles its smoke program against every public package, and what it touches it
+touches deliberately. (The smoke lived in this repository as `tests/fable-smoke/` until Phase 217;
+it is now `fuaran-dotnet`'s `tests/core-fable/Program.fs`, carried over unchanged, touches included.) A member reached from there therefore carries a **portability guarantee to Fable
 consumers**, not merely a proof that it compiles — and seven such members have no other caller in
 this repository, which is exactly the shape a caller-count reading takes for dead code. Narrowing
 one to `internal` would withdraw a guarantee **without turning the gate red**: the smoke project
@@ -1334,8 +1367,10 @@ so the next such reading knows it:
 - **`Fuaran.Core.Idl.Sanitize.sanitizeAttributes`** and **`Idl.Sanitize.scrubMarkdown`** — the
   sanitisers, which a client host needs precisely because it is the side rendering untrusted content.
 
-**The rule generalises: `tests/fable-smoke/` is a promise surface, not a scratch project.** Adding a
-member to it makes a portability promise; removing one withdraws it. Neither is a tidying edit.
+**The rule generalises: the Core Fable smoke is a promise surface, not a scratch project.** Adding a
+member to it makes a portability promise; removing one withdraws it. Neither is a tidying edit —
+and since Phase 217 the edit is made in `fuaran-dotnet`, so a change here that should widen the
+promise names the smoke line it needs in its own record.
 
 ## Canonical float layout (Phase 55)
 
@@ -2285,6 +2320,25 @@ draft, so it advances the untagged `0.30.1` draft below to `0.31.0`. The entries
 were never tagged, so they ship in `0.31.0`. `<Version>` and both copies of the laws corpus
 (`conformance/laws/*.json` here, and its byte copy in the shared wire-format corpus) are re-stamped
 together in one sitting when the slot moves, per `docs/conformance-corpus.md`.
+
+### The Fable gate leaves this repository; the parity table is public — `Fuaran.Core.ParityVectors` (Phase 217) — ADDITIVE
+
+**What changed.** `Fuaran.Core.Conformance` gains a module, `ParityVectors`: `vectors` (the named
+cross-pipeline table), `hashSweep` (the 124-row corpus of the retired hash probe, four digests a
+row) and `lines ()` (both, as the `VEC <label> <value>` lines a runner compares). The surface gate
+classes the move additive, so it rides this draft. Nothing else moves: no member changes, no value
+changes, no published guarantee changes.
+
+**Why it is public.** This repository no longer runs the Fable compiler; its compile leg and value
+leg run in `fuaran-dotnet`'s `tests/core-fable/` (see "Fable cleanliness"). That gate sees this
+repository as packages, and the transpiled side of a value comparison has to COMPUTE the vectors, so
+the table ships as code in a package the gate already Fable-compiles.
+
+**What a consumer does.** Nothing, unless it runs its own cross-pipeline check, in which case
+`ParityVectors.lines ()` is the table to diff. **What a maintainer of this repository does:** every
+version cut, `0.31.0` first, cites a green run of that gate against the candidate packages
+("Versioning policy"). DECISIONS.md D55 has the ruling, the consumer census it rests on, and the
+217.E red/green evidence.
 
 ### The refusable-family audit — `opAlgebra` and `reducer` are `Guarded` over accepted / refused, and `certify`'s verdict moves with them (Phase 220) — BREAKING
 

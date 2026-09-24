@@ -26,6 +26,14 @@
          it reads `ConfRng` and `LawResult` from Conformance.fs, which is the only ordering
          constraint it has. -->
     <Compile Include="IncrementalDelta.fs" />
+    <!-- Phase 217 — the cross-pipeline VALUE table, public. It lived in the repository's own Fable
+         smoke until the Fable compiler left this repository; a consumer that owns a Fable toolchain
+         now compiles it from this package's `fable/` sources and diffs `ParityVectors.lines ()`
+         between the two pipelines. Here, not in a test project, because the transpiled side has to
+         COMPUTE the vectors and sees this repository only as packages. It reads `ConfRng` from
+         Conformance.fs and carries no law, so it sits before the roster and depends on nothing
+         after it. -->
+    <Compile Include="ParityVectors.fs" />
     <!-- Phase 184 — the law-family roster, exported as data. LAST, and the position is a
          property rather than a habit: it declares the enumeration of every family above it and
          depends on none of them (it carries strings, not laws), so appending is the only

@@ -141,6 +141,7 @@ method Fuaran.Core.IncrementalDelta.lawsWith(System.Int32, System.Int32, System.
 method Fuaran.Core.IncrementalDelta.report(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.IncrementalSample>) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.IncrementalDelta.samples(System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.IncrementalSample>
 method Fuaran.Core.IncrementalDelta.samplesWith(System.Int32, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.IncrementalSample>
+method Fuaran.Core.ParityVectors.lines() : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.SampleAdequacy.cases(System.String, Fuaran.Core.AdequacyClass, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>) : Fuaran.Core.CaseCount
 method Fuaran.Core.SampleAdequacy.check`1(System.String, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.AdequacyDemand`1<!!0>>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.SampleAdequacy.isVacuous(Fuaran.Core.CaseCount) : System.Boolean
@@ -158,6 +159,8 @@ property Fuaran.Core.Families.obligations : Microsoft.FSharp.Collections.FSharpL
 property Fuaran.Core.Families.refusalAudit : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit> { get }
 property Fuaran.Core.FoldConfluence.permutationBound : System.Int32 { get }
 property Fuaran.Core.IncrementalDelta.demands : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.AdequacyDemand`1<Fuaran.Core.IncrementalSample>> { get }
+property Fuaran.Core.ParityVectors.hashSweep : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>> { get }
+property Fuaran.Core.ParityVectors.vectors : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>> { get }
 property Fuaran.Core.SampleAdequacy.census : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>> { get }
 property Fuaran.Core.WireNullTolerance.vectors : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WireNullTolerance+Vector> { get }
 record-field Fuaran.Core.CaseCount.Cases #1 : System.Int32
@@ -279,6 +282,7 @@ type Fuaran.Core.LaneFoldOutcome+Tags (type)
 type Fuaran.Core.LaneGen`2 (record)
 type Fuaran.Core.LawResult (record)
 type Fuaran.Core.OpGen`2 (record)
+type Fuaran.Core.ParityVectors (module)
 type Fuaran.Core.SampleAdequacy (module)
 type Fuaran.Core.StreamGen`2 (record)
 type Fuaran.Core.WireNullTolerance (module)

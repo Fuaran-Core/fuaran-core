@@ -48,7 +48,7 @@ module ConfRng =
     /// LCG built on exactly that product, and under Fable every draw after the first
     /// collapsed to zero — so a domain certifying in a browser drew a degenerate sample from
     /// a seed that behaved perfectly on .NET. Nothing in a .NET suite could see it; the
-    /// cross-pipeline `confRng/*` vectors in `tests/fable-smoke/ParityVectors.fs` are what
+    /// cross-pipeline `confRng/*` vectors in `ParityVectors` (this package) are what
     /// buys it, and they redden on a reverted multiply.
     ///
     /// State 0 is xorshift's fixed point — it maps to itself, and every draw from it is 0 —
