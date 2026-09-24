@@ -39,71 +39,84 @@ is the state a family passing green while exercising nothing used to render as, 
 what this column exists to make impossible to read past. `unmeasured` means no run was
 handed to the renderer, which is a different fact and deliberately a different word.
 
+**Adequacy.** How the family's green run is to be read. `unconditional` — every iteration
+builds every branch the laws distinguish, so a green run is a pass. `guarded-reached` — the
+family carries an adequacy guard and this run reached every guarded side. `guarded-starved`
+— the guard went red: the run tested nothing on a side a law is about, and the family is
+RED in `certify`'s verdict rather than silently green. `guarded-unmeasured` — a guarded
+family no run was handed for.
+
+**Refusal.** The refusable-family audit (Phase 220): where the family's refused outcomes
+come from. `none` — no law reads one. `built` — every refused case is constructed, so no
+run can miss it. `drawn-miss-is-red` — drawn, but a law demands the refused case, so a
+run that misses it fails. `drawn` — drawn, and a run that misses it stays green unless
+the family is guarded, which is what the `Adequacy` cell beside it answers.
+
 64 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
 
-| Family | Run by | Why opt-in | Witness | Discharges | Cases |
-|---|---|---|---|---|---|
-| `Conformance.aggregateParityLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 |
-| `Conformance.aiSurfaceLaws` | opt-in | `needs-witness-capability` | `AiSurfaceWitness` | — | 800 |
-| `Conformance.arbitrationLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1800 |
-| `Conformance.attestationLaws` | opt-in | `needs-witness-capability` | `StreamWitness`, `StreamGen`, `IAttestationSink` | — | 1000 |
-| `Conformance.attributedLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 |
-| `Conformance.canonicalFloatLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1500 |
-| `Conformance.capabilityLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1400 |
-| `Conformance.capabilityPipelineIncrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 |
-| `Conformance.capabilityPipelineLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 |
-| `Conformance.captureReplayLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
-| `Conformance.casLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 |
-| `Conformance.chainBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 |
-| `Conformance.codecInjectivityLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 |
-| `Conformance.columnarOpLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1200 |
-| `Conformance.columnarOpLawsWith` | opt-in | `seam-not-every-domain-has` | — | — | 1200 |
-| `Conformance.columnarValidatorLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 |
-| `Conformance.compositionLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 |
-| `Conformance.compositionPilot` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 1200 |
-| `Conformance.concurrencyLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | `lanes-apply` | 900 |
-| `Conformance.concurrencyLawsWith` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 900 |
-| `Conformance.constructThenEncodeLaws` | opt-in | `seam-not-every-domain-has` | — | — | 12 |
-| `Conformance.containerLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 |
-| `Conformance.dagBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — | 480 |
-| `Conformance.dagLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 400 |
-| `Conformance.deferredLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 |
-| `Conformance.diffContainedLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 |
-| `Conformance.diffLaws` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 |
-| `Conformance.dirtyPropagationLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
-| `Conformance.encoderInjectivityLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 200 |
-| `Conformance.footprintLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | `independence-diamond` | 900 |
-| `Conformance.functionVerifyLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 600 |
-| `Conformance.hashFnAdversarialLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1000000 |
-| `Conformance.hashFnLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 |
-| `Conformance.idempotencyLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 800 |
-| `Conformance.incrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 |
-| `Conformance.keyedChildrenLaws` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | `witness-surface-scope` | 600 |
-| `Conformance.memoLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 |
-| `Conformance.memoSoundnessLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 100 |
-| `Conformance.mergeConflictLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 900 |
-| `Conformance.noAttestationVacuityLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 |
-| `Conformance.normalizeLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 |
-| `Conformance.nowLaws` | opt-in | `seam-not-every-domain-has` | — | — | 750 |
-| `Conformance.opAlgebra` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `tree-algebra-well-formed-states` | 1000 |
-| `Conformance.packLoadingLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
-| `Conformance.paramLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
-| `Conformance.projectionLaws` | opt-in | `needs-witness-capability` | `ProjectionWitness` | — | 800 |
-| `Conformance.propagationEvalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
-| `Conformance.propagationEvaluatorLaws` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-change-set-and-prior` | 600 |
-| `Conformance.queryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1400 |
-| `Conformance.reconcileLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 |
-| `Conformance.reducer` | base run | — | `StreamGen` | — | 400 |
-| `Conformance.registryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
-| `Conformance.schemaWalkLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1200 |
-| `Conformance.slotParamLaws` | opt-in | `seam-not-every-domain-has` | — | — | 720 |
-| `Conformance.snapshotLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 |
-| `Conformance.snapshotLawsWith` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 |
-| `Conformance.streamLaws` | base run | — | `StreamWitness`, `StreamGen` | — | 600 |
-| `Conformance.transformLaws` | opt-in | `seam-not-every-domain-has` | — | — | 32 |
-| `Conformance.verifyHonestyLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 400 |
-| `Conformance.witnessLaws` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 400 |
-| `FoldConfluence.laneFoldLaws` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 |
-| `FoldConfluence.laneFoldLawsWith` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 |
-| `IncrementalDelta.laws` | opt-in | `seam-not-every-domain-has` | — | — | 420 |
-| `IncrementalDelta.lawsWith` | opt-in | `seam-not-every-domain-has` | — | — | 700 |
+| Family | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
+|---|---|---|---|---|---|---|---|
+| `Conformance.aggregateParityLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 | `unconditional` | `none` |
+| `Conformance.aiSurfaceLaws` | opt-in | `needs-witness-capability` | `AiSurfaceWitness` | — | 800 | `unconditional` | `drawn` |
+| `Conformance.arbitrationLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1800 | `guarded-reached` | `drawn` |
+| `Conformance.attestationLaws` | opt-in | `needs-witness-capability` | `StreamWitness`, `StreamGen`, `IAttestationSink` | — | 1000 | `guarded-reached` | `built` |
+| `Conformance.attributedLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
+| `Conformance.canonicalFloatLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1500 | `unconditional` | `none` |
+| `Conformance.capabilityLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1400 | `unconditional` | `built` |
+| `Conformance.capabilityPipelineIncrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `guarded-reached` | `none` |
+| `Conformance.capabilityPipelineLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
+| `Conformance.captureReplayLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
+| `Conformance.casLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `drawn` |
+| `Conformance.chainBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
+| `Conformance.codecInjectivityLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `none` |
+| `Conformance.columnarOpLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1200 | `guarded-reached` | `drawn` |
+| `Conformance.columnarOpLawsWith` | opt-in | `seam-not-every-domain-has` | — | — | 1200 | `guarded-reached` | `drawn` |
+| `Conformance.columnarValidatorLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 | `unconditional` | `drawn` |
+| `Conformance.compositionLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 | `unconditional` | `none` |
+| `Conformance.compositionPilot` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 1200 | `unconditional` | `none` |
+| `Conformance.concurrencyLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | `lanes-apply` | 900 | `guarded-reached` | `none` |
+| `Conformance.concurrencyLawsWith` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 900 | `guarded-reached` | `none` |
+| `Conformance.constructThenEncodeLaws` | opt-in | `seam-not-every-domain-has` | — | — | 12 | `unconditional` | `none` |
+| `Conformance.containerLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `guarded-reached` | `built` |
+| `Conformance.dagBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — | 480 | `unconditional` | `built` |
+| `Conformance.dagLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 400 | `unconditional` | `built` |
+| `Conformance.deferredLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
+| `Conformance.diffContainedLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `unconditional` | `drawn` |
+| `Conformance.diffLaws` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `unconditional` | `none` |
+| `Conformance.dirtyPropagationLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `none` |
+| `Conformance.encoderInjectivityLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 200 | `unconditional` | `none` |
+| `Conformance.footprintLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | `independence-diamond` | 900 | `guarded-reached` | `none` |
+| `Conformance.functionVerifyLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 600 | `unconditional` | `drawn-miss-is-red` |
+| `Conformance.hashFnAdversarialLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1000000 | `unconditional` | `none` |
+| `Conformance.hashFnLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
+| `Conformance.idempotencyLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 800 | `unconditional` | `drawn` |
+| `Conformance.incrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 | `unconditional` | `none` |
+| `Conformance.keyedChildrenLaws` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | `witness-surface-scope` | 600 | `guarded-reached` | `built` |
+| `Conformance.memoLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 | `unconditional` | `none` |
+| `Conformance.memoSoundnessLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 100 | `unconditional` | `none` |
+| `Conformance.mergeConflictLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 900 | `guarded-reached` | `none` |
+| `Conformance.noAttestationVacuityLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
+| `Conformance.normalizeLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `unconditional` | `none` |
+| `Conformance.nowLaws` | opt-in | `seam-not-every-domain-has` | — | — | 750 | `unconditional` | `built` |
+| `Conformance.opAlgebra` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `tree-algebra-well-formed-states` | 1000 | `guarded-reached` | `drawn` |
+| `Conformance.packLoadingLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
+| `Conformance.paramLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
+| `Conformance.projectionLaws` | opt-in | `needs-witness-capability` | `ProjectionWitness` | — | 800 | `unconditional` | `none` |
+| `Conformance.propagationEvalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `built` |
+| `Conformance.propagationEvaluatorLaws` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-change-set-and-prior` | 600 | `guarded-reached` | `drawn` |
+| `Conformance.queryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1400 | `unconditional` | `built` |
+| `Conformance.reconcileLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 | `guarded-reached` | `drawn` |
+| `Conformance.reducer` | base run | — | `StreamGen` | — | 400 | `guarded-reached` | `drawn` |
+| `Conformance.registryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
+| `Conformance.schemaWalkLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1200 | `guarded-reached` | `none` |
+| `Conformance.slotParamLaws` | opt-in | `seam-not-every-domain-has` | — | — | 720 | `unconditional` | `built` |
+| `Conformance.snapshotLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
+| `Conformance.snapshotLawsWith` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
+| `Conformance.streamLaws` | base run | — | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
+| `Conformance.transformLaws` | opt-in | `seam-not-every-domain-has` | — | — | 32 | `unconditional` | `drawn` |
+| `Conformance.verifyHonestyLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 400 | `unconditional` | `drawn-miss-is-red` |
+| `Conformance.witnessLaws` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 400 | `unconditional` | `none` |
+| `FoldConfluence.laneFoldLaws` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
+| `FoldConfluence.laneFoldLawsWith` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
+| `IncrementalDelta.laws` | opt-in | `seam-not-every-domain-has` | — | — | 420 | `guarded-reached` | `drawn` |
+| `IncrementalDelta.lawsWith` | opt-in | `seam-not-every-domain-has` | — | — | 700 | `guarded-reached` | `drawn` |

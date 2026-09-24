@@ -2274,6 +2274,100 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.31.0 — draft (opened by Phase 220)
+
+**This slot is a DRAFT, and it is a MINOR slot because the change opening it is BREAKING.**
+Phase 220 changes `Conformance.certify`'s and `Conformance.certifyStream`'s VERDICT for some
+domains. That is a behaviour change on the kit's most central aggregates, whatever the surface gate
+says about the members that carry it (the gate classes those members as additive, and that is
+right about the members and says nothing about the verdict). A breaking change cannot ride a patch
+draft, so it advances the untagged `0.30.1` draft below to `0.31.0`. The entries under `0.30.1`
+were never tagged, so they ship in `0.31.0`. `<Version>` and both copies of the laws corpus
+(`conformance/laws/*.json` here, and its byte copy in the shared wire-format corpus) are re-stamped
+together in one sitting when the slot moves, per `docs/conformance-corpus.md`.
+
+### The refusable-family audit — `opAlgebra` and `reducer` are `Guarded` over accepted / refused, and `certify`'s verdict moves with them (Phase 220) — BREAKING
+
+**What changed.** `Conformance.opAlgebra` and `Conformance.reducer` are the two families `certify`
+and `certifyStream` are built from. Their laws read the apply OUTCOME: totality (a refusal is
+typed, never thrown), `canApply ≡ apply`, the envelope law, and the replay, inversion, uniqueness
+and preservation laws, which all read the accepted side. Whether a run reached an accepted op AND a
+refused one is decided by the draw, not built. Until now both families were censused
+`Unconditional`, so a run that never reached one side reported every law green. Each family now
+appends two adequacy laws. They come after its subject laws, so the subject laws' positions do not
+move:
+
+- `sample adequacy (Conformance.opAlgebra): the sample reached every accepted op the laws distinguish`
+- `sample adequacy (Conformance.opAlgebra): the sample reached every refused op the laws distinguish`
+- the same two, for `Conformance.reducer`
+
+and `SampleAdequacy.census` reads `Guarded [ "accepted"; "refused" ]` for both.
+
+**Which verdicts move, and which domains go RED.**
+
+- **`certifyStream`, which runs `reducer`, is where a real domain moves.** Every op the reducer sees
+  comes from the domain's own `StreamGen`. A generator that never draws an op the reducer refuses
+  was certified green on a totality law that never probed the refusal path. It is now RED on
+  `…reducer): the sample reached every refused op…`. The concrete instance in this repository is
+  the counter reducer driven by an increment-only generator (`ReducerTests`, "a generator that
+  draws only Inc"): the verdict was green before this phase and is red after it, and the refused
+  guard is the ONLY red line. The mirror case also goes red: a generator whose every op is refused
+  starves `accepted`, and replay determinism then asserted nothing.
+- **`certify`, which runs `opAlgebra`, moves in principle but seldom in practice.** The ops come from
+  the KIT's own `genOp`, not from the domain. Over any tree it draws a reorder (always accepted)
+  and a remove of the root (always refused), and the built collision arm adds refusals wherever the
+  witness can carry a multi-node subtree. So at a realistic iteration count every domain reaches
+  both sides. We measured this: a lone leaf that holds nothing, a lone leaf that holds everything,
+  and a one-child section all reach both sides over 200 iterations. The guard fires on a run too
+  short to reach both sides, for example `iterations = 1`. A domain calling `certify` at such a
+  count is now RED where it used to be green.
+- **Nothing else moves.** Every other family's verdict, and every subject law's verdict, is
+  unchanged.
+
+**What a consumer does when their build goes red.** Read the red line. It names the side the run
+never reached: `refused op` or `accepted op`.
+
+- **`refused op` never reached: WIDEN THE GENERATOR** so that it can draw an op your reducer
+  rejects. That can be an op against a missing id, an out-of-range value, or whatever your domain
+  refuses. Do NOT raise the iteration count and do NOT hunt for a seed. Either leaves the refusal
+  path certified by one trial, and the guard's own counterexample says so.
+- **`accepted op` never reached**: your generator only produces ops your State0 refuses. Draw some
+  that apply.
+- **opAlgebra's guard at a tiny iteration count**: run the base run at a realistic count. The kit's
+  own suites use 200.
+- There is no opt-out. A domain whose reducer genuinely has no refusal (it accepts every op) is
+  the one case the guard cannot be satisfied for. Such a reducer has no refusal path for totality
+  to probe, so call `streamLaws` directly, and record in your conformance census that you did not
+  use `reducer`, with that reason. Do not run a generator that cannot reach the path.
+
+**`certifyStream`'s short-circuit now reads the reducer's SUBJECT laws only.** It still refuses to
+run `streamLaws` over a non-total reducer, because `append` would crash. A starved guard is no such
+hazard, so the stream laws still run beside it and report their own verdict: a starved domain sees
+one red line, not four. The report therefore carries 7 results where it used to carry 5 (3 stream
+laws, 2 reducer laws, 2 guards). `certify` carries 17 where it used to carry 15. A consumer that
+asserts on those counts moves with them.
+
+**The audit is DATA: `Families.refusalAudit`.** It has one row per family: the family, a
+`RefusalPopulation` (`NoRefusal` | `Built` | `DrawnMissIsRed` | `Drawn`) and the evidence for the
+verdict. `Families.tryRefusal` looks up one family. The suite holds the audit equal to the roster
+in both directions, so a family added later is audited in the commit that ships it. `Drawn` means
+refusals a run can miss while every law stays green. That is the vacuity class, and a `Guarded`
+census class is what reports it. `DrawnMissIsRed` means a drawn refusal whose absence turns a law
+red (`functionVerifyLaws`, `verifyHonestyLaws`), which is loud and needs no guard.
+
+**The roster export's shape moves, and `schema` reads 4.** Each family object gains two members,
+written after `cases`:
+
+- `adequacy`: `unconditional` | `guarded-reached` | `guarded-starved` | `guarded-unmeasured`
+  (`Families.adequacyToken`). With it, whether a family passed, was guarded and reached, or was
+  guarded and starved is a fact the generated data carries, not something a reader reconstructs
+  from the census and the `cases` cell.
+- `refusal`: `none` | `built` | `drawn-miss-is-red` | `drawn` (`Families.refusalToken`).
+
+The markdown table gains two columns, `Adequacy` and `Refusal`, after `Cases`. Every member and
+column before them is unchanged. A reader keyed on `schema: 3` should expect 4. Nothing it already
+reads has moved. This is a shape change and it takes the stamp that says so.
+
 ## 0.30.1 — draft
 
 **This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries
