@@ -1854,7 +1854,8 @@ module FStarTarget =
     // (8a'), not a `match`, so the body has no arms to split. Same probe: every k=16 lookup
     // discharges at under half a unit (the first: 58.6 -> 0.15). What remains at k=16 is the
     // ROUND-TRIP arm (345 units; 24.4 at k=12), and it is NOT the body's split — an arm citing
-    // matchless per-member lemmas still costs 271. See `proofs/README.md` and DECISIONS D54.
+    // matchless per-member lemmas still costs 271. Successor: Phase 224. See `proofs/README.md`
+    // and DECISIONS D54.
     //
     // The load-bearing fact the linear form rests on is that `find_field name` pushes through an
     // entry with a different key, so `find_field n (if c then t else (k, v) :: t)` is `find_field

@@ -46,7 +46,9 @@ the move D52 made for the encoder, applied to the DECODER. Each member read beco
 top-level, opaque reader, with one lemma per reader stating its value off the encoded object. The
 round trip then threads 17 opaque applications instead of 17 inlined reads. Whether the k=16
 round-trip clause is worth that generator work, or should be retired as an acceptance criterion
-at this width, is the operator's call. This phase does not retire it.
+at this width, was the operator's call. The operator ruled that it gets a successor:
+**Phase 224 carries the k=16 round trip under `--z3rlimit 40`, with this candidate
+named.** This phase does not retire the clause.
 
 **Not re-proposed.** The seven remedies in D52's list stay refuted; none of them is used here.
 The round-trip arm's two perturbations above join that list.

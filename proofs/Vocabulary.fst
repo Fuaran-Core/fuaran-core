@@ -161,12 +161,12 @@ let sfx_vkind__Embed__props (#num #flt: eqtype) (e: option (jval num flt)) (rest
 let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__node__Node i k e0 e1 ->
-    JObj (("id", JStr i) :: ("kind", enc_vkind k) :: (let s1 = sfx_node__Node__label #num #flt (match e1 with | None -> None | Some w -> Some (JStr w)) ([]) in let s0 = sfx_node__Node__hidden #num #flt (match e0 with | None -> None | Some w -> Some (JBool w)) (s1) in s0))
+    JObj (("id", JStr i) :: ("kind", enc_vkind k) :: (let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt e1) ([]) in let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt e0) (s1) in s0))
 
 and enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
-    JObj (("$type", JStr "Embed") :: (let s1 = sfx_vkind__Embed__props #num #flt (match f3 with | None -> None | Some w -> Some (JObj (enc_entries_m_json w))) ([]) in let s0 = sfx_vkind__Embed__content_hash #num #flt (match f1 with | None -> None | Some w -> Some (enc_r_content_hash w)) (("moduleId", JStr f2) :: s1) in ("componentId", JStr f0) :: s0))
+    JObj (("$type", JStr "Embed") :: (let s1 = sfx_vkind__Embed__props #num #flt (enc_opt_m_json #num #flt f3) ([]) in let s0 = sfx_vkind__Embed__content_hash #num #flt (enc_opt_r_content_hash #num #flt f1) (("moduleId", JStr f2) :: s1) in ("componentId", JStr f0) :: s0))
   | C__vkind__Group f0 f1 f2 ->
     JObj (("$type", JStr "Group") :: ("children", JArr (enc_items_l_node f0)) :: (if f1 = C__e_layout_kind__Stack then ("onSelect", JStr "<closure>") :: [] else ("layout", enc_e_layout_kind f1) :: ("onSelect", JStr "<closure>") :: []))
   | C__vkind__Link f0 f1 f2 ->
@@ -206,6 +206,18 @@ and enc_entries_m_str (#num #flt: eqtype) (es: list (string & string)) : Tot (li
   match es with
   | [] -> []
   | (k, v) :: t -> (k, JStr v) :: enc_entries_m_str t
+
+and enc_opt_bool (#num #flt: eqtype) (o: option (bool)) : Tot (option (jval num flt)) (decreases o) =
+  match o with | None -> None | Some w -> Some (JBool w)
+
+and enc_opt_str (#num #flt: eqtype) (o: option (string)) : Tot (option (jval num flt)) (decreases o) =
+  match o with | None -> None | Some w -> Some (JStr w)
+
+and enc_opt_r_content_hash (#num #flt: eqtype) (o: option (r_content_hash num flt)) : Tot (option (jval num flt)) (decreases o) =
+  match o with | None -> None | Some w -> Some (enc_r_content_hash w)
+
+and enc_opt_m_json (#num #flt: eqtype) (o: option (list (string & jval num flt))) : Tot (option (jval num flt)) (decreases o) =
+  match o with | None -> None | Some w -> Some (JObj (enc_entries_m_json w))
 
 (* ======================================================================================
    4. The tag-dispatch decoder. Every cross-type call goes through `get_prop`, whose

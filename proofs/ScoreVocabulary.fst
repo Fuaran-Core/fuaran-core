@@ -516,13 +516,13 @@ let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (dec
 and enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__vkind__Score f0 f1 f2 ->
-    JObj (("kind", JStr "Score") :: (let s1 = sfx_vkind__Score__title #num #flt (match f2 with | None -> None | Some w -> Some (JStr w)) ([]) in let s0 = sfx_vkind__Score__composer #num #flt (match f1 with | None -> None | Some w -> Some (JStr w)) (s1) in ("children", JArr (enc_items_l_node f0)) :: s0))
+    JObj (("kind", JStr "Score") :: (let s1 = sfx_vkind__Score__title #num #flt (enc_opt_str #num #flt f2) ([]) in let s0 = sfx_vkind__Score__composer #num #flt (enc_opt_str #num #flt f1) (s1) in ("children", JArr (enc_items_l_node f0)) :: s0))
   | C__vkind__Part f0 f1 f2 ->
     JObj (("kind", JStr "Part") :: ("children", JArr (enc_items_l_node f0)) :: ("name", JStr f1) :: ("staves", JArr (enc_items_l_r_staff_definition f2)) :: [])
   | C__vkind__PartGroup f0 f1 f2 ->
     JObj (("kind", JStr "PartGroup") :: ("bracket", enc_e_bracket_kind f0) :: ("children", JArr (enc_items_l_node f1)) :: (match f2 with | None -> [] | Some w -> ("name", JStr w) :: []))
   | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    JObj (("kind", JStr "Measure") :: (let s3 = sfx_vkind__Measure__volta #num #flt (match f5 with | None -> None | Some w -> Some (JArr (enc_items_l_int w))) ([]) in let s2 = sfx_vkind__Measure__repeat_start #num #flt (if f4 = false then None else Some (JBool f4)) (s3) in let s1 = sfx_vkind__Measure__repeat_end #num #flt (if f3 = false then None else Some (JBool f3)) (s2) in let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (if f1 = false then None else Some (JBool f1)) (("number", JInt f2) :: s1) in ("children", JArr (enc_items_l_node f0)) :: s0))
+    JObj (("kind", JStr "Measure") :: (let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in ("children", JArr (enc_items_l_node f0)) :: s0))
   | C__vkind__Staff f0 f1 ->
     JObj (("kind", JStr "Staff") :: ("children", JArr (enc_items_l_node f0)) :: ("staffNumber", JInt f1) :: [])
   | C__vkind__GraceNote f0 f1 ->
@@ -598,6 +598,15 @@ and enc_items_l_str (#num #flt: eqtype) (xs: list (string)) : Tot (list (jval nu
   match xs with
   | [] -> []
   | y :: t -> JStr y :: enc_items_l_str t
+
+and enc_opt_str (#num #flt: eqtype) (o: option (string)) : Tot (option (jval num flt)) (decreases o) =
+  match o with | None -> None | Some w -> Some (JStr w)
+
+and enc_dflt_bool (#num #flt: eqtype) (d: bool) (v: bool) : Tot (option (jval num flt)) (decreases v) =
+  if v = d then None else Some (JBool v)
+
+and enc_opt_l_int (#num #flt: eqtype) (o: option (list (num))) : Tot (option (jval num flt)) (decreases o) =
+  match o with | None -> None | Some w -> Some (JArr (enc_items_l_int w))
 
 (* ======================================================================================
    4. The tag-dispatch decoder. Every cross-type call goes through `get_prop`, whose

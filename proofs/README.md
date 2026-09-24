@@ -1722,7 +1722,8 @@ inlined member reads, even when it is given each read's value. The next candidat
 204's move applied to the decoder. Each member read becomes a named, opaque top-level reader with
 one lemma giving its value off the encoded object, so the round trip threads applications instead
 of inlined reads. Whether that is worth building, or the k=16 round-trip clause is retired at this
-width, is an operator decision (DECISIONS D54). Nothing is admitted or weakened, and the k=16 probe
+width, was an operator decision. The operator ruled for a successor, **Phase 224**, which
+carries the k=16 round trip under `--z3rlimit 40` with this candidate named (DECISIONS D54). Nothing is admitted or weakened, and the k=16 probe
 is not in the leg.
 
 **The mutual-family split — RETIRED as a successor (Phase 204).** What the shapes above fix is the
