@@ -898,6 +898,11 @@ module Conformance =
         let mutable reconstruction = None
         let mutable applyability = None
         let mutable refusal = None
+        // Phase 223 — the refusal IFF's two directions, counted over every pair it is asked of
+        // (the derived pair and the minted probe). The demanding direction is reached only where
+        // `after` carries a node the witness's `canHold` rejects, which is DRAWN.
+        let mutable accepted = 0
+        let mutable refused = 0
 
         /// the first node of `t` the predicate refuses, if any — the offender `toOpsContained`
         /// names once it also carries children
@@ -912,6 +917,11 @@ module Conformance =
 
         let checkRefusal (i: int) (before: 'Node) (after: 'Node) =
             let expected = violates after
+
+            if expected then
+                refused <- refused + 1
+            else
+                accepted <- accepted + 1
 
             match Diff.toOpsContained canHold nodew idw before after with
             | Error(Diff.TargetNotAContainer(p, _)) when expected ->
@@ -1029,7 +1039,12 @@ module Conformance =
             Counterexample = applyability }
           { Law = "contained diff refuses exactly a non-container after-parent"
             Passed = refusal.IsNone
-            Counterexample = refusal } ]
+            Counterexample = refusal }
+          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A witness whose
+          // `canHold` refuses nothing (or supplies none) exercises only the trivial direction of the
+          // refusal IFF; that is now reported as the guard, not as a pass.
+          SampleAdequacy.reached "Conformance.diffContainedLaws" "container-valid pair" seed [ "accepted", accepted ]
+          SampleAdequacy.reached "Conformance.diffContainedLaws" "refused pair" seed [ "refused", refused ] ]
 
     /// The op-script normalisation laws (Phase 23) — the teeth on `Ops.normalize`. Build a random
     /// *applyable* script (apply random ops, keep the accepted ones), then check: **preservation**
@@ -1515,6 +1530,10 @@ module Conformance =
         let mutable rng = ConfRng.ofSeed seed
         let mutable parity = None
         let mutable totality = None
+        // Phase 223 — the reference's outcome populations over the caller's DRAWN pipelines: the
+        // Error/Error arm of the parity law is reached only when the reference REFUSES a pipeline.
+        let mutable accepted = 0
+        let mutable refused = 0
 
         for i in 0 .. iterations - 1 do
             let (table, pipeline), r' = gen rng
@@ -1539,6 +1558,10 @@ module Conformance =
                 if totality.IsNone then
                     totality <- Some(sprintf "seed=%d iter=%d: an evaluator threw: %s" seed i m)
             | Ok refR, Ok underR ->
+                (match refR with
+                 | Ok _ -> accepted <- accepted + 1
+                 | Error _ -> refused <- refused + 1)
+
                 let agree =
                     match refR, underR with
                     | Ok a, Ok b -> ColumnCodec.encode (Embedded a) = ColumnCodec.encode (Embedded b)
@@ -1553,7 +1576,11 @@ module Conformance =
             Counterexample = parity }
           { Law = "evaluators are total (return EvalError, never throw)"
             Passed = totality.IsNone
-            Counterexample = totality } ]
+            Counterexample = totality }
+          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A generator of
+          // only well-formed pipelines certifies the Error/Error parity arm by nothing, and green.
+          SampleAdequacy.reached "Conformance.transformLaws" "evaluated pipeline" seed [ "accepted", accepted ]
+          SampleAdequacy.reached "Conformance.transformLaws" "refused pipeline" seed [ "refused", refused ] ]
 
     /// The invocable-capability laws (Phase 30) — the teeth on `Capability` / `Registry` and their
     /// Phase 27 replay wiring. Self-contained (it builds its own capabilities from the seed); over a
@@ -3443,6 +3470,10 @@ module Conformance =
         let mutable rng = ConfRng.ofSeed seed
         let mutable determinism = None
         let mutable soundness = None
+        // Phase 223 — the fault populations the soundness law counts. A fault-free sample
+        // satisfies `defects = injected faults` as 0 = 0 and certifies nothing about either rule.
+        let mutable nullsInjected = 0
+        let mutable outOfRangeInjected = 0
 
         let reg =
             ColumnValidator.empty
@@ -3457,7 +3488,7 @@ module Conformance =
             let mutable r = rng
 
             // column a: int straying out of [0,100], with ~1/5 nulls
-            let aCells =
+            let drawn =
                 [ for _ in 0..nRows ->
                       let k, r' = ConfRng.intBelow 5 r
                       r <- r'
@@ -3468,6 +3499,22 @@ module Conformance =
                           let v, r'' = ConfRng.intBelow 160 r
                           r <- r''
                           Int(v - 30) ]
+
+            // Phase 223 — the roll is STRATIFIED by iteration index, so every run of three or more
+            // iterations reaches both faults the soundness law counts, by construction rather than
+            // by the draw: stratum 0 is a clean table (the drawn values folded into range, nulls
+            // dropped), stratum 1 carries the draw plus one null, stratum 2 the draw plus one
+            // out-of-range value. A shorter run can still miss them, and the guard below says so.
+            let aCells =
+                match i % 3 with
+                | 0 ->
+                    drawn
+                    |> List.choose (fun c ->
+                        match c with
+                        | Int v -> Some(Int(((v % 101) + 101) % 101))
+                        | _ -> None)
+                | 1 -> drawn @ [ Null ]
+                | _ -> drawn @ [ Int 150 ]
 
             let sCells = aCells |> List.map (fun _ -> Str "x")
             rng <- r
@@ -3502,6 +3549,9 @@ module Conformance =
             let inRangeDefects =
                 defects |> List.filter (fun d -> d.Code = "COL-INRANGE") |> List.length
 
+            nullsInjected <- nullsInjected + nullCount
+            outOfRangeInjected <- outOfRangeInjected + outOfRange
+
             if
                 (notNullDefects <> nullCount || inRangeDefects <> outOfRange)
                 && soundness.IsNone
@@ -3523,7 +3573,15 @@ module Conformance =
             Counterexample = determinism }
           { Law = "columnar stock rules are sound (defect counts = injected faults)"
             Passed = soundness.IsNone
-            Counterexample = soundness } ]
+            Counterexample = soundness }
+          // Phase 223 — `Guarded ["null cell"; "out-of-range cell"]`, after the subject laws. The
+          // stratified roll reaches both at three iterations; a shorter run reports the guard.
+          SampleAdequacy.reached "Conformance.columnarValidatorLaws" "injected null" seed [ "null cell", nullsInjected ]
+          SampleAdequacy.reached
+              "Conformance.columnarValidatorLaws"
+              "injected out-of-range value"
+              seed
+              [ "out-of-range cell", outOfRangeInjected ] ]
 
     // ---- incremental DataFrame evaluation (Phase 34) ----
     // The teeth on `DataFrame.evalFrom`: the incremental path is byte-identical to a full `evalPipeline`
@@ -5734,6 +5792,11 @@ module Conformance =
 
         let catalogued = w.OpKinds |> List.map (fun o -> o.Kind) |> Set.ofList
         let mutable seenKinds = Set.empty
+        // Phase 223 — the reducer's outcome populations over the caller's DRAWN ops:
+        // `explainRejection` and the rejected arms of the allow / approve parity read a reducer
+        // rejection, which a generator that draws only applicable ops never reaches.
+        let mutable accepted = 0
+        let mutable refused = 0
 
         // ---- read-tool discipline (state-fixed — checked once, not per draw) ----
 
@@ -5854,9 +5917,11 @@ module Conformance =
                 // a reducer rejection renders non-empty guidance through Explain.
                 (match direct with
                  | Error rej ->
+                     refused <- refused + 1
+
                      if Proposals.explainRejection w rej = "" && proposals.IsNone then
                          proposals <- Some(sprintf "seed=%d iter=%d: explainRejection rendered empty guidance" seed i)
-                 | Ok _ -> ())
+                 | Ok _ -> accepted <- accepted + 1)
 
                 let dRoll, r5 = ConfRng.intBelow 3 rng
                 rng <- r5
@@ -5982,7 +6047,12 @@ module Conformance =
             Counterexample = patterns }
           { Law = "proposal soundness (approved applies via the domain reducer; denied/rejected never mutates)"
             Passed = proposals.IsNone
-            Counterexample = proposals } ]
+            Counterexample = proposals }
+          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A generator that
+          // draws no op the reducer rejects leaves the guidance law and the rejected-parity arms
+          // certified by nothing; one that draws nothing applicable leaves the applied-parity arms so.
+          SampleAdequacy.reached "Conformance.aiSurfaceLaws" "accepted op" seed [ "accepted", accepted ]
+          SampleAdequacy.reached "Conformance.aiSurfaceLaws" "rejected op" seed [ "refused", refused ] ]
 
     // ---- integrity & provenance conformance (Wave 17) ----
     // Rebuild a chain's hashes from its `(seq, actor, op)` pre-images under the canonical binding —
@@ -7016,6 +7086,11 @@ module Conformance =
         let mutable staleLaw = None
         let mutable raceLaw = None
         let actor = Human "conf"
+        // Phase 223 — the match arm's two outcome populations, both DRAWN from the caller's
+        // StreamGen: `match ≡ append` compares a domain refusal with a CAS `Domain` rejection only
+        // when the drawn op is refused, and compares two accepted appends only when it is not.
+        let mutable accepted = 0
+        let mutable refused = 0
 
         for i in 0 .. iterations - 1 do
             // Build a random base chain (as streamLaws does) — the CAS is exercised against its head.
@@ -7039,6 +7114,10 @@ module Conformance =
             rng <- rM
             let viaAppend = OpStream.append hashFn sw actor opM state recs
             let viaCas = OpStream.appendIf hashFn sw baseHead actor opM state recs
+
+            (match viaAppend with
+             | Ok _ -> accepted <- accepted + 1
+             | Error _ -> refused <- refused + 1)
 
             let matchOk =
                 match viaAppend, viaCas with
@@ -7101,7 +7180,12 @@ module Conformance =
             Counterexample = staleLaw }
           { Law = "two racing appendIf calls off one base admit exactly one winner under any serialisation"
             Passed = raceLaw.IsNone
-            Counterexample = raceLaw } ]
+            Counterexample = raceLaw }
+          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws so their positions
+          // are unchanged. A StreamGen that never draws a refused op leaves `match ≡ append`
+          // certified on the accept path alone, and green.
+          SampleAdequacy.reached "Conformance.casLaws" "accepted op" seed [ "accepted", accepted ]
+          SampleAdequacy.reached "Conformance.casLaws" "refused op" seed [ "refused", refused ] ]
 
     // ---- confluence / interleaving law (Phase 80) ----
     // The coordination claim the agent-fleet substrate rests on: op-scripts `Ops.independent`
@@ -7606,6 +7690,11 @@ module Conformance =
         let mutable parityLaw = None
         let mutable casLaw = None
         let actor = Human "conf"
+        // Phase 223 — the fresh-key arms' outcome populations, DRAWN from the caller's StreamGen:
+        // `fresh ≡ append` and the true-head CAS arm forward a domain refusal verbatim only when the
+        // drawn op is refused, which is a property of the run.
+        let mutable accepted = 0
+        let mutable refused = 0
 
         for i in 0 .. iterations - 1 do
             // Build a base chain THROUGH appendIdempotent, threading (state, records, index) — a
@@ -7641,6 +7730,10 @@ module Conformance =
 
                 let viaIdem =
                     OpStream.appendIdempotent hashFn sw (keyOf opF) actor opF state index recs
+
+                (match viaAppend with
+                 | Ok _ -> accepted <- accepted + 1
+                 | Error _ -> refused <- refused + 1)
 
                 let freshOk =
                     match viaAppend, viaIdem with
@@ -7720,6 +7813,10 @@ module Conformance =
                 let viaBoth =
                     OpStream.appendIdempotentIf hashFn sw (keyOf opC) baseHead actor opC state index recs
 
+                (match viaAppend with
+                 | Ok _ -> accepted <- accepted + 1
+                 | Error _ -> refused <- refused + 1)
+
                 let matchOk =
                     match viaAppend, viaBoth with
                     | Ok(sA, recsA), Ok(AppendOutcome.Appended(sI, recsI, _)) -> sA = sI && recsA = recsI
@@ -7740,7 +7837,12 @@ module Conformance =
             Counterexample = parityLaw }
           { Law = "idempotency precedes the CAS (a seen key converges under any head; a fresh key CASes as appendIf)"
             Passed = casLaw.IsNone
-            Counterexample = casLaw } ]
+            Counterexample = casLaw }
+          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A StreamGen that
+          // never draws a refused fresh op leaves the verbatim-forwarding half of `fresh ≡ append`
+          // and of the true-head CAS arm certified by nothing, and green.
+          SampleAdequacy.reached "Conformance.idempotencyLaws" "accepted fresh op" seed [ "accepted", accepted ]
+          SampleAdequacy.reached "Conformance.idempotencyLaws" "refused fresh op" seed [ "refused", refused ] ]
 
     // ---- construct-then-encode (Phase 126) ----
     // Every family above that touches a codec certifies `decode` and `encode` against each other.

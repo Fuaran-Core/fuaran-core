@@ -80,7 +80,7 @@ let private runs =
            run
                "Conformance.diffContainedLaws"
                200
-               (Conformance.diffContainedLaws nodew idw ContainedOpsTests.containerGen 4242 200)
+               (Conformance.diffContainedLaws nodew idw ConformanceTests.containedGen 4242 200)
            run "Conformance.normalizeLaws" 200 (Conformance.normalizeLaws nodew idw ConformanceTests.opGen 1234 200)
            run
                "Conformance.containerLaws"
@@ -150,14 +150,19 @@ let private runs =
            run
                "Conformance.casLaws"
                200
-               (Conformance.casLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200)
+               (Conformance.casLaws
+                   ConformanceTests.sw
+                   ConformanceTests.stratifiedStreamGen
+                   OpStream.defaultHash
+                   4242
+                   200)
            run
                "Conformance.idempotencyLaws"
                200
                (Conformance.idempotencyLaws
                    ConformanceTests.sw.Encode
                    ConformanceTests.sw
-                   ConformanceTests.streamGen
+                   ConformanceTests.stratifiedStreamGen
                    OpStream.defaultHash
                    8282
                    200)
@@ -383,6 +388,45 @@ let cases () : (string * CaseCount) list =
     |> List.map (fun r -> r.Id, SampleAdequacy.cases r.Id (classOf r.Id) r.Iterations r.Results)
     |> List.sortBy fst
 
+/// Phase 223 — the six families Phase 220's audit found drawing a refusal population a run could
+/// silently miss, with the dimensions each is now `Guarded` over.
+let private drawnRefusalSix: (string * string list) list =
+    [ "Conformance.casLaws", [ "accepted"; "refused" ]
+      "Conformance.idempotencyLaws", [ "accepted"; "refused" ]
+      "Conformance.aiSurfaceLaws", [ "accepted"; "refused" ]
+      "Conformance.transformLaws", [ "accepted"; "refused" ]
+      "Conformance.columnarValidatorLaws", [ "null cell"; "out-of-range cell" ]
+      "Conformance.diffContainedLaws", [ "accepted"; "refused" ] ]
+
+/// ... and each one's reference run as a function of the seed, at the size the census runs it:
+/// the kit reference generator, stratified, which is what "the kit's own run" means.
+let private drawnRefusalSixRuns: (string * (int * (int -> LawResult list))) list =
+    [ "Conformance.casLaws",
+      (200,
+       fun seed ->
+           Conformance.casLaws ConformanceTests.sw ConformanceTests.stratifiedStreamGen OpStream.defaultHash seed 200)
+      "Conformance.idempotencyLaws",
+      (200,
+       fun seed ->
+           Conformance.idempotencyLaws
+               ConformanceTests.sw.Encode
+               ConformanceTests.sw
+               ConformanceTests.stratifiedStreamGen
+               OpStream.defaultHash
+               seed
+               200)
+      "Conformance.aiSurfaceLaws",
+      (200,
+       fun seed ->
+           Conformance.aiSurfaceLaws AiSurfaceTests.witness AiSurfaceTests.genNoteOp AiSurfaceTests.state0 seed 200)
+      "Conformance.transformLaws",
+      (LawVectorExport.iterations,
+       fun seed ->
+           Conformance.transformLaws DataFrame.evalPipeline (LawVectorExport.lawGen ()) seed LawVectorExport.iterations)
+      "Conformance.columnarValidatorLaws", (200, fun seed -> Conformance.columnarValidatorLaws seed 200)
+      "Conformance.diffContainedLaws",
+      (200, fun seed -> Conformance.diffContainedLaws nodew idw ConformanceTests.containedGen seed 200) ]
+
 // ---------------------------------------------------------------------------
 
 [<Tests>]
@@ -562,12 +606,15 @@ let vacuityTests =
               for a in Families.refusalAudit do
                   Expect.isTrue (a.Why.Trim().Length > 10) (sprintf "%s carries no usable evidence" a.Family)
 
-          testCase "every family whose refusals a run can silently miss is Guarded — a ratchet that only shrinks"
+          testCase "every family whose refusals a run can silently miss is Guarded"
           <| fun _ ->
               // The PROPERTY, read off the audit and the census rather than off a list of families:
               // a `Drawn` row is a refusal population a run can miss while every law stays green, and
               // a `Guarded` census class is what reports that. So a family added later with a drawn
               // refusal and no guard fails here without anyone having to remember to list it.
+              //
+              // Phase 220 shipped this as a ratchet naming six permitted violators; Phase 223 guarded
+              // all six and emptied it, so there are no exceptions left to name.
               let unguardedDrawn =
                   Families.refusalAudit
                   |> List.filter (fun a -> a.Population = Families.Drawn)
@@ -576,29 +623,10 @@ let vacuityTests =
                       | Guarded _ -> false
                       | Unconditional _ -> true)
                   |> List.map (fun a -> a.Family)
-                  |> Set.ofList
-
-              // Phase 223 — the six the Phase 220 audit found and deliberately did not guard: each is
-              // an opt-in family whose drawn refusal arm (a domain refusal compared by an agreement
-              // law, or a fault the kit's own roll may not inject) is not yet guaranteed reached.
-              // The set is asserted EXACTLY, so it can only shrink: a new violator fails, and so does
-              // guarding one of these six until it is removed from here in the same commit.
-              let permitted =
-                  set
-                      [ "Conformance.casLaws"
-                        "Conformance.idempotencyLaws"
-                        "Conformance.aiSurfaceLaws"
-                        "Conformance.transformLaws"
-                        "Conformance.columnarValidatorLaws"
-                        "Conformance.diffContainedLaws" ]
 
               Expect.isEmpty
-                  (Set.difference unguardedDrawn permitted |> Set.toList)
+                  unguardedDrawn
                   "these families have a refusal population a run can silently miss (audited `Drawn`) and no adequacy guard — guard them, or the census reports an unguarded pass"
-
-              Expect.isEmpty
-                  (Set.difference permitted unguardedDrawn |> Set.toList)
-                  "these permitted violators are no longer violators — remove them from the Phase 223 set in the same commit"
 
           testCase "the two base-run families certify is built from are Guarded, and reached at the reference witness"
           <| fun _ ->
@@ -619,6 +647,42 @@ let vacuityTests =
                       (Families.adequacyToken measured id)
                       "guarded-reached"
                       (sprintf "%s reached both sides at the reference witness" id)
+
+          // ---- Phase 223: the six drawn-refusal families ----
+
+          testCase "the six drawn-refusal families are Guarded, and reached at the reference witness"
+          <| fun _ ->
+              let measured = cases ()
+
+              for id, dims in drawnRefusalSix do
+                  Expect.equal
+                      (Families.tryRefusal id |> Option.map (fun a -> a.Population))
+                      (Some Families.Drawn)
+                      (sprintf "%s is audited Drawn" id)
+
+                  Expect.equal (classOf id) (Guarded dims) (sprintf "%s is censused Guarded" id)
+
+                  Expect.equal
+                      (Families.adequacyToken measured id)
+                      "guarded-reached"
+                      (sprintf "%s reached every guarded dimension at the reference witness" id)
+
+          testCase "each kit reference generator reaches the refused branch on every seed tried, at the default size"
+          <| fun _ ->
+              // The stratification half, proven rather than asserted: the same run the census is
+              // measured from, over twenty seeds that are not the reference seed. A guard that fired
+              // here would be the intermittent failure the stratification exists to rule out, so
+              // every seed must read `guarded-reached` — never `guarded-starved`.
+              let seeds = [ 1..20 ] |> List.map (fun k -> k * 7919 + 3)
+
+              for id, (iterations, runAt) in drawnRefusalSixRuns do
+                  for seed in seeds do
+                      let measured = [ id, SampleAdequacy.cases id (classOf id) iterations (runAt seed) ]
+
+                      Expect.equal
+                          (Families.adequacyToken measured id)
+                          "guarded-reached"
+                          (sprintf "%s at seed %d, %d iterations" id seed iterations)
 
           testCase "the adequacy cell tells reached from starved from unconditional — made-up runs"
           <| fun _ ->

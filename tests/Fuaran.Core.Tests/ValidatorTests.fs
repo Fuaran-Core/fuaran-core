@@ -157,7 +157,7 @@ let tests =
           testCase "columnarValidatorLaws certify determinism + soundness (Phase 37)"
           <| fun _ ->
               let results = Conformance.columnarValidatorLaws 4242 200
-              Expect.equal (List.length results) 2 "determinism + soundness reported"
+              Expect.equal (List.length results) 4 "determinism + soundness, and the two Phase 223 guards"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -167,4 +167,22 @@ let tests =
 
                   failtestf "columnarValidatorLaws failed:\n%s" (String.concat "\n" fails)
 
-              Expect.equal (Conformance.columnarValidatorLaws 4242 200) results "same seed ⇒ identical report" ]
+              Expect.equal (Conformance.columnarValidatorLaws 4242 200) results "same seed ⇒ identical report"
+
+          testCase "Phase 223 — a fault-free sample turns columnarValidatorLaws RED, on both fault guards alone"
+          <| fun _ ->
+              // The kit draws this family's sample itself, so the refusal-free generator is the
+              // roll's own clean stratum: iteration 0 is a table with every cell in range and none
+              // null, by construction, at any seed. One iteration is therefore a run whose soundness
+              // law holds as 0 = 0 for both rules — green on every subject law, and exactly what the
+              // two guards exist to refuse.
+              for seed in [ 1; 4242; 90210 ] do
+                  Expect.equal
+                      (Conformance.columnarValidatorLaws seed 1
+                       |> List.filter (fun r -> not r.Passed)
+                       |> List.map (fun r -> r.Law))
+                      [ SampleAdequacy.lawPrefix "Conformance.columnarValidatorLaws"
+                        + "the sample reached every injected null the laws distinguish"
+                        SampleAdequacy.lawPrefix "Conformance.columnarValidatorLaws"
+                        + "the sample reached every injected out-of-range value the laws distinguish" ]
+                      (sprintf "seed %d: both fault guards red, nothing else" seed) ]

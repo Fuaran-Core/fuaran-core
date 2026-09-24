@@ -2426,6 +2426,71 @@ The markdown table gains two columns, `Adequacy` and `Refusal`, after `Cases`. E
 column before them is unchanged. A reader keyed on `schema: 3` should expect 4. Nothing it already
 reads has moved. This is a shape change and it takes the stamp that says so.
 
+### The six drawn-refusal families are `Guarded` too, and the kit's reference generators reach the refused branch (Phase 223) — BREAKING
+
+**What changed.** Phase 220's audit found six more families in the same class as `opAlgebra` and
+`reducer`. Each has a law that compares a REFUSED outcome, an agreement or an iff that holds
+trivially when nothing was refused, over a population the run DRAWS. Each was censused
+`Unconditional`, so a run that drew no refusal reported every law green. Each now appends adequacy
+laws after its subject laws, so the subject laws' positions do not move, and `SampleAdequacy.census`
+reads `Guarded` for all six. These are the six verdict moves:
+
+- **`casLaws`**: `Guarded [ "accepted"; "refused" ]`. `appendIf with the true head ≡ append`
+  compares a domain refusal with a CAS `Domain` rejection only when your `StreamGen` draws a
+  refused op. New lines: `…casLaws): the sample reached every accepted op …` and `… every refused
+  op …`. 3 results become 5.
+- **`idempotencyLaws`**: `Guarded [ "accepted"; "refused" ]`. `fresh ≡ append` and the true-head
+  CAS arm forward a domain refusal verbatim only when the drawn fresh op is refused. New lines: `…
+  every accepted fresh op …` and `… every refused fresh op …`. 4 results become 6.
+- **`aiSurfaceLaws`**: `Guarded [ "accepted"; "refused" ]`. `explainRejection` and the rejected arms
+  of the allow / approve parity read a reducer rejection only when your op generator draws one. New
+  lines: `… every accepted op …` and `… every rejected op …`. 4 results become 6.
+- **`transformLaws`**: `Guarded [ "accepted"; "refused" ]`. The Error/Error arm of the parity law
+  is reached only when your generator yields a pipeline the reference refuses. New lines: `… every
+  evaluated pipeline …` and `… every refused pipeline …`. 2 results become 4.
+- **`columnarValidatorLaws`**: `Guarded [ "null cell"; "out-of-range cell" ]`. The kit draws this
+  sample itself, and a fault-free draw satisfied the soundness law as 0 = 0. The roll is now
+  stratified by iteration index: iteration `i mod 3 = 0` is a clean table, `1` adds a null, and
+  `2` adds an out-of-range value. So every run of three or more iterations reaches both faults.
+  New lines: `… every injected null …` and `… every injected out-of-range value …`. 2 results
+  become 4. The sample the soundness law sees changes with the stratification. Its verdict does not.
+- **`diffContainedLaws`**: `Guarded [ "accepted"; "refused" ]`. The refusal iff reads the drawn
+  pair and the minted probe under your witness's `canHold`. A `canHold` that refuses nothing, or an
+  `OpGen` that supplies none, exercises only the trivial direction. The census row used to excuse
+  this as "rather than missing a branch", and the guard now reports it. New lines: `… every
+  container-valid pair …` and `… every refused pair …`. 3 results become 5.
+
+**Which domains go RED.** A consumer whose own generator never draws a refusal on one of these
+families now sees the guard instead of a pass. The subject laws are unchanged, so the guard line is
+the ONLY red line. Each family's suite in this repository holds that as a must-fail case: an
+`Inc`-only `StreamGen` (`casLaws`, `idempotencyLaws`), a generator of only applicable notes
+(`aiSurfaceLaws`), the five well-formed pipeline shapes (`transformLaws`), one iteration
+(`columnarValidatorLaws`), and an `OpGen` with no `CanHold` (`diffContainedLaws`). Two cases break
+without any generator at fault:
+
+- **`diffContainedLaws` over a witness with no container capability is now RED by design.** Such a
+  witness has no refusal for the iff to demand, so it has nothing this family can certify. Run
+  `diffLaws` instead, and record why in your census.
+- **`columnarValidatorLaws` at fewer than three iterations** reports the guard. Run it at a realistic
+  count; the kit's own suites use 200.
+
+**What a consumer does.** It is the same remedy as `reducer` above. Read the red line, WIDEN THE
+GENERATOR so it can draw the side it names, and do not raise the iteration count or hunt for a
+seed. The kit's reference generators show the shape. Give the refusal its own STRATUM: a class of
+draws that is refused in every reachable state, drawn at a fixed rate. Do not rely on a refusal
+that depends on where the state happens to sit. `ConformanceTests.stratifiedStreamGen` adds an
+overdraw no counter state absorbs. `AiSurfaceTests.genNoteOp` removes a note that is never there.
+`LawVectorExport.lawGen` cycles eight shapes, one of which names an unknown column.
+`ConformanceTests.containedGen` puts a non-container leaf under every root.
+
+**Nothing else moves.** The published transform-laws corpus (`conformance/laws/transform-laws.json`
+and its byte copy in the shared corpus) is byte-identical. Its sample already carried an
+always-refused shape, so hosts reading it see no change. No member was added, removed or retyped,
+and the roster export stays `schema: 4`. Its `adequacy` cell reads `guarded-reached` for all six
+where it read `unconditional`. The ratchet Phase 220 left in the suite, six permitted violators
+asserted exactly, is now the plain property. Every family `Families.refusalAudit` classes `Drawn`
+is `Guarded`, with no exceptions.
+
 ## 0.30.1 — draft
 
 **This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries

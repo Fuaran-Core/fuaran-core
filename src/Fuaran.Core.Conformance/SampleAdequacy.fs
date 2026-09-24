@@ -381,20 +381,44 @@ module SampleAdequacy =
           // family that certifies the unsigned path is `noAttestationVacuityLaws` beside it.
           "Conformance.attestationLaws", Guarded [ "signing outcome" ]
 
+          // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
+          // found and left for this phase. Each was `Unconditional` on the strength of what every
+          // iteration BUILDS, and each also carries a law that compares a REFUSED outcome — an
+          // agreement or an iff that holds trivially when nothing was refused — over a population
+          // the run DRAWS. So each counts its accepted and refused cases and emits the guard, and
+          // each kit reference generator is stratified so the guard never fires on it.
+          //
+          // `match ≡ append` compares a domain refusal with a CAS `Domain` rejection only when the
+          // caller's StreamGen draws a refused op.
+          "Conformance.casLaws", Guarded [ "accepted"; "refused" ]
+          // `fresh ≡ append` and the true-head CAS arm forward a domain refusal verbatim only when
+          // the drawn fresh op is refused; `Duplicate` and `StaleHead` beside them are built.
+          "Conformance.idempotencyLaws", Guarded [ "accepted"; "refused" ]
+          // `explainRejection` and the rejected arms of the allow / approve parity read a reducer
+          // rejection only when the caller's op generator draws one; the decision axis, the unknown
+          // tool and the unknown proposal id are built.
+          "Conformance.aiSurfaceLaws", Guarded [ "accepted"; "refused" ]
+          // The Error/Error arm of the parity law is reached only when the caller's generator yields
+          // a pipeline the reference refuses.
+          "Conformance.transformLaws", Guarded [ "accepted"; "refused" ]
+          // The kit draws its own sample here, and a fault-free draw satisfies the soundness law as
+          // 0 = 0. The roll is stratified by iteration index, so three iterations reach both faults;
+          // a shorter run can still miss them, which is why the class is not `Unconditional`.
+          "Conformance.columnarValidatorLaws", Guarded [ "null cell"; "out-of-range cell" ]
+          // The refusal iff reads the drawn pair (and the minted probe) under the witness's
+          // `canHold`; a canHold that refuses nothing, or none at all, exercises only its trivial
+          // direction — the "rather than missing a branch" this row used to excuse.
+          "Conformance.diffContainedLaws", Guarded [ "accepted"; "refused" ]
+
           // ---- unconditional: every iteration builds the evidence for every branch ----
           "Conformance.witnessLaws", Unconditional "each iteration rebuilds a drawn node and re-reads every accessor"
           "Conformance.streamLaws", Unconditional "each iteration applies, replays and tampers the same chain"
           "Conformance.diffLaws", Unconditional "each iteration diffs a pair and re-applies the emitted script"
-          "Conformance.diffContainedLaws",
-          Unconditional
-              "each iteration diffs a pair under the witness's own canHold and asks all three questions of it — the refusal law is an IFF checked every iteration, so a witness supplying no CanHold exercises its trivial direction rather than missing a branch"
           "Conformance.normalizeLaws", Unconditional "each iteration normalises a drawn script and compares both ways"
           "Conformance.snapshotLawsWith", Unconditional "each iteration takes a snapshot and replays across it"
           "Conformance.snapshotLaws", Unconditional "delegates to snapshotLawsWith"
           "Conformance.dagLaws", Unconditional "each iteration builds, replays, tampers and round-trips one DAG"
           "Conformance.captureReplayLaws", Unconditional "each iteration records, replays and tampers one session"
-          "Conformance.transformLaws",
-          Unconditional "each iteration compares the host evaluator against the reference on the same input"
           "Conformance.capabilityLaws",
           Unconditional "each iteration exercises accept, reject and unknown-arg on a built declaration"
           "Conformance.queryLaws",
@@ -411,7 +435,6 @@ module SampleAdequacy =
           Unconditional "each iteration loads a pack and refuses a stale pin and an unknown base"
           "Conformance.aggregateParityLaws",
           Unconditional "each iteration compares aggregate against a single-group groupBy on the same column"
-          "Conformance.columnarValidatorLaws", Unconditional "each iteration injects a known fault count and validates"
           "Conformance.incrementalLaws",
           Unconditional "each iteration compares evalFrom against a full evalPipeline over the same change"
           "Conformance.paramLaws",
@@ -430,8 +453,6 @@ module SampleAdequacy =
           Unconditional
               "the left-inverse law is BUILT by every iteration — one drawn op round-tripped through the domain's own Decode, and a codec with a total left inverse is injective — so the family's weight does not rest on the collision search beside it, whose own third law fails when the draw was too narrow to compare anything"
           "Conformance.projectionLaws", Unconditional "each iteration projects, re-imports and scopes the same tree"
-          "Conformance.aiSurfaceLaws",
-          Unconditional "each iteration walks the catalogue and exercises approved, denied and unknown"
           "Conformance.noAttestationVacuityLaws",
           Unconditional "each iteration asks the no-op sink to sign and to verify"
           "Conformance.hashFnLaws", Unconditional "each iteration reorders, drops and bit-flips the same chain"
@@ -439,9 +460,6 @@ module SampleAdequacy =
           Unconditional "the budget IS the sample size, and it is the caller's own declared parameter"
           "Conformance.attributedLaws",
           Unconditional "each iteration lifts, re-attributes and round-trips the same stream"
-          "Conformance.casLaws", Unconditional "each iteration appends at the true head, at a stale head, and races two"
-          "Conformance.idempotencyLaws",
-          Unconditional "each iteration appends a fresh key then re-sends it under both heads"
           "Conformance.slotParamLaws",
           Unconditional
               "each iteration BUILDS the bound, substituted, unbound, mistyped and literal-only runs over the same drawn table — the draw varies the table, the page size and which column is ordered on, never which branch is taken"

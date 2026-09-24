@@ -96,6 +96,11 @@ let private emptyWitness: AiSurfaceWitness<unit, string, string> =
       Explain = fun m -> { Message = m; Alternatives = [] } }
 
 // ---- the op generator for the laws (covers both kinds + a rejection path) ----
+// Phase 223 — this is the kit reference generator for `aiSurfaceLaws`, and it was already
+// STRATIFIED before the family was guarded: the laws apply every draw to the fixed `state0`, so
+// `RemoveNote "missing"` is refused in every state the run reaches and `RemoveNote "n1"` applies in
+// every one. Each is a third of the draws, so the chance that a two-hundred-iteration run misses
+// the rejected stratum is (2/3)^200.
 
 let genNoteOp (rng: ConfRng.T) : NoteOp * ConfRng.T =
     let k, r1 = ConfRng.intBelow 3 rng
@@ -301,5 +306,30 @@ let tests =
           <| fun _ ->
               let results = Conformance.aiSurfaceLaws witness genNoteOp state0 1234 200
 
+              Expect.equal (List.length results) 6 "four subject laws, and the two Phase 223 guards"
+
               for r in results do
-                  Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample) ]
+                  Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+
+          testCase
+              "Phase 223 — an op generator that draws no rejection turns aiSurfaceLaws RED, on the rejected-op guard alone"
+          <| fun _ ->
+              // The must-fail case: both catalogued kinds, neither ever rejected (fresh ids only, and
+              // a removal of the note `state0` holds). Every subject law passes — the guidance law
+              // and the rejected-parity arms were simply never asked.
+              let applicableOnly (rng: ConfRng.T) : NoteOp * ConfRng.T =
+                  let k, r1 = ConfRng.intBelow 2 rng
+
+                  if k = 0 then
+                      let v, r2 = ConfRng.intBelow 1000 r1
+                      AddNote("fresh" + string v, "text"), r2
+                  else
+                      RemoveNote "n1", r1
+
+              let results = Conformance.aiSurfaceLaws witness applicableOnly state0 1234 200
+
+              Expect.equal
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLaws"
+                    + "the sample reached every rejected op the laws distinguish" ]
+                  "exactly the rejected-op guard is red" ]

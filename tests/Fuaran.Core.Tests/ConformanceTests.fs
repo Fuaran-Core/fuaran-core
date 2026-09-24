@@ -84,6 +84,58 @@ let private genStreamOp (rng: ConfRng.T) : CounterOp * ConfRng.T =
 
 let streamGen: StreamGen<CounterOp, int> = { State0 = 0; Op = genStreamOp }
 
+// ---- Phase 223: the stratified reference generators for the drawn-refusal families ----
+
+/// A `Dec` no reachable counter state can absorb. Every chain these laws build is a handful of
+/// `Inc` draws below five, so an overdraw is refused in EVERY state the run can reach.
+let overdraw = 1_000_000
+
+/// `streamGen` with its refusal made a STRATUM rather than a coincidence: one draw in three is
+/// `Inc` (applies in every state), one is `Dec n` (applies or refuses by the state, as before), and
+/// one is an overdraw (refuses in every state). The kit reference generator for `casLaws` and
+/// `idempotencyLaws`, whose agreement laws compare a domain refusal only when one is drawn — so a
+/// run of the default size reaches both outcomes by the generator's shape, not by the counter
+/// happening to sit low. A StreamGen is not told the iteration index, so the stratum is drawn at a
+/// fixed rate: over the two hundred iterations the reference runs, the chance that no draw in the
+/// arm lands on it is (2/3)^200.
+let private genStratifiedStreamOp (rng: ConfRng.T) : CounterOp * ConfRng.T =
+    let stratum, r1 = ConfRng.intBelow 3 rng
+    let n, r2 = ConfRng.intBelow 5 r1
+
+    match stratum with
+    | 0 -> Inc n, r2
+    | 1 -> Dec n, r2
+    | _ -> Dec overdraw, r2
+
+let stratifiedStreamGen: StreamGen<CounterOp, int> =
+    { State0 = 0
+      Op = genStratifiedStreamOp }
+
+/// The refusal-free generator every drawn-refusal suite's must-fail case uses: `Inc` only, so no
+/// op is ever refused and the family's refused-op guard is the only line that can say so.
+let refusalFreeStreamGen: StreamGen<CounterOp, int> =
+    { State0 = 0
+      Op =
+        fun rng ->
+            let n, r = ConfRng.intBelow 5 rng
+            Inc n, r }
+
+/// The stratified reference generator for `diffContainedLaws`: "section" holds children and "para"
+/// is a leaf, and every drawn tree carries a para directly under its root, so the minted probe
+/// always has a non-container to graft under unless the four derived ops removed it. Before this
+/// the demanding direction of the refusal iff was reached on whichever draws happened to carry a
+/// para (100 of 200 at seed 4242).
+let containedGen: OpGen<RNode, string> =
+    { Tree =
+        fun rng ->
+            let t, r = genTree rng
+
+            { t with
+                Children = t.Children @ [ RNode.leaf "strat-para" "para" "v" ] },
+            r
+      FreshNode = opGen.FreshNode
+      CanHold = Some(fun (n: RNode) -> n.Kind <> "para") }
+
 // ---- Phase 60/65: an in-repo keyed signing sink + a wide collision-resistant HashFn stand-in ----
 // GP3: no cryptographic hash ships in Core; these live test-side. `keyedSink` is a keyed FNV/HMAC-style
 // stand-in (head-bound: Verify recomputes the keyed tag AND checks the covered head), enough to prove
@@ -357,18 +409,23 @@ let tests =
               // it. Run against a witness with a real capability — the generator builds "section"
               // internally and "para" at the leaves, so a para is a genuine non-container and the
               // family's minted probe has somewhere to graft.
-              let containerGen =
-                  { opGen with
-                      CanHold = Some(fun (n: RNode) -> n.Kind <> "para") }
+              // Phase 223 — the stratified `containedGen` (a para under every drawn root), which is
+              // the kit reference generator the census row is measured against.
+              let containerGen = containedGen
 
               // The probe was MEASURED rather than trusted, because a refusal law is green whether
-              // or not its demanding direction is ever taken: under this predicate 100 of 200
+              // or not its demanding direction is ever taken: under this predicate, before the
+              // Phase 223 stratification, 100 of 200
               // iterations mint the violating probe (the rest draw an `after` with no para at all),
               // all 100 are refused with the offender named by id AND kind, and all 100 are
               // ACCEPTED by the plain `toOps` — so the refusal really is the container check's
               // contribution and not something else's.
               let results = Conformance.diffContainedLaws nodew idw containerGen 4242 200
-              Expect.equal (List.length results) 3 "reconstruction + applyability + refusal exactness"
+
+              Expect.equal
+                  (List.length results)
+                  5
+                  "reconstruction + applyability + refusal exactness + the two Phase 223 guards"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -413,6 +470,19 @@ let tests =
                   (Conformance.diffLaws nodew idw refuseAll 4242 200
                    |> List.forall (fun r -> r.Passed))
                   "the PLAIN diff laws are unaffected by the predicate — the container check is the only difference"
+
+          testCase
+              "Phase 223 — a canHold that refuses nothing turns diffContainedLaws RED, on the refused-pair guard alone"
+          <| fun _ ->
+              // The must-fail case: `opGen` supplies no `CanHold`, so the refusal iff is only ever
+              // asked in its trivial direction. The three subject laws pass; the guard does not.
+              let results = Conformance.diffContainedLaws nodew idw opGen 4242 200
+
+              Expect.equal
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  [ SampleAdequacy.lawPrefix "Conformance.diffContainedLaws"
+                    + "the sample reached every refused pair the laws distinguish" ]
+                  "exactly the refused-pair guard is red"
 
           testCase "a deliberately-broken witness fails with a reproducible counterexample"
           <| fun _ ->
@@ -1085,9 +1155,12 @@ let functionVerifyTests =
           // Phase 79 — compare-and-append (optimistic concurrency) over the StreamWitness.
           testCase "casLaws certify match≡append + stale-rejection + race-serialisation (Phase 79)"
           <| fun _ ->
-              let results = Conformance.casLaws sw streamGen OpStream.defaultHash 4242 200
+              // Phase 223 — the stratified reference generator, so the refused-op guard is reached
+              // by the generator's shape.
+              let results =
+                  Conformance.casLaws sw stratifiedStreamGen OpStream.defaultHash 4242 200
 
-              Expect.equal (List.length results) 3 "match + stale + race laws reported"
+              Expect.equal (List.length results) 5 "match + stale + race laws, and the two Phase 223 guards"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -1098,7 +1171,7 @@ let functionVerifyTests =
                   failtestf "casLaws failed under defaultHash:\n%s" (String.concat "\n" fails)
 
               // the CAS is over head identity, so it is HashFn-agnostic — green under a wide HashFn too.
-              let wide = Conformance.casLaws sw streamGen wideHash 4242 200
+              let wide = Conformance.casLaws sw stratifiedStreamGen wideHash 4242 200
 
               Expect.isTrue
                   (wide |> List.forall (fun r -> r.Passed))
@@ -1106,9 +1179,22 @@ let functionVerifyTests =
 
               // seed-replay determinism
               Expect.equal
-                  (Conformance.casLaws sw streamGen OpStream.defaultHash 4242 200)
+                  (Conformance.casLaws sw stratifiedStreamGen OpStream.defaultHash 4242 200)
                   results
                   "same seed ⇒ identical report"
+
+          testCase "Phase 223 — a StreamGen that draws no refusal turns casLaws RED, on the refused-op guard alone"
+          <| fun _ ->
+              // The must-fail case: `Inc` only, so `match ≡ append` never compares a refusal. Every
+              // subject law still passes — which is exactly the green this guard exists to refuse.
+              let results =
+                  Conformance.casLaws sw refusalFreeStreamGen OpStream.defaultHash 4242 200
+
+              Expect.equal
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  [ SampleAdequacy.lawPrefix "Conformance.casLaws"
+                    + "the sample reached every refused op the laws distinguish" ]
+                  "exactly the refused-op guard is red"
 
           // Phase 52 — the verifyFunction contract honesty boundary (effect-class-aware guard).
           testCase

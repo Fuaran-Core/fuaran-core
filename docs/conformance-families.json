@@ -24,7 +24,7 @@
       "reason": "needs-witness-capability",
       "discharges": [],
       "cases": "800",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
     {
@@ -132,7 +132,7 @@
       "reason": "stronger-promise",
       "discharges": [],
       "cases": "600",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
     {
@@ -192,7 +192,7 @@
       "reason": "seam-not-every-domain-has",
       "discharges": [],
       "cases": "400",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
     {
@@ -312,7 +312,7 @@
       "reason": "stronger-promise",
       "discharges": [],
       "cases": "600",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
     {
@@ -407,7 +407,7 @@
       "reason": "stronger-promise",
       "discharges": [],
       "cases": "800",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
     {
@@ -692,7 +692,7 @@
       "reason": "seam-not-every-domain-has",
       "discharges": [],
       "cases": "32",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
     {

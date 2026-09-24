@@ -54,12 +54,30 @@ let private buildIdem ops =
 
     ops |> List.fold step (Ok(0, OpStream.empty, KeyIndex.empty))
 
-let private genStreamOp (rng: ConfRng.T) : CounterOp * ConfRng.T =
-    let kind, r1 = ConfRng.intBelow 2 rng
-    let n, r2 = ConfRng.intBelow 5 r1
-    (if kind = 0 then Inc n else Dec n), r2
+// Phase 223 — the kit reference generator for `idempotencyLaws`, stratified (it replaces the
+// two-way Inc/Dec draw this file carried): one draw in three is an overdraw no reachable counter
+// state absorbs, so the fresh-key arms reach a domain refusal by the generator's shape rather
+// than by the counter happening to sit low (the shape `ConformanceTests.stratifiedStreamGen` has,
+// over this file's own private witness).
+let private stratifiedStreamGen: StreamGen<CounterOp, int> =
+    { State0 = 0
+      Op =
+        fun rng ->
+            let stratum, r1 = ConfRng.intBelow 3 rng
+            let n, r2 = ConfRng.intBelow 5 r1
 
-let private streamGen: StreamGen<CounterOp, int> = { State0 = 0; Op = genStreamOp }
+            match stratum with
+            | 0 -> Inc n, r2
+            | 1 -> Dec n, r2
+            | _ -> Dec 1_000_000, r2 }
+
+// ... and the refusal-free one the must-fail case uses: `Inc` only.
+let private refusalFreeStreamGen: StreamGen<CounterOp, int> =
+    { State0 = 0
+      Op =
+        fun rng ->
+            let n, r = ConfRng.intBelow 5 rng
+            Inc n, r }
 
 [<Tests>]
 let tests =
@@ -260,9 +278,12 @@ let tests =
           testCase "idempotencyLaws certify fresh≡append + duplicate-convergence + rebuild-parity + key-before-CAS"
           <| fun _ ->
               let results =
-                  Conformance.idempotencyLaws keyOf sw streamGen OpStream.defaultHash 8282 200
+                  Conformance.idempotencyLaws keyOf sw stratifiedStreamGen OpStream.defaultHash 8282 200
 
-              Expect.equal (List.length results) 4 "fresh + duplicate + parity + composition laws reported"
+              Expect.equal
+                  (List.length results)
+                  6
+                  "fresh + duplicate + parity + composition laws, and the two Phase 223 guards"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -274,6 +295,20 @@ let tests =
 
               // seed-replay determinism of the kit itself
               Expect.equal
-                  (Conformance.idempotencyLaws keyOf sw streamGen OpStream.defaultHash 8282 200)
+                  (Conformance.idempotencyLaws keyOf sw stratifiedStreamGen OpStream.defaultHash 8282 200)
                   results
-                  "same seed ⇒ identical report" ]
+                  "same seed ⇒ identical report"
+
+          testCase
+              "Phase 223 — a StreamGen that draws no refusal turns idempotencyLaws RED, on the refused-op guard alone"
+          <| fun _ ->
+              // The must-fail case: every subject law passes over `Inc`-only draws, and the guard is
+              // the one line that says the verbatim-forwarding arms were never exercised.
+              let results =
+                  Conformance.idempotencyLaws keyOf sw refusalFreeStreamGen OpStream.defaultHash 8282 200
+
+              Expect.equal
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  [ SampleAdequacy.lawPrefix "Conformance.idempotencyLaws"
+                    + "the sample reached every refused fresh op the laws distinguish" ]
+                  "exactly the refused-op guard is red" ]
