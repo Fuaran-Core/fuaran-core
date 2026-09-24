@@ -1035,6 +1035,104 @@ let idlFStarTargetTests =
                   "and the lookups cite their steps at the same application, so the body re-binds no `match`"
 
           testCase
+              "a suffixed constructor's leaf members are DECODED through named, opaque readers, and the round trip cites one value lemma per reader"
+          <| fun _ ->
+              // Phase 224. Phase 222's decoder wrote every member's read INLINE in the kind's arm,
+              // so the round-trip arm's query unfolded sixteen reads inside a seventeen-deep nest of
+              // outcomes: 345 units of rlimit for `rt_vkind`'s Grid arm at k=16, red at 40, even
+              // when handed each read's value. Each assertion below fails against that emitter (the
+              // go-red: no reader is emitted, so 0 where 16 are expected) and holds against this
+              // one, whose k=16 round-trip arm discharges at 0.33 units.
+              let model = modelOver uiScaleIdl
+              let proofs = proofsOver uiScaleIdl
+
+              // The whole text of one top-level definition, up to the next `let` / `and`.
+              let definition (name: string) (text: string) =
+                  let text = lf text
+                  let start = text.IndexOf(sprintf " %s (#num #flt: eqtype)" name)
+                  Expect.isTrue (start >= 0) (sprintf "the module declares %s" name)
+                  let rest = text.Substring start
+                  let stop = Regex.Match(rest.Substring 1, @"(?m)^(and|let|\[@@) ")
+
+                  if stop.Success then
+                      rest.Substring(0, stop.Index + 1)
+                  else
+                      rest
+
+              Expect.equal
+                  (Regex
+                      .Matches(
+                          lf model,
+                          @"(?m)^\[@@""opaque_to_smt""\]\nlet rd_vkind__Grid__c[0-9]+ \(#num #flt: eqtype\) \(el: jval num flt\) : Tot \(outcome \(option \(string\)\)\) ="
+                      )
+                      .Count)
+                  16
+                  "one top-level, OPAQUE reader per conditional member of the suffixed kind"
+
+              let decoder = definition "dec_vkind" model
+
+              Expect.equal
+                  (Regex
+                      .Matches(
+                          decoder,
+                          @"let o[0-9]+ : outcome \(option \(string\)\) = rd_vkind__Grid__c[0-9]+ #num #flt el in"
+                      )
+                      .Count)
+                  16
+                  "the decoder APPLIES each reader, where Phase 222's inlined the read"
+
+              Expect.isFalse
+                  (decoder.Contains "get_prop \"c00\"")
+                  "and no hoisted member's read is left inline in the decoder"
+
+              // A member whose read calls the decoder family (here Wide's list member `i`) cannot be
+              // hoisted above the family, and is read inline exactly as before.
+              Expect.isFalse
+                  (model.Contains "rd_vkind__Wide__i ")
+                  "a member whose read reaches the family is not hoisted"
+
+              Expect.stringContains decoder "get_prop \"i\" el" "and is read inline, as Phase 222 read it"
+
+              for m in [ "g"; "h"; "j"; "k" ] do
+                  Expect.stringContains
+                      model
+                      (sprintf "let rd_vkind__Wide__%s (#num #flt: eqtype)" m)
+                      (sprintf "Wide's leaf member `%s` has its reader, optional or omit-at-default alike" m)
+
+              Expect.equal
+                  (Regex.Matches(proofs, @"(?m)^let rv_vkind__Grid__c[0-9]+ \(#num #flt: eqtype\)").Count)
+                  16
+                  "one value lemma per reader"
+
+              Expect.stringContains
+                  (definition "rv_vkind__Grid__c00" proofs)
+                  "reveal_opaque (`%rd_vkind__Grid__c00)"
+                  "a value lemma is the only place its reader is looked inside"
+
+              let arm = definition "rt_vkind__Grid" proofs
+
+              Expect.equal
+                  (Regex.Matches(arm, @"rv_vkind__Grid__c[0-9]+ #num #flt x;").Count)
+                  16
+                  "the round-trip arm cites each reader's value lemma"
+
+              Expect.isFalse
+                  (Regex.IsMatch(arm, @"\(match f[0-9]+ with \| None -> lk_"))
+                  "and carries no presence case of its own for a hoisted member"
+
+              Expect.isTrue
+                  (Regex.IsMatch(
+                      definition "rt_vkind__Wide" proofs,
+                      @"\(match f[0-9]+ with \| None -> lk_vkind__Wide__i__absent"
+                  ))
+                  "an unhoisted member keeps its two-way citation of the lookups"
+
+              // A vocabulary with no suffixed constructor emits no reader at all — the shape is
+              // additive, which is what keeps `DocVocabulary` byte-identical.
+              let small = modelOver (gridAt 1)
+              Expect.isFalse (small.Contains "rd_") "below the split threshold nothing is hoisted"
+
+          testCase
               "the family recurses on a lexicographic measure, and the rlimit precedent is retired with the shape that needed it"
           <| fun _ ->
               let proofs = proofsOver ReferenceIdl.refIdl

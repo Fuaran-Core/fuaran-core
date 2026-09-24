@@ -1,5 +1,50 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-24 — D55: a member's READ is a named, opaque reader with one value lemma — the k=16 round trip discharges under `--z3rlimit 40` (continues D54)
+
+**Decided (Phase 224).** A conditional member of a suffixed constructor (D52) whose read calls
+nothing in the decoder's mutual family is decoded through a named, top-level, opaque READER,
+`rd_<T>__<Ctor>__<member>`. Such a member is a scalar, a verbatim value, a sentinel, or a closed
+string set, whose decoder is top-level. The decoder applies the reader where Phase 222 inlined the
+read. The proof script emits one VALUE lemma per reader, `rv_<T>__<Ctor>__<member>`, beside the
+lookups: the reader on the encoded object is `Ok` the member. It is proved by revealing the reader
+and citing the member's two lookups. The round-trip arm cites that lemma in place of its two-way
+presence case. This is D52's move for the encoder, applied to the decoder, which is the candidate
+D54 named. Only suffixed constructors get readers, so a vocabulary with none emits byte-identical
+text (`DocVocabulary` does).
+
+**What it is measured to buy.** Same synthetic probe as D52 and D54, pinned prover, one
+perturbation per run, `--query_stats`:
+
+| k | round-trip arm, 222 → 224 | slowest lookup, 224 (222) |
+|---|---|---|
+| 5 | 1.12 → 0.179 | 0.172 (0.19) |
+| 8 | 2.92 → 0.220 | 0.244 (0.24) |
+| 12 | 24.4 → 0.273 | 0.344 (0.34) |
+| 16 | **345 → 0.328** | 0.446 (0.446) |
+
+The mechanism D54 named is CONFIRMED, not merely consistent with the data. The first measurement
+was the one change alone, hand-applied to 222's k=16 output, beside an unchanged copy in the same
+pass. The copy reproduced 345.36, and the change gave 0.328. The emitter's version was then
+measured at `--z3rlimit 40` at all four widths and agrees. The k=16 round-trip clause D54 carried
+forward is met: nothing admitted, no statement weakened, the rlimit still 40. The clause is
+therefore NOT retired, and no operator decision about retiring it is needed.
+
+**Why the body-side remedies could not work, now that this one has.** D54's two perturbations
+changed what the arm's query was TOLD about each read (a presence split, then the read's value). The
+read itself stayed in the query's term, because the decoder's body is what the query unfolds. A
+fact about a term does not stop the solver from working through the term. Making the term opaque
+does.
+
+**The boundary, stated.** A member whose read CALLS the family (a record, union, node, list or map)
+cannot be defined above the family, so it is read inline and keeps its two-way citation, as in 222.
+No vocabulary here carries a wide constructor of such members, so its cost at width is unmeasured,
+not known to be cheap. The obvious extension, if one is ever wanted, is a reader of the member's
+PRESENCE alone, `get_prop` refined by `jsize`, opaque and non-recursive, with the family decoder
+applied to its result. That is named here and not built: nothing measured asks for it.
+
+**Not re-proposed.** D52's seven remedies and D54's two round-trip perturbations stay refuted.
+
 ## 2026-09-24 — D54: a suffix chain's argument is an APPLICATION, not a `match` — the k=16 lookups discharge; the round trip is the next wall, and it is not the same mechanism (continues D52)
 
 **Decided (Phase 222).** Every link of a suffixed member list (D52) now passes its member to its

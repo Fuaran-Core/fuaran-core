@@ -1726,6 +1726,48 @@ width, was an operator decision. The operator ruled for a successor, **Phase 224
 carries the k=16 round trip under `--z3rlimit 40` with this candidate named (DECISIONS D54). Nothing is admitted or weakened, and the k=16 probe
 is not in the leg.
 
+**Phase 224 — each member's READ is an opaque reader with one value lemma: the k=16 round trip
+discharges, measured.** 222 located the round-trip cost in the decoder's term, not in the proof body:
+the kind's arm read every member INLINE, and the arm's query unfolded sixteen reads inside the
+decoder's seventeen-deep nest of outcomes even when it was handed each read's value. 224 applies
+Phase 204's move to the decoder. A conditional member of a suffixed constructor whose read calls
+nothing in the decoder family (a scalar, a verbatim value, a sentinel, or a closed string set, whose
+decoder is top-level) is now read through a named, top-level, `[@@"opaque_to_smt"]` READER,
+`rd_<T>__<Ctor>__<member>`, which the decoder applies where it used to inline the read. The proof
+script states one VALUE lemma per reader beside the lookups, `rv_<T>__<Ctor>__<member>`: the reader
+applied to the encoded object is `Ok` the member. It is proved by revealing the reader once and
+citing the member's two lookups, and it is the only place a reader is looked inside. The round-trip
+arm cites the value lemma where it used to carry the member's two-way presence case, so its query
+holds k opaque applications and nothing to unfold. A member whose read CALLS the family (a record,
+union, node, list or map) has no definition above the family to be hoisted into, so it is read
+inline and keeps its two-way citation, exactly as 222 emitted it. That is the shape's stated
+boundary. No vocabulary here carries a wide constructor of such members, so it is unmeasured
+rather than known to be cheap. `IdlFStarTargetTests` pins the shape: sixteen opaque readers for
+`Grid`, the decoder applying each and inlining none, sixteen value lemmas cited by `rt_vkind__Grid`
+with no presence case, and `Wide`'s list member still inline. It fails against 222's emitter
+(`expected: 16, actual: 0`), which is the go-red.
+
+Measured first by hand, then from the emitter, on the pinned prover, one perturbation per run,
+`--query_stats`, same synthetic probe as 204 and 222:
+
+| k | round-trip arm (`rt_vkind`, Grid), 222 → 224 | slowest lookup (224; 222) | slowest value lemma | proof script check |
+|---|---|---|---|---|
+| 5 | 1.12 → **0.179** | 0.172 (0.19) | 0.026 | 20 s, green |
+| 8 | 2.92 → **0.220** | 0.244 (0.24) | 0.033 | 26 s, green |
+| 12 | 24.4 → **0.273** | 0.344 (0.34) | 0.043 | 44 s, green |
+| 16 | **345 → 0.328** | 0.446 (0.446) | 0.053 | 72 s, green |
+
+Every row is green at `--z3rlimit 40`. The first k=16 figure is the change ALONE, hand-applied to
+222's committed k=16 output and measured at `--z3rlimit 400` beside an unchanged copy in the same
+pass. The copy reproduced 222's wall (345.36 against the recorded 345.45) and the change took the
+arm to 0.328, which is the falsifier run in both directions. The emitter's output was then measured
+at `--z3rlimit 40` and agrees. The growth is gone, not moved: the arm rises ~0.05 units per four
+members where it rose ~1.7x per member. No lookup regressed past 222's figures. **The k=16
+round-trip clause is met.** Nothing is admitted or weakened, and the rlimit is still 40. The k=16
+probe is still a probe and not in the leg; the certification set's regenerated models are, and they
+are what `check.ps1` proves (`modules.json`). `DocVocabulary` has no suffixed constructor and
+regenerates byte-identically.
+
 **The mutual-family split — RETIRED as a successor (Phase 204).** What the shapes above fix is the
 WIDTH of a query; what it leaves alone is the size of the mutual family every query is checked
 inside, which is where the cost turns superlinear as the proof vocabulary widens (Phase 150: the

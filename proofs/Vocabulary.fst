@@ -158,6 +158,18 @@ let sfx_vkind__Embed__content_hash (#num #flt: eqtype) (e: option (jval num flt)
 let sfx_vkind__Embed__props (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
   match e with | None -> rest | Some v -> ("props", v) :: rest
 
+(* The member READERS — one per conditional member of a suffixed constructor whose read calls
+   nothing in the decoder family, applied by the decoder below rather than inlined into it.
+   Opaque to the solver: only the per-reader value lemmas of the proof script look inside. *)
+
+[@@"opaque_to_smt"]
+let rd_node__Node__hidden (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (bool))) =
+  (match get_prop "hidden" el with | Error _ -> Ok None | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok (Some w)))
+
+[@@"opaque_to_smt"]
+let rd_node__Node__label (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (string))) =
+  (match get_prop "label" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w)))
+
 let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__node__Node i k e0 e1 ->
@@ -229,8 +241,8 @@ and enc_opt_m_json (#num #flt: eqtype) (o: option (list (string & jval num flt))
 let rec dec_node (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (node num flt)) (decreases %[(jsize el <: nat); 0]) =
   let oid : outcome string = str_field "id" el in
   let ok : outcome (vkind num flt) = (match get_prop "kind" el with | Error e -> Error e | Ok v -> dec_vkind v) in
-  let o0 : outcome (option (bool)) = (match get_prop "hidden" el with | Error _ -> Ok None | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok (Some w))) in
-  let o1 : outcome (option (string)) = (match get_prop "label" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
+  let o0 : outcome (option (bool)) = rd_node__Node__hidden #num #flt el in
+  let o1 : outcome (option (string)) = rd_node__Node__label #num #flt el in
   (match oid with | Error e -> Error e | Ok i -> (match ok with | Error e -> Error e | Ok k -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__Node i k f0 f1)))))
 
 and dec_vkind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (vkind num flt)) (decreases %[(jsize el <: nat); 0]) =

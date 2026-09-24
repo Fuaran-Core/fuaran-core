@@ -826,6 +826,39 @@ module FStarTarget =
     let private suffixName (typeName: string) (label: string) (m: Member) =
         sprintf "sfx_%s__%s__%s" typeName label (snake m.Name)
 
+    /// Phase 224 — a member whose decode reads nothing in the decoder's mutual family: a scalar, a
+    /// verbatim value, a sentinel, or a closed string set (whose decoder is top-level, above the
+    /// family). Only such a member's read can be hoisted out of the family as a top-level
+    /// definition; a record, union, node, list or map member's read calls the family itself.
+    let private leafSlot (s: Slot) =
+        match s with
+        | SStr
+        | SInt
+        | SBool
+        | SFloat
+        | SJson
+        | SSentinel _
+        | SEnum _ -> true
+        | SRecord _
+        | SUnion _
+        | SNode
+        | SList _
+        | SMap _ -> false
+
+    /// Phase 224 — a conditional member of a SUFFIXED constructor (8a) whose read is a leaf: the
+    /// decoder reads it through a named, opaque READER (8a'') and the round trip cites one value
+    /// lemma for it. The same set of constructors as the suffixes, so a vocabulary with no suffixes
+    /// emits byte-identical text.
+    let private hoisted (ms: Member list) (m: Member) =
+        suffixed ms && m.Presence.IsSome && leafSlot m.Slot
+
+    /// One hoisted member's opaque reader, and the lemma giving its value off the encoded object.
+    let private readerName (typeName: string) (label: string) (m: Member) =
+        sprintf "rd_%s__%s__%s" typeName label (snake m.Name)
+
+    let private readerValueName (typeName: string) (label: string) (m: Member) =
+        sprintf "rv_%s__%s__%s" typeName label (snake m.Name)
+
     /// Phase 222 — the per-slot option encoders a suffixed member list applies (8a below).
     let private optEncoderName (s: Slot) = "enc_opt_" + slotName s
 
@@ -956,7 +989,10 @@ module FStarTarget =
     /// The decoder of one member off the object bound to `el`, as a `let`-bound outcome.
     /// Each member is read independently and combined at the end, so a vocabulary with
     /// twenty optional members emits twenty reads rather than 2^20 continuations.
-    let private decMember (el: string) (i: int) (m: Member) =
+    ///
+    /// Phase 224: this is the READ alone — the outcome's type and the expression — which a hoisted
+    /// member's opaque reader (8a'') carries as its body and every other member writes inline.
+    let private decRead (el: string) (m: Member) =
         let name = lit m.Name
         let ty = slotType m.Slot
 
@@ -1019,7 +1055,21 @@ module FStarTarget =
                     d
                     (readInto "v" (fun w -> "Ok " + w))
 
+        outcomeTy, body
+
+    /// The decoder of one member off the object bound to `el`, as a `let`-bound outcome.
+    let private decMember (el: string) (i: int) (m: Member) =
+        let outcomeTy, body = decRead el m
         sprintf "let o%d : outcome (%s) = %s in" i outcomeTy body
+
+    /// Phase 224 — one member of the constructor `label` of `typeName` (its members `ms`): read
+    /// through its opaque reader when it is hoisted (8a''), else written inline as before.
+    let private decMemberOf (typeName: string) (label: string) (ms: Member list) (el: string) (i: int) (m: Member) =
+        if hoisted ms m then
+            let outcomeTy, _ = decRead el m
+            sprintf "let o%d : outcome (%s) = %s #num #flt %s in" i outcomeTy (readerName typeName label m) el
+        else
+            decMember el i m
 
     /// Combine the `let`-bound member outcomes into the constructor application.
     let private decCombine (ms: Member list) (ctor: string) =
@@ -1307,6 +1357,40 @@ module FStarTarget =
                         line (sprintf "  match e with | None -> rest | Some v -> (%s, v) :: rest" (lit m.Name))
                         line ""
 
+            // ---- 8a''. the member readers (Phase 224) ------------------------
+            // The decoder's side of the same move. Each hoisted member's READ is a
+            // named, opaque top-level definition, and the proof script states its value off the
+            // encoded object in one lemma, so the round trip threads k opaque applications rather
+            // than unfolding k inlined reads inside the decoder's nest of outcomes. The boundary: a
+            // member whose read CALLS the decoder family (a record, union, node, list or map) has
+            // no definition above that family to be hoisted into, so it is read inline and its arm
+            // keeps the two-way citation of its lookups, exactly as Phase 222 emitted it.
+            let readers =
+                [ for typeName, label, ms in suffixOwners do
+                      for m in ms do
+                          if hoisted ms m then
+                              yield typeName, label, m ]
+
+            if not readers.IsEmpty then
+                line "(* The member READERS — one per conditional member of a suffixed constructor whose read calls"
+                line "   nothing in the decoder family, applied by the decoder below rather than inlined into it."
+                line "   Opaque to the solver: only the per-reader value lemmas of the proof script look inside. *)"
+                line ""
+
+            for typeName, label, m in readers do
+                let outcomeTy, body = decRead "el" m
+                line "[@@\"opaque_to_smt\"]"
+
+                line (
+                    sprintf
+                        "let %s (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (%s)) ="
+                        (readerName typeName label m)
+                        outcomeTy
+                )
+
+                line (sprintf "  %s" body)
+                line ""
+
             let disc = idl.Wire.Discriminator
             let mutable firstEnc = true
 
@@ -1543,7 +1627,8 @@ module FStarTarget =
                     (lit "kind")
             )
 
-            envArgs |> List.iteri (fun i m -> line (indent 1 (decMember "el" i m)))
+            envArgs
+            |> List.iteri (fun i m -> line (indent 1 (decMemberOf "node" "Node" envArgs "el" i m)))
 
             let envCombine =
                 let rec go i rest =
@@ -1577,7 +1662,10 @@ module FStarTarget =
             for tag, ms in c.Kinds do
                 let sorted = sortMembers ms
                 line (sprintf "    if tag = %s then" (lit tag))
-                sorted |> List.iteri (fun i m -> line (indent 3 (decMember "el" i m)))
+
+                sorted
+                |> List.iteri (fun i m -> line (indent 3 (decMemberOf "vkind" tag sorted "el" i m)))
+
                 line (indent 3 (decCombine sorted (ctorName "vkind" tag)))
                 line "    else"
 
@@ -1600,7 +1688,7 @@ module FStarTarget =
                         )
                     )
 
-                    ms |> List.iteri (fun i m -> line (indent 1 (decMember "el" i m)))
+                    ms |> List.iteri (fun i m -> line (indent 1 (decMemberOf n "Mk" ms "el" i m)))
                     line (indent 1 (decCombine ms (ctorName n "Mk")))
                     line ""
                 | SUnion _ ->
@@ -1653,7 +1741,10 @@ module FStarTarget =
                         | _ ->
                             let sorted = sortMembers ms
                             line (sprintf "    if tag = %s then" (lit tag))
-                            sorted |> List.iteri (fun i m -> line (indent 3 (decMember "el" i m)))
+
+                            sorted
+                            |> List.iteri (fun i m -> line (indent 3 (decMemberOf n tag sorted "el" i m)))
+
                             line (indent 3 (decCombine sorted (ctorName n tag)))
                             line "    else"
 
@@ -1856,6 +1947,13 @@ module FStarTarget =
     // ROUND-TRIP arm (345 units; 24.4 at k=12), and it is NOT the body's split — an arm citing
     // matchless per-member lemmas still costs 271. Successor: Phase 224. See `proofs/README.md`
     // and DECISIONS D54.
+    //
+    // PHASE 224 closed that: the cost was the DECODER's term — sixteen member reads inlined into
+    // the kind's arm, which the arm's query unfolds inside a seventeen-deep nest of outcomes. Each
+    // hoisted member's read is now a named, opaque reader (8a''), and one VALUE lemma per reader
+    // (`rv_<T>__<Ctor>__<member>`, emitted beside the lookups) states it off the encoded object,
+    // so the arm cites k value lemmas over k opaque applications. Same probe, `--z3rlimit 40`:
+    // the k=16 round-trip arm 345 -> 0.33 (k = 5, 8, 12: 0.18, 0.22, 0.27), no lookup moved.
     //
     // The load-bearing fact the linear form rests on is that `find_field name` pushes through an
     // entry with a different key, so `find_field n (if c then t else (k, v) :: t)` is `find_field
@@ -2139,6 +2237,70 @@ module FStarTarget =
                                  @ [ step links[t] "none" None ]
                                  @ (links |> List.skip (t + 1) |> List.map (fun l -> step l "skip" (Some m.Name)))))
 
+                // Phase 224 — one VALUE lemma per hoisted member's reader: the reader applied to the
+                // encoded object is `Ok` the member, proved by revealing the reader once, here, and
+                // citing the member's two lookups above. The round trip cites these by name and never
+                // looks inside a reader, so its query holds k opaque applications and nothing more.
+                ms
+                |> List.iteri (fun i m ->
+                    match m.Presence with
+                    | Some d when hoisted ms m ->
+                        let rd = readerName typeName c.Label m
+                        let applied = sprintf "%s #num #flt (enc_%s #num #flt x)" rd typeName
+                        let b = sprintf "f%d" i
+
+                        let cite =
+                            (citeConditional
+                                (lookupName typeName c.Label m)
+                                { Binder = b
+                                  Name = m.Name
+                                  Default = d })
+                                .TrimEnd
+                                ';'
+
+                        // A closed string set's own round trip is a lemma of section 1, cited
+                        // for the present value exactly as the constructor's arm cites it.
+                        let own =
+                            memberLemma m.Slot (if d.IsNone then "w" else b)
+                            |> Option.map (fun call ->
+                                if d.IsNone then
+                                    sprintf "(match %s with | None -> () | Some w -> %s); " b call
+                                else
+                                    call + "; ")
+                            |> Option.defaultValue ""
+
+                        let req =
+                            if multi then
+                                sprintf "(requires (%s? x)) " c.CtorName
+                            else
+                                ""
+
+                        line (
+                            sprintf
+                                "(* %s — the value of `%s` off the encoded object *)"
+                                (readerValueName typeName c.Label m)
+                                rd
+                        )
+
+                        line (
+                            sprintf
+                                "let %s (#num #flt: eqtype) (x: %s) : Lemma %s(ensures (%s)) ="
+                                (readerValueName typeName c.Label m)
+                                fsType
+                                req
+                                (guarded (sprintf "%s == Ok %s" applied b) "True")
+                        )
+
+                        line (sprintf "  reveal_opaque (`%%%s) (%s);" rd applied)
+                        line "  match x with"
+                        line (sprintf "  | %s -> %s%s" pattern own cite)
+
+                        if multi then
+                            line "  | _ -> ()"
+
+                        line ""
+                    | _ -> ())
+
     /// One type's round trip as a family of lemmas — see 8b above for the shape. `rtHead` supplies
     /// `let rec` / `and`; `line` receives the emitted text.
     let private emitFamily
@@ -2207,6 +2369,10 @@ module FStarTarget =
 
                         match m.Presence with
                         | None -> line (indent 2 (sprintf "%s #num #flt x;" lk))
+                        // Phase 224: a hoisted member is cited by its reader's value lemma, with
+                        // no presence case in the arm and no read for the query to unfold.
+                        | Some _ when hoisted ms m ->
+                            line (indent 2 (sprintf "%s #num #flt x;" (readerValueName typeName c.Label m)))
                         | Some d ->
                             line (
                                 indent

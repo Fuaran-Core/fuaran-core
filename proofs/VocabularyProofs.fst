@@ -151,6 +151,18 @@ let lk_node__Node__label__absent (#num #flt: eqtype) (x: node num flt) : Lemma (
     sk_node__Node__label__none #num #flt (enc_opt_str #num #flt f1) ([])
 #pop-options
 
+(* rv_node__Node__hidden — the value of `rd_node__Node__hidden` off the encoded object *)
+let rv_node__Node__hidden (#num #flt: eqtype) (x: node num flt) : Lemma (ensures (match x with | C__node__Node i k f0 f1 -> rd_node__Node__hidden #num #flt (enc_node #num #flt x) == Ok f0)) =
+  reveal_opaque (`%rd_node__Node__hidden) (rd_node__Node__hidden #num #flt (enc_node #num #flt x));
+  match x with
+  | C__node__Node i k f0 f1 -> (match f0 with | None -> lk_node__Node__hidden__absent #num #flt x | Some _ -> lk_node__Node__hidden__present #num #flt x)
+
+(* rv_node__Node__label — the value of `rd_node__Node__label` off the encoded object *)
+let rv_node__Node__label (#num #flt: eqtype) (x: node num flt) : Lemma (ensures (match x with | C__node__Node i k f0 f1 -> rd_node__Node__label #num #flt (enc_node #num #flt x) == Ok f1)) =
+  reveal_opaque (`%rd_node__Node__label) (rd_node__Node__label #num #flt (enc_node #num #flt x));
+  match x with
+  | C__node__Node i k f0 f1 -> (match f1 with | None -> lk_node__Node__label__absent #num #flt x | Some _ -> lk_node__Node__label__present #num #flt x)
+
 (* The suffixes of C__vkind__Embed — each revealed once, here, and cited by name below. *)
 let sk_vkind__Embed__content_hash__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "contentHash")) (ensures (find_field n (sfx_vkind__Embed__content_hash e rest) == find_field n rest))
   = reveal_opaque (`%sfx_vkind__Embed__content_hash) (sfx_vkind__Embed__content_hash #num #flt e rest)
@@ -234,8 +246,8 @@ let lk_vkind__Embed__props__absent (#num #flt: eqtype) (x: vkind num flt) : Lemm
 let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
   | C__node__Node i k f0 f1 ->
-    (match f0 with | None -> lk_node__Node__hidden__absent #num #flt x | Some _ -> lk_node__Node__hidden__present #num #flt x);
-    (match f1 with | None -> lk_node__Node__label__absent #num #flt x | Some _ -> lk_node__Node__label__present #num #flt x);
+    rv_node__Node__hidden #num #flt x;
+    rv_node__Node__label #num #flt x;
     rt_vkind #num #flt k
 
 and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 2]) =

@@ -165,6 +165,20 @@ let lk_vkind__Score__title__absent (#num #flt: eqtype) (x: vkind num flt) : Lemm
   | _ -> ()
 #pop-options
 
+(* rv_vkind__Score__composer — the value of `rd_vkind__Score__composer` off the encoded object *)
+let rv_vkind__Score__composer (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> rd_vkind__Score__composer #num #flt (enc_vkind #num #flt x) == Ok f1 | _ -> True)) =
+  reveal_opaque (`%rd_vkind__Score__composer) (rd_vkind__Score__composer #num #flt (enc_vkind #num #flt x));
+  match x with
+  | C__vkind__Score f0 f1 f2 -> (match f1 with | None -> lk_vkind__Score__composer__absent #num #flt x | Some _ -> lk_vkind__Score__composer__present #num #flt x)
+  | _ -> ()
+
+(* rv_vkind__Score__title — the value of `rd_vkind__Score__title` off the encoded object *)
+let rv_vkind__Score__title (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> rd_vkind__Score__title #num #flt (enc_vkind #num #flt x) == Ok f2 | _ -> True)) =
+  reveal_opaque (`%rd_vkind__Score__title) (rd_vkind__Score__title #num #flt (enc_vkind #num #flt x));
+  match x with
+  | C__vkind__Score f0 f1 f2 -> (match f2 with | None -> lk_vkind__Score__title__absent #num #flt x | Some _ -> lk_vkind__Score__title__present #num #flt x)
+  | _ -> ()
+
 (* The suffixes of C__vkind__Measure — each revealed once, here, and cited by name below. *)
 let sk_vkind__Measure__is_anacrusis__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "isAnacrusis")) (ensures (find_field n (sfx_vkind__Measure__is_anacrusis e rest) == find_field n rest))
   = reveal_opaque (`%sfx_vkind__Measure__is_anacrusis) (sfx_vkind__Measure__is_anacrusis #num #flt e rest)
@@ -326,6 +340,27 @@ let lk_vkind__Measure__volta__absent (#num #flt: eqtype) (x: vkind num flt) : Le
   | _ -> ()
 #pop-options
 
+(* rv_vkind__Measure__is_anacrusis — the value of `rd_vkind__Measure__is_anacrusis` off the encoded object *)
+let rv_vkind__Measure__is_anacrusis (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rd_vkind__Measure__is_anacrusis #num #flt (enc_vkind #num #flt x) == Ok f1 | _ -> True)) =
+  reveal_opaque (`%rd_vkind__Measure__is_anacrusis) (rd_vkind__Measure__is_anacrusis #num #flt (enc_vkind #num #flt x));
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> (if f1 = false then lk_vkind__Measure__is_anacrusis__absent #num #flt x else lk_vkind__Measure__is_anacrusis__present #num #flt x)
+  | _ -> ()
+
+(* rv_vkind__Measure__repeat_end — the value of `rd_vkind__Measure__repeat_end` off the encoded object *)
+let rv_vkind__Measure__repeat_end (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rd_vkind__Measure__repeat_end #num #flt (enc_vkind #num #flt x) == Ok f3 | _ -> True)) =
+  reveal_opaque (`%rd_vkind__Measure__repeat_end) (rd_vkind__Measure__repeat_end #num #flt (enc_vkind #num #flt x));
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> (if f3 = false then lk_vkind__Measure__repeat_end__absent #num #flt x else lk_vkind__Measure__repeat_end__present #num #flt x)
+  | _ -> ()
+
+(* rv_vkind__Measure__repeat_start — the value of `rd_vkind__Measure__repeat_start` off the encoded object *)
+let rv_vkind__Measure__repeat_start (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rd_vkind__Measure__repeat_start #num #flt (enc_vkind #num #flt x) == Ok f4 | _ -> True)) =
+  reveal_opaque (`%rd_vkind__Measure__repeat_start) (rd_vkind__Measure__repeat_start #num #flt (enc_vkind #num #flt x));
+  match x with
+  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> (if f4 = false then lk_vkind__Measure__repeat_start__absent #num #flt x else lk_vkind__Measure__repeat_start__present #num #flt x)
+  | _ -> ()
+
 (* ======================================================================================
    3. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL
       value — F*'s subterm order spans a mutual inductive family, so each case needs only
@@ -363,8 +398,8 @@ and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (
 and rt_vkind__Score (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
   | C__vkind__Score f0 f1 f2 ->
-    (match f1 with | None -> lk_vkind__Score__composer__absent #num #flt x | Some _ -> lk_vkind__Score__composer__present #num #flt x);
-    (match f2 with | None -> lk_vkind__Score__title__absent #num #flt x | Some _ -> lk_vkind__Score__title__present #num #flt x);
+    rv_vkind__Score__composer #num #flt x;
+    rv_vkind__Score__title #num #flt x;
     rt_items_l_node #num #flt [] f0
 
 and rt_vkind__Part (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Part? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
@@ -378,10 +413,10 @@ and rt_vkind__PartGroup (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires
 and rt_vkind__Measure (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
   | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    (if f1 = false then lk_vkind__Measure__is_anacrusis__absent #num #flt x else lk_vkind__Measure__is_anacrusis__present #num #flt x);
+    rv_vkind__Measure__is_anacrusis #num #flt x;
     lk_vkind__Measure__number #num #flt x;
-    (if f3 = false then lk_vkind__Measure__repeat_end__absent #num #flt x else lk_vkind__Measure__repeat_end__present #num #flt x);
-    (if f4 = false then lk_vkind__Measure__repeat_start__absent #num #flt x else lk_vkind__Measure__repeat_start__present #num #flt x);
+    rv_vkind__Measure__repeat_end #num #flt x;
+    rv_vkind__Measure__repeat_start #num #flt x;
     (match f5 with | None -> lk_vkind__Measure__volta__absent #num #flt x | Some _ -> lk_vkind__Measure__volta__present #num #flt x);
     rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
 

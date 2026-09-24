@@ -508,6 +508,30 @@ let sfx_vkind__Measure__repeat_start (#num #flt: eqtype) (e: option (jval num fl
 let sfx_vkind__Measure__volta (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
   match e with | None -> rest | Some v -> ("volta", v) :: rest
 
+(* The member READERS — one per conditional member of a suffixed constructor whose read calls
+   nothing in the decoder family, applied by the decoder below rather than inlined into it.
+   Opaque to the solver: only the per-reader value lemmas of the proof script look inside. *)
+
+[@@"opaque_to_smt"]
+let rd_vkind__Score__composer (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (string))) =
+  (match get_prop "composer" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w)))
+
+[@@"opaque_to_smt"]
+let rd_vkind__Score__title (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (string))) =
+  (match get_prop "title" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w)))
+
+[@@"opaque_to_smt"]
+let rd_vkind__Measure__is_anacrusis (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
+  (match get_prop "isAnacrusis" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
+
+[@@"opaque_to_smt"]
+let rd_vkind__Measure__repeat_end (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
+  (match get_prop "repeatEnd" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
+
+[@@"opaque_to_smt"]
+let rd_vkind__Measure__repeat_start (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
+  (match get_prop "repeatStart" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
+
 let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__node__Node i k  ->
@@ -626,8 +650,8 @@ and dec_vkind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (vkind num f
   | Ok tag ->
     if tag = "Score" then
       let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (option (string)) = (match get_prop "composer" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
-      let o2 : outcome (option (string)) = (match get_prop "title" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
+      let o1 : outcome (option (string)) = rd_vkind__Score__composer #num #flt el in
+      let o2 : outcome (option (string)) = rd_vkind__Score__title #num #flt el in
       (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__vkind__Score f0 f1 f2))))
     else
     if tag = "Part" then
@@ -644,10 +668,10 @@ and dec_vkind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (vkind num f
     else
     if tag = "Measure" then
       let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (bool) = (match get_prop "isAnacrusis" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (bool) = rd_vkind__Measure__is_anacrusis #num #flt el in
       let o2 : outcome (num) = (match get_prop "number" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o3 : outcome (bool) = (match get_prop "repeatEnd" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o4 : outcome (bool) = (match get_prop "repeatStart" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o3 : outcome (bool) = rd_vkind__Measure__repeat_end #num #flt el in
+      let o4 : outcome (bool) = rd_vkind__Measure__repeat_start #num #flt el in
       let o5 : outcome (option (list (num))) = (match get_prop "volta" el with | Error _ -> Ok None | Ok v -> (match v with | JArr ys -> (match dec_items_l_int [] ys with | Error e -> Error e | Ok w -> Ok (Some w)) | other -> Error ("expected array, got " ^ kind_name other))) in
       (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> (match o3 with | Error e -> Error e | Ok f3 -> (match o4 with | Error e -> Error e | Ok f4 -> (match o5 with | Error e -> Error e | Ok f5 -> Ok (C__vkind__Measure f0 f1 f2 f3 f4 f5)))))))
     else
