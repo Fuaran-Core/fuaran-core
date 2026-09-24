@@ -27,23 +27,13 @@ if (-not $SkipFormatCheck) {
 dotnet build Fuaran.Core.slnx --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Fable-compile gate (Phase 54): every PUBLIC Fuaran.Core package must compile clean under Fable, so the
-# GP3 / STABILITY.md "Fable-clean on encode AND decode" claim is enforced in-repo rather than discovered
-# downstream. The smoke project references the public packages + touches their encode/decode surface; the
-# emitted JS is throwaway (the compile is the gate). No npm/npx is invoked — `dotnet fable` transpiles
-# without installing the JS runtime library — so the workspace Invoke-Npm/Invoke-Npx convention does not
-# apply here. Errors fail the gate; pre-existing benign warnings (e.g. Double.TryParse provider ignored —
-# JS parses invariantly) do not.
-dotnet fable tests/fable-smoke/FableSmoke.fsproj -o tests/fable-smoke/out --noCache
-if ($LASTEXITCODE -ne 0) {
-    Write-Host '==== verify: Fable-compile gate FAILED (a public package is not Fable-clean)' -ForegroundColor Red
-    exit $LASTEXITCODE
-}
-
-# Value-parity leg (Phase 118): the emitted JS is not throwaway any more — the smoke prints the committed
-# parity vectors under node and they must be byte-identical to the .NET table. A missing node FAILS.
-pwsh ./tests/fable-smoke/parity.ps1 -UseFreshlyEmitted tests/fable-smoke/out
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# The Fable compile and the cross-pipeline VALUE-parity leg do not run here (Phase 217). The Fable
+# compiler belongs to the consumer that owns a Fable toolchain — `fuaran-dotnet`'s `tests/core-fable/`,
+# which compiles every public package under Fable and byte-compares `ParityVectors` between .NET and
+# node, failing rather than skipping without a JS runtime — and every version cut cites a green run of
+# that leg against the candidate packages (STABILITY.md "Fable cleanliness"). What needs no Fable stays
+# in the suite below: the .NET half of every parity vector, and the Fable surface's membership
+# (`fable-exclusions.json`), including the check that no script here invokes the compiler.
 
 dotnet run --project tests/Fuaran.Core.Tests --no-build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
