@@ -210,6 +210,37 @@ type KeyedWitness<'Node, 'Id> =
         IdsUnique: 'Node -> bool
     }
 
+/// The domain-supplied INCREMENTAL EVALUATOR (Phase 211): what a domain hands `Propagation.eval`
+/// and `Propagation.evalFrom`, together with the edits it re-evaluates under and the change set it
+/// names for each. `Conformance.propagationEvaluatorLaws` runs it.
+///
+/// **Why this is a witness of its own.** The agreement theorem (`evalfrom_agrees`,
+/// `proofs/Propagation.fst`) is generic over the evaluator, so the evaluator is the model's
+/// PARAMETER and stays outside every theorem. What the theorem assumes of it — that it is a
+/// function of what it reads, and that a change set names every node on which it moved — can only
+/// be checked at the evaluator a domain actually runs. The kit's own `propagationEvalLaws`
+/// certifies the DRIVER over a toy evaluator; this certifies an ADOPTER, over its own.
+///
+/// `'Model` is whatever the domain evaluates — a sheet of formulas, a pipeline, a document — and
+/// every other field reads it, so one generated model yields the map, the evaluator and the edits
+/// the domain would hand the driver for it.
+type EvaluatorWitness<'Model, 'V> =
+    {
+        /// The domain's evaluator, named as a reader of a counterexample would look for it — name
+        /// the thing an author calls ("the cell evaluator in `Sheet.recalc`"), not the module.
+        Surface: string
+        /// A generated domain model, drawn from the domain's own generator.
+        Model: ConfRng.T -> 'Model * ConfRng.T
+        /// The dependency map the domain hands `Propagation.eval` / `evalFrom` for this model.
+        Deps: 'Model -> Map<string, Set<string>>
+        /// The domain's per-node evaluator for this model — exactly what it hands the driver.
+        EvalNode: 'Model -> (string -> 'V option) -> string -> Result<'V, string>
+        /// An edit to the model, and the change set the domain would hand `evalFrom` for it. The
+        /// change set is the CLAIM being certified, so it is the domain's and never derived by the
+        /// kit — a kit that computed it from the edit would agree with the domain by construction.
+        Change: 'Model -> ConfRng.T -> ('Model * Set<string>) * ConfRng.T
+    }
+
 /// The aggregate certification report.
 type ConformanceReport =
     { Results: LawResult list
@@ -4651,6 +4682,329 @@ module Conformance =
               seed
               [ "read of a real node", refusedRealNode
                 "read of an id the map does not hold", refusedAbsentId ] ]
+
+    // ---- the propagation contract at a DOMAIN'S evaluator (Phase 211) ----
+    // `propagationEvalLaws` above certifies the DRIVER, over a toy evaluator the kit wrote. What the
+    // agreement theorem still assumes after Phase 209 is about the EVALUATOR — row
+    // `propagation-change-set-and-prior` of `proofs.json` — and an evaluator is the model's parameter,
+    // so the only place that assumption can be checked is at the evaluator a domain actually runs.
+
+    /// The evaluator-contract laws (Phase 211) — what is left of `evalfrom_agrees`' premises after
+    /// Phase 209 made the declared-reads clause a property of the driver, run at a DOMAIN'S
+    /// evaluator over the domain's own generated models and edits. Its green run is the sampled
+    /// discharge of `propagation-change-set-and-prior`.
+    ///
+    /// Three laws, in the order a defect localises:
+    ///
+    /// - **Purity and determinism.** Two full evaluations of one model over one map are the same
+    ///   `Result`; and each node, handed the same resolver answers, returns the same value and asks
+    ///   for the same reads in the same order — asked twice in a row, and asked with every node
+    ///   visited in reverse. Checked of the model before the edit and of the model after it. An
+    ///   evaluator that consults state it does not read through the resolver — a clock, a counter, a
+    ///   cache keyed on something else — is caught here and CANNOT be caught by a resolver
+    ///   restriction at all, which is why Phase 209's refusal and this family are complements and
+    ///   not alternatives. It is first because the two laws below are about comparing evaluations,
+    ///   and an evaluation that disagrees with itself makes every comparison a coin toss.
+    /// - **Change-set honesty.** Off the ids the domain names, the edited model DECLARES the same
+    ///   reads (`Deps` agrees), and its evaluator returns the same result and asks for the same reads
+    ///   as the prior one — probed under the prior model's values, the edited model's values, a
+    ///   mixture of the two, and no answers at all. That is the theorem's `agree_off` and
+    ///   `touches_off` sampled at four resolvers rather than quantified over all of them; and where the
+    ///   edit keeps the map, every named id is one the map holds (`evalFrom` refuses an unknown one as
+    ///   `EvalUnknownChange`, so such a change cannot be replayed incrementally at all).
+    /// - **Agreement.** Where the edit keeps the dependency map and the prior model evaluates, `evalFrom`
+    ///   of the edited evaluator over `eval`'s own prior equals `eval` of the edited evaluator — and
+    ///   so does `evalFrom` over that prior with HOLES drawn in it, because a prior holding fewer of
+    ///   `eval`'s values is the other thing the theorem admits and production recomputes a hole. This
+    ///   is the end-to-end consequence the two laws above exist for, sampled where the domain's real
+    ///   evaluator lives.
+    ///
+    /// **Prior provenance is carried by CONSTRUCTION, and the half the kit cannot see is yours.** The
+    /// law builds every prior the one way the theorem admits: `eval`'s output over the same map, or a
+    /// sub-map of it. Where a prior came from in a running domain — which is the premise's other
+    /// clause — is not something a law can observe, so it stays the domain's to keep: **a domain that
+    /// persists a `prior` across an edit that MOVES the dependency map must not hand it to `evalFrom`
+    /// over the new map**; it re-primes with `eval` over the new map, or refuses to reuse the prior.
+    /// That is why an edit that moves the map is checked for honesty and never for agreement here: the
+    /// kit declines to certify a replay the contract does not cover.
+    ///
+    /// **Vacuity, per law, and the guard that measures it.** Purity reaches every node of every model,
+    /// so it is vacuous only over empty models. Honesty says nothing where the change set names every
+    /// node, and agreement says little where every node is dirty or no evaluation ever fails. The one
+    /// guard counts, over the edits that reached the agreement law: an edit that reached a node it
+    /// did not name (a READER of a changed node, so dirtiness propagated), a clean node reused from
+    /// `prior` (so work was avoided and the reuse was checked), and an edited evaluator that FAILED (so
+    /// the `Error` branch of the whole-`Result` comparison was reached). A domain whose edits all move
+    /// the map, or whose models never evaluate, reaches none of them and is told so — widen the
+    /// generator, which is the only remedy that does not leave the law certified by one trial.
+    ///
+    /// **Opt-in, not folded into `certify`** — the `keyedChildrenLaws` shape. `certify` takes a tree
+    /// witness, and a domain that does not evaluate incrementally has nothing for this family to say.
+    let propagationEvaluatorLaws (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable purity = None
+        let mutable honesty = None
+        let mutable agreement = None
+        let mutable readerReached = 0
+        let mutable cleanReused = 0
+        let mutable failed = 0
+
+        /// One node, evaluated under a FIXED set of answers, with the reads it asked for in the order
+        /// it asked. The resolver answers any id it holds: this probes the evaluator as a function, and
+        /// the driver's restriction to declared reads is `propagationEvalLaws`' to certify.
+        let probe (ev: (string -> 'V option) -> string -> Result<'V, string>) (answers: Map<string, 'V>) (id: string) =
+            let asked = ResizeArray<string>()
+
+            let resolve k =
+                asked.Add k
+                Map.tryFind k answers
+
+            let result = ev resolve id
+            result, List.ofSeq asked
+
+        let valuesOf (r: Result<Propagation.EvalOutcome<'V>, Propagation.PropagationError>) =
+            match r with
+            | Ok o -> o.Values
+            | Error _ -> Map.empty
+
+        let keysOf (deps: Map<string, Set<string>>) = deps |> Map.toList |> List.map fst
+
+        let purityDefect (i: int) (which: string) ev (deps: Map<string, Set<string>>) : string option =
+            let first = Propagation.eval ev deps
+            let second = Propagation.eval ev deps
+
+            if first <> second then
+                Some(
+                    sprintf
+                        "seed=%d iter=%d: %s — two full evaluations of the %s model over one map disagree: %A, then %A"
+                        seed
+                        i
+                        evw.Surface
+                        which
+                        first
+                        second
+                )
+            else
+                let answers = valuesOf first
+                let ids = keysOf deps
+                let forward = ids |> List.map (fun id -> id, probe ev answers id)
+                let again = ids |> List.map (fun id -> id, probe ev answers id)
+
+                let backward =
+                    ids |> List.rev |> List.map (fun id -> id, probe ev answers id) |> List.rev
+
+                let differs (label: string) (xs: (string * (Result<'V, string> * string list)) list) =
+                    List.zip forward xs
+                    |> List.tryFind (fun (a, b) -> a <> b)
+                    |> Option.map (fun ((id, a), (_, b)) ->
+                        sprintf
+                            "seed=%d iter=%d: %s — node %s of the %s model, handed the same answers, gave %A (asking %A) and then %A (asking %A) %s"
+                            seed
+                            i
+                            evw.Surface
+                            id
+                            which
+                            (fst a)
+                            (snd a)
+                            (fst b)
+                            (snd b)
+                            label)
+
+                match differs "when asked again" again with
+                | Some why -> Some why
+                | None -> differs "when every node was visited in reverse" backward
+
+        let honestyDefect
+            (i: int)
+            ev0
+            ev1
+            (deps0: Map<string, Set<string>>)
+            (deps1: Map<string, Set<string>>)
+            (changed: Set<string>)
+            (answerSets: (string * Map<string, 'V>) list)
+            : string option =
+            let unnamed =
+                Set.union (Set.ofList (keysOf deps0)) (Set.ofList (keysOf deps1))
+                |> Set.filter (fun id -> not (Set.contains id changed))
+                |> Set.toList
+
+            match unnamed |> List.tryFind (fun id -> Map.tryFind id deps0 <> Map.tryFind id deps1) with
+            | Some id ->
+                Some(
+                    sprintf
+                        "seed=%d iter=%d: %s — node %s is not in the change set %A, but the edit moved the reads it DECLARES from %A to %A"
+                        seed
+                        i
+                        evw.Surface
+                        id
+                        (Set.toList changed)
+                        (Map.tryFind id deps0)
+                        (Map.tryFind id deps1)
+                )
+            | None ->
+                let unknown =
+                    if deps0 = deps1 then
+                        changed |> Set.filter (fun c -> not (Map.containsKey c deps1)) |> Set.toList
+                    else
+                        []
+
+                if not (List.isEmpty unknown) then
+                    Some(
+                        sprintf
+                            "seed=%d iter=%d: %s — the change set names %A, which the dependency map does not hold; evalFrom refuses such a change as EvalUnknownChange, so it cannot be replayed incrementally"
+                            seed
+                            i
+                            evw.Surface
+                            unknown
+                    )
+                else
+                    [ for id in unnamed do
+                          for label, answers in answerSets -> id, label, answers ]
+                    |> List.tryPick (fun (id, label, answers) ->
+                        let r0, asked0 = probe ev0 answers id
+                        let r1, asked1 = probe ev1 answers id
+
+                        if r0 <> r1 || asked0 <> asked1 then
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s — node %s is not in the change set %A, but under %s the prior evaluator gave %A (asking %A) and the edited one %A (asking %A); a change set that omits a node the edit moved makes evalFrom reuse a stale value there"
+                                    seed
+                                    i
+                                    evw.Surface
+                                    id
+                                    (Set.toList changed)
+                                    label
+                                    r0
+                                    asked0
+                                    r1
+                                    asked1
+                            )
+                        else
+                            None)
+
+        for i in 0 .. iterations - 1 do
+            let m0, r1 = evw.Model rng
+            let (m1, changed), r2 = evw.Change m0 r1
+            rng <- r2
+            let deps0 = evw.Deps m0
+            let deps1 = evw.Deps m1
+            let ev0 = evw.EvalNode m0
+            let ev1 = evw.EvalNode m1
+
+            // ---- law 1: purity and determinism, of both evaluators ----
+            if purity.IsNone then
+                purity <-
+                    match purityDefect i "prior" ev0 deps0 with
+                    | Some why -> Some why
+                    | None -> purityDefect i "edited" ev1 deps1
+
+            // ---- law 2: change-set honesty ----
+            let old = Propagation.eval ev0 deps0
+            let full = Propagation.eval ev1 deps1
+            let oldValues = valuesOf old
+            let newValues = valuesOf full
+
+            let mixed =
+                newValues
+                |> Map.toList
+                |> List.mapi (fun k kv -> k, kv)
+                |> List.fold (fun acc (k, (id, v)) -> if k % 2 = 0 then Map.add id v acc else acc) oldValues
+
+            if honesty.IsNone then
+                honesty <-
+                    honestyDefect
+                        i
+                        ev0
+                        ev1
+                        deps0
+                        deps1
+                        changed
+                        [ "the prior model's values", oldValues
+                          "the edited model's values", newValues
+                          "a mixture of the two", mixed
+                          "no answers at all", Map.empty ]
+
+            // ---- law 3: agreement, over the priors the theorem admits ----
+            let known = changed |> Set.forall (fun c -> Map.containsKey c deps1)
+
+            match old with
+            | Ok out0 when deps0 = deps1 && known ->
+                let mutable holed = out0.Values
+                let mutable r = rng
+
+                for id in keysOf deps0 do
+                    let coin, r' = ConfRng.intBelow 3 r
+                    r <- r'
+
+                    if coin = 0 then
+                        holed <- Map.remove id holed
+
+                rng <- r
+                let exact = Propagation.evalFrom ev1 out0.Values changed deps1
+                let viaHoled = Propagation.evalFrom ev1 holed changed deps1
+
+                if agreement.IsNone then
+                    if exact <> full then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s — evalFrom over eval's own prior (changed=%A) returned %A, and eval of the edited evaluator %A"
+                                    seed
+                                    i
+                                    evw.Surface
+                                    (Set.toList changed)
+                                    exact
+                                    full
+                            )
+                    elif viaHoled <> full then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s — evalFrom over eval's prior with holes at %A (changed=%A) returned %A, and eval of the edited evaluator %A"
+                                    seed
+                                    i
+                                    evw.Surface
+                                    (keysOf deps0 |> List.filter (fun id -> not (Map.containsKey id holed)))
+                                    (Set.toList changed)
+                                    viaHoled
+                                    full
+                            )
+
+                let dirty = Propagation.dirtyFromChangedIds deps1 changed
+
+                if dirty |> Set.exists (fun d -> not (Set.contains d changed)) then
+                    readerReached <- readerReached + 1
+
+                if
+                    (Propagation.sort deps1).Order
+                    |> List.exists (fun id -> not (Set.contains id dirty) && Map.containsKey id out0.Values)
+                then
+                    cleanReused <- cleanReused + 1
+
+                match full with
+                | Error _ -> failed <- failed + 1
+                | Ok _ -> ()
+            | _ -> ()
+
+        [ { Law =
+              "the domain's evaluator is a function of what it reads: repeated and reordered evaluation agree (purity, determinism)"
+            Passed = purity.IsNone
+            Counterexample = purity }
+          { Law =
+              "off the change set the domain names, the edit moves neither the declared reads nor the evaluator's results or asked reads (change-set honesty)"
+            Passed = honesty.IsNone
+            Counterexample = honesty }
+          { Law =
+              "evalFrom of the edited evaluator over eval's own prior, whole and with holes, equals eval over the same map (agreement)"
+            Passed = agreement.IsNone
+            Counterexample = agreement }
+          SampleAdequacy.reached
+              "Conformance.propagationEvaluatorLaws"
+              "evaluator edit"
+              seed
+              [ "change reaching a reader", readerReached
+                "clean node reused from prior", cleanReused
+                "failing evaluator", failed ] ]
 
     // ---- cross-witness composition pilot (Phase 51) ----
     // Validate the Wave-13 frontier operators (`composeAcross`, Phase 47; `applyMemo`, Phase 49)

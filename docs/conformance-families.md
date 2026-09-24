@@ -39,7 +39,7 @@ is the state a family passing green while exercising nothing used to render as, 
 what this column exists to make impossible to read past. `unmeasured` means no run was
 handed to the renderer, which is a different fact and deliberately a different word.
 
-63 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
+64 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
 
 | Family | Run by | Why opt-in | Witness | Discharges | Cases |
 |---|---|---|---|---|---|
@@ -90,6 +90,7 @@ handed to the renderer, which is a different fact and deliberately a different w
 | `Conformance.paramLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
 | `Conformance.projectionLaws` | opt-in | `needs-witness-capability` | `ProjectionWitness` | — | 800 |
 | `Conformance.propagationEvalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 |
+| `Conformance.propagationEvaluatorLaws` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-change-set-and-prior` | 600 |
 | `Conformance.queryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1400 |
 | `Conformance.reconcileLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 |
 | `Conformance.reducer` | base run | — | `StreamGen` | — | 400 |

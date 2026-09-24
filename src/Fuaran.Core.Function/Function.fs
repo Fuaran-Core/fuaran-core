@@ -2028,6 +2028,14 @@ module CapabilityPipeline =
     /// with every `FromNode` edge already resolved to the upstream value. Total — a forward `FromNode`
     /// reference or a body failure is a named `PipelineEvalError`, never a throw. The cross-host compute
     /// contract the incremental `evalFrom` is certified byte-identical to.
+    ///
+    /// **It stays SYNCHRONOUS, by decision (Phase 210's routed-out question, operator decision
+    /// 2026-09-19).** `Capability.invoke` and both dispatchers carry the `Deferred` envelope; `body`
+    /// here returns a plain `Result` and does not. Enveloping it would be a RESUMPTION model rather
+    /// than a retype — a fold that meets `Pending` at one node must say what becomes of every node
+    /// after it, and `evalFrom`'s byte-identical contract would have to hold across the suspension —
+    /// and no demand for one has been measured. Asynchrony belongs at the leaves: a host that must
+    /// wait resolves its `Deferred` invocations before it folds the pipeline.
     let eval
         (body: PipelineNode -> (string * PipelineArg<'v>) list -> Result<'v, string>)
         (p: CapabilityPipeline)

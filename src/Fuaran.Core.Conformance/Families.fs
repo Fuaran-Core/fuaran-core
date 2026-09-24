@@ -159,6 +159,12 @@ module Families =
               (Some NeedsWitnessCapability)
               [ "witness-surface-scope" ]
 
+          c
+              "propagationEvaluatorLaws"
+              [ "EvaluatorWitness" ]
+              (Some NeedsWitnessCapability)
+              [ "propagation-change-set-and-prior" ]
+
           c "captureReplayLaws" none (Some SeamNotEveryDomainHas) []
           c "transformLaws" none (Some SeamNotEveryDomainHas) []
           c "constructThenEncodeLaws" none (Some SeamNotEveryDomainHas) []

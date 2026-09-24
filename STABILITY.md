@@ -2365,6 +2365,52 @@ than `dDef` for such a member, so the "improvement" cannot be made without meeti
 byte moves. The change is one test module, one registration line, and prose on an existing type.
 `api/` is byte-identical.
 
+### The propagation contract at YOUR evaluator — `propagationEvaluatorLaws` and `EvaluatorWitness` (Phase 211) — additive
+
+**What it is.** `Fuaran.Core.Conformance` gains `propagationEvaluatorLaws` and the
+`EvaluatorWitness<'Model, 'V>` record it takes: a domain's model generator, the dependency map it
+hands `Propagation.eval` / `evalFrom` for a model, its per-node evaluator, and its edits, each with
+the change set the domain would name for it. The family runs that evaluator and certifies three
+things of it. **Purity and determinism:** repeated and reordered evaluation agree, in values and in
+the reads asked for. **Change-set honesty:** off the named ids, an edit moves neither the declared
+reads nor the evaluator's results or asked reads, probed at four resolvers. **Agreement:** where the
+edit keeps the map, `evalFrom` over `eval`'s own prior, whole and with holes drawn in it, equals
+`eval`. One adequacy guard counts three arms: an edit that reached a reader, a clean node reused
+from `prior`, and an edited evaluator that failed. The family reports four `LawResult`s.
+
+**Why.** It is what the agreement theorem still assumed after Phase 209. The claims-ladder row
+`propagation-change-set-and-prior` was a `premise` because no kit law ran a domain's evaluator. It is
+now a `domain-obligation` with `dischargedBy: Conformance.propagationEvaluatorLaws`, following the
+precedent Phase 189 set for `witness-surface-scope`. The proof contract in `proofs/README.md` is now
+6 obligations, 15 bridges and 3 premises. The `prior` clause is carried by construction, and its
+unobservable half stays with the domain, stated on the family: **a `prior` kept across an edit that
+moves the dependency map is re-primed with `eval`, never replayed.** The family checks such an edit
+for honesty and deliberately does not replay it.
+
+**What it costs a pinned consumer: nothing.** The Phase 183 surface gate classifies the
+`Fuaran.Core.Conformance` move `additive`: one new record type, one new module function, and no
+existing member touched. `propagationEvalLaws`, which certifies the DRIVER over a toy evaluator, is
+byte-identical and still reports six results. The `Families` roster gains the family (opt-in,
+`needs-witness-capability`), so `docs/conformance-families.{md,json}` carry 64 families. A consumer
+whose census quantifies over the roster has one new row to answer at its next pin raise. A domain
+that evaluates incrementally should run the family from its first build.
+
+**The adequacy witness is in-repo, and the go-reds are one perturbation each.** No adopter
+evaluator exists yet (measured 2026-09-24: no caller of `Propagation.eval` / `evalFrom` outside
+this repository, and every caller inside it is a test's toy). So the family ships certified against
+a formula sheet in the suite: cells that divide, branch and read cells nobody holds. It reaches all
+three arms (at seed 2110, 200 iterations: 110 readers, 154 clean reuses, 35 failures). Four
+witnesses, each a single perturbation in its own run, show the laws can fail:
+- an impure evaluator that reads a mutable cell loses purity;
+- a change set naming the wrong cell loses honesty and agreement, while purity holds;
+- an edit that moves only the reads an unnamed cell ASKS for loses honesty alone, which shows the
+  reads half has teeth of its own;
+- an evaluator that never fails starves the guard, which names that arm alone.
+
+**Also here, comment only:** `CapabilityPipeline.eval`'s doc comment now records that the pipeline
+fold stays synchronous (Phase 210's routed-out question, operator decision 2026-09-19). The
+`Fuaran.Core.Function` baseline did not move.
+
 ## 0.30.0 — released 2026-09-23 as `v0.30.0`
 
 **This slot is RELEASED.** `<Version>` reads `0.30.0` and the repository holds the `v0.30.0` tag, so

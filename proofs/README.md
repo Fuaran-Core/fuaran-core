@@ -583,7 +583,7 @@ place together with the contract it implies.
   the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
   law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
   witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
-  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 5 rows.
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 6 rows.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
@@ -594,7 +594,7 @@ place together with the contract it implies.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 4 rows.
+  on. 3 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -624,7 +624,7 @@ over-read.
 | `column-transform-evaluator-abstract` | `model-bridge` | `unscheduled` |
 | `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
 | `propagation-order-distinct` | `model-bridge` | `unscheduled` |
-| `propagation-change-set-and-prior` | `premise` | — |
+| `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLaws` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
 
@@ -676,6 +676,23 @@ was. A domain that declares no keyed position runs the family and is told, in th
 that its report is vacuous by declaration; that is a different thing from a green run, and the
 report says which one it is.
 
+**Why `propagation-change-set-and-prior` stopped being a `premise` (Phase 211).** The same move,
+one row further on. What theorem 11 still assumes after Phase 209 is about the EVALUATOR — that a
+change set names every node an edit moved, in its results and in its reads, and that `prior` is
+`eval`'s own output over the same map — and the evaluator is the model's parameter, so no kit law
+ran one and there was no green run to cite. `Conformance.propagationEvaluatorLaws` runs a DOMAIN'S:
+it takes an `EvaluatorWitness` (the evaluator, its dependency map, the domain's model generator and
+edits, each edit with the change set the domain names) and certifies at that evaluator that it is
+pure and deterministic, that its change sets are honest, and that `evalFrom` over the priors the
+theorem admits agrees with `eval`. Purity is the obligation a resolver restriction can never reach,
+which is why Phase 209's fix and this law are complements and not alternatives. The `prior`
+clause is carried by construction — the law builds priors the one way the theorem admits — and the
+half no law can see stays yours in words: **a `prior` persisted across an edit that moves the
+dependency map is re-primed with `eval`, never replayed.** The family's adequacy witness is an
+in-repo formula sheet, because no adopter evaluator existed when it shipped; the go-reds are an
+impure evaluator, a change set naming the wrong cell, and an edit that moves only what an unnamed
+cell asks for.
+
 **This table is CHECKED against `../proofs.json`, row for row** — same rows, same order, same
 class, same third column — by the `contract-agrees` clause of the `Proofs.Ladder` family in
 `../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, with its own go-red fixtures. It is the ONE
@@ -706,7 +723,7 @@ other three). It reads JSON this directory already keeps and runs no prover, and
 whatever the verdict:
 
 ```
-proofs: exhaustive (11 packages modelled, 9 excluded; 24 assumed: 15 permanent, 5 domain-discharged, 4 unscheduled, 0 scheduled)
+proofs: exhaustive (11 packages modelled, 9 excluded; 24 assumed: 14 permanent, 6 domain-discharged, 4 unscheduled, 0 scheduled)
 ```
 
 Three clauses stand behind it.
@@ -4833,12 +4850,13 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
      call, so the model takes the observed read set as a parameter and the differential supplies it.
      Sampled there, proved nowhere, and permanent rather than closable — the semantic dependency set
      a pure model could define is a different set.
-   - **What is left of the evaluator contract** (`propagation-change-set-and-prior`, a `premise`).
-     A complete change set — about results and about reads — and a `prior` that is `eval`'s own
-     output over the same map. The domain's, enforced nowhere, and discharged by no run: the shipped
-     law family runs a toy evaluator, never a domain's. That was `witness-surface-scope`'s reasoning
-     too, until Phase 189 retired it by letting a domain declare what the kit cannot see; the
-     reasoning here stands on its own rather than on that precedent. The
+   - **What is left of the evaluator contract** (`propagation-change-set-and-prior`, a
+     `domain-obligation` since Phase 211). A complete change set — about results and about reads —
+     and a `prior` that is `eval`'s own output over the same map. The domain's, and until Phase 211
+     discharged by no run, because the shipped law family ran a toy evaluator and never a domain's.
+     `Conformance.propagationEvaluatorLaws` runs the domain's, on the precedent Phase 189 set for
+     `witness-surface-scope`; see the proof contract above for what it certifies and what stays
+     the domain's in words. The
      contract's declared-reads clause was the third member of this list until Phase 209 and is now
      `propagation-evaluator-contract`, a PROVED row.
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row: every
@@ -5248,13 +5266,13 @@ Either the code moves (step 2 counts a `Null` binding of a required param as unb
 what a public function accepts) or the comment does; `validate_params_exact` is written as an iff
 so that whichever is chosen is one clause in one definition.
 
-**A law family generic over a DOMAIN'S evaluator** — the OTHER way theorem 11 named of narrowing its
-premise, still not taken and now worth more rather than less. Phase 209 discharged the declared-reads
-clause by construction, which is the strongest form available and reaches every input; it reaches
-nothing else an evaluator owes. `propagation-change-set-and-prior` is still a `premise` discharged by
-no run, and purity and determinism are not resolver-shaped at all: a family a domain runs at its OWN
-evaluator would turn the row into a `domain-obligation` a green kit run discharges. The shape to copy
-is `witnessLaws` — the obligation is the domain's, so the discharge is the domain's run.
+_(**A law family generic over a DOMAIN'S evaluator** was on this list — the other way theorem 11
+named of narrowing its premise — and is DONE: Phase 211. `Conformance.propagationEvaluatorLaws` runs
+at the domain's own evaluator and certifies purity and determinism, change-set honesty about results
+and about reads, and `evalFrom`'s agreement with `eval` over the priors the theorem admits, so
+`propagation-change-set-and-prior` is a `domain-obligation` it discharges. What it does not reach is
+where a running domain's `prior` came from, which no law can observe; the proof contract above
+states that half in words.)_
 
 **`sort` inside the model** — theorem 11's one bridge (`propagation-order-distinct`). A functional
 model of Tarjan's algorithm with its emitted components proved pairwise disjoint would make "`Order`

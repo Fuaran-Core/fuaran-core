@@ -472,6 +472,16 @@
       "cases": "800"
     },
     {
+      "id": "Conformance.propagationEvaluatorLaws",
+      "module": "Conformance",
+      "entry": "propagationEvaluatorLaws",
+      "witness": ["EvaluatorWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": ["propagation-change-set-and-prior"],
+      "cases": "600"
+    },
+    {
       "id": "Conformance.queryLaws",
       "module": "Conformance",
       "entry": "queryLaws",

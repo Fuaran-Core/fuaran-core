@@ -328,6 +328,10 @@ let private runs =
                (Conformance.capabilityPipelineIncrementalLaws 4242 200)
            run "Conformance.dirtyPropagationLaws" 200 (Conformance.dirtyPropagationLaws 4242 200)
            run "Conformance.propagationEvalLaws" 200 (Conformance.propagationEvalLaws 4242 200)
+           run
+               "Conformance.propagationEvaluatorLaws"
+               200
+               (Conformance.propagationEvaluatorLaws ConformanceTests.sheetw 2110 200)
            run "Conformance.canonicalFloatLaws" 500 (Conformance.canonicalFloatLaws 4242 500)
            run "Conformance.chainBreakReasonLaws" 120 (Conformance.chainBreakReasonLaws 5125 120)
            run "Conformance.dagBreakReasonLaws" 120 (Conformance.dagBreakReasonLaws 5147 120)

@@ -344,6 +344,11 @@ module SampleAdequacy =
           // Phase 209 — the second dimension is the undeclared-read refusal: a real node read
           // without being declared, and an id the map does not hold at all.
           "Conformance.propagationEvalLaws", Guarded [ "node reuse"; "undeclared read" ]
+          // Phase 211 — the same contract, at a DOMAIN'S evaluator. Every arm the agreement law
+          // distinguishes is DRAWN from the domain's own edits: a change that reached a reader, a
+          // clean node reused from `prior`, and an edited evaluator that failed. A domain whose edits
+          // all move the dependency map reaches none of them, and the guard says so.
+          "Conformance.propagationEvaluatorLaws", Guarded [ "evaluator edit" ]
           // Phase 181. Every other arm is BUILT each iteration — an op applied, inverted, chained
           // and replayed — but the inverse-only-for-applicable law is about the ops the table
           // REFUSES, and whether the generator refused an INVERTIBLE one is a property of the run.

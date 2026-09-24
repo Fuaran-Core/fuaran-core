@@ -125,6 +125,16 @@ model-to-production gap, which you inherit), or a `premise` (what nothing discha
 does not collide, an extractor and a compiler that are correct). The table is checked against
 `proofs.json` row for row rather than reviewed.
 
+**If you evaluate incrementally with `Propagation.evalFrom`, your evaluator is one of those
+obligations** (Phase 211). The agreement theorem holds of an evaluator that is a function of what it
+reads, handed a change set that names every node an edit moved, and a `prior` that is `eval`'s own
+output over the same dependency map. The driver enforces none of that, and the first two are
+properties of YOUR evaluator. `Conformance.propagationEvaluatorLaws` certifies them at your
+evaluator, from an `EvaluatorWitness`: your model generator, your dependency map, your per-node
+evaluator, and your edits, each with the change set you would name for it. The third is yours in
+words, because no law can see where a stored `Map` came from. A `prior` kept across an edit that
+moves the dependency map must be re-primed with `eval`, not replayed.
+
 ### The container capability — what `applyContained` enforces, and the one thing it asks of you
 
 `Ops.applyContained canHold` is the variant for a domain with leaves: `canHold` answers *can this
