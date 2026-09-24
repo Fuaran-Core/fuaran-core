@@ -1,0 +1,13 @@
+# Wire-surface baseline for Fuaran.Core.OpStream (Phase 214) — GENERATED, do not edit.
+# The canonical bytes of a document set reaching every member and discriminator this package emits:
+# one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
+# Regenerate with:
+#   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+# class since v0.30.0: first snapshot
+doc	actor	sha256:9f78ceebb19b5e298b41407bc6150c4f010bdfee46219c1e268a4f3ba5c309e1	{"id":"s","kind":"human"}
+doc	actor / Actor.Agent	sha256:ec897fd0b11906c876a1d8195cb70cc3ed3b95d478150db37db9c51be7964b6d	{"id":"s","kind":"agent","model":"s","version":"s"}
+doc	actor / Actor.Human	sha256:9f78ceebb19b5e298b41407bc6150c4f010bdfee46219c1e268a4f3ba5c309e1	{"id":"s","kind":"human"}
+doc	attributed	sha256:bec9ec46dfc95e6710aff41c48614baef7314d1e285d3e9bcdf64e91b8e8f463	{"actor":"s","at":"s","op":"s","session":"s","turn":1}
+doc	records	sha256:9db9b07145580efe563bbe2a15e5ad222032f8842c2ceaabeec2fc5843597bf5	{"actor":{"id":"s","kind":"human"},"hash":"s","op":"s","prevHash":"s","seq":1}
+doc	records / Actor.Agent	sha256:1934b2718f05cab770dab3440c51f2ad7aa892a9db676ed494764cbbe9297a9c	{"actor":{"id":"s","kind":"agent","model":"s","version":"s"},"hash":"s","op":"s","prevHash":"s","seq":1}
+doc	records / Actor.Human	sha256:9db9b07145580efe563bbe2a15e5ad222032f8842c2ceaabeec2fc5843597bf5	{"actor":{"id":"s","kind":"human"},"hash":"s","op":"s","prevHash":"s","seq":1}

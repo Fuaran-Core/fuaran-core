@@ -1,0 +1,22 @@
+# Wire-surface baseline for Fuaran.Core.Column (Phase 214) — GENERATED, do not edit.
+# The canonical bytes of a document set reaching every member and discriminator this package emits:
+# one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
+# Regenerate with:
+#   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+# class since v0.30.0: first snapshot
+doc	dataSource	sha256:2e8e4d639b54ee3e77b1093977e9bd54d0de659a6b3128bda75982e47506ad5e	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / Cell.Bool	sha256:ae4a8c51c1b37a23facece3ae0a53081394577fe07ca0adfad4e284359e0cb93	{"columns":{"s":{"validity":[true],"values":[true]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / Cell.Date	sha256:77ca5b3c6ea4da1c93c4e594a016ba975ef7248adeb995d01bd1cedb5b063f60	{"columns":{"s":{"validity":[true],"values":["s"]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / Cell.Float	sha256:cf6f436d1d80d7a0159b7f0887ea0ec5c26327112aa817c56ca9fdb4bd020d5b	{"columns":{"s":{"validity":[true],"values":[1.5]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / Cell.Int	sha256:2e8e4d639b54ee3e77b1093977e9bd54d0de659a6b3128bda75982e47506ad5e	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / Cell.Null	sha256:12bc87199f565c6291df65c2f2574b02333e7f3b472c7e21111a2e75ad67dcda	{"columns":{"s":{"validity":[false],"values":[0]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / Cell.Str	sha256:77ca5b3c6ea4da1c93c4e594a016ba975ef7248adeb995d01bd1cedb5b063f60	{"columns":{"s":{"validity":[true],"values":["s"]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / Cell.Timestamp	sha256:77ca5b3c6ea4da1c93c4e594a016ba975ef7248adeb995d01bd1cedb5b063f60	{"columns":{"s":{"validity":[true],"values":["s"]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / ColumnType.BoolType	sha256:dda3f8525ad1c3c2b1feae3d126b3656a57484cf5246c9a93698629f2651246a	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"bool"}]}
+doc	dataSource / ColumnType.DateType	sha256:0d8d129b955d64de10ae05763e0c944e906fc236df518df321a782561ec6f0fb	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"date"}]}
+doc	dataSource / ColumnType.FloatType	sha256:24972dd26bf7c46722e27de83d3455ab254502911b3e3b1233cb8305330bcc60	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"float"}]}
+doc	dataSource / ColumnType.IntType	sha256:2e8e4d639b54ee3e77b1093977e9bd54d0de659a6b3128bda75982e47506ad5e	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / ColumnType.StringType	sha256:ac053c6e2792867060ed56ecc0c587ab8510e58ed6230f03bbf4e14d69b905c7	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"string"}]}
+doc	dataSource / ColumnType.TimestampType	sha256:0724eefb032b80e99cce237061d5b8602cb91c2a7ceb3c39201a78e45de9a265	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"timestamp"}]}
+doc	dataSource / DataSource.Embedded	sha256:2e8e4d639b54ee3e77b1093977e9bd54d0de659a6b3128bda75982e47506ad5e	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / DataSource.Ref	sha256:b17b8d24a1ac0d33e98736a0b107bbdf771c530bc96fc3d49a2b471b362dcf66	{"ref":"s","schema":[]}

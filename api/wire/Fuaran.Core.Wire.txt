@@ -1,0 +1,21 @@
+# Wire-surface baseline for Fuaran.Core.Wire (Phase 214) — GENERATED, do not edit.
+# The canonical bytes of a document set reaching every member and discriminator this package emits:
+# one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
+# Regenerate with:
+#   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+# class since v0.30.0: first snapshot
+doc	envelope	sha256:22cb6b2257e056408a6cb74cf0eac197b81448eaf8d7b3ea423544bdc6e4c08e	{"$payload":"s","$profile":"s@1.1"}
+doc	envelope / JVal.JArr	sha256:5aa9f96ee6b3595182e7dcda22312b85ea770b6e77757d10222b855d243ff989	{"$payload":["s"],"$profile":"s@1.1"}
+doc	envelope / JVal.JBool	sha256:fd8722cc8258535b08496838de6001f518ca05f29411569ec11829daf7b5debd	{"$payload":true,"$profile":"s@1.1"}
+doc	envelope / JVal.JFloat	sha256:74501bc6bd4320d83399439182c2c5b163b235377fff536a7ba1f43a9969c8d5	{"$payload":1.5,"$profile":"s@1.1"}
+doc	envelope / JVal.JInt	sha256:0f0cca8a1d380f5e4259b1f1aad8920ca697072ba730e6c959fd63caa988d4e3	{"$payload":1,"$profile":"s@1.1"}
+doc	envelope / JVal.JObj	sha256:40da0dabafd3d7f3ebe516013cada02b31f1a48e9ec58c6925f12635b1a648bb	{"$payload":{"s":"s"},"$profile":"s@1.1"}
+doc	envelope / JVal.JStr	sha256:22cb6b2257e056408a6cb74cf0eac197b81448eaf8d7b3ea423544bdc6e4c08e	{"$payload":"s","$profile":"s@1.1"}
+doc	jval	sha256:0f4657778ae14ff7aeeb2c2190ede79099aa9c4e8a9e54829462f0e92af659e5	"s"
+doc	jval / JVal.JArr	sha256:db5bda0c50d94c1eff85bf6c03e67086aff88cc8803307d761dcf294ef37fd3e	["s"]
+doc	jval / JVal.JBool	sha256:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b	true
+doc	jval / JVal.JFloat	sha256:9f29a130438b81170b92a42650f9a94291ecad60bd47af2a3886e75f7f728725	1.5
+doc	jval / JVal.JInt	sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b	1
+doc	jval / JVal.JObj	sha256:80d31ab301e440488c1f31e15a45bdaff681740a377a6c4bd5f1dba02787f763	{"s":"s"}
+doc	jval / JVal.JStr	sha256:0f4657778ae14ff7aeeb2c2190ede79099aa9c4e8a9e54829462f0e92af659e5	"s"
+doc	rows	sha256:95075d19cb8787a81dcd473ca7a859328bce517737f7f8e82e941e81ba82dbf3	[{"bool":true,"float":1.5,"int":1,"string":"s"}]

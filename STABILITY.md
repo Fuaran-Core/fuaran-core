@@ -79,6 +79,57 @@ Three boundaries, named rather than assumed:
 - **Not internals.** An internal member cannot break a consumer in another assembly and is not in
   the surface to begin with.
 
+## The wire surface — a canonical-encode change states its class in the same commit (Phase 214)
+
+The managed baseline's first boundary is "not semantics", and the canonical BYTES a package emits sit
+on the far side of it. Phase 213 moved them: a `project` step's `cols` became `columns`. That is
+breaking for every consumer that pins canonical bytes, and the managed gate correctly reported
+nothing. So the wire surface has a baseline of its own:
+[`api/wire/<package>.txt`](api/wire/).
+
+**What each file holds.** One file per wire-bearing package. It holds the canonical bytes of a
+document set that reaches every member name and every discriminator the package emits. Each line
+carries the sha256 of the emitted bytes and the document rendered canonically. The set is DERIVED by
+reflection from each package's root document types, so a case added to a union is in the set without
+anyone listing it (DECISIONS D53).
+
+**What the gate does.** The `Wire surface` test family re-encodes the set on every gate run. A changed
+byte fails it, naming the document and the member, until the baseline is regenerated:
+
+```
+CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+```
+
+**THE RULE: a wire-baseline change states its class in the same commit.** The regeneration writes the
+class into the baseline's own header (`# class since <tag>: <class>`). A second test recomputes that
+class against the tag the header names and fails if the statement is missing, stale or wrong. The
+commit that moves a baseline therefore carries its class, and the class is checked rather than
+asserted. Put the same word in the commit message and, for a published package, in the draft slot's
+entry here.
+
+The classes:
+
+| class | what moved | ride or advance |
+|---|---|---|
+| `additive` | a new member, or a new case (a document added) | may **ride** the standing draft slot |
+| `breaking` | a member renamed or removed; a discriminator changed; a document removed; the same structure emitted as different bytes | **advance `<Version>`** |
+
+An F# case renamed with its wire bytes untouched is not a wire move; that one is the managed gate's.
+A member reordering cannot occur in `Canon.render` output, which sorts keys. The two emitters that are
+not `Canon.render` (the IDL artifact's indented form, and the hand-assembled stream envelopes) are
+pinned by the hash, and a layout move there is `breaking`.
+
+**What it does not pin, named rather than assumed:**
+- **Decode.** A consumer pins what a package EMITS. A decode alias is outside the baseline, and
+  adding one moves nothing; a test holds that for the alias Phase 213 kept.
+- **A domain's vocabulary.** A domain's values under its own IDL vocabulary, and the op payload
+  embedded in a stream envelope, are the domain's to pin.
+- **Semantics.** The same bytes meaning something new is invisible here, as it is to the managed
+  gate.
+
+**The hazard is the managed switch's.** The switch rewrites EVERY drifted wire baseline. Stage the
+ones you meant to move BY NAME.
+
 ## The load-bearing invariant
 
 `Fuaran.Core.*` is **a library of generic functions over domain-witness records, never a

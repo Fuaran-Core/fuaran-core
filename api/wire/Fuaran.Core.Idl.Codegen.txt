@@ -1,0 +1,7 @@
+# Wire-surface baseline for Fuaran.Core.Idl.Codegen (Phase 214) — GENERATED, do not edit.
+# The canonical bytes of a document set reaching every member and discriminator this package emits:
+# one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
+# Regenerate with:
+#   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+# class since v0.30.0: first snapshot
+doc	supportArtifact	sha256:8e203a200e1c02a05ed49ca9fbfa1837c1cc4cf0699f8ca0a75b34e016de636b	{"caseRefines":[{"case":"s","expression":"s"}],"description":"The declared-support record for a Fuaran IDL vocabulary — doc comments, verbatim source splices, per-case decode refinements and per-kind host projections — plus the host prelude the generated module is compiled after. Together with idl.json beside it and the prelude file it names, this is everything a domain needs to regenerate its structural layer against the packaged engine. Every string here is host-language source, not wire spec.","docs":[{"lines":["s"],"path":"s"}],"hostPrelude":{"module":"s","path":"s"},"kindProjections":[{"decoder":"s","encoder":"s","kind":"s","mk":"s","specDecl":"s"}],"splices":{"accessor":"s","decode":"s","encode":"s","type":"s"},"version":1}

@@ -1,5 +1,94 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-24 — D53: the wire surface gets a committed baseline of its own, over a DERIVED document set — not a view over the law corpus
+
+**Decided (Phase 214).** Each wire-bearing package commits `api/wire/<package>.txt`, beside the
+managed baseline in `api/`. The file holds the canonical bytes of a document set that reaches every
+member name and every discriminator the package emits. Each document line carries the sha256 of the
+bytes the package emitted and the document re-rendered canonically. The `Wire surface` test family
+re-encodes the set on every gate run and fails when a byte moves without its baseline. The
+regeneration step, `CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests`, writes the
+CLASS of the move into the baseline's own header. A second test holds that stated class to a
+recomputation. So a canonical-encode change cannot land without the baseline moving, and the baseline
+cannot move without a class that is checked rather than asserted.
+
+**Why not a view over the law corpus.** `conformance/laws/transform-laws.json` was read first, as the
+phase asked, and it cannot serve.
+- It pins BEHAVIOUR: a host evaluates the vectors and compares result tables, not document framing.
+- Its sixteen vectors reach six step kinds (derive, filter, sort, distinct, groupBy, limit) and
+  three expression kinds (col, binary, lit). They carry no `project` step, so the very move this
+  phase was filed for (Phase 213's `cols` → `columns`) is outside it.
+- Widening it into a framing corpus would put two purposes behind one emission. Every framing change
+  would then re-emit a file that a declared byte copy in the shared corpus must follow: the coupling
+  D50 and the 0.30.0 entry exist to contain, bought for no gain.
+- It covers one package of the eleven that emit.
+
+So the baseline is a second artefact, and says so.
+
+**Why the document set is derived and not authored.** A hand-written set is exactly as complete as
+its author's attention on the day it was written, and the next case added to a union sits outside it
+with the gate green. That is the silent failure a baseline exists to prevent.
+
+The set is therefore built by reflection from each package's ROOT document types, in the test file's
+`roots`. For every union reachable from a root, and every case of it, one document is built:
+- each enclosing union routes toward that case, choosing a case that reaches it without re-entering a
+  union already on the path;
+- every record field is populated;
+- every option is `Some`, so every optional member is spelled.
+
+A suite test reads the builder's construction log and requires that every per-case document really
+built the case it is named for, since a route that silently fell back to a default would name a
+document after a case it does not contain.
+
+A case added tomorrow is in tomorrow's set without anyone listing it, and so it MOVES the baseline:
+additive, and stated. Two roots are specimens written by hand, because reflection cannot build their
+values: the row codec (a `Row` cell is `obj`, and its RUNTIME type is the discriminator) and the
+AI-surface catalogue (its witness carries functions). The code says so where they are declared. As
+cut: 11 packages and 420 documents.
+
+**The classes, and why they are these.** They follow the managed baseline's pattern and the phase's
+statement:
+- **Additive:** a new member or a new case.
+- **Breaking:** a renamed or removed member, a changed discriminator, or the same structure rendered
+  to different bytes.
+- **Not a wire move at all:** an F# case renamed with its bytes unchanged. That is the managed gate's
+  business.
+- **No class of its own for a reordered member.** It cannot occur in `Canon.render` output, which
+  sorts keys. In the two emitters that are not `Canon.render` (the IDL artifact's indented form, and
+  the hand-assembled stream envelopes), the hash is what sees layout, and a layout move is breaking.
+
+A member is named by its PATH through every `$type` it meets, so `{project}.cols` and
+`{project}.columns` are different members, and a rename reads as one member removed and one added.
+
+**What it deliberately does not pin.**
+- **Decode.** A consumer pins what a package EMITS; what it ACCEPTS is a superset by design. A decode
+  alias is therefore outside the baseline, and adding one moves nothing, which a test holds.
+- **A domain's vocabulary.** `Idl.Encode` renders a domain's values under the domain's own
+  vocabulary, and an op stream embeds the domain's op encoding verbatim. Those names are the domain's
+  to pin.
+- **Packages that emit no document of their own.** Each is named with its reason in `notWire`, and a
+  roster test refuses a packable package that is in neither list.
+
+**Why the stated class is anchored to the tag it NAMES.** The header reads
+`# class since <tag>: <class>`, and the check recomputes the class against that tag's own copy of the
+file. If it were anchored to the newest tag instead, cutting a release would stale every header at
+once. That would be one more re-stamp a version move must carry, the coupling D50 was written about.
+The check adds one condition so an old statement cannot hide a new move: a baseline that has moved
+since the newest tag must state its class since THAT tag.
+
+**Measured, and proved able to fail.**
+- **Phase 213's rename, replayed.** On a scratch copy, the pre-213 encoder spelling was restored and
+  a baseline cut from it. With the 213 encoder back, the gate fails `breaking`, naming
+  `$[]{project}.cols` and the window sort key's `orderBy[].col` as removed-or-renamed in every
+  document that carries them, in `Fuaran.Core.DataFrame` and again in `Fuaran.Core.Column.Ops`, whose
+  `applyTransform` op embeds a pipeline.
+- **A wrong stated class.** A header stating `additive` where the recomputation says
+  `first snapshot` fails, naming both.
+- **In-suite classifier tests** hold that an added optional member reads additive, and that a new
+  case reads additive. They also hold that a changed discriminator, a re-rendered value, and bytes
+  that moved under an unchanged structure each read breaking. And they hold that the decode alias
+  `cols` re-encodes to the very bytes the baseline pins.
+
 ## 2026-09-23 — D52: the model's member list is bound as named, opaque SUFFIXES — the MODEL's exponential D42 named, removed; the mutual-family split is not the successor; k=16 lookups spill over
 
 **Decided (Phase 204).** A constructor with `FStarTarget.presenceSplitAt` (two) or more conditional

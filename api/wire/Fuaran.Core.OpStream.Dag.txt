@@ -1,0 +1,9 @@
+# Wire-surface baseline for Fuaran.Core.OpStream.Dag (Phase 214) — GENERATED, do not edit.
+# The canonical bytes of a document set reaching every member and discriminator this package emits:
+# one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
+# Regenerate with:
+#   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+# class since v0.30.0: first snapshot
+doc	dag	sha256:6da47c57e5d10c776f66469010cc3c0fe13ea9de131eb28df2b894779b2e4c85	{"actor":{"id":"s","kind":"human"},"id":"s","node":true,"op":"s","parents":["s"]}
+doc	dag / Actor.Agent	sha256:9b21af11da55b3b39193c9dc13264fb29750b0b6c2986f9b0cef7e25284efb81	{"actor":{"id":"s","kind":"agent","model":"s","version":"s"},"id":"s","node":true,"op":"s","parents":["s"]}
+doc	dag / Actor.Human	sha256:6da47c57e5d10c776f66469010cc3c0fe13ea9de131eb28df2b894779b2e4c85	{"actor":{"id":"s","kind":"human"},"id":"s","node":true,"op":"s","parents":["s"]}

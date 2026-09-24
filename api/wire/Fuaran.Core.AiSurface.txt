@@ -1,0 +1,7 @@
+# Wire-surface baseline for Fuaran.Core.AiSurface (Phase 214) — GENERATED, do not edit.
+# The canonical bytes of a document set reaching every member and discriminator this package emits:
+# one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
+# Regenerate with:
+#   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+# class since v0.30.0: first snapshot
+doc	catalogue	sha256:96041939e8e97961529e86f97b0b8fd0d3fa8623e5564f69bcd22a5d648eb3d1	{"kind":"aiSurface","ops":[{"description":"Append a note","kind":"addNote","schema":{"holes":["id","text"],"kind":"signature"}},{"description":"Remove a note by id","kind":"removeNote","schema":{"holes":["id"],"kind":"signature"}}],"patterns":[{"name":"add-note","promptAnchors":["add a note {text}","note that {text}"],"title":"Add a note"}],"readTools":[{"description":"Every note id in order","name":"listNotes","readOnly":true},{"description":"How many notes","name":"noteCount","readOnly":true}]}

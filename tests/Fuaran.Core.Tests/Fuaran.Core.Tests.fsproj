@@ -266,6 +266,13 @@
          ONE derivation of "what ships" and Snapshots.fs for the repository root, so it follows
          both; appended at the end of the list (append-only registration). -->
     <Compile Include="ProofCoverageTests.fs" />
+    <!-- Phase 214 — the committed WIRE-surface baseline per wire-bearing package (api/wire/): a
+         document set derived by reflection to reach every member and discriminator, its canonical
+         bytes, and the classifier that states a move's class in the baseline's header. Reads
+         PublicSurfaceTests.fs (the tag ordering), PackageRosterTests.fs, AiSurfaceTests.fs and
+         Snapshots.fs, so it follows all four; appended at the end of the list (append-only
+         registration). -->
+    <Compile Include="WireSurfaceTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
