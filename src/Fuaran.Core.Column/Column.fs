@@ -513,7 +513,7 @@ module Schema =
     // A DELIBERATE COPY of `Hash.fnv1a` (`Fuaran.Core.Tree`), kept because `Column` references only
     // `Wire` and taking a `Tree` dependency to reach one 8-line function would add a package edge
     // for every consumer. It must stay VALUE-IDENTICAL to the canonical one, which
-    // `tests\hash-parity-probe` checks over a shared corpus rather than leaving to discipline.
+    // the `hashSweep/*` rows of `ParityVectors` (Fuaran.Core.Conformance) compare over a shared corpus.
     //
     // The multiply is split into 16-bit halves — see `Hash.mul32` for why a plain `h * 16777619u`
     // is not portable (the product passes 2^53 under Fable's doubles, losing precision inside the

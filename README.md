@@ -179,9 +179,13 @@ dotnet build Fuaran.Core.slnx
 dotnet run --project tests/Fuaran.Core.Tests
 ```
 
-`./verify.ps1` includes a **Fable-compile gate** (Phase 54): `tests/fable-smoke/` references every
-public package and is compiled with `dotnet fable`, so the "Fable-clean on encode **and** decode" claim
-is enforced in-repo, not discovered downstream — a package that stops compiling under Fable fails the gate.
+The "Fable-clean on encode **and** decode" claim is **gated, not asserted** — in the consumer that owns
+the Fable toolchain rather than here (Phase 217): `fuaran-dotnet`'s `tests/core-fable/` compiles every
+public package under Fable and runs the `ParityVectors` table (Fuaran.Core.Conformance) on both
+pipelines, byte-compared. Every version cut cites a green run of that leg against the candidate
+packages first. This repository keeps the half that needs no Fable: `fable-exclusions.json` and the
+suite hold every packable package to "ships the `fable/` sources, or is excluded with a reason", and
+the .NET side of every parity vector is pinned. See STABILITY.md "Fable cleanliness".
 
 `proofs/` carries a **machine-checked model of the N-lane DAG fold** (Phase 131): `DagFold.fst` is
 an F\* model of `Dag.reconcileMany` and the replay with fold confluence proved as a theorem, and

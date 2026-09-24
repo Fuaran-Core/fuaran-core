@@ -138,10 +138,9 @@
          and the sort vector whose class does). Reads nothing here, so it simply follows. -->
     <Compile Include="IncrementalCorpusTests.fs" />
     <Compile Include="SampleAdequacyTests.fs" />
-    <!-- Phase 118 - the cross-pipeline vector table, LINKED from the Fable smoke rather than
-         copied: the .NET pin and the `node` diff have to be measuring the same source, or the
-         comparison certifies a coincidence. Reads nothing here, so it simply follows. -->
-    <Compile Include="..\fable-smoke\ParityVectors.fs" Link="ParityVectors.fs" />
+    <!-- Phase 118 - the .NET pin of the cross-pipeline vector table. The table itself is public in
+         Fuaran.Core.Conformance since Phase 217 (`ParityVectors`), so this pins the very module a
+         Fable consumer runs on both pipelines. Reads nothing here, so it simply follows. -->
     <Compile Include="ParityVectorTests.fs" />
     <!-- The host-neutral export of the transform-parity family's reference answers, and the
          checks that keep it an oracle: the law over the declared sample, a decode-and-recompute
@@ -222,11 +221,12 @@
          every test module whose witnesses and fixtures it reuses rather than duplicates. -->
     <Compile Include="ConformanceVacuityTests.fs" />
     <Compile Include="ConformanceFamiliesTests.fs" />
-    <!-- Phase 185 — the Fable smoke's membership derived rather than remembered: every packable
-         project under src/ is compiled by tests/fable-smoke or carries an exclusions.json entry
-         with a reason, checked in both directions so a stale reason fails too. Reads Snapshots.fs
-         for the repository root and the two smoke files off disk; it references no other test
-         module, so it is appended here (append-only registration). -->
+    <!-- Phase 185, retargeted by Phase 217 — the Fable surface's membership derived rather than
+         remembered: every packable project under src/ ships the `fable/` source distribution or
+         carries a `fable-exclusions.json` entry with a reason, checked in both
+         directions so a stale reason fails too. The Fable COMPILE of that surface runs in the consumer that owns
+         the toolchain (STABILITY.md "Fable cleanliness"). Reads Snapshots.fs for the repository
+         root and the project files off disk; it references no other test module. -->
     <Compile Include="FableSmokeCompletenessTests.fs" />
     <!-- Phase 199 — the package roster held to the tree: the README table's rows equal the
          packable projects under src/, nothing packable sits outside that scope, STABILITY.md

@@ -30,7 +30,9 @@ opt-out.
   `Rejection`, or a named `*Error` envelope), never a thrown exception. A recoverable envelope must
   *name the failure and enumerate the valid alternatives*.
 - **FSharp.Core only, Fable-clean.** No `System.Text.Json`, no host or native dependency. Every
-  public surface must compile under both .NET and Fable — the `tests/fable-smoke` gate enforces it.
+  public surface must compile under both .NET and Fable — the Fable consumer's compile gate enforces it, and
+  `fable-exclusions.json` records any package deliberately off that surface (STABILITY.md
+  "Fable cleanliness").
 
 ## The design invariants — please read before a non-trivial change
 

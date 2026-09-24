@@ -85,7 +85,7 @@ let internal isPackable (fallback: string option) (projectText: string) : bool =
     | Some v -> not (String.Equals(v, "false", StringComparison.OrdinalIgnoreCase))
     | None -> true
 
-/// THE derivation, kept in one small function on purpose: the Fable smoke's completeness
+/// THE derivation, kept in one small function on purpose: the Fable surface's completeness
 /// check (Phase 185) derives the same set, and two spellings of "what ships" would drift
 /// exactly the way the documents this file gates drifted. `src/*/*.fsproj` +
 /// `src/*/*.csproj` — the C# facade is a published package too, and a roster scoped to F#
@@ -296,23 +296,12 @@ let private withRoot (f: string -> unit) =
 let private fileLines (path: string) =
     File.ReadAllText(path).Replace("\r\n", "\n").Split('\n') |> Array.toList
 
-// ---- the Fable-smoke cross-check -----------------------------------------
+// ---- the Fable-surface cross-check ---------------------------------------
 
-let private projectRefRe =
-    Regex(@"ProjectReference\s+Include=""[^""]*[\\/](?<id>[^\\/""]+)\.fsproj""", RegexOptions.Compiled)
-
-/// The packages the Fable smoke actually references today, read off its own project file.
-let internal smokeRoster (smokeProjectText: string) : string list =
-    projectRefRe.Matches smokeProjectText
-    |> Seq.map (fun m -> m.Groups["id"].Value)
-    |> Seq.distinct
-    |> Seq.sort
-    |> Seq.toList
-
-/// The package ids Phase 185's `exclusions.json` declares, or `None` when its shape is not
-/// one this reader recognises. `None` is reported as a named skip rather than a failure:
-/// that file is a concurrent sibling's, and a check that reddens because someone else's
-/// format is newer than its reader is a false accusation.
+/// The package ids `fable-exclusions.json` declares (Phase 185; at the repository
+/// root since Phase 217), or `None` when its shape is not one this reader recognises.
+/// Tolerant of the shapes it was written against before that file existed; the live check fails
+/// on `None`.
 let internal declaredExclusions (json: string) : Set<string> option =
     let stringsOf (el: JsonElement) =
         if el.ValueKind = JsonValueKind.Array then
@@ -483,65 +472,38 @@ let tests =
                               (String.concat ", " missing))
           }
 
-          test "every package the Fable smoke references is documented in the README" {
-              // The Phase 185 cross-check in the form that is assertable today: whatever
-              // the smoke compiles against is a package a reader must be able to find.
+          test "the Fable surface's declared roster — packable minus its exclusions — is documented in the README" {
+              // Phase 185's cross-check, over the DECLARED surface since Phase 217 moved the Fable
+              // compile out of this repository: the packages a Fable consumer can compile are the
+              // packable ones minus `fable-exclusions.json`, and each is a package a
+              // reader must be able to find. The file is this repository's own now, so its absence
+              // or an unrecognised shape is a failure rather than a skip.
               withRoot (fun root ->
-                  let smoke =
-                      smokeRoster (File.ReadAllText(Path.Combine(root, "tests", "fable-smoke", "FableSmoke.fsproj")))
+                  let exclusionsPath = Path.Combine(root, "fable-exclusions.json")
 
-                  let documented =
-                      readmePackageIds (File.ReadAllText(Path.Combine(root, "README.md")))
-                      |> Set.ofList
+                  Expect.isTrue (File.Exists exclusionsPath) "fable-exclusions.json exists"
 
-                  Expect.isNonEmpty smoke "the Fable smoke's project references were parsed"
+                  match declaredExclusions (File.ReadAllText exclusionsPath) with
+                  | None -> failtest "fable-exclusions.json holds no array of package ids this reader recognises"
+                  | Some excluded ->
+                      let documented =
+                          readmePackageIds (File.ReadAllText(Path.Combine(root, "README.md")))
+                          |> Set.ofList
 
-                  match smoke |> List.filter (documented.Contains >> not) with
-                  | [] -> ()
-                  | absent ->
-                      failtestf
-                          "the Fable smoke references %d package(s) the README table does not list: %s"
-                          absent.Length
-                          (String.concat ", " absent))
-          }
+                      let declared =
+                          packableProjects root
+                          |> List.map _.PackageId
+                          |> List.filter (excluded.Contains >> not)
 
-          test "the smoke's declared roster — packable minus its exclusions — is documented in the README" {
-              withRoot (fun root ->
-                  let exclusionsPath = Path.Combine(root, "tests", "fable-smoke", "exclusions.json")
+                      Expect.isNonEmpty declared "the declared Fable surface is not empty"
 
-                  if not (File.Exists exclusionsPath) then
-                      // Phase 185 owns that file and had not landed when this was written.
-                      // The leg above covers the same property over the smoke's ACTUAL
-                      // references meanwhile, so nothing is unguarded — this one asserts
-                      // the DECLARED roster once there is a declaration to read.
-                      printfn "smoke exclusions cross-check SKIPPED: %s is absent" exclusionsPath
-
-                      skiptestf
-                          "smoke exclusions cross-check skipped — tests/fable-smoke/exclusions.json is absent (Phase 185 owns it)"
-                  else
-                      match declaredExclusions (File.ReadAllText exclusionsPath) with
-                      | None ->
-                          printfn "smoke exclusions cross-check SKIPPED: exclusions.json shape not recognised"
-
-                          skiptestf
-                              "smoke exclusions cross-check skipped — tests/fable-smoke/exclusions.json holds no array of package ids this reader recognises"
-                      | Some excluded ->
-                          let documented =
-                              readmePackageIds (File.ReadAllText(Path.Combine(root, "README.md")))
-                              |> Set.ofList
-
-                          let declared =
-                              packableProjects root
-                              |> List.map _.PackageId
-                              |> List.filter (excluded.Contains >> not)
-
-                          match declared |> List.filter (documented.Contains >> not) with
-                          | [] -> ()
-                          | absent ->
-                              failtestf
-                                  "%d package(s) in the Fable smoke's declared roster are absent from the README table: %s"
-                                  absent.Length
-                                  (String.concat ", " absent))
+                      match declared |> List.filter (documented.Contains >> not) with
+                      | [] -> ()
+                      | absent ->
+                          failtestf
+                              "%d package(s) on the declared Fable surface are absent from the README table: %s"
+                              absent.Length
+                              (String.concat ", " absent))
           }
 
           // ---- the go-red controls ------------------------------------------

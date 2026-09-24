@@ -1,5 +1,4 @@
-/// The committed cross-pipeline VECTOR TABLE (Phase 118) — the .NET half of the value claim
-/// `tests/fable-smoke/parity.ps1` completes.
+/// The committed cross-pipeline VECTOR TABLE (Phase 118) — the .NET half of the value claim.
 ///
 /// TWO CLAIMS, AND NEITHER IMPLIES THE OTHER. This file pins what the .NET pipeline computes, so a
 /// change that moves a digest, a chain hash or a float layout is a failing test attached to the
@@ -8,12 +7,15 @@
 /// the Fable side passes here and is caught only there. `Hash.fnv1a` sat divergent behind a fully
 /// green suite until `0.6.0` for exactly that reason.
 ///
-/// The table itself lives in `tests/fable-smoke/ParityVectors.fs` and is LINKED into this project,
-/// not copied: the two pipelines have to be measuring the same source, or the diff certifies a
-/// coincidence rather than a contract.
+/// The table is PUBLIC since Phase 217 — `Fuaran.Core.ParityVectors`, in the conformance kit — so
+/// the transpiled half runs where the Fable compiler is: a consumer that owns a Fable toolchain
+/// compiles the module from the package's `fable/` sources and diffs `ParityVectors.lines ()`
+/// between the two pipelines. STABILITY.md "Fable cleanliness" names where, and the rule that ties
+/// that run to every version cut. This file tests the module the consumer runs, not a copy of it.
 module Fuaran.Core.Tests.ParityVectorTests
 
 open Expecto
+open Fuaran.Core
 
 /// The expected bytes, in table order. Hand-checkable against published values where one exists:
 /// `sha256/empty` and `sha256/abc` are the FIPS 180-4 known answers, `sha256/two-block` is the
@@ -81,6 +83,16 @@ let private families =
       "chain/"
       "confRng/" ]
 
+/// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
+/// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the
+/// named table above carries the hand-checkable known answers, and 496 hex strings committed here
+/// would be a table nobody reads. The digest is SHA-256 over the rows' `VEC` lines joined by `\n`,
+/// so any row moving reddens it; the row-level tests below say which one did.
+let private sweepRows = 124
+
+let private sweepDigest =
+    "86213e76c48e7e0eea259781167489b400961a086e1fbafcdef819890d95eb40"
+
 [<Tests>]
 let tests =
     testList
@@ -88,18 +100,18 @@ let tests =
         [ testCase "the table is the committed set, in order"
           <| fun _ ->
               Expect.equal
-                  (FableSmoke.ParityVectors.vectors |> List.map fst)
+                  (ParityVectors.vectors |> List.map fst)
                   (expected |> List.map fst)
                   "the vector labels, in table order — a new vector is added to BOTH lists"
 
           testCase "every vector computes its committed bytes"
           <| fun _ ->
-              for (label, actual), (_, want) in List.zip FableSmoke.ParityVectors.vectors expected do
+              for (label, actual), (_, want) in List.zip ParityVectors.vectors expected do
                   Expect.equal actual want (sprintf "vector %s" label)
 
           testCase "labels are unique"
           <| fun _ ->
-              let labels = FableSmoke.ParityVectors.vectors |> List.map fst
+              let labels = ParityVectors.vectors |> List.map fst
 
               Expect.equal
                   (labels |> List.distinct |> List.length)
@@ -108,7 +120,7 @@ let tests =
 
           testCase "every declared family is present"
           <| fun _ ->
-              let labels = FableSmoke.ParityVectors.vectors |> List.map fst
+              let labels = ParityVectors.vectors |> List.map fst
 
               for family in families do
                   Expect.isTrue
@@ -122,7 +134,7 @@ let tests =
           // Non-ASCII INPUTS are fine and present; what must stay ASCII is what is PRINTED.
           testCase "every emitted label and value is printable ASCII"
           <| fun _ ->
-              for label, value in FableSmoke.ParityVectors.vectors do
+              for label, value in ParityVectors.vectors @ ParityVectors.hashSweep do
                   for ch in label + value do
                       Expect.isTrue
                           (int ch >= 0x20 && int ch <= 0x7E)
@@ -132,5 +144,44 @@ let tests =
           // carrying one would silently truncate the label and corrupt the value.
           testCase "no label contains a space"
           <| fun _ ->
-              for label, _ in FableSmoke.ParityVectors.vectors do
-                  Expect.isFalse (label.Contains " ") (sprintf "label %s is one token" label) ]
+              for label, _ in ParityVectors.vectors @ ParityVectors.hashSweep do
+                  Expect.isFalse (label.Contains " ") (sprintf "label %s is one token" label)
+
+          testCase "the hash sweep has its committed row count and digest"
+          <| fun _ ->
+              Expect.equal (List.length ParityVectors.hashSweep) sweepRows "the sweep's row count"
+
+              let joined =
+                  ParityVectors.hashSweep
+                  |> List.map (fun (k, v) -> sprintf "VEC %s %s" k v)
+                  |> String.concat "\n"
+
+              Expect.equal
+                  (Hash.sha256Hex joined)
+                  sweepDigest
+                  "the sweep's committed digest — a moved row is a moved .NET value"
+
+          testCase "every sweep row carries four digests of the right widths"
+          <| fun _ ->
+              // A row that lost a column would still compare equal on both pipelines — the width
+              // check is what says each of the four implementations is actually in the row.
+              for label, value in ParityVectors.hashSweep do
+                  let parts = value.Split '/'
+                  Expect.equal parts.Length 4 (sprintf "%s has four digests" label)
+                  Expect.equal parts[0].Length 8 (sprintf "%s: fnv1a is 32-bit hex" label)
+                  Expect.equal parts[1].Length 64 (sprintf "%s: sha256 is 256-bit hex" label)
+
+          testCase "lines () is the named table then the sweep, one VEC line each, in order"
+          <| fun _ ->
+              let lines = ParityVectors.lines ()
+
+              Expect.equal
+                  lines
+                  (ParityVectors.vectors @ ParityVectors.hashSweep
+                   |> List.map (fun (k, v) -> "VEC " + k + " " + v))
+                  "the runner's comparison unit is exactly the two tables, formatted"
+
+              Expect.equal
+                  (lines |> List.distinct |> List.length)
+                  (List.length (ParityVectors.vectors @ ParityVectors.hashSweep))
+                  "no two vectors share a label" ]

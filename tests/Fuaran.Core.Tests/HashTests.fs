@@ -221,8 +221,8 @@ let tests =
 
               // What a .NET suite structurally CANNOT hold is the other pipeline's answer — a
               // compile gate cannot disagree about a number. That half is measured by
-              // `tests/hash-parity-probe/run-parity-probe.ps1`, which compiles this corpus both ways
-              // and byte-compares. Re-run it if you touch the multiply.
+              // the `hashSweep/*` rows of `ParityVectors`, which the Fable consumer's parity leg runs on
+              // both pipelines and byte-compares (STABILITY.md "Fable cleanliness").
               ()
 
           testCase "the two deliberate fnv1a copies stay value-identical to the canonical one"

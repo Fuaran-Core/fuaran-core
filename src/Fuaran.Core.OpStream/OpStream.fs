@@ -327,7 +327,7 @@ module OpStream =
     // A DELIBERATE COPY of `Hash.fnv1a` (`Fuaran.Core.Tree`), kept because `OpStream` is standalone
     // by design — it takes no `Tree` dependency (DECISIONS D2), and this is the one hash the layer
     // cannot do without. It must stay VALUE-IDENTICAL to the canonical one: `Hash.fnv1a` and this
-    // are compared over a shared corpus by `tests\hash-parity-probe`, so a copy that drifts is
+    // are compared over a shared corpus by `ParityVectors.hashSweep` (Fuaran.Core.Conformance), so a copy that drifts is
     // caught rather than discovered in a forked chain.
     //
     // The multiply is split into 16-bit halves for the reason spelled out at `Hash.mul32`: a plain

@@ -1,5 +1,107 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-24 — D55: the Fable compiler leaves this repository; both legs of the Fable gate RELOCATE to `fuaran-dotnet`, neither is retired, and every version cut cites the relocated run
+
+**Decided (operator ruling on Phase 217.A, 2026-09-24).** The operator rule of 2026-09-21: the Fable
+compiler belongs in applications and in the language's .NET implementation, not in the substrate.
+This repository gated its "Fable-clean on encode AND decode" claim with two in-repo legs, and they
+prove different things, so each was decided on its own:
+
+| leg | proves | ruling |
+|---|---|---|
+| `dotnet fable` over the smoke | every public package transpiles | **RELOCATE** to `fuaran-dotnet` `tests/core-fable/` |
+| node value parity | the transpiled code computes the same BYTES as .NET | **RELOCATE** beside it, **never retire** |
+
+**Why the parity leg is not retired, with the two recorded defects answered by name.** A compile
+cannot disagree about a number, and neither can a .NET suite. `Hash.fnv1a` was value-divergent
+between the pipelines behind a fully green suite until `0.6.0`. `Wire.Json.render` THREW under Fable
+for any float — a public encode surface, unusable in a browser — from before `0.5.0` until Phase 118,
+with the compile green throughout. A third instance is recorded in the table itself: the `ConfRng`
+LCG before `0.20.0` drew zeros under Fable after its first draw. Retiring the leg would leave nothing
+able to catch any of the three: every consumer's compile was green through all of them.
+
+**The census the ruling rests on (217.B, measured 2026-09-24).** Of the smoke's 17 members (18 when
+the phase was filed; Phase 188 took `Lease` out first):
+
+- 9 are Fable-compiled by shipping browser code in `fuaran-dotnet` and `fuaran-live`;
+- 7 only inside `fuaran-dotnet`'s law harness, through this repository's Conformance kit;
+- `Fuaran.Core.Idl` by no Fable consumer at all.
+
+**Idl keeps its claim**, and the relocated smoke references it for no reason but to gate it. The
+Phase 97 split exists to make exactly that claim (STABILITY.md, the IDL engine's section). It is not
+the lease case (D51): the lease algebra had a measured server-only consumer set and no design intent
+to reach a browser. **No published guarantee changes** — the claim moves where it is checked, not
+whether it holds.
+
+**The vector table ships as CODE, in the conformance kit — `Fuaran.Core.ParityVectors`, ADDITIVE,
+riding the `0.31.0` draft.** The shard proposed shipping the vectors "as data". That premise is
+false: the transpiled side has to COMPUTE them, and the consumer sees this repository only as
+packages at its pin. Inside Conformance, the table reaches the consumer in a package it already
+Fable-compiles, and is version-coherent with the surfaces it measures by construction. A tracked
+copy in the consumer was the alternative, and was declined: it could run ahead of the consumer's pin
+and stop compiling against it.
+
+**The retired `tests/hash-parity-probe` is ABSORBED, not dropped.** The vectors did not cover it.
+The probe's 124-input corpus runs four implementations — the canonical `Hash.fnv1a`, `sha256Hex`, and
+the two deliberate FNV copies in `OpStream` (the chain hash) and `Column` (`Schema.fingerprint`) —
+while the table had five `fnv1a` inputs and no `Column` copy. So the corpus joined the table as
+`hashSweep/*`, pinned here by row count and digest, and the probe is gone because it is covered, not
+because it was inconvenient.
+
+**§M — the latency cost, and the rule that narrows it.** A relocated gate fires when the consumer
+raises its Core pin, so a divergence would surface in another repository a release later. So:
+**every Fuaran.Core version cut cites a green run of `fuaran-dotnet`'s
+`tests/core-fable/core-fable.ps1 -CoreVersion <candidate> -CoreFeed <folder>` against the candidate
+packages before the release gesture.** That run:
+
+- restores every Core package from the candidate folder alone, into an isolated cache, so a
+  same-version repack can never be served stale;
+- derives the surface from what the candidate actually ships;
+- REQUIRES the parity leg.
+
+The cut is where the divergence is caught, before any consumer can pin it. The rule is recorded here
+and in STABILITY.md's release section, and not in `verify.ps1`, because it is a property of the
+release gesture rather than of a commit.
+
+**Until the consumer's pin reaches `0.31.0`, its default run cannot compile the table** — `0.30.0`
+predates it, and the pin must stay publicly restorable. Its gate therefore:
+
+- says so on every run, naming this rule;
+- reads whether the table is present off the RESTORE, not off a version number;
+- FAILS if a pin at or above `0.31.0` restores a Conformance package without the table (the
+  tripwire). The decision table is proven at the start of every run.
+
+**Membership splits (§C).** The half that needs no Fable stays here:
+
+- `fable-exclusions.json` at the repository root (moved from the smoke, whose PROJECT is gone; it is
+  the scope of THIS repository's claim);
+- the retargeted `FableSmokeCompletenessTests`: every packable project ships the `fable/` source
+  distribution or carries an entry, in both directions.
+
+The consumer holds its own completeness check over its pins, and over the candidate's packages in a
+cut-time run. The residual gap is a new package the consumer does not pin yet. It is not silent: the
+cut-time run derives the surface from the candidate, so the new package fails by name at the first
+cut that ships it.
+
+**217.F, redrawn, and checked rather than asserted.** Taken literally, "no authored `Fable.Core`
+reference" would have removed `Fuaran.Core.Wire`'s. That reference powers Wire's own
+`#if FABLE_COMPILER` float-layout emit, which is the FIX for the `Json.render` defect above, and a
+Fable consumer of Wire needs it to compile that arm at all. **Wire's is the one sanctioned authored
+`Fable.Core` reference** — a library's reference powering its own Fable arm, not tooling. The suite
+now fails on:
+
+- any script or workflow here that invokes `dotnet fable`;
+- a `fable` entry in the tool manifest;
+- any authored `Fable.Core` reference other than Wire's.
+
+The line is the compiler and an authored tooling reference; a transitive `Fable.Core` is a restore
+artefact.
+
+**Proved red in the receiver (217.E).** Against a candidate `0.31.0` with `Hash.(.+.)`'s mask
+removed, the relocated leg reported 40 of 164 vectors divergent, `sha256/two-block` first — the
+vector chosen in Phase 118 as the leg's go-red anchor. Against the clean candidate it was green,
+164/164. With no `node` on PATH it failed by name.
+
 ## 2026-09-24 — D54: a suffix chain's argument is an APPLICATION, not a `match` — the k=16 lookups discharge; the round trip is the next wall, and it is not the same mechanism (continues D52)
 
 **Decided (Phase 222).** Every link of a suffixed member list (D52) now passes its member to its
