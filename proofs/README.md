@@ -906,6 +906,61 @@ run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`;
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
 
+### What `==== proofs: green` stands behind — and what it does not (Phase 221)
+
+**Until Phase 221 the word stood behind nothing a step could fail.** The kit script carried
+`$LASTEXITCODE = 0` at script scope, a line inherited from the pre-kit `check.ps1`, where it had
+been harmless. Once `check.ps1` became a caller invoking the kit with `&` (Phase 155), that line
+became a script-scope variable SHADOWING the automatic one, and every exit code the leg read — the
+prover's at the check and extract steps, `dotnet build`'s and `dotnet run`'s at the host step —
+read 0. Measured 2026-09-24 against the pinned prover, through the same `&` a caller uses: a host
+build of a project that does not exist (MSB1009) printed `==== proofs: green` and exited 0, a host
+filter that could not run did the same, and **so did a model with a type error** — F* printed
+`Error 19` and the leg printed `LegBad.fst verified … every query 3/3`. The shard that filed this
+(found by the fuaran-core#200 worker) suspected the host step's `try`/`finally` beside the script's
+`trap`; that hypothesis was wrong, and the check step being blind as well is what the sweep it
+asked for found. How far that reached, measured on the pre-221 kit: a refuted model that is also
+EXTRACTED was still caught, one step late and in the wrong words — F* then refuses the extraction,
+no `.fs` appears, and the file-exists test (which reads no exit code) failed the leg as an
+APPARATUS fault (exit 4, "the model is not implicated"). A refuted model in `$proofOnly` — the six
+generated vocabulary models and their proof scripts — was not caught at all. So a leg green between
+Phase 155 and Phase 221 is evidence that every extracted model verified and matched its oracle, and
+is NOT evidence that a `$proofOnly` model verified or that any host family passed. The host half
+was worse than "did not run": with a compile error planted in the test project, the pre-221 kit
+printed `Build FAILED.`, read exit 0, and ran `dotnet run --no-build` against the PREVIOUS build's
+binary — `Proofs.Oracle` reported 108 passed and the leg said `green` about code that did not
+compile. The fixed kit stops at the build with exit 1 and a line naming the HOST step.
+
+What a green `check.ps1` means now, step by step:
+
+| Step | Green means | Refused (non-zero exit, no `green`) when |
+|---|---|---|
+| CHECK | every `$modules` entry verified, `-Runs` times, from a cold cache, above its floor | the prover exits non-zero (a refutation, exit 1; an abort twice, exit 3), or a run beats its floor |
+| EXTRACT | every non-`$proofOnly` model's fresh extraction is byte-identical to its committed oracle | the prover exits non-zero, no `.fs` is produced (an APPARATUS fault is exit 4), or the diff is non-empty |
+| HOST | the host project built and every `$hostFilters` family passed | the build or any family exits non-zero — the verdict line says `HOST step` and names the project or filter |
+| leg-tests | the leg itself refused a failed host build, an unrunnable host filter and a refuted model, beside a green control | any of those came back exit 0 or printed `green` |
+
+What it does **not** cover, said so a ship record citing it does not over-claim:
+
+- **A skipped host step.** `-SkipOracleHost` (which `verify.ps1 -Proofs` passes, leaving the
+  families to its own suite run) and an empty `-HostFilters` both reach `green` without running a
+  host family. The leg now prints `the HOST step did NOT run (…)` immediately before the verdict,
+  so the log says which green it is.
+- **A zero-exit check that printed a diagnostic.** The check step trusts the prover's exit code;
+  the Phase-166 discriminator only CLASSIFIES a non-zero one. F* was measured exiting 0 over an
+  error at the EXTRACT step (Error 317), which is why that step also asks whether the file exists;
+  no such case has been observed at the CHECK step, so none is guarded against.
+- **Cost.** A budget overshoot is a finding and the leg stays green unless `-Strict` is passed.
+- **The claims ladder and the coverage predicate** are host families (`Proofs.Ladder`,
+  `Proofs.Coverage`), so they stand behind the word only when the host step ran.
+
+`kit/check-proof-leg.tests.ps1` is the regression test. It runs the leg the way a caller does
+(`&`, in process) over a scratch proofs directory, asserts the EXIT CODE of each arm, and reads
+the transcript only to assert `proofs: green` is absent. It was run against the pre-221 kit first
+and went red on six of its eight assertions (arms B, C and D; the green control held), then green
+against the fixed one. Unlike the post-pass's go-red proof above, it IS part of `check.ps1`: it
+takes a few seconds, and it is what the leg's green is a claim about.
+
 ### A lost pass has three classes, and only one of them is a proof failure (Phase 166)
 
 Over 2026-09-14/15 the leg lost passes three different ways and all three read as "did NOT verify".
