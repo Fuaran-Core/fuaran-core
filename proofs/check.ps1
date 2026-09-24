@@ -233,5 +233,15 @@ if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
 # `&` and not `.`: a dot-sourced script's `exit` does NOT propagate to its caller, so a dot-source
 # here would print the kit's red line and then return 0 — a green leg over a failed proof, which
 # is the very class Phase 164 was about. Measured both ways before choosing.
+# `&` is also the shape under which the kit's own `$LASTEXITCODE = 0` seed shadowed every exit code
+# it read, so a failed host build and a refuted model both came back green (Phase 221): the choice
+# of `&` was right, and what it exposed was a defect in the kit, now removed.
 & (Join-Path $PSScriptRoot 'kit/check-proof-leg.ps1') @legArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Then the leg's own refusals, run the same way (Phase 221): a scratch leg over a failed host build,
+# a host filter that cannot run and a refuted model must each exit non-zero, beside a green control.
+# A few seconds, and after the leg so the prover is already installed. This is what lets the green
+# above be cited as "every step was able to fail" rather than only as "no step said it failed".
+& (Join-Path $PSScriptRoot 'kit/check-proof-leg.tests.ps1') -ProofsDir $PSScriptRoot
 exit $LASTEXITCODE

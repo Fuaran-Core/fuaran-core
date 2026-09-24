@@ -184,7 +184,20 @@ if (-not $WorkDir) { $WorkDir = Join-Path $ProofsDir 'obj' }
 $budgetName = Split-Path $BudgetFile -Leaf
 
 Set-Location $ProofsDir
-$LASTEXITCODE = 0
+
+# NEVER ASSIGN $LASTEXITCODE IN THIS SCRIPT (Phase 221). It is an automatic variable that a native
+# command sets in the GLOBAL scope. An assignment here — this line used to read `$LASTEXITCODE = 0`,
+# carried over from the pre-kit `check.ps1` — creates a SCRIPT-scope variable of the same name, and
+# every later read in this script and in its functions finds that one first. Run as `pwsh -File`,
+# the script's scope happens to be the one a native command writes, so the seed was harmless in
+# the pre-kit script. Run as `& check-proof-leg.ps1`, which is how every caller's `check.ps1`
+# invokes it (Phase 155), the seed SHADOWS the real code: every `$LASTEXITCODE` read below saw 0
+# whatever the command did. Measured 2026-09-24 against the pinned prover: a host build of a
+# project that does not exist (MSB1009) printed `==== proofs: green` and exited 0, and so did a
+# model with a type error — the check step's exit code read 0 too, so a refutation was reported
+# as a verification. The failure was DIAGNOSED (MSBuild and F* both said so) and not REFUSED.
+# `check-proof-leg.tests.ps1` beside this file runs the leg the way a caller does and holds every
+# step to a non-zero exit; it goes red if this line ever comes back.
 
 # The per-invocation cache this run owns, once section 3 has resolved one. Named here, above
 # Fail, so that EVERY exit path removes it: PowerShell resolves a function body at call time, so
@@ -954,7 +967,7 @@ if (-not $SkipOracleHost -and $HostFilters.Count -gt 0) {
     Push-Location $RepoRoot
     try {
         dotnet build $HostProjectFile --nologo
-        if ($LASTEXITCODE -ne 0) { Fail "the test project did not build" $LASTEXITCODE }
+        if ($LASTEXITCODE -ne 0) { Fail "the test project did not build — HOST step, $HostProjectFile, exit $LASTEXITCODE" $LASTEXITCODE }
 
         # `$hostStep` and not `$host`: `$Host` is a PowerShell automatic variable and a foreach
         # over it is a hard error, which is the kind of thing that only shows up on the first red
@@ -962,10 +975,17 @@ if (-not $SkipOracleHost -and $HostFilters.Count -gt 0) {
         foreach ($hostStep in $HostFilters) {
             $filter = $hostStep.Filter
             dotnet run --project $HostProject --no-build -- --filter $filter
-            if ($LASTEXITCODE -ne 0) { Fail $hostStep.Failure $LASTEXITCODE }
+            if ($LASTEXITCODE -ne 0) { Fail "$($hostStep.Failure) — HOST step, filter '$filter', exit $LASTEXITCODE" $LASTEXITCODE }
         }
     }
     finally { Pop-Location }
+}
+else {
+    # Said out loud, because the verdict line below is the same word either way (Phase 221): a
+    # green with no host step is a statement about the check and extract steps only, and a reader
+    # citing it must be able to see that from the log rather than from the invocation.
+    $why = if ($SkipOracleHost) { '-SkipOracleHost' } else { 'the caller declared no -HostFilters' }
+    Write-Host "==== proofs: the HOST step did NOT run ($why) — this leg's green covers the check and extract steps only" -ForegroundColor Yellow
 }
 
 # ---- 6. the cost verdict ---------------------------------------------------------------------------
