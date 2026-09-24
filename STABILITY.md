@@ -2313,14 +2313,18 @@ and `SampleAdequacy.census` reads `Guarded [ "accepted"; "refused" ]` for both.
   draws only Inc"): the verdict was green before this phase and is red after it, and the refused
   guard is the ONLY red line. The mirror case also goes red: a generator whose every op is refused
   starves `accepted`, and replay determinism then asserted nothing.
-- **`certify`, which runs `opAlgebra`, moves in principle but seldom in practice.** The ops come from
-  the KIT's own `genOp`, not from the domain. Over any tree it draws a reorder (always accepted)
-  and a remove of the root (always refused), and the built collision arm adds refusals wherever the
-  witness can carry a multi-node subtree. So at a realistic iteration count every domain reaches
-  both sides. We measured this: a lone leaf that holds nothing, a lone leaf that holds everything,
-  and a one-child section all reach both sides over 200 iterations. The guard fires on a run too
-  short to reach both sides, for example `iterations = 1`. A domain calling `certify` at such a
-  count is now RED where it used to be green.
+- **`certify`, which runs `opAlgebra`: no consumer-visible break at a realistic iteration count.**
+  This is a premise finding, and it corrects the phase's own framing. The phase assumed that a
+  domain's generator might never draw a refused op for `opAlgebra`. For this family that is false.
+  The ops come from the KIT's own `genOp`, not from the domain, and over ANY tree it draws both a
+  reorder (always accepted) and a remove of the root (always refused). The built collision arm adds
+  more refusals wherever the witness can carry a multi-node subtree. We measured it: a lone leaf
+  that holds nothing, a lone leaf that holds everything, and a one-child section all reach both
+  sides over 200 iterations. So at the default and customary counts, `certify` gives every domain
+  the same verdict it gave before. Its guard fires only on runs too short to have reached both
+  sides, such as `iterations = 1`. It is guarded because the class has to say what the code does,
+  not because we expect consumers to see it red. **The consumer-visible break is `reducer`'s,
+  through `certifyStream`.**
 - **Nothing else moves.** Every other family's verdict, and every subject law's verdict, is
   unchanged.
 
@@ -2333,8 +2337,8 @@ never reached: `refused op` or `accepted op`.
   path certified by one trial, and the guard's own counterexample says so.
 - **`accepted op` never reached**: your generator only produces ops your State0 refuses. Draw some
   that apply.
-- **opAlgebra's guard at a tiny iteration count**: run the base run at a realistic count. The kit's
-  own suites use 200.
+- **opAlgebra's guard (seen only at a tiny iteration count)**: run the base run at a realistic
+  count. The kit's own suites use 200.
 - There is no opt-out. A domain whose reducer genuinely has no refusal (it accepts every op) is
   the one case the guard cannot be satisfied for. Such a reducer has no refusal path for totality
   to probe, so call `streamLaws` directly, and record in your conformance census that you did not

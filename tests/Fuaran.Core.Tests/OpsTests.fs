@@ -596,4 +596,7 @@ let insertIdUniquenessTests =
               | None -> failtestf "opAlgebra no longer reports the preservation law: %A" (results |> List.map _.Law)
               | Some r -> Expect.isTrue r.Passed (sprintf "the law must hold on the reference witness: %A" r)
 
-              Expect.equal (List.length results) 5 "the algebra family reports five laws" ]
+              Expect.equal
+                  (List.length results)
+                  7
+                  "the algebra family reports five laws plus its two accepted/refused guards (Phase 220)" ]
