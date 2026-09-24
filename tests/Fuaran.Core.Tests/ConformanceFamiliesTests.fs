@@ -421,7 +421,7 @@ let familiesTests =
               let json = Families.toJsonWith (Export.cases ())
 
               Expect.stringContains json "\"kind\": \"fuaran.core.conformance.families\"" "the export names its kind"
-              Expect.stringContains json "\"schema\": 3" "the export carries a schema version"
+              Expect.stringContains json "\"schema\": 4" "the export carries a schema version"
 
               Expect.stringContains
                   json
@@ -437,7 +437,9 @@ let familiesTests =
                     "\"witness\":"
                     "\"optIn\":"
                     "\"discharges\":"
-                    "\"cases\":" ] do
+                    "\"cases\":"
+                    "\"adequacy\":"
+                    "\"refusal\":" ] do
                   Expect.stringContains json member_ (sprintf "the export carries %s" member_)
 
               Expect.isTrue (json.EndsWith "\n") "the export ends with a newline"
@@ -477,7 +479,7 @@ let familiesTests =
                       | None -> failtestf "the export carries no `%s`" name
 
                   Expect.equal (member_ "kind") (JStr "fuaran.core.conformance.families") "kind"
-                  Expect.equal (member_ "schema") (JInt 3) "schema"
+                  Expect.equal (member_ "schema") (JInt 4) "schema"
                   Expect.equal (member_ "package") (JStr "Fuaran.Core.Conformance") "package"
 
                   let rebuilt =

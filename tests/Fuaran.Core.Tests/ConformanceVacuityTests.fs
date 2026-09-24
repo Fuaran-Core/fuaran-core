@@ -539,6 +539,108 @@ let vacuityTests =
                   [ "the sample reached every arm the laws distinguish" ]
                   "and the dimension is cut at the guard's own `): `, not at an assumed family name"
 
+          // ---- Phase 220: the refusable-family audit ----
+
+          testCase "the refusal audit covers the roster, both directions, once per family, with its evidence"
+          <| fun _ ->
+              // The audit is data so the next audit can diff it; a family missing from it is a
+              // family nobody asked the question of, and a row naming nothing is a verdict about a
+              // family that no longer exists.
+              let audited = Families.refusalAudit |> List.map (fun a -> a.Family)
+              let rostered = Set.ofList Families.ids
+
+              Expect.isEmpty
+                  (Set.difference rostered (Set.ofList audited) |> Set.toList)
+                  "these law families have no Families.refusalAudit row — audit each in the commit that ships it"
+
+              Expect.isEmpty
+                  (Set.difference (Set.ofList audited) rostered |> Set.toList)
+                  "these refusal-audit rows name no roster family"
+
+              Expect.equal (List.length audited) (Set.count (Set.ofList audited)) "one row per family"
+
+              for a in Families.refusalAudit do
+                  Expect.isTrue (a.Why.Trim().Length > 10) (sprintf "%s carries no usable evidence" a.Family)
+
+          testCase "every family whose refusals a run can silently miss is Guarded — a ratchet that only shrinks"
+          <| fun _ ->
+              // The PROPERTY, read off the audit and the census rather than off a list of families:
+              // a `Drawn` row is a refusal population a run can miss while every law stays green, and
+              // a `Guarded` census class is what reports that. So a family added later with a drawn
+              // refusal and no guard fails here without anyone having to remember to list it.
+              let unguardedDrawn =
+                  Families.refusalAudit
+                  |> List.filter (fun a -> a.Population = Families.Drawn)
+                  |> List.filter (fun a ->
+                      match classOf a.Family with
+                      | Guarded _ -> false
+                      | Unconditional _ -> true)
+                  |> List.map (fun a -> a.Family)
+                  |> Set.ofList
+
+              // Phase 223 — the six the Phase 220 audit found and deliberately did not guard: each is
+              // an opt-in family whose drawn refusal arm (a domain refusal compared by an agreement
+              // law, or a fault the kit's own roll may not inject) is not yet guaranteed reached.
+              // The set is asserted EXACTLY, so it can only shrink: a new violator fails, and so does
+              // guarding one of these six until it is removed from here in the same commit.
+              let permitted =
+                  set
+                      [ "Conformance.casLaws"
+                        "Conformance.idempotencyLaws"
+                        "Conformance.aiSurfaceLaws"
+                        "Conformance.transformLaws"
+                        "Conformance.columnarValidatorLaws"
+                        "Conformance.diffContainedLaws" ]
+
+              Expect.isEmpty
+                  (Set.difference unguardedDrawn permitted |> Set.toList)
+                  "these families have a refusal population a run can silently miss (audited `Drawn`) and no adequacy guard — guard them, or the census reports an unguarded pass"
+
+              Expect.isEmpty
+                  (Set.difference permitted unguardedDrawn |> Set.toList)
+                  "these permitted violators are no longer violators — remove them from the Phase 223 set in the same commit"
+
+          testCase "the two base-run families certify is built from are Guarded, and reached at the reference witness"
+          <| fun _ ->
+              // (A) of Phase 196's deferred call: `opAlgebra` and `reducer` read a refusal
+              // population the run DRAWS, so their census class is `Guarded` over accepted/refused,
+              // and the generated data says which way a run went rather than rendering a count.
+              let measured = cases ()
+
+              for id in [ "Conformance.opAlgebra"; "Conformance.reducer" ] do
+                  Expect.equal
+                      (Families.tryRefusal id |> Option.map (fun a -> a.Population))
+                      (Some Families.Drawn)
+                      (sprintf "%s is audited Drawn" id)
+
+                  Expect.equal (classOf id) (Guarded [ "accepted"; "refused" ]) (sprintf "%s is censused Guarded" id)
+
+                  Expect.equal
+                      (Families.adequacyToken measured id)
+                      "guarded-reached"
+                      (sprintf "%s reached both sides at the reference witness" id)
+
+          testCase "the adequacy cell tells reached from starved from unconditional — made-up runs"
+          <| fun _ ->
+              // The roster carries the verdict, so its derivation is exercised over inputs chosen
+              // here, not over whatever the reference run happens to produce.
+              let reached =
+                  [ "Conformance.reducer",
+                    { Family = "Conformance.reducer"
+                      Cases = 10
+                      Starved = [] } ]
+
+              let starved =
+                  [ "Conformance.reducer",
+                    { Family = "Conformance.reducer"
+                      Cases = 10
+                      Starved = [ "the sample reached every refused op the laws distinguish" ] } ]
+
+              Expect.equal (Families.adequacyToken reached "Conformance.reducer") "guarded-reached" "reached"
+              Expect.equal (Families.adequacyToken starved "Conformance.reducer") "guarded-starved" "starved"
+              Expect.equal (Families.adequacyToken [] "Conformance.reducer") "guarded-unmeasured" "unmeasured"
+              Expect.equal (Families.adequacyToken reached "Conformance.witnessLaws") "unconditional" "unconditional"
+
           testCase "`unmeasured` is a third state, not a synonym for `vacuous`"
           <| fun _ ->
               // A consumer that handed the renderer no run has not measured zero cases; it has

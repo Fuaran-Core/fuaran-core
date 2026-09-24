@@ -58,7 +58,11 @@ let tests =
           <| fun _ ->
               let results = Conformance.reducer apply gen None 314 200
               Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "totality + determinism pass"
-              Expect.equal (List.length results) 2 "two laws when no envelope predicate"
+
+              Expect.equal
+                  (List.length results)
+                  4
+                  "two laws when no envelope predicate, plus the accepted/refused guards (Phase 220)"
 
           testCase "a throwing reducer fails the totality law"
           <| fun _ ->
@@ -82,7 +86,12 @@ let tests =
                   | WouldGoNegative(_, _) -> true
 
               let results = Conformance.reducer apply gen (Some namesAlternatives) 99 200
-              Expect.equal (List.length results) 3 "envelope law added when a predicate is supplied"
+
+              Expect.equal
+                  (List.length results)
+                  5
+                  "envelope law added when a predicate is supplied (3 laws + 2 Phase 220 guards)"
+
               Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "all three pass"
 
           testCase "the envelope-shape law fails when a rejection is judged empty"
@@ -99,10 +108,11 @@ let tests =
           testCase "certifyStream certifies a reducer-only domain (op-stream laws + reducer laws, no tree)"
           <| fun _ ->
               // F7: a domain with no uniform node tree certifies via the op-stream + reducer
-              // seams alone. The report bundles streamLaws (3) + reducer laws (2) = 5.
+              // seams alone. The report bundles streamLaws (3) + reducer laws (2) + the reducer's
+              // accepted/refused guards (2, Phase 220) = 7.
               let report = Conformance.certifyStream sw gen OpStream.defaultHash 271 200
               Expect.isTrue report.AllPassed "a well-formed reducer-only domain certifies green"
-              Expect.equal (List.length report.Results) 5 "3 op-stream laws + 2 reducer laws"
+              Expect.equal (List.length report.Results) 7 "3 op-stream laws + 2 reducer laws + 2 reducer guards"
 
           testCase "certifyStream surfaces a throwing reducer through the bundled report"
           <| fun _ ->
@@ -113,4 +123,30 @@ let tests =
 
               let badSw = { sw with Apply = throwing }
               let report = Conformance.certifyStream badSw gen OpStream.defaultHash 1 200
-              Expect.isFalse report.AllPassed "a throwing reducer fails the bundled certification" ]
+              Expect.isFalse report.AllPassed "a throwing reducer fails the bundled certification"
+
+          testCase "Phase 220 — a generator that draws only Inc never reaches a refusal, and certifyStream goes RED"
+          <| fun _ ->
+              // Every subject law holds over this run, and until Phase 220 it certified green —
+              // totality included, although nothing it drew could have exercised a typed refusal.
+              let incOnly: StreamGen<Op, int> =
+                  { State0 = 0
+                    Op =
+                      fun rng ->
+                          let n, r = ConfRng.intBelow 5 rng
+                          Inc n, r }
+
+              let report = Conformance.certifyStream sw incOnly OpStream.defaultHash 271 200
+
+              let red =
+                  report.Results
+                  |> List.filter (fun r -> not r.Passed)
+                  |> List.map (fun r -> r.Law)
+
+              Expect.isFalse report.AllPassed "the verdict moves: this domain certified green before Phase 220"
+
+              Expect.equal
+                  red
+                  [ SampleAdequacy.lawPrefix "Conformance.reducer"
+                    + "the sample reached every refused op the laws distinguish" ]
+                  "and the ONLY red line is the refused-side guard" ]

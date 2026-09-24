@@ -396,6 +396,14 @@ module Conformance =
         let mutable inversion = None
         let mutable uniqueness = None
         let mutable preservation = None
+        // Phase 220 — the apply-outcome populations every law above branches on. `canApply ≡
+        // apply` and totality are claims about BOTH sides; inversion, uniqueness and preservation
+        // read the accepted side alone. Counted over the drawn and the built arms together, because
+        // the refusal population is partly each: `genOp` draws refusals (a remove of the root, a
+        // move under a descendant) and the collision arm BUILDS them where the witness can carry a
+        // multi-node subtree.
+        let mutable accepted = 0
+        let mutable refused = 0
 
         /// The first id `t` carries twice (by key), if any — the post-condition an accepted insert
         /// must not create.
@@ -483,6 +491,10 @@ module Conformance =
                 if not equiv && equivalence.IsNone then
                     equivalence <-
                         Some(sprintf "seed=%d iter=%d: canApply≠apply on %A (apply=%A canApply=%A)" seed i op res chk)
+
+                (match res with
+                 | Ok _ -> accepted <- accepted + 1
+                 | Error _ -> refused <- refused + 1)
 
                 match res with
                 | Ok post ->
@@ -586,6 +598,10 @@ module Conformance =
                                             chk
                                     )
 
+                            (match res with
+                             | Ok _ -> accepted <- accepted + 1
+                             | Error _ -> refused <- refused + 1)
+
                             match res with
                             | Ok post ->
                                 noteIfRepeats origin candidate post
@@ -606,7 +622,14 @@ module Conformance =
             Counterexample = uniqueness }
           { Law = "apply's accept path preserves Tree.WellFormed"
             Passed = preservation.IsNone
-            Counterexample = preservation } ]
+            Counterexample = preservation }
+          // Phase 220 — `Guarded ["accepted"; "refused"]`. A generator that never draws a refused
+          // op (and a witness that cannot carry the built collision) leaves totality and
+          // `canApply ≡ apply` certified on the accept path alone; one that never draws an
+          // accepted op leaves three of the five laws asserting nothing. Either is a green run
+          // that tested nothing on the side a law is about, so it reports the guard, not a pass.
+          SampleAdequacy.reached "Conformance.opAlgebra" "accepted op" seed [ "accepted", accepted ]
+          SampleAdequacy.reached "Conformance.opAlgebra" "refused op" seed [ "refused", refused ] ]
 
     /// The op-stream laws: `verifyChain` accepts an intact chain and rejects a tampered
     /// op; `replay` re-derives the live state from the base state.
@@ -689,6 +712,12 @@ module Conformance =
         let mutable totality = None
         let mutable determinism = None
         let mutable envelope = None
+        // Phase 220 — the outcome populations the laws branch on, both DRAWN from the domain's
+        // own generator: replay determinism reads the accepted ops, the envelope law reads the
+        // refused ones, and totality is the claim that a refusal is TYPED rather than thrown —
+        // which a run that never reached a refusal has not tested.
+        let mutable acceptedN = 0
+        let mutable refusedN = 0
 
         for i in 0 .. iterations - 1 do
             let mutable state = gen.State0
@@ -709,9 +738,12 @@ module Conformance =
                     if totality.IsNone then
                         totality <- Some(sprintf "seed=%d iter=%d: apply threw (not a typed rejection)" seed i)
                 | Some(Ok st') ->
+                    acceptedN <- acceptedN + 1
                     state <- st'
                     accepted <- accepted @ [ op ]
                 | Some(Error rej) ->
+                    refusedN <- refusedN + 1
+
                     match namesAlternatives with
                     | Some p when not (p rej) && envelope.IsNone ->
                         envelope <-
@@ -741,6 +773,10 @@ module Conformance =
                    Passed = envelope.IsNone
                    Counterexample = envelope } ]
            | None -> [])
+        // Phase 220 — `Guarded ["accepted"; "refused"]`, after the subject laws so their positions
+        // are unchanged for every caller that reads them by index.
+        @ [ SampleAdequacy.reached "Conformance.reducer" "accepted op" seed [ "accepted", acceptedN ]
+            SampleAdequacy.reached "Conformance.reducer" "refused op" seed [ "refused", refusedN ] ]
 
     /// The structural-diff laws (Phase 03) — certify `Diff.toOps` against a domain's own
     /// witness. Build a random `before`, derive `after` by applying a random valid op sequence,
@@ -1118,8 +1154,15 @@ module Conformance =
         // rather than report. Same short-circuit philosophy as `certify`: foundational law first.
         let red = reducer sw.Apply streamGen None seed iterations
 
+        // Phase 220 — the short-circuit reads the SUBJECT laws only. It exists because a non-total
+        // reducer would crash `streamLaws`; a starved adequacy guard is no such hazard, and
+        // hiding the stream laws behind it would turn one red line into four.
+        let isGuard (r: LawResult) =
+            let p = SampleAdequacy.guardOpening
+            r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p
+
         let stream =
-            if red |> List.forall (fun r -> r.Passed) then
+            if red |> List.filter (isGuard >> not) |> List.forall (fun r -> r.Passed) then
                 streamLaws sw streamGen hashFn (seed + 1) iterations
             else
                 []

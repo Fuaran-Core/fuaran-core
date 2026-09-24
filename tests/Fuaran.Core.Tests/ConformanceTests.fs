@@ -252,10 +252,11 @@ let tests =
 
               Expect.equal
                   (report.Results |> List.length)
-                  15
-                  // algebra gained the insert-uniqueness law in Phase 137 and the
-                  // WellFormed-preservation law in Phase 139.
-                  "witness (4) + algebra (5) + diff (3) + stream (3) laws reported"
+                  17
+                  // algebra gained the insert-uniqueness law in Phase 137, the
+                  // WellFormed-preservation law in Phase 139, and — Phase 220 — its two
+                  // accepted/refused adequacy guards.
+                  "witness (4) + algebra (5 + 2 guards) + diff (3) + stream (3) laws reported"
 
           // ---- Phase 145: the op codec's own injectivity, the content-id theorem's fourth premise ----
 
@@ -1740,3 +1741,110 @@ let propagationEvaluatorLawTests =
               // The counterexample renders every count and then the arms it never reached; the arm
               // list must be exactly the one this witness starves.
               Expect.stringContains why "never reached failing evaluator —" "it names that arm, and only that arm" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 220 — the refusable base-run families are `Guarded` over accepted / refused
+// ---------------------------------------------------------------------------
+
+/// The counter reducer driven by a generator that only ever increments, so it never reaches a
+/// refusal. Every subject law is green over it, and until Phase 220 `certifyStream` certified it —
+/// totality included, although no op it drew could have exercised a typed refusal.
+let private incOnlyGen: StreamGen<CounterOp, int> =
+    { State0 = 0
+      Op =
+        fun rng ->
+            let n, r = ConfRng.intBelow 5 rng
+            Inc n, r }
+
+/// A lone leaf that holds nothing. The ops are the KIT's (`genOp`), not the domain's, and over any
+/// tree `genOp` draws a reorder (always accepted) and a remove of the root (always refused), so
+/// across a real run opAlgebra reaches both sides whatever the domain generates — measured in
+/// Phase 220, and the reason the guard's teeth are shown at ONE iteration: a run too short to have
+/// reached both sides is exactly the run the guard exists to refuse. No holder, so no built arm.
+let private loneLeafGen: OpGen<RNode, string> =
+    { Tree = fun rng -> RNode.leaf "only" "para" "v", rng
+      FreshNode = genFresh
+      CanHold = Some(fun _ -> false) }
+
+let private guardNamed (family: string) (side: string) (results: LawResult list) =
+    results
+    |> List.find (fun r ->
+        r.Law = SampleAdequacy.lawPrefix family
+                + "the sample reached every "
+                + side
+                + " the laws distinguish")
+
+let private subjectOf (results: LawResult list) =
+    results
+    |> List.filter (fun r -> not (r.Law.StartsWith SampleAdequacy.guardOpening))
+
+[<Tests>]
+let refusableFamilyTests =
+    testList
+        "Conformance.refusableFamilies"
+        [ testCase "the reference witness reaches both sides of opAlgebra and reducer"
+          <| fun _ ->
+              for family, results in
+                  [ "Conformance.opAlgebra", Conformance.opAlgebra nodew idw opGen 999 200
+                    "Conformance.reducer", Conformance.reducer sw.Apply streamGen None 314 200 ] do
+                  for side in [ "accepted op"; "refused op" ] do
+                      let g = guardNamed family side results
+                      Expect.isTrue g.Passed (sprintf "%s: %s — %A" family side g.Counterexample)
+
+          testCase "go-red: a reducer whose generator draws no refusal starves the guard, and certifyStream goes RED"
+          <| fun _ ->
+              let results = Conformance.reducer sw.Apply incOnlyGen None 314 200
+
+              Expect.isTrue
+                  (subjectOf results |> List.forall (fun r -> r.Passed))
+                  "every subject law is green — which is the problem the guard exists for"
+
+              Expect.isFalse
+                  (guardNamed "Conformance.reducer" "refused op" results).Passed
+                  "the refused side is starved"
+
+              Expect.isTrue (guardNamed "Conformance.reducer" "accepted op" results).Passed "the accepted side is not"
+
+              let measured =
+                  SampleAdequacy.cases "Conformance.reducer" (Guarded [ "accepted"; "refused" ]) 200 results
+
+              Expect.isTrue (SampleAdequacy.isVacuous measured) "the census reads it as starved, not as a count"
+
+              let report = Conformance.certifyStream sw incOnlyGen OpStream.defaultHash 271 200
+
+              Expect.isFalse
+                  report.AllPassed
+                  "the aggregate verdict MOVES: this domain certified green before Phase 220"
+
+              Expect.equal
+                  (List.length report.Results)
+                  7
+                  "a starved guard does not short-circuit the stream laws — reducer (2 + 2 guards) + stream (3)"
+
+          testCase "go-red: an opAlgebra run too short to reach both sides reports the guard, not a pass"
+          <| fun _ ->
+              let results = Conformance.opAlgebra nodew idw loneLeafGen 999 1
+
+              Expect.isTrue
+                  (subjectOf results |> List.forall (fun r -> r.Passed))
+                  "every subject law is green over one drawn op"
+
+              let starved =
+                  [ "accepted op"; "refused op" ]
+                  |> List.filter (fun side -> not (guardNamed "Conformance.opAlgebra" side results).Passed)
+
+              Expect.equal (List.length starved) 1 "one op reaches one side, and the other is reported starved"
+
+          testCase "go-red: certify's verdict moves with opAlgebra's guard"
+          <| fun _ ->
+              let report =
+                  Conformance.certify nodew idw loneLeafGen sw streamGen OpStream.defaultHash 12345 1
+
+              let redGuards =
+                  report.Results
+                  |> List.filter (fun r ->
+                      not r.Passed
+                      && r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.opAlgebra"))
+
+              Expect.isFalse report.AllPassed "a run that reached one side of apply no longer certifies"
+              Expect.isNonEmpty redGuards "and the red line is opAlgebra's guard, naming the starved side" ]

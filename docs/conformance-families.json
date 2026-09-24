@@ -1,6 +1,6 @@
 {
   "kind": "fuaran.core.conformance.families",
-  "schema": 3,
+  "schema": 4,
   "package": "Fuaran.Core.Conformance",
   "families": [
     {
@@ -11,7 +11,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "400"
+      "cases": "400",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.aiSurfaceLaws",
@@ -21,7 +23,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.arbitrationLaws",
@@ -31,7 +35,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "1800"
+      "cases": "1800",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.attestationLaws",
@@ -41,7 +47,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "1000"
+      "cases": "1000",
+      "adequacy": "guarded-reached",
+      "refusal": "built"
     },
     {
       "id": "Conformance.attributedLaws",
@@ -51,7 +59,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.canonicalFloatLaws",
@@ -61,7 +71,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1500"
+      "cases": "1500",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.capabilityLaws",
@@ -71,7 +83,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1400"
+      "cases": "1400",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.capabilityPipelineIncrementalLaws",
@@ -81,7 +95,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.capabilityPipelineLaws",
@@ -91,7 +107,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.captureReplayLaws",
@@ -101,7 +119,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.casLaws",
@@ -111,7 +131,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.chainBreakReasonLaws",
@@ -121,7 +143,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.codecInjectivityLaws",
@@ -131,7 +155,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.columnarOpLaws",
@@ -141,7 +167,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1200"
+      "cases": "1200",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.columnarOpLawsWith",
@@ -151,7 +179,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1200"
+      "cases": "1200",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.columnarValidatorLaws",
@@ -161,7 +191,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "400"
+      "cases": "400",
+      "adequacy": "unconditional",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.compositionLaws",
@@ -171,7 +203,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.compositionPilot",
@@ -181,7 +215,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "1200"
+      "cases": "1200",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.concurrencyLaws",
@@ -191,7 +227,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": ["lanes-apply"],
-      "cases": "900"
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.concurrencyLawsWith",
@@ -201,7 +239,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "900"
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.constructThenEncodeLaws",
@@ -211,7 +251,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "12"
+      "cases": "12",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.containerLaws",
@@ -221,7 +263,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "guarded-reached",
+      "refusal": "built"
     },
     {
       "id": "Conformance.dagBreakReasonLaws",
@@ -231,7 +275,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "480"
+      "cases": "480",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.dagLaws",
@@ -241,7 +287,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "400"
+      "cases": "400",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.deferredLaws",
@@ -251,7 +299,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.diffContainedLaws",
@@ -261,7 +311,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.diffLaws",
@@ -270,7 +322,9 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": false,
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.dirtyPropagationLaws",
@@ -280,7 +334,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.encoderInjectivityLaws",
@@ -290,7 +346,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "200"
+      "cases": "200",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.footprintLaws",
@@ -300,7 +358,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": ["independence-diamond"],
-      "cases": "900"
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.functionVerifyLaws",
@@ -310,7 +370,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "drawn-miss-is-red"
     },
     {
       "id": "Conformance.hashFnAdversarialLaws",
@@ -320,7 +382,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1000000"
+      "cases": "1000000",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.hashFnLaws",
@@ -330,7 +394,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.idempotencyLaws",
@@ -340,7 +406,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.incrementalLaws",
@@ -350,7 +418,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "400"
+      "cases": "400",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.keyedChildrenLaws",
@@ -360,7 +430,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": ["witness-surface-scope"],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "guarded-reached",
+      "refusal": "built"
     },
     {
       "id": "Conformance.memoLaws",
@@ -370,7 +442,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.memoSoundnessLaws",
@@ -380,7 +454,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "100"
+      "cases": "100",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.mergeConflictLaws",
@@ -390,7 +466,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "900"
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.noAttestationVacuityLaws",
@@ -400,7 +478,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.normalizeLaws",
@@ -410,7 +490,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.nowLaws",
@@ -420,7 +502,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "750"
+      "cases": "750",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.opAlgebra",
@@ -429,7 +513,9 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": false,
       "discharges": ["tree-algebra-well-formed-states"],
-      "cases": "1000"
+      "cases": "1000",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.packLoadingLaws",
@@ -439,7 +525,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.paramLaws",
@@ -449,7 +537,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.projectionLaws",
@@ -459,7 +549,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.propagationEvalLaws",
@@ -469,7 +561,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "guarded-reached",
+      "refusal": "built"
     },
     {
       "id": "Conformance.propagationEvaluatorLaws",
@@ -479,7 +573,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": ["propagation-change-set-and-prior"],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.queryLaws",
@@ -489,7 +585,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1400"
+      "cases": "1400",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.reconcileLaws",
@@ -499,7 +597,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "1200"
+      "cases": "1200",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.reducer",
@@ -508,7 +608,9 @@
       "witness": ["StreamGen"],
       "optIn": false,
       "discharges": [],
-      "cases": "400"
+      "cases": "400",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.registryLaws",
@@ -518,7 +620,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800"
+      "cases": "800",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.schemaWalkLaws",
@@ -528,7 +632,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1200"
+      "cases": "1200",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.slotParamLaws",
@@ -538,7 +644,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "720"
+      "cases": "720",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.snapshotLaws",
@@ -548,7 +656,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "200"
+      "cases": "200",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.snapshotLawsWith",
@@ -558,7 +668,9 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "200"
+      "cases": "200",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "Conformance.streamLaws",
@@ -567,7 +679,9 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": false,
       "discharges": [],
-      "cases": "600"
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.transformLaws",
@@ -577,7 +691,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "32"
+      "cases": "32",
+      "adequacy": "unconditional",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.verifyHonestyLaws",
@@ -587,7 +703,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "400"
+      "cases": "400",
+      "adequacy": "unconditional",
+      "refusal": "drawn-miss-is-red"
     },
     {
       "id": "Conformance.witnessLaws",
@@ -596,7 +714,9 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": false,
       "discharges": ["lawful-abstract-witness"],
-      "cases": "400"
+      "cases": "400",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "FoldConfluence.laneFoldLaws",
@@ -606,7 +726,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "360"
+      "cases": "360",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "FoldConfluence.laneFoldLawsWith",
@@ -616,7 +738,9 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "360"
+      "cases": "360",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "IncrementalDelta.laws",
@@ -626,7 +750,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "420"
+      "cases": "420",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "IncrementalDelta.lawsWith",
@@ -636,7 +762,9 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "700"
+      "cases": "700",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     }
   ]
 }

@@ -94,6 +94,35 @@ module Families =
             Discharges: string list
         }
 
+    /// Where a family's REFUSAL population comes from — Phase 220's audit vocabulary. A refusal
+    /// population is the set of refused / rejected / invalid outcomes at least one of the family's
+    /// laws branches on or asserts something about. What matters is whether a run can MISS it:
+    /// a population the family builds cannot be missed, and one a generator draws can.
+    type RefusalPopulation =
+        /// No law reads a refused outcome. Either the algebra has none, or refusals occur and every
+        /// law passes over them (a rejected op that simply does not extend a chain).
+        | NoRefusal
+        /// Every refused case a law reads is BUILT — each iteration, or from a fixed fixture — so
+        /// no run can miss it.
+        | Built
+        /// At least part of the refused population is DRAWN, and a run that misses it goes RED:
+        /// a law DEMANDS the refused case ("a broken function is caught"), so an unreached refusal
+        /// is a failing law rather than a green one. Loud, so it needs no guard.
+        | DrawnMissIsRed
+        /// At least part of the refused population is DRAWN — by a caller's generator or by the
+        /// kit's own roll — and a run that misses it stays GREEN, because the laws that read it are
+        /// agreements or implications that hold trivially over an empty population. This is the
+        /// vacuity class: a family carrying it must be `Guarded` in `SampleAdequacy.census`, or its
+        /// green run can mean nothing on the side the law is about.
+        | Drawn
+
+    /// One row of the refusable-family audit: a family, where its refusal population comes from,
+    /// and the evidence for that verdict in words a reader can check against the code.
+    type RefusalAudit =
+        { Family: string
+          Population: RefusalPopulation
+          Why: string }
+
     /// Every law family the kit ships, in declaration order. Renderings sort by `Id`, so the order
     /// here is for a reader's benefit and never reaches an artefact.
     let families: LawFamily list =
@@ -217,6 +246,179 @@ module Families =
               for o in f.Discharges -> o, f.Id ]
         |> List.sortBy fst
 
+    /// Phase 220 — the refusable-family audit, one row per family. It is DATA so the next audit
+    /// diffs it rather than re-reading sixty families: a row is a verdict and the evidence for it.
+    ///
+    /// The question each row answers: does the algebra the family certifies have a REFUSAL
+    /// population — a refused / rejected / invalid outcome a law branches on — and can a run miss
+    /// it without a law going red? `Drawn` is the class that matters: the suite holds every
+    /// `Drawn` row to a `Guarded` census class, so a family whose refusals a run can silently miss
+    /// cannot report an unguarded pass. The suite also holds this list equal to the roster in both
+    /// directions, so a family added later is audited in the commit that ships it.
+    let refusalAudit: RefusalAudit list =
+        let r family population why =
+            { Family = family
+              Population = population
+              Why = why }
+
+        [
+          // ---- the base run ----
+          r "Conformance.witnessLaws" NoRefusal "accessor round-trips only; no apply, no refusal path"
+          r
+              "Conformance.opAlgebra"
+              Drawn
+              "canApply ≡ apply and totality read both outcomes; genOp DRAWS refusals, and the collision arm BUILDS them only where the witness can carry a multi-node subtree"
+          r "Conformance.diffLaws" NoRefusal "a refused op is skipped while building `after`; no law reads it"
+          r
+              "Conformance.streamLaws"
+              Built
+              "the tampered chain it must reject is built each iteration; a rejected append is only skipped"
+          r
+              "Conformance.reducer"
+              Drawn
+              "totality (a refusal is typed, not thrown) and the envelope law read refusals that only the caller's StreamGen draws"
+
+          // ---- tree-shaped opt-ins ----
+          r
+              "Conformance.diffContainedLaws"
+              Drawn
+              "the refusal IFF reads the drawn pair under the witness's canHold, and a canHold that refuses nothing holds it trivially; the graft probe beside it is built"
+          r "Conformance.normalizeLaws" NoRefusal "a refused op is skipped; no law reads it"
+          r
+              "Conformance.containerLaws"
+              Built
+              "the interior-offender graft is built and must be refused NotAContainer; its guard covers the built arms"
+          r "Conformance.mergeConflictLaws" NoRefusal "conflicts is a report list, never a refused outcome"
+          r
+              "Conformance.reconcileLaws"
+              Drawn
+              "a reconcile Error arises from OpGen-drawn scripts; guarded on reconcile outcome"
+          r "Conformance.footprintLaws" NoRefusal "a refused op is skipped; no law reads it"
+          r "Conformance.concurrencyLaws" NoRefusal "delegates to concurrencyLawsWith"
+          r "Conformance.concurrencyLawsWith" NoRefusal "a drawn refusal is skipped; an applyAll Error only fails a law"
+          r
+              "Conformance.arbitrationLaws"
+              Drawn
+              "Inapplicable comes from the kit's corruption roll and Conflicts from drawn scripts; guarded on arbitration bucket"
+          r
+              "Conformance.keyedChildrenLaws"
+              Built
+              "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms"
+
+          // ---- stream-shaped opt-ins ----
+          r "Conformance.snapshotLaws" NoRefusal "delegates to snapshotLawsWith"
+          r "Conformance.snapshotLawsWith" NoRefusal "a rejected append is skipped; a compact Error only fails a law"
+          r "Conformance.dagLaws" Built "the tampered node it must reject is built each iteration"
+          r
+              "Conformance.casLaws"
+              Drawn
+              "match ≡ append compares a domain refusal with a CAS Domain rejection only when StreamGen draws one; the stale-head rejection beside it is built"
+          r
+              "Conformance.idempotencyLaws"
+              Drawn
+              "fresh-key ≡ append and the CAS arm compare domain refusals only when StreamGen draws one; Duplicate and StaleHead are built"
+          r "Conformance.hashFnLaws" Built "reorder, drop and bit-flip are built and must fail verifyChain"
+          r "Conformance.attributedLaws" Built "a re-attributed op is built and must fail verifyChain"
+          r "Conformance.codecInjectivityLaws" NoRefusal "a Decode refusal only fails a law"
+          r
+              "Conformance.noAttestationVacuityLaws"
+              Built
+              "a plausible attestation is built and the no-op sink must reject it"
+          r
+              "Conformance.attestationLaws"
+              Built
+              "op and actor forgeries are built each iteration; its guard is on the signing outcome"
+
+          // ---- artifact-witness opt-ins ----
+          r "Conformance.compositionLaws" NoRefusal "a compose Error only fails a law or is compared opaquely"
+          r "Conformance.compositionPilot" NoRefusal "as compositionLaws; a memo Error only fails a law"
+          r "Conformance.memoLaws" NoRefusal "every Error arm only fails a law"
+          r "Conformance.memoSoundnessLaws" NoRefusal "an Error only fails a law; the cache bypass is not a refusal"
+          r
+              "Conformance.functionVerifyLaws"
+              DrawnMissIsRed
+              "the broken function is caught only when genParams reaches its bad sub-space, and a broken function that verifies clean is itself a red law"
+          r
+              "Conformance.verifyHonestyLaws"
+              DrawnMissIsRed
+              "the broken verdicts depend on genParams, and a broken function verifying under any axis is a red law"
+          r "Conformance.encoderInjectivityLaws" NoRefusal "no refused outcome is read"
+
+          // ---- the remaining witnessed opt-ins ----
+          r "Conformance.projectionLaws" NoRefusal "a re-import Error only fails a law"
+          r
+              "Conformance.aiSurfaceLaws"
+              Drawn
+              "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one; unknown tool, deny and unknown id are built"
+          r
+              "Conformance.propagationEvaluatorLaws"
+              Drawn
+              "the failing-evaluator arm comes from the domain's own edits; guarded on evaluator edit"
+
+          // ---- the fixture-only families ----
+          r "Conformance.captureReplayLaws" Built "the tampered capture and the misordered replay are built"
+          r
+              "Conformance.transformLaws"
+              Drawn
+              "the Error/Error parity arm is reached only when the caller's generator yields an evaluation error"
+          r
+              "Conformance.constructThenEncodeLaws"
+              NoRefusal
+              "Reject corpus cases are filtered out; a Construct Error only fails a law"
+          r "Conformance.hashFnAdversarialLaws" NoRefusal "a collision search; no refused outcome"
+          r
+              "Conformance.capabilityLaws"
+              Built
+              "out-of-space arg, unknown arg and unregistered id are built each iteration"
+          r "Conformance.queryLaws" Built "type mismatch, unknown param, NoSuchQuery and ExecutionFailed are built"
+          r "Conformance.registryLaws" Built "an unregistered id and an out-of-space arg are built"
+          r "Conformance.packLoadingLaws" Built "a stale-version pack and an unknown base are built"
+          r
+              "Conformance.aggregateParityLaws"
+              NoRefusal
+              "an Error only lands in a parity bucket, and the kit draws no type that can raise one"
+          r "Conformance.columnarOpLaws" Drawn "delegates to columnarOpLawsWith"
+          r
+              "Conformance.columnarOpLawsWith"
+              Drawn
+              "the refusal arms are picked by the kit's own roll; guarded on invert's refusal population"
+          r
+              "Conformance.columnarValidatorLaws"
+              Drawn
+              "null and out-of-range faults are injected by the kit's own roll, and a fault-free draw satisfies the count laws trivially"
+          r "Conformance.incrementalLaws" NoRefusal "an Error is only skipped"
+          r "Conformance.paramLaws" Built "one paramsOf member is dropped each iteration and must refuse UnboundParam"
+          r "Conformance.schemaWalkLaws" NoRefusal "an evaluator rejection is skipped"
+          r "Conformance.deferredLaws" Built "the fixed Failed case must yield Error"
+          r "Conformance.capabilityPipelineLaws" Built "the fixed ill-typed pipeline must refuse EdgeTypeMismatch"
+          r "Conformance.capabilityPipelineIncrementalLaws" NoRefusal "an eval Error only records a failure"
+          r "Conformance.dirtyPropagationLaws" NoRefusal "no refused outcome is read"
+          r
+              "Conformance.propagationEvalLaws"
+              Built
+              "the unknown change and the leaky evaluator are built each iteration"
+          r "Conformance.canonicalFloatLaws" NoRefusal "no refused outcome is read"
+          r "Conformance.chainBreakReasonLaws" Built "all three break kinds are built each iteration"
+          r "Conformance.dagBreakReasonLaws" Built "both break kinds are built each iteration"
+          r "Conformance.nowLaws" Built "the unpinned clock must refuse UnpinnedClock, built each iteration"
+          r "Conformance.slotParamLaws" Built "the unbound and mistyped slots are built each iteration"
+
+          // ---- outside `Conformance` ----
+          r "FoldConfluence.laneFoldLaws" Drawn "delegates to laneFoldLawsWith"
+          r
+              "FoldConfluence.laneFoldLawsWith"
+              Drawn
+              "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome"
+          r "IncrementalDelta.laws" Drawn "delegates to lawsWith"
+          r
+              "IncrementalDelta.lawsWith"
+              Drawn
+              "declined pipelines are picked from a fixed menu by the kit's roll; guarded on refresh class" ]
+
+    /// The audit row for one family, if the roster audits it (the suite holds that it always does).
+    let tryRefusal (id: string) : RefusalAudit option =
+        refusalAudit |> List.tryFind (fun a -> a.Family = id)
+
     // ---- the exports ------------------------------------------------------------------------
 
     let private quote (s: string) : string =
@@ -259,6 +461,36 @@ module Families =
         | SeamNotEveryDomainHas -> "seam-not-every-domain-has"
         | StrongerPromise -> "stronger-promise"
 
+    /// The wire spelling of a refusal-audit verdict — Phase 220. `unaudited` is never rendered for
+    /// a shipped family (the suite holds the audit equal to the roster); it exists so the renderer
+    /// is total rather than throwing on a roster a consumer extended.
+    let refusalToken (id: string) : string =
+        match tryRefusal id with
+        | Some a ->
+            match a.Population with
+            | NoRefusal -> "none"
+            | Built -> "built"
+            | DrawnMissIsRed -> "drawn-miss-is-red"
+            | Drawn -> "drawn"
+        | None -> "unaudited"
+
+    /// The adequacy cell — Phase 220. What `certify`'s verdict for a family is made of, as a fact
+    /// the generated data carries rather than one a reader reconstructs: `unconditional` (every
+    /// iteration builds every branch, so a green run is a pass), `guarded-reached` (the family
+    /// carries a guard and this run reached every guarded side), `guarded-starved` (the guard went
+    /// red — the run tested nothing on a side a law is about), or `guarded-unmeasured` (a guarded
+    /// family no run was handed for). Read from `SampleAdequacy.census` and the measured run, so it
+    /// cannot disagree with either.
+    let adequacyToken (cases: (string * CaseCount) list) (id: string) : string =
+        match SampleAdequacy.census |> List.tryFind (fun (k, _) -> k = id) with
+        | None -> "unclassified"
+        | Some(_, Unconditional _) -> "unconditional"
+        | Some(_, Guarded _) ->
+            match cases |> List.tryFind (fun (k, _) -> k = id) with
+            | None -> "guarded-unmeasured"
+            | Some(_, c) when List.isEmpty c.Starved -> "guarded-reached"
+            | Some _ -> "guarded-starved"
+
     /// The roster as JSON — the machine export, and the one an offline projection reads without
     /// building or running anything (it is committed, generated, at `docs/conformance-families.json`).
     ///
@@ -266,10 +498,11 @@ module Families =
     /// `kind`, `schema`, `package` and a `families` array sorted by `id`, each member an object
     /// with `id`, `module`, `entry`, `witness` (array), `optIn` (boolean), `reason` (a string from
     /// the [[OptInReason]] vocabulary, **present only for an opt-in family** — this wire model has
-    /// no null), `discharges` (array) and `cases` (a string: a decimal count, `vacuous`, or
-    /// `unmeasured`).
+    /// no null), `discharges` (array), `cases` (a string: a decimal count, `vacuous`, or
+    /// `unmeasured`), `adequacy` (see [[adequacyToken]]) and `refusal` (see [[refusalToken]]).
     ///
-    /// `schema` reads 3 since Phase 196 added `cases`; it read 2 from Phase 194's `reason`. The
+    /// `schema` reads 4 since Phase 220 added `adequacy` and `refusal`; it read 3 from Phase 196's
+    /// `cases` and 2 from Phase 194's `reason`. The
     /// bump is free and therefore taken: a search of the workspace found no reader of this file
     /// outside this repository's own suite, so nothing keys on the old number, and a shape that
     /// changes under an unmoved stamp is the drift class this estate keeps paying for elsewhere.
@@ -292,7 +525,9 @@ module Families =
               "      " + quote "witness" + ": " + jsonArray f.Witness
               "      " + quote "optIn" + ": " + (if f.OptIn then "true" else "false")
               "      " + quote "discharges" + ": " + jsonArray f.Discharges
-              "      " + quote "cases" + ": " + quote (casesCell cases f.Id) ]
+              "      " + quote "cases" + ": " + quote (casesCell cases f.Id)
+              "      " + quote "adequacy" + ": " + quote (adequacyToken cases f.Id)
+              "      " + quote "refusal" + ": " + quote (refusalToken f.Id) ]
             |> fun members ->
                 match f.Reason with
                 | None -> members
@@ -317,7 +552,7 @@ module Families =
         + ",\n"
         + "  "
         + quote "schema"
-        + ": 3,\n"
+        + ": 4,\n"
         + "  "
         + quote "package"
         + ": "
@@ -332,8 +567,7 @@ module Families =
     /// The roster as the generated `docs/conformance-families.md` — the human-readable half of the
     /// same export. Sorted by `id`, so the table is byte-stable and a diff shows only what moved.
     ///
-    /// `cases` carries what a run measured, per Phase 196; the five columns beside it are rendered
-    /// exactly as they were before it existed.
+    /// `cases` carries what a run measured, per Phase 196; `adequacy` and `refusal` are Phase 220's.
     let toMarkdownWith (cases: (string * CaseCount) list) : string =
         let cell (xs: string list) =
             if List.isEmpty xs then
@@ -343,7 +577,7 @@ module Families =
 
         let row (f: LawFamily) =
             sprintf
-                "| `%s` | %s | %s | %s | %s | %s |"
+                "| `%s` | %s | %s | %s | %s | %s | %s | %s |"
                 f.Id
                 (if f.OptIn then "opt-in" else "base run")
                 (match f.Reason with
@@ -352,6 +586,8 @@ module Families =
                 (cell f.Witness)
                 (cell f.Discharges)
                 (casesCell cases f.Id)
+                ("`" + adequacyToken cases f.Id + "`")
+                ("`" + refusalToken f.Id + "`")
 
         let rows = families |> List.sortBy (fun f -> f.Id) |> List.map row
 
@@ -396,13 +632,26 @@ module Families =
           "what this column exists to make impossible to read past. `unmeasured` means no run was"
           "handed to the renderer, which is a different fact and deliberately a different word."
           ""
+          "**Adequacy.** How the family's green run is to be read. `unconditional` — every iteration"
+          "builds every branch the laws distinguish, so a green run is a pass. `guarded-reached` — the"
+          "family carries an adequacy guard and this run reached every guarded side. `guarded-starved`"
+          "— the guard went red: the run tested nothing on a side a law is about, and the family is"
+          "RED in `certify`'s verdict rather than silently green. `guarded-unmeasured` — a guarded"
+          "family no run was handed for."
+          ""
+          "**Refusal.** The refusable-family audit (Phase 220): where the family's refused outcomes"
+          "come from. `none` — no law reads one. `built` — every refused case is constructed, so no"
+          "run can miss it. `drawn-miss-is-red` — drawn, but a law demands the refused case, so a"
+          "run that misses it fails. `drawn` — drawn, and a run that misses it stays green unless"
+          "the family is guarded, which is what the `Adequacy` cell beside it answers."
+          ""
           sprintf
               "%d families, across %s."
               (List.length families)
               (modules |> List.map (fun m -> "`" + m + "`") |> String.concat ", ")
           ""
-          "| Family | Run by | Why opt-in | Witness | Discharges | Cases |"
-          "|---|---|---|---|---|---|" ]
+          "| Family | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |"
+          "|---|---|---|---|---|---|---|---|" ]
         @ rows
         @ [ "" ]
         |> String.concat "\n"
