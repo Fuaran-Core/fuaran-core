@@ -44,6 +44,10 @@ module ModelProp = Propagation
 // open.
 module ModelQuery = Query
 
+// Phase 154 — the extracted COUNTED-PIPELINE-DRIVER model, bound the same way for consistency
+// (production has no `Pipeline` module, but the alias keeps every model read the same way here).
+module ModelPipe = Pipeline
+
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
@@ -8972,6 +8976,791 @@ let private queryDifferential
     tally
 
 
+// ------------------------------------------------------------------------------------------
+// Phase 154 — the COUNTED PIPELINE DRIVER. `proofs/Pipeline.fst` models `Fuaran.Core.DataFrame`'s
+// closed `ColExpr` and `Transform` algebra, `evalPipelineWithInEnvCounted`'s fold and its cost
+// model clause for clause over an ABSTRACT STEP EVALUATOR (the verbs' semantics are the
+// parameter, as Phase 176's pipeline evaluator and Phase 186's node evaluator were);
+// `proofs/oracle/Pipeline.fs` is that model extracted. This runs it BESIDE production over the
+// `conformance/laws/transform-laws.json` vectors (decoded with the shipped codec) and a generated
+// sample — the vectors' own draw recipe, WIDENED to reach all fourteen verbs and all thirteen
+// expression kinds, with a `Ref` resolver, a param env, embedded and referenced right-hand
+// sources, and expressions that refuse — comparing the TABLE (byte for byte through
+// `ColumnCodec.encode`) and the COUNT, or the rendered error.
+//
+// The step evaluator the model is handed is production's own, one verb at a time, through the
+// public entry point: `evalPipelineWithInEnv resolve env [ step ]` over the frame crossed back to
+// a `Table`. So what the differential measures is exactly what the theorems are about — the
+// fold, the cost model, and the two closed alphabets — with the primitives shared. A float cell
+// crosses as its round-trip `R` text and back; a `Table` crosses as its row-major view (the
+// transpose `toFrame` / `ofFrame` perform), so the bridge never hands the model a zero-column
+// frame with rows — a `Table` cannot carry one — and the generator keeps every `Project` to at
+// least one column for that reason.
+// ------------------------------------------------------------------------------------------
+
+let private pColToModel (t: ColumnType) : ModelPipe.column_type =
+    match t with
+    | IntType -> ModelPipe.IntType
+    | FloatType -> ModelPipe.FloatType
+    | BoolType -> ModelPipe.BoolType
+    | StringType -> ModelPipe.StringType
+    | DateType -> ModelPipe.DateType
+    | TimestampType -> ModelPipe.TimestampType
+
+let private pColOfModel (t: ModelPipe.column_type) : ColumnType =
+    match t with
+    | ModelPipe.IntType -> IntType
+    | ModelPipe.FloatType -> FloatType
+    | ModelPipe.BoolType -> BoolType
+    | ModelPipe.StringType -> StringType
+    | ModelPipe.DateType -> DateType
+    | ModelPipe.TimestampType -> TimestampType
+
+let private pCellToModel (c: Cell) : ModelPipe.cell =
+    match c with
+    | Cell.Int v -> ModelPipe.Int(bigint v)
+    | Cell.Float v -> ModelPipe.Float(v.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+    | Cell.Bool v -> ModelPipe.Bool v
+    | Cell.Str v -> ModelPipe.Str v
+    | Cell.Date v -> ModelPipe.Date v
+    | Cell.Timestamp v -> ModelPipe.Timestamp v
+    | Cell.Null -> ModelPipe.Null
+
+let private pCellOfModel (c: ModelPipe.cell) : Cell =
+    match c with
+    | ModelPipe.Int v -> Cell.Int(int v)
+    | ModelPipe.Float s ->
+        Cell.Float(
+            System.Double.Parse(
+                s,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture
+            )
+        )
+    | ModelPipe.Bool v -> Cell.Bool v
+    | ModelPipe.Str v -> Cell.Str v
+    | ModelPipe.Date v -> Cell.Date v
+    | ModelPipe.Timestamp v -> Cell.Timestamp v
+    | ModelPipe.Null -> Cell.Null
+
+/// A closed enumeration crosses through one table read both ways, so a case the table misses is
+/// a `KeyNotFoundException` on the first draw that reaches it rather than a silent default.
+let private pFwd (table: ('a * 'b) list) (x: 'a) : 'b =
+    table |> List.find (fun (a, _) -> a = x) |> snd
+
+let private pBack (table: ('a * 'b) list) (y: 'b) : 'a =
+    table |> List.find (fun (_, b) -> b = y) |> fst
+
+let private pBinOps: (BinOp * ModelPipe.bin_op) list =
+    [ Add, ModelPipe.Add
+      Sub, ModelPipe.Sub
+      Mul, ModelPipe.Mul
+      Div, ModelPipe.Div
+      Mod, ModelPipe.Mod
+      Eq, ModelPipe.Eq
+      Ne, ModelPipe.Ne
+      Lt, ModelPipe.Lt
+      Le, ModelPipe.Le
+      Gt, ModelPipe.Gt
+      Ge, ModelPipe.Ge
+      And, ModelPipe.And
+      Or, ModelPipe.Or
+      Contains, ModelPipe.Contains
+      StartsWith, ModelPipe.StartsWith
+      EndsWith, ModelPipe.EndsWith ]
+
+let private pScalarFns: (ScalarFn * ModelPipe.scalar_fn) list =
+    [ Abs, ModelPipe.Abs
+      Round, ModelPipe.Round
+      Floor, ModelPipe.Floor
+      Ceil, ModelPipe.Ceil
+      Length, ModelPipe.Length
+      Lower, ModelPipe.Lower
+      Upper, ModelPipe.Upper
+      Substr, ModelPipe.Substr
+      DatePart, ModelPipe.DatePart
+      Concat, ModelPipe.Concat
+      Trim, ModelPipe.Trim
+      Replace, ModelPipe.Replace
+      DateDiffDays, ModelPipe.DateDiffDays
+      Sqrt, ModelPipe.Sqrt
+      Least, ModelPipe.Least
+      Greatest, ModelPipe.Greatest
+      IndexOf, ModelPipe.IndexOf ]
+
+let private pAggFns: (AggFn * ModelPipe.agg_fn) list =
+    [ Sum, ModelPipe.Sum
+      Mean, ModelPipe.Mean
+      Min, ModelPipe.Min
+      Max, ModelPipe.Max
+      Count, ModelPipe.Count
+      Median, ModelPipe.Median
+      StdDev, ModelPipe.StdDev
+      First, ModelPipe.First
+      Last, ModelPipe.Last
+      CountDistinct, ModelPipe.CountDistinct ]
+
+let private pWindowFns: (WindowFn * ModelPipe.window_fn) list =
+    [ RowNumber, ModelPipe.RowNumber
+      Rank, ModelPipe.Rank
+      Lag, ModelPipe.Lag
+      Lead, ModelPipe.Lead
+      CumulSum, ModelPipe.CumulSum
+      RollingMean, ModelPipe.RollingMean
+      DenseRank, ModelPipe.DenseRank
+      CompetitionRank, ModelPipe.CompetitionRank
+      CumulMax, ModelPipe.CumulMax
+      CumulMin, ModelPipe.CumulMin
+      RollingSum, ModelPipe.RollingSum ]
+
+let private pWindowFnToModel (f: WindowFn) : ModelPipe.window_fn =
+    match f with
+    | NTile n -> ModelPipe.NTile(bigint n)
+    | other -> pFwd pWindowFns other
+
+let private pWindowFnOfModel (f: ModelPipe.window_fn) : WindowFn =
+    match f with
+    | ModelPipe.NTile n -> NTile(int n)
+    | other -> pBack pWindowFns other
+
+let private pJoinKinds: (JoinKind * ModelPipe.join_kind) list =
+    [ Inner, ModelPipe.Inner
+      Left, ModelPipe.Left
+      Right, ModelPipe.Right
+      Outer, ModelPipe.Outer
+      Semi, ModelPipe.Semi
+      Anti, ModelPipe.Anti ]
+
+let private pSortDirs: (SortDir * ModelPipe.sort_dir) list =
+    [ Asc, ModelPipe.Asc; Desc, ModelPipe.Desc ]
+
+let private pGrains: (NowGrain * ModelPipe.now_grain) list =
+    [ NowGrain.Date, ModelPipe.GrainDate
+      NowGrain.Timestamp, ModelPipe.GrainTimestamp ]
+
+let rec private pExprToModel (e: ColExpr) : ModelPipe.col_expr =
+    match e with
+    | Col n -> ModelPipe.Col n
+    | Lit c -> ModelPipe.Lit(pCellToModel c)
+    | Param n -> ModelPipe.Param n
+    | Binary(op, a, b) -> ModelPipe.Binary(pFwd pBinOps op, pExprToModel a, pExprToModel b)
+    | Not x -> ModelPipe.Not(pExprToModel x)
+    | Coalesce xs -> ModelPipe.Coalesce(xs |> List.map pExprToModel)
+    | Case(cases, els) ->
+        ModelPipe.Case(cases |> List.map (fun (w, t) -> pExprToModel w, pExprToModel t), pExprToModel els)
+    | Cast(ty, x) -> ModelPipe.Cast(pColToModel ty, pExprToModel x)
+    | ApplyFn(fn, xs) -> ModelPipe.ApplyFn(pFwd pScalarFns fn, xs |> List.map pExprToModel)
+    | InList(x, items) -> ModelPipe.InList(pExprToModel x, items |> List.map pExprToModel)
+    | IsNull x -> ModelPipe.IsNull(pExprToModel x)
+    | InParam(x, n) -> ModelPipe.InParam(pExprToModel x, n)
+    | Now g -> ModelPipe.Now(pFwd pGrains g)
+
+let rec private pExprOfModel (e: ModelPipe.col_expr) : ColExpr =
+    match e with
+    | ModelPipe.Col n -> Col n
+    | ModelPipe.Lit c -> Lit(pCellOfModel c)
+    | ModelPipe.Param n -> Param n
+    | ModelPipe.Binary(op, a, b) -> Binary(pBack pBinOps op, pExprOfModel a, pExprOfModel b)
+    | ModelPipe.Not x -> Not(pExprOfModel x)
+    | ModelPipe.Coalesce xs -> Coalesce(xs |> List.map pExprOfModel)
+    | ModelPipe.Case(cases, els) ->
+        Case(cases |> List.map (fun (w, t) -> pExprOfModel w, pExprOfModel t), pExprOfModel els)
+    | ModelPipe.Cast(ty, x) -> Cast(pColOfModel ty, pExprOfModel x)
+    | ModelPipe.ApplyFn(fn, xs) -> ApplyFn(pBack pScalarFns fn, xs |> List.map pExprOfModel)
+    | ModelPipe.InList(x, items) -> InList(pExprOfModel x, items |> List.map pExprOfModel)
+    | ModelPipe.IsNull x -> IsNull(pExprOfModel x)
+    | ModelPipe.InParam(x, n) -> InParam(pExprOfModel x, n)
+    | ModelPipe.Now g -> Now(pBack pGrains g)
+
+/// A `Table` as its row-major view — the transpose `toFrame` performs.
+let private pFrameOfTable (t: Table) : ModelPipe.frame =
+    let n = Table.rowCount t
+    let cols = t.Columns |> List.map (fun c -> List.toArray c.Cells)
+
+    { ModelPipe.frame.cols = t.Schema |> List.map (fun (name, ty) -> name, pColToModel ty)
+      ModelPipe.frame.rows = [ for i in 0 .. n - 1 -> cols |> List.map (fun a -> pCellToModel a[i]) ] }
+
+/// The transpose back — `ofFrame`.
+let private pTableOfFrame (f: ModelPipe.frame) : Table =
+    let arrs = f.rows |> List.map List.toArray
+
+    { Schema = f.cols |> List.map (fun (name, ty) -> name, pColOfModel ty)
+      Columns =
+        f.cols
+        |> List.mapi (fun ci (name, ty) ->
+            Column.create name (pColOfModel ty) (arrs |> List.map (fun r -> pCellOfModel r[ci]))) }
+
+let private pSourceToModel (s: DataSource) : ModelPipe.data_source =
+    match s with
+    | Embedded t -> ModelPipe.Embedded(pFrameOfTable t)
+    | Ref r -> ModelPipe.Ref r
+
+let private pSourceOfModel (s: ModelPipe.data_source) : DataSource =
+    match s with
+    | ModelPipe.Embedded f -> Embedded(pTableOfFrame f)
+    | ModelPipe.Ref r -> Ref r
+
+let private pSlotToModel (f: 'a -> 'b) (s: Slot<'a>) : ModelPipe.slot<'b> =
+    match s with
+    | Slot.Lit v -> ModelPipe.SlotLit(f v)
+    | Slot.Param n -> ModelPipe.SlotParam n
+
+let private pSlotOfModel (f: 'b -> 'a) (s: ModelPipe.slot<'b>) : Slot<'a> =
+    match s with
+    | ModelPipe.SlotLit v -> Slot.Lit(f v)
+    | ModelPipe.SlotParam n -> Slot.Param n
+
+let private pTransformToModel (t: Transform) : ModelPipe.transform =
+    match t with
+    | Filter e -> ModelPipe.Filter(pExprToModel e)
+    | Project pairs -> ModelPipe.Project pairs
+    | Derive(name, e) -> ModelPipe.Derive(name, pExprToModel e)
+    | GroupBy(keys, aggs) ->
+        ModelPipe.GroupBy(
+            keys,
+            aggs
+            |> List.map (fun a ->
+                { ModelPipe.agg.a_name = a.Name
+                  ModelPipe.agg.a_fn = pFwd pAggFns a.Fn
+                  ModelPipe.agg.a_of = a.Of })
+        )
+    | Join(src, on, kind) -> ModelPipe.Join(pSourceToModel src, on, pFwd pJoinKinds kind)
+    | Window w ->
+        ModelPipe.Window
+            { ModelPipe.window_spec.partition_by = w.PartitionBy
+              ModelPipe.window_spec.order_by = w.OrderBy |> List.map (fun (c, d) -> c, pFwd pSortDirs d)
+              ModelPipe.window_spec.w_fn = pWindowFnToModel w.Fn
+              ModelPipe.window_spec.w_of = w.Of
+              ModelPipe.window_spec.w_as = w.As }
+    | Pivot p ->
+        ModelPipe.Pivot
+            { ModelPipe.pivot_spec.p_index = p.Index
+              ModelPipe.pivot_spec.p_on = p.On
+              ModelPipe.pivot_spec.p_values = p.Values
+              ModelPipe.pivot_spec.p_agg = pFwd pAggFns p.Agg }
+    | Unpivot(idVars, valueVars) -> ModelPipe.Unpivot(idVars, valueVars)
+    | Sort by -> ModelPipe.Sort(by |> List.map (fun (c, d) -> pSlotToModel id c, pFwd pSortDirs d))
+    | Distinct -> ModelPipe.Distinct
+    | Limit(n, offset) ->
+        ModelPipe.Limit(pSlotToModel (fun (v: int) -> bigint v) n, pSlotToModel (fun (v: int) -> bigint v) offset)
+    | Union src -> ModelPipe.Union(pSourceToModel src)
+    | Intersect src -> ModelPipe.Intersect(pSourceToModel src)
+    | Except src -> ModelPipe.Except(pSourceToModel src)
+
+let private pTransformOfModel (t: ModelPipe.transform) : Transform =
+    match t with
+    | ModelPipe.Filter e -> Filter(pExprOfModel e)
+    | ModelPipe.Project pairs -> Project pairs
+    | ModelPipe.Derive(name, e) -> Derive(name, pExprOfModel e)
+    | ModelPipe.GroupBy(keys, aggs) ->
+        GroupBy(
+            keys,
+            aggs
+            |> List.map (fun a ->
+                { Name = a.a_name
+                  Fn = pBack pAggFns a.a_fn
+                  Of = a.a_of })
+        )
+    | ModelPipe.Join(src, on, kind) -> Join(pSourceOfModel src, on, pBack pJoinKinds kind)
+    | ModelPipe.Window w ->
+        Window
+            { PartitionBy = w.partition_by
+              OrderBy = w.order_by |> List.map (fun (c, d) -> c, pBack pSortDirs d)
+              Fn = pWindowFnOfModel w.w_fn
+              Of = w.w_of
+              As = w.w_as }
+    | ModelPipe.Pivot p ->
+        Pivot
+            { Index = p.p_index
+              On = p.p_on
+              Values = p.p_values
+              Agg = pBack pAggFns p.p_agg }
+    | ModelPipe.Unpivot(idVars, valueVars) -> Unpivot(idVars, valueVars)
+    | ModelPipe.Sort by -> Sort(by |> List.map (fun (c, d) -> pSlotOfModel id c, pBack pSortDirs d))
+    | ModelPipe.Distinct -> Distinct
+    | ModelPipe.Limit(n, offset) -> Limit(pSlotOfModel int n, pSlotOfModel int offset)
+    | ModelPipe.Union src -> Union(pSourceOfModel src)
+    | ModelPipe.Intersect src -> Intersect(pSourceOfModel src)
+    | ModelPipe.Except src -> Except(pSourceOfModel src)
+
+/// The pipeline crossed to the model, each step through `perturb` first — the identity for the
+/// faithful bridge, and the go-reds' lever.
+let private pPipelineToModelWith (perturb: Transform -> Transform) (p: Transform list) : ModelPipe.transform list =
+    p |> List.map (perturb >> pTransformToModel)
+
+let private pPipelineToModel (p: Transform list) : ModelPipe.transform list = pPipelineToModelWith id p
+
+let private pRenderError (e: EvalError) : string = sprintf "%A" e
+
+/// The step evaluator the theorems quantify over, instantiated at production's own primitives:
+/// one verb through the public entry point, over the frame crossed back to a `Table`. This is the
+/// faithful instantiation — the model's transform is what is evaluated.
+let private pStepOfProduction
+    (resolve: string -> Result<Table, EvalError>)
+    (env: Map<string, Cell>)
+    : ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string> =
+    fun f t ->
+        match DataFrame.evalPipelineWithInEnv resolve env [ pTransformOfModel t ] (pTableOfFrame f) with
+        | Ok t' -> ModelPipe.Ok(pFrameOfTable t')
+        | Error e -> ModelPipe.Error(pRenderError e)
+
+/// The faithful step evaluator in the differential's shape — it reads no production pipeline,
+/// because the model's transform is what it evaluates.
+let private pFaithfulStep
+    (resolve: string -> Result<Table, EvalError>)
+    (env: Map<string, Cell>)
+    (_: Transform list)
+    : ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string> =
+    pStepOfProduction resolve env
+
+/// The go-red's step evaluator: it walks PRODUCTION's pipeline in lock-step and ignores the
+/// transform the model hands it, so the model's transform reaches `costOf` and nothing else. Behind
+/// a bridge that crosses a `Derive` as a `Distinct`, that is a model whose count skips one step
+/// kind while every table stays right — which is exactly what the count comparison has to catch.
+let private pStepLockstep
+    (resolve: string -> Result<Table, EvalError>)
+    (env: Map<string, Cell>)
+    (production: Transform list)
+    : ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string> =
+    let cursor = ref production
+
+    fun f _ ->
+        match cursor.Value with
+        | s :: rest ->
+            cursor.Value <- rest
+
+            match DataFrame.evalPipelineWithInEnv resolve env [ s ] (pTableOfFrame f) with
+            | Ok t' -> ModelPipe.Ok(pFrameOfTable t')
+            | Error e -> ModelPipe.Error(pRenderError e)
+        | [] -> ModelPipe.Error "lock-step cursor exhausted: the model asked for a step production does not have"
+
+let private pVerbTag (t: Transform) : string =
+    match t with
+    | Filter _ -> "Filter"
+    | Project _ -> "Project"
+    | Derive _ -> "Derive"
+    | GroupBy _ -> "GroupBy"
+    | Join _ -> "Join"
+    | Window _ -> "Window"
+    | Pivot _ -> "Pivot"
+    | Unpivot _ -> "Unpivot"
+    | Sort _ -> "Sort"
+    | Distinct -> "Distinct"
+    | Limit _ -> "Limit"
+    | Union _ -> "Union"
+    | Intersect _ -> "Intersect"
+    | Except _ -> "Except"
+
+let rec private pExprTags (e: ColExpr) : string list =
+    match e with
+    | Col _ -> [ "Col" ]
+    | Lit _ -> [ "Lit" ]
+    | Param _ -> [ "Param" ]
+    | Binary(_, a, b) -> "Binary" :: pExprTags a @ pExprTags b
+    | Not x -> "Not" :: pExprTags x
+    | Coalesce xs -> "Coalesce" :: List.collect pExprTags xs
+    | Case(cases, els) ->
+        "Case" :: (cases |> List.collect (fun (w, t) -> pExprTags w @ pExprTags t))
+        @ pExprTags els
+    | Cast(_, x) -> "Cast" :: pExprTags x
+    | ApplyFn(_, xs) -> "ApplyFn" :: List.collect pExprTags xs
+    | InList(x, items) -> "InList" :: pExprTags x @ List.collect pExprTags items
+    | IsNull x -> "IsNull" :: pExprTags x
+    | InParam(x, _) -> "InParam" :: pExprTags x
+    | Now _ -> [ "Now" ]
+
+type private PipeTally =
+    {
+        /// Every disagreement, rendered — the tally's verdict is that this is empty.
+        PDiffs: string list
+        PCompared: int
+        /// Pipelines both sides evaluated to a table.
+        POk: int
+        /// Pipelines both sides refused.
+        PErr: int
+        /// The counts compared, summed — so the count half is known to have been reached.
+        PCountTotal: int
+        /// Pipelines that evaluated to a table with a NONZERO count.
+        PCounted: int
+        /// The verb kinds reached, by tag.
+        PVerbs: Set<string>
+        /// The expression kinds reached, by tag.
+        PExprs: Set<string>
+        /// Pipelines whose model crossing crossed BACK to the same pipeline.
+        PRoundTrips: int
+    }
+
+let private pEmptyTally =
+    { PDiffs = []
+      PCompared = 0
+      POk = 0
+      PErr = 0
+      PCountTotal = 0
+      PCounted = 0
+      PVerbs = Set.empty
+      PExprs = Set.empty
+      PRoundTrips = 0 }
+
+/// One comparison: production's counted evaluator against the model's, over one pipeline and one
+/// input, with the step evaluator `mkStep` builds for that pipeline.
+let private pCompare
+    (label: string)
+    (resolve: string -> Result<Table, EvalError>)
+    (env: Map<string, Cell>)
+    (bridge: Transform list -> ModelPipe.transform list)
+    (mkStep: Transform list -> ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string>)
+    (p: Transform list)
+    (input: Table)
+    (t: PipeTally)
+    : PipeTally =
+    let prod = DataFrame.evalPipelineWithInEnvCounted resolve env p input
+    let model = ModelPipe.eval_counted (mkStep p) (bridge p) (pFrameOfTable input)
+    let verbs = p |> List.map pVerbTag |> Set.ofList
+
+    let exprs =
+        p
+        |> List.collect (function
+            | Filter e
+            | Derive(_, e) -> pExprTags e
+            | _ -> [])
+        |> Set.ofList
+
+    let roundTrip =
+        if (pPipelineToModel p |> List.map pTransformOfModel) = p then
+            1
+        else
+            0
+
+    let diff, ok, err, count =
+        match prod, model with
+        | Ok(table, n), ModelPipe.Ok(f, m) ->
+            let a = ColumnCodec.encode (Embedded table)
+            let b = ColumnCodec.encode (Embedded(pTableOfFrame f))
+
+            if a <> b then
+                Some(sprintf "%s: table differs — production %s, model %s" label a b), 1, 0, n
+            elif bigint n <> m then
+                Some(sprintf "%s: count differs — production %d, model %A" label n m), 1, 0, n
+            else
+                None, 1, 0, n
+        | Error e, ModelPipe.Error s ->
+            let r = pRenderError e
+
+            (if r <> s then
+                 Some(sprintf "%s: error differs — production %s, model %s" label r s)
+             else
+                 None),
+            0,
+            1,
+            0
+        | Ok(_, n), ModelPipe.Error s -> Some(sprintf "%s: production evaluated, model refused %s" label s), 1, 0, n
+        | Error e, ModelPipe.Ok _ ->
+            Some(sprintf "%s: production refused %s, model evaluated" label (pRenderError e)), 0, 1, 0
+
+    { t with
+        PDiffs =
+            (match diff with
+             | Some d -> d :: t.PDiffs
+             | None -> t.PDiffs)
+        PCompared = t.PCompared + 1
+        POk = t.POk + ok
+        PErr = t.PErr + err
+        PCountTotal = t.PCountTotal + count
+        PCounted = t.PCounted + (if ok = 1 && count > 0 then 1 else 0)
+        PVerbs = Set.union t.PVerbs verbs
+        PExprs = Set.union t.PExprs exprs
+        PRoundTrips = t.PRoundTrips + roundTrip }
+
+/// The `conformance/laws/transform-laws.json` vectors, decoded with the shipped codec: id, the
+/// pipeline, the embedded source, and whether the file expects the reference to refuse.
+let private pLawVectors () : (string * Transform list * Table * bool) list =
+    use doc =
+        System.Text.Json.JsonDocument.Parse(File.ReadAllText(Snapshots.repoFile "conformance/laws/transform-laws.json"))
+
+    [ for v in doc.RootElement.GetProperty("vectors").EnumerateArray() ->
+          let id = v.GetProperty("id").GetString()
+          let input = v.GetProperty("input")
+
+          let pipeline =
+              match DataFrameCodec.decodePipeline (input.GetProperty("pipeline").GetString()) with
+              | Ok p -> p
+              | Error e -> failtestf "vector %s: the pipeline did not decode: %A" id e
+
+          let table =
+              match ColumnCodec.decode (input.GetProperty("source").GetString()) with
+              | Ok(Embedded t) -> t
+              | Ok(Ref r) -> failtestf "vector %s: the source is a Ref %s, not an embedded table" id r
+              | Error e -> failtestf "vector %s: the source did not decode: %A" id e
+
+          let refuses = v.GetProperty("expected").GetProperty("verdict").GetString() = "error"
+          id, pipeline, table, refuses ]
+
+/// The generated sample — the vectors' own draw recipe for the table (a tie-heavy string key, an
+/// int column carrying nulls, a float column), WIDENED in the pipeline: one to four steps over all
+/// fourteen verbs, expressions over all thirteen kinds, a right-hand source that is embedded,
+/// resolved through `resolve` or unresolvable, and slots that are literals or params.
+let private pGenTable (rng: ConfRng.T) : Table * ConfRng.T =
+    let extra, r1 = ConfRng.intBelow 4 rng
+    let offset, r2 = ConfRng.intBelow 7 r1
+    let rows = extra + 2
+    let groupKeys = [| "a"; "b"; "c" |]
+    let g = [ for i in 0 .. rows - 1 -> Cell.Str groupKeys[i % 3] ]
+
+    let v =
+        [ for i in 0 .. rows - 1 ->
+              if (i + offset) % 4 = 0 then
+                  Cell.Null
+              else
+                  Cell.Int(i * 3 + offset - 5) ]
+
+    let w = [ for i in 0 .. rows - 1 -> Cell.Float(float (i + offset) / 2.0) ]
+
+    let table: Table =
+        { Schema = [ "g", StringType; "v", IntType; "w", FloatType ]
+          Columns =
+            [ Column.create "g" StringType g
+              Column.create "v" IntType v
+              Column.create "w" FloatType w ] }
+
+    table, r2
+
+let private pPick (xs: 'a list) (rng: ConfRng.T) : 'a * ConfRng.T =
+    let i, r = ConfRng.intBelow (List.length xs) rng
+    List.item i xs, r
+
+let rec private pGenExpr (depth: int) (rng: ConfRng.T) : ColExpr * ConfRng.T =
+    // Twenty draws over thirteen kinds: the seven extra land on the three leaves, so a tree is
+    // mostly columns and literals with the rarer kinds (an unbound list param, an unpinned clock,
+    // an unknown column) present but not dominant — enough refusals to compare, enough tables too.
+    let k, r = ConfRng.intBelow (if depth = 0 then 3 else 20) rng
+
+    match k with
+    | 0
+    | 13
+    | 14
+    | 15 ->
+        pPick [ Col "g"; Col "v"; Col "w"; Col "v"; Col "w"; Col "nope" ] r
+        |> fun (e, r) -> e, r
+    | 1
+    | 16
+    | 17 ->
+        pPick
+            [ Lit(Cell.Int 1)
+              Lit(Cell.Int 0)
+              Lit(Cell.Float 2.5)
+              Lit(Cell.Str "b")
+              Lit(Cell.Bool true)
+              Lit Cell.Null ]
+            r
+    | 2
+    | 18
+    | 19 -> pPick [ Param "p"; Param "s"; Param "unbound" ] r
+    | 3 ->
+        let op, r1 = pPick (pBinOps |> List.map fst) r
+        let a, r2 = pGenExpr (depth - 1) r1
+        let b, r3 = pGenExpr (depth - 1) r2
+        Binary(op, a, b), r3
+    | 4 ->
+        let x, r1 = pGenExpr (depth - 1) r
+        Not x, r1
+    | 5 ->
+        let x, r1 = pGenExpr (depth - 1) r
+        let y, r2 = pGenExpr (depth - 1) r1
+        Coalesce [ x; y ], r2
+    | 6 ->
+        let w, r1 = pGenExpr (depth - 1) r
+        let t, r2 = pGenExpr (depth - 1) r1
+        let els, r3 = pGenExpr (depth - 1) r2
+        Case([ w, t ], els), r3
+    | 7 ->
+        let ty, r1 = pPick ColumnType.all r
+        let x, r2 = pGenExpr (depth - 1) r1
+        Cast(ty, x), r2
+    | 8 ->
+        let fn, r1 =
+            pPick [ Abs; Round; Length; Lower; Upper; Trim; Sqrt; Least; IndexOf; Concat ] r
+
+        let x, r2 = pGenExpr (depth - 1) r1
+        let y, r3 = pGenExpr (depth - 1) r2
+
+        let args =
+            match fn with
+            | Concat
+            | Least
+            | IndexOf -> [ x; y ]
+            | _ -> [ x ]
+
+        ApplyFn(fn, args), r3
+    | 9 ->
+        let x, r1 = pGenExpr (depth - 1) r
+        InList(x, [ Lit(Cell.Int 1); Lit(Cell.Str "a"); Lit Cell.Null ]), r1
+    | 10 ->
+        let x, r1 = pGenExpr (depth - 1) r
+        IsNull x, r1
+    | 11 ->
+        let x, r1 = pGenExpr (depth - 1) r
+        InParam(x, "items"), r1
+    | _ ->
+        let g, r1 = pPick [ NowGrain.Date; NowGrain.Timestamp ] r
+        Now g, r1
+
+let private pAgg name fn ofCol : Agg = { Name = name; Fn = fn; Of = ofCol }
+
+let private pGenSource (rng: ConfRng.T) : DataSource * ConfRng.T =
+    let k, r = ConfRng.intBelow 4 rng
+
+    match k with
+    | 0 -> Ref "r", r
+    | 1 -> Ref "missing", r
+    | _ ->
+        let t, r1 = pGenTable r
+        Embedded t, r1
+
+let private pGenStep (rng: ConfRng.T) : Transform * ConfRng.T =
+    let k, r = ConfRng.intBelow 15 rng
+
+    match k with
+    | 0 ->
+        let e, r1 = pGenExpr 2 r
+        Filter e, r1
+    | 1 -> Project [ "g", "g"; "v", "v2" ], r
+    | 2 ->
+        let e, r1 = pGenExpr 2 r
+        Derive("d", e), r1
+    | 3 ->
+        let fn, r1 = pPick (pAggFns |> List.map fst) r
+        GroupBy([ "g" ], [ pAgg "s" fn "v"; pAgg "n" Count "v"; pAgg "m" Mean "w" ]), r1
+    | 4 ->
+        let kind, r1 = pPick (pJoinKinds |> List.map fst) r
+        let src, r2 = pGenSource r1
+        Join(src, [ "g", "g" ], kind), r2
+    | 5 ->
+        let fn, r1 = pPick ((pWindowFns |> List.map fst) @ [ NTile 2; NTile 0 ]) r
+
+        Window
+            { PartitionBy = [ "g" ]
+              OrderBy = [ "v", Asc ]
+              Fn = fn
+              Of = "v"
+              As = "wv" },
+        r1
+    | 6 ->
+        let fn, r1 = pPick [ Sum; Count; Max ] r
+
+        Pivot
+            { Index = [ "v" ]
+              On = "g"
+              Values = "w"
+              Agg = fn },
+        r1
+    | 7 -> Unpivot([ "g" ], [ "v"; "w" ]), r
+    | 8 ->
+        let key, r1 =
+            pPick
+                [ Slot.Lit "g", Asc
+                  Slot.Lit "v", Desc
+                  Slot.Param "sortcol", Asc
+                  Slot.Param "nope", Asc ]
+                r
+
+        Sort [ key; Slot.Lit "w", Asc ], r1
+    | 9 -> Distinct, r
+    | 10 ->
+        let n, r1 = pPick [ Slot.Lit 3; Slot.Lit 1; Slot.Param "n"; Slot.Param "s" ] r
+        let off, r2 = pPick [ Slot.Lit 0; Slot.Lit 1; Slot.Param "off" ] r1
+        Limit(n, off), r2
+    | 11 ->
+        let src, r1 = pGenSource r
+        Union src, r1
+    | 12 ->
+        let src, r1 = pGenSource r
+        Intersect src, r1
+    | 13 ->
+        let src, r1 = pGenSource r
+        Except src, r1
+    | _ ->
+        // a keep-all filter: charges the frame's rows and changes nothing, so a count is compared
+        // past every other verb rather than only where a drawn predicate happens to hold
+        Filter(Lit(Cell.Bool true)), r
+
+let private pGenPipeline (rng: ConfRng.T) : Transform list * ConfRng.T =
+    let n, r = ConfRng.intBelow 4 rng
+
+    let rec draw k acc r =
+        if k = 0 then
+            List.rev acc, r
+        else
+            let s, r' = pGenStep r
+            draw (k - 1) (s :: acc) r'
+
+    draw (n + 1) [] r
+
+/// The environment and the resolver every generated pipeline evaluates under — the same on both
+/// sides, since the step evaluator closes over them exactly as production's does.
+let private pEnv: Map<string, Cell> =
+    Map.ofList
+        [ "p", Cell.Int 2
+          "s", Cell.Str "b"
+          "sortcol", Cell.Str "v"
+          "n", Cell.Int 2
+          "off", Cell.Int 1 ]
+
+let private pResolveWith (right: Table) : string -> Result<Table, EvalError> =
+    fun r -> if r = "r" then Ok right else Error(UnresolvedSource r)
+
+/// The whole differential: the law vectors under `noResolve` and an empty env (as the law runs
+/// them), then `trials` generated pipelines at `seed`, each under the resolver and env above.
+let private pipelineDifferential
+    (bridge: Transform list -> ModelPipe.transform list)
+    (mkStep:
+        (string -> Result<Table, EvalError>)
+            -> Map<string, Cell>
+            -> Transform list
+            -> ModelPipe.frame
+            -> ModelPipe.transform
+            -> ModelPipe.outcome<ModelPipe.frame, string>)
+    (seed: int)
+    (trials: int)
+    : PipeTally =
+    let mutable tally = pEmptyTally
+
+    for id, p, table, refuses in pLawVectors () do
+        let verdict =
+            DataFrame.evalPipelineWithInEnvCounted DataFrame.noResolve Map.empty p table
+
+        Expect.equal
+            (Result.isError verdict)
+            refuses
+            (sprintf
+                "vector %s: the file's verdict is production's verdict (the vectors are the reference's own answers)"
+                id)
+
+        tally <- pCompare id DataFrame.noResolve Map.empty bridge (mkStep DataFrame.noResolve Map.empty) p table tally
+
+    let mutable rng = ConfRng.ofSeed seed
+
+    for i in 1..trials do
+        let table, r1 = pGenTable rng
+        let right, r2 = pGenTable r1
+        let p, r3 = pGenPipeline r2
+        let resolve = pResolveWith right
+        tally <- pCompare (sprintf "generated %d" i) resolve pEnv bridge (mkStep resolve pEnv) p table tally
+        rng <- r3
+
+    tally
+
+/// An expression of exactly `nodes` `ColExpr` nodes (odd, at least 1): `Col "v"` wrapped in
+/// `Binary(Add, _, Lit 1)` — two nodes a wrap.
+let private pExprOfNodes (nodes: int) : ColExpr =
+    let rec wrap (acc: ColExpr) (k: int) =
+        if k = 0 then
+            acc
+        else
+            wrap (Binary(Add, acc, Lit(Cell.Int 1))) (k - 1)
+
+    wrap (Col "v") ((nodes - 1) / 2)
+
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -13842,4 +14631,231 @@ let proofOracleTests =
                   (Error(Propagation.EvalUnknownChange [ "nope" ]))
                   "an unknown change is the typed refusal naming it"
 
-              Expect.isEmpty ranUnknown "and no evaluator ran" ]
+              Expect.isEmpty ranUnknown "and no evaluator ran"
+
+          // ---- Phase 154: the counted pipeline driver (`proofs/Pipeline.fst`) ----
+
+          testCase
+              "the pipeline oracle agrees with DataFrame.evalPipelineWithInEnvCounted on table and count over the transform-laws vectors and a generated sample that reaches every verb and every expression kind"
+          <| fun _ ->
+              let t = pipelineDifferential pPipelineToModel pFaithfulStep 154 400
+
+              Expect.isEmpty t.PDiffs (sprintf "disagreements:\n%s" (String.concat "\n" (List.rev t.PDiffs)))
+              Expect.equal t.PCompared (16 + 400) "sixteen vectors and four hundred generated pipelines were compared"
+              Expect.isGreaterThan t.POk 120 (sprintf "pipelines evaluated to a table on both sides (ok=%d)" t.POk)
+              Expect.isGreaterThan t.PErr 60 (sprintf "pipelines were refused on both sides (err=%d)" t.PErr)
+
+              Expect.isGreaterThan
+                  t.PCounted
+                  60
+                  (sprintf
+                      "pipelines evaluated with a NONZERO count, so the count half was reached (counted=%d)"
+                      t.PCounted)
+
+              Expect.isGreaterThan
+                  t.PCountTotal
+                  200
+                  (sprintf "row evaluations were compared in total (total=%d)" t.PCountTotal)
+
+              printfn
+                  "pipeline differential: compared=%d ok=%d err=%d counted=%d rowEvaluations=%d roundTrips=%d verbs=%d exprKinds=%d"
+                  t.PCompared
+                  t.POk
+                  t.PErr
+                  t.PCounted
+                  t.PCountTotal
+                  t.PRoundTrips
+                  t.PVerbs.Count
+                  t.PExprs.Count
+
+              Expect.equal
+                  t.PRoundTrips
+                  t.PCompared
+                  "every pipeline crossed to the model and back unchanged — the two closed alphabets are the same"
+
+              for verb in
+                  [ "Filter"
+                    "Project"
+                    "Derive"
+                    "GroupBy"
+                    "Join"
+                    "Window"
+                    "Pivot"
+                    "Unpivot"
+                    "Sort"
+                    "Distinct"
+                    "Limit"
+                    "Union"
+                    "Intersect"
+                    "Except" ] do
+                  Expect.isTrue
+                      (Set.contains verb t.PVerbs)
+                      (sprintf "the sample reached the %s verb (reached: %A)" verb t.PVerbs)
+
+              for kind in
+                  [ "Col"
+                    "Lit"
+                    "Param"
+                    "Binary"
+                    "Not"
+                    "Coalesce"
+                    "Case"
+                    "Cast"
+                    "ApplyFn"
+                    "InList"
+                    "IsNull"
+                    "InParam"
+                    "Now" ] do
+                  Expect.isTrue
+                      (Set.contains kind t.PExprs)
+                      (sprintf "the sample reached the %s expression kind (reached: %A)" kind t.PExprs)
+
+              Expect.equal
+                  (pipelineDifferential pPipelineToModel pFaithfulStep 154 400)
+                  t
+                  "same seed => identical tally"
+
+          testCase
+              "a pipeline oracle whose count skips one step kind DISAGREES with DataFrame.evalPipelineWithInEnvCounted on the count and on nothing else — the measurement can fail"
+          <| fun _ ->
+              // The teeth. Behind the lock-step evaluator production's own Derive runs on both sides,
+              // so every table agrees; the bridge crosses that Derive to the model as a Distinct, which
+              // `costOf` charges nothing — a model whose count skips one step kind. If this ever
+              // passes, the count comparison has stopped reaching the clause and the green run above
+              // certifies nothing about it.
+              let forgetful =
+                  pipelineDifferential
+                      (pPipelineToModelWith (function
+                          | Derive _ -> Distinct
+                          | other -> other))
+                      pStepLockstep
+                      154
+                      400
+
+              Expect.isNonEmpty forgetful.PDiffs "a model that does not charge a Derive MUST disagree with production"
+
+              printfn
+                  "pipeline go-red: the forgetful model disagreed on %d of %d pipelines"
+                  (List.length forgetful.PDiffs)
+                  forgetful.PCompared
+
+              Expect.isTrue
+                  (forgetful.PDiffs |> List.forall (fun d -> d.Contains "count differs"))
+                  (sprintf
+                      "and every disagreement is about the count — the tables agree, because production's steps ran on both sides:\n%s"
+                      (String.concat "\n" (forgetful.PDiffs |> List.filter (fun d -> not (d.Contains "count differs")))))
+
+              // And the TABLE half can lose too: under the faithful step evaluator a bridge that
+              // negates every Filter's predicate hands the model a different pipeline, and the byte
+              // comparison must see it.
+              let negated =
+                  pipelineDifferential
+                      (pPipelineToModelWith (function
+                          | Filter e -> Filter(Not e)
+                          | other -> other))
+                      pFaithfulStep
+                      154
+                      120
+
+              Expect.isNonEmpty negated.PDiffs "a bridge that negates every Filter MUST disagree with production"
+
+              printfn
+                  "pipeline go-red: the negated bridge disagreed on %d of %d pipelines"
+                  (List.length negated.PDiffs)
+                  negated.PCompared
+
+              Expect.isTrue
+                  (negated.PDiffs |> List.exists (fun d -> d.Contains "table differs"))
+                  "and at least one disagreement is about the table"
+
+          testCase
+              "`uncounted_is_projection` on the shipped evaluator — evalPipelineWithInEnv is the counted path projected, over the vectors and the sample"
+          <| fun _ ->
+              // The identity the phase was chartered to prove as an agreement between two paths,
+              // pinned on production so that a second path — a counter, a check, a refusal added to
+              // one entry point and not the other — turns this red.
+              let mutable checked = 0
+
+              let assertProjection resolve env (p: Transform list) (table: Table) label =
+                  let counted = DataFrame.evalPipelineWithInEnvCounted resolve env p table
+                  let uncounted = DataFrame.evalPipelineWithInEnv resolve env p table
+
+                  Expect.equal
+                      uncounted
+                      (counted |> Result.map fst)
+                      (sprintf "%s: the uncounted entry point is the counted one projected" label)
+
+                  // and the model's reading of the same identity, over the same input
+                  let step = pStepOfProduction resolve env
+                  let mp = pPipelineToModel p
+                  let mf = pFrameOfTable table
+
+                  Expect.equal
+                      (ModelPipe.eval_uncounted step mp mf)
+                      (ModelPipe.result_map fst (ModelPipe.eval_counted step mp mf))
+                      (sprintf "%s: and the model says the same" label)
+
+                  checked <- checked + 1
+
+              for id, p, table, _ in pLawVectors () do
+                  assertProjection DataFrame.noResolve Map.empty p table id
+
+              let mutable rng = ConfRng.ofSeed 1540
+
+              for i in 1..200 do
+                  let table, r1 = pGenTable rng
+                  let right, r2 = pGenTable r1
+                  let p, r3 = pGenPipeline r2
+                  assertProjection (pResolveWith right) pEnv p table (sprintf "generated %d" i)
+                  rng <- r3
+
+              Expect.equal checked 216 "sixteen vectors and two hundred generated pipelines were checked"
+
+          testCase
+              "the finding holds on the shipped evaluator — an expression over `Limits.max_expr_nodes` is evaluated, never refused"
+          <| fun _ ->
+              // THE FINDING, pinned on production so that an enforcement of §21.8 turns this red and
+              // sends its author to the ladder row (`pipeline-limit-unenforced`) and the README's
+              // theorem 14 section, where the decision it needs is recorded as open.
+              let table, _ = pGenTable (ConfRng.ofSeed 512)
+              let rows = Table.rowCount table
+              let over = pExprOfNodes 513
+              let within = pExprOfNodes 511
+
+              Expect.equal
+                  (ModelPipe.expr_nodes (pExprToModel over))
+                  (bigint 513)
+                  "the model counts 513 nodes in the expression"
+
+              Expect.equal (ModelPipe.expr_nodes (pExprToModel within)) (bigint 511) "and 511 in its neighbour"
+
+              Expect.isFalse
+                  (ModelPipe.within_limit (pPipelineToModel [ Derive("big", over) ]))
+                  "a pipeline carrying the 513-node expression is OUTSIDE the §21.8 limit (512) on the model"
+
+              Expect.isTrue
+                  (ModelPipe.within_limit (pPipelineToModel [ Derive("ok", within); Filter(Lit(Cell.Bool true)) ]))
+                  "and one carrying the 511-node expression is within it — the premise is not constant"
+
+              match DataFrame.evalPipeline [ Derive("big", over) ] table with
+              | Ok t -> Expect.equal (Table.rowCount t) rows "the shipped evaluator evaluates the over-limit pipeline"
+              | Error e ->
+                  failtestf
+                      "the shipped evaluator refused the over-limit pipeline: %A — the finding no longer holds; re-read the ladder row"
+                      e
+
+              match
+                  DataFrame.evalPipelineWithInEnvCounted DataFrame.noResolve Map.empty [ Derive("big", over) ] table
+              with
+              | Ok(_, n) -> Expect.equal n rows "and charges it exactly the frame's rows, as any Derive"
+              | Error e -> failtestf "the counted path refused it: %A" e
+
+              // the model agrees: the walk succeeds, so `over_limit_not_refused` applies and it is Ok
+              match
+                  ModelPipe.eval_counted
+                      (pStepOfProduction DataFrame.noResolve Map.empty)
+                      (pPipelineToModel [ Derive("big", over) ])
+                      (pFrameOfTable table)
+              with
+              | ModelPipe.Ok(_, m) -> Expect.equal m (bigint rows) "the model evaluates it too, at the same count"
+              | ModelPipe.Error s -> failtestf "the model refused the over-limit pipeline: %s" s ]

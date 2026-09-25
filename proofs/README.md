@@ -574,7 +574,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 24 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 25 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -590,7 +590,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 15 rows.
+  `unscheduled` where something could and nobody has. 16 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -627,8 +627,9 @@ over-read.
 | `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLaws` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
+| `pipeline-step-evaluator-abstract` | `model-bridge` | `unscheduled` |
 
-**Why `unscheduled` is a value rather than a rounding to `permanent`.** Four of the bridges can be
+**Why `unscheduled` is a value rather than a rounding to `permanent`.** Five of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
 of what this document already says. `dag-outside-the-model` has been narrowed twice already — by
 Phase 134, from "all of it", and by Phase 158, which took `Dag.mergeBase` out of it for every shape
@@ -723,7 +724,7 @@ other three). It reads JSON this directory already keeps and runs no prover, and
 whatever the verdict:
 
 ```
-proofs: exhaustive (11 packages modelled, 9 excluded; 24 assumed: 14 permanent, 6 domain-discharged, 4 unscheduled, 0 scheduled)
+proofs: exhaustive (12 packages modelled, 8 excluded; 25 assumed: 14 permanent, 6 domain-discharged, 5 unscheduled, 0 scheduled)
 ```
 
 Three clauses stand behind it.
@@ -746,17 +747,22 @@ deletes an exclusion — at which point the gate names the gap, and keeps naming
 exists. That is the whole mechanism: the exclusions are not a way of avoiding proofs, they are the
 list of proofs nobody has asked for, written down where deleting a line is how you ask.
 
-### The nine exclusions, and the two reasons that were not carried
+### The eight exclusions, and the two reasons that were not carried
 
-The nine packages with no model are `Fuaran.Core.CSharp` and `Fuaran.Core.Idl.Cli` (**`facade`** —
+The eight packages with no model are `Fuaran.Core.CSharp` and `Fuaran.Core.Idl.Cli` (**`facade`** —
 surfaces over modelled packages, whose every claim is their callee's restated in a second syntax);
 `Fuaran.Core.Conformance`, `Fuaran.Core.Validator` and `Fuaran.Core.Observer`
 (**`content-free-seam`** — generic seams whose content is supplied entirely by the domain, so there
 is no concrete computation here for a theorem to be about); and `Fuaran.Core.Projection`,
-`Fuaran.Core.AiSurface`, `Fuaran.Core.Column` and `Fuaran.Core.DataFrame`
+`Fuaran.Core.AiSurface` and `Fuaran.Core.Column`
 (**`law-tested-by-design`** — real computation, theorem declined in favour of a named `Conformance`
 family, which the entry cites and the gate holds to the shipped roster). Each entry's own prose is
-in `coverage-exclusions.json`; it is the decision, and the token is only its kind.
+in `coverage-exclusions.json`; it is the decision, and the token is only its kind. There were nine
+until Phase 154: `Fuaran.Core.DataFrame`'s entry retired the day `Pipeline.fst` gave the package a
+model, because clause 1's second direction fails an exclusion for a package that has since gained
+one — and what that entry declined (the verbs' semantics, left to `incrementalLaws` and its
+siblings) is still declined, as the model's own `pipeline-step-evaluator-abstract` row. The file
+keeps the retirement under `$retired` so the next reader finds the decision where the entry was.
 
 Phase 203 was filed naming four reasons and this file carries three, which is a correction and is
 recorded rather than quietly absorbed. **`tooling`** was written for `Fuaran.Core.Idl.Codegen`'s
@@ -5371,6 +5377,170 @@ refused.
 4. **Policy.** **`arbitration-pinned-order`** — ascending id is the order; whether it is the right
    one is not a theorem.
 
+## Theorem 14 — the counted pipeline driver is total and budget-monotone (Phase 154)
+
+_(This directory's fourteenth, and the first over `Fuaran.Core.DataFrame` itself. The
+attested-stack programme's third theorem — interpreter budget monotonicity — is the Program tier's
+(`fuaran#1716`), and Program's `Call` into a transform slot bottoms out in this evaluator; that
+theorem shipped with no Core-evaluator row, neither proving nor axiomatising it, so this is a
+standalone result and the ladder names no consuming phase. The phase's charter moved twice before
+it was taken and both moves are recorded in its shard: `counted_agrees` was to relate the counted
+path to the uncounted one, and there is one path; and "a pipeline that exceeds the limit is
+refused before evaluation" described enforcement that does not exist.)_
+
+`evalPipelineWithInEnvCounted`'s doc comment states the cost model, and the theorems are about it:
+
+> **"The unit is one evaluation of one step's expression against one row … A `Filter` and a
+> `Derive` evaluate their expression once per row alive at that step, so each is charged the
+> frame's row count where it stands; every other verb evaluates no per-row expression and is
+> charged none."**
+
+`Pipeline.fst` models the DRIVER clause for clause — the two closed DUs `ColExpr` (thirteen cases)
+and `Transform` (fourteen verbs) with every payload type they carry, the evaluator's row-major
+`Frame`, the local `costOf`, the loop `go`, and `evalPipelineWithInEnv` as the projection it is —
+over ONE parameter: the STEP EVALUATOR. Production's `evalStep resolve env` dispatches fourteen verbs
+to fourteen primitives, and none of that is what the phase is about; the model takes
+`step : frame -> transform -> outcome frame e` with the resolver and the param env closed over, as
+the F# closure closes over them, and every theorem holds for every step evaluator. That is the
+Phase 176 and Phase 186 shape — the pipeline evaluator and the node evaluator were parameters
+there — applied to the driver that those two phases' concrete evaluator sits under. The error type
+is abstract too: the driver reads no error, it threads the step's.
+
+### What is proved
+
+Four theorems and a finding, over any step evaluator, any pipeline and any input frame:
+
+1. **`eval_total`** — the counted evaluator returns `Ok` exactly when every step of the walk
+   succeeds (`go_ok_iff`), and then the count is the walk's cost, charged step by step where each
+   step stands (`go_count`); otherwise it returns the FIRST failing step's own error, verbatim
+   (`go_error`). Termination is structural on the pipeline and the prover checks it. The sentence
+   with content is the second half: the driver INVENTS NO REFUSAL. There is no clause in `go` that
+   produces an `Error` a step did not — which is what makes the finding below a theorem.
+2. **`budget_monotone`** — the count is monotone in the pipeline PREFIX: if `p ++ q` evaluates to
+   `Ok (_, m')` then `p` evaluates to `Ok (_, m)` with `m <= m'`. Two lemmas carry it: `go_app`,
+   the fold over a concatenation is the fold over the prefix continued over the suffix from the
+   prefix's frame and count; and `go_count_ge`, a count never goes down, because the driver only
+   ever adds. What is deliberately NOT claimed is a bound in the INPUT's row count — a `Join` or a
+   `Union` can grow the frame, and the count is charged where each step stands, which is exactly
+   what monotone-in-the-prefix says and what a bound in the input would not.
+3. **`work_bounded`** — the §21.8 expression-node limit, taken as a HYPOTHESIS on the pipeline,
+   says what the count MEANS. `expr_nodes` counts an expression's nodes, one per constructor
+   occurrence through every list it carries (a mutual induction with its two list walks);
+   `within_limit` says every expression a `Filter` or a `Derive` carries has at most
+   `Limits.max_expr_nodes` of them. Under it, the expression WORK a walk can cost — `work`, rows
+   times the expression's nodes at each charged step, an upper bound because `evalExpr` is
+   structural and visits a node at most once (`Case` and `Coalesce` short-circuit; nothing
+   revisits) — is at most the count times the limit. `work` is the model's reading and not a
+   quantity production computes; the theorem is that the count production reports bounds it, with
+   the format's own constant.
+4. **`uncounted_is_projection`** — `evalPipelineWithInEnv` is
+   `evalPipelineWithInEnvCounted … |> Result.map fst`, discharged by definition, with
+   `uncounted_ok_iff` reading it back (the uncounted path succeeds exactly when the walk does, with
+   the counted path's frame). This REPLACES the `counted_agrees` the phase was chartered with. The
+   shard's 2026-09-20 refine finding is exactly right: the uncounted entry point is the counted one
+   projected (`DataFrame.fs`, the `evalPipelineWithInEnv` definition), there is no second path, and
+   an agreement lemma would relate one path to itself. So the identity is stated as the one line it
+   is, and the differential pins it on production so that a second path — a counter, a check, a
+   refusal added to one entry point and not the other — turns a case red.
+
+### The finding: the §21.8 limit is a premise, and nothing enforces it
+
+`Limits.fst` says of itself that it "is not a model of enforcement", and it is right about the
+tree: `max_expr_nodes` (512) is read NOWHERE under `src/`. The shard's original text — "a pipeline
+that exceeds the limit is refused before evaluation rather than partway through" — described
+behaviour that does not exist, and adding it would breach the phase's own zero-impact constraint on
+the evaluator. So the theorem takes the bound as a hypothesis (`work_bounded` above), and the
+absence of the refusal is carried as a theorem of its own: **`over_limit_not_refused`** — a
+pipeline OUTSIDE the limit whose every step succeeds evaluates to `Ok`, because the driver has no
+clause that reads the bound. It goes red the day `go` gains one. The differential asserts the same
+on the shipped evaluator: a `Derive` over a 513-node expression evaluates, charged exactly the
+frame's rows, and the model counts 513 and says the pipeline is outside the limit while its
+511-node neighbour is within it.
+
+Whether a conformant host MUST refuse such a pipeline before evaluation — §21.2's obligation, stated
+for the decoder and "every walk" — is a decision for a later operator act, recorded on the "Next"
+list, not taken here: it changes what a public function accepts, and where it is enforced (the
+codec, the driver, the host) is a design question the theorem does not settle. What the theorem
+settles is that TODAY the limit is a premise a caller may assume and never a refusal the evaluator
+performs.
+
+### The differential
+
+`Proofs.Oracle`'s pipeline family runs the extracted driver beside production with the step
+evaluator instantiated at production's own primitives, one verb at a time through the public entry
+point — `evalPipelineWithInEnv resolve env [ step ]` over the frame crossed back to a `Table` — so
+what is compared is exactly what is modelled: the fold, the cost model and the two closed
+alphabets, with the verb semantics SHARED rather than compared. It compares the TABLE, byte for
+byte through `ColumnCodec.encode` as `transformLaws` does, and the COUNT, or the rendered error.
+Two pools: the sixteen `conformance/laws/transform-laws.json` vectors, decoded with the shipped
+codec (each file verdict cross-checked against the reference's), and four hundred generated
+pipelines at seed 154 — the vectors' own table recipe (a tie-heavy string key, an int column
+carrying nulls, a float column), WIDENED in the pipeline to one to four steps over all fourteen
+verbs and expressions over all thirteen kinds, with a `Ref` resolver that resolves one name and
+refuses another, a param env, embedded and referenced right-hand sources, and slots that are
+literals or params. Every pipeline is also crossed to the model and back and must return
+unchanged, which is the check that the two closed alphabets are the same alphabet. Measured: 416
+compared, 200 evaluated to a table on both sides and 216 refused on both, 65 with a nonzero count,
+285 row evaluations compared in total, 416 round trips, all fourteen verb tags and all thirteen
+expression kinds reached. The model agreed with production on the first run.
+
+A float cell crosses as its round-trip `R` text and back, and a `Table` crosses as its row-major
+view — the transpose `toFrame` / `ofFrame` perform — so the bridge can never hand the model a
+zero-column frame that still has rows (a `Table` cannot carry one, its row count being its first
+column's length); the generator keeps every `Project` to at least one column for that reason, and
+this is the one shape the differential does not reach.
+
+Two go-reds, one per half of the comparison. The COUNT half: a lock-step step evaluator walks
+production's own pipeline and ignores the transform the model hands it, so every table stays right,
+while the bridge crosses each `Derive` to the model as a `Distinct` — a model whose count skips one
+step kind, the shard's own words — and it must lose on the count and on nothing else, which is
+asserted (every disagreement names the count). The TABLE half: under the faithful evaluator a
+bridge that negates every `Filter`'s predicate hands the model a different pipeline, and the byte
+comparison must see it. Seeded and replayable; the same seed reproduces the same tally, asserted.
+
+### What it cost
+
+Cold runs of the prover invoked directly on the file with the leg's own flags (rlimit 40, `--quake
+3`, `--report_assumes error`), a fresh per-run cache each time with `Limits` checked into it first
+as the leg has it: **5.4s, 5.8s, 5.9s**, taken beside one other proof worker and a dozen build
+processes on the same machine. Budget **20s** (the minimum — 2 × 5.9 is under it) and floor **2s**
+(half of 5, rounded down), seeded per Phase 148/164's rules and recorded in `modules.json`; the
+phase's own `check.ps1 -Runs 3` leg then read 5s, 6s, 6s through the kit, every run labelled
+contended (x0.83, x0.96, x1.17) and none of them a seed. No
+`--ext context_pruning`, no scoped rlimit, no SMT pattern; the module opens `Limits` for the one
+constant it takes as a premise. **The whole module verified on the first prover run**, which is
+worth recording as a fact about the shape rather than as a boast: the driver is a structural fold,
+the proofs are six inductions over the pipeline list with the step's outcome split in each arm, and
+the only arithmetic is the two `FStar.Math.Lemmas` calls that carry a multiplication by the 512
+constant through a sum (`lemma_mult_le_left`, `distributivity_add_left`) — the one place the SMT
+solver would otherwise have met a nonlinear term. The one structural choice worth a sentence is
+`expr_nodes`: a mutual recursion with its two list walks rather than one function over a work list,
+because the former is what the extractor emits as three `let rec … and …` functions F# accepts,
+and the latter would need a non-structural measure for nothing. The oracle compiles against
+`Prims.fs` and the `option` shim with nothing added; `fst` is the shim's, as theorem 6's was.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The four theorems above and the finding
+   (`eval_total`, `budget_monotone`, `work_bounded`, `uncounted_is_projection`,
+   `over_limit_not_refused`) with their supporting lemmas (`go_ok_iff`, `go_count`, `go_error`,
+   `go_app`, `go_count_ge`, `step_work_bounded`, `uncounted_ok_iff`), over any step evaluator, any
+   pipeline and any input frame. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
+   `--report_assumes error` on, no `assume`, no `admit`. Opens `Limits`; restates `outcome` and its
+   two list helpers.
+2. **Differentially tested.** The extracted driver agrees with the shipped counted evaluator over
+   the two pools above, with the lock-step forgetful model and the negating bridge each required to
+   lose. Agreement is over those pools, never over all inputs, and the verbs are shared with
+   production by construction rather than compared.
+3. **Assumed, and stated as such.**
+   - **The step-evaluator premise** (`pipeline-step-evaluator-abstract`, a `model-bridge`,
+     `unscheduled`). The fourteen verbs' semantics are the parameter; nothing here is a claim about
+     any of them, and they stay with the laws the retired `Fuaran.Core.DataFrame` coverage
+     exclusion named. `unscheduled` rather than `permanent` because a model of a verb is possible,
+     verb by verb, on the Phase 176 precedent, and nobody has asked for one.
+   - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row.
+   - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
+
 ## Next
 
 _(**A resolver that resolves only declared reads** was the first item on this list and is DONE:
@@ -5515,4 +5685,24 @@ what widening would actually recover.
 
 Interpreter budget monotonicity — the attested-stack programme's theorem 3, which is not this
 directory's numbering — is `fuaran-program`'s and follows the same shape now that the prover is
-settled.
+settled. **Core's half of it is theorem 14 (Phase 154)**, and it is a standalone result: the
+Program-tier theorem shipped without a Core-evaluator row, so the ladder names no consuming phase,
+and the day one is written it consumes `pipeline-eval-total` and `pipeline-budget-monotone` as
+stated rather than an axiom about them.
+
+**The §21.8 expression-node limit, raised for an operator decision** — theorem 14's finding
+(`pipeline-limit-unenforced`). `Limits.max_expr_nodes` is a named premise and nothing under `src/`
+enforces it; `over_limit_not_refused` says so as a theorem and the differential asserts it on the
+shipped evaluator with a 513-node expression. Whether a conformant host MUST refuse such a pipeline
+before evaluation — §21.2's obligation, stated for the decoder and "every walk" — is not this
+directory's call: enforcing it changes what a public function accepts and touches the hot path the
+phase was chartered to leave alone. When it is decided, the theorem's hypothesis becomes a
+precondition the driver checks, `over_limit_not_refused` stops being provable, and the differential's
+fourth case is rewritten to assert the refusal.
+
+**The verbs, one at a time** — theorem 14's one bridge (`pipeline-step-evaluator-abstract`,
+`unscheduled`). The driver is proved over an abstract step evaluator; a model of a verb — `Filter`'s
+three-valued predicate over `evalExpr`, or `Limit`'s window — would let the count be related to
+what the verb actually reads, verb by verb, on the Phase 176 precedent of a table algebra with a
+validity mask. Nobody has asked for one; the operator decision above is the natural moment to say
+whether the first is wanted.

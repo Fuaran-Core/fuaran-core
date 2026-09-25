@@ -2121,6 +2121,92 @@
       "evidence": {
         "assumption": "the int and float renderers, the hash and the name comparator behind invocationKey are host functions the model takes as parameters; the comparator is assumed a total order where a theorem needs one"
       }
+    },
+    {
+      "id": "pipeline-eval-total",
+      "level": "proved",
+      "claim": "`DataFrame.evalPipelineWithInEnvCounted` is TOTAL, and its two outcomes are characterised: it returns `Ok` exactly when every step of the walk succeeds — and then the count is the walk's cost, charged step by step where each step stands — and otherwise it returns the FIRST failing step's own error, verbatim (`go_ok_iff`, `go_count`, `go_error`). The driver invents no refusal: there is no clause in `go` that produces an `Error` a step did not, which is what makes the §21.8 finding below a theorem rather than an observation. Termination is structural on the pipeline and checked by the prover. Over any step evaluator, any pipeline and any input frame; the verbs' semantics are the model's parameter and no theorem is about one.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "eval_total",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [ "go_ok_iff", "go_count", "go_error", "walk_ok", "first_error", "cost" ]
+      }
+    },
+    {
+      "id": "pipeline-budget-monotone",
+      "level": "proved",
+      "claim": "The count is MONOTONE IN THE PIPELINE PREFIX: if `p ++ q` evaluates to `Ok (_, m')` then `p` evaluates to `Ok (_, m)` with `m <= m'`. The fold over a concatenation is the fold over the prefix continued over the suffix from the prefix's frame and count (`go_app`), and a count never goes down because the driver only ever adds (`go_count_ge`). What is deliberately NOT claimed is a bound in the INPUT's row count: a `Join` or a `Union` can grow the frame, and the count is charged where each step stands — which is exactly what monotone-in-the-prefix says and what a bound in the input would not. This is Core's half of the attested-stack programme's budget-monotonicity theorem, and the ladder names NO consuming phase: the Program-tier theorem (`fuaran#1716`) shipped without a Core-evaluator row, neither proving nor axiomatising this evaluator, so the row stands alone until a consumer cites it.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "budget_monotone",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [ "go_app", "go_count_ge" ]
+      }
+    },
+    {
+      "id": "pipeline-work-bounded-by-expr-limit",
+      "level": "proved",
+      "claim": "Under the §21.8 expression-node limit taken as a HYPOTHESIS on the pipeline — `within_limit`: every expression a `Filter` or a `Derive` carries has at most `Limits.max_expr_nodes` nodes, counted one per constructor occurrence through every list an expression carries (`expr_nodes`) — the expression WORK a walk can cost is at most the count it reports times the limit: `work <= cost * max_expr_nodes` (`work_bounded`, from `step_work_bounded` per step). `work` is the model's reading of what the count stands for — rows times the expression's nodes at each charged step, an upper bound because `evalExpr` is structural on the expression and visits a node at most once — and is not a quantity production computes. The bound is a hypothesis and not a refusal because that is all it is on this tree: see `pipeline-limit-unenforced`.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "work_bounded",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [ "step_work_bounded", "expr_nodes", "within_limit", "work" ]
+      }
+    },
+    {
+      "id": "pipeline-limit-unenforced",
+      "level": "proved",
+      "claim": "THE FINDING. `Limits.max_expr_nodes` (§21.8, 512) is enforced NOWHERE under `src/`: a pipeline OUTSIDE the limit whose every step succeeds evaluates to `Ok` (`over_limit_not_refused`), because the driver has no clause that reads the bound — the limit is a premise a caller may assume and never a refusal the evaluator performs. The differential asserts the same on the shipped evaluator with a 513-node expression, so an enforcement added later turns that case red and sends its author here. Whether a conformant host MUST refuse such a pipeline before evaluation (§21.2's obligation, stated for the decoder and \"every walk\") is a decision for a later operator act; this phase records it and changes nothing, because adding the refusal would breach its own zero-impact constraint on the evaluator.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "over_limit_not_refused",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "pipeline-uncounted-is-projection",
+      "level": "proved",
+      "claim": "`DataFrame.evalPipelineWithInEnv` is `evalPipelineWithInEnvCounted … |> Result.map fst` and nothing else — the one-line identity the source is (`uncounted_is_projection`, discharged by definition), and so the uncounted path succeeds exactly when the walk does, with the counted path's frame (`uncounted_ok_iff`). This row REPLACES the `counted_agrees` the phase was chartered with: there is no second path for the counted one to agree with, so an agreement lemma would relate one path to itself. The differential pins the identity on production over the vectors and the sample, so a second path — a counter, a check, a refusal added to one entry point and not the other — turns that case red.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "uncounted_is_projection",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [ "uncounted_ok_iff" ]
+      }
+    },
+    {
+      "id": "pipeline-differential",
+      "level": "tested",
+      "claim": "The extracted driver agrees with the shipped `DataFrame.evalPipelineWithInEnvCounted` on the TABLE (byte for byte through `ColumnCodec.encode`) and the COUNT, or on the rendered error, with the step evaluator instantiated at production's own primitives one verb at a time through `evalPipelineWithInEnv resolve env [ step ]` — over the sixteen `conformance/laws/transform-laws.json` vectors decoded with the shipped codec (each file verdict cross-checked against the reference's), and four hundred generated pipelines at seed 154: the vectors' own table recipe, widened in the pipeline to one to four steps over all fourteen verbs and expressions over all thirteen kinds, with a `Ref` resolver, a param env, embedded and referenced right-hand sources, and slots that are literals or params. Every pipeline is also crossed to the model and back and must return unchanged. Two go-reds: a lock-step step evaluator that runs production's own Derive while the bridge crosses it as a Distinct — a model whose count skips one step kind — must lose on the count and on nothing else; and a bridge that negates every Filter under the faithful evaluator must lose on the table. Agreement is over the pools drawn, never over all inputs, and the verb SEMANTICS are shared with production by construction rather than compared.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Pipeline.fst",
+        "cases": [
+          "the pipeline oracle agrees with DataFrame.evalPipelineWithInEnvCounted on table and count over the transform-laws vectors and a generated sample that reaches every verb and every expression kind",
+          "a pipeline oracle whose count skips one step kind DISAGREES with DataFrame.evalPipelineWithInEnvCounted on the count and on nothing else — the measurement can fail",
+          "`uncounted_is_projection` on the shipped evaluator — evalPipelineWithInEnv is the counted path projected, over the vectors and the sample",
+          "the finding holds on the shipped evaluator — an expression over `Limits.max_expr_nodes` is evaluated, never refused"
+        ]
+      }
+    },
+    {
+      "id": "pipeline-step-evaluator-abstract",
+      "level": "assumed",
+      "claim": "THE STEP-EVALUATOR PREMISE. `evalStep resolve env` — the dispatch of fourteen verbs to fourteen primitives: three-valued predicates, group aggregation, windows, pivots, joins, the set operations, the pinned float layout — is the model's PARAMETER (`step : frame -> transform -> outcome frame e`), exactly as Phase 176 made the pipeline evaluator one and Phase 186 the node evaluator. Every theorem holds for every step evaluator, so nothing here is a claim about any verb's semantics; those stay with the laws the retired `Fuaran.Core.DataFrame` coverage exclusion named (`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`) and with `Conformance.transformLaws` at every host. The differential instantiates the parameter at production's own primitives, so the verbs are exercised and shared, not modelled. `unscheduled` rather than `permanent`: a model of the verbs is possible verb by verb (the Phase 176 precedent modelled a table algebra with a validity mask), and nobody has taken it — the operator decision the finding row asks for is the natural moment to decide whether one is wanted.",
+      "phase": "fuaran-core#154",
+      "class": "model-bridge",
+      "closes": "unscheduled",
+      "evidence": {
+        "assumption": "the step evaluator the driver folds with is a parameter; the fourteen verbs' semantics are neither modelled nor claimed"
+      }
     }
   ]
 }
