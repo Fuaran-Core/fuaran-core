@@ -2735,17 +2735,23 @@ at genesis, so a tamper of the TAIL is found across a boundary exactly as it is 
 spending the same premise for the same arm — `rec_injective_on` since Phase 197, so the two
 records' actors are ones the code emits.
 
-**One boundary is a finding about production rather than a modelling choice.** `snapshotAtOpt`
-hard-wires the boundary hash at sequence zero to `""`, where the walkers start from `cfg.Genesis`.
-`compact_at_zero_needs_the_empty_genesis` proves the consequence: under any OTHER genesis, a
-compaction at zero of an intact non-empty stream does **not** verify across — the first tail record
-links to the genesis and the snapshot says `""`. Both shipped configs (`canonicalConfig`,
-`legacyActorConfig`) have the empty genesis, so nothing shipped meets this. `StreamConfig` is a public
-record, so a domain can, and `compact_preserves_verify` carries the condition in its signature
-(`n == PZero ==> genesis == ""`) rather than hiding it in a modelling decision. Past sequence zero
-the boundary hash is a stored one and the genesis never reaches it (`boundary_ignores_the_seed`).
-Closing it is a one-token change in `snapshotAtOpt` — take the genesis from a config — and is a
-change to a shipped signature, so it is named here and not taken by a proof-leg phase.
+**One boundary was a finding about production, and Phase 227 closed it.** Phase 191 found that
+`snapshotAtOpt` hard-wired the boundary hash at sequence zero to `""`, where the walkers start from
+`cfg.Genesis`, and `compact_at_zero_needs_the_empty_genesis` proved the consequence: under any OTHER
+genesis, a compaction at zero of an intact non-empty stream did **not** verify across — the first
+tail record linked to the genesis and the snapshot said `""`. Both shipped configs
+(`canonicalConfig`, `legacyActorConfig`) have the empty genesis, so nothing shipped met it; a
+domain with its own `StreamConfig` could. Phase 227 took ruling (A): production gained
+`snapshotAtOptWith cfg`, `compactWith cfg` and `compactChainOnlyWith cfg`, which seed the boundary
+at zero with `cfg.Genesis`, and the existing entry points became their canonical-config
+instantiation — additive, and byte-identical under both shipped configs (pinned by a digest vector
+in the differential). The model's `compact` now takes the genesis, `compact_preserves_verify` carries
+no condition on it, and the finding is restated as the positive
+`compact_at_zero_verifies_under_any_genesis`. Past sequence zero the boundary hash is a stored one
+and the genesis never reaches it (`boundary_ignores_the_seed`), so the canonical `compact` and
+`compactWith cfg` agree there whatever the genesis. What remains an obligation rather than a theorem
+is the ORDERING above — verify, then compact — and since 227 it is stated on `compact`'s and
+`compactChainOnly`'s doc comments and in the repository README's op-stream section.
 
 **The differential** runs the extracted section beside `compact`, `compactChainOnly`, `replayFrom`,
 `replay`, `verifyAcross` and `verifyAcrossChainOnly` over both witnesses' generated streams, at

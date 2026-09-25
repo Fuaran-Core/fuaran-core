@@ -135,6 +135,23 @@ evaluator, and your edits, each with the change set you would name for it. The t
 words, because no law can see where a stored `Map` came from. A `prior` kept across an edit that
 moves the dependency map must be re-primed with `eval`, not replayed.
 
+### Compacting an op-stream — verify, then compact
+
+**`OpStream.compact` and `compactChainOnly` do not walk the chain.** They read the boundary record's
+hash and TRUST it. So the compacted stream verifies exactly when the original does only over a
+prefix that was verified BEFORE it was discarded — `compact_preserves_verify` and its corollary
+`compact_verifies_iff_original` in [`proofs/Chain.fst`](proofs/Chain.fst) — and a tamper in the
+prefix of an unverified stream survives compaction, verifies across the new boundary, and once the
+prefix is gone nothing can find it again. **A host that compacts an unverified stream has compacted
+whatever it was handed.** The order is an obligation on every caller: `verifyChain` (or
+`verifyChainWith cfg`) first, then `compact`.
+
+**A stream kept under its own `StreamConfig` compacts under the same config** (Phase 227):
+`compactWith cfg` / `compactChainOnlyWith cfg` (over `snapshotAtOptWith cfg`) seed the boundary at
+sequence zero with `cfg.Genesis`, the value every chain walker starts from, so a compaction at zero
+verifies across under any genesis (`compact_at_zero_verifies_under_any_genesis`). The canonical
+entry points are the empty-genesis instantiation and emit the same bytes they always have.
+
 ### The container capability — what `applyContained` enforces, and the one thing it asks of you
 
 `Ops.applyContained canHold` is the variant for a domain with leaves: `canHold` answers *can this

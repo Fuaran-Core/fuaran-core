@@ -817,7 +817,7 @@ let __proj__Compacted__item___1 = (fun ( projectee  :  compacted<'op, 'st> ) -> 
      end))
 
 
-let compact = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( pay  :  pos  ->  'st  ->  Prims.string ) ( apply  :  'op  ->  'st  ->  applied<'st, 'rej> ) ( s0  :  'st ) ( rs  :  Prims.list<record<'op>> ) ( n  :  pos ) ->  
+let compact = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( pay  :  pos  ->  'st  ->  Prims.string ) ( apply  :  'op  ->  'st  ->  applied<'st, 'rej> ) ( genesis  :  Prims.string ) ( s0  :  'st ) ( rs  :  Prims.list<record<'op>> ) ( n  :  pos ) ->  
 if (not ((within n rs))) then begin
      CompactRefused ("OpStream.snapshotAt: seq out of range")
      end else begin
@@ -828,7 +828,7 @@ if (not ((within n rs))) then begin
 | Replayed (s) -> begin
      (
 
-let prev = (hash_at_boundary "" n rs)
+let prev = (hash_at_boundary genesis n rs)
 in Compacted ({sseq = n; sstate = s; sprev = prev; shash = (h prev (pay n s))}, (drop n rs)))
      end)
      end)
