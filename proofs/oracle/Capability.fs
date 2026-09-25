@@ -364,6 +364,7 @@ type value_space =
 | StringLen of Prims.int * Prims.int
 | Enum of Prims.list<Prims.string>
 | AnyString
+| SlotTree of FStar_Pervasives_Native.option<Prims.string>
 
 
 let uu___is_IntRange : value_space  ->  Prims.bool = (fun ( projectee  :  value_space ) -> (match (projectee) with
@@ -452,24 +453,45 @@ let uu___is_AnyString : value_space  ->  Prims.bool = (fun ( projectee  :  value
      false
      end))
 
-type readers = {int_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.int>; float_in : Prims.string  ->  Prims.string  ->  Prims.string  ->  Prims.bool; str_len : Prims.string  ->  Prims.nat}
+
+let uu___is_SlotTree : value_space  ->  Prims.bool = (fun ( projectee  :  value_space ) -> (match (projectee) with
+| SlotTree (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__SlotTree__item___0 : value_space  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( projectee  :  value_space ) -> (match (projectee) with
+| SlotTree (_0) -> begin
+     _0
+     end))
+
+type readers = {int_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.int>; float_in : Prims.string  ->  Prims.string  ->  Prims.string  ->  Prims.bool; str_len : Prims.string  ->  Prims.nat; kind_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.string>}
 
 
 let __proj__Mkreaders__item__int_of : readers  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of} -> begin
      int_of
      end))
 
 
 let __proj__Mkreaders__item__float_in : readers  ->  Prims.string  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of} -> begin
      float_in
      end))
 
 
 let __proj__Mkreaders__item__str_len : readers  ->  Prims.string  ->  Prims.nat = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of} -> begin
      str_len
+     end))
+
+
+let __proj__Mkreaders__item__kind_of : readers  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( projectee  :  readers ) -> (match (projectee) with
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of} -> begin
+     kind_of
      end))
 
 
@@ -494,11 +516,29 @@ let validate : readers  ->  value_space  ->  Prims.string  ->  Prims.bool = (fun
      end
 | AnyString -> begin
      true
+     end
+| SlotTree (c) -> begin
+     (match ((rd.kind_of s)) with
+| FStar_Pervasives_Native.None -> begin
+     false
+     end
+| FStar_Pervasives_Native.Some (k) -> begin
+     (match (c) with
+| FStar_Pervasives_Native.None -> begin
+     true
+     end
+| FStar_Pervasives_Native.Some (kc) -> begin
+     (Prims.op_Equals k kc)
+     end)
+     end)
      end))
 
 
 let is_bounded : value_space  ->  Prims.bool = (fun ( space  :  value_space ) -> (match (space) with
 | AnyString -> begin
+     false
+     end
+| SlotTree (uu___) -> begin
      false
      end
 | uu___ -> begin
@@ -1083,7 +1123,7 @@ let entry_of : hole_decl  ->  sig_entry = (fun ( h  :  hole_decl ) -> (match (h.
      {s_addr = h.h_addr; s_name = h.h_name; s_kind = "value"; s_space = FStar_Pervasives_Native.Some (s); s_slot = FStar_Pervasives_Native.None; s_action = FStar_Pervasives_Native.None; s_required = true}
      end
 | SlotHole (c) -> begin
-     {s_addr = h.h_addr; s_name = h.h_name; s_kind = "slot"; s_space = FStar_Pervasives_Native.None; s_slot = c; s_action = FStar_Pervasives_Native.None; s_required = true}
+     {s_addr = h.h_addr; s_name = h.h_name; s_kind = "slot"; s_space = FStar_Pervasives_Native.Some (SlotTree (c)); s_slot = c; s_action = FStar_Pervasives_Native.None; s_required = true}
      end
 | RepeatHole (s) -> begin
      {s_addr = h.h_addr; s_name = h.h_name; s_kind = "repeat"; s_space = FStar_Pervasives_Native.Some (s); s_slot = FStar_Pervasives_Native.None; s_action = FStar_Pervasives_Native.None; s_required = false}
@@ -1457,10 +1497,27 @@ let rec check_args : readers  ->  Prims.list<sig_entry>  ->  Prims.list<Prims.st
      end
 | FStar_Pervasives_Native.Some (space) -> begin
       
+if ((match (space) with
+| SlotTree (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) && (match ((rd.kind_of value)) with
+| FStar_Pervasives_Native.None -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)) then begin
+     Error (UninvocableArg (addr))
+     end else begin
+      
 if (validate rd space value) then begin
      (check_args rd holes declared rest)
      end else begin
      Error (ArgOutOfSpace (addr, space, value))
+     end
      end
      end)
      end)
@@ -1634,6 +1691,27 @@ let rec all_declared : Prims.list<sig_entry>  ->  Prims.list<Prims.string>  ->  
 | uu___ -> begin
      false
      end) && (all_declared holes t))
+     end))
+
+
+let rec args_in_space : readers  ->  Prims.list<sig_entry>  ->  invocation  ->  Prims.bool = (fun ( rd  :  readers ) ( holes  :  Prims.list<sig_entry> ) ( a  :  invocation ) -> (match (a) with
+| [] -> begin
+     true
+     end
+| ((addr, value))::rest -> begin
+     ((match ((find_entry addr holes)) with
+| FStar_Pervasives_Native.Some (h) -> begin
+     (match (h.s_space) with
+| FStar_Pervasives_Native.Some (sp) -> begin
+     (validate rd sp value)
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end) && (args_in_space rd holes rest))
      end))
 
 

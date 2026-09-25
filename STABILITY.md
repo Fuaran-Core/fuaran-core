@@ -2650,6 +2650,76 @@ required params, and it also requires that an optional `Null` is still accepted.
 and the family's `cases` cell (1400) are unchanged; only the law's name gained a clause. The laws
 corpus is byte-identical. DECISIONS.md D61 has the ruling.
 
+### A tree-typed slot has a value space — `ValueSpace.SlotTree`, so a capability over a slotted artifact is invocable (Phase 229) — BREAKING (a case added to a closed union, and behaviour)
+
+**What changed.** `ValueSpace` gains a sixth case, `SlotTree of kindConstraint: string option`. It
+is the value space of a tree-typed slot at the scalar invocation seam: a wire document (a
+`"kind"`-tagged JSON object, passed as the argument string) whose kind matches the constraint when
+one is declared, and any kind otherwise. `Function.signature` now enters every `SlotHole c` with
+`Space = Some(SlotTree c)`. Before this change it entered it with `Space = None`. It is still
+required, and `Slot` still carries `c`. `Capability.validateArgs`, and so `invoke` and
+`Registry.dispatch`, now ACCEPT a slot argument that is a tree of the right kind. A tree of the
+wrong kind is refused as `ArgOutOfSpace(addr, SlotTree c, got)`, which names the address and the
+constraint. An argument that is no tree at all (a scalar, a malformed document, an object with no
+string `"kind"`) is `UninvocableArg addr`, as every slot argument was before. `Space.validate`
+checks the new space. `Space.slotKindOf : string -> string option` is the public reader it uses
+(ADDITIVE). A capability declared over an artifact with a slot is now dispatchable. Before, it
+registered, enumerated and refused every argument list (Phase 177's finding).
+
+**Two breaks, both in this draft.**
+- **Source.** `ValueSpace` is a closed union and gains a case (tag 5, appended after `AnyString`,
+  so no existing tag moves). **Every exhaustive `match` on `ValueSpace` needs a `SlotTree` arm.**
+  Without one, F# warns FS0025, which fails a build that treats warnings as errors, and a slot
+  entry's space throws `MatchFailureException` at run time. That applies to any code that walks a
+  derived signature's `Space`, because slot entries now carry one. `api/Fuaran.Core.Function.txt`
+  records the case and the reader.
+- **Behaviour.** A derived slot entry's `Space` is `Some(SlotTree c)` where it was `None`. Code
+  that read `Space = None` as "this is a slot" should test `Kind = "slot"` instead. An argument set
+  that binds a slot to a conforming tree is now accepted where it was refused. A capability
+  `Pipeline` literal for a slot hole is checked against the space the same way, where it was
+  `PipelineUnknownArg`.
+- **The C# facade, the same break.** `Fuaran.Core.CSharp.HoleSpace` gains
+  `HoleSpace.SlotTree(string? kindConstraint)`, and `HoleSpace.Match` / `Switch` gain a REQUIRED
+  sixth arm, `onSlotTree` (`Func<string?, T>` / `Action<string?>`). A C# consumer's existing
+  five-arm `Match` stops compiling, which is the facade's form of FS0025. There is deliberately no
+  five-arm overload kept for compatibility: it would have to throw on a derived slot entry's
+  `SignatureHoleView.Space`, and throwing there is exactly the defect this change removes.
+  `api/Fuaran.Core.CSharp.txt` records the change.
+
+**What does NOT change: the wire.** A slot entry's space is derived from its `Slot` constraint, so
+`Function.toSchema`, `Function.toJsonSchema` and `CapabilityCodec` omit it. The bytes of every
+slotted signature are the bytes they were before this change, and so is
+`ContentPack.signatureFingerprint`, which a packed function records as its
+`BaseSignatureVersion`. A pack authored against a slotted base still loads. A document written
+before 229 decodes to the post-229 signature: the decoder restores the space from `slotKind`. Only a
+slot entry whose space says something its constraint does not is written with an explicit
+`"slotTree"` space, and it round-trips. **Wire-surface class: ADDITIVE** (`api/wire/Fuaran.Core.Function.txt`,
+Phase 214's rule). The `capability` and `capabilityPipeline` documents gain the `"slotTree"`
+space encoding, `{"$type":"slotTree"}` with an optional `"slotKind"`. It is emitted only when a
+slot's space disagrees with its constraint, and every slotted signature is byte-identical. A port
+that decodes capability documents (the TS and Go capability ports) learns the encoding under
+fuaran#1860. The laws corpus is byte-identical. `InvokeError`,
+`ApplyError` and `Deferred` are unchanged. `FunctionRegistry`'s `Exact` match compares a slot's
+derived space, so a hand-built spaceless slot entry still matches a derived one.
+
+**What a consumer does.** Add a `SlotTree` arm to every exhaustive match on `ValueSpace`. A schema
+renderer projects it as an object-typed parameter carrying its kind, as `toJsonSchema` does. A host
+that dispatches a slotted capability passes the slot's tree as its wire JSON string and decodes it
+into its own node inside the body. Core checks the document's shape and kind and decodes nothing
+below the tag. Nothing changes for a consumer that declares no slot.
+
+**Where it is certified.** In `proofs/Capability.fst`, `slot_hole_invocable_in_space` replaces
+Phase 177's `slot_hole_uninvocable`. It is proved over the completeness lemma
+`validate_args_complete`, with `slot_entry_shape` (a slot is entered with its tree space),
+`slot_space_exact`, `slot_wrong_kind_refused` and `slot_scalar_uninvocable`. The ladder row
+`capability-slot-hole-invocable-in-space` replaces `capability-slot-hole-uninvocable`. The oracle is
+re-extracted with the `kind_of` reader, the capability differential draws conforming,
+wrong-kind and non-tree slot arguments, and the shipped-seam test moves the finding to closed.
+`Conformance.capabilityLaws` gains an eighth law, BUILT each iteration. A capability over a slotted
+artifact is derived through `Function.signature`, registered, enumerated and dispatched with a
+conforming argument, and refused with both non-conforming ones. The family's `cases` cell moves from
+1400 to 1600. DECISIONS.md D63 has the ruling.
+
 ## 0.30.1 — draft
 
 **This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries

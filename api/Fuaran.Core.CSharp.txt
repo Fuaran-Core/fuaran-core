@@ -203,9 +203,10 @@ method Fuaran.Core.CSharp.HoleSpace.FloatRange(System.Double, System.Double) : F
 method Fuaran.Core.CSharp.HoleSpace.FromCore(Fuaran.Core.ValueSpace) : Fuaran.Core.CSharp.HoleSpace
 method Fuaran.Core.CSharp.HoleSpace.GetHashCode() : System.Int32
 method Fuaran.Core.CSharp.HoleSpace.IntRange(System.Int32, System.Int32) : Fuaran.Core.CSharp.HoleSpace
-method Fuaran.Core.CSharp.HoleSpace.Match`1(System.Func`3<System.Int32, System.Int32, !!0>, System.Func`3<System.Double, System.Double, !!0>, System.Func`3<System.Int32, System.Int32, !!0>, System.Func`2<System.Collections.Generic.IReadOnlyList`1<System.String>, !!0>, System.Func`1<!!0>) : !!0
+method Fuaran.Core.CSharp.HoleSpace.Match`1(System.Func`3<System.Int32, System.Int32, !!0>, System.Func`3<System.Double, System.Double, !!0>, System.Func`3<System.Int32, System.Int32, !!0>, System.Func`2<System.Collections.Generic.IReadOnlyList`1<System.String>, !!0>, System.Func`1<!!0>, System.Func`2<System.String, !!0>) : !!0
+method Fuaran.Core.CSharp.HoleSpace.SlotTree(System.String) : Fuaran.Core.CSharp.HoleSpace
 method Fuaran.Core.CSharp.HoleSpace.StringLen(System.Int32, System.Int32) : Fuaran.Core.CSharp.HoleSpace
-method Fuaran.Core.CSharp.HoleSpace.Switch(System.Action`2<System.Int32, System.Int32>, System.Action`2<System.Double, System.Double>, System.Action`2<System.Int32, System.Int32>, System.Action`1<System.Collections.Generic.IReadOnlyList`1<System.String>>, System.Action) : System.Void
+method Fuaran.Core.CSharp.HoleSpace.Switch(System.Action`2<System.Int32, System.Int32>, System.Action`2<System.Double, System.Double>, System.Action`2<System.Int32, System.Int32>, System.Action`1<System.Collections.Generic.IReadOnlyList`1<System.String>>, System.Action, System.Action`1<System.String>) : System.Void
 method Fuaran.Core.CSharp.HoleSpace.ToCore() : Fuaran.Core.ValueSpace
 method Fuaran.Core.CSharp.HoleSpace.ToString() : System.String
 method Fuaran.Core.CSharp.HoleSpace.Validate(System.String) : System.Boolean

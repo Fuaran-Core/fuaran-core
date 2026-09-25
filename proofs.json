@@ -1854,12 +1854,12 @@
       }
     },
     {
-      "id": "capability-slot-hole-uninvocable",
+      "id": "capability-slot-hole-invocable-in-space",
       "level": "proved",
-      "claim": "THE FINDING. A signature entry that is REQUIRED and has NO value space refuses every argument list: an argument at its address is `UninvocableArg`, and no argument there is `RequiredArgsUnbound`. `Function.signature` enters every `SlotHole` exactly so — required, spaceless (`slot_entry_shape`) — which means a capability declared over an artifact with a tree-typed slot can be registered, enumerated and advertised, and never dispatched. Not a contract violation: a slot is not scalar-invocable by design, and `validateArgs`'s doc comment says so of the argument; what nothing said is that the ENTRY makes the whole capability un-invocable, so a host that lifts a template's signature straight into `Capability.create` has published a capability no invocation reaches. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: the fix shape, if taken, is either `signature` marking a slot entry non-required on the invocation axis (as it already does for action holes) or `create` refusing a spaceless required entry, and both are behaviour changes to a public function.",
-      "phase": "fuaran-core#177",
+      "claim": "CLOSED BY PHASE 229 (was Phase 177's finding `slot_hole_uninvocable`). A capability over a slotted artifact is INVOCABLE. `Function.signature` enters every `SlotHole c` required and WITH the tree space `SlotTree c` (`slot_entry_shape`) — a wire document whose `\"kind\"` satisfies the constraint (any kind when unconstrained; `slot_space_exact`), read through the `kind_of` reader (production's `Space.slotKindOf`). An argument set binding the slot to a conforming tree, with every other argument in its entry's space and every required entry bound, is ACCEPTED (`slot_hole_invocable_in_space`, over the completeness lemma `validate_args_complete`, the converse of `validate_args_sound`); a tree of the wrong kind is refused BY NAME as `ArgOutOfSpace addr (SlotTree (Some k)) v` (`slot_wrong_kind_refused`) and an argument that is no tree as `UninvocableArg addr` (`slot_scalar_uninvocable`). What Phase 177 proved survives about the one shape `signature` no longer makes: a REQUIRED entry with NO space refuses every argument list (`spaceless_required_uninvocable`). Asserted on the shipped seam by the differential's fourth case, which now dispatches the whole template with a conforming slot and refuses the non-conforming ones by name, and built each iteration by `capabilityLaws`' eighth law. What is NOT claimed: that the host's decode of the document into its node succeeds — Core checks shape and kind only, per the witness pattern.",
+      "phase": "fuaran-core#229",
       "evidence": {
-        "theorem": "slot_hole_uninvocable",
+        "theorem": "slot_hole_invocable_in_space",
         "model": "proofs/Capability.fst",
         "prover": "proofs/fstar-pin.json"
       }

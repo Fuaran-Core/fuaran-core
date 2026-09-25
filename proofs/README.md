@@ -4775,7 +4775,7 @@ comparison is the one the refusal already used), and an `Ok (Failed _)` from eit
 recorded difference. It cost the prover nothing measurable — the module still verifies in 7s, every
 query 3/3, and the extraction was byte-identical to a fresh one on the first run.
 
-### The finding: a slot hole makes a capability un-invocable
+### The finding: a slot hole makes a capability un-invocable (CLOSED by Phase 229)
 
 `Function.signature` enters a `SlotHole` as `Required = true, Space = None` — required on the data
 axis, because `apply` must bind it, and spaceless, because a tree is not a scalar. `validateArgs`
@@ -4796,6 +4796,26 @@ its own phase. The fix shape, if taken: `signature` marking a slot entry non-req
 invocation axis, as it already does for action holes — or `Capability.create` refusing a spaceless
 required entry so the un-invocable capability is refused at registration rather than at every
 dispatch. Both change a public function's behaviour.
+
+**Closed by Phase 229, by neither of those shapes.** The operator ruled (A) (DECISIONS.md D63): the
+slot is a legitimate parameter and gets a VALUE SPACE, so a slotted capability is invocable rather
+than un-invocable in a new way. `ValueSpace` gains `SlotTree of kindConstraint`. This is a wire
+document whose `"kind"` meets the constraint, read through a fourth reader in the premise record,
+`kind_of` (production's `Space.slotKindOf`). `signature` enters a slot as
+`Space = Some (SlotTree c)`, still required (`slot_entry_shape`, restated). The positive theorem is
+`slot_hole_invocable_in_space`: a slot bound to a conforming tree, with every other argument in
+space and every required entry bound, is ACCEPTED. It is proved over `validate_args_complete`, the
+completeness lemma this module lacked beside `validate_args_sound`. The refusals are characterised
+by name. A tree of the wrong kind is `ArgOutOfSpace addr (SlotTree (Some k)) v`
+(`slot_wrong_kind_refused`). An argument that is no tree is `UninvocableArg`
+(`slot_scalar_uninvocable`), and `refusal_is_truthful` now allows that class for a tree-spaced entry
+as well as a spaceless one. Phase 177's statement is kept as `spaceless_required_uninvocable`,
+because it is still true, but after 229 it describes only a hand-built entry. The fourth
+differential case now dispatches the whole template with a conforming slot and refuses the
+non-conforming arguments by name. The new lemmas all discharge at the leg's rlimit with no
+annotation beyond one recursive helper (`check_args_in_space_ok`). A falsification run that
+swapped `slot_wrong_kind_refused`'s refusal class for `UninvocableArg` was refuted (Error 19),
+so the refusal clause is not proved vacuously.
 
 ### The differential
 
@@ -4877,8 +4897,10 @@ written decoder, with a bare separator as the go-red. The module's cost moved fr
    `register_keeps_distinct`, `rejected_never_bound`, `undeclared_address_refused`,
    `same_name_no_capture`, `signature_excluding_exact`, `data_holes_all_data`, `observed_least`,
    `audit_effect_join`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
-   `dispatch_never_ok_failed` — Phase 210), the finding
-   (`slot_hole_uninvocable`, `slot_entry_shape`) and, since Phase 225, the capture key's
+   `dispatch_never_ok_failed` — Phase 210), since Phase 229 the finding's closure
+   (`slot_hole_invocable_in_space`, `validate_args_complete`, `slot_entry_shape`,
+   `slot_space_exact`, `slot_wrong_kind_refused`, `slot_scalar_uninvocable`, with Phase 177's
+   statement kept as `spaceless_required_uninvocable`) and, since Phase 225, the capture key's
    injectivity (`invocation_key_injective`, with `esc_split`, `enc_injective`,
    `key_fields_injective` and `binding_fields_injective` under it), over any
    witness, any readers, any registry and any host body. F\* 2026.09.06, Z3 4.13.3, every query

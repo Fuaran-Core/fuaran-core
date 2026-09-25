@@ -43,10 +43,16 @@
        (`invoke_never_ok_failed`, `dispatch_never_ok_failed` — Phase 210); and what validation says is
        characterised: the refusal is one of its own four, an accepted set addresses declared
        holes only and binds every required one (`validate_args_sound`), and an `ArgOutOfSpace`
-       names a value the space really refuses (`refusal_is_truthful`). THE FINDING read off it,
-       `slot_hole_uninvocable`: a required entry with no value space — which is what `signature`
-       makes of every `SlotHole` — refuses EVERY argument list, so a capability declared over an
-       artifact with a tree-typed slot can be registered and enumerated and never dispatched.
+       names a value the space really refuses (`refusal_is_truthful`). And since Phase 229 the
+       converse of Phase 177's finding: `slot_hole_invocable_in_space` — `signature` enters every
+       `SlotHole` with the tree space `SlotTree` (`slot_entry_shape`), and an argument set that
+       binds a slot to a wire tree of its kind, with every other argument in its space and every
+       required entry bound, is ACCEPTED (`validate_args_complete`), while a tree of the wrong kind
+       is the typed `ArgOutOfSpace` naming the constraint (`slot_wrong_kind_refused`) and a scalar
+       is `UninvocableArg` (`slot_scalar_uninvocable`). A capability over a slotted artifact is
+       invocable. What Phase 177 proved survives about the one entry shape `signature` no longer
+       makes — a REQUIRED entry with NO space refuses every argument list
+       (`spaceless_required_uninvocable`).
      - `enumerate_is_registry` — an id is enumerable exactly when it is dispatchable: there is
        no entry `enumerate` hides and none `dispatch` reaches past it (`no_such_iff_unregistered`).
        `register` refuses a held id and extends by exactly one entry otherwise, and a registry
@@ -309,16 +315,20 @@ type value_space =
   | StringLen  : lo:int -> hi:int -> value_space
   | Enum       : list string -> value_space
   | AnyString  : value_space
+  | SlotTree   : option string -> value_space
 
-(* The readers premise: the three host functions `Space.validate` reaches for.
+(* The readers premise: the four host functions `Space.validate` reaches for.
    `int_of`   — F#: `System.Int32.TryParse`, as an option.
    `float_in` — F#: `System.Double.TryParse` (invariant, `NumberStyles.Float`) of the value, then
                 `lo <= v && v <= hi` against the two carriers' parsed floats.
-   `str_len`  — F#: `String.Length`. *)
+   `str_len`  — F#: `String.Length`.
+   `kind_of`  — F#: `Space.slotKindOf` (Phase 229): the `"kind"` tag of a wire document whose top
+                level is a kind-tagged object, `None` for anything else. *)
 noeq type readers = {
   int_of:   string -> option int;
   float_in: string -> string -> string -> bool;
-  str_len:  string -> nat
+  str_len:  string -> nat;
+  kind_of:  string -> option string
 }
 
 (* F#: `Space.validate`. *)
@@ -332,11 +342,18 @@ let validate (rd:readers) (space:value_space) (s:string) : Tot bool =
   | StringLen lo hi -> rd.str_len s >= lo && rd.str_len s <= hi
   | Enum xs -> mem s xs
   | AnyString -> true
+  | SlotTree c ->
+    (match rd.kind_of s with
+     | None -> false
+     | Some k -> (match c with
+                  | None -> true
+                  | Some kc -> k = kc))
 
 (* F#: `Space.isBounded` — the totality criterion for repeats. *)
 let is_bounded (space:value_space) : Tot bool =
   match space with
   | AnyString -> false
+  | SlotTree _ -> false
   | _ -> true
 
 (* ======================================================================================
@@ -450,7 +467,7 @@ let entry_of (h:hole_decl) : Tot sig_entry =
       s_space = Some s; s_slot = None; s_action = None; s_required = true }
   | SlotHole c ->
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "slot";
-      s_space = None; s_slot = c; s_action = None; s_required = true }
+      s_space = Some (SlotTree c); s_slot = c; s_action = None; s_required = true }
   | RepeatHole s ->
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "repeat";
       s_space = Some s; s_slot = None; s_action = None; s_required = false }
@@ -638,7 +655,8 @@ let rec check_args (rd:readers) (holes:list sig_entry) (declared:list string) (a
       match h.s_space with
       | None -> Error (UninvocableArg addr)
       | Some space ->
-        if validate rd space value then check_args rd holes declared rest
+        if SlotTree? space && None? (rd.kind_of value) then Error (UninvocableArg addr)
+        else if validate rd space value then check_args rd holes declared rest
         else Error (ArgOutOfSpace addr space value)
 
 (* F#: `validateArgs`'s step 2 — the required holes the args leave unbound. *)
@@ -858,14 +876,17 @@ let validate_args_sound (rd:readers) (c:capability) (a:invocation)
   = check_args_ok_declared rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
 
 (* What a REFUSAL guarantees: an `ArgOutOfSpace` names a value the named space really refuses, an
-   `UnknownArg` names an address no hole declares, an `UninvocableArg` names a slot hole. *)
+   `UnknownArg` names an address no hole declares, an `UninvocableArg` names a spaceless entry
+   or a tree-spaced one (Phase 229: a slot bound to something that is no tree). *)
 let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation)
   : Lemma (ensures (match check_args rd holes declared a with
                     | Error (ArgOutOfSpace addr space got) -> not (validate rd space got) /\ has_key addr a
                     | Error (UnknownArg addr d) -> None? (find_entry addr holes) /\ d == declared
                     | Error (UninvocableArg addr) ->
                       (match find_entry addr holes with
-                       | Some h -> None? h.s_space
+                       | Some h -> (match h.s_space with
+                                    | None -> True
+                                    | Some sp -> SlotTree? sp)
                        | None -> False)
                     | _ -> True))
           (decreases a)
@@ -879,11 +900,11 @@ let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list s
           | None -> ()
           | Some space -> if validate rd space value then refusal_is_truthful rd holes declared rest else ()))
 
-(* THE FINDING. A signature entry that is REQUIRED and has NO value space — a slot hole, which
-   `Function.signature` marks required and spaceless — makes the capability un-invocable by
-   construction: an argument at its address is `UninvocableArg`, and no argument there is
-   `RequiredArgsUnbound`. Every argument list is refused. A capability declared over a template
-   with a tree-typed slot can be registered and enumerated and never dispatched. *)
+(* What survives of Phase 177's finding. A signature entry that is REQUIRED and has NO value
+   space makes the capability un-invocable by construction: an argument at its address is
+   `UninvocableArg`, and no argument there is `RequiredArgsUnbound`. Until Phase 229 that was what
+   `Function.signature` made of every slot hole; since then it makes none (`slot_entry_shape`), so
+   this now characterises only a hand-built entry. *)
 let rec check_args_hits_uninvocable (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation) (h:sig_entry)
   : Lemma (requires has_key h.s_addr a /\ find_entry h.s_addr holes == Some h /\ None? h.s_space)
           (ensures Error? (check_args rd holes declared a))
@@ -915,18 +936,84 @@ let rec unbound_required_memp (holes:list sig_entry) (a:invocation) (h:sig_entry
     | [] -> ()
     | x :: t -> if x.s_required && not (has_key x.s_addr a) then () else unbound_required_memp t a h
 
-let slot_hole_uninvocable (rd:readers) (c:capability) (a:invocation) (h:sig_entry)
+let spaceless_required_uninvocable (rd:readers) (c:capability) (a:invocation) (h:sig_entry)
   : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\ h.s_required /\ None? h.s_space)
           (ensures Error? (validate_args rd c a))
   = let holes = c.c_signature.sg_holes in
     if has_key h.s_addr a then check_args_hits_uninvocable rd holes (entry_addrs holes) a h
     else (find_entry_memp h.s_addr holes; unbound_required_memp holes a h)
 
-(* And `signature` is where such an entry comes from: a `SlotHole` is entered required and
-   spaceless, so every artifact with a tree-typed slot yields an un-invocable capability. *)
+(* Phase 229. `signature` enters a `SlotHole` REQUIRED and WITH a value space: the tree space of
+   its own constraint. *)
 let slot_entry_shape (h:hole_decl)
   : Lemma (requires SlotHole? h.h_kind)
-          (ensures (entry_of h).s_required /\ None? (entry_of h).s_space)
+          (ensures (entry_of h).s_required /\
+                   (entry_of h).s_space == Some (SlotTree (SlotHole?._0 h.h_kind)) /\
+                   (entry_of h).s_slot == SlotHole?._0 h.h_kind)
+  = ()
+
+(* The tree space admits exactly the wire documents of the constrained kind (any kind when
+   unconstrained), and nothing that is no tree. *)
+let slot_space_exact (rd:readers) (c:option string) (v:string)
+  : Lemma (validate rd (SlotTree c) v <==>
+           (match rd.kind_of v with
+            | Some k -> None? c \/ c == Some k
+            | None -> False))
+  = ()
+
+(* Every argument addresses a declared entry that HAS a space, and lies in it. *)
+let rec args_in_space (rd:readers) (holes:list sig_entry) (a:invocation) : Tot bool (decreases a) =
+  match a with
+  | [] -> true
+  | (addr, value) :: rest ->
+    (match find_entry addr holes with
+     | Some h -> (match h.s_space with
+                  | Some sp -> validate rd sp value
+                  | None -> false)
+     | None -> false) && args_in_space rd holes rest
+
+let rec check_args_in_space_ok (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation)
+  : Lemma (requires args_in_space rd holes a)
+          (ensures check_args rd holes declared a == Ok ())
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | _ :: rest -> check_args_in_space_ok rd holes declared rest
+
+(* COMPLETENESS — the converse of `validate_args_sound`: an argument set every member of which
+   lies in its entry's space, binding every required entry, is accepted. *)
+let validate_args_complete (rd:readers) (c:capability) (a:invocation)
+  : Lemma (requires args_in_space rd c.c_signature.sg_holes a /\ unbound_required c.c_signature.sg_holes a == [])
+          (ensures validate_args rd c a == Ok ())
+  = check_args_in_space_ok rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
+
+(* THE POSITIVE (Phase 229, restating Phase 177's `slot_hole_uninvocable`). A slot entry — which
+   `signature` spaces with `SlotTree` of its constraint — bound to a wire tree of its kind, beside
+   arguments that are otherwise in space and bind every required entry, is ACCEPTED: a capability
+   over a slotted artifact is invocable. *)
+let slot_hole_invocable_in_space (rd:readers) (c:capability) (a:invocation) (h:sig_entry) (v:string)
+  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
+                    h.s_space == Some (SlotTree h.s_slot) /\
+                    Some? (rd.kind_of v) /\
+                    (None? h.s_slot \/ h.s_slot == rd.kind_of v) /\
+                    args_in_space rd c.c_signature.sg_holes a /\
+                    unbound_required c.c_signature.sg_holes ((h.s_addr, v) :: a) == [])
+          (ensures validate_args rd c ((h.s_addr, v) :: a) == Ok ())
+  = validate_args_complete rd c ((h.s_addr, v) :: a)
+
+(* ... and refused BY NAME when it is not: a tree of the wrong kind is `ArgOutOfSpace` carrying
+   the slot's constraint, and anything that is no tree is `UninvocableArg`. *)
+let slot_wrong_kind_refused (rd:readers) (c:capability) (h:sig_entry) (kc:string) (v:string)
+  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
+                    h.s_space == Some (SlotTree (Some kc)) /\
+                    Some? (rd.kind_of v) /\ Some?.v (rd.kind_of v) <> kc)
+          (ensures validate_args rd c [(h.s_addr, v)] == Error (ArgOutOfSpace h.s_addr (SlotTree (Some kc)) v))
+  = ()
+
+let slot_scalar_uninvocable (rd:readers) (c:capability) (h:sig_entry) (sc:option string) (v:string)
+  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
+                    h.s_space == Some (SlotTree sc) /\ None? (rd.kind_of v))
+          (ensures validate_args rd c [(h.s_addr, v)] == Error (UninvocableArg h.s_addr))
   = ()
 
 (* ======================================================================================

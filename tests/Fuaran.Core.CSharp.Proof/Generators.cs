@@ -35,7 +35,7 @@ internal sealed class Gen
     internal const int ExprCases = 13;
     internal const int StepCases = 16;
     internal const int JsonCases = 6;
-    internal const int SpaceCases = 5;
+    internal const int SpaceCases = 6;
     internal const int ShapeCases = 4;
 
     private ConfRng.T _rng;
@@ -306,6 +306,8 @@ internal sealed class Gen
             1 => HoleSpace.FloatRange(Below(5) / 2.0, 5.0 + Below(20)),
             2 => HoleSpace.StringLen(Below(3), 3 + Below(30)),
             3 => HoleSpace.Enumeration(Enumerable.Range(0, 1 + Below(3)).Select(_ => Name()).ToArray()),
+            // Phase 229 — the tree space; with AnyString after it, the two unbounded cases are last.
+            4 => HoleSpace.SlotTree(Below(2) == 0 ? null : "k" + Below(4)),
             _ => HoleSpace.AnyString,
         };
 
@@ -314,7 +316,7 @@ internal sealed class Gen
         {
             0 => HoleShape.Value(Space(Below(SpaceCases))),
             1 => HoleShape.Slot(Below(2) == 0 ? null : "k" + Below(4)),
-            2 => HoleShape.Repeat(Space(Below(SpaceCases - 1))),
+            2 => HoleShape.Repeat(Space(Below(SpaceCases - 2))), // bounded spaces only
             _ => HoleShape.Action(Effect()),
         };
 

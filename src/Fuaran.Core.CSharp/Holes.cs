@@ -90,8 +90,15 @@ public sealed class HoleSpace : IEquatable<HoleSpace>
     /// <summary>A fixed set of admissible strings.</summary>
     public static HoleSpace Enumeration(params string[] members) => Enumeration((IEnumerable<string>)members);
 
-    /// <summary>Any string — the only UNBOUNDED space, and therefore the one a repeat count may not use.</summary>
+    /// <summary>Any string — an UNBOUNDED space, and therefore one a repeat count may not use.</summary>
     public static HoleSpace AnyString { get; } = new(ValueSpace.AnyString);
+
+    /// <summary>
+    /// A tree-typed slot's space (Phase 229): a wire document — a <c>"kind"</c>-tagged JSON object
+    /// passed as the argument string — whose kind is <paramref name="kindConstraint"/>, or any kind
+    /// when it is <c>null</c>. Unbounded, like <see cref="AnyString"/>.
+    /// </summary>
+    public static HoleSpace SlotTree(string? kindConstraint) => new(ValueSpace.NewSlotTree(Interop.Some(kindConstraint)));
 
     /// <summary>Read this space by case. Total: exactly one branch runs.</summary>
     public T Match<T>(
@@ -99,7 +106,8 @@ public sealed class HoleSpace : IEquatable<HoleSpace>
         Func<double, double, T> onFloatRange,
         Func<int, int, T> onStringLen,
         Func<IReadOnlyList<string>, T> onEnumeration,
-        Func<T> onAnyString
+        Func<T> onAnyString,
+        Func<string?, T> onSlotTree
     )
     {
         switch (_core.Tag)
@@ -123,6 +131,8 @@ public sealed class HoleSpace : IEquatable<HoleSpace>
                 return onEnumeration(Interop.Read(((ValueSpace.Enum)_core).Item));
             case ValueSpace.Tags.AnyString:
                 return onAnyString();
+            case ValueSpace.Tags.SlotTree:
+                return onSlotTree(Interop.Opt(((ValueSpace.SlotTree)_core).kindConstraint));
             default:
                 throw Interop.UnknownCase(nameof(ValueSpace), _core.Tag);
         }
@@ -134,7 +144,8 @@ public sealed class HoleSpace : IEquatable<HoleSpace>
         Action<double, double> onFloatRange,
         Action<int, int> onStringLen,
         Action<IReadOnlyList<string>> onEnumeration,
-        Action onAnyString
+        Action onAnyString,
+        Action<string?> onSlotTree
     ) =>
         Match(
             (lo, hi) =>
@@ -160,6 +171,11 @@ public sealed class HoleSpace : IEquatable<HoleSpace>
             () =>
             {
                 onAnyString();
+                return true;
+            },
+            k =>
+            {
+                onSlotTree(k);
                 return true;
             }
         );

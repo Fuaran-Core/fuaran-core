@@ -1638,7 +1638,13 @@ module Conformance =
     ///    produce a different value, and fully consumes the journal;
     ///  - **stable enumeration** — `Registry.enumerate` is order-stable (by id) regardless of
     ///    insertion order;
-    ///  - **declaration round-trip** — `CapabilityCodec.decode (encode c) = Ok c`.
+    ///  - **declaration round-trip** — `CapabilityCodec.decode (encode c) = Ok c`;
+    ///  - **a slotted artifact is invocable** (Phase 229) — a capability whose signature
+    ///    `Function.signature` derives from an artifact carrying tree-typed slots registers,
+    ///    enumerates and DISPATCHES with a conforming slot argument (a wire document of the slot's
+    ///    kind), while a constructed non-conforming one is refused by name before the body runs: a
+    ///    tree of the wrong kind is `ArgOutOfSpace` carrying the slot's `SlotTree` constraint, and a
+    ///    scalar is `UninvocableArg`. Both refusals are BUILT every iteration.
     ///
     /// Since Phase 210 it also certifies the seam's `Deferred` envelope, in the shape `queryLaws`
     /// carries it (Phase 198): the envelope rides out of `invoke` and `dispatch` UNCHANGED on
@@ -1663,6 +1669,7 @@ module Conformance =
         let mutable envelope = None
         let mutable asyncAxis = None
         let mutable typedFailure = None
+        let mutable slotted = None
 
         // value-codec for the captured realized value (an int — the stand-in for a model output).
         let encodeV (v: int) : string = string v
@@ -1844,6 +1851,83 @@ module Conformance =
                                     other
                             )
 
+            // Phase 229 — a capability over a slotted artifact is invocable. The artifact is a
+            // one-node witness declaring a CONSTRAINED slot (a drawn kind), an UNCONSTRAINED slot
+            // and a value hole; its signature is derived by `Function.signature`, never written by
+            // hand, so the law is about what the seam is actually given.
+            let kind = "k" + string (lo % 7)
+            let slotAddr, anyAddr, valueAddr = "tpl/body", "tpl/any", "tpl/n"
+
+            let slottedWitness: ArtifactWitness<unit, string> =
+                { Tree =
+                    { Id = fun () -> "tpl"
+                      KindTag = fun () -> "tpl"
+                      Children = fun () -> []
+                      ReplaceChildren = fun () _ -> () }
+                  IdW =
+                    { ToString = id
+                      OfString = id
+                      Equals = (=) }
+                  Holes =
+                    fun () ->
+                        [ { Addr = slotAddr
+                            Name = "body"
+                            Kind = SlotHole(Some kind) }
+                          { Addr = anyAddr
+                            Name = "any"
+                            Kind = SlotHole None }
+                          { Addr = valueAddr
+                            Name = "n"
+                            Kind = ValueHole(IntRange(lo, hi)) } ]
+                  Effect = fun () -> sg.Effect
+                  Bind = fun _ _ () -> Ok() }
+
+            let slottedCap =
+                Capability.create ("slotted-" + string i) (Function.signature slottedWitness "slotted" ()) Server
+
+            let tree (k: string) =
+                Json.render (Json.kindObj k [ "n", JInt i ])
+
+            let conforming =
+                [ slotAddr, tree kind; anyAddr, tree ("free" + string i); valueAddr, string lo ]
+
+            let wrongKind =
+                [ slotAddr, tree (kind + "x"); anyAddr, tree kind; valueAddr, string lo ]
+
+            let scalar = [ slotAddr, tree kind; anyAddr, string lo; valueAddr, string lo ]
+
+            let failSlotted msg =
+                if slotted.IsNone then
+                    slotted <- Some(sprintf "seed=%d iter=%d: %s" seed i msg)
+
+            match Registry.register slottedCap Registry.empty with
+            | Error e -> failSlotted (sprintf "a slotted capability did not register: %A" e)
+            | Ok sreg ->
+                if Registry.enumerate sreg |> List.map (fun c -> c.Id) <> [ slottedCap.Id ] then
+                    failSlotted "a registered slotted capability is not enumerated"
+
+                let ran = ref false
+
+                let run a =
+                    ran.Value <- false
+
+                    Registry.dispatch sreg slottedCap.Id a (fun _ () ->
+                        ran.Value <- true
+                        Ready realized)
+
+                (match run conforming with
+                 | Ok(Ready v) when v = realized && ran.Value -> ()
+                 | other -> failSlotted (sprintf "a conforming slot argument did not dispatch: %A" other))
+
+                (match run wrongKind with
+                 | Error(ArgOutOfSpace(a, SlotTree(Some c), _)) when a = slotAddr && c = kind && not ran.Value -> ()
+                 | other ->
+                     failSlotted (sprintf "a tree of the wrong kind was not refused by name before the body: %A" other))
+
+                (match run scalar with
+                 | Error(UninvocableArg a) when a = anyAddr && not ran.Value -> ()
+                 | other -> failSlotted (sprintf "a scalar bound to a slot was not refused as uninvocable: %A" other))
+
         [ { Law = "arg-validation accepts in-space + rejects out-of-space / unknown args"
             Passed = validation.IsNone
             Counterexample = validation }
@@ -1864,7 +1948,10 @@ module Conformance =
             Counterexample = asyncAxis }
           { Law = "a body failure is a typed BodyFailed, never Ok(Failed _)"
             Passed = typedFailure.IsNone
-            Counterexample = typedFailure } ]
+            Counterexample = typedFailure }
+          { Law = "a capability over a slotted artifact is invocable; a non-conforming slot arg is refused by name"
+            Passed = slotted.IsNone
+            Counterexample = slotted } ]
 
     /// Certify the `Fuaran.Core.Query` data-acquisition seam (Phase 46): typed-param validation
     /// (in-type accepts; wrong-type + unknown reject; since Phase 226 the all-`Null` argument set,
@@ -2439,6 +2526,21 @@ module Conformance =
                 None
             )
         | AnyString -> SampledDom((fun r -> let k, r' = ConfRng.intBelow 1000 r in "s" + string k, r'), None)
+        // A tree space (Phase 229) samples wire documents of the constrained kind (a drawn kind
+        // when unconstrained); it is unbounded, so it carries no finite size.
+        | SlotTree c ->
+            SampledDom(
+                (fun r ->
+                    let k, r' = ConfRng.intBelow 1000 r
+
+                    let kind =
+                        match c with
+                        | Some kc -> kc
+                        | None -> "k" + string k
+
+                    Json.render (Json.kindObj kind [ "n", JInt k ]), r'),
+                None
+            )
 
     /// Property-verify an artifact-function by deriving the param space from its holes' value-spaces
     /// (Phase 48) — the symbolic / bounded mode. Value / repeat holes are enumerated **exhaustively**

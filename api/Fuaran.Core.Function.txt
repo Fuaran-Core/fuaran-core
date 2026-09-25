@@ -86,6 +86,7 @@ field Fuaran.Core.ValueSpace+Tags.AnyString : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.Enum : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.FloatRange : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.IntRange : System.Int32 (literal)
+field Fuaran.Core.ValueSpace+Tags.SlotTree : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.StringLen : System.Int32 (literal)
 method Fuaran.Core.CapabilityCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
 method Fuaran.Core.CapabilityCodec.decodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
@@ -152,6 +153,7 @@ method Fuaran.Core.Registry.dispatch`1(Fuaran.Core.CapabilityRegistry, System.St
 method Fuaran.Core.Registry.enumerate(Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Capability>
 method Fuaran.Core.Registry.register(Fuaran.Core.Capability, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.Registry.tryFind(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>
+method Fuaran.Core.Space.slotKindOf(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Space.validate(Fuaran.Core.ValueSpace, System.String) : System.Boolean
 property Fuaran.Core.Effect.pureDeterministic : Fuaran.Core.EffectClass { get }
 property Fuaran.Core.FunctionRegistryModule.empty : Fuaran.Core.FunctionRegistry { get }
@@ -313,6 +315,7 @@ type Fuaran.Core.ValueSpace (union)
 type Fuaran.Core.ValueSpace+Enum (type)
 type Fuaran.Core.ValueSpace+FloatRange (type)
 type Fuaran.Core.ValueSpace+IntRange (type)
+type Fuaran.Core.ValueSpace+SlotTree (type)
 type Fuaran.Core.ValueSpace+StringLen (type)
 type Fuaran.Core.ValueSpace+Tags (type)
 union-case Fuaran.Core.ApplyError.NewBindFailed #6(System.String, System.String)
@@ -381,4 +384,5 @@ union-case Fuaran.Core.ValueSpace.AnyString #4()
 union-case Fuaran.Core.ValueSpace.NewEnum #3(Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.ValueSpace.NewFloatRange #1(System.Double, System.Double)
 union-case Fuaran.Core.ValueSpace.NewIntRange #0(System.Int32, System.Int32)
+union-case Fuaran.Core.ValueSpace.NewSlotTree #5(Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 union-case Fuaran.Core.ValueSpace.NewStringLen #2(System.Int32, System.Int32)

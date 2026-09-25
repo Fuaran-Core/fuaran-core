@@ -536,15 +536,15 @@ let tests =
                   results
                   "same seed ⇒ identical report"
 
-          // Phase 30 — the invocable-capability laws; Phase 210 added the three envelope laws.
+          // Phase 30 — the invocable-capability laws; Phase 210 added the three envelope laws, Phase 229 the slotted-artifact law.
           testCase "capabilityLaws certify validation + replay + enumeration + round-trip + envelope (Phase 30)"
           <| fun _ ->
               let results = Conformance.capabilityLaws 4242 200
 
               Expect.equal
                   (List.length results)
-                  7
-                  "validation + replay + enumeration + round-trip + the three envelope laws reported"
+                  8
+                  "validation + replay + enumeration + round-trip + the three envelope laws + the slotted-artifact law (Phase 229) reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

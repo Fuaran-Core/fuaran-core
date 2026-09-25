@@ -1,5 +1,60 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-25 — D63: a tree-typed slot gets a value space — ruling (A), carried as a new `ValueSpace.SlotTree` case; (B), refusing at `register`, is declined
+
+**Decided (operator, 2026-09-20; executed by Phase 229, shape confirmed 2026-09-25).** Ruling
+**(A)** on the Tidy-Up bundle from Phase 177, "a SlotHole makes a capability un-invocable". A slot
+is a legitimate capability parameter, and it gets a value space. The space is a wire document whose
+`"kind"` matches the slot's constraint, or any kind when there is no constraint. Core owns no node
+type, so the space is stated over the WIRE and checked by shape. The argument is the document's
+JSON string, and decoding it into the domain's node is the host's job, per the witness pattern.
+`Function.signature` enters every `SlotHole c` as `Space = Some(SlotTree c)`. `validateArgs`
+accepts a conforming tree. It refuses a tree of the wrong kind as
+`ArgOutOfSpace(addr, SlotTree c, got)`, which names the address and the constraint, and refuses
+anything that is no tree as `UninvocableArg addr`.
+
+**The finding it closes.** Phase 177's `slot_hole_uninvocable`: `signature` entered a slot as a
+required entry with no space, and such an entry refuses every argument list. A capability declared
+over an artifact with a slot registered, enumerated and never dispatched. The model now proves the
+positive statement, `slot_hole_invocable_in_space`, over a completeness lemma
+(`validate_args_complete`, the converse of `validate_args_sound`). The old statement survives as
+`spaceless_required_uninvocable`, and after this change it describes only a hand-built entry.
+
+**The shape: a new `ValueSpace` case, and why it is breaking.** The shard asked for two things
+that meet at one point. `InvokeError` must stay unchanged, and the refusal must name the
+constraint. The one existing refusal that carries a space is
+`ArgOutOfSpace of addr * space: ValueSpace * got`, so the constraint has to be expressible as a
+`ValueSpace`. Adding a case to a closed union is a union widening, which is BREAKING. It rides the
+open `0.31.0` breaking draft, which was already advanced by Phase 220, as the shard allowed. The
+operator confirmed that on 2026-09-25, and `STABILITY.md` states the migration: add a `SlotTree` arm
+to every exhaustive match.
+
+**The wire does not move, deliberately.** A slot entry's space is derived from its `Slot`, so the
+tool schema and the capability codec omit it, and decoding restores it. So the bytes and the
+`ContentPack.signatureFingerprint` of every slotted signature are unchanged. That matters because a
+packed function records its base's fingerprint as `BaseSignatureVersion` and refuses to load on a
+mismatch. Writing the derived space would have silently orphaned every pack authored against a
+slotted base. A test pins the literal pre-229 bytes.
+
+**Alternatives not taken, recorded so they are not re-proposed.**
+- **A new `InvokeError` case** (say, `SlotKindMismatch`), with slots left spaceless. The shard
+  ruled it out (`InvokeError` unchanged), and it would have been a union widening anyway, so it buys
+  no compatibility. It would also have left `signature` entering a slot with no space, which is the
+  state the finding named.
+- **Refusing with an existing space as a stand-in** (`ArgOutOfSpace(addr, Enum [k], got)`). It adds
+  no case, but the refusal would then name a space that is not the slot's space: an `Enum` of kind
+  strings, which the argument (a document) never lies in. A refusal that is false about its own
+  payload violates `refusal_is_truthful`'s promise, and was rejected for that reason.
+- **Emitting the slot's space on the wire.** Rejected for the fingerprint reason above.
+
+**Declined: (B), refusing at `register`.** `Registry.register` (or `Capability.create`) could have
+refused a capability whose signature has a required spaceless entry. That is non-breaking on the
+type surface, and it would make the defect loud. But it would make a capability over a slotted
+artifact impossible rather than invocable, so every host with a slotted template would lose the
+capability instead of gaining the call. The ruling is that the slot is a parameter, not a defect.
+Recorded so that (B) is not re-proposed as the "non-breaking" alternative: it is non-breaking only
+because it forbids the case outright.
+
 ## 2026-09-25 — D61: `Required` means non-null — ruling (A), refused as a DISTINCT `RequiredParamsNull`; (B), a doc-only correction, is declined
 
 **Decided (operator, 2026-09-25; Phase 226).** Ruling **(A)**. A `Required` query parameter that is

@@ -125,7 +125,8 @@ internal static class Rebuild
             onFloatRange: (lo, hi) => HoleSpace.FloatRange(lo, hi),
             onStringLen: (lo, hi) => HoleSpace.StringLen(lo, hi),
             onEnumeration: ms => HoleSpace.Enumeration(ms),
-            onAnyString: () => HoleSpace.AnyString
+            onAnyString: () => HoleSpace.AnyString,
+            onSlotTree: k => HoleSpace.SlotTree(k)
         );
 
     internal static HoleShape Shape(HoleShape k) =>

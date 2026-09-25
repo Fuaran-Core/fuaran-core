@@ -95,15 +95,35 @@ module Effect =
         | Network -> "network"
 
 /// The value domain a hole ranges over (value-space projection is the type system
-/// for holes). `AnyString` is the only *unbounded* space.
+/// for holes). `AnyString` and `SlotTree` are the *unbounded* spaces.
+///
+/// `SlotTree` (Phase 229) is the value space of a tree-typed slot at the scalar invocation seam:
+/// a wire document — a `"kind"`-tagged JSON object, carried as the argument string — whose kind
+/// satisfies the slot's constraint when one is declared (any kind otherwise). Core owns no node
+/// type, so the space is stated over the WIRE and checked by shape; decoding the document into the
+/// domain's node is the host's, per the witness pattern. `Function.signature` enters every
+/// `SlotHole` with this space, which is what makes a capability over a slotted artifact invocable.
 type ValueSpace =
     | IntRange of lo: int * hi: int
     | FloatRange of lo: float * hi: float
     | StringLen of lo: int * hi: int
     | Enum of string list
     | AnyString
+    | SlotTree of kindConstraint: string option
 
 module Space =
+
+    /// The kind tag of a tree argument (Phase 229): `Some kind` when the string is a well-formed
+    /// wire document whose top level is a `"kind"`-tagged object, `None` otherwise — a scalar, a
+    /// malformed document, or an object with no string `"kind"`. The one reader `SlotTree` reaches
+    /// for; it decodes nothing below the tag.
+    let slotKindOf (s: string) : string option =
+        match Json.parse s with
+        | Ok(JObj _ as el) ->
+            match Decode.kindOf el with
+            | Ok k -> Some k
+            | Error _ -> None
+        | _ -> None
 
     /// Is a candidate value within the space?
     let validate (space: ValueSpace) (s: string) : bool =
@@ -125,11 +145,18 @@ module Space =
         | StringLen(lo, hi) -> s.Length >= lo && s.Length <= hi
         | Enum xs -> List.contains s xs
         | AnyString -> true
+        | SlotTree constraintOpt ->
+            match slotKindOf s, constraintOpt with
+            | None, _ -> false
+            | Some _, None -> true
+            | Some k, Some c -> k = c
 
-    /// A space is bounded unless it is `AnyString` — the totality criterion for repeats.
+    /// A space is bounded unless it is `AnyString` or `SlotTree` — the totality criterion for
+    /// repeats (a tree space is no count space, so a repeat over one is refused as non-total).
     let internal isBounded (space: ValueSpace) : bool =
         match space with
-        | AnyString -> false
+        | AnyString
+        | SlotTree _ -> false
         | _ -> true
 
 /// The hole flavours. The first three are the *data* axis — a typed value, a tree-typed
@@ -293,7 +320,9 @@ module Function =
             let kindStr, space, slot, action, required =
                 match h.Kind with
                 | ValueHole s -> "value", Some s, None, None, true
-                | SlotHole c -> "slot", None, c, None, true
+                // Phase 229: a slot is entered WITH its value space — a wire tree of the constrained
+                // kind — so a capability over a slotted artifact is invocable at the scalar seam.
+                | SlotHole c -> "slot", Some(SlotTree c), c, None, true
                 | RepeatHole s -> "repeat", Some s, None, None, false
                 // An action hole is non-required on the *data* binding axis (no value/slot arg fills it);
                 // it is bound on the *behaviour* axis by `bindHandlers`, which enforces its own coverage.
@@ -633,6 +662,26 @@ module Function =
         | StringLen(lo, hi) -> Json.kindObj "stringLen" [ "minLength", JInt lo; "maxLength", JInt hi ]
         | Enum xs -> Json.kindObj "enum" [ "values", JArr(xs |> List.map JStr) ]
         | AnyString -> Json.kindObj "anyString" []
+        | SlotTree c ->
+            Json.kindObj
+                "slotTree"
+                (match c with
+                 | Some k -> [ "slotKind", JStr k ]
+                 | None -> [])
+
+    /// A slot entry's space is DERIVED from its `Slot` constraint (Phase 229) — `signature` enters
+    /// every `SlotHole` as `Some(SlotTree c)` beside `Slot = c` — so the wire projections omit it,
+    /// and a pre-229 slot entry and a post-229 one project to the same bytes (and the same
+    /// `signatureFingerprint`). Only a space that says something the entry does not is written.
+    let internal derivedSlotSpace (e: SigEntry) : bool =
+        e.Kind = "slot" && e.Space = Some(SlotTree e.Slot)
+
+    /// An entry's space with a slot's derived space filled in — so an entry built by hand before
+    /// Phase 229 (a spaceless slot) and one `signature` derives compare equal where shape matters.
+    let internal slotSpaceOf (e: SigEntry) : ValueSpace option =
+        match e.Kind, e.Space with
+        | "slot", None -> Some(SlotTree e.Slot)
+        | _, sp -> sp
 
     let private hostStr =
         function
@@ -653,6 +702,7 @@ module Function =
           "kind", JStr e.Kind
           "required", JBool e.Required ]
         @ (match e.Space with
+           | Some _ when derivedSlotSpace e -> []
            | Some s -> [ "space", spaceToJson s ]
            | None -> [])
         @ (match e.Slot with
@@ -688,6 +738,11 @@ module Function =
         | StringLen(lo, hi) -> [ "type", JStr "string"; "minLength", JInt lo; "maxLength", JInt hi ]
         | Enum xs -> [ "enum", JArr(xs |> List.map JStr) ]
         | AnyString -> [ "type", JStr "string" ]
+        | SlotTree c ->
+            [ "type", JStr "object" ]
+            @ (match c with
+               | Some k -> [ "description", JStr("slot of kind: " + k) ]
+               | None -> [])
 
     /// The JSON-Schema property for one signature entry. A slot hole projects an `object`
     /// carrying its kind-constraint in `description` (a tree-typed argument has no scalar JSON
@@ -986,8 +1041,12 @@ module Capability =
         c.Id + "#" + Hash.fnv1a canonical
 
     /// Validate typed `args` (addr → string value) against the capability's signature *before*
-    /// dispatch: every arg must address a declared value/repeat hole and lie in its space; every
-    /// required hole must be bound; a slot hole is not scalar-invocable. The host validates this
+    /// dispatch: every arg must address a declared data hole and lie in its space; every required
+    /// hole must be bound. A slot hole is invocable since Phase 229: its space is `SlotTree`, so its
+    /// argument is a wire document (a `"kind"`-tagged object) whose kind satisfies the constraint —
+    /// a tree of the wrong kind is `ArgOutOfSpace` naming the addr and the `SlotTree` constraint,
+    /// and an argument that is no tree at all (a scalar, a malformed document) is `UninvocableArg`.
+    /// A spaceless entry (an action hole) stays `UninvocableArg` for every argument. The host validates this
     /// before running any body (default-deny by shape, FGP 3). `Required` is checked as the hole's
     /// PRESENCE among the args, which here is presence of a value: an arg is a string checked
     /// against its space, and a value space has no absent marker, so a required hole cannot be
@@ -1006,7 +1065,8 @@ module Capability =
                 | None -> Error(UnknownArg(addr, declared))
                 | Some h ->
                     match h.Space with
-                    | None -> Error(UninvocableArg addr) // a slot hole — no scalar value-space
+                    | None -> Error(UninvocableArg addr) // a spaceless (action) hole
+                    | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Error(UninvocableArg addr) // no tree
                     | Some space ->
                         if Space.validate space value then
                             checkArgs rest
@@ -1106,6 +1166,12 @@ module CapabilityCodec =
         | StringLen(lo, hi) -> Canon.typed "stringLen" [ "min", JInt lo; "max", JInt hi ]
         | Enum xs -> Canon.typed "enum" [ "values", JArr(xs |> List.map JStr) ]
         | AnyString -> Canon.typed "anyString" []
+        | SlotTree c ->
+            Canon.typed
+                "slotTree"
+                (match c with
+                 | Some k -> [ "slotKind", JStr k ]
+                 | None -> [])
 
     let private spaceOf (el: JVal) : Result<ValueSpace, string> =
         Decode.strField "$type" el
@@ -1129,6 +1195,14 @@ module CapabilityCodec =
                 |> Result.bind (Decode.mapList Decode.asString)
                 |> Result.map Enum
             | "anyString" -> Ok AnyString
+            | "slotTree" ->
+                Ok(
+                    SlotTree(
+                        match Decode.strField "slotKind" el with
+                        | Ok k -> Some k
+                        | Error _ -> None
+                    )
+                )
             | other -> Error("unknown value-space kind: " + other))
 
     // ---- effect class ----
@@ -1175,6 +1249,7 @@ module CapabilityCodec =
           "kind", JStr e.Kind
           "required", JBool e.Required ]
         @ (match e.Space with
+           | Some _ when Function.derivedSlotSpace e -> []
            | Some s -> [ "space", spaceJson s ]
            | None -> [])
         @ (match e.Slot with
@@ -1213,6 +1288,13 @@ module CapabilityCodec =
                                     match Decode.strField "slotKind" el with
                                     | Ok k -> Some k
                                     | Error _ -> None
+
+                                // A slot entry travels without its derived space (Phase 229), so
+                                // decoding restores it from the constraint.
+                                let sp =
+                                    match sp with
+                                    | None when kind = "slot" -> Some(SlotTree slot)
+                                    | other -> other
 
                                 { Addr = addr
                                   Name = name
@@ -1482,6 +1564,8 @@ module FunctionRegistry =
         | StringLen(rl, rh), StringLen(al, ah) -> rl <= al && ah <= rh
         | Enum rs, Enum als -> als |> List.forall (fun v -> List.contains v rs)
         | AnyString, (StringLen _ | Enum _ | AnyString) -> true
+        | SlotTree None, SlotTree _ -> true
+        | SlotTree(Some rk), SlotTree(Some ak) -> rk = ak
         | _ -> false
 
     /// Is a required slot constraint satisfied by an available slot? An unconstrained required slot
@@ -1535,7 +1619,10 @@ module FunctionRegistry =
             && required
                |> List.forall (fun req ->
                    match Map.tryFind req.Addr availByAddr with
-                   | Some av -> req.Kind = av.Kind && req.Space = av.Space && req.Slot = av.Slot
+                   | Some av ->
+                       req.Kind = av.Kind
+                       && Function.slotSpaceOf req = Function.slotSpaceOf av
+                       && req.Slot = av.Slot
                    | None -> false)
 
     /// Find every registered function whose signature matches the query under `mode` (Phase 50). A
@@ -1781,6 +1868,7 @@ module CapabilityPipeline =
         | StringLen _ -> "string"
         | Enum _ -> "enum"
         | AnyString -> "anyString"
+        | SlotTree _ -> "slotTree"
 
     /// Does a producer output value-space `feed` a consumer arg value-space — every value the producer
     /// can emit is acceptable to the consumer (int feeds int or widens to float; a string space feeds
@@ -1792,6 +1880,7 @@ module CapabilityPipeline =
         | StringLen _, (StringLen _ | AnyString) -> true
         | Enum _, (Enum _ | AnyString) -> true
         | AnyString, AnyString -> true
+        | SlotTree _, SlotTree None -> true
         | a, b -> a = b
 
     /// Type-check the pipeline against the registry (Phase 35): node ids are unique; every `Invoke`'s
@@ -1825,7 +1914,7 @@ module CapabilityPipeline =
                             | None -> Some(PipelineUnknownArg(nid, addr))
                             | Some h ->
                                 match h.Space with
-                                | None -> Some(PipelineUnknownArg(nid, addr)) // a slot hole — not scalar-feedable
+                                | None -> Some(PipelineUnknownArg(nid, addr)) // a spaceless (action) hole — not feedable
                                 | Some argSpace ->
                                     match src with
                                     | Literal v ->
@@ -1906,6 +1995,12 @@ module CapabilityPipeline =
         | StringLen(lo, hi) -> Canon.typed "stringLen" [ "min", JInt lo; "max", JInt hi ]
         | Enum xs -> Canon.typed "enum" [ "values", JArr(xs |> List.map JStr) ]
         | AnyString -> Canon.typed "anyString" []
+        | SlotTree c ->
+            Canon.typed
+                "slotTree"
+                (match c with
+                 | Some k -> [ "slotKind", JStr k ]
+                 | None -> [])
 
     let private spaceFromJ (el: JVal) : Result<ValueSpace, string> =
         Decode.strField "$type" el
@@ -1929,6 +2024,14 @@ module CapabilityPipeline =
                 |> Result.bind (Decode.mapList Decode.asString)
                 |> Result.map Enum
             | "anyString" -> Ok AnyString
+            | "slotTree" ->
+                Ok(
+                    SlotTree(
+                        match Decode.strField "slotKind" el with
+                        | Ok k -> Some k
+                        | Error _ -> None
+                    )
+                )
             | other -> Error("unknown value-space: " + other))
 
     let private argSrcToJ (s: ArgSource) : JVal =

@@ -275,6 +275,112 @@ let tests =
               | Error(RequiredArgsUnbound [ "n" ]) -> ()
               | other -> failtestf "expected RequiredArgsUnbound, got %A" other
 
+          // Phase 229 — a tree-typed slot has a value space (`SlotTree`), so a capability over a
+          // slotted artifact is invocable at the scalar seam. The signature is DERIVED from the
+          // reference template (title, count, and a slot constrained to "para"), never hand-built.
+          testCase "a capability over a slotted artifact registers, enumerates and dispatches (Phase 229)"
+          <| fun _ ->
+              let sg = Function.signature artw "tpl" (template ())
+
+              let slot = sg.Holes |> List.find (fun h -> h.Addr = "tpl/s")
+              Expect.equal slot.Space (Some(SlotTree(Some "para"))) "the slot is entered with its tree space"
+              Expect.isTrue slot.Required "and stays required"
+
+              let cap = Capability.create "tpl-cap" sg Server
+
+              let reg =
+                  match Registry.register cap Registry.empty with
+                  | Ok r -> r
+                  | Error e -> failtestf "a slotted capability did not register: %A" e
+
+              Expect.equal (Registry.enumerate reg |> List.map (fun c -> c.Id)) [ "tpl-cap" ] "enumerated"
+
+              let para = """{"kind":"para","text":"hi"}"""
+
+              let args s =
+                  [ "tpl/t", "Hello"; "tpl/c", "5"; "tpl/s", s ]
+
+              Expect.equal
+                  (Registry.dispatch reg "tpl-cap" (args para) (fun _ () -> Ready "ran"))
+                  (Ok(Ready "ran"))
+                  "a conforming slot argument dispatches"
+
+              let ran = ref false
+
+              match
+                  Registry.dispatch reg "tpl-cap" (args """{"kind":"heading"}""") (fun _ () ->
+                      ran.Value <- true
+                      Ready "ran")
+              with
+              | Error(ArgOutOfSpace("tpl/s", SlotTree(Some "para"), """{"kind":"heading"}""")) ->
+                  Expect.isFalse ran.Value "refused before the body"
+              | other -> failtestf "expected ArgOutOfSpace naming the slot's constraint, got %A" other
+
+              for notATree in [ "hi"; "42"; "[1,2]"; """{"text":"no kind"}"""; """{"kind":7}"""; "{" ] do
+                  match Capability.validateArgs cap (args notATree) with
+                  | Error(UninvocableArg "tpl/s") -> ()
+                  | other -> failtestf "a slot bound to %s: expected UninvocableArg, got %A" notATree other
+
+              // an unconstrained slot takes a tree of any kind, and still no scalar
+              Expect.isTrue (Space.validate (SlotTree None) """{"kind":"anything"}""") "any kind"
+              Expect.isFalse (Space.validate (SlotTree None) "anything") "no scalar"
+              Expect.equal (Space.slotKindOf """{"kind":"para"}""") (Some "para") "the reader"
+
+          // Phase 229's wire promise: the slot's space is DERIVED from its constraint, so the tool
+          // schema, the capability codec and the pack fingerprint of a slotted signature are the
+          // bytes they were before 229 — pinned against the literal pre-229 schema — and a pre-229
+          // document decodes to the post-229 signature.
+          testCase "a slotted signature's wire bytes and fingerprint are unchanged by Phase 229"
+          <| fun _ ->
+              let derived = Function.signature artw "tpl" (template ())
+
+              // the pre-229 shape of the same signature: the slot entered spaceless
+              let pre229 =
+                  { derived with
+                      Holes =
+                          derived.Holes
+                          |> List.map (fun h -> if h.Kind = "slot" then { h with Space = None } else h) }
+
+              let schema = Json.render (Function.toSchema derived)
+
+              Expect.equal
+                  schema
+                  """{"kind":"signature","name":"tpl","effect":{"host":"pure","determinism":"deterministic"},"holes":[{"addr":"tpl/t","name":"title","kind":"value","required":true,"space":{"kind":"stringLen","minLength":1,"maxLength":20}},{"addr":"tpl/c","name":"count","kind":"value","required":true,"space":{"kind":"intRange","min":0,"max":10}},{"addr":"tpl/s","name":"body","kind":"slot","required":true,"slotKind":"para"}],"required":["tpl/t","tpl/c","tpl/s"]}"""
+                  "the literal pre-229 tool schema"
+
+              Expect.equal schema (Json.render (Function.toSchema pre229)) "toSchema bytes"
+
+              Expect.equal
+                  (ContentPack.signatureFingerprint derived)
+                  (ContentPack.signatureFingerprint pre229)
+                  "the pack fingerprint"
+
+              let enc sg =
+                  CapabilityCodec.encode (Capability.create "tpl-cap" sg Server)
+
+              Expect.equal (enc derived) (enc pre229) "capability codec bytes"
+              Expect.isFalse ((enc derived).Contains "slotTree") "the derived space is not written"
+
+              match CapabilityCodec.decode (enc pre229) with
+              | Ok c -> Expect.equal c.Signature derived "a pre-229 document decodes to the post-229 signature"
+              | Error e -> failtestf "decode failed: %s" e
+
+              // a space that says something the entry does not IS written, and round-trips
+              let odd =
+                  { derived with
+                      Holes =
+                          derived.Holes
+                          |> List.map (fun h ->
+                              if h.Kind = "slot" then
+                                  { h with
+                                      Space = Some(SlotTree(Some "other")) }
+                              else
+                                  h) }
+
+              match CapabilityCodec.decode (enc odd) with
+              | Ok c -> Expect.equal c.Signature odd "an explicit slot space round-trips"
+              | Error e -> failtestf "decode failed: %s" e
+
           testCase "invocationKey is arg-order-independent but arg-value-sensitive"
           <| fun _ ->
               let sg: Signature =

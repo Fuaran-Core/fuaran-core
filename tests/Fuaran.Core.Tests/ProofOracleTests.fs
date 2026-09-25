@@ -7380,6 +7380,7 @@ let private spaceToModel (s: ValueSpace) : ModelCap.value_space =
     | StringLen(lo, hi) -> ModelCap.StringLen(bigint lo, bigint hi)
     | Enum xs -> ModelCap.Enum xs
     | AnyString -> ModelCap.AnyString
+    | SlotTree c -> ModelCap.SlotTree(toMOpt c)
 
 let private spaceOfModel (s: ModelCap.value_space) : ValueSpace =
     match s with
@@ -7388,6 +7389,7 @@ let private spaceOfModel (s: ModelCap.value_space) : ValueSpace =
     | ModelCap.StringLen(lo, hi) -> StringLen(int lo, int hi)
     | ModelCap.Enum xs -> Enum xs
     | ModelCap.AnyString -> AnyString
+    | ModelCap.SlotTree c -> SlotTree(ofMOpt c)
 
 let private modelSpaceRender (s: ModelCap.value_space) : string =
     match s with
@@ -7396,9 +7398,10 @@ let private modelSpaceRender (s: ModelCap.value_space) : string =
     | ModelCap.StringLen(lo, hi) -> sprintf "len[%s..%s]" (string lo) (string hi)
     | ModelCap.Enum xs -> sprintf "enum{%s}" (String.concat "," xs)
     | ModelCap.AnyString -> "any"
+    | ModelCap.SlotTree c -> sprintf "tree{%s}" (defaultArg (ofMOpt c) "*")
 
-/// The readers premise made concrete: the three host functions `Space.validate` reaches for,
-/// exactly as production calls them.
+/// The readers premise made concrete: the four host functions `Space.validate` reaches for,
+/// exactly as production calls them (Phase 229 added `kind_of`, production's `Space.slotKindOf`).
 let private readers: ModelCap.readers =
     { ModelCap.readers.int_of =
         fun s ->
@@ -7407,7 +7410,8 @@ let private readers: ModelCap.readers =
             | _ -> FStar_Pervasives_Native.None
       ModelCap.readers.float_in =
         fun lo hi s -> Space.validate (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) s
-      ModelCap.readers.str_len = fun s -> bigint s.Length }
+      ModelCap.readers.str_len = fun s -> bigint s.Length
+      ModelCap.readers.kind_of = fun s -> toMOpt (Space.slotKindOf s) }
 
 /// The go-red: an int reader that reads nothing, so every int-ranged value is out of space to
 /// the model and in space to production.
@@ -7589,6 +7593,16 @@ let private genValueFor (s: ValueSpace) (r: ConfRng.T) : string * ConfRng.T =
     | StringLen(lo, hi) -> String.replicate (if roll < 6 then lo + k % (hi - lo + 1) else hi + 1 + k) "s", r2
     | Enum xs -> (if roll < 7 then List.item (k % List.length xs) xs else "zz"), r2
     | AnyString -> sprintf "v%d" k, r2
+    // Phase 229 — a tree space: a document of the constrained kind, one of another kind, or
+    // something that is no tree at all (a scalar, then a kind-less object).
+    | SlotTree c ->
+        let kind = defaultArg c ("k" + string (k % 3))
+
+        (if roll < 6 then sprintf """{"kind":"%s","n":%d}""" kind k
+         elif roll < 8 then sprintf """{"kind":"%s-x"}""" kind
+         elif roll < 9 then "s"
+         else """{"n":1}"""),
+        r2
 
 let private genHoleKind (r: ConfRng.T) : HoleKind * ConfRng.T =
     let roll, r1 = ConfRng.intBelow 10 r
@@ -7865,8 +7879,9 @@ let private genCapSignature (name: string) (r: ConfRng.T) : Signature * ConfRng.
 
 let private capIdPool = [ "cap-a"; "cap-b"; "cap-c" ]
 
-/// A typed invocation: for each entry, three draws in four an arg (a value for its space, or
-/// — for a slot entry — a value it cannot take), plus one draw in five an unknown address.
+/// A typed invocation: for each entry, three draws in four an arg (a value for its space — for a
+/// slot entry, since Phase 229, a tree of its kind, of another kind, or no tree — or, for a
+/// spaceless entry, a value it cannot take), plus one draw in five an unknown address.
 let private genInvocation (sg: Signature) (r: ConfRng.T) : (string * string) list * ConfRng.T =
     let mutable rng = r
     let args = System.Collections.Generic.List<string * string>()
@@ -14656,8 +14671,9 @@ let proofOracleTests =
               // The two theorems' statements instantiated on production: an unregistered id and
               // a rejected argument set each return the typed refusal with the body untouched,
               // and the result is the same under a body that would have failed.
-              // The template's slot hole is dropped from the invocable signature: a required
-              // slot entry refuses every argument list (`slot_hole_uninvocable`, asserted below).
+              // The template's slot hole is dropped from this signature so the refusal sets stay
+              // scalar; the slot-bearing capability is exercised below, where Phase 229 CLOSED the
+              // Phase 177 finding (`slot_hole_invocable_in_space`).
               let full =
                   { Function.signature artw "f" (template ()) with
                       Effect = Effect.pureDeterministic }
@@ -14716,9 +14732,12 @@ let proofOracleTests =
 
               Expect.equal ran.Value 0 "no body ran on any refusal"
 
-              // slot_hole_uninvocable — the finding, on the shipped seam: the capability declared
-              // over the WHOLE template (its slot hole required and spaceless) is registered,
-              // enumerated, and refused on every argument list, the body never running.
+              // CLOSED (Phase 229; was Phase 177's `slot_hole_uninvocable`): the capability declared
+              // over the WHOLE template — its slot hole required, and spaced `SlotTree (Some "para")`
+              // — is registered and enumerated, refuses a non-conforming slot argument by name with
+              // the body never running, and DISPATCHES a conforming one (asserted after the counts
+              // below): `slot_hole_invocable_in_space`, `slot_wrong_kind_refused` and
+              // `slot_scalar_uninvocable`, on the shipped seam.
               let slotCap = Capability.create "cap-slot" full Server
 
               let reg2 =
@@ -14731,14 +14750,17 @@ let proofOracleTests =
                   [ "cap-slot"; "cap-t" ]
                   "the slot-bearing capability enumerates like any other"
 
-              for args in
-                  [ []
-                    [ "tpl/t", "x"; "tpl/c", "3" ]
-                    [ "tpl/t", "x"; "tpl/c", "3"; "tpl/s", "para" ]
-                    [ "tpl/s", "" ] ] do
-                  Expect.isTrue
-                      (Result.isError (Registry.dispatch reg2 "cap-slot" args body))
-                      (sprintf "the slot-bearing capability refuses %A" args)
+              for args, expected in
+                  [ [], RequiredArgsUnbound [ "tpl/t"; "tpl/c"; "tpl/s" ]
+                    [ "tpl/t", "x"; "tpl/c", "3" ], RequiredArgsUnbound [ "tpl/s" ]
+                    [ "tpl/t", "x"; "tpl/c", "3"; "tpl/s", "para" ], UninvocableArg "tpl/s"
+                    [ "tpl/t", "x"; "tpl/c", "3"; "tpl/s", """{"kind":"field"}""" ],
+                    ArgOutOfSpace("tpl/s", SlotTree(Some "para"), """{"kind":"field"}""")
+                    [ "tpl/s", "" ], UninvocableArg "tpl/s" ] do
+                  Expect.equal
+                      (Registry.dispatch reg2 "cap-slot" args body)
+                      (Error expected)
+                      (sprintf "the slot-bearing capability refuses %A by name" args)
 
               Expect.equal ran.Value 0 "and no body ran on any of those either"
 
@@ -14766,6 +14788,14 @@ let proofOracleTests =
                   "a failing body is the typed BodyFailed, never Ok(Failed _)"
 
               Expect.equal ran.Value 3 "and each of those ran its body once"
+
+              // ... and the slot-bearing capability DISPATCHES a conforming slot argument.
+              Expect.equal
+                  (Registry.dispatch reg2 "cap-slot" (accepted @ [ "tpl/s", """{"kind":"para"}""" ]) body)
+                  (Ok(Ready "ran"))
+                  "a capability over a slotted artifact is invocable"
+
+              Expect.equal ran.Value 4 "and it ran its body once"
 
               // and the model says the same through the same theorems' clauses
               let mreg =
