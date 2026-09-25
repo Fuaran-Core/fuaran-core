@@ -42,10 +42,13 @@
       composes them back into the premise the theorems take (`node_injective_derived`). What is
       still ASSUMED about the DAG's content id is exactly `hash_injective` — the cryptographic
       one — and `op_codec_injective`, which is the domain's own promise and has a conformance law
-      in the kit for a domain's witness to certify by sampling. The LINEAR side's `rec_injective`
-      is deliberately left bundled: its pre-image is a four-way JSON envelope rather than
-      `nodeHash`'s two splices, and decomposing it is a separate piece of work, named in the
-      claims ladder rather than quietly implied by this one.
+      in the kit for a domain's witness to certify by sampling. The LINEAR side's premise was
+      left bundled by Phase 145 — its pre-image is a four-way JSON envelope rather than
+      `nodeHash`'s two splices — and Phase 197 unbundled it the same way (section 6b): the
+      envelope is PARSED, three splits each forced by the leading comma of the separator that
+      follows, and `rec_injective_on` is built by `rec_injective_derived` from the hash's
+      injectivity, the op codec's, the reading, the numeral code and the actor code. What is
+      assumed about the record hash is now exactly what is assumed about the content id.
    3. **The chain's SEQUENCE and PREV-LINK breaks need none of it.** `chain_tamper_seq_detected`
       and `chain_tamper_prev_detected` are proved with no hypothesis at all: those two checks
       compare stored data against the walk's own running values and never consult the hash. Only
@@ -1190,21 +1193,210 @@ let rec_hash
   : Tot string =
   h prev (rec_payload show enc_op s a o)
 
-(* The linear side's premise, in the same shape and for the same reason as the DAG's. Note it is
-   injective in FOUR components, the predecessor's hash among them: that is what makes a chain
-   re-cut from a different history detectable rather than merely different. *)
+(* ---- 6b. The envelope parse — the linear side's premise, DECOMPOSED (Phase 197) ----
+
+   Phase 136 took the linear side's injectivity bundled: "the record hash determines the
+   predecessor, the sequence, the actor and the op". Phase 145 unbundled the DAG's and deliberately
+   left this one, because its pre-image is not `nodeHash`'s two splices but a four-way JSON
+   envelope, `{"seq":<n>,"actor":<a>,"op":<o>}`, and the argument is a PARSE rather than a split.
+   This section does it, with the machinery section 1b already has, and what it finds is that the
+   parse is three splits in a row, each forced by the FIRST symbol of the separator that follows:
+
+     1. the SEQUENCE is cut at the first comma — `app_sep_split` — because a numeral carries none;
+     2. the ACTOR is cut at the comma that opens `,"op":` — `splice_split` — because the actor code
+        is prefix-free (the same premise the DAG's `|` splice takes, `actor_code_prefix_free`,
+        and NOT comma-freedom: `Actor.encode` emits `{"kind":"human","id":"a,b"}` for an id with a
+        comma in it, so the numeral's argument is unavailable here);
+     3. the OP is what is left before the closing brace — `app_snoc_inj` — and it needs NOTHING of
+        the op encoding's alphabet: whatever `enc_op o` contains, `x ^ "}" == y ^ "}"` forces
+        `x == y`, so the op codec is asked for injectivity (`op_codec_injective`, premise 4) and
+        for no shape condition at all.
+
+   The digraphs the envelope's separators are made of (`,"`, `":`) are therefore not what the
+   proof spends: `,"actor":` and `,"op":` matter only through their leading comma, and
+   `{"seq":` and `"actor":` and `"op":` are cancelled as shared prefixes without being read at all
+   (`app_cancel_left`). The two literal facts the proof does need — that each separator begins
+   with the comma symbol — are discharged by normalising the string literals (`assert_norm`), so
+   the reading hypothesis is the one section 1b already states plus one more symbol, the brace.
+
+   What is NEW as a named premise is the numeral: `seq_numeral_code` says `show` is injective and
+   emits no comma. Production's `show` is `string : int -> string`, which is both; the
+   differential measures it beside the parse. The op codec's premise is unchanged and is spent
+   exactly once, on the equal encodings the parse hands back.
+
+   So the linear side now mirrors the DAG's exactly: `rec_injective_on` is the composite the
+   tamper and signed-head theorems take, RESTRICTED to actor strings the code emits (what the
+   splice needs, and what production supplies — a stored actor is an `Actor` the walker
+   re-encodes with `Actor.encode`), and `rec_injective_derived` builds it from `hash_injective`,
+   `op_codec_injective`, the reading, the numeral code and the actor code. The bundled premise is
+   gone: nothing in this module takes the unrestricted form, and the unrestricted form is not a
+   theorem — over a FREE actor string `A,"op":B` with op `C` and actor `A` with an op encoding
+   `B,"op":C` mint one envelope, which is the ambiguity the restriction excludes. *)
+
+(* A shared prefix cancels. *)
+let rec app_cancel_left (#a: Type) (p: list a) (x: list a) (y: list a)
+  : Lemma (requires app p x == app p y) (ensures x == y) =
+  match p with
+  | [] -> ()
+  | _ :: t -> app_cancel_left t x y
+
+(* A shared ONE-SYMBOL suffix cancels, whatever the two lists contain — the closing brace's
+   argument, and the reason the op encoding needs no alphabet condition. *)
+let rec app_snoc_inj (#a: Type) (c: a) (x: list a) (y: list a)
+  : Lemma (requires app x [c] == app y [c]) (ensures x == y) =
+  match x, y with
+  | [], [] -> ()
+  | [], _ :: t -> app_cons_nonempty t c []
+  | _ :: t, [] -> app_cons_nonempty t c []
+  | _ :: xt, _ :: yt -> app_snoc_inj c xt yt
+
+(* PREMISE (new, named) — the sequence numeral's code: `show` is injective and a numeral carries
+   no comma. Production's `show` is `string` on an `int`. *)
 [@@ noextract_to "FSharp"]
-let rec_injective
+let seq_numeral_code (#sym: eqtype) (reveal: string -> list sym) (comma: sym) (show: pos -> string)
+  : prop =
+  (forall (s: pos). sym_free comma (reveal (show s))) /\
+  (forall (s: pos) (t: pos). show s == show t ==> s == t)
+
+(* PREMISE 3 again, named so the linear side can spend it: the actor code is prefix-free. It is
+   the `code` hypothesis `node_injective_derived` takes inline, and nothing stronger. *)
+[@@ noextract_to "FSharp"]
+let actor_code_prefix_free (#sym: eqtype) (reveal: string -> list sym) (actor_ok: string -> bool)
+  : prop =
+  forall (x: string) (y: string).
+    actor_ok x /\ actor_ok y ==> not (proper_prefix (reveal x) (reveal y))
+
+(* The envelope, read as its symbols: six concatenations peeled by `faithful_cat`, and the two
+   separators' leading commas exposed by normalising the literals. *)
+let rec_payload_symbols
+  (#sym: eqtype)
+  (#op: eqtype)
+  (reveal: string -> list sym)
+  (comma: sym)
+  (close: sym)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (s: pos)
+  (a: string)
+  (o: op)
+  : Lemma
+    (requires symbols_faithful reveal /\ reveal "," == [comma] /\ reveal "}" == [close])
+    (ensures
+      reveal (rec_payload show enc_op s a o) ==
+      app (reveal "{\"seq\":")
+        (app (reveal (show s))
+          (comma :: app (reveal "\"actor\":")
+            (app (reveal a)
+              (comma :: app (reveal "\"op\":") (app (reveal (enc_op o)) [close])))))) =
+  assert_norm (",\"actor\":" == "," ^ "\"actor\":");
+  assert_norm (",\"op\":" == "," ^ "\"op\":");
+  faithful_cat reveal "," "\"actor\":";
+  faithful_cat reveal "," "\"op\":";
+  faithful_cat reveal (enc_op o) "}";
+  faithful_cat reveal ",\"op\":" (enc_op o ^ "}");
+  faithful_cat reveal a (",\"op\":" ^ enc_op o ^ "}");
+  faithful_cat reveal ",\"actor\":" (a ^ ",\"op\":" ^ enc_op o ^ "}");
+  faithful_cat reveal (show s) (",\"actor\":" ^ a ^ ",\"op\":" ^ enc_op o ^ "}");
+  faithful_cat reveal "{\"seq\":" (show s ^ ",\"actor\":" ^ a ^ ",\"op\":" ^ enc_op o ^ "}")
+
+(* THEOREM — THE ENVELOPE PARSE. Two payloads that are one string carry one sequence, one actor
+   and one op ENCODING, for actors the code emits. Three splits, each forced by the first symbol
+   of the separator that follows it, and the closing brace cancelled last. *)
+let rec_payload_parsed
+  (#sym: eqtype)
+  (#op: eqtype)
+  (reveal: string -> list sym)
+  (comma: sym)
+  (close: sym)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (actor_ok: string -> bool)
+  (s1: pos)
+  (a1: string)
+  (o1: op)
+  (s2: pos)
+  (a2: string)
+  (o2: op)
+  : Lemma
+    (requires
+      symbols_faithful reveal /\ reveal "," == [comma] /\ reveal "}" == [close] /\
+      seq_numeral_code reveal comma show /\ actor_code_prefix_free reveal actor_ok /\
+      actor_ok a1 /\ actor_ok a2 /\
+      rec_payload show enc_op s1 a1 o1 == rec_payload show enc_op s2 a2 o2)
+    (ensures s1 == s2 /\ a1 == a2 /\ enc_op o1 == enc_op o2) =
+  rec_payload_symbols reveal comma close show enc_op s1 a1 o1;
+  rec_payload_symbols reveal comma close show enc_op s2 a2 o2;
+  let op1 = app (reveal "\"op\":") (app (reveal (enc_op o1)) [close]) in
+  let op2 = app (reveal "\"op\":") (app (reveal (enc_op o2)) [close]) in
+  let act1 = app (reveal "\"actor\":") (app (reveal a1) (comma :: op1)) in
+  let act2 = app (reveal "\"actor\":") (app (reveal a2) (comma :: op2)) in
+  (* 1. the sequence: cut at the first comma, which a numeral does not carry *)
+  app_cancel_left
+    (reveal "{\"seq\":")
+    (app (reveal (show s1)) (comma :: act1))
+    (app (reveal (show s2)) (comma :: act2));
+  app_sep_split comma (reveal (show s1)) act1 (reveal (show s2)) act2;
+  faithful_det reveal (show s1) (show s2);
+  (* 2. the actor: cut at the comma opening `,"op":`, forced by the code's prefix-freedom *)
+  app_cancel_left (reveal "\"actor\":") (app (reveal a1) (comma :: op1)) (app (reveal a2) (comma :: op2));
+  splice_split comma (reveal a1) op1 (reveal a2) op2;
+  faithful_det reveal a1 a2;
+  (* 3. the op: what is left before the brace, whatever it contains *)
+  app_cancel_left (reveal "\"op\":") (app (reveal (enc_op o1)) [close]) (app (reveal (enc_op o2)) [close]);
+  app_snoc_inj close (reveal (enc_op o1)) (reveal (enc_op o2));
+  faithful_det reveal (enc_op o1) (enc_op o2)
+
+(* The composite the linear theorems take — Phase 136's `rec_injective`, RESTRICTED to actor
+   strings the code emits, exactly as `node_injective_on` is the DAG's. Injective in FOUR
+   components, the predecessor's hash among them: that is what makes a chain re-cut from a
+   different history detectable rather than merely different. *)
+[@@ noextract_to "FSharp"]
+let rec_injective_on
   (op: eqtype)
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
+  (actor_ok: string -> bool)
   : Type =
   p1: string -> s1: pos -> a1: string -> o1: op ->
   p2: string -> s2: pos -> a2: string -> o2: op ->
   Lemma
-    (requires rec_hash h show enc_op p1 s1 a1 o1 == rec_hash h show enc_op p2 s2 a2 o2)
+    (requires
+      actor_ok a1 /\ actor_ok a2 /\
+      rec_hash h show enc_op p1 s1 a1 o1 == rec_hash h show enc_op p2 s2 a2 o2)
     (ensures p1 == p2 /\ s1 == s2 /\ a1 == a2 /\ o1 == o2)
+
+(* THE DISCHARGE. The composite is BUILT from the named premises: the hash's injectivity, the op
+   codec's, the reading of a string, the numeral code and the actor code. Nothing about the record
+   hash is bundled any more. *)
+let rec_injective_derived
+  (#sym: eqtype)
+  (op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (reveal: string -> list sym)
+  (comma: sym)
+  (close: sym)
+  (actor_ok: string -> bool)
+  (hinj: hash_injective h)
+  (oinj: op_codec_injective op enc_op)
+  (reading: squash (symbols_faithful reveal /\ reveal "," == [comma] /\ reveal "}" == [close]))
+  (numeral: squash (seq_numeral_code reveal comma show))
+  (code: squash (actor_code_prefix_free reveal actor_ok))
+  : rec_injective_on op h show enc_op actor_ok =
+  fun p1 s1 a1 o1 p2 s2 a2 o2 ->
+    hinj p1 (rec_payload show enc_op s1 a1 o1) p2 (rec_payload show enc_op s2 a2 o2);
+    rec_payload_parsed reveal comma close show enc_op actor_ok s1 a1 o1 s2 a2 o2;
+    oinj o1 o2
+
+(* Every record's actor is one the code emits — what the theorems below ask of a chain, and what
+   production supplies, since a stored actor is a typed `Actor`. *)
+[@@ noextract_to "FSharp"]
+let rec actors_ok (#op: eqtype) (actor_ok: string -> bool) (rs: list (record op)) : Tot bool =
+  match rs with
+  | [] -> true
+  | r :: t -> actor_ok r.ractor && actors_ok actor_ok t
 
 (* F#: `ChainBreak`, with `ChainBreakReason.toString`'s spellings verbatim. `Index` is the walk's
    own position, which is where production takes it from too. *)
@@ -1404,7 +1596,8 @@ let rec chain_tamper_detected
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (prev: string)
   (i: pos)
   (rs: list (record op))
@@ -1414,6 +1607,7 @@ let rec chain_tamper_detected
   : Lemma
     (requires
       chain_ok_from h show enc_op prev i rs /\ record_at rs n == Found r /\
+      actor_ok r.ractor /\ actor_ok r'.ractor /\
       r'.rprev == r.rprev /\ r'.rhash == r.rhash /\ not (same_content r r'))
     (ensures not (chain_ok_from h show enc_op prev i (replace_at rs n r')))
     (decreases rs) =
@@ -1429,7 +1623,7 @@ let rec chain_tamper_detected
       end
     else ()
   | x :: t, PSucc m ->
-    chain_tamper_detected h show enc_op inj x.rhash (PSucc i) t m r r'
+    chain_tamper_detected h show enc_op actor_ok inj x.rhash (PSucc i) t m r r'
 
 (* THEOREM (no hypothesis at all). Re-pointing one record's `PrevHash` is found by the prev-link
    check, which compares stored data against the walk's own running value and never consults the
@@ -1489,7 +1683,8 @@ let chain_tamper_detected_verify
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (genesis: string)
   (rs: list (record op))
   (n: pos)
@@ -1498,11 +1693,49 @@ let chain_tamper_detected_verify
   : Lemma
     (requires
       verify_chain h show enc_op genesis rs /\ record_at rs n == Found r /\
+      actor_ok r.ractor /\ actor_ok r'.ractor /\
       r'.rprev == r.rprev /\ r'.rhash == r.rhash /\ not (same_content r r'))
     (ensures not (verify_chain h show enc_op genesis (replace_at rs n r'))) =
   chain_break_none_iff h show enc_op genesis PZero rs;
-  chain_tamper_detected h show enc_op inj genesis PZero rs n r r';
+  chain_tamper_detected h show enc_op actor_ok inj genesis PZero rs n r r';
   chain_break_none_iff h show enc_op genesis PZero (replace_at rs n r')
+
+(* THEOREM (Phase 197) — THE PAYLOAD SPLICE, stated positively and on the NAMED premises alone.
+   Swap one record's payload content for another — a different sequence, actor or op, with the
+   stored hash and prev-link left as they were — in a chain `verifyChain` accepted, and it no
+   longer accepts it. No composite premise is taken: the hash's injectivity, the op codec's, the
+   reading, the numeral code and the actor code are the whole of what it rests on, and the two
+   splice lemmas and the parse are proved. It is `chain_tamper_detected_verify` with its premise
+   discharged through `rec_injective_derived`. *)
+let payload_splice_breaks_chain
+  (#sym: eqtype)
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (reveal: string -> list sym)
+  (comma: sym)
+  (close: sym)
+  (actor_ok: string -> bool)
+  (hinj: hash_injective h)
+  (oinj: op_codec_injective op enc_op)
+  (reading: squash (symbols_faithful reveal /\ reveal "," == [comma] /\ reveal "}" == [close]))
+  (numeral: squash (seq_numeral_code reveal comma show))
+  (code: squash (actor_code_prefix_free reveal actor_ok))
+  (genesis: string)
+  (rs: list (record op))
+  (n: pos)
+  (r: record op)
+  (r': record op)
+  : Lemma
+    (requires
+      verify_chain h show enc_op genesis rs /\ record_at rs n == Found r /\
+      actor_ok r.ractor /\ actor_ok r'.ractor /\
+      r'.rprev == r.rprev /\ r'.rhash == r.rhash /\ not (same_content r r'))
+    (ensures not (verify_chain h show enc_op genesis (replace_at rs n r'))) =
+  chain_tamper_detected_verify h show enc_op actor_ok
+    (rec_injective_derived op h show enc_op reveal comma close actor_ok hinj oinj reading numeral code)
+    genesis rs n r r'
 
 (* ======================================================================================
    7. Snapshot and bounded replay (Phase 191; F#: `OpStream.replay`, `snapshotAtOpt`, `compact`,
@@ -1983,7 +2216,8 @@ let compacted_tail_tamper_detected
   (show: pos -> string)
   (enc_op: op -> string)
   (pay: pos -> st -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (snap: snapshot st)
   (tail: list (record op))
   (k: pos)
@@ -1992,9 +2226,10 @@ let compacted_tail_tamper_detected
   : Lemma
     (requires
       verify_across h show enc_op pay snap tail /\ record_at tail k == Found r /\
+      actor_ok r.ractor /\ actor_ok r'.ractor /\
       r'.rprev == r.rprev /\ r'.rhash == r.rhash /\ not (same_content r r'))
     (ensures not (verify_across h show enc_op pay snap (replace_at tail k r'))) =
-  chain_tamper_detected h show enc_op inj snap.sprev snap.sseq tail k r r'
+  chain_tamper_detected h show enc_op actor_ok inj snap.sprev snap.sseq tail k r r'
 
 (* ======================================================================================
    8. The signed head (Phase 193; F#: `Attestation`, `IAttestationSink`, `OpStream.head`,
@@ -2009,8 +2244,9 @@ let compacted_tail_tamper_detected
        ONE attestation, are the same chain — the same records, so the same ops in the same order.
        It is the composition of two facts: the attestation verifies against at most one head
        (`signature_binds`, the section's one new premise), and a verified chain's head determines
-       the chain (`same_head_same_chain_from`, which spends `rec_injective` once per record, tip
-       to root).
+       the chain (`same_head_same_chain_from`, which spends `rec_injective_on` once per record,
+       tip to root — the composite section 6b derives, so the chains it is stated over carry
+       actors the code emits, `actors_ok`).
      - `signed_head_rejects_splice`. Replace, insert or drop one op and RE-MINT the whole chain, so
        that `verifyChain` accepts it — the rewrite sections 1-7 cannot see — and the original
        attestation does not verify against the result. `signed_head_rejects_rewrite` is the general
@@ -2020,7 +2256,7 @@ let compacted_tail_tamper_detected
    `IAttestationSink.Verify` and `sign` for `IAttestationSink.Sign`; nothing here models an
    algorithm, a key, a keyring or its lockout rules, which belong to whoever supplies the sink.
    `signature_binds verify` says an attestation verifies against AT MOST ONE head — `verify` holds
-   only for the signed bytes. It is a lemma-valued parameter, as `rec_injective` is, never an
+   only for the signed bytes. It is a lemma-valued parameter, as `rec_injective_on` is, never an
    `assume`. Two things about it are worth reading twice.
 
    1. **It is BINDING, not UNFORGEABILITY.** The theorems are about ONE attestation — the original
@@ -2139,7 +2375,8 @@ let rec head_seq_at_least
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (prev: string)
   (i: pos)
   (rs: list (record op))
@@ -2149,7 +2386,7 @@ let rec head_seq_at_least
   (o: op)
   : Lemma
     (requires
-      chain_ok_from h show enc_op prev i rs /\ Cons? rs /\
+      chain_ok_from h show enc_op prev i rs /\ Cons? rs /\ actors_ok actor_ok rs /\ actor_ok a /\
       chain_head rs == rec_hash h show enc_op p s a o)
     (ensures ple i s)
     (decreases rs) =
@@ -2159,13 +2396,14 @@ let rec head_seq_at_least
     inj prev r.rseq r.ractor r.rop p s a o;
     ple_refl i
   | r :: t ->
-    head_seq_at_least h show enc_op inj r.rhash (PSucc i) t p s a o;
+    head_seq_at_least h show enc_op actor_ok inj r.rhash (PSucc i) t p s a o;
     ple_succ_left i s
 
 (* THE LINEAR CHAIN'S OWN INJECTIVITY. Two sound walks from one index that end at one head are the
    same records, walked from the same predecessor hash. Tip to root: the two tips share a hash, so
-   `rec_injective` makes them the same record with the same prev-link, which is the head of what is
-   left. A chain against one of its own extensions is excluded by the sequence, through
+   `rec_injective_on` makes them the same record with the same prev-link, which is the head of
+   what is left — for chains whose actors the code emits (`actors_ok`), which is what the derived
+   composite asks and what a typed `Actor` supplies. A chain against one of its own extensions is excluded by the sequence, through
    `head_seq_at_least`. Stated at an arbitrary `(prev, i)` rather than at genesis, because nothing
    in it needs the walk to start there — see the section header for what that does and does not say
    about a compacted stream. *)
@@ -2174,7 +2412,8 @@ let rec same_head_same_chain_from
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (p1: string)
   (p2: string)
   (i: pos)
@@ -2183,32 +2422,35 @@ let rec same_head_same_chain_from
   : Lemma
     (requires
       chain_ok_from h show enc_op p1 i rs1 /\ chain_ok_from h show enc_op p2 i rs2 /\
+      actors_ok actor_ok rs1 /\ actors_ok actor_ok rs2 /\
       Cons? rs1 /\ Cons? rs2 /\ chain_head rs1 == chain_head rs2)
     (ensures rs1 == rs2 /\ p1 == p2)
     (decreases rs1) =
   match rs1, rs2 with
   | [r1], [r2] -> inj p1 r1.rseq r1.ractor r1.rop p2 r2.rseq r2.ractor r2.rop
   | [r1], r2 :: t2 ->
-    head_seq_at_least h show enc_op inj r2.rhash (PSucc i) t2 p1 r1.rseq r1.ractor r1.rop;
+    head_seq_at_least h show enc_op actor_ok inj r2.rhash (PSucc i) t2 p1 r1.rseq r1.ractor r1.rop;
     ple_succ_self i
   | r1 :: t1, [r2] ->
-    head_seq_at_least h show enc_op inj r1.rhash (PSucc i) t1 p2 r2.rseq r2.ractor r2.rop;
+    head_seq_at_least h show enc_op actor_ok inj r1.rhash (PSucc i) t1 p2 r2.rseq r2.ractor r2.rop;
     ple_succ_self i
   | r1 :: t1, r2 :: t2 ->
-    same_head_same_chain_from h show enc_op inj r1.rhash r2.rhash (PSucc i) t1 t2;
+    same_head_same_chain_from h show enc_op actor_ok inj r1.rhash r2.rhash (PSucc i) t1 t2;
     inj p1 r1.rseq r1.ractor r1.rop p2 r2.rseq r2.ractor r2.rop
   | _, _ -> ()
 
 (* THEOREM (Phase 193). The signed head binds the chain it seals: two chains a verifier accepts
    under one attestation are the same chain — the same records, so the same ops in the same order.
-   The premises are `rec_injective` (section 6's), `signature_binds` (this section's), and that the
-   signed head is not the empty-chain sentinel. *)
+   The premises are `rec_injective_on` (section 6b's derived composite, so both chains carry
+   actors the code emits), `signature_binds` (this section's), and that the signed head is not the
+   empty-chain sentinel. *)
 let signed_head_binds_chain
   (#op: eqtype)
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (verify: attestation -> string -> bool)
   (binds: signature_binds verify)
   (genesis: string)
@@ -2219,12 +2461,13 @@ let signed_head_binds_chain
     (requires
       accepts_signed h show enc_op genesis verify att rs1 /\
       accepts_signed h show enc_op genesis verify att rs2 /\
+      actors_ok actor_ok rs1 /\ actors_ok actor_ok rs2 /\
       ~(chain_head rs1 == ""))
     (ensures rs1 == rs2) =
   chain_break_none_iff h show enc_op genesis PZero rs1;
   chain_break_none_iff h show enc_op genesis PZero rs2;
   binds att (chain_head rs1) (chain_head rs2);
-  same_head_same_chain_from h show enc_op inj genesis genesis PZero rs1 rs2
+  same_head_same_chain_from h show enc_op actor_ok inj genesis genesis PZero rs1 rs2
 
 (* THE BOUNDARY, stated rather than hidden. `OpStream.head` of the empty chain is the literal `""`,
    so an attestation that verifies against `""` makes the EMPTY chain acceptable — under every
@@ -2249,7 +2492,8 @@ let signed_head_rejects_rewrite
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (verify: attestation -> string -> bool)
   (binds: signature_binds verify)
   (genesis: string)
@@ -2259,10 +2503,11 @@ let signed_head_rejects_rewrite
   : Lemma
     (requires
       accepts_signed h show enc_op genesis verify att rs /\
+      actors_ok actor_ok rs /\ actors_ok actor_ok rs' /\
       ~(chain_head rs == "") /\ ~(rs' == rs))
     (ensures not (accepts_signed h show enc_op genesis verify att rs')) =
   if accepts_signed h show enc_op genesis verify att rs'
-  then signed_head_binds_chain h show enc_op inj verify binds genesis att rs rs'
+  then signed_head_binds_chain h show enc_op actor_ok inj verify binds genesis att rs rs'
   else ()
 
 (* ---- the three splices, over the OPS — each followed by a full re-mint ---- *)
@@ -2386,16 +2631,89 @@ let rec build_chain_steps
     let r = append_rec h show enc_op prev i c.cactor c.cop in
     build_chain_steps h show enc_op r.rhash (PSucc i) t
 
+(* ---- the actor code, carried from the steps to the chain they mint (Phase 197) ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec steps_actors_ok (#op: eqtype) (actor_ok: string -> bool) (cs: list (cstep op)) : Tot bool =
+  match cs with
+  | [] -> true
+  | c :: t -> actor_ok c.cactor && steps_actors_ok actor_ok t
+
+(* A splice's own step, where it has one, names an actor the code emits. *)
+[@@ noextract_to "FSharp"]
+let splice_actor_ok (#op: eqtype) (actor_ok: string -> bool) (sp: splice op) : Tot bool =
+  match sp with
+  | Replaced _ c' -> actor_ok c'.cactor
+  | Inserted _ c' -> actor_ok c'.cactor
+  | Dropped _ -> true
+
+let rec build_chain_actors_ok
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (actor_ok: string -> bool)
+  (prev: string)
+  (i: pos)
+  (cs: list (cstep op))
+  : Lemma
+    (requires steps_actors_ok actor_ok cs)
+    (ensures actors_ok actor_ok (build_chain h show enc_op prev i cs))
+    (decreases cs) =
+  match cs with
+  | [] -> ()
+  | c :: t ->
+    let r = append_rec h show enc_op prev i c.cactor c.cop in
+    build_chain_actors_ok h show enc_op actor_ok r.rhash (PSucc i) t
+
+let rec replace_step_actors_ok (#op: eqtype) (actor_ok: string -> bool) (cs: list (cstep op)) (n: pos) (c': cstep op)
+  : Lemma
+    (requires steps_actors_ok actor_ok cs /\ actor_ok c'.cactor)
+    (ensures steps_actors_ok actor_ok (replace_step cs n c'))
+    (decreases cs) =
+  match cs, n with
+  | _ :: t, PSucc m -> replace_step_actors_ok actor_ok t m c'
+  | _, _ -> ()
+
+let rec insert_step_actors_ok (#op: eqtype) (actor_ok: string -> bool) (cs: list (cstep op)) (n: pos) (c': cstep op)
+  : Lemma
+    (requires steps_actors_ok actor_ok cs /\ actor_ok c'.cactor)
+    (ensures steps_actors_ok actor_ok (insert_step cs n c'))
+    (decreases cs) =
+  match cs, n with
+  | _ :: t, PSucc m -> insert_step_actors_ok actor_ok t m c'
+  | _, _ -> ()
+
+let rec remove_step_actors_ok (#op: eqtype) (actor_ok: string -> bool) (cs: list (cstep op)) (n: pos)
+  : Lemma
+    (requires steps_actors_ok actor_ok cs)
+    (ensures steps_actors_ok actor_ok (remove_step cs n))
+    (decreases cs) =
+  match cs, n with
+  | _ :: t, PSucc m -> remove_step_actors_ok actor_ok t m
+  | _, _ -> ()
+
+let apply_splice_actors_ok (#op: eqtype) (actor_ok: string -> bool) (cs: list (cstep op)) (sp: splice op)
+  : Lemma
+    (requires steps_actors_ok actor_ok cs /\ splice_actor_ok actor_ok sp)
+    (ensures steps_actors_ok actor_ok (apply_splice cs sp)) =
+  match sp with
+  | Replaced n c' -> replace_step_actors_ok actor_ok cs n c'
+  | Inserted n c' -> insert_step_actors_ok actor_ok cs n c'
+  | Dropped n -> remove_step_actors_ok actor_ok cs n
+
 (* THEOREM (Phase 193). Replace, insert or drop ONE op, and re-mint the whole chain from genesis so
    that it verifies — and it is still refused under the original attestation. The re-mint is the
    point: this is the tamper no walker finds, and the attack `Conformance.attestationLaws` forges
-   with `reforgeCanonical`. *)
+   with `reforgeCanonical`. Since Phase 197 the steps, and the splice's own step, name actors the
+   code emits — what the discharged premise asks, and what a typed `Actor` supplies. *)
 let signed_head_rejects_splice
   (#op: eqtype)
   (h: string -> string -> string)
   (show: pos -> string)
   (enc_op: op -> string)
-  (inj: rec_injective op h show enc_op)
+  (actor_ok: string -> bool)
+  (inj: rec_injective_on op h show enc_op actor_ok)
   (verify: attestation -> string -> bool)
   (binds: signature_binds verify)
   (genesis: string)
@@ -2406,6 +2724,7 @@ let signed_head_rejects_splice
     (requires
       accepts_signed h show enc_op genesis verify att (build_chain h show enc_op genesis PZero cs) /\
       ~(chain_head (build_chain h show enc_op genesis PZero cs) == "") /\
+      steps_actors_ok actor_ok cs /\ splice_actor_ok actor_ok sp /\
       splice_changes cs sp)
     (ensures
       not
@@ -2414,6 +2733,9 @@ let signed_head_rejects_splice
   splice_differs cs sp;
   build_chain_steps h show enc_op genesis PZero cs;
   build_chain_steps h show enc_op genesis PZero (apply_splice cs sp);
-  signed_head_rejects_rewrite h show enc_op inj verify binds genesis att
+  apply_splice_actors_ok actor_ok cs sp;
+  build_chain_actors_ok h show enc_op actor_ok genesis PZero cs;
+  build_chain_actors_ok h show enc_op actor_ok genesis PZero (apply_splice cs sp);
+  signed_head_rejects_rewrite h show enc_op actor_ok inj verify binds genesis att
     (build_chain h show enc_op genesis PZero cs)
     (build_chain h show enc_op genesis PZero (apply_splice cs sp))
