@@ -935,13 +935,15 @@ module OpStream =
         | Some enc -> snapPayload enc snap
         | None -> snapPayloadChainOnly snap
 
-    /// Capture a snapshot at boundary `atSeq` under an *optional* state encoder (Phase 258) — the
-    /// generic form `snapshotAt` (strict) and `snapshotAtChainOnly` both delegate to. `Some enc` hashes
-    /// the `'State` into the checkpoint (strict — a swapped state is caught); `None` binds chain-only
-    /// (the hash covers `PrevHash` + `Seq`, the stored `'State` is trusted). A domain whose `'State` is
-    /// a whole tree can pass `None` to adopt bounded replay without a canonical state encoder, and add
-    /// state-hashing (`Some`) later — the trade-off is the domain's, not the substrate's.
-    let snapshotAtOpt
+    /// `snapshotAtOpt` under an explicit `StreamConfig` (Phase 227) — the boundary hash at sequence
+    /// zero is `cfg.Genesis`, the seed every chain walker (`verifyChainWith`, `firstChainBreakWith`,
+    /// `appendWith`) starts from, so a compaction at zero of an intact stream verifies across under
+    /// ANY configured genesis (`compact_at_zero_verifies_under_any_genesis`, `proofs/Chain.fst`).
+    /// Past zero the boundary hash is the stored `records[atSeq-1].Hash` and `cfg` does not reach it.
+    /// Only `cfg.Genesis` is read: the snapshot's own hash payload is the checkpoint format, not the
+    /// per-op chain format, so `cfg.Payload` is unused here (as in `verifyAcrossWith`).
+    let snapshotAtOptWith
+        (cfg: StreamConfig)
         (hashFn: HashFn)
         (stateEncode: ('State -> string) option)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -957,7 +959,7 @@ module OpStream =
             | Ok state ->
                 let prevHash =
                     if atSeq = 0 then
-                        ""
+                        cfg.Genesis
                     else
                         (List.item (atSeq - 1) records).Hash
 
@@ -970,6 +972,25 @@ module OpStream =
                 Ok
                     { snap0 with
                         Hash = hashFn prevHash (snapPayloadWith stateEncode snap0) }
+
+    /// Capture a snapshot at boundary `atSeq` under an *optional* state encoder (Phase 258) — the
+    /// generic form `snapshotAt` (strict) and `snapshotAtChainOnly` both delegate to. `Some enc` hashes
+    /// the `'State` into the checkpoint (strict — a swapped state is caught); `None` binds chain-only
+    /// (the hash covers `PrevHash` + `Seq`, the stored `'State` is trusted). A domain whose `'State` is
+    /// a whole tree can pass `None` to adopt bounded replay without a canonical state encoder, and add
+    /// state-hashing (`Some`) later — the trade-off is the domain's, not the substrate's.
+    /// The canonical-config wrapper over `snapshotAtOptWith` (Phase 227): the boundary hash at zero is
+    /// `canonicalConfig.Genesis`, `""`, so every byte it emits is the pre-227 value. A stream appended
+    /// under a config with a non-empty genesis snapshots through `snapshotAtOptWith` with that config.
+    let snapshotAtOpt
+        (hashFn: HashFn)
+        (stateEncode: ('State -> string) option)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (records: OpRecord<'Op> list)
+        (atSeq: int)
+        : Result<Snapshot<'State>, string> =
+        snapshotAtOptWith canonicalConfig hashFn stateEncode w state0 records atSeq
 
     /// Capture a snapshot at boundary `atSeq` — after applying `records[0 .. atSeq-1]` from
     /// `state0`. The `'State` is hashed via `stateEncode` so the checkpoint is tamper-evident.
@@ -999,8 +1020,48 @@ module OpStream =
         : Result<Snapshot<'State>, string> =
         snapshotAtOpt hashFn None w state0 records atSeq
 
+    /// Compact a stream at `atSeq` into `(snapshot, tail)` under an explicit `StreamConfig`
+    /// (Phase 227) — `compact` over `snapshotAtOptWith cfg`, so a compaction at zero carries
+    /// `cfg.Genesis` as its boundary hash and verifies across under `verifyAcrossWith cfg`. The same
+    /// verify-then-compact obligation as `compact` applies: the boundary hash is read, not checked.
+    let compactWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (records: OpRecord<'Op> list)
+        (atSeq: int)
+        : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
+        snapshotAtOptWith cfg hashFn (Some stateEncode) w state0 records atSeq
+        |> Result.map (fun snap -> snap, records |> List.skip atSeq)
+
+    /// Compact a stream at `atSeq` into `(chain-only snapshot, tail)` under an explicit
+    /// `StreamConfig` (Phase 227) — the chain-only analogue of `compactWith`. The same
+    /// verify-then-compact obligation as `compact` applies.
+    let compactChainOnlyWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (records: OpRecord<'Op> list)
+        (atSeq: int)
+        : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
+        snapshotAtOptWith cfg hashFn None w state0 records atSeq
+        |> Result.map (fun snap -> snap, records |> List.skip atSeq)
+
     /// Compact a stream at `atSeq` into `(snapshot, tail)` that replays identically to the
     /// full stream from `state0` — the prefix is discarded, the chain stays verifiable.
+    ///
+    /// **Verify, then compact (Phase 227).** `compact` does not walk the chain: it reads
+    /// `records[atSeq-1].Hash` and TRUSTS it. So the compacted stream verifies exactly when the
+    /// original does only if the discarded prefix verified first — `compact_preserves_verify` /
+    /// `compact_verifies_iff_original` (`proofs/Chain.fst`). A tamper in the prefix of an UNVERIFIED
+    /// stream survives compaction, verifies across the boundary, and once the prefix is discarded
+    /// nothing can find it again: a host that compacts an unverified stream has compacted whatever it
+    /// was handed. Run `verifyChain` (or `verifyChainWith cfg`) over the stream before compacting it.
+    /// Canonical config: the boundary hash at zero is `""`; a stream under another genesis compacts
+    /// through `compactWith`.
     let compact
         (hashFn: HashFn)
         (stateEncode: 'State -> string)
@@ -1016,6 +1077,11 @@ module OpStream =
     /// analogue of `compact`, requiring no `stateEncode`. The tail replays identically to the full
     /// stream from `state0` (`replayFrom` is unaffected by the snapshot's hash mode); the boundary is
     /// verified with `verifyAcrossChainOnly` rather than `verifyAcross`.
+    ///
+    /// **Verify, then compact (Phase 227)** — the obligation stated on `compact` binds here
+    /// unchanged: the boundary hash is read and trusted, so `compact_preserves_verify` gives the
+    /// compacted stream's verdict only over a prefix that was verified BEFORE it was discarded.
+    /// Canonical config: the boundary hash at zero is `""`; see `compactChainOnlyWith`.
     let compactChainOnly
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
