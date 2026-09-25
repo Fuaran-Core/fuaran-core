@@ -1179,7 +1179,7 @@ measurement, not a guarantee: if you are the caller it could not see, say so and
 | `Function` | `Space.isBounded`, `Function.memoKey`, `CapabilityCodec.signatureJson`, `CapabilityCodec.encodeInvocationJson`, `CapabilityPipelineModule.nodeOutputType` |
 | `Idl` | `Idl.Encode.encodeNodeEnv` |
 | `Idl.Codegen` | `Idl.Diff.stabilityImpact`, `Idl.Diff.profileBump`, `Idl.Diff.rosterFrom`, `Idl.Gen.msgCarrying`, `Idl.Gen.typescriptValueWith`, `Idl.Trust.gateCustom` |
-| `OpStream` | `OpStream.verifyAcrossWithOpt`, `OpStream.verifyAcrossChainOnlyWith` |
+| `OpStream` | `OpStream.verifyAcrossWithOpt`, `OpStream.verifyAcrossChainOnlyWith` (**public again at `0.31.0`**, Phase 236 — see there) |
 | `Query` | `QueryModule.cellType`, and the codec quartet `QueryCodec.queryJson` / `queryOf` / `resultJson` / `resultOf` |
 | `Wire` | `Versioning.profileKey`, `Versioning.requiredProfileKey`, `Corpus.runCase` |
 
@@ -2719,6 +2719,21 @@ wrong-kind and non-tree slot arguments, and the shipped-seam test moves the find
 artifact is derived through `Function.signature`, registered, enumerated and dispatched with a
 conforming argument, and refused with both non-conforming ones. The family's `cases` cell moves from
 1400 to 1600. DECISIONS.md D63 has the ruling.
+
+### A chain-only compaction under any `StreamConfig` is verifiable through the public surface — `verifyAcrossChainOnlyWith` (Phase 236) — ADDITIVE
+
+**What changed.** `OpStream.verifyAcrossChainOnlyWith` is public again. It takes a `StreamConfig`
+first, like the rest of the `...With` family. `0.19.0` narrowed it to `internal` because no caller
+outside the package was found. Phase 227 then shipped `compactChainOnlyWith cfg`, whose boundary
+only this function can verify under a non-canonical config. The canonical `verifyAcrossChainOnly`
+walks the tail under the canonical payload, so it refuses an intact compaction taken under any other
+format. The doc comments on `compactChainOnly` and `compactChainOnlyWith` now name their verifier.
+
+**What it costs a pinned consumer: nothing.** One member is added and nothing is retyped. The
+surface gate classes the OpStream move additive, so it rides this draft. A test in `SnapshotTests`
+pins the pair from outside the package. It uses a config with its own payload format and a
+non-empty genesis, and checks every boundary, zero included. A one-byte change to any tail record's
+hash or back-link fails the verification.
 
 ## 0.30.1 — draft
 

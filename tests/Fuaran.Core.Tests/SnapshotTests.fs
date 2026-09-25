@@ -258,6 +258,88 @@ let tests =
                   | Error e -> failtestf "compactChainOnly failed: %s" e
               | Error e -> failtestf "build failed: %A" e
 
+          testCase
+              "a chain-only compaction under a NON-canonical config verifies across through the public surface, and a one-byte tail change fails it"
+          <| fun _ ->
+              // Phase 236. `compactChainOnlyWith cfg` states its obligation against
+              // `verifyAcrossChainOnlyWith cfg`; this pins that the pair is reachable from outside the
+              // package and agrees under a config that shares NOTHING with the canonical one — its own
+              // payload format and a non-empty genesis — at every boundary, zero included.
+              let cfg: StreamConfig =
+                  { Payload = fun seq _ op -> sprintf "custom-v1|%d|%s" seq op
+                    Genesis = "genesis-236" }
+
+              let step acc op =
+                  acc
+                  |> Result.bind (fun (st, recs) -> OpStream.appendWith cfg h sw (Human "tester") op st recs)
+
+              match [ Inc 5; Inc 3; Dec 2; Inc 4 ] |> List.fold step (Ok(0, OpStream.empty)) with
+              | Error e -> failtestf "build failed: %A" e
+              | Ok(live, recs) ->
+                  Expect.isTrue (OpStream.verifyChainWith cfg h sw recs) "the stream verifies under its own config"
+
+                  Expect.isFalse
+                      (OpStream.verifyChain h sw recs)
+                      "the config is genuinely non-canonical: the canonical walker refuses the stream"
+
+                  let flipLast (s: string) =
+                      let c = s.[s.Length - 1]
+                      s.Substring(0, s.Length - 1) + string (if c = '0' then '1' else '0')
+
+                  for atSeq in 0..4 do
+                      match OpStream.compactChainOnlyWith cfg h sw 0 recs atSeq with
+                      | Error e -> failtestf "compactChainOnlyWith failed at %d: %s" atSeq e
+                      | Ok(snap, tail) ->
+                          Expect.isTrue
+                              (OpStream.verifyAcrossChainOnlyWith cfg h sw snap tail)
+                              (sprintf "intact boundary verifies under its own config at seq %d" atSeq)
+
+                          Expect.equal
+                              (OpStream.replayFrom sw snap tail)
+                              (Ok live)
+                              (sprintf "bounded replay = live at seq %d" atSeq)
+
+                          if not tail.IsEmpty then
+                              Expect.isFalse
+                                  (OpStream.verifyAcrossChainOnly h sw snap tail)
+                                  (sprintf "the canonical verifier refuses the non-canonical tail at seq %d" atSeq)
+
+                          // One byte of the tail changed — in each record's hash, and in each record's
+                          // back-link — is caught at every position.
+                          tail
+                          |> List.iteri (fun i _ ->
+                              let at f =
+                                  tail |> List.mapi (fun j r -> if j = i then f r else r)
+
+                              Expect.isFalse
+                                  (OpStream.verifyAcrossChainOnlyWith
+                                      cfg
+                                      h
+                                      sw
+                                      snap
+                                      (at (fun r -> { r with Hash = flipLast r.Hash })))
+                                  (sprintf "one byte of tail[%d].Hash changed is caught at seq %d" i atSeq)
+
+                              Expect.isFalse
+                                  (OpStream.verifyAcrossChainOnlyWith
+                                      cfg
+                                      h
+                                      sw
+                                      snap
+                                      (at (fun r ->
+                                          { r with
+                                              PrevHash = flipLast r.PrevHash })))
+                                  (sprintf "one byte of tail[%d].PrevHash changed is caught at seq %d" i atSeq)
+
+                              Expect.isFalse
+                                  (OpStream.verifyAcrossChainOnlyWith
+                                      cfg
+                                      h
+                                      sw
+                                      snap
+                                      (at (fun r -> { r with Op = Inc 99 })))
+                                  (sprintf "a changed op in tail[%d] is caught at seq %d" i atSeq))
+
           testCase "chain-only does NOT catch a swapped state, but strict does"
           <| fun _ ->
               match build () with

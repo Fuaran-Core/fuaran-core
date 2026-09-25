@@ -1039,6 +1039,10 @@ module OpStream =
     /// Compact a stream at `atSeq` into `(chain-only snapshot, tail)` under an explicit
     /// `StreamConfig` (Phase 227) — the chain-only analogue of `compactWith`. The same
     /// verify-then-compact obligation as `compact` applies.
+    ///
+    /// **Its public verifier is `verifyAcrossChainOnlyWith cfg` (Phase 236)** — the SAME `cfg`: the
+    /// tail records continue the chain under `cfg.Payload`, so the canonical `verifyAcrossChainOnly`
+    /// refuses an intact compaction taken under any other payload format.
     let compactChainOnlyWith
         (cfg: StreamConfig)
         (hashFn: HashFn)
@@ -1082,6 +1086,8 @@ module OpStream =
     /// unchanged: the boundary hash is read and trusted, so `compact_preserves_verify` gives the
     /// compacted stream's verdict only over a prefix that was verified BEFORE it was discarded.
     /// Canonical config: the boundary hash at zero is `""`; see `compactChainOnlyWith`.
+    /// **Its public verifier is `verifyAcrossChainOnly`** (Phase 236); a compaction taken through
+    /// `compactChainOnlyWith cfg` verifies through `verifyAcrossChainOnlyWith cfg`.
     let compactChainOnly
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -1149,7 +1155,10 @@ module OpStream =
     /// the tail chain. **Does NOT detect a swapped `'State`** — that is the chain-only trade-off; use
     /// `verifyAcrossWith` (strict) for independent state-tamper detection. A domain on a legacy chain
     /// format (its own `cfg`) that snapshots a large/awkward `'State` verifies its boundary here.
-    let internal verifyAcrossChainOnlyWith
+    /// **Public since Phase 236** (narrowed to `internal` at `0.19.0` for want of a caller): it is the
+    /// verifier `compactChainOnlyWith cfg` states its obligation against, so a compaction under any
+    /// `StreamConfig` is checkable through the public surface.
+    let verifyAcrossChainOnlyWith
         (cfg: StreamConfig)
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
