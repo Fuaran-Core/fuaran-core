@@ -2518,7 +2518,7 @@ reads 800 where it read 600. A consumer asserting the family's result COUNT upda
 consumer that reads the laws by name, or checks that all passed, sees one more green law at any
 coherent witness. At the reference witness the correspondence is asked on 180 of 200 iterations.
 No public member of `Fuaran.Core.Conformance` moves. `docs/conformance-corpus.md` records that the
-two Core classes map to one host class. The laws corpus is byte-identical. DECISIONS.md has the
+two Core classes map to one host class. The laws corpus is byte-identical. DECISIONS.md D58 has the
 ruling.
 
 ## 0.30.1 — draft

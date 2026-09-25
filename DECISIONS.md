@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-09-25 — D@@228@@: one payload for the graft-containment refusal — `DiffError.TargetNotAContainer` names its `target`, ruling (B); option (A) declined
+## 2026-09-25 — D58: one payload for the graft-containment refusal — `DiffError.TargetNotAContainer` names its `target`, ruling (B); option (A) declined
 
 **Decided (operator, 2026-09-20; executed by Phase 228).** Core refused the graft-containment
 shape (a node holding children while `canHold` refuses it) under two cases:
