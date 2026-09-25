@@ -42,7 +42,7 @@ let __proj__DuplicateIdInTree__item___0 : diff_error  ->  Prims.string = (fun ( 
 
 
 let uu___is_TargetNotAContainer : diff_error  ->  Prims.bool = (fun ( projectee  :  diff_error ) -> (match (projectee) with
-| TargetNotAContainer (parent, kind_tag) -> begin
+| TargetNotAContainer (target, kind_tag) -> begin
      true
      end
 | uu___ -> begin
@@ -50,14 +50,14 @@ let uu___is_TargetNotAContainer : diff_error  ->  Prims.bool = (fun ( projectee 
      end))
 
 
-let __proj__TargetNotAContainer__item__parent : diff_error  ->  Prims.string = (fun ( projectee  :  diff_error ) -> (match (projectee) with
-| TargetNotAContainer (parent, kind_tag) -> begin
-     parent
+let __proj__TargetNotAContainer__item__target : diff_error  ->  Prims.string = (fun ( projectee  :  diff_error ) -> (match (projectee) with
+| TargetNotAContainer (target, kind_tag) -> begin
+     target
      end))
 
 
 let __proj__TargetNotAContainer__item__kind_tag : diff_error  ->  Prims.string = (fun ( projectee  :  diff_error ) -> (match (projectee) with
-| TargetNotAContainer (parent, kind_tag) -> begin
+| TargetNotAContainer (target, kind_tag) -> begin
      kind_tag
      end))
 

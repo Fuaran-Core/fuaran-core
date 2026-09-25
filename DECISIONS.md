@@ -1,5 +1,47 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-25 — D@@228@@: one payload for the graft-containment refusal — `DiffError.TargetNotAContainer` names its `target`, ruling (B); option (A) declined
+
+**Decided (operator, 2026-09-20; executed by Phase 228).** Core refused the graft-containment
+shape (a node holding children while `canHold` refuses it) under two cases:
+`Rejection.NotAContainer of target: 'Id * kindTag` on the apply path and
+`Diff.DiffError.TargetNotAContainer of parent: 'Id * kindTag` on the diff path. Both named the same
+offender, but under two field names. The Tidy-Up bundle Phase 161 filed ("one refusal name for the
+graft-containment shape") put two options to the operator:
+
+- **(A) One CASE:** retire `TargetNotAContainer` and have the diff return the apply envelope's
+  `NotAContainer`. **Declined.** `DiffError` and `Rejection` answer different questions (why no
+  script exists, and why an op was refused). A diff error that borrowed the apply envelope would
+  have to carry `Rejection`'s other cases into a result type that can never raise them. The
+  difference is the ENVELOPE, and the envelope is correctly two types.
+- **(B) One PAYLOAD:** keep both cases and give them one field name, `target`, with one definition
+  behind them and a law holding them to the same trees. **Taken.**
+
+**What landed.** The field is renamed `parent` → `target` (source-breaking for construction and
+matching by name, so it rides the `0.31.0` draft, and STABILITY.md has the one-line migration).
+The shard expected the surface gate to print `retype` for this. It does not, because
+`api/Fuaran.Core.Ops.txt` records a union case by its field TYPES and not by its field names. So
+the class is carried by the STABILITY entry and not by the baseline.
+`Ops.firstUncontained` becomes `internal`, and `Diff.toOpsContained` calls it instead of re-stating
+its lambda. The shard said the two already shared that predicate. They shared its TEXT, not its
+definition, and after this phase they share the definition. `Conformance.diffContainedLaws` gains
+the **refusal correspondence** law. Wherever the diff refuses with `TargetNotAContainer(t, k)`, it
+builds the offending graft: the subtree at `t`, cut out of `after` and re-inserted under its own
+parent. `Ops.applyContained` must then refuse that graft with `NotAContainer(t, k)`. The law skips
+two cases rather than counting them: a ROOT offender, which has no parent to graft under, and a host
+parent the predicate refuses once the graft is cut out of it. The second arises because a `canHold`
+may read the child list (Phase 140's `child_blind`), and that insert would be refused at the parent
+clause instead. At the reference witness the law is asked on 180 of 200 iterations. A predicate
+that is not a function of the node turns it red (`OpsTests`, Phase 228). `docs/conformance-corpus.md`
+records that the two Core classes map to one host class.
+
+**Not changed.** The proof model's `diff_error` in `proofs/TreeDiff.fst` still spells the field
+`parent`. The extracted oracle and every differential over it match POSITIONALLY, so the model and
+the shipped engine agree on the value. The model's field name is not part of any published surface.
+It stays as it is, and that is a decision, not a deferral. A rename would cost a prover run and a
+re-extraction and would change no statement, and the model's names are the F\* backend's, not the
+package surface.
+
 ## 2026-09-25 — D57: a theorem over the CONCRETE pipeline driver is taken — Phase 154 supersedes, for `Fuaran.Core.DataFrame`, D14's "declined as a domain's cost" and Phase 203's `law-tested-by-design` exclusion
 
 **Decided (operator, 2026-09-25; Phase 154).** `proofs/Pipeline.fst` models `Fuaran.Core.DataFrame`'s

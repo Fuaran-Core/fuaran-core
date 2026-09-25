@@ -600,3 +600,90 @@ let insertIdUniquenessTests =
                   (List.length results)
                   7
                   "the algebra family reports five laws plus its two accepted/refused guards (Phase 220)" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 228 — one payload for the graft-containment refusal
+//
+//  `Diff.DiffError.TargetNotAContainer` and `Rejection.NotAContainer` detect one shape through one
+//  definition (`Ops.firstUncontained`) and, since this phase, name the offender under one field,
+//  `target`. The cases below match on the NAMED fields, so a field that drifted back apart would
+//  stop compiling here rather than read as a pass.
+// ---------------------------------------------------------------------------
+
+/// `sample ()` with the para leaf "a1" given a child — the nesting both refusals are about.
+let private nestedUnderPara () =
+    Tree.updateNode nodew idw "a1" (fun n -> nodew.ReplaceChildren n [ RNode.leaf "a1x" "para" "under" ]) (sample ())
+    |> Option.get
+
+/// A stratified generator for `diffContainedLaws`: `sample ()` carries paras, so the minted probe
+/// always has a non-container to graft under.
+let private graftGen (canHold: RNode -> bool) : OpGen<RNode, string> =
+    let genFresh (taken: Set<string>) (rng: ConfRng.T) =
+        let n, r = ConfRng.next rng
+        let mutable id = sprintf "g%d" (abs n)
+
+        while taken.Contains id do
+            id <- id + "'"
+
+        RNode.leaf id "para" "v", r
+
+    { Tree = (fun rng -> sample (), rng)
+      FreshNode = genFresh
+      CanHold = Some canHold }
+
+let private correspondenceLaw = "contained diff refusal corresponds"
+
+[<Tests>]
+let graftRefusalCorrespondenceTests =
+    testList
+        "Diff.TargetNotAContainer ≡ Ops.NotAContainer (Phase 228)"
+        [ testCase "the diff and the apply path name the same offender under the same field"
+          <| fun _ ->
+              let after = nestedUnderPara ()
+
+              match Diff.toOpsContained canHold137 nodew idw (sample ()) after with
+              | Error(Diff.TargetNotAContainer(target = "a1"; kindTag = "para")) -> ()
+              | other -> failtestf "expected TargetNotAContainer(target = a1, kindTag = para), got %A" other
+
+              // the same graft, cut out of `after` and re-inserted under its own parent
+              let graft = Tree.tryFind nodew idw "a1" after |> Option.get
+
+              let cut =
+                  Ops.apply nodew idw (RemoveNode "a1") after
+                  |> Result.defaultWith (failwithf "cut: %A")
+
+              match Ops.applyContained canHold137 nodew idw (InsertChild("a", graft)) cut with
+              | Error(NotAContainer(target = "a1"; kindTag = "para")) -> ()
+              | other -> failtestf "expected NotAContainer(target = a1, kindTag = para), got %A" other
+
+          testCase "diffContainedLaws reports the correspondence law, green on a container-bearing witness"
+          <| fun _ ->
+              // MEASURED rather than trusted (Phase 228): the correspondence was asked, and held, on
+              // 188 of these 200 iterations — and on 180 of 200 at the suite's reference witness
+              // (`ConformanceTests.containedGen`, seed 4242). The rest drew no refusal to correspond to:
+              // their derived ops left no para in `after` for the probe to graft under.
+              let results = Conformance.diffContainedLaws nodew idw (graftGen canHold137) 228 200
+
+              match results |> List.tryFind (fun r -> r.Law.StartsWith correspondenceLaw) with
+              | None ->
+                  failtestf "diffContainedLaws no longer reports the correspondence law: %A" (results |> List.map _.Law)
+              | Some r -> Expect.isTrue r.Passed (sprintf "the law must hold on a coherent witness: %A" r)
+
+          testCase "the correspondence law has teeth — a canHold that answers differently per call goes red"
+          <| fun _ ->
+              // The two refusals share one definition, so a coherent witness cannot split them; what
+              // CAN is a predicate that is not a function of the node. Here a para's answer is a
+              // seeded coin: the diff names a para it saw refused, and the apply path re-asks and
+              // may be told otherwise. If the law never re-ran the apply path it could not see this.
+              let coin = System.Random 228
+
+              let flaky (n: RNode) = n.Kind <> "para" || coin.Next 2 = 0
+
+              let results = Conformance.diffContainedLaws nodew idw (graftGen flaky) 228 200
+
+              match results |> List.tryFind (fun r -> r.Law.StartsWith correspondenceLaw) with
+              | None ->
+                  failtestf "diffContainedLaws no longer reports the correspondence law: %A" (results |> List.map _.Law)
+              | Some r ->
+                  Expect.isFalse r.Passed "an incoherent predicate must split the two refusals"
+                  Expect.isSome r.Counterexample "and the split is reported with a counterexample" ]

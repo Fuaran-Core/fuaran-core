@@ -879,6 +879,18 @@ module Conformance =
     /// under a node the predicate rejects, and the plain `toOps` accepts the same pair — so the
     /// refusal is the container check's contribution and nothing else's).
     ///
+    /// A fourth law, **refusal correspondence** (Phase 228), holds the diff-side refusal to its
+    /// apply-side sibling: wherever `toOpsContained` refuses an `after` with
+    /// `TargetNotAContainer(t, k)`, the offending nesting is BUILT as a graft — the subtree `after`
+    /// carries at `t`, cut out of `after` and re-inserted under its own parent through
+    /// `Ops.applyContained` — and that insert must refuse with `NotAContainer(t, k)`: the same
+    /// offender, the same kind tag. Both refusals are defined by `Ops.firstUncontained`, and this is
+    /// the law that says a host may read them as one class. Two cases are not askable and are
+    /// skipped rather than counted: an offender that is `after`'s ROOT (there is no parent to graft
+    /// under), and a host parent the predicate refuses once the graft is cut out of it (a `canHold`
+    /// may read a node's child list — Phase 140's `child_blind` — and the insert would then be
+    /// refused at the PARENT site, which is a different clause).
+    ///
     /// The third law mints a probe as well as checking the generated pair: where the witness's
     /// predicate refuses some node of `after`, a fresh child is grafted under the first such node
     /// and the refusal is demanded by name. A witness that supplies no `CanHold` exercises only the
@@ -898,6 +910,7 @@ module Conformance =
         let mutable reconstruction = None
         let mutable applyability = None
         let mutable refusal = None
+        let mutable correspondence = None
         // Phase 223 — the refusal IFF's two directions, counted over every pair it is asked of
         // (the derived pair and the minted probe). The demanding direction is reached only where
         // `after` carries a node the witness's `canHold` rejects, which is DRAWN.
@@ -915,6 +928,30 @@ module Conformance =
             Tree.preorder nodew t
             |> List.exists (fun n -> not (List.isEmpty (nodew.Children n)) && not (canHold n))
 
+        /// Phase 228 — the offending nesting `after` carries at `t`, built as a graft and applied
+        /// through `Ops.applyContained`: it must refuse with `NotAContainer(t, k)`
+        let checkCorrespondence (i: int) (after: 'Node) (t: 'Id) (k: string) =
+            match Tree.tryFind nodew idw t after, Tree.parentOf nodew idw t after with
+            | Some graft, Some host ->
+                match Ops.apply nodew idw (RemoveNode t) after with
+                | Ok cut when Tree.tryFind nodew idw (nodew.Id host) cut |> Option.exists canHold ->
+                    match Ops.applyContained canHold nodew idw (InsertChild(nodew.Id host, graft)) cut with
+                    | Error(NotAContainer(t', k')) when idw.Equals t t' && k = k' -> ()
+                    | other ->
+                        if correspondence.IsNone then
+                            correspondence <-
+                                Some(
+                                    sprintf
+                                        "seed=%d iter=%d: toOpsContained refused with TargetNotAContainer(%s, %s), but grafting the same subtree through applyContained answered %A"
+                                        seed
+                                        i
+                                        (idw.ToString t)
+                                        k
+                                        other
+                                )
+                | _ -> ()
+            | _ -> ()
+
         let checkRefusal (i: int) (before: 'Node) (after: 'Node) =
             let expected = violates after
 
@@ -924,7 +961,9 @@ module Conformance =
                 accepted <- accepted + 1
 
             match Diff.toOpsContained canHold nodew idw before after with
-            | Error(Diff.TargetNotAContainer(p, _)) when expected ->
+            | Error(Diff.TargetNotAContainer(p, k)) when expected ->
+                checkCorrespondence i after p k
+
                 // the node it names must be one `after` really carries, really has children, and
                 // the predicate really rejects
                 let named =
@@ -1040,6 +1079,10 @@ module Conformance =
           { Law = "contained diff refuses exactly a non-container after-parent"
             Passed = refusal.IsNone
             Counterexample = refusal }
+          { Law =
+              "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through applyContained refuses NotAContainer(t, k))"
+            Passed = correspondence.IsNone
+            Counterexample = correspondence }
           // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A witness whose
           // `canHold` refuses nothing (or supplies none) exercises only the trivial direction of the
           // refusal IFF; that is now reported as the guard, not as a pass.
