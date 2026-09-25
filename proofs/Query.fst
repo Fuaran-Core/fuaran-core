@@ -34,8 +34,9 @@
        only past an accepted validation (`resolver_runs_only_validated`); the envelope has no
        fourth outcome (`invoke_never_ok_failed`, `dispatch_never_ok_failed`); and validation is
        characterised EXACTLY: it accepts precisely the sets whose every binding addresses a
-       declared param with a `Null` or an in-type cell and that bind every required name
-       (`validate_params_exact`), and each refusal is truthful (`refusal_is_truthful`).
+       declared param with a `Null` or an in-type cell, that bind every required name, and (Phase
+       226) that bind none of them only to `Null` (`validate_params_exact`), and each refusal is
+       truthful (`refusal_is_truthful`, `unbound_required_truthful`, `null_required_truthful`).
      - `enumerate_is_registry` — an id is enumerable exactly when `tryFind` resolves it, and
        `dispatch` raises `NoSuchQuery` exactly off the enumeration (`no_such_iff_unregistered`);
        `register` refuses a held id, extends by one entry otherwise, and keeps ids distinct.
@@ -50,12 +51,19 @@
        of a string as its symbols (`symbols_faithful`, the reading `Chain.fst` takes) and states
        what it needs of the host functions in `key_premises` (section 8b).
 
-   THE FINDINGS read off the model, each proved and asserted on the shipped seam:
+   THE FINDINGS read off the model, each proved and asserted on the shipped seam — and both
+   now CLOSED:
 
-     - `all_null_accepted` — EVERY declaration, whatever it marks required, accepts the argument
-       set binding each param to `Null`. `Required` constrains the presence of a NAME, never of
-       a value: `QueryParam`'s doc comment says a bound cell may "be `Null` when not required",
-       and the code accepts it when required as well.
+     - `all_null_accepted` was the first, until Phase 226 closed it: EVERY declaration, whatever
+       it marks required, accepted the argument set binding each param to `Null`, because the
+       only required-params step asked whether the NAME was a key of the argument map. `Required`
+       now means a VALUE: a third step refuses, as the distinct `RequiredParamsNull`, a required
+       param that is present but bound only to `Null` (`null_required`), so a caller can tell
+       "present but null" from "missing" (`RequiredParamsUnbound`). `required_is_non_null`
+       (section 9) is the positive statement that replaced the finding — acceptance is exactly
+       well-typed bindings plus every required name bound to a value (`has_value`) — and
+       `all_null_refusal_exact` pins what the all-`Null` set now gets: refused as
+       `RequiredParamsNull`, naming every required param, whenever there is one.
      - `key_collision` was the second, until Phase 225 closed it: the canonical string joined
        `name=cellKey` pairs with NO separator, so two distinct accepted argument sets could share
        it. The lemma is gone because it is no longer true; `invocation_key_injective` is what
@@ -180,6 +188,7 @@ type query_error =
   | SourceNotResolved     : source:string -> query_error
   | ExecutionFailed       : detail:string -> recoverable:list string -> query_error
   | Timeout               : query_error
+  | RequiredParamsNull    : names:list string -> query_error
 
 (* F#: `(string * Cell) list` — a typed invocation's args, name → bound cell. *)
 type arguments = list (string & cell)
@@ -329,13 +338,33 @@ let rec unbound_required (ps:list query_param) (a:arguments) : Tot (list string)
     if p.p_required && not (has_key p.p_name a) then p.p_name :: unbound_required t a
     else unbound_required t a
 
+(* F#: `validateParams`'s `boundToValue` — some binding gives the name a non-`Null` cell. A `Null`
+   binding is absence to step 1, so it binds the name to NO value (Phase 226). *)
+let rec has_value (k:string) (a:arguments) : Tot bool =
+  match a with
+  | [] -> false
+  | (k', c) :: t -> (k = k' && not (Null? c)) || has_value k t
+
+(* F#: `validateParams`'s step 3 (Phase 226) — the required params the args bind, but only to
+   `Null`: present, and bound to no value. *)
+let rec null_required (ps:list query_param) (a:arguments) : Tot (list string) =
+  match ps with
+  | [] -> []
+  | p :: t ->
+    if p.p_required && has_key p.p_name a && not (has_value p.p_name a) then
+      p.p_name :: null_required t a
+    else null_required t a
+
 (* F#: `Query.validateParams`. *)
 let validate_params (q:query) (a:arguments) : Tot (outcome unit query_error) =
   match check_args q.q_params (param_names q.q_params) a with
   | Error e -> Error e
   | Ok () ->
     match unbound_required q.q_params a with
-    | [] -> Ok ()
+    | [] ->
+      (match null_required q.q_params a with
+       | [] -> Ok ()
+       | n -> Error (RequiredParamsNull n))
     | u -> Error (RequiredParamsUnbound u)
 
 (* F#: `Deferred<'T>` — the async-result envelope the resolver answers in (Phase 198). Restated
@@ -419,7 +448,8 @@ let unregistered_refused (#v:Type) (r:registry) (id:string) (a:arguments)
                    dispatch r id a resolve == dispatch r id a resolve')
   = find_query_mem id r.queries
 
-(* `validateParams` refuses in three classes and no other. *)
+(* `validateParams` refuses in four classes and no other (the fourth, `RequiredParamsNull`, since
+   Phase 226). *)
 let rec check_args_shape (ps:list query_param) (declared:list string) (a:arguments)
   : Lemma (ensures (match check_args ps declared a with
                     | Ok () -> True
@@ -438,7 +468,8 @@ let rec check_args_shape (ps:list query_param) (declared:list string) (a:argumen
 let validate_params_shape (q:query) (a:arguments)
   : Lemma (ensures (match validate_params q a with
                     | Ok () -> True
-                    | Error e -> UnknownParam? e \/ ParamTypeMismatch? e \/ RequiredParamsUnbound? e))
+                    | Error e -> UnknownParam? e \/ ParamTypeMismatch? e \/ RequiredParamsUnbound? e \/
+                                 RequiredParamsNull? e))
   = check_args_shape q.q_params (param_names q.q_params) a
 
 (* `invoke` never produces the registry's two refusals: the classes are disjoint. *)
@@ -531,10 +562,11 @@ let rec check_args_exact (ps:list query_param) (declared:list string) (a:argumen
     | _ :: rest -> check_args_exact ps declared rest
 
 (* Validation, characterised EXACTLY: accepted precisely when every binding is well typed against
-   the declaration and no required name is left unbound. *)
+   the declaration, no required name is left unbound, and (Phase 226) none is bound only to `Null`. *)
 let validate_params_exact (q:query) (a:arguments)
   : Lemma (validate_params q a == Ok () <==>
-           (all_well_typed q.q_params a /\ unbound_required q.q_params a == []))
+           (all_well_typed q.q_params a /\ unbound_required q.q_params a == [] /\
+            null_required q.q_params a == []))
   = check_args_exact q.q_params (param_names q.q_params) a
 
 (* What a REFUSAL guarantees: an `UnknownParam` names a bound name no param declares, and lists
@@ -571,6 +603,17 @@ let rec unbound_required_truthful (ps:list query_param) (a:arguments) (n:string)
       if p.p_required && not (has_key p.p_name a) then
         (if n = p.p_name then () else unbound_required_truthful t a n)
       else unbound_required_truthful t a n
+
+(* And a `RequiredParamsNull` names only declared names the args bind, and bind to no value. *)
+let rec null_required_truthful (ps:list query_param) (a:arguments) (n:string)
+  : Lemma (requires mem n (null_required ps a))
+          (ensures has_key n a /\ not (has_value n a) /\ mem n (param_names ps))
+  = match ps with
+    | [] -> ()
+    | p :: t ->
+      if p.p_required && has_key p.p_name a && not (has_value p.p_name a) then
+        (if n = p.p_name then () else null_required_truthful t a n)
+      else null_required_truthful t a n
 
 (* ======================================================================================
    7. THE THIRD THEOREM — what is enumerable is exactly what is dispatchable.
@@ -1024,16 +1067,73 @@ let rec nulls_bind_all (sub:list query_param) (a:arguments)
     | [] -> ()
     | p :: t -> has_key_keys p.p_name a; nulls_bind_all t a
 
-(* THE FIRST FINDING. EVERY declaration — whatever it marks required — accepts the argument set
-   binding each of its params to `Null`. `Required` constrains the presence of a NAME, never of
-   a value: a `Null` cell is "type-agnostic absence" to step 1 and a bound name to step 2. *)
-let all_null_accepted (q:query)
-  : Lemma (validate_params q (nulls_of q.q_params) == Ok ())
+(* Every required param is bound to a value — the clause `Required` now carries. *)
+let rec required_valued (ps:list query_param) (a:arguments) : Tot bool =
+  match ps with
+  | [] -> true
+  | p :: t -> (not p.p_required || has_value p.p_name a) && required_valued t a
+
+let rec has_value_has_key (k:string) (a:arguments)
+  : Lemma (has_value k a ==> has_key k a)
+  = match a with
+    | [] -> ()
+    | _ :: t -> has_value_has_key k t
+
+let rec required_steps_iff (ps:list query_param) (a:arguments)
+  : Lemma ((unbound_required ps a == [] /\ null_required ps a == []) <==> required_valued ps a)
+  = match ps with
+    | [] -> ()
+    | p :: t -> has_value_has_key p.p_name a; required_steps_iff t a
+
+(* THE FIRST FINDING, CLOSED (Phase 226; it was `all_null_accepted`). Validation accepts EXACTLY
+   the argument sets whose every binding is well typed and that bind every required param to a
+   VALUE — a `Null` binding no longer satisfies `Required`. Stated as the iff so the clause is
+   visible where the finding said there was none: `required_valued` relates `Null` to
+   `p_required` through `has_value`. *)
+let required_is_non_null (q:query) (a:arguments)
+  : Lemma (validate_params q a == Ok () <==>
+           (all_well_typed q.q_params a /\ required_valued q.q_params a))
+  = validate_params_exact q a;
+    required_steps_iff q.q_params a
+
+(* The names a declaration marks required, in declaration order. *)
+let rec required_names (ps:list query_param) : Tot (list string) =
+  match ps with
+  | [] -> []
+  | p :: t -> if p.p_required then p.p_name :: required_names t else required_names t
+
+let rec has_value_nulls (sub:list query_param) (n:string)
+  : Lemma (has_value n (nulls_of sub) == false)
+  = match sub with
+    | [] -> ()
+    | _ :: t -> has_value_nulls t n
+
+let rec null_nulls (ps sub:list query_param)
+  : Lemma (requires all_in (param_names ps) (param_names sub))
+          (ensures null_required ps (nulls_of sub) == required_names ps)
+  = match ps with
+    | [] -> ()
+    | p :: t ->
+      nulls_keys sub;
+      has_key_keys p.p_name (nulls_of sub);
+      has_value_nulls sub p.p_name;
+      null_nulls t sub
+
+(* The all-`Null` argument set, BUILT from the declaration: it passes step 1 (every name is
+   declared, and `Null` is type-agnostic absence) and step 2 (every name is present), and step 3
+   refuses it as `RequiredParamsNull`, naming EVERY required param in declaration order — so it is
+   accepted only by a declaration that requires nothing. *)
+let all_null_refusal_exact (q:query)
+  : Lemma (validate_params q (nulls_of q.q_params) ==
+           (match required_names q.q_params with
+            | [] -> Ok ()
+            | n -> Error (RequiredParamsNull n)))
   = all_in_refl (param_names q.q_params);
     nulls_well_typed q.q_params q.q_params;
+    check_args_exact q.q_params (param_names q.q_params) (nulls_of q.q_params);
     nulls_keys q.q_params;
     nulls_bind_all q.q_params (nulls_of q.q_params);
-    validate_params_exact q (nulls_of q.q_params)
+    null_nulls q.q_params q.q_params
 
 (* The declaration the former second finding (`key_collision`, closed by Phase 225) was exhibited
    on: `a` required, `b` optional, both strings. The two argument sets below shared a pre-image

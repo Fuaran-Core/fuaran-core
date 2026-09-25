@@ -49,7 +49,13 @@ namespace Fuaran.Core
 
 /// A typed parameter a query expects at invocation — the data-acquisition analogue of a
 /// `Capability` hole. Typed by a `ColumnType` (the scalar set the result columns also use), so a
-/// bound value's `Cell` shape must agree with `Type` (or be `Null` when not required).
+/// bound value's `Cell` shape must agree with `Type`, or be `Null`.
+///
+/// `Required` means the parameter must be bound to a VALUE. `validateParams` refuses a required
+/// parameter that is left out as `RequiredParamsUnbound`, and one that is present but bound only to
+/// `Null` (a `Null` binding is absence) as `RequiredParamsNull`. An optional parameter may be left
+/// out or bound to `Null`. This has held since Phase 226. Before it, `Required` checked only that
+/// the NAME was present, so a required parameter bound to `Null` reached the resolver.
 type QueryParam =
     { Name: string
       Type: ColumnType
@@ -89,6 +95,9 @@ type QueryError =
     | SourceNotResolved of ref: string
     | ExecutionFailed of detail: string * recoverable: string list
     | Timeout
+    /// The required params the args bind only to `Null` — present, but bound to no value (Phase 226).
+    /// Distinct from `RequiredParamsUnbound` (left out), so a caller can tell the two apart.
+    | RequiredParamsNull of names: string list
 
 /// The data-acquisition surface: typed registry (populate + enumerate + dispatch), the
 /// param-validation contract, the Phase 27 capture keying. Additive over `Column`/`Function`;
@@ -145,8 +154,11 @@ module Query =
 
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any
     /// fetch: every arg must address a declared param and its cell type must match (or be `Null`);
-    /// every required param must be bound. Default-deny by shape (FGP 3) — the host validates this
-    /// before running any resolver.
+    /// every required param must be bound (`RequiredParamsUnbound` otherwise); and every required
+    /// param must be bound to a VALUE — one whose bindings are all `Null` is refused as
+    /// `RequiredParamsNull` (Phase 226, `required_is_non_null` in `proofs/Query.fst`). The steps run
+    /// in that order and the first refusal is the answer. Default-deny by shape (FGP 3) — the host
+    /// validates this before running any resolver.
     let validateParams (q: Query) (args: (string * Cell) list) : Result<unit, QueryError> =
         let declared = q.Params |> List.map (fun p -> p.Name)
         let argMap = Map.ofList args
@@ -174,6 +186,26 @@ module Query =
                 Ok()
             else
                 Error(RequiredParamsUnbound unbound))
+        |> Result.bind (fun () ->
+            // Some binding gives the name a non-`Null` cell. A `Null` binding is absence (step 1
+            // treats it so), so a required name bound only to `Null` is bound to no value.
+            let boundToValue (name: string) =
+                args
+                |> List.exists (fun (n, c) ->
+                    n = name
+                    && (match c with
+                        | Null -> false
+                        | _ -> true))
+
+            let nullBound =
+                q.Params
+                |> List.filter (fun p -> p.Required && not (boundToValue p.Name))
+                |> List.map (fun p -> p.Name)
+
+            if List.isEmpty nullBound then
+                Ok()
+            else
+                Error(RequiredParamsNull nullBound))
 
     /// Invoke a query: validate the params, then run the host `resolve` (which performs the actual
     /// fetch per the query's source + effect/placement). The resolver answers in the shipped

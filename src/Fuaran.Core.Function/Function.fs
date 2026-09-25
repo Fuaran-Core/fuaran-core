@@ -161,6 +161,12 @@ type HoleDecl =
 /// so the schema projection can type a slot faithfully. `Action` carries an action hole's
 /// declared effect ceiling (None for non-action holes), so a host's hole-binding can be
 /// effect-checked and the LLM-tool schema can advertise the dispatch slots (Phase 318).
+///
+/// `Required` means the hole must be BOUND. At the capability seam (`Capability.validateArgs`) a
+/// bound value is a string that lies in the hole's `Space`, and no `ValueSpace` has an absent
+/// marker — there is no `Null` here, unlike a `Query` cell — so a bound required hole always
+/// carries a value in its space, and "bound" and "bound to a value" coincide (Phase 226, which
+/// made `Required` mean non-`Null` on the query seam, where they did not).
 type SigEntry =
     { Addr: string
       Name: string
@@ -982,7 +988,10 @@ module Capability =
     /// Validate typed `args` (addr → string value) against the capability's signature *before*
     /// dispatch: every arg must address a declared value/repeat hole and lie in its space; every
     /// required hole must be bound; a slot hole is not scalar-invocable. The host validates this
-    /// before running any body (default-deny by shape, FGP 3).
+    /// before running any body (default-deny by shape, FGP 3). `Required` is checked as the hole's
+    /// PRESENCE among the args, which here is presence of a value: an arg is a string checked
+    /// against its space, and a value space has no absent marker, so a required hole cannot be
+    /// bound to "no value" the way a `Query` param bound to `Null` could before Phase 226.
     let validateArgs (c: Capability) (args: (string * string) list) : Result<unit, InvokeError> =
         let holes = c.Signature.Holes
         let declared = holes |> List.map (fun h -> h.Addr)

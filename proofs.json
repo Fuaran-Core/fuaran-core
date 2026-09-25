@@ -2087,7 +2087,7 @@
     {
       "id": "query-validate-before-resolve",
       "level": "proved",
-      "claim": "An argument set `validateParams` rejects makes `invoke` return that rejection, for every resolver alike — no resolver ran — and, at the registry, a dispatch that resolved its id still runs nothing on a set validation rejects (`dispatch_validates_first`). The converse holds too: a settled or pending result, or an `ExecutionFailed`, is reachable only past an accepted validation (`resolver_runs_only_validated`). Validation is characterised EXACTLY rather than soundly: it accepts precisely the sets whose every binding addresses a declared param with a `Null` or an in-type cell and that leave no required name unbound (`validate_params_exact`), the refusal is one of its own three classes (`validate_params_shape`), and a refusal is truthful — an `UnknownParam` names a bound name no param declares and lists the declared ones, a `ParamTypeMismatch` names a declared param, its declared type and a DIFFERENT type the bound cell really has (`refusal_is_truthful`), and a `RequiredParamsUnbound` names only declared names the args really leave out (`unbound_required_truthful`).",
+      "claim": "An argument set `validateParams` rejects makes `invoke` return that rejection, for every resolver alike — no resolver ran — and, at the registry, a dispatch that resolved its id still runs nothing on a set validation rejects (`dispatch_validates_first`). The converse holds too: a settled or pending result, or an `ExecutionFailed`, is reachable only past an accepted validation (`resolver_runs_only_validated`). Validation is characterised EXACTLY rather than soundly: it accepts precisely the sets whose every binding addresses a declared param with a `Null` or an in-type cell, that leave no required name unbound, and (since Phase 226) that bind none of them only to `Null` (`validate_params_exact`), the refusal is one of its own four classes (`validate_params_shape`), and a refusal is truthful — an `UnknownParam` names a bound name no param declares and lists the declared ones, a `ParamTypeMismatch` names a declared param, its declared type and a DIFFERENT type the bound cell really has (`refusal_is_truthful`), a `RequiredParamsUnbound` names only declared names the args really leave out (`unbound_required_truthful`), and a `RequiredParamsNull` only declared names the args bind, and bind only to `Null` (`null_required_truthful`, Phase 226).",
       "phase": "fuaran-core#187",
       "evidence": {
         "theorem": "validate_before_resolve",
@@ -2129,12 +2129,12 @@
       }
     },
     {
-      "id": "query-all-null-accepted",
+      "id": "query-required-is-non-null",
       "level": "proved",
-      "claim": "THE FIRST FINDING. EVERY declaration — whatever it marks `Required` — accepts the argument set that binds each of its params to `Null`. `validateParams`'s step 1 treats a `Null` cell as type-agnostic absence and passes it; step 2 asks only whether the NAME is a key of the argument map, and it is. So `Required` constrains the presence of a name and never of a value, and a resolver is reached with its required param absent. `QueryParam`'s doc comment says a bound cell must agree with the type \"(or be `Null` when not required)\"; the code accepts it when required as well. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: this phase changes no behaviour of `Fuaran.Core.Query`, and the fix shape — step 2 counting a `Null` binding of a required param as unbound — changes what a public function accepts.",
-      "phase": "fuaran-core#187",
+      "claim": "THE FIRST FINDING, CLOSED (Phase 226; it was `all_null_accepted`). `Required` means a VALUE: `validateParams` accepts EXACTLY the argument sets whose every binding addresses a declared param with a `Null` or an in-type cell AND that bind every required param to a non-`Null` cell (`required_is_non_null`, the positive iff over `required_valued`). A required param left out is refused as `RequiredParamsUnbound`; one that is present but bound only to `Null` is refused as the DISTINCT `RequiredParamsNull` (`null_required`), naming it, before any resolver runs. The finding it replaced: the only required-params step asked whether the NAME was a key of the argument map, so EVERY declaration accepted the argument set binding each param to `Null` and a resolver was reached with its required param absent. What that set gets now is stated exactly (`all_null_refusal_exact`): it passes the type and presence steps and is refused as `RequiredParamsNull` naming every required param in declaration order, and is accepted only by a declaration that requires nothing. A required name with SOME binding to a value is bound whatever else binds it (`has_value`). Asserted on the shipped seam by the closure case, and certified by `queryLaws`' param-validation law over the all-`Null` set BUILT from its declaration.",
+      "phase": "fuaran-core#226",
       "evidence": {
-        "theorem": "all_null_accepted",
+        "theorem": "required_is_non_null",
         "model": "proofs/Query.fst",
         "prover": "proofs/fstar-pin.json"
       }
@@ -2162,7 +2162,7 @@
           "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets",
           "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail",
           "no resolver runs on a refused dispatch — `unregistered_refused` and `validate_before_resolve`, on the shipped seam",
-          "the first finding holds on the shipped seam — `all_null_accepted`",
+          "the first finding is CLOSED on the shipped seam — `required_is_non_null`",
           "the second finding is CLOSED on the shipped seam — `invocation_key_injective`, in both seams and the pipeline",
           "the escaper premise holds of Hash.canonicalFields, and a separator WITHOUT an escape refutes it — the measurement can fail"
         ]

@@ -1,5 +1,53 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-25 — D&lt;TBD-226&gt;: `Required` means non-null — ruling (A), refused as a DISTINCT `RequiredParamsNull`; (B), a doc-only correction, is declined
+
+**Decided (operator, 2026-09-25; Phase 226).** Ruling **(A)**. A `Required` query parameter that is
+present but bound only to `Null` is refused before any resolver runs. On the error's shape the
+operator took the STRICTER of the shard's two readings. The refusal is a new
+`QueryError.RequiredParamsNull of names: string list`, so a caller can tell "present but null" from
+"missing" (`RequiredParamsUnbound`, whose meaning does not change). The change is BREAKING twice
+over in the draft `0.31.0`: it changes what a public function accepts, and it adds a case to a
+closed union, which breaks every exhaustive `match` on `QueryError`. `STABILITY.md` states both
+breaks and the migration: declare the parameter optional, and add the match arm.
+
+**The finding it closes.** Phase 187's `all_null_accepted`: the only required-params step asked
+whether the NAME was a key of the argument map. So every declaration accepted the set binding each
+param to `Null`, and a resolver was reached with its required param absent, against `QueryParam`'s
+own doc comment. The model now proves the positive statement instead. `required_is_non_null` says
+validation accepts EXACTLY the well-typed sets that bind every required name to a value.
+`all_null_refusal_exact` says the all-`Null` set is refused as `RequiredParamsNull`, naming every
+required param in declaration order, and is accepted only where nothing is required.
+`null_required_truthful` says the refusal names only declared names that are bound, and bound to no
+value.
+
+**Why (A).** A default-deny seam (FGP 3) should refuse what its declaration says it requires. Under
+(B), every resolver in every domain would re-implement the same null check, and removing that
+repetition is what this substrate is for.
+
+**The shape, and the alternative not taken.** The worker proposed widening `RequiredParamsUnbound`'s
+MEANING to cover null-bound names, on the grounds that the seam already treats `Null` as absence and
+that it would add no case. That was declined. It would have made one refusal answer two different
+questions, and a caller that distinguishes a missing argument from an explicitly nulled one (a form
+that sends every field, for example) could not. The step order is fixed: unknown or mistyped
+binding, then missing, then null-bound. The new case is appended after `Timeout`, so no existing tag
+moves.
+
+**Duplicates.** A name bound more than once is bound to a value when ANY of its bindings carries
+one (`has_value`). The model states that rather than inheriting `Map.ofList`'s last-wins rule.
+
+**The capability seam is unchanged, deliberately.** The shard asked for the same rule "where its
+value space admits an absent marker". `Capability.validateArgs` takes strings checked against a
+`ValueSpace`, and no value space has an absent marker: `StringLen (0, _)` admits `""` as a value,
+not as absence. So a bound required hole already carries an in-space value, and there is nothing to
+refuse. Its doc comments change, and nothing else. `capabilityLaws` gains no law, because it would
+restate the space check it already certifies.
+
+**Declined: (B).** Correcting only the doc comments to call `Required` a presence check was cheaper.
+It would have left the resolver owning null-handling in every domain. Recorded so that it is not
+re-proposed as the "non-breaking" alternative: it is non-breaking only because it moves the defect
+out of this repository.
+
 ## 2026-09-25 — D60: the capture key's pre-image becomes injective by an OUTRIGHT change — no versioned key scheme, because no host journals these keys
 
 **Decided (operator, 2026-09-25; Phase 225).** Ruling **(B)**. `Query.invocationKey` and

@@ -1867,7 +1867,9 @@ module Conformance =
             Counterexample = typedFailure } ]
 
     /// Certify the `Fuaran.Core.Query` data-acquisition seam (Phase 46): typed-param validation
-    /// (in-type accepts; wrong-type + unknown reject), a non-deterministic query replays
+    /// (in-type accepts; wrong-type + unknown reject; since Phase 226 the all-`Null` argument set,
+    /// built from the declaration, is refused as `RequiredParamsNull` naming every required param,
+    /// while an optional param bound to `Null` is still accepted), a non-deterministic query replays
     /// byte-identically through the Phase 27 capture seam, registry enumeration is id-stable, and the
     /// declaration + result round-trip the codec. Mirrors `capabilityLaws`.
     ///
@@ -1931,6 +1933,38 @@ module Conformance =
              | other ->
                  if validation.IsNone then
                      validation <- Some(sprintf "seed=%d iter=%d: unknown param not rejected: %A" seed i other))
+
+            // `Required` means non-null (Phase 226): the all-`Null` argument set, BUILT from the
+            // declaration rather than drawn, is refused as `RequiredParamsNull` naming every required
+            // param and only those; an optional param may still be bound to `Null`.
+            let qOpt =
+                { q with
+                    Params =
+                        q.Params
+                        @ [ { Name = "p1"
+                              Type = StringType
+                              Required = false } ] }
+
+            let allNull = qOpt.Params |> List.map (fun p -> p.Name, Null)
+
+            let requiredNames =
+                qOpt.Params |> List.filter (fun p -> p.Required) |> List.map (fun p -> p.Name)
+
+            (match Query.validateParams qOpt allNull with
+             | Error(RequiredParamsNull names) when names = requiredNames -> ()
+             | other ->
+                 if validation.IsNone then
+                     validation <-
+                         Some(
+                             sprintf "seed=%d iter=%d: a required param bound to Null was not refused: %A" seed i other
+                         ))
+
+            (match Query.validateParams qOpt [ "p0", Int 42; "p1", Null ] with
+             | Ok() -> ()
+             | Error e ->
+                 if validation.IsNone then
+                     validation <-
+                         Some(sprintf "seed=%d iter=%d: an optional param bound to Null was refused: %A" seed i e))
 
             // byte-identical replay of the realized result through the Phase 27 seam.
             let realized: QueryResult =
@@ -2066,7 +2100,8 @@ module Conformance =
                                  other
                          ))
 
-        [ { Law = "param-validation accepts in-type + rejects type-mismatch / unknown params"
+        [ { Law =
+              "param-validation accepts in-type + rejects type-mismatch / unknown params / a required param bound to Null"
             Passed = validation.IsNone
             Counterexample = validation }
           { Law = "a non-deterministic query replays byte-identically via capture"

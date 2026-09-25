@@ -5223,10 +5223,12 @@ Four theorems, over any registry, any renderers and any host resolver:
    is characterised EXACTLY, which theorem 10's was not: `validate_params_exact` says it accepts
    precisely the sets whose every binding addresses a declared param with a `Null` or an in-type
    cell and that leave no required name unbound — an iff, so the first finding below is read off a
-   definition rather than searched for. Refusals are truthful (`refusal_is_truthful`,
-   `unbound_required_truthful`): an `UnknownParam` names a bound name no param declares, a
-   `ParamTypeMismatch` a declared param with a DIFFERENT type the cell really has, a
-   `RequiredParamsUnbound` only declared names the args really leave out.
+   definition rather than searched for. (Since Phase 226 it also requires that no required name is
+   bound only to `Null`: see "What Phase 226 changed here".) Refusals are truthful
+   (`refusal_is_truthful`, `unbound_required_truthful`, `null_required_truthful`): an
+   `UnknownParam` names a bound name no param declares, a `ParamTypeMismatch` a declared param with
+   a DIFFERENT type the cell really has, a `RequiredParamsUnbound` only declared names the args
+   really leave out, and a `RequiredParamsNull` only declared names the args bind only to `Null`.
 3. **`enumerate_is_registry`** — an id is enumerable exactly when `tryFind` resolves it, and
    `dispatch` raises `NoSuchQuery` exactly off the enumeration (`no_such_iff_unregistered`).
    `register` refuses a held id and extends by exactly one entry otherwise; a registry built by it
@@ -5319,6 +5321,40 @@ encoding, so it could not tell an escaping `field` from a bare one — measured,
 appends the terminator left it green. The escaper case, over an adversarial alphabet, is what goes
 red on that, and it is why that case exists.
 
+### What Phase 226 changed here: the first finding is closed
+
+Phase 226 took ruling (A) on `all_null_accepted` (the operator's, 2026-09-25, recorded as
+`DECISIONS.md` D&lt;TBD-226&gt;): `Required` means a VALUE. `validateParams` gains a third step. A
+required param that is present but bound only to `Null` is refused before any resolver runs, as a
+DISTINCT new case, `RequiredParamsNull`, naming it. A required param that is left out is still
+`RequiredParamsUnbound`, so "present but null" and "missing" stay apart. That is the operator's
+stricter reading of the fix shape named above, chosen over widening what `RequiredParamsUnbound`
+means. The case is appended to `QueryError`, so no tag moves, but every exhaustive match on the
+union breaks. `all_null_accepted` is gone from the model because it is no longer true, and three
+lemmas replaced it (section 9, and section 6 for the third):
+
+- `required_is_non_null` — the positive iff: validation accepts EXACTLY the sets whose every
+  binding is well typed AND that bind every required param to a value (`required_valued`, through
+  `has_value`). The clause the exactness theorem showed missing, relating `Null` to `p_required`,
+  is now there.
+- `all_null_refusal_exact` — the all-`Null` set, built from the declaration, passes the type and
+  presence steps and is refused as `RequiredParamsNull` naming every required param in declaration
+  order (`required_names`). It is accepted only by a declaration that requires nothing.
+- `null_required_truthful` — a `RequiredParamsNull` names only declared names that the args bind,
+  and bind only to `Null`.
+
+A name bound more than once is bound to a value when ANY binding carries one. The model states that
+rather than inheriting `Map.ofList`'s last-wins rule. The capability seam needed no change: its
+values are strings checked against a space, and no space has an absent marker. The shipped seam's
+case moved from "the finding holds" to "the finding is closed", by name. `queryLaws`'
+param-validation law now BUILDS the all-`Null` set and requires the new refusal. The oracle was
+re-extracted, and the differential compares the new case by class and payload and is required to
+reach it. Its generator is unchanged, but the verdict split it measures moved, because argument
+sets that null a required param now refuse. The tallies under "The differential" below are Phase
+187's measurement. One perturbation was run on the model: step 3 raising `RequiredParamsUnbound`
+fails `all_null_refusal_exact`. One was run on production: a `boundToValue` that counts `Null`
+reddens the differential, the forgetful-bridge go-red, the closure case and `queryLaws`.
+
 ### The differential
 
 `Proofs.Oracle`'s query family runs the extracted model beside production with the model's result
@@ -5375,7 +5411,8 @@ the `renderers` record so the model and its extraction stay ASCII. The oracle co
    `unbound_required_truthful`, `no_such_iff_unregistered`, `registered_dispatches`,
    `register_refuses_duplicate`, `register_extends`, `register_keeps_distinct`, `sorted_unique`,
    `invocation_key_id_only`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
-   `dispatch_never_ok_failed`), the first finding (`all_null_accepted`) and, since Phase 225, the
+   `dispatch_never_ok_failed`), since Phase 226 `required_is_non_null`, `all_null_refusal_exact`
+   and `null_required_truthful` where the first finding (`all_null_accepted`) stood, and, since Phase 225, the
    capture key's injectivity (`invocation_key_injective` and the six lemmas under it) where the
    second finding (`key_collision`) stood, over any registry, any renderers and any host resolver. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it opens
@@ -5836,11 +5873,12 @@ separator (which a string value can spell), and `key_collision` was replaced by
 `invocation_key_injective` in `Query.fst` and `Capability.fst`. Theorem 12's "What Phase 225
 changed here" section carries the rest.)_
 
-**`Required` meaning a VALUE** — theorem 12's first finding (`query-all-null-accepted`).
-`validateParams` accepts a required param bound to `Null`, against `QueryParam`'s own doc comment.
-Either the code moves (step 2 counts a `Null` binding of a required param as unbound — a change to
-what a public function accepts) or the comment does; `validate_params_exact` is written as an iff
-so that whichever is chosen is one clause in one definition.
+_(**`Required` meaning a VALUE** — theorem 12's first finding — was on this list and is DONE:
+Phase 226. The operator ruled for (A): the code moved. A required param bound only to `Null` is
+refused as the distinct `RequiredParamsNull`. `all_null_accepted` was replaced by
+`required_is_non_null`, `all_null_refusal_exact` and `null_required_truthful` in `Query.fst`, and
+the ladder row is now `query-required-is-non-null`. Theorem 12's "What Phase 226 changed here"
+section carries the rest.)_
 
 _(**A law family generic over a DOMAIN'S evaluator** was on this list — the other way theorem 11
 named of narrowing its premise — and is DONE: Phase 211. `Conformance.propagationEvaluatorLaws` runs

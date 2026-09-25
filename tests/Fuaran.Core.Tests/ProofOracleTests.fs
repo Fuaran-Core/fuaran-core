@@ -8709,6 +8709,7 @@ let private prodQueryErrRender (e: QueryError) : string =
     | SourceNotResolved r -> sprintf "SourceNotResolved(%s)" r
     | ExecutionFailed(detail, recoverable) -> sprintf "ExecutionFailed(%s;%s)" detail (String.concat "," recoverable)
     | Timeout -> "Timeout"
+    | RequiredParamsNull names -> sprintf "RequiredParamsNull(%s)" (String.concat "," names)
 
 let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     match e with
@@ -8722,6 +8723,7 @@ let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     | ModelQuery.ExecutionFailed(detail, recoverable) ->
         sprintf "ExecutionFailed(%s;%s)" detail (String.concat "," recoverable)
     | ModelQuery.Timeout -> "Timeout"
+    | ModelQuery.RequiredParamsNull names -> sprintf "RequiredParamsNull(%s)" (String.concat "," names)
 
 let private queryErrClass (e: QueryError) : string =
     match e with
@@ -8733,6 +8735,7 @@ let private queryErrClass (e: QueryError) : string =
     | SourceNotResolved _ -> "SourceNotResolved"
     | ExecutionFailed _ -> "ExecutionFailed"
     | Timeout -> "Timeout"
+    | RequiredParamsNull _ -> "RequiredParamsNull"
 
 let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
     match d with
@@ -14860,6 +14863,7 @@ let proofOracleTests =
                         "UnknownParam"
                         "ParamTypeMismatch"
                         "RequiredParamsUnbound"
+                        "RequiredParamsNull"
                         "ExecutionFailed" ] do
                       Expect.isTrue
                           (Set.contains cls t.QClasses)
@@ -14986,12 +14990,15 @@ let proofOracleTests =
 
               Expect.equal (ModelQuery.ids (ModelQuery.enumerate mreg)) [ "q-t" ] "and enumerates the registered one"
 
-          testCase "the first finding holds on the shipped seam — `all_null_accepted`"
+          testCase "the first finding is CLOSED on the shipped seam — `required_is_non_null`"
           <| fun _ ->
-              // THE FIRST FINDING, pinned on production so that a fix turns this case red and sends
-              // its author to the ladder row (`query-all-null-accepted`) and the README's theorem 12
-              // section, which is where it is argued. The second finding, `key_collision`, was
-              // pinned here beside it until Phase 225 closed it; its closure is the next case.
+              // Phase 226. `all_null_accepted` was pinned here as "the finding holds": a REQUIRED
+              // param bound to Null passed validation and the resolver ran. `Required` now means a
+              // VALUE — a third step refuses a required param bound only to Null as the DISTINCT
+              // `RequiredParamsNull`, apart from `RequiredParamsUnbound` (left out) — the model proves
+              // the exact characterisation (`required_is_non_null`) and what the all-Null set gets
+              // (`all_null_refusal_exact`), and this case pins the CLOSURE on production.
+              // The ladder row is `query-required-is-non-null`; the README's theorem 12 argues it.
               let q: Query =
                   { Id = "q-f"
                     Params =
@@ -15014,10 +15021,10 @@ let proofOracleTests =
               Expect.equal
                   mq.q_params
                   ModelQuery.collision_params
-                  "the declaration IS the one the model exhibits the collision on"
+                  "the declaration IS the one the model exhibits its findings on"
 
-              // `all_null_accepted`: a REQUIRED param bound to Null passes validation, and the
-              // resolver runs — `Required` constrains the presence of a name, never of a value.
+              // The all-Null set, BUILT from the declaration: refused as present-but-null, naming the
+              // required param only.
               let nulls = [ "a", Cell.Null; "b", Cell.Null ]
 
               Expect.equal
@@ -15027,18 +15034,33 @@ let proofOracleTests =
 
               Expect.equal
                   (Query.validateParams q nulls)
-                  (Ok())
-                  "every param bound to Null is ACCEPTED, the required one included"
+                  (Error(RequiredParamsNull [ "a" ]))
+                  "every param bound to Null is REFUSED as RequiredParamsNull, naming the required one and only it"
+
+              Expect.equal
+                  (ModelQuery.required_names mq.q_params)
+                  [ "a" ]
+                  "which is the model's `required_names`, what `all_null_refusal_exact` says it names"
 
               Expect.equal
                   (Query.validateParams q [ "a", Cell.Null ])
-                  (Ok())
-                  "and so is the required param bound to Null on its own"
+                  (Error(RequiredParamsNull [ "a" ]))
+                  "the required param bound to Null on its own is refused the same way"
 
               Expect.equal
                   (Query.validateParams q [])
                   (Error(RequiredParamsUnbound [ "a" ]))
-                  "where leaving the same name out is refused — the two are told apart by the NAME alone"
+                  "while leaving it out is still RequiredParamsUnbound — present-but-null and missing are told apart"
+
+              Expect.equal
+                  (Query.validateParams q [ "a", Str "x"; "b", Cell.Null ])
+                  (Ok())
+                  "an OPTIONAL param bound to Null is still accepted — `Required` is what moved"
+
+              Expect.equal
+                  (Query.validateParams q [ "a", Cell.Null; "a", Str "x" ])
+                  (Ok())
+                  "a required name with SOME binding to a value is bound (`has_value`), whatever else binds it"
 
               let ran = ref false
 
@@ -15046,10 +15068,10 @@ let proofOracleTests =
                   (Query.invoke q [ "a", Cell.Null ] (fun _ ->
                       ran.Value <- true
                       Pending))
-                  (Ok Pending)
-                  "so the resolver is reached with its required param absent"
+                  (Error(RequiredParamsNull [ "a" ]))
+                  "so the resolver is no longer reached with its required param absent"
 
-              Expect.isTrue ran.Value "and it ran"
+              Expect.isFalse ran.Value "and it did not run"
 
           testCase
               "the second finding is CLOSED on the shipped seam — `invocation_key_injective`, in both seams and the pipeline"

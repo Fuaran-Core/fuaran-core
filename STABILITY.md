@@ -2608,6 +2608,48 @@ No public member of `Fuaran.Core.Conformance` moves. `docs/conformance-corpus.md
 two Core classes map to one host class. The laws corpus is byte-identical. DECISIONS.md D59 has the
 ruling.
 
+### `Required` means non-null — a required query param bound only to `Null` is refused as the new `QueryError.RequiredParamsNull` (Phase 226) — BREAKING (behaviour, and a case added to a closed union)
+
+**What changed.** `Query.validateParams`, and so `Query.invoke` and `QueryRegistry.dispatch`, gains
+a third step. A `Required` parameter that is PRESENT but bound only to `Null` (every binding of its
+name is `Null`) is refused before any resolver runs, with a new case,
+`QueryError.RequiredParamsNull of names: string list`, naming every such parameter in declaration
+order. A required parameter that is left OUT is still `RequiredParamsUnbound`, so a caller can tell
+"present but null" from "missing". The steps run in order and the first refusal is the answer: an
+unknown or mistyped binding first, then a missing required parameter, then a null-bound one. Before
+this change `Required` checked only that the NAME was present. `[ "a", Null ]` was accepted for a
+required `a`, and the resolver ran with its required parameter absent.
+
+**Two breaks, both in this draft.**
+- **Behaviour.** The argument sets that newly refuse are exactly those that bind some `Required`
+  parameter, and bind it only to `Null`. That includes the all-`Null` set of any declaration that
+  requires something. An optional parameter bound to `Null` is accepted as before. A required name
+  with at least one non-`Null` binding is bound, whatever else binds it.
+- **Source.** `QueryError` is a closed union, and it gains a case (tag 8, appended after `Timeout`
+  so no existing tag moves). **Every exhaustive `match` on `QueryError` becomes incomplete.** F# warns
+  FS0025, which fails a build that treats warnings as errors, and an unhandled `RequiredParamsNull`
+  throws `MatchFailureException` at run time. `api/Fuaran.Core.Query.txt` records the case.
+
+**What a consumer does.** If a caller relied on passing `Null` for a required parameter so that the
+resolver could default it, **declare that parameter optional** (`Required = false`). The resolver
+then sees the `Null` exactly as it did before. Add a `RequiredParamsNull names` arm to every
+exhaustive match on `QueryError`. Where the caller's remedy is the same as for a missing parameter,
+handle it beside `RequiredParamsUnbound`.
+
+**The capability seam does not change.** `Capability.validateArgs` takes string arguments checked
+against a `ValueSpace`, and no value space has an absent marker. A bound required hole therefore
+always carries an in-space value, and "bound" and "bound to a value" are the same thing there.
+`InvokeError` gains nothing. Its doc comments, and `SigEntry`'s, now say this.
+
+**Where it is certified.** `required_is_non_null`, `all_null_refusal_exact` and
+`null_required_truthful` in `proofs/Query.fst`. The ladder row `query-required-is-non-null` replaces
+`query-all-null-accepted`. The oracle is re-extracted, and the query differential compares the new
+refusal by class and payload and reaches it. `Conformance.queryLaws`' param-validation law now
+BUILDS the all-`Null` set from its declaration and requires `RequiredParamsNull` naming exactly the
+required params, and it also requires that an optional `Null` is still accepted. The law count (7)
+and the family's `cases` cell (1400) are unchanged; only the law's name gained a clause. The laws
+corpus is byte-identical. DECISIONS.md D&lt;TBD-226&gt; has the ruling.
+
 ## 0.30.1 — draft
 
 **This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries

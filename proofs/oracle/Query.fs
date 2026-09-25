@@ -409,6 +409,7 @@ type query_error =
 | SourceNotResolved of Prims.string
 | ExecutionFailed of Prims.string * Prims.list<Prims.string>
 | Timeout
+| RequiredParamsNull of Prims.list<Prims.string>
 
 
 let uu___is_NoSuchQuery : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
@@ -552,6 +553,21 @@ let uu___is_Timeout : query_error  ->  Prims.bool = (fun ( projectee  :  query_e
      end
 | uu___ -> begin
      false
+     end))
+
+
+let uu___is_RequiredParamsNull : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| RequiredParamsNull (names) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RequiredParamsNull__item__names : query_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| RequiredParamsNull (names) -> begin
+     names
      end))
 
 
@@ -807,6 +823,35 @@ if (p.p_required && (not ((has_key p.p_name a)))) then begin
      end))
 
 
+let rec has_value : Prims.string  ->  arguments  ->  Prims.bool = (fun ( k  :  Prims.string ) ( a  :  arguments ) -> (match (a) with
+| [] -> begin
+     false
+     end
+| ((k', c))::t -> begin
+     (((Prims.op_Equals k k') && (not ((match (c) with
+| Null -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)))) || (has_value k t))
+     end))
+
+
+let rec null_required : Prims.list<query_param>  ->  arguments  ->  Prims.list<Prims.string> = (fun ( ps  :  Prims.list<query_param> ) ( a  :  arguments ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+      
+if ((p.p_required && (has_key p.p_name a)) && (not ((has_value p.p_name a)))) then begin
+     (p.p_name)::(null_required t a)
+     end else begin
+     (null_required t a)
+     end
+     end))
+
+
 let validate_params : query  ->  arguments  ->  outcome<unit, query_error> = (fun ( q  :  query ) ( a  :  arguments ) -> (match ((check_args q.q_params (param_names q.q_params) a)) with
 | Error (e) -> begin
      Error (e)
@@ -814,7 +859,13 @@ let validate_params : query  ->  arguments  ->  outcome<unit, query_error> = (fu
 | Ok (()) -> begin
      (match ((unbound_required q.q_params a)) with
 | [] -> begin
+     (match ((null_required q.q_params a)) with
+| [] -> begin
      Ok (())
+     end
+| n -> begin
+     Error (RequiredParamsNull (n))
+     end)
      end
 | u -> begin
      Error (RequiredParamsUnbound (u))
@@ -1002,6 +1053,29 @@ let rec nulls_of : Prims.list<query_param>  ->  arguments = (fun ( ps  :  Prims.
      end
 | (p)::t -> begin
      (((p.p_name), (Null)))::(nulls_of t)
+     end))
+
+
+let rec required_valued : Prims.list<query_param>  ->  arguments  ->  Prims.bool = (fun ( ps  :  Prims.list<query_param> ) ( a  :  arguments ) -> (match (ps) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     (((not (p.p_required)) || (has_value p.p_name a)) && (required_valued t a))
+     end))
+
+
+let rec required_names : Prims.list<query_param>  ->  Prims.list<Prims.string> = (fun ( ps  :  Prims.list<query_param> ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+      
+if p.p_required then begin
+     (p.p_name)::(required_names t)
+     end else begin
+     (required_names t)
+     end
      end))
 
 
