@@ -1,5 +1,45 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-25 — D58: a snapshot at sequence zero carries the CONFIGURED genesis — ruling (A), the `...With` family; (B), refusing the boundary, is declined
+
+**Decided (operator, 2026-09-25; Phase 227).** Ruling **(A) — thread the genesis.** Phase 191
+found, and `compact_at_zero_needs_the_empty_genesis` proved, that `OpStream.snapshotAtOpt` wrote the
+literal `""` as the boundary hash at sequence zero where every chain walker (`verifyChainWith`,
+`firstChainBreakWith`, `appendWith`) starts from `cfg.Genesis`. Under a non-empty genesis, the
+compaction at zero of an intact stream therefore failed `verifyAcross`. Neither shipped config
+(`canonicalConfig`, `legacyActorConfig`) is affected, because both carry the empty genesis.
+`StreamConfig` is a public record, though, so a domain could configure its own genesis and would meet
+the defect on its first compaction at zero.
+
+**What shipped.** Three public members were ADDED: `snapshotAtOptWith cfg`, `compactWith cfg` and
+`compactChainOnlyWith cfg`. Each seeds the boundary at zero with `cfg.Genesis`. `snapshotAtOpt`
+became `snapshotAtOptWith canonicalConfig`. `snapshotAt`, `snapshotAtChainOnly`, `compact` and
+`compactChainOnly` keep their signatures and their bytes; each is the canonical config's
+instantiation. No published member was retyped. A new parameter on an existing function would have
+been a `retype`, and the class had to be `additive` to ride the 0.31.0 draft. The surface gate
+reported the move as additions only. A digest vector in `Proofs.Oracle` pins the strict and
+chain-only snapshots at zero of a fixed stream. The same case holds every canonical entry point equal
+to its `...With` form, at both shipped configs and at every boundary.
+
+**The proof side moved with it.** The model's `compact` in `proofs/Chain.fst` takes the genesis. The
+split theorem `compact_preserves_verify` and its corollary `compact_verifies_iff_original` LOSE the
+condition `n == PZero ==> genesis == ""`, which makes them strictly stronger. The negative theorem is
+restated as the positive `compact_at_zero_verifies_under_any_genesis`, and the oracle is re-extracted.
+The pinned production case moves from "the finding holds" to "the finding is closed". Under genesis
+`g0`, production's `...With` family agrees with the model at every boundary in both modes and
+verifies across at zero.
+
+**Declined: (B), refusing `atSeq = 0` under a non-empty genesis with a typed error.** It would have
+removed a legitimate operation, compacting at zero, to protect an internal constant. It would also
+have added an error case to an existing `Result` for no gain in what a host can do. Nothing about
+(A) needs a refusal, because the value a host needs at zero is already in the config it holds.
+
+**What stays an OBLIGATION rather than a theorem: verify, then compact.** `compact` reads the
+boundary record's hash and trusts it. So `compact_preserves_verify` gives the compacted stream's
+verdict only over a prefix verified before it was discarded. (A) does not change that, and no
+signature can. It is now stated where a host reads it: on `compact`'s and `compactChainOnly`'s doc
+comments, in the README, and in `STABILITY.md`'s hash-chain integrity posture.
+
 ## 2026-09-25 — D57: a theorem over the CONCRETE pipeline driver is taken — Phase 154 supersedes, for `Fuaran.Core.DataFrame`, D14's "declined as a domain's cost" and Phase 203's `law-tested-by-design` exclusion
 
 **Decided (operator, 2026-09-25; Phase 154).** `proofs/Pipeline.fst` models `Fuaran.Core.DataFrame`'s

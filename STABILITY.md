@@ -2533,7 +2533,7 @@ non-empty genesis should compact through `compactWith cfg`. The canonical `compa
 boundary hash is read and trusted, so the compacted stream's verdict equals the original's only over
 a prefix verified first. The proof side moved in the same commit. The model's `compact` takes the
 genesis, `compact_preserves_verify` drops its genesis condition, and the finding is restated as
-`compact_at_zero_verifies_under_any_genesis`. DECISIONS.md DXX has the ruling and the declined option.
+`compact_at_zero_verifies_under_any_genesis`. DECISIONS.md D58 has the ruling and the declined option.
 
 ## 0.30.1 — draft
 
