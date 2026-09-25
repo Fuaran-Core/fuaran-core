@@ -311,7 +311,7 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600",
+      "cases": "800",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
     },

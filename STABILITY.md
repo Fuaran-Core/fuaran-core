@@ -2570,13 +2570,43 @@ back by that key.
   treats the pre-bump journal as read-only history.
 - No compatibility window ships (no versioned `#2#` prefix, no read-both period). This was the
   operator's ruling on the census: no host journals these keys today, so a window would protect
-  nothing and would add permanent surface. See `DECISIONS.md` D59.
+  nothing and would add permanent surface. See `DECISIONS.md` D60.
 - A host whose journal lives only for one process (an in-memory sink) is unaffected.
 
 **What else moves with it.** The cross-host law corpus pins literal capability keys, and the other
 language ports reimplement the key. Both follow this release at their consumer's Core pin raise, in
 that consumer's own change-set. Nothing in this repository's published corpus
 (`conformance/laws/transform-laws.json`) moves.
+
+### One payload for the graft-containment refusal — `DiffError.TargetNotAContainer`'s field is `target` (Phase 228) — BREAKING (one named field renamed; by-name use only)
+
+**What changed.** `Diff.DiffError.TargetNotAContainer of parent: 'Id * kindTag: string` is now
+`TargetNotAContainer of target: 'Id * kindTag: string`. That is the payload its apply-side sibling
+`Rejection.NotAContainer` has always had. Both are raised from one definition,
+`Ops.firstUncontained`, which `Diff.toOpsContained` now calls instead of re-stating it. The
+function is `internal`, so no new public surface comes with it. A named field is source surface,
+so the change is breaking and rides this breaking draft. **`api/Fuaran.Core.Ops.txt` does not move,
+and that is not an oversight.** The baseline records a union case by its field TYPES
+(`NewTargetNotAContainer #2(!0, System.String)`), not by its field names, so a field rename is
+invisible to it and the gate prints no `retype`. The class is stated here instead.
+
+**Migration, one line.** Construction or matching BY NAME changes:
+`TargetNotAContainer(parent = …)` becomes `TargetNotAContainer(target = …)`. Positional
+construction and matching (`TargetNotAContainer(p, k)`) are unaffected, and so is the runtime
+value: the case, its tag and its field order do not move.
+
+**One law list grows.** `Conformance.diffContainedLaws` reports a fourth subject law, **refusal
+correspondence**, "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft
+through applyContained refuses NotAContainer(t, k))". Wherever the diff refuses, the law BUILDS the
+offending nesting: the subtree `after` carries at `t` is cut out and re-inserted under its own
+parent through `Ops.applyContained`. That insert must refuse with the same offender and the same
+kind tag. The family now returns six results where it returned five, and its roster `cases` cell
+reads 800 where it read 600. A consumer asserting the family's result COUNT updates that number. A
+consumer that reads the laws by name, or checks that all passed, sees one more green law at any
+coherent witness. At the reference witness the correspondence is asked on 180 of 200 iterations.
+No public member of `Fuaran.Core.Conformance` moves. `docs/conformance-corpus.md` records that the
+two Core classes map to one host class. The laws corpus is byte-identical. DECISIONS.md D59 has the
+ruling.
 
 ## 0.30.1 — draft
 

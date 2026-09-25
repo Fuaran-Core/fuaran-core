@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-09-25 — D59: the capture key's pre-image becomes injective by an OUTRIGHT change — no versioned key scheme, because no host journals these keys
+## 2026-09-25 — D60: the capture key's pre-image becomes injective by an OUTRIGHT change — no versioned key scheme, because no host journals these keys
 
 **Decided (operator, 2026-09-25; Phase 225).** Ruling **(B)**. `Query.invocationKey` and
 `Capability.invocationKey` build their pre-image through ONE canonicaliser, `Hash.canonicalFields`,
@@ -74,6 +74,48 @@ equality calls them equal too, and the closure test pins both facts together.
 **A measurement lesson worth keeping.** The query differential compares the capture key byte for byte and
 stayed GREEN under a `field` that only appended the terminator: its generator draws no character of
 the encoding. The escaper case exists because of that measurement, and it goes red on that `field`.
+## 2026-09-25 — D59: one payload for the graft-containment refusal — `DiffError.TargetNotAContainer` names its `target`, ruling (B); option (A) declined
+
+**Decided (operator, 2026-09-20; executed by Phase 228).** Core refused the graft-containment
+shape (a node holding children while `canHold` refuses it) under two cases:
+`Rejection.NotAContainer of target: 'Id * kindTag` on the apply path and
+`Diff.DiffError.TargetNotAContainer of parent: 'Id * kindTag` on the diff path. Both named the same
+offender, but under two field names. The Tidy-Up bundle Phase 161 filed ("one refusal name for the
+graft-containment shape") put two options to the operator:
+
+- **(A) One CASE:** retire `TargetNotAContainer` and have the diff return the apply envelope's
+  `NotAContainer`. **Declined.** `DiffError` and `Rejection` answer different questions (why no
+  script exists, and why an op was refused). A diff error that borrowed the apply envelope would
+  have to carry `Rejection`'s other cases into a result type that can never raise them. The
+  difference is the ENVELOPE, and the envelope is correctly two types.
+- **(B) One PAYLOAD:** keep both cases and give them one field name, `target`, with one definition
+  behind them and a law holding them to the same trees. **Taken.**
+
+**What landed.** The field is renamed `parent` → `target` (source-breaking for construction and
+matching by name, so it rides the `0.31.0` draft, and STABILITY.md has the one-line migration).
+The shard expected the surface gate to print `retype` for this. It does not, because
+`api/Fuaran.Core.Ops.txt` records a union case by its field TYPES and not by its field names. So
+the class is carried by the STABILITY entry and not by the baseline.
+`Ops.firstUncontained` becomes `internal`, and `Diff.toOpsContained` calls it instead of re-stating
+its lambda. The shard said the two already shared that predicate. They shared its TEXT, not its
+definition, and after this phase they share the definition. `Conformance.diffContainedLaws` gains
+the **refusal correspondence** law. Wherever the diff refuses with `TargetNotAContainer(t, k)`, it
+builds the offending graft: the subtree at `t`, cut out of `after` and re-inserted under its own
+parent. `Ops.applyContained` must then refuse that graft with `NotAContainer(t, k)`. The law skips
+two cases rather than counting them: a ROOT offender, which has no parent to graft under, and a host
+parent the predicate refuses once the graft is cut out of it. The second arises because a `canHold`
+may read the child list (Phase 140's `child_blind`), and that insert would be refused at the parent
+clause instead. At the reference witness the law is asked on 180 of 200 iterations. A predicate
+that is not a function of the node turns it red (`OpsTests`, Phase 228). `docs/conformance-corpus.md`
+records that the two Core classes map to one host class.
+
+**The proof model follows the rename (operator, 2026-09-25).** `proofs/TreeDiff.fst`'s
+`diff_error` spells the field `target` too, and `diff_contained_locates` projects it under that
+name. This is one perturbation. TreeDiff verified on its first run, the oracle was re-extracted and
+not hand-edited, and `proofs/check.ps1 -Runs 3` is green. The extracted oracle and the
+differentials over it match POSITIONALLY, so no statement and no comparison moved. The rename keeps
+the model's vocabulary equal to the package's.
+
 ## 2026-09-25 — D58: a snapshot at sequence zero carries the CONFIGURED genesis — ruling (A), the `...With` family; (B), refusing the boundary, is declined
 
 **Decided (operator, 2026-09-25; Phase 227).** Ruling **(A) — thread the genesis.** Phase 191

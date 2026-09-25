@@ -81,7 +81,7 @@ the family is guarded, which is what the `Adequacy` cell beside it answers.
 | `Conformance.dagBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — | 480 | `unconditional` | `built` |
 | `Conformance.dagLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 400 | `unconditional` | `built` |
 | `Conformance.deferredLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
-| `Conformance.diffContainedLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `guarded-reached` | `drawn` |
+| `Conformance.diffContainedLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 800 | `guarded-reached` | `drawn` |
 | `Conformance.diffLaws` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `unconditional` | `none` |
 | `Conformance.dirtyPropagationLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `none` |
 | `Conformance.encoderInjectivityLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 200 | `unconditional` | `none` |

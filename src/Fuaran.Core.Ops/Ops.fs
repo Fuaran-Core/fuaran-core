@@ -21,6 +21,11 @@ type Rejection<'Id> =
     /// an `InsertChild` carries, which is a node of the caller's own graft. `kindTag` is always that
     /// node's own. Only the container-aware `applyContained` / `canApplyContained` raise this; the
     /// plain `apply` / `canApply` treat every node as able to hold children.
+    ///
+    /// The graft-interior site is defined by `Ops.firstUncontained`, the single definition of the
+    /// shape; its diff-side sibling is `Diff.DiffError.TargetNotAContainer`, which names the same
+    /// offender under the same payload (Phase 228), and `Conformance.diffContainedLaws` holds the two
+    /// refusals to the same trees.
     | NotAContainer of target: 'Id * kindTag: string
     /// A reorder whose proposed order is not a permutation of the parent's children.
     | ReorderMismatch of parent: 'Id * expected: 'Id list * got: 'Id list
@@ -132,7 +137,14 @@ module Ops =
     /// The predicate is `Diff.toOpsContained`'s, deliberately: the diff path has walked an `after`
     /// tree for exactly this shape since Phase 09, and the accept path was the one place the check
     /// was missing — word for word Phase 137's situation with `DuplicateIdInTree`.
-    let private firstUncontained (canHold: 'Node -> bool) (w: NodeWitness<'Node, 'Id>) (node: 'Node) : 'Node option =
+    ///
+    /// **The single definition of the graft-containment shape (Phase 228).** Both refusals of that
+    /// shape are raised from THIS function — `Rejection.NotAContainer` on the apply path (through
+    /// `validateGraftContainment`) and `Diff.DiffError.TargetNotAContainer` on the diff path (through
+    /// `Diff.toOpsContained`, which calls it over the whole `after` tree) — and both name the node it
+    /// returns under one payload, `target * kindTag`. It is `internal` rather than `private` only so
+    /// the `Diff` module can call it instead of re-stating it; it is not public surface.
+    let internal firstUncontained (canHold: 'Node -> bool) (w: NodeWitness<'Node, 'Id>) (node: 'Node) : 'Node option =
         Tree.preorder w node
         |> List.tryFind (fun n -> not (List.isEmpty (w.Children n)) && not (canHold n))
 
@@ -758,7 +770,15 @@ module Diff =
         /// (Container-aware diff, Phase 09) the `after` tree places children under a node that
         /// `canHold` rejects — a container-legal script is impossible, so the diff is refused
         /// rather than emitting an `InsertChild`/`MoveNode` under a leaf (the F1 hazard).
-        | TargetNotAContainer of parent: 'Id * kindTag: string
+        ///
+        /// `target` is the first such node of `after` in preorder, as `Ops.firstUncontained` — the
+        /// single definition of the shape — finds it, and `kindTag` is that node's own. The payload
+        /// is its apply-side sibling's, `Rejection.NotAContainer`: grafting the same subtree through
+        /// `Ops.applyContained` refuses with `NotAContainer` naming the same `target` and `kindTag`,
+        /// which `Conformance.diffContainedLaws` asserts. (Phase 228 renamed the field from `parent`,
+        /// the operator's ruling (B) of 2026-09-20; positional construction and matching are
+        /// unaffected.)
+        | TargetNotAContainer of target: 'Id * kindTag: string
 
     /// Derive a script such that `Ops.applyAll (toOps w idw before after) before`
     /// reproduces `after` structurally. Relocated subtrees diff to `MoveNode` (never
@@ -922,9 +942,6 @@ module Diff =
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
         // Every (new) parent the script targets is an `after` node that has children. If any
         // such node cannot hold children, no container-legal script exists.
-        match
-            Tree.preorder w after
-            |> List.tryFind (fun p -> not (List.isEmpty (w.Children p)) && not (canHold p))
-        with
+        match Ops.firstUncontained canHold w after with
         | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
         | None -> toOps w idw before after

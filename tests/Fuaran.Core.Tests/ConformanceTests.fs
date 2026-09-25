@@ -424,8 +424,8 @@ let tests =
 
               Expect.equal
                   (List.length results)
-                  5
-                  "reconstruction + applyability + refusal exactness + the two Phase 223 guards"
+                  6
+                  "reconstruction + applyability + refusal exactness + Phase 228's refusal correspondence + the two Phase 223 guards"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

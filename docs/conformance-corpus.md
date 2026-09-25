@@ -250,6 +250,23 @@ ids and `ReorderMismatch`'s two orders, which are evidence for a class rather th
 And the container-capability refusal (`NotAContainer` / `ChildlessKind`), which comes from a
 predicate the engine is HANDED rather than from anything in a wire document.
 
+One correspondence about that refusal is pinned all the same, because it holds inside Core rather
+than across hosts. Core raises the graft-containment shape under two names: `Rejection.NotAContainer`
+when an op is applied, and `Diff.DiffError.TargetNotAContainer` when a diff is derived. **The two map
+to ONE host class**, the one a host raises for its container refusal (`ChildlessKind` on the hosts
+named above).
+
+| Core class | Raised by | Payload | Host class |
+|---|---|---|---|
+| `NotAContainer` | `Ops.applyContained` / `canApplyContained`, at the insert's parent or the graft's interior | `target`, `kindTag` | the host's one container refusal |
+| `TargetNotAContainer` | `Diff.toOpsContained`, at the first offending node of `after` | `target`, `kindTag` | the same class |
+
+Both are defined by `Ops.firstUncontained` and carry one payload, the offender's id and its own kind
+tag (Phase 228 renamed the diff case's field from `parent`). So a host that maps one of them has
+mapped both. `Conformance.diffContainedLaws` holds the two to the same trees: wherever the diff
+refuses with `TargetNotAContainer(t, k)`, it builds the same graft, and `applyContained` must refuse
+it with `NotAContainer(t, k)`.
+
 ### Adoption
 
 The F# host certifies first, and its `adoption` entry reads `adopted`. The other four read

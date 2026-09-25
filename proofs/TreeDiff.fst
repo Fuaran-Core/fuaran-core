@@ -106,7 +106,7 @@ open Preservation
 type diff_error =
   | RootIdMismatch      : before:string -> after:string -> diff_error
   | DuplicateIdInTree   : string -> diff_error
-  | TargetNotAContainer : parent:string -> kind_tag:string -> diff_error
+  | TargetNotAContainer : target:string -> kind_tag:string -> diff_error
 
 (* ======================================================================================
    2. The walk and the two maps `toOps` builds before its first pass.
@@ -342,7 +342,8 @@ let to_ops (before after:tree) : Tot (outcome (list op) diff_error) =
        | Some d -> Error (DuplicateIdInTree d)
        | None -> Ok (script_of (diff_blocks before after)))
 
-(* F#: `Tree.preorder w after |> List.tryFind (fun p -> not (List.isEmpty (w.Children p)) && not
+(* F#: `Ops.firstUncontained canHold w after` (Phase 228; before it, the same body inline), which is
+   `Tree.preorder w after |> List.tryFind (fun p -> not (List.isEmpty (w.Children p)) && not
    (canHold p))` — the first `after` node that HAS children and cannot hold them. *)
 let rec first_non_container (ch:tree -> bool) (ns:list tree) : Tot (option tree) (decreases ns) =
   match ns with
@@ -726,7 +727,7 @@ let diff_contained_locates (ch:tree -> bool) (b a:tree)
                     TargetNotAContainer? (Error?._0 (to_ops_contained ch b a)))
           (ensures (exists (n:tree).
                       mem n (pre a) /\ Cons? (kids_of n) /\ ~(ch n) /\
-                      TargetNotAContainer?.parent (Error?._0 (to_ops_contained ch b a)) == tid_of n /\
+                      TargetNotAContainer?.target (Error?._0 (to_ops_contained ch b a)) == tid_of n /\
                       TargetNotAContainer?.kind_tag (Error?._0 (to_ops_contained ch b a)) == kind_of n))
   = match first_non_container ch (pre a) with
     | Some n -> first_non_container_some ch (pre a) n
