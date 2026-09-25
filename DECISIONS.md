@@ -55,6 +55,39 @@ capability instead of gaining the call. The ruling is that the slot is a paramet
 Recorded so that (B) is not re-proposed as the "non-breaking" alternative: it is non-breaking only
 because it forbids the case outright.
 
+## 2026-09-25 — D62: per-language Core packages are cut on a named trigger — a SECOND domain needing Core semantics in that language — and not before
+
+**Decided (operator, 2026-09-25).** This repository is the implementation of `Fuaran.Core` for .NET,
+and the reference implementation and specification owner for every other host language. The
+UI domain's TypeScript, Python, Go and Rust hosts each reimplement the Core subsystems they need
+(the `Transform` / DataFrame evaluator, `FunctionRegistry.findBySignature`,
+`Capability.invocationKey`, list-parameter substitution and the lenient-ingest rules) as twins inside
+their own packages. They certify against the law vectors and wire corpora this repository is the
+reference for.
+
+**A per-language Core package (`fuaran-core-<lang>`) is NOT cut now.** Every non-.NET port of a Core
+subsystem today serves one domain, so each package would open with a single consumer: the host it
+was carved out of. That is structure ahead of demand. The second domain to reach a browser consumes
+this repository's own code compiled to JavaScript with Fable, not a TypeScript reimplementation, so
+for JavaScript the Fable route is a live alternative to a port.
+
+**The trigger.** Cut `fuaran-core-<lang>` when a SECOND domain needs Core semantics in that language
+by a route other than Fable. That is the first point at which two consumers would otherwise each
+carry their own twins of the same subsystems. Until then the extraction is PREPARED, so that it will
+be a copy and not an untangling:
+
+- Each host keeps its Core twins behind an internal boundary that imports nothing from its domain's
+  packages, held there by a test rather than by convention.
+- This repository emits EVERY law set it is the reference for, so a future per-language Core
+  package has its certification suite on its first day.
+
+**Declined:**
+- **(1) Cut all four packages now.** Each would have one consumer, and add a release rhythm, version
+  pins and a publication path per language.
+- **(2) Leave the twins where they are, with no boundary.** A later cut would then be an untangling
+  across domain packages, and a second domain in the same language would reimplement the twins a
+  second time.
+
 ## 2026-09-25 — D61: `Required` means non-null — ruling (A), refused as a DISTINCT `RequiredParamsNull`; (B), a doc-only correction, is declined
 
 **Decided (operator, 2026-09-25; Phase 226).** Ruling **(A)**. A `Required` query parameter that is
