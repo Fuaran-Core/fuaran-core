@@ -95,6 +95,35 @@ type ProbeUnion =
     | ProbeEmpty
     | ProbeCarrying of int * string
 
+/// A single-case union with a NAMED field — its field property sits on the union type itself
+/// and carries the two-argument `(Field, seq)` mapping (Phase 237).
+type ProbeSingle = ProbeSingle of value: int
+
+/// A struct union — its fields sit on the union type itself too, each carrying
+/// `(Field, variant, seq)` (Phase 237).
+[<Struct>]
+type ProbeStructUnion =
+    | ProbeStructA of a: int
+    | ProbeStructB of b: string * c: int
+
+/// Phase 237's go-red fixture pair, and its control. Three modules, each declaring the same
+/// union; `Before` and `After` differ ONLY by one field's name, `Same` by nothing. Rendered from
+/// this assembly's own IL, so the pair is a real compiled pair rather than two edited strings.
+module ProbeFieldsBefore =
+    type Shape =
+        | Empty
+        | Held of parent: int * kindTag: string
+
+module ProbeFieldsAfter =
+    type Shape =
+        | Empty
+        | Held of target: int * kindTag: string
+
+module ProbeFieldsSame =
+    type Shape =
+        | Empty
+        | Held of parent: int * kindTag: string
+
 /// An interface — the `interface-marker` token, which is what lets the classifier call a
 /// member added to a published interface breaking without re-reading the assembly.
 type IProbeSeam =
@@ -320,6 +349,81 @@ let internal renderAssembly (dllPath: string) : string list =
             else
                 vis = TypeAttributes.Public
 
+        // Phase 237 — the FIELD NAMES of every union case, keyed by (union, tag).
+        //
+        // A case's factory signature carries its field TYPES only, and its parameter names
+        // are a lossy spelling of the field names (`target` is emitted as `_target`), so they
+        // are not read. The names come from the properties the compiler emits for each field,
+        // which carry `CompilationMappingAttribute(Field, variant, seq)`: on the case's nested
+        // class for a multi-case reference union, on the union type itself for a single-case
+        // or a struct union. The (Field, seq) two-argument form is the single-case shape, and
+        // its variant is 0. What the renderer does with a case whose fields it could not name
+        // is the conservative thing — it renders the types alone — and the guard test
+        // "every carrying union case renders its field names" turns that into a failure.
+        let caseFieldNames =
+            Collections.Generic.Dictionary<struct (string * int), ResizeArray<int * string>>()
+
+        let isUnion (th: TypeDefinitionHandle) =
+            match mappingInts r ((r.GetTypeDefinition th).GetCustomAttributes()) with
+            | Some(flags :: _) -> (flags &&& SourceConstructMask) = SourceConstructSumType
+            | _ -> false
+
+        for th in r.TypeDefinitions do
+            let td = r.GetTypeDefinition th
+
+            let unionOwner =
+                if isUnion th then
+                    Some th
+                elif td.IsNested && isUnion (td.GetDeclaringType()) then
+                    Some(td.GetDeclaringType())
+                else
+                    None
+
+            match unionOwner with
+            | None -> ()
+            | Some u ->
+                for ph in td.GetProperties() do
+                    let pd = r.GetPropertyDefinition ph
+
+                    match mappingInts r (pd.GetCustomAttributes()) with
+                    | Some(flags :: rest) when (flags &&& SourceConstructMask) = SourceConstructField ->
+                        let variant, seq =
+                            match rest with
+                            | [ v; s ] -> v, s
+                            | [ s ] -> 0, s
+                            | _ -> -1, -1
+
+                        if variant >= 0 then
+                            let key = struct (fullName u, variant)
+
+                            match caseFieldNames.TryGetValue key with
+                            | true, xs -> xs.Add((seq, r.GetString pd.Name))
+                            | _ -> caseFieldNames[key] <- ResizeArray [ (seq, r.GetString pd.Name) ]
+                    | _ -> ()
+
+        /// The factory's parameter list, each type prefixed with its field name when the
+        /// case's fields were all named — `target: !0, kindTag: System.String`.
+        ///
+        /// Measured, not assumed: a multi-case union's field is reached TWICE by the pass
+        /// above, once on the case class and once on the union type, both rows naming the same
+        /// (variant, seq). Hence `distinct` — and a genuine disagreement (two names at one
+        /// position) still fails the count below and falls back, which the guard test catches.
+        let caseParameters (union: string) (tag: int) (types: ImmutableArray<string>) : string =
+            let named =
+                match caseFieldNames.TryGetValue(struct (union, tag)) with
+                | true, xs ->
+                    let names = xs |> Seq.distinct |> Seq.sortBy fst |> Seq.map snd |> List.ofSeq
+
+                    if names.Length = types.Length then
+                        Some(List.map2 (fun n t -> n + ": " + t) names (List.ofSeq types))
+                    else
+                        None
+                | _ -> None
+
+            match named with
+            | Some ps -> String.Join(", ", ps)
+            | None -> String.Join(", ", types)
+
         for th in r.TypeDefinitions do
             let td = r.GetTypeDefinition th
 
@@ -403,7 +507,14 @@ let internal renderAssembly (dllPath: string) : string list =
                                         else
                                             name
 
-                                    tokens.Add(sprintf "union-case %s.%s #%d(%s)" full caseName tag ps)
+                                    tokens.Add(
+                                        sprintf
+                                            "union-case %s.%s #%d(%s)"
+                                            full
+                                            caseName
+                                            tag
+                                            (caseParameters full tag signature.ParameterTypes)
+                                    )
                                 elif name = ".ctor" then
                                     tokens.Add(sprintf "ctor %s..ctor(%s)" full ps)
                                 else
@@ -730,9 +841,117 @@ let internal headline (moves: Move list) : MoveClass option =
 
     order |> List.tryFind (fun c -> moves |> List.exists (fun m -> m.Class = c))
 
+// ---- union field names (Phase 237) ------------------------------------------
+//
+// A `union-case` token's parameter list reads `name: Type, …` since Phase 237. A rename of a
+// field changes the token and leaves its identity (everything before the `(`) alone, so the
+// pairing step above already classes it `retype`; what these add is the REPORT — naming the
+// case and both field names rather than leaving a reader to spot the difference between two
+// long tokens — and the legacy-format reading the since-tag report needs.
+
+/// The top-level comma-separated items of a parameter list — a generic instantiation carries
+/// `, ` inside its angle brackets, so a plain split would cut `Map<K, V>` in two.
+let private splitParameters (ps: string) : string list =
+    let items = ResizeArray<string>()
+    let current = StringBuilder()
+    let mutable depth = 0
+
+    for c in ps do
+        match c with
+        | '<' ->
+            depth <- depth + 1
+            current.Append c |> ignore
+        | '>' ->
+            depth <- depth - 1
+            current.Append c |> ignore
+        | ',' when depth = 0 ->
+            items.Add(current.ToString().Trim())
+            current.Clear() |> ignore
+        | _ -> current.Append c |> ignore
+
+    let last = current.ToString().Trim()
+
+    if last <> "" || items.Count > 0 then
+        items.Add last
+
+    List.ofSeq items
+
+/// A `union-case` token's fields as `(name, type)` — `None` for the name when the token
+/// carries none (the pre-Phase-237 format). Empty for a nullary case or any other token.
+let internal unionCaseFields (token: string) : (string option * string) list =
+    let o = token.IndexOf '('
+
+    if
+        not (token.StartsWith("union-case ", StringComparison.Ordinal))
+        || o < 0
+        || not (token.EndsWith ")")
+    then
+        []
+    else
+        token.Substring(o + 1, token.Length - o - 2)
+        |> splitParameters
+        |> List.map (fun p ->
+            // A rendered type never carries `: `; a field name never carries `<`.
+            let colon = p.IndexOf ": "
+            let angle = p.IndexOf '<'
+
+            if colon > 0 && (angle < 0 || colon < angle) then
+                Some(p.Substring(0, colon)), p.Substring(colon + 2)
+            else
+                None, p)
+
+/// The field renames a `retype` move carries: `(case, before, after)` for every position whose
+/// name changed while its type did not. Empty for any other move — including a retype that
+/// changed a field's TYPE, which `describe` reports as the plain before/after pair.
+let internal fieldRenames (m: Move) : (string * string * string) list =
+    match m.Class, m.Before, m.After with
+    | Retype, Some b, Some a when b.StartsWith("union-case ", StringComparison.Ordinal) ->
+        let bf = unionCaseFields b
+        let af = unionCaseFields a
+
+        if bf.Length <> af.Length then
+            []
+        else
+            let case = (identity b).Substring("union-case ".Length)
+
+            List.zip bf af
+            |> List.choose (fun ((bn, bt), (an, at)) ->
+                match bn, an with
+                | Some x, Some y when x <> y && bt = at -> Some(case, x, y)
+                | _ -> None)
+    | _ -> []
+
+/// A token with its union field names removed — the pre-Phase-237 rendering of the same
+/// surface. Used ONLY to compare against a baseline that predates the names (the since-tag
+/// report); the live gate never normalises, because a nameless comparison is exactly the
+/// blindness Phase 237 removes.
+let internal stripFieldNames (token: string) : string =
+    match unionCaseFields token with
+    | [] -> token
+    | fields ->
+        let o = token.IndexOf '('
+        token.Substring(0, o + 1) + String.Join(", ", fields |> List.map snd) + ")"
+
+/// `true` when a baseline predates field names: it carries a union case with fields and not
+/// one of them names a field. A baseline with no carrying case at all is not legacy — there is
+/// nothing a name would have been added to.
+let internal predatesFieldNames (tokens: string list) : bool =
+    let carrying =
+        tokens |> List.map unionCaseFields |> List.filter (List.isEmpty >> not)
+
+    not carrying.IsEmpty
+    && carrying |> List.forall (List.forall (fst >> Option.isNone))
+
 /// A move rendered for a human, one line.
 let internal describe (m: Move) : string =
     match m.Before, m.After with
+    | Some b, Some a when not (fieldRenames m).IsEmpty ->
+        let renames =
+            fieldRenames m
+            |> List.map (fun (case, x, y) -> sprintf "field rename on %s: %s -> %s" case x y)
+            |> String.concat "; "
+
+        sprintf "%-18s %s  (%s  ->  %s)" (className m.Class) renames b a
     | Some b, Some a -> sprintf "%-18s %s  ->  %s" (className m.Class) b a
     | Some b, None -> sprintf "%-18s - %s" (className m.Class) b
     | None, Some a -> sprintf "%-18s + %s" (className m.Class) a
@@ -1002,7 +1221,28 @@ let tests =
                               | Error _ ->
                                   printfn "  %-28s first snapshot — %s carries no baseline for this package" id tag
                               | Ok text ->
-                                  match classify (baselineTokens text) current with
+                                  // A tag cut before Phase 237 carries nameless union cases. Read
+                                  // against it, today's named baseline would report every carrying
+                                  // case as a `retype` that no consumer ever saw. So the comparison
+                                  // drops the names — and says so, because a field rename since
+                                  // that tag is invisible to it, exactly as it was to the gate then.
+                                  // This expires by itself: the first tag cut after 237 carries
+                                  // named baselines, and nothing is stripped against it.
+                                  let tagged = baselineTokens text
+
+                                  let current =
+                                      if predatesFieldNames tagged then
+                                          printfn
+                                              "  %-28s (%s's baseline predates union field names — compared without them; a field rename since %s is not visible here)"
+                                              id
+                                              tag
+                                              tag
+
+                                          current |> List.map stripFieldNames
+                                      else
+                                          current
+
+                                  match classify tagged current with
                                   | [] -> ()
                                   | moves ->
                                       moved <- moved + 1
@@ -1087,8 +1327,33 @@ let tests =
 
               Expect.equal
                   cases
-                  [ "NewProbeCarrying #1(System.Int32, System.String)"; "ProbeEmpty #0()" ]
-                  "a nullary case renders from its property and a carrying case from its factory — the factory is `CompilerGenerated`, so keeping it is the deliberate carve-out the union-widening class rests on"
+                  [ "NewProbeCarrying #1(Item1: System.Int32, Item2: System.String)"
+                    "ProbeEmpty #0()" ]
+                  "a nullary case renders from its property and a carrying case from its factory — the factory is `CompilerGenerated`, so keeping it is the deliberate carve-out the union-widening class rests on; an unnamed field renders under the name the compiler gives it (Phase 237)"
+
+              let caseOf (typeSuffix: string) =
+                  own
+                  |> List.filter (fun t ->
+                      t.StartsWith("union-case ", StringComparison.Ordinal)
+                      && t.Contains(typeSuffix + "."))
+                  |> List.map (fun t -> t.Substring(t.IndexOf(typeSuffix + ".") + typeSuffix.Length + 1))
+                  |> List.sort
+
+              Expect.equal
+                  (caseOf "+ProbeSingle")
+                  [ "NewProbeSingle #0(value: System.Int32)" ]
+                  "a single-case union's field is named — its property sits on the union type and carries the two-argument mapping (Phase 237)"
+
+              Expect.equal
+                  (caseOf "+ProbeStructUnion")
+                  [ "NewProbeStructA #0(a: System.Int32)"
+                    "NewProbeStructB #1(b: System.String, c: System.Int32)" ]
+                  "a struct union's fields are named per case, in declaration order (Phase 237)"
+
+              Expect.equal
+                  (caseOf "+ProbeFieldsBefore+Shape")
+                  [ "Empty #0()"; "NewHeld #1(parent: System.Int32, kindTag: System.String)" ]
+                  "a multi-case union's fields are named from the case class's properties, in declaration order (Phase 237)"
 
               Expect.isSome
                   (own
@@ -1198,6 +1463,152 @@ let tests =
                   (headline (classify before after))
                   (Some Retype)
                   "a field that moved position is reported — positional construction would bind the wrong slot"
+          }
+
+          // ---- Phase 237: a union field rename is a surface move ----------------
+          //
+          // Phase 228 renamed `DiffError.TargetNotAContainer`'s field `parent` -> `target`, and
+          // this gate printed nothing: a case rendered by its field TYPES only. These legs pin
+          // the move on a compiled fixture pair, on its control, and on 228's rename itself.
+
+          test
+              "a union field rename is a breaking `retype` naming the case and both names; an identical pair is unchanged (Phase 237)" {
+              let own = renderAssembly (Uri(typeof<ProbeRecord>.Assembly.Location).LocalPath)
+
+              // One module's surface, re-homed under a common name so the three are comparable
+              // as one package seen at two points in time.
+              let surfaceOf (moduleName: string) =
+                  own
+                  |> List.filter (fun t -> t.Contains("+" + moduleName + "+"))
+                  |> List.map (fun t -> t.Replace("+" + moduleName + "+", "+ProbeFields+"))
+
+              let before = surfaceOf "ProbeFieldsBefore"
+              let after = surfaceOf "ProbeFieldsAfter"
+              let same = surfaceOf "ProbeFieldsSame"
+
+              Expect.isNonEmpty before "the fixture's surface rendered"
+
+              Expect.equal
+                  (List.length before)
+                  (List.length after)
+                  "the pair differs by no token count — only by one field's name"
+
+              Expect.isEmpty (classify before same) "a pair differing by nothing is classed unchanged"
+              Expect.equal (headline (classify before same)) None "and has no headline"
+
+              let moves = classify before after
+
+              Expect.equal
+                  (moves |> List.map _.Class)
+                  [ Retype ]
+                  "a pair differing only by a union field name is ONE move, a `retype` — not a removal beside an addition"
+
+              Expect.isTrue
+                  (headline moves |> Option.map isBreaking |> Option.defaultValue false)
+                  "and it is BREAKING: a consumer constructing or matching the case by field name stops compiling"
+
+              let case = "Fuaran.Core.Tests.PublicSurfaceTests+ProbeFields+Shape.NewHeld"
+
+              Expect.equal
+                  (moves |> List.collect fieldRenames)
+                  [ case, "parent", "target" ]
+                  "the move names the case and both field names"
+
+              let line = describe (List.head moves)
+
+              Expect.stringContains
+                  line
+                  (sprintf "field rename on %s: parent -> target" case)
+                  "the report a reviewer reads names the case and both names"
+          }
+
+          test
+              "Phase 228's rename of DiffError.TargetNotAContainer's field is caught as a breaking `retype` (named vector)" {
+              let root = repoRoot ()
+
+              let project = roster () |> List.find (fun p -> p.PackageId = "Fuaran.Core.Ops")
+
+              match assemblyFor root project.ProjectFile project.PackageId with
+              | Error why -> failtest why
+              | Ok dll ->
+                  let current = renderAssembly dll
+
+                  let token =
+                      current
+                      |> List.filter (fun t ->
+                          t.StartsWith("union-case ", StringComparison.Ordinal)
+                          && t.Contains "+DiffError`1.NewTargetNotAContainer ")
+
+                  Expect.equal
+                      token
+                      [ "union-case Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer #2(target: !0, kindTag: System.String)" ]
+                      "the case as 228 left it renders with its field names"
+
+                  // The surface as it stood before 228: the same case, its first field `parent`.
+                  let before228 =
+                      current
+                      |> List.map (fun t ->
+                          if t = List.head token then
+                              t.Replace("(target: ", "(parent: ")
+                          else
+                              t)
+
+                  let moves = classify before228 current
+
+                  Expect.equal (moves |> List.map _.Class) [ Retype ] "228's rename is one `retype`"
+                  Expect.equal (headline moves) (Some Retype) "and the package's headline says so"
+
+                  Expect.equal
+                      (moves |> List.collect fieldRenames)
+                      [ "Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer", "parent", "target" ]
+                      "naming the case and both names — the class 228's worker had to write by hand"
+
+                  // The blindness this phase removes, stated as its own control: rendered the
+                  // pre-237 way, the two surfaces are the same surface.
+                  Expect.isEmpty
+                      (classify (before228 |> List.map stripFieldNames) (current |> List.map stripFieldNames))
+                      "without field names the rename is invisible — which is what the gate printed for 228"
+          }
+
+          test "every carrying union case in every packable package renders its field names (Phase 237)" {
+              // The renderer falls back to types alone for a case whose fields it could not
+              // name; this is what turns that fallback into a failure rather than a quiet
+              // return of the blindness.
+              let root = repoRoot ()
+
+              let unnamed =
+                  [ for p in roster () do
+                        match assemblyFor root p.ProjectFile p.PackageId with
+                        | Error _ -> () // reported by the baseline leg as an unbuilt solution
+                        | Ok dll ->
+                            for t in renderAssembly dll do
+                                if unionCaseFields t |> List.exists (fst >> Option.isNone) then
+                                    yield sprintf "%s: %s" p.PackageId t ]
+
+              Expect.isEmpty unnamed "every union case with fields renders `name: Type` for each"
+          }
+
+          test "the since-tag report reads a pre-237 baseline without names, and only it (Phase 237)" {
+              let named = [ "type A.U (union)"; "union-case A.U.NewC #0(target: System.Int32)" ]
+
+              let legacy = named |> List.map stripFieldNames
+
+              Expect.equal legacy [ "type A.U (union)"; "union-case A.U.NewC #0(System.Int32)" ] "names stripped"
+              Expect.isTrue (predatesFieldNames legacy) "a nameless baseline with a carrying case predates the names"
+              Expect.isFalse (predatesFieldNames named) "a named one does not"
+
+              Expect.isFalse
+                  (predatesFieldNames [ "type A.U (union)"; "union-case A.U.C #0()" ])
+                  "a baseline with no carrying case has nothing a name was added to"
+
+              Expect.isEmpty
+                  (classify legacy (named |> List.map stripFieldNames))
+                  "a legacy baseline read against a stripped current surface is unchanged"
+
+              Expect.equal
+                  (classify legacy named |> List.map _.Class)
+                  [ Retype ]
+                  "while the LIVE gate, which never strips, sees a nameless baseline as moved — so a stale baseline cannot hide a rename"
           }
 
           test "a field added to a PUBLISHED record is `record-widening`, and to a new one is `additive`" {
