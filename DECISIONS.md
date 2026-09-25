@@ -1,5 +1,38 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-25 — D57: the concrete transform pipeline HAS a model — Phase 154 supersedes Phase 203's `Fuaran.Core.DataFrame` exclusion and that part of D14's reading
+
+**Decided (Phase 154, operator decision 2026-09-25).** `proofs/Pipeline.fst` models the reference
+evaluator's counted driver over the concrete pipeline — the closed `ColExpr` and `Transform` DUs,
+`evalExpr` with its four inner loops, `evalFilter`, `evalDerive` and `evalStep`'s dispatch, and
+`evalPipelineWithInEnvCounted`'s cost model — and proves it total, its row-evaluation count additive
+and monotone in the pipeline prefix, and the node-weighted cost bounded by WIRE_FORMAT §21.8's
+expression-node limit taken as a hypothesis. Its `proofs/modules.json` entry attributes it to
+`Fuaran.Core.DataFrame`. The `law-tested-by-design` exclusion Phase 203 filed for that package is
+**deleted** in the same commit.
+
+**What this supersedes.** The exclusion's note said "a theorem over the concrete pipeline is
+declined as a domain's cost, per D14". That is no longer the position for the part the model covers.
+Phase 203's own README states the mechanism: an operator's decision deletes an exclusion, and the
+coverage gate then holds the model to exist. `Proofs.Coverage` refuses a model and an exclusion
+naming the same package (`exclusion-stale`), and refuses a model attributed to no package. So the
+two could not both stand, and the operator chose the model. D14's rule itself is unchanged. It
+decides where a VOCABULARY lives, and nothing here is a vocabulary. What changes is the reading the
+exclusion took from it, that a theorem over this package is a domain's cost to pay.
+
+**What is still NOT proved, and stays on the laws.** The twelve verbs the model takes through a
+host-supplied step evaluator (`Project`, `GroupBy`, `Join`, `Window`, `Pivot`, `Unpivot`, `Sort`,
+`Distinct`, `Limit`, `Union`, `Intersect`, `Except`). Their contract is stated (a well-formed frame
+in, a well-formed frame or a named error out), and their semantics remains
+`Conformance.transformLaws`'. The cell primitives. The incremental driver (`Incremental.fs`,
+`Delta.fs`), which `Conformance.incrementalLaws` holds and `Propagation.fst` proves generically. A
+later phase that wants any of these proved extends `Pipeline.fst` and does not need a new exclusion.
+
+**Not decided here: enforcing §21.8.** Nothing under `src/` checks `max_expr_nodes`. The theorem
+takes it as a hypothesis on the pipeline, never as a refusal the evaluator performs. Whether Core's
+decoder or evaluator should refuse a 513-node expression is recorded as a finding in
+`proofs/README.md`, for an operator decision.
+
 ## 2026-09-24 — D56: a member's READ is a named, opaque reader with one value lemma — the k=16 round trip discharges under `--z3rlimit 40` (continues D54)
 
 **Decided (Phase 224).** A conditional member of a suffixed constructor (D52) whose read calls

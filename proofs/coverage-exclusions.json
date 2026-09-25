@@ -59,13 +59,6 @@
       "family": "Conformance.aggregateParityLaws",
       "phase": "fuaran-core#203",
       "note": "Cells, column types, the table and the codec. The table algebra IS reached by a model — `proofs/ColumnOps.fst` is stated over a table with a validity mask — but that model is attributed to `Fuaran.Core.Column.Ops`, whose operations it is about, and attributing it here as well would let this package's own two gaps hide behind it. They are named instead: `Column.aggregate` is held by the family above, as the single source the DataFrame `GroupBy` calls; and `ColumnCodec` has NO theorem — its injectivity is a law (`Conformance.codecInjectivityLaws`) a domain runs, not a proof this repository carries. An operator who wants the codec proved deletes this entry."
-    },
-    {
-      "package": "Fuaran.Core.DataFrame",
-      "reason": "law-tested-by-design",
-      "family": "Conformance.incrementalLaws",
-      "phase": "fuaran-core#203",
-      "note": "The transform pipeline, its evaluator and the incremental driver. The INCREMENTAL PROMISE is proved — `proofs/Propagation.fst` proves the dirty set sound and least and `evalFrom` equal to `eval` under the stated evaluator contract — but it is proved GENERICALLY, over an abstract node evaluator, and is attributed to `Fuaran.Core.Propagation`. What this package adds is the concrete evaluator that instantiates it, and that is where the laws sit: `incrementalLaws` for change-driven and op-driven equivalence, `schemaWalkLaws` for the derived-schema soundness, `aggregateParityLaws` for the host/reference agreement. A theorem over the concrete pipeline is declined as a domain's cost, per D14."
     }
   ]
 }

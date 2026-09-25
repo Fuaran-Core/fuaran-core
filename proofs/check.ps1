@@ -123,13 +123,21 @@ $ErrorActionPreference = 'Stop'
 #                rejection proved justified (maximal, NOT maximum), and the whole result proved
 #                invariant under arrival order for id-distinct input, with the witness that the
 #                hypothesis is needed. Opens DagFold and TreeOps, so it follows both.
+#   Pipeline   — Phase 154, the REFERENCE TRANSFORM EVALUATOR'S counted driver:
+#                `Fuaran.Core.DataFrame`'s closed `ColExpr` / `Transform` DUs, `evalExpr` with its
+#                four inner loops, `evalFilter`, `evalDerive`, `evalStep`'s dispatch and
+#                `evalPipelineWithInEnvCounted` with its cost model, clause for clause over a
+#                host-supplied cell algebra and step evaluator — with the evaluator proved total
+#                (an error is one named step's), the count additive and monotone in the pipeline
+#                prefix, and the node-weighted cost bounded by WIRE_FORMAT section 21.8's limit
+#                taken as a HYPOTHESIS. It opens Limits, so it follows it.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation', 'Query', 'Arbitrate')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'Pipeline')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.

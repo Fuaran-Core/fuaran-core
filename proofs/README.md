@@ -40,6 +40,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `Limits.fst` | The WIRE_FORMAT §21 resource limits as NAMED PREMISES and nothing else (Phase 149): eight constants with their captions, and the two relations the section's own argument uses. It models no enforcement — §21.2's host obligations are about code it does not describe — and it exists so that a changed limit moves one constant rather than a paragraph of prose, and so the ladder can say which theorem depends on which bound. `WireCanon.fst` is the first consumer and takes one of the eight. |
 | `WireCanon.fst` | The eighth model (Phase 149): the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and `Canon.render` clause for clause, a READER for exactly the grammar they emit, and the canonical form proved in BOTH directions. Named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`, which already carries a `Canon`. It `open`s `Limits`; otherwise it shares nothing with the models above but `oracle/Prims.fs`. Since Phase 170 its section 14 is the BRIDGE to `JsonParse.fst` — the alphabet and value correspondences between the two models, and the proof that section 6's reader and theorem 4's parser agree on everything `render` emits — so it also references `JsonParse`, which the leg already checks before it. The reference is proof-only: every definition in that section is `noextract_to "FSharp"`, and the extraction is unchanged. |
 | `oracle/Limits.fs`, `oracle/WireCanon.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Pipeline.fst`, `oracle/Pipeline.fs` | The reference transform evaluator's counted driver (Phase 154): `ColExpr` / `Transform`, `evalExpr`, `evalFilter`, `evalDerive`, `evalStep` and `evalPipelineWithInEnvCounted` over a host cell algebra and step evaluator, with `eval_total`, `count_additive`, `budget_monotone` and `budget_bounded` proved. The oracle is **generated**, like every other one. See theorem 14. |
 | `Vocabulary.fst`, `DocVocabulary.fst`, `ScoreVocabulary.fst` and their `…Proofs.fst` | **Generated** — the other way round: not extracted FROM a model but emitted AS one, by `Fuaran.Core.Idl.Codegen`'s F\* target (Phase 150) from the three vocabularies the engine is certified on (Phase 173: `tests/Fuaran.Core.Tests/ReferenceIdl.fs`, `SecondDomainSpike.fs`, `ScoreDomainSpike.fs`). Each model carries a vocabulary's types, encoder and tag-dispatch decoder over `WireDecode`; each `…Proofs` carries the round trip `dec_node (enc_node x) == Ok x` over it. Held to a fresh generation by the `Proofs.Vocabulary` family; checked, not extracted. See theorem 1's generated-vocabulary section. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
@@ -574,7 +575,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 24 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 27 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -590,11 +591,11 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 15 rows.
+  `unscheduled` where something could and nobody has. 17 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 3 rows.
+  on. 4 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -627,9 +628,12 @@ over-read.
 | `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLaws` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
+| `pipeline-cell-algebra-abstract` | `model-bridge` | `unscheduled` |
+| `pipeline-verbs-contract` | `model-bridge` | `unscheduled` |
+| `pipeline-expr-limit-unenforced` | `premise` | — |
 
-**Why `unscheduled` is a value rather than a rounding to `permanent`.** Four of the bridges can be
-closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
+**Why `unscheduled` is a value rather than a rounding to `permanent`.** Six of the bridges can be
+closed and nobody has taken the work (Phase 154 added two), and recording them as `permanent` would assert the opposite
 of what this document already says. `dag-outside-the-model` has been narrowed twice already — by
 Phase 134, from "all of it", and by Phase 158, which took `Dag.mergeBase` out of it for every shape
 but a criss-cross merge. A closed set of two values would have forced those into a claim of
@@ -746,17 +750,22 @@ deletes an exclusion — at which point the gate names the gap, and keeps naming
 exists. That is the whole mechanism: the exclusions are not a way of avoiding proofs, they are the
 list of proofs nobody has asked for, written down where deleting a line is how you ask.
 
-### The nine exclusions, and the two reasons that were not carried
+### The eight exclusions, and the two reasons that were not carried
 
-The nine packages with no model are `Fuaran.Core.CSharp` and `Fuaran.Core.Idl.Cli` (**`facade`** —
+The eight packages with no model are `Fuaran.Core.CSharp` and `Fuaran.Core.Idl.Cli` (**`facade`** —
 surfaces over modelled packages, whose every claim is their callee's restated in a second syntax);
 `Fuaran.Core.Conformance`, `Fuaran.Core.Validator` and `Fuaran.Core.Observer`
 (**`content-free-seam`** — generic seams whose content is supplied entirely by the domain, so there
 is no concrete computation here for a theorem to be about); and `Fuaran.Core.Projection`,
-`Fuaran.Core.AiSurface`, `Fuaran.Core.Column` and `Fuaran.Core.DataFrame`
+`Fuaran.Core.AiSurface` and `Fuaran.Core.Column`
 (**`law-tested-by-design`** — real computation, theorem declined in favour of a named `Conformance`
 family, which the entry cites and the gate holds to the shipped roster). Each entry's own prose is
 in `coverage-exclusions.json`; it is the decision, and the token is only its kind.
+
+**There were nine, and the mechanism above has now run once.** `Fuaran.Core.DataFrame` carried a
+`law-tested-by-design` entry until Phase 154. The operator's decision of 2026-09-25 deleted it, and
+the gate then held `proofs/Pipeline.fst` (theorem 14) to exist. DECISIONS.md D57 records what
+that supersedes and what stays on the laws.
 
 Phase 203 was filed naming four reasons and this file carries three, which is a correction and is
 recorded rather than quietly absorbed. **`tooling`** was written for `Fuaran.Core.Idl.Codegen`'s
@@ -875,6 +884,18 @@ either way. What was found, in the order it was hit:
    "The extraction post-pass" section has the whole account — including the **retirement
    condition**, which is that a pin bump makes the fixture stop going red, and which that script
    reports by name rather than passing quietly.
+8. **A universe-polymorphic type parameter is a cost cliff at seven parameters, and it looks like
+   a hang** (Phase 154, measured on the pinned prover). `Pipeline.fst`'s first draft declared its
+   leaf types as `(#c #op #fn #ty #g #e #p:Type)`. F\* reads a bare `Type` as universe-polymorphic,
+   so every query carried seven universe variables (`U_max` terms in the logged SMT). A reflexive
+   one-line identity then took 51-73s at about 20 rlimit units, and the whole module did not finish
+   in 720s. The first run printed nothing at all, because the log is buffered, so it read as a hang.
+   Three one-change runs did NOT fix it: `--ext context_pruning`, a lemma field in place of a refined
+   arrow, and an opaque well-formedness predicate. `--query_stats` located the slow queries, and
+   `--log_queries` on the one reflexive query showed the universe terms. `Type0` everywhere took the
+   module from not finishing to **21s**, with nothing else changed. The rule: a model whose leaf
+   types are parameters declares them `Type0`, which is what an F# type is anyway. Each of the
+   other models here has one or two `Type` parameters, and at that count the cost is invisible.
 
 On the operator's familiarity argument — an ML-family model of an ML-family kernel — the finding is
 that it held: the model is the F# with `Set` spelled as `list` and `Result` spelled as `outcome`,
@@ -5370,6 +5391,129 @@ refused.
    `int` in the F#; ordering agrees on the whole `int` range, so nothing turns on the width.
 4. **Policy.** **`arbitration-pinned-order`** — ascending id is the order; whether it is the right
    one is not a theorem.
+
+## Theorem 14 — the reference transform evaluator is total, and its count is additive, monotone and bounded (Phase 154)
+
+_(This directory's fourteenth model. It covers the reference evaluator every host evaluator is
+certified against. Until this phase, `Conformance.transformLaws` sampled that evaluator's answers
+and no theorem covered its driver. The phase was filed as "Core's half of the Program budget
+theorem", and its refine pass found three of its premises false. This section says what was built
+instead.)_
+
+`Pipeline.fst` models `src/Fuaran.Core.DataFrame/DataFrame.fs`'s counted driver and the part of it
+that evaluates EXPRESSIONS, clause for clause:
+
+- the closed `ColExpr` DU (thirteen cases) and `Transform` DU (fourteen verbs), in declaration
+  order;
+- the private `evalExpr` with its four inner loops;
+- `evalFilter` and `evalDerive`, with `inferType`, `colIndex` and the replace-or-append of a
+  derived column;
+- `evalStep`'s dispatch;
+- `evalPipelineWithInEnvCounted`, with its cost model `costOf`.
+
+Three things are PARAMETERS, on the Phase 176 and 177 precedent:
+
+- the CELL ALGEBRA, a `prims` record holding the five leaf types and the primitives `evalExpr`
+  calls on them;
+- the TWELVE VERBS that evaluate no expression, a `step_eval` record whose contract (a well-formed
+  frame in, a well-formed frame or a named error out) is a lemma field;
+- the FRAME, the evaluator's working form rather than the columnar `Table`.
+
+### What is proved
+
+Every theorem holds over any cell algebra, any environment, any step evaluator meeting its
+contract, and any pipeline.
+
+- **`eval_total`.** On a well-formed frame the counted evaluator returns `Ok` with a well-formed
+  frame, or an `Error` that is EXACTLY one named step's error. The pipeline is `pre @ (s :: post)`,
+  `pre` evaluates to the frame `s` faced, and `s` fails on it with that error. Termination is
+  structural recursion over the closed DUs. Two operations on the modelled path are partial in
+  production: `evalExpr`'s `List.item i row` in the `Col` clause, and `evalDerive`'s `List.map2`.
+  Both are proved in range by refinement.
+- **`uncounted_is_projection`.** `evalPipelineWithInEnv = counted |> Result.map fst`, the one-line
+  identity it is. It replaces the shard's `counted_agrees`: production has no second path to agree
+  with.
+- **`count_additive`.** The count of `p1 @ p2` is the count of `p1` plus the count of `p2` from the
+  frame `p1` left. The pipeline fails exactly when one half does.
+- **`budget_monotone`.** A pipeline that evaluates has every prefix evaluate, at a count no larger.
+- **`budget_bounded`.** Take as a HYPOTHESIS that every embedded expression is within
+  `Limits.max_expr_nodes`. Then the node-weighted run (rows times expression nodes, per evaluating
+  step) and the counted run produce the same frame, and the weighted cost is at most
+  `max_expr_nodes` times the count.
+- **`visits_le_nodes`, `rows_visits_le`.** One row's evaluation of an expression makes at most
+  node-count `evalExpr` calls, following every short circuit. Over a step's rows the calls are at
+  most rows times nodes. This is what makes the node weight in `budget_bounded` an honest bound
+  rather than a definition.
+
+The counting theorems are proved ONCE, over a driver generic in its state, step and cost model
+(`run_shift`, `run_app`, `run_additive`, `run_total`, `run_scaled`). The pipeline's statements
+instantiate them. That split is a proof-cost decision, recorded in finding 8 below. It changes
+nothing modelled: production's `go` IS that loop, with `evalStep` and `costOf` fixed.
+
+### What the refine finding changed, and what the ladder therefore does NOT say
+
+- **No consuming phase is named.** `fuaran#1716`, the Program-tier budget theorem, SHIPPED WITHOUT
+  a Core-evaluator row. It neither proved nor axiomatised Core's evaluator. The ladder rows here
+  cite no consumer and say so (`pipeline-budget-monotone`). If a later Program-side phase wants
+  Core's half, these are the theorems to cite. That act is theirs.
+- **`counted_agrees` is not a theorem here.** It would have related one path to itself.
+- **The expression-node limit is a hypothesis, and its absence from `src/` is a FINDING**
+  (`pipeline-expr-limit-unenforced`, a `premise`). WIRE_FORMAT §21.8 places the 512-node count at
+  DECODE. Core's `DataFrameCodec.decodePipeline` does not take it, and neither the evaluator nor
+  anything else under `src/` checks it. The differential asserts that a 513-node expression
+  evaluates normally. Adding the check to the evaluator was ruled out by this phase's zero-impact
+  constraint. Adding it to the decoder changes what a public function accepts. Either one is an
+  operator decision and is not taken here.
+
+### The differential
+
+`Proofs.Oracle` runs the extracted model beside `DataFrame.evalPipelineWithInEnvCounted`. It
+compares the table (encoded canonically) and the count, or the named `EvalError`, over three
+samples:
+
+- the committed `conformance/laws/transform-laws.json` vectors;
+- every pipeline the D19 sample generator draws (`IncrementalDelta.samples`), each on four seeded
+  tables of that family's shape;
+- nineteen clause-reaching pipelines, covering every `ColExpr` case, the three error clauses, a
+  replacing and an appending `Derive`, and several evaluating steps over a changing row count.
+
+The model's parameters are instantiated FROM production. Each primitive goes through
+`evalExprInRow` on a one-node expression, and each verb through the evaluator on a one-step
+pipeline. So the comparison exercises what the model owns. The go-red is a model whose count skips
+`Derive`, and it must lose. A bridge round-trip case establishes that a disagreement would be the
+model's and not the bridge's.
+
+### Cost
+
+Five cold observations with the leg's own flags: 45s and 51s standalone, then 33s, 50s and 32s
+across the three passes of `check.ps1 -Runs 3`. Every one of them was CONTENDED. The leg labelled
+its passes x1.00, x1.33 and x1.06 against the x0.80 threshold, with a second proof worker on the
+machine. Budget **110s** (2 × 51, rounded up) and floor **16s** (half of 32), with the contention
+factor recorded beside them in `modules.json` as provenance. Nothing needed a scoped rlimit, an
+SMT pattern, a tactic or `--ext context_pruning`. Getting there took finding 8: the draft that
+declared its type parameters as bare `Type` did not finish in 720s.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** `eval_total`, `uncounted_is_projection`,
+   `count_additive`, `budget_monotone`, `budget_bounded`, `visits_le_nodes` and `rows_visits_le`,
+   and the generic driver lemmas under them. Checked on F\* 2026.09.06 with Z3 4.13.3, every query
+   3/3 under `--quake 3`, at the leg's own `--z3rlimit 40`, with `--report_assumes error` on and no
+   `assume` or `admit`. The module has no scoped options. Opens `Limits` only.
+2. **Differentially tested.** `pipeline-differential`, over the samples above. Agreement is over
+   those samples, never over all inputs.
+3. **Assumed, and stated as such.** Three new rows:
+   - **`pipeline-cell-algebra-abstract`** (`model-bridge`, unscheduled): the cell primitives.
+   - **`pipeline-verbs-contract`** (`model-bridge`, unscheduled): the twelve verbs and their
+     well-formedness contract.
+   - **`pipeline-expr-limit-unenforced`** (`premise`): the §21.8 hypothesis and the finding
+     behind it.
+
+   The model also inherits theorem 1's **`extractor-and-compiler-trusted`**.
+4. **Coverage.** `Fuaran.Core.DataFrame` is now a MODELLED package. Its Phase 203
+   `law-tested-by-design` exclusion is deleted, by operator decision (DECISIONS.md D57). What the
+   exclusion's laws covered and this model does not stays on those laws: the twelve verbs, the cell
+   primitives, and the incremental driver.
 
 ## Next
 

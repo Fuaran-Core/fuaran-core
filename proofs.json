@@ -2121,6 +2121,121 @@
       "evidence": {
         "assumption": "the int and float renderers, the hash and the name comparator behind invocationKey are host functions the model takes as parameters; the comparator is assumed a total order where a theorem needs one"
       }
+    },
+    {
+      "id": "pipeline-eval-total",
+      "level": "proved",
+      "claim": "The reference evaluator's counted driver is TOTAL on a well-formed frame: `evalPipelineWithInEnvCounted` reaches `Ok` with a well-formed frame, or an `Error` that is exactly one named step's error. The pipeline splits as `pre @ (s :: post)`, `pre` evaluates to the frame `s` faced, and `s` failed there with that error (`eval_total`, from the driver-generic `run_total`). Termination is structural recursion over the closed `ColExpr` and `Transform` DUs, checked by the prover. The modelled path has two partial operations, `evalExpr`'s `List.item i row` and `evalDerive`'s `List.map2`, and both are proved in range, by refinement, on a frame whose every row is as wide as its schema. The twelve verbs the model takes through a step evaluator are total by their contract (`pipeline-verbs-contract`), not by proof.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "eval_total",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "pipeline-uncounted-is-projection",
+      "level": "proved",
+      "claim": "`evalPipelineWithInEnv` is `evalPipelineWithInEnvCounted |> Result.map fst`, stated as the one-line identity it is (`uncounted_is_projection`). It REPLACES the shard's original `counted_agrees`: production has no second, uncounted path for a counted one to agree with (`DataFrame.fs`, where the uncounted entry is the counted one projected), so a lemma relating two paths would have related one path to itself. No counter, allocation or check was added to either entry point.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "uncounted_is_projection",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "pipeline-count-additive",
+      "level": "proved",
+      "claim": "The row-evaluation count is ADDITIVE over pipeline concatenation. The count of `p1 @ p2` is the count of `p1` plus the count of `p2` run from the frame `p1` left, and `p1 @ p2` fails exactly when one of the halves does, with that half's error (`count_additive`, from the driver-generic `run_additive` / `run_app` / `run_shift`). The count's unit is production's own: one evaluation of one step's expression against one row, so a `Filter` or a `Derive` is charged the rows alive where it stands and every other verb nothing (`row_cost` is `costOf`).",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "count_additive",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "pipeline-budget-monotone",
+      "level": "proved",
+      "claim": "The count is MONOTONE in the pipeline prefix. A pipeline that evaluates has every prefix evaluate too, at a count no larger (`budget_monotone`). No consuming phase is named: the Program-tier budget theorem this was filed as Core's half of (`fuaran#1716`) SHIPPED WITHOUT a Core-evaluator row. It neither proved nor axiomatised Core's evaluator, so this theorem stands on its own and cites no consumer.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "budget_monotone",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "pipeline-budget-bounded",
+      "level": "proved",
+      "claim": "Under the HYPOTHESIS that every expression the pipeline embeds has at most `Limits.max_expr_nodes` (WIRE_FORMAT §21.8, 512) `ColExpr` nodes (`within_expr_limit`), two runs agree. The node-weighted run (rows times expression nodes per `Filter` or `Derive`) and the counted run produce the same frame, or the same error. The weighted cost is at most `max_expr_nodes` times the row-evaluation count (`budget_bounded`, from the driver-generic `run_scaled`). The limit is a hypothesis on the pipeline, NEVER a refusal the evaluator performs; see `pipeline-expr-limit-unenforced`.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "budget_bounded",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "pipeline-visits-bounded",
+      "level": "proved",
+      "claim": "The node weight is an honest bound. `expr_visits` counts the `evalExpr` invocations one row's evaluation makes, following every short circuit exactly as the evaluator takes it: `Binary`'s left error, `Coalesce`'s first non-null, `Case`'s first true arm, `InList`'s null subject and first match, `ApplyFn`'s first failing argument. It is at most the expression's node count (`visits_le_nodes`). Over a step's rows, the visits sum to at most rows times nodes (`rows_visits_le`), which is the weight `budget_bounded` charges. It is the instrumented reading, stated as a function of the model rather than observed in production.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "theorem": "visits_le_nodes",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "pipeline-differential",
+      "level": "tested",
+      "claim": "The extracted model agrees with `DataFrame.evalPipelineWithInEnvCounted` on the table (encoded canonically) and the count, or on the named `EvalError`. The comparison runs over the committed `conformance/laws/transform-laws.json` vectors, and over every pipeline the D19 sample generator draws (`IncrementalDelta.samples`) plus clause-reaching pipelines, each on four seeded tables of the D19 shape. The model's cell algebra and its twelve non-expression verbs are instantiated FROM production: each primitive goes through `evalExprInRow` on a one-node expression, each verb through the evaluator on a one-step pipeline. What the comparison exercises is therefore what the model owns: the expression recursion and its short circuits, `evalFilter`, `evalDerive`, the dispatch and the counted driver. The go-red is a model whose count skips `Derive`, and it must lose. Agreement is over the sample drawn, never over all inputs.",
+      "phase": "fuaran-core#154",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Pipeline.fst",
+        "cases": [
+          "the pipeline oracle agrees with evalPipelineWithInEnvCounted on table and count",
+          "the pipeline oracle reads every committed transform-laws vector",
+          "go-red: a model whose count skips Derive disagrees with production",
+          "the pipeline bridge round-trips a frame, so a disagreement is the model's and not the bridge's",
+          "within_expr_limit reads the §21.8 bound: a 513-node expression is outside it, 512 inside"
+        ]
+      }
+    },
+    {
+      "id": "pipeline-cell-algebra-abstract",
+      "level": "assumed",
+      "claim": "THE CELL-ALGEBRA BRIDGE. `evalExpr` reaches for eleven host functions, and the model takes them as a `prims` record: the operator-class primitives (`arith` / `comparison` / `logical` / `stringPred`), `castCell`, `applyScalar`, `compareCells` read at zero, `Cell.typeOf`, the `Bool` and `Null` constructors and readers, and the param environment. The `EvalError` constructors `evalExpr` raises come with them. The recursion over `ColExpr` and each clause's short-circuit order are modelled. What each primitive computes on cells is not: division by zero, overflow, coercion and the date parts stay `Conformance.transformLaws`' to certify. The differential instantiates the record from production's own evaluator, so the primitives are exercised and not modelled. Unscheduled: modelling the numeric primitives needs integer and float arithmetic in the extracted code, which is finding 2's cost and not a proof difficulty.",
+      "phase": "fuaran-core#154",
+      "class": "model-bridge",
+      "closes": "unscheduled",
+      "evidence": {
+        "assumption": "the cell primitives evalExpr calls are host functions the model takes as parameters; the theorems hold for every such record"
+      }
+    },
+    {
+      "id": "pipeline-verbs-contract",
+      "level": "assumed",
+      "claim": "THE TWELVE-VERB CONTRACT. `Project`, `GroupBy`, `Join`, `Window`, `Pivot`, `Unpivot`, `Sort`, `Distinct`, `Limit`, `Union`, `Intersect` and `Except` evaluate no expression and are charged nothing. The model takes them through a `step_eval` record under ONE contract, carried as a lemma field: a well-formed frame in, a well-formed frame or a named error out. Every totality claim here is conditional on that contract for those verbs. Production's `ofFrame` throws on a frame narrower than its schema, so a verb breaking the contract fails loudly and never silently. The differential instantiates the record from production's evaluator over one-step pipelines and round-trips each frame through the columnar table, so the contract is exercised on every sampled step. Unscheduled: each verb can be modelled clause for clause; `Pivot` and `Window` are the large ones.",
+      "phase": "fuaran-core#154",
+      "class": "model-bridge",
+      "closes": "unscheduled",
+      "evidence": {
+        "assumption": "the twelve non-expression verbs map a well-formed frame to a well-formed frame or a named error; the model takes them as a parameter"
+      }
+    },
+    {
+      "id": "pipeline-expr-limit-unenforced",
+      "level": "assumed",
+      "claim": "THE FINDING, recorded for an operator decision and not fixed here. Nothing under `src/` enforces WIRE_FORMAT §21.8's 512-node expression limit. §21.8 places the count at DECODE, and Core's `DataFrameCodec.decodePipeline` does not take it. `Limits.fst` says of itself that it is not a model of enforcement. So `budget_bounded` takes the limit as a HYPOTHESIS on the pipeline. A pipeline carrying a 513-node expression evaluates normally, and the differential asserts that on the shipped evaluator. Whether Core's decoder should refuse such a pipeline (a behaviour change to a public function) or leave it to the UI hosts that decode `Binding.Transform` is the open question. Adding the check in the evaluator was ruled out by this phase's zero-impact constraint.",
+      "phase": "fuaran-core#154",
+      "class": "premise",
+      "evidence": {
+        "assumption": "every expression a pipeline embeds is within Limits.max_expr_nodes; Core's evaluator and codec do not check it"
+      }
     }
   ]
 }

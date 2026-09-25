@@ -44,6 +44,10 @@ module ModelProp = Propagation
 // open.
 module ModelQuery = Query
 
+// Phase 154 — the extracted REFERENCE-TRANSFORM-EVALUATOR model, bound the same way. No production
+// module shares its name today; bound here so a later one cannot shadow it silently.
+module ModelPipe = Pipeline
+
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
@@ -8972,6 +8976,323 @@ let private queryDifferential
     tally
 
 
+// ---------------------------------------------------------------------------
+//  Phase 154 — the REFERENCE TRANSFORM EVALUATOR's counted driver: `proofs/Pipeline.fst`
+//  extracted, run beside `DataFrame.evalPipelineWithInEnvCounted`.
+// ---------------------------------------------------------------------------
+//
+// The model takes its cell algebra and its twelve non-expression verbs as PARAMETERS. The bridge
+// instantiates both FROM production, so the model and production share every primitive and differ
+// only in what the model owns: the recursion over `ColExpr`, the short-circuit order of each clause,
+// `evalFilter` / `evalDerive`, the step dispatch and the counted driver. Each cell primitive is read
+// through the public `evalExprInRow` on a one-node expression over literals, which is production's
+// own primitive behind its own dispatch. Each of the twelve verbs is production's evaluator over a
+// one-step pipeline. What is compared per (table, pipeline) is the WHOLE counted result: the table,
+// encoded canonically, and the count on `Ok`, or the same named `EvalError`.
+
+module private PipelineDiff =
+
+    type MExpr = ModelPipe.colexpr<Cell, BinOp, ScalarFn, ColumnType, NowGrain>
+    type MStep = ModelPipe.transform<Cell, BinOp, ScalarFn, ColumnType, NowGrain, Transform>
+    type MFrame = ModelPipe.frame<Cell, ColumnType>
+
+    let outcome (r: Result<'a, 'e>) : ModelPipe.outcome<'a, 'e> =
+        match r with
+        | Ok v -> ModelPipe.Ok v
+        | Error e -> ModelPipe.Error e
+
+    let result (r: ModelPipe.outcome<'a, 'e>) : Result<'a, 'e> =
+        match r with
+        | ModelPipe.Ok v -> Ok v
+        | ModelPipe.Error e -> Error e
+
+    let rec toExpr (e: ColExpr) : MExpr =
+        match e with
+        | Col n -> ModelPipe.Col n
+        | ColExpr.Lit c -> ModelPipe.Lit c
+        | ColExpr.Param n -> ModelPipe.Param n
+        | Binary(op, a, b) -> ModelPipe.Binary(op, toExpr a, toExpr b)
+        | Not a -> ModelPipe.Not(toExpr a)
+        | Coalesce xs -> ModelPipe.Coalesce(List.map toExpr xs)
+        | Case(cs, els) -> ModelPipe.Case(cs |> List.map (fun (w, t) -> toExpr w, toExpr t), toExpr els)
+        | Cast(ty, a) -> ModelPipe.Cast(ty, toExpr a)
+        | ApplyFn(fn, xs) -> ModelPipe.ApplyFn(fn, List.map toExpr xs)
+        | InList(s, xs) -> ModelPipe.InList(toExpr s, List.map toExpr xs)
+        | IsNull a -> ModelPipe.IsNull(toExpr a)
+        | InParam(a, n) -> ModelPipe.InParam(toExpr a, n)
+        | Now g -> ModelPipe.Now g
+
+    /// A production step as the model reads it: the two expression-bearing verbs are converted,
+    /// every other verb carries the production step itself as its opaque payload.
+    let toStep (t: Transform) : MStep =
+        match t with
+        | Filter pred -> ModelPipe.Filter(toExpr pred)
+        | Derive(n, e) -> ModelPipe.Derive(n, toExpr e)
+        | Project _ -> ModelPipe.Project t
+        | GroupBy _ -> ModelPipe.GroupBy t
+        | Join _ -> ModelPipe.Join t
+        | Window _ -> ModelPipe.Window t
+        | Pivot _ -> ModelPipe.Pivot t
+        | Unpivot _ -> ModelPipe.Unpivot t
+        | Sort _ -> ModelPipe.Sort t
+        | Distinct -> ModelPipe.Distinct
+        | Limit _ -> ModelPipe.Limit t
+        | Union _ -> ModelPipe.Union t
+        | Intersect _ -> ModelPipe.Intersect t
+        | Except _ -> ModelPipe.Except t
+
+    /// `toFrame`: the transpose, short and absent columns padded with `Null` exactly as
+    /// `RowAccess.columns` pads them.
+    let toFrame (t: Table) : MFrame =
+        let n = Table.rowCount t
+
+        let cols =
+            t.Schema
+            |> List.map (fun (name, _) ->
+                match Table.tryColumn name t with
+                | Some c ->
+                    let a = List.toArray c.Cells
+                    Array.init n (fun i -> if i < a.Length then a[i] else Null)
+                | None -> Array.create n Null)
+
+        { ModelPipe.cols = t.Schema
+          ModelPipe.rows = [ for i in 0 .. n - 1 -> cols |> List.map (fun a -> a[i]) ] }
+
+    /// `ofFrame`: the transpose back.
+    let ofFrame (f: MFrame) : Table =
+        { Schema = f.cols
+          Columns =
+            f.cols
+            |> List.mapi (fun ci (name, ty) -> Column.create name ty (f.rows |> List.map (fun r -> List.item ci r))) }
+
+    /// F#'s option as the extraction spells it.
+    let opt (o: 'a option) : FStar_Pervasives_Native.option<'a> =
+        match o with
+        | Some v -> FStar_Pervasives_Native.Some v
+        | None -> FStar_Pervasives_Native.None
+
+    let private one (env: Map<string, Cell>) (e: ColExpr) : Result<Cell, EvalError> =
+        DataFrame.evalExprInRow env [] [] e
+
+    /// The cell algebra, read off production.
+    let prims (env: Map<string, Cell>) : ModelPipe.prims<Cell, BinOp, ScalarFn, ColumnType, NowGrain, EvalError> =
+        { ModelPipe.env_find = fun n -> opt (Map.tryFind n env)
+          ModelPipe.env_names = env |> Map.toList |> List.map fst
+          ModelPipe.binary = fun op a b -> outcome (one env (Binary(op, ColExpr.Lit a, ColExpr.Lit b)))
+          ModelPipe.as_bool =
+            fun c ->
+                match c with
+                | Bool b -> FStar_Pervasives_Native.Some b
+                | _ -> FStar_Pervasives_Native.None
+          ModelPipe.is_null =
+            fun c ->
+                match c with
+                | Null -> true
+                | _ -> false
+          ModelPipe.mk_bool = Bool
+          ModelPipe.null_cell = Null
+          ModelPipe.cast_cell = fun ty c -> outcome (one env (Cast(ty, ColExpr.Lit c)))
+          ModelPipe.apply_fn = fun fn args -> outcome (one env (ApplyFn(fn, args |> List.map ColExpr.Lit)))
+          // `compareCells sv iv` read at zero, through production's own membership test on two
+          // non-null literals: `Some 0` answers `true`, `Some _` falls through to `false`, `None`
+          // is the incompatible-types refusal.
+          ModelPipe.cells_equal =
+            fun sv iv ->
+                match one env (InList(ColExpr.Lit sv, [ ColExpr.Lit iv ])) with
+                | Ok(Bool b) -> FStar_Pervasives_Native.Some b
+                | _ -> FStar_Pervasives_Native.None
+          ModelPipe.type_of = fun c -> opt (Cell.typeOf c)
+          ModelPipe.string_type = StringType
+          ModelPipe.unknown_column = fun n avail -> UnknownColumn(n, avail)
+          ModelPipe.unbound_param = fun n bound -> UnboundParam(n, bound)
+          ModelPipe.unpinned_clock = UnpinnedClock
+          ModelPipe.not_non_bool = TypeError "not of a non-bool"
+          ModelPipe.in_incompatible = TypeError "in: comparison between incompatible types" }
+
+    /// The twelve verbs, read off production: its evaluator over the one-step pipeline.
+    let verbs
+        (resolve: string -> Result<Table, EvalError>)
+        (env: Map<string, Cell>)
+        : ModelPipe.step_eval<Cell, BinOp, ScalarFn, ColumnType, NowGrain, EvalError, Transform> =
+        { ModelPipe.step =
+            fun f t ->
+                let step =
+                    match t with
+                    | ModelPipe.Distinct -> Distinct
+                    | ModelPipe.Project p
+                    | ModelPipe.GroupBy p
+                    | ModelPipe.Join p
+                    | ModelPipe.Window p
+                    | ModelPipe.Pivot p
+                    | ModelPipe.Unpivot p
+                    | ModelPipe.Sort p
+                    | ModelPipe.Limit p
+                    | ModelPipe.Union p
+                    | ModelPipe.Intersect p
+                    | ModelPipe.Except p -> p
+                    | ModelPipe.Filter _
+                    | ModelPipe.Derive _ -> failwith "the model evaluates Filter and Derive itself"
+
+                DataFrame.evalPipelineWithInEnv resolve env [ step ] (ofFrame f)
+                |> Result.map toFrame
+                |> outcome
+          ModelPipe.step_wf = () }
+
+    /// The model's counted answer under a cost model, in production's shape.
+    let modelCountedWith cost (env: Map<string, Cell>) (pipeline: Transform list) (input: Table) =
+        ModelPipe.run
+            (ModelPipe.eval_step (prims env) (verbs DataFrame.noResolve env))
+            cost
+            (toFrame input)
+            0I
+            (List.map toStep pipeline)
+        |> result
+        |> Result.map (fun (f, n) -> ofFrame f, int n)
+
+    /// The model's counted answer: `counted`, i.e. the driver at `row_cost`.
+    let modelCounted (env: Map<string, Cell>) (pipeline: Transform list) (input: Table) =
+        ModelPipe.counted (prims env) (verbs DataFrame.noResolve env) (List.map toStep pipeline) (toFrame input)
+        |> result
+        |> Result.map (fun (f, n) -> ofFrame f, int n)
+
+    /// The go-red model: a count that skips one step kind — `Derive` is charged nothing.
+    let skipsDerive (f: MFrame) (t: MStep) : bigint =
+        match t with
+        | ModelPipe.Filter _ -> ModelPipe.len f.rows
+        | _ -> 0I
+
+    let render (r: Result<Table * int, EvalError>) : string =
+        match r with
+        | Ok(t, n) -> sprintf "Ok %s count=%d" (ColumnCodec.encode (Embedded t)) n
+        | Error e -> sprintf "Error %A" e
+
+    // ---- the samples ----
+
+    /// The `transform-laws.json` vectors, decoded as a host reads them.
+    let lawVectors () : (string * Table * Transform list) list =
+        let path = Path.Combine(OwnedConformance.root (), "laws", "transform-laws.json")
+        use doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText path)
+
+        [ for v in doc.RootElement.GetProperty("vectors").EnumerateArray() do
+              let id = v.GetProperty("id").GetString()
+              let input = v.GetProperty("input")
+
+              match
+                  DataFrameCodec.decodePipeline (input.GetProperty("pipeline").GetString()),
+                  ColumnCodec.decode (input.GetProperty("source").GetString())
+              with
+              | Ok p, Ok(Embedded t) -> yield id, t, p
+              | _ -> failwithf "law vector %s did not decode" id ]
+
+    /// The table shape the D19 incremental family draws (`id` string, `a` and `b` int), drawn here
+    /// from a seeded generator: 0..8 rows, `a` in -5..6, `b` in 0..2 with a null now and then.
+    let d19Table (rng: System.Random) : Table =
+        let n = rng.Next(0, 9)
+
+        let rows =
+            [ for j in 0 .. n - 1 ->
+                  let a = rng.Next(12) - 5
+                  let b = rng.Next(3)
+                  let bCell = if rng.Next(7) = 0 then Null else Int b
+                  Str("r" + string j), Int a, bCell ]
+
+        { Schema = [ "id", StringType; "a", IntType; "b", IntType ]
+          Columns =
+            [ Column.create "id" StringType (rows |> List.map (fun (i, _, _) -> i))
+              Column.create "a" IntType (rows |> List.map (fun (_, a, _) -> a))
+              Column.create "b" IntType (rows |> List.map (fun (_, _, b) -> b)) ] }
+
+    /// The pipelines the D19 sample generator draws (`IncrementalDelta.samples`), deduplicated.
+    let d19Pipelines () : Transform list list =
+        IncrementalDelta.samples 20260925 400 |> List.map _.Pipeline |> List.distinct
+
+    /// Pipelines that reach every `ColExpr` clause and its short circuits, the error clauses, a
+    /// derived column replacing and appending, and several evaluating steps over a changing row
+    /// count — the shapes the laws do not concentrate on.
+    let clausePipelines: Transform list list =
+        let gt0 = Binary(Gt, Col "a", ColExpr.Lit(Int 0))
+        let lt0 = Binary(Lt, Col "a", ColExpr.Lit(Int 0))
+
+        [ [ Filter(Not gt0) ]
+          [ Derive("c", Coalesce [ ColExpr.Lit Null; Col "b"; ColExpr.Lit(Int 9) ]) ]
+          [ Derive("c", Case([ gt0, ColExpr.Lit(Str "pos"); lt0, ColExpr.Lit(Str "neg") ], ColExpr.Lit(Str "zero"))) ]
+          [ Derive("c", Cast(FloatType, Col "a")) ]
+          [ Derive("c", ApplyFn(Abs, [ Col "a" ])) ]
+          [ Derive("c", ApplyFn(Abs, [ Col "a"; Col "b" ])) ]
+          [ Filter(InList(Col "b", [ ColExpr.Lit(Int 1); ColExpr.Lit Null ])) ]
+          [ Filter(InList(Col "b", [ ColExpr.Lit(Str "x") ])) ]
+          [ Derive("c", IsNull(Col "b")) ]
+          [ Filter(InParam(Col "a", "sel")) ]
+          [ Derive("c", Now NowGrain.Date) ]
+          [ Filter(Binary(Eq, Col "b", ColExpr.Param "p")) ]
+          [ Filter(Binary(Eq, Col "b", ColExpr.Param "unbound")) ]
+          [ Filter(Not(Col "a")) ]
+          [ Filter(Binary(Gt, Col "nope", ColExpr.Lit(Int 0))) ]
+          [ Derive("a", Binary(Mul, Col "a", ColExpr.Lit(Int 2)))
+            Filter gt0
+            Derive("d", Binary(Add, Col "a", Col "b")) ]
+          [ Filter gt0
+            Transform.sortBy [ "a", Desc ]
+            Derive("d", Col "a")
+            Transform.limit 2 0
+            Filter(IsNull(Col "b")) ]
+          [ Derive("d", Col "a")
+            Distinct
+            GroupBy([ "b" ], [ { Name = "s"; Fn = Sum; Of = "a" } ])
+            Derive("t", Binary(Mul, Col "s", ColExpr.Lit(Int 3))) ]
+          [ Filter gt0
+            Derive("q", Binary(Div, Col "a", ColExpr.Lit(Int 0)))
+            Filter(Binary(Gt, Col "q", ColExpr.Lit(Int 0))) ] ]
+
+    /// The env every sample evaluates in: one bound scalar param.
+    let env: Map<string, Cell> = Map.ofList [ "p", Int 1 ]
+
+    /// Every (label, table, pipeline) the differential runs.
+    let samples () : (string * Table * Transform list) list =
+        let rng = System.Random 154
+
+        let generated =
+            [ for i, p in List.indexed (d19Pipelines () @ clausePipelines) do
+                  for k in 0..3 do
+                      yield sprintf "generated #%d.%d" i k, d19Table rng, p ]
+
+        lawVectors () @ generated
+
+    /// Run a model over every sample: the disagreements, then how many samples production answered
+    /// `Ok`, answered `Error`, and answered `Ok` with a non-zero count.
+    let differential model : string list * int * int * int =
+        let all = samples ()
+
+        let prods =
+            all
+            |> List.map (fun (label, t, p) ->
+                label, p, DataFrame.evalPipelineWithInEnvCounted DataFrame.noResolve env p t, model env p t)
+
+        let disagreements =
+            prods
+            |> List.choose (fun (label, p, prod, m) ->
+                let a, b = render prod, render m
+
+                if a = b then
+                    None
+                else
+                    Some(sprintf "%s: production %s, model %s (pipeline %A)" label a b p))
+
+        let oks = prods |> List.filter (fun (_, _, r, _) -> Result.isOk r) |> List.length
+
+        let errs =
+            prods |> List.filter (fun (_, _, r, _) -> Result.isError r) |> List.length
+
+        let counted =
+            prods
+            |> List.filter (fun (_, _, r, _) ->
+                match r with
+                | Ok(_, n) -> n > 0
+                | _ -> false)
+            |> List.length
+
+        disagreements, oks, errs, counted
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -13842,4 +14163,87 @@ let proofOracleTests =
                   (Error(Propagation.EvalUnknownChange [ "nope" ]))
                   "an unknown change is the typed refusal naming it"
 
-              Expect.isEmpty ranUnknown "and no evaluator ran" ]
+              Expect.isEmpty ranUnknown "and no evaluator ran"
+
+          // ---- Phase 154 — the reference transform evaluator's counted driver ----
+
+          testCase "the pipeline oracle agrees with evalPipelineWithInEnvCounted on table and count"
+          <| fun _ ->
+              let disagreements, oks, errs, counted =
+                  PipelineDiff.differential PipelineDiff.modelCounted
+
+              Expect.isEmpty
+                  disagreements
+                  (sprintf
+                      "the extracted model and production disagree:\n%s"
+                      (String.concat "\n" (List.truncate 5 disagreements)))
+
+              // The sample must reach both verdicts and a non-zero count, or agreement is vacuous.
+              Expect.isGreaterThan oks 50 "the sample reached many evaluated pipelines"
+              Expect.isGreaterThan errs 10 "the sample reached many refused pipelines"
+              Expect.isGreaterThan counted 50 "the sample reached many pipelines with a non-zero count"
+
+          testCase "the pipeline oracle reads every committed transform-laws vector"
+          <| fun _ ->
+              let vectors = PipelineDiff.lawVectors ()
+              Expect.isGreaterThan (List.length vectors) 10 "the law vectors are read, not empty"
+
+              for id, t, p in vectors do
+                  Expect.equal
+                      (PipelineDiff.render (PipelineDiff.modelCounted PipelineDiff.env p t))
+                      (PipelineDiff.render (
+                          DataFrame.evalPipelineWithInEnvCounted DataFrame.noResolve PipelineDiff.env p t
+                      ))
+                      (sprintf "law vector %s: model and production agree" id)
+
+          testCase "go-red: a model whose count skips Derive disagrees with production"
+          <| fun _ ->
+              let disagreements, _, _, _ =
+                  PipelineDiff.differential (PipelineDiff.modelCountedWith PipelineDiff.skipsDerive)
+
+              Expect.isNonEmpty
+                  disagreements
+                  "a count that charges Derive nothing must lose the comparison, or the comparison cannot lose"
+
+          testCase "the pipeline bridge round-trips a frame, so a disagreement is the model's and not the bridge's"
+          <| fun _ ->
+              let rng = System.Random 1540
+
+              for _ in 1..50 do
+                  let t = PipelineDiff.d19Table rng
+                  let back = PipelineDiff.ofFrame (PipelineDiff.toFrame t)
+
+                  Expect.equal
+                      (ColumnCodec.encode (Embedded back))
+                      (ColumnCodec.encode (Embedded t))
+                      "toFrame then ofFrame is the identity"
+
+          testCase "within_expr_limit reads the §21.8 bound: a 513-node expression is outside it, 512 inside"
+          <| fun _ ->
+              // A left-deep `Binary` chain of k leaves has 2k - 1 nodes.
+              let chain k =
+                  List.init (k - 1) id
+                  |> List.fold (fun acc _ -> Binary(Add, acc, Col "a")) (Col "a")
+
+              let nodes e =
+                  PipelineDiff.toExpr e |> ModelPipe.expr_nodes |> int
+
+              Expect.equal (nodes (chain 256)) 511 "256 leaves are 511 nodes"
+              Expect.equal (nodes (Cast(IntType, chain 256))) 512 "one more node is 512"
+              Expect.equal (nodes (chain 257)) 513 "257 leaves are 513 nodes"
+
+              let within e =
+                  ModelPipe.within_expr_limit [ PipelineDiff.toStep (Filter e) ]
+
+              Expect.isTrue (within (Cast(IntType, chain 256))) "512 nodes are within the limit"
+              Expect.isFalse (within (chain 257)) "513 nodes are not"
+
+              // And production evaluates the 513-node expression anyway: the limit is a hypothesis,
+              // not a refusal the evaluator performs (the Phase 154 finding).
+              let t =
+                  { Schema = [ "a", IntType ]
+                    Columns = [ Column.create "a" IntType [ Int 1; Int 2 ] ] }
+
+              Expect.isOk
+                  (DataFrame.evalPipeline [ Derive("big", chain 257) ] t |> Result.mapError string)
+                  "the evaluator does not enforce section 21.8" ]
