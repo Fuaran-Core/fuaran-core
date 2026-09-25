@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-09-25 — D&lt;TBD-226&gt;: `Required` means non-null — ruling (A), refused as a DISTINCT `RequiredParamsNull`; (B), a doc-only correction, is declined
+## 2026-09-25 — D61: `Required` means non-null — ruling (A), refused as a DISTINCT `RequiredParamsNull`; (B), a doc-only correction, is declined
 
 **Decided (operator, 2026-09-25; Phase 226).** Ruling **(A)**. A `Required` query parameter that is
 present but bound only to `Null` is refused before any resolver runs. On the error's shape the

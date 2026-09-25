@@ -5324,7 +5324,7 @@ red on that, and it is why that case exists.
 ### What Phase 226 changed here: the first finding is closed
 
 Phase 226 took ruling (A) on `all_null_accepted` (the operator's, 2026-09-25, recorded as
-`DECISIONS.md` D&lt;TBD-226&gt;): `Required` means a VALUE. `validateParams` gains a third step. A
+`DECISIONS.md` D61): `Required` means a VALUE. `validateParams` gains a third step. A
 required param that is present but bound only to `Null` is refused before any resolver runs, as a
 DISTINCT new case, `RequiredParamsNull`, naming it. A required param that is left out is still
 `RequiredParamsUnbound`, so "present but null" and "missing" stay apart. That is the operator's

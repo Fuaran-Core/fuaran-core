@@ -2648,7 +2648,7 @@ refusal by class and payload and reaches it. `Conformance.queryLaws`' param-vali
 BUILDS the all-`Null` set from its declaration and requires `RequiredParamsNull` naming exactly the
 required params, and it also requires that an optional `Null` is still accepted. The law count (7)
 and the family's `cases` cell (1400) are unchanged; only the law's name gained a clause. The laws
-corpus is byte-identical. DECISIONS.md D&lt;TBD-226&gt; has the ruling.
+corpus is byte-identical. DECISIONS.md D61 has the ruling.
 
 ## 0.30.1 — draft
 
