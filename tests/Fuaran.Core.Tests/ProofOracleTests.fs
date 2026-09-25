@@ -3688,6 +3688,138 @@ let private planStreamGen: StreamGen<PlanOp, Plan> =
 let private adversarialOpEncodings: string list =
     [ ""; "|"; "A|x|t"; "}|{"; "{\"kind\":\"human\",\"id\":\"a\"}|A|x|t"; "\"}" ]
 
+// ---------------------------------------------------------------------------
+//  Phase 197 — the linear chain's ENVELOPE PARSE, measured against production's payload
+//
+//  `Chain.fst` section 6b discharges the linear side's premise: `rec_payload`'s four-way envelope
+//  `{"seq":<n>,"actor":<a>,"op":<o>}` is parsed back into its three fields, each split forced by
+//  the leading comma of the separator that follows it, under three conditions on the alphabets —
+//  the numeral carries no comma and `show` is injective (`seq_numeral_code`), the actor code is
+//  prefix-free (`actor_code_prefix_free`, Phase 145's premise again), and the op codec is
+//  injective (premise 4, nothing about its alphabet). The model cannot check any of those of
+//  production, so this is where they are measured: that production's payload IS the model's
+//  envelope, that the parse recovers all three fields over the adversarial population, that each
+//  alphabet condition is load-bearing (the parse loses under a perturbed code), and that the
+//  theorem the discharge buys — `payload_splice_breaks_chain` — holds beside production's walker.
+// ---------------------------------------------------------------------------
+
+/// Op encodings for the ENVELOPE, chosen to break a parse if anything can: the op is the last
+/// field, so these carry the envelope's own separators and its closing brace.
+let private adversarialEnvelopeOps: string list =
+    [ ""
+      "}"
+      "{}"
+      ",\"op\":"
+      "\"}"
+      "{\"seq\":1,\"actor\":{},\"op\":{}}"
+      "A|x|t" ]
+
+/// Sequence numbers for the envelope, including the ones a thousands-separated renderer would
+/// print differently. Bounded at four digits because the model's `pos` is a Peano numeral built
+/// by a non-tail recursion (`posOfInt`), which a six-digit sequence overflows the stack with.
+let private adversarialSeqs: int list = [ 0; 1; 7; 10; 999; 1000; 1001; 2026 ]
+
+/// The model's envelope over a STRING op with the identity codec — the shape the parse is stated
+/// over, since `rec_payload` reads nothing of the op but its encoding.
+let private modelEnvelope (show: Chain.pos -> string) (seq: int) (actor: string) (opJson: string) : string =
+    Chain.rec_payload show id (posOfInt seq) actor opJson
+
+/// Every PAYLOAD SPLICE of one chain: record `i` takes record `j`'s content while keeping its own
+/// stored hash and prev-link — the whole content (which the sequence check finds first) and the
+/// actor-and-op only (which only the recomputed hash can find). Exactly the tamper
+/// `payload_splice_breaks_chain` is about, drawn from the chain's own payloads rather than minted.
+let private payloadSplices (rs: OpRecord<'Op> list) : (string * OpRecord<'Op> list) list =
+    let n = List.length rs
+
+    [ for i in 0 .. n - 1 do
+          for j in 0 .. n - 1 do
+              if i <> j then
+                  let r = List.item i rs
+                  let s = List.item j rs
+
+                  let put (r': OpRecord<'Op>) =
+                      rs |> List.mapi (fun k x -> if k = i then r' else x)
+
+                  yield
+                      sprintf "content@%d<-%d" i j,
+                      put
+                          { r with
+                              Seq = s.Seq
+                              Actor = s.Actor
+                              Op = s.Op }
+
+                  if s.Actor <> r.Actor || s.Op <> r.Op then
+                      yield sprintf "actor+op@%d<-%d" i j, put { r with Actor = s.Actor; Op = s.Op } ]
+
+let private payloadSpliceDifferential
+    (label: string)
+    (prodHash: HashFn)
+    (modelHash: HashFn)
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (gen: LaneGen<'Op, 'State>)
+    (seed: int)
+    (iterations: int)
+    : WalkerTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let mutable t = emptyWalkerTally
+
+    let note (why: string) =
+        if t.Failure.IsNone then
+            t <- { t with Failure = Some why }
+
+    for _ in 1..iterations do
+        let lanes, r' = gen.Lanes 2 rng
+        rng <- r'
+        let ops = List.concat lanes
+        // Two writers, so an actor-and-op splice can change the actor as well as the op.
+        let rs =
+            ops
+            |> List.mapi (fun k op ->
+                (if k % 2 = 0 then
+                     Human "writer"
+                 else
+                     Agent("m", "v", "writer-2")),
+                op)
+            |> List.fold
+                (fun (st, acc) (actor, op) ->
+                    match OpStream.append prodHash w actor op st acc with
+                    | Ok(st', acc') -> st', acc'
+                    | Error _ -> st, acc)
+                (gen.State0, OpStream.empty)
+            |> snd
+
+        let compare (what: string) (records: OpRecord<'Op> list) : ChainVerdict =
+            let p, m = chainVerdicts prodHash modelHash w records
+
+            if p <> m then
+                note (
+                    sprintf
+                        "%s: seed=%d splice=%s ops=[%s]\n  production: %s\n  model:      %s"
+                        label
+                        seed
+                        what
+                        (ops |> List.map w.Encode |> String.concat "; ")
+                        (renderChainVerdict p)
+                        (renderChainVerdict m)
+                )
+
+            p
+
+        if List.length rs > 1 then
+            if compare "none" rs = ChainIntact then
+                t <- { t with Intact = t.Intact + 1 }
+
+            for (what, spliced) in payloadSplices rs do
+                let p = compare what spliced
+                t <- { t with Tampers = t.Tampers + 1 }
+
+                if p <> ChainIntact then
+                    t <- { t with Detected = t.Detected + 1 }
+                else
+                    note (sprintf "%s: seed=%d splice=%s went UNDETECTED by production" label seed what)
+
+    t
+
 
 // ---------------------------------------------------------------------------
 //  Phase 138 — the APPLY-ENGINE PRESERVATION model beside `Ops.apply` / `canApply` / `invert`.
@@ -11172,6 +11304,186 @@ let proofOracleTests =
               Expect.isTrue
                   (Dag.verifyDag OpStream.defaultHash lossy tampered)
                   "under a non-injective CODEC — the hash untouched — production's own walker cannot see the tamper"
+
+          // ---- Phase 197 — the envelope parse: the linear side's premise, discharged ----
+
+          testCase "production's chain payload IS the model's envelope, over the adversarial actors, ops and sequences"
+          <| fun _ ->
+              // `rec_payload` is a hand-spelled copy of `OpStream.canonicalConfig.Payload`, and the
+              // parse is a theorem about the copy. This is the byte-for-byte check that the copy is
+              // the production envelope, over the population every case below runs on.
+              for seq in adversarialSeqs do
+                  for a in adversarialActors do
+                      for o in adversarialEnvelopeOps do
+                          Expect.equal
+                              (modelEnvelope showPos seq (Actor.encode a) o)
+                              (OpStream.canonicalConfig.Payload seq a o)
+                              (sprintf "the model's envelope is production's payload for seq=%d actor=%A op=%s" seq a o)
+
+          testCase "the envelope parse recovers the sequence, the actor and the op over the adversarial population"
+          <| fun _ ->
+              // `Chain.rec_payload_parsed`, measured: over every (seq, actor, op-encoding) triple the
+              // envelope determines all three — no two distinct triples share an envelope.
+              let triples =
+                  [ for seq in adversarialSeqs do
+                        for a in adversarialActors do
+                            for o in adversarialEnvelopeOps -> seq, Actor.encode a, o ]
+
+              let envelopes =
+                  triples
+                  |> List.map (fun (seq, a, o) -> modelEnvelope showPos seq a o, (seq, a, o))
+
+              let collisions =
+                  envelopes
+                  |> List.groupBy fst
+                  |> List.filter (fun (_, g) -> (g |> List.map snd |> List.distinct |> List.length) > 1)
+                  |> List.map fst
+
+              Expect.isEmpty
+                  collisions
+                  "two distinct (seq, actor, op) triples share one envelope — the parse is ambiguous"
+
+              Expect.equal
+                  (envelopes |> List.map fst |> List.distinct |> List.length)
+                  (List.length envelopes)
+                  "and no two triples collide at all"
+
+          testCase
+              "under a FREE actor code the same envelope IS ambiguous — the prefix-free premise is what the parse spends"
+          <| fun _ ->
+              // The go-red for the actor split. The parse cuts the actor at the comma that opens
+              // `,"op":` and needs the actor code prefix-free to do it; over a free actor string the
+              // cut is not forced, and the ambiguity the model's section 6b names is REAL: the actor
+              // `A,"op":B` with op `C` and the actor `A` with op `B,"op":C` mint one envelope.
+              let ambiguous = modelEnvelope showPos 3 "A,\"op\":B" "C"
+              Expect.equal ambiguous (modelEnvelope showPos 3 "A" "B,\"op\":C") "one envelope, two (actor, op) readings"
+
+              // What saves production: both actors are `Actor.encode` outputs there, and the code is
+              // prefix-free (Phase 145's measurement), so neither reading's actor is an encoding.
+              let isEncoding (s: string) =
+                  adversarialActors |> List.exists (fun a -> Actor.encode a = s)
+
+              Expect.isFalse (isEncoding "A,\"op\":B") "the free actor is not an actor encoding"
+              Expect.isFalse (isEncoding "A") "nor is the other reading's"
+
+              // And the SAME ambiguity cannot be built from encodings: no actor encoding is a proper
+              // prefix of another, so no encoding extended by `,"op":<x>` is an encoding.
+              let encs = adversarialActors |> List.map Actor.encode
+
+              Expect.isEmpty
+                  [ for x in encs do
+                        for y in encs do
+                            if y.StartsWith(x + ",\"op\":", System.StringComparison.Ordinal) then
+                                yield x, y ]
+                  "no actor encoding is another encoding followed by the op separator"
+
+          testCase
+              "the sequence numeral is comma-free and injective, and a numeral WITH a comma refutes the first-comma split rather than the envelope"
+          <| fun _ ->
+              // `seq_numeral_code`, measured on production's `show` — `string : int -> string`.
+              let rendered =
+                  adversarialSeqs @ [ for i in 0..2000 -> i ]
+                  |> List.distinct
+                  |> List.map (fun i -> i, string i)
+
+              for (i, s) in rendered do
+                  Expect.isFalse (s.Contains ",") (sprintf "the numeral for %d carries no comma: %s" i s)
+
+              Expect.equal
+                  (rendered |> List.map snd |> List.distinct |> List.length)
+                  (List.length rendered)
+                  "and `string` is injective on the sequence numbers"
+
+              // Where the premise is SPENT, and the finding beside it. The proof cuts the sequence at
+              // the FIRST comma (`app_sep_split`), which a thousands-separated renderer defeats: for
+              // seq 1000 it prints `1,000`, and the first-comma cut reads the sequence as `1`. That
+              // is a refutation of the PROOF STEP, not of the envelope — the bytes after that comma
+              // are `000,"actor":`, which no envelope's skeleton begins with, so the envelope for
+              // seq 1000 is still not the envelope for seq 1. Comma-freedom is therefore SUFFICIENT
+              // and what production has, not NECESSARY: the weakest premise the digraph `,"actor":`
+              // would admit is that a numeral never spells the separator, and it was not taken
+              // because the one-symbol premise is true of `string` and is a one-line split. Recorded
+              // so the next reader does not mistake the numeral's comma for an ambiguity.
+              let grouped (p: Chain.pos) : string =
+                  (intOfPos p).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)
+
+              Expect.equal (grouped (posOfInt 1000)) "1,000" "the perturbed renderer carries a comma"
+
+              let env = modelEnvelope grouped 1000 "X" "{}"
+              let afterSkeleton = env.Substring("{\"seq\":".Length)
+
+              Expect.equal
+                  (afterSkeleton.Substring(0, afterSkeleton.IndexOf ','))
+                  "1"
+                  "the first-comma cut misreads the grouped numeral — `app_sep_split`'s premise is load-bearing"
+
+              Expect.notEqual
+                  env
+                  (modelEnvelope grouped 1 "X" "{}")
+                  "yet the envelopes for 1000 and 1 still differ — the skeleton after the comma is not `000`"
+
+              Expect.isFalse
+                  (afterSkeleton.StartsWith("1,\"actor\":", System.StringComparison.Ordinal))
+                  "so no second reading of the envelope exists; the comma refutes the split, not the parse"
+
+          testCase "a payload splice breaks the chain — production and the oracle agree, over the work-plan stream"
+          <| fun _ ->
+              // `payload_splice_breaks_chain`, beside production: one record's content swapped for
+              // another record's, its stored hash and prev-link kept, in a chain `verifyChain`
+              // accepted — and both walkers refuse it, reporting the same break.
+              payloadSpliceDifferential
+                  "work-plan payload splices"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  planW
+                  planLaneGen
+                  3970
+                  40
+              |> expectWalkerAgreement "work-plan payload splices"
+
+          testCase
+              "a payload splice breaks the chain — production and the oracle agree, over the reference witness's stream"
+          <| fun _ ->
+              payloadSpliceDifferential
+                  "reference payload splices"
+                  OpStream.defaultHash
+                  OpStream.defaultHash
+                  treeW
+                  treeLaneGen
+                  3971
+                  30
+              |> expectWalkerAgreement "reference payload splices"
+
+          testCase
+              "a payload splice is INVISIBLE under a hash that folds the payload — the parse cannot outrun the hash premise"
+          <| fun _ ->
+              // The differential's own go-red, and the honest boundary of the discharge: the parse
+              // makes the ENVELOPE injective, and the record hash is `h prev envelope`, so a hash that
+              // is not injective on its second argument hides a splice from production and the model
+              // alike. `hash_injective` stays the one premise the linear side assumes, exactly as the
+              // DAG's does.
+              let payloadBlind: HashFn = fun prev _ -> OpStream.defaultHash prev "payload"
+              let lanes, _ = planLaneGen.Lanes 2 (ConfRng.ofSeed 3972)
+
+              let rs =
+                  chainUnder payloadBlind planW planLaneGen.State0 (Human "writer") (List.concat lanes)
+
+              Expect.isGreaterThan (List.length rs) 1 "at least two records appended, so a splice exists"
+
+              let splices =
+                  payloadSplices rs |> List.filter (fun (what, _) -> what.StartsWith "actor+op@")
+
+              Expect.isNonEmpty splices "there is an actor-and-op splice to try"
+
+              for (what, spliced) in splices do
+                  let p, m = chainVerdicts payloadBlind payloadBlind planW spliced
+
+                  Expect.equal
+                      p
+                      ChainIntact
+                      (sprintf "%s: under a payload-blind hash production cannot see the splice" what)
+
+                  Expect.equal m ChainIntact (sprintf "%s: nor can the model" what)
 
           // ---- Phase 191 — snapshot and bounded replay: compact, replayFrom, verifyAcross ----
 

@@ -2463,8 +2463,8 @@ theorems statements about the walker rather than about a re-description of it:
 The premise is that **the content id determines the content**: two contents that hash to one id are
 the same content. That is the collision-resistance assumption every content-addressed store makes;
 what is unusual is only that it is written down beside the code that needs it. It is an explicit
-lemma-valued **parameter** of the theorems that use it (`node_injective_on`, `rec_injective`), never
-an `assume` — `--report_assumes error` is on and the module carries no `assume`, no `admit`, no
+lemma-valued **parameter** of the theorems that use it (`node_injective_on`, `rec_injective_on`),
+never an `assume` — `--report_assumes error` is on and the module carries no `assume`, no `admit`, no
 `assume val`.
 
 **1. It is stated MODULO THE PARENT SORT, and that is the strongest form that is true.** Production
@@ -2527,9 +2527,10 @@ is symbol-list append, and two strings with the same symbols are the same string
 the assumption visible in a signature rather than inherited from a library `--report_assumes` does
 not quantify over. And it costs a **restriction**: `node_injective_on` concludes only for pre-images
 whose parents are ids and whose actor string is one the actor code emits, which is what the splice
-lemmas need and what production supplies. The LINEAR side is deliberately untouched — `rec_injective`
-splices a four-way JSON envelope rather than `nodeHash`'s two, and decomposing it is separate work,
-named in the ladder rather than quietly implied by this one.
+lemmas need and what production supplies. The LINEAR side was deliberately left untouched here —
+its pre-image is a four-way JSON envelope rather than `nodeHash`'s two splices — and Phase 197
+decomposed it the same way, with the same restriction and the same two remaining assumptions plus
+the numeral code: see "The envelope parse" below.
 
 **3. The chain's SEQUENCE and PREV-LINK breaks need none of it.**
 `chain_tamper_seq_detected` and `chain_tamper_prev_detected` are proved **under no hypothesis at
@@ -2634,9 +2635,12 @@ prefix-free hypothesis reddens `splice_split`; dropping the appeal to the op cod
      construction and are what makes any splice argument possible at all; F\*'s own `FStar.String`
      admits them. A stated hypothesis, in the same style as the total order below, rather than a
      parameter.
-   - **The LINEAR side's premise is still bundled.** `rec_injective` splices a four-way JSON
-     envelope, and Phase 145 decomposed `nodeHash`'s two splices only. Nothing about the chain
-     payload's splices is proved; the row above is the whole of what is claimed there.
+   - **The LINEAR side's premise is decomposed too — since Phase 197.** `rec_injective_on` is
+     built by `rec_injective_derived` from the hash's injectivity, the op codec's, the reading,
+     the numeral code and the actor code; the envelope parse is the row `chain-envelope-parse`,
+     and the one premise new to it, the numeral code, is `seq-numeral-code-certified`. Phase 145
+     decomposed `nodeHash`'s two splices only, and this entry used to say the chain payload's were
+     unproved; they are proved now (section 6b of the model, "The envelope parse" below).
    - **The comparison is a total order.** `merge_id_parent_order_independent` asks for it and
      nothing else does; `String.CompareOrdinal(a,b) <= 0` satisfies it.
    - **The walk order is production's own.** The model walks its entry list in the order it is
@@ -2717,7 +2721,8 @@ for it — but it is an ordering obligation on every caller, and it was nowhere 
 **verify, then compact.** `compacted_tail_tamper_detected` is the other direction, and is an appeal
 to section 6's `chain_tamper_detected` and nothing more: that theorem never needed the walk to start
 at genesis, so a tamper of the TAIL is found across a boundary exactly as it is from the origin,
-spending the same `rec_injective` premise for the same arm.
+spending the same premise for the same arm — `rec_injective_on` since Phase 197, so the two
+records' actors are ones the code emits.
 
 **One boundary is a finding about production rather than a modelling choice.** `snapshotAtOpt`
 hard-wires the boundary hash at sequence zero to `""`, where the walkers start from `cfg.Genesis`.
@@ -2785,8 +2790,9 @@ was not the seed.
 
 1. **Proved.** The two theorems and their corollaries above, the refusal characterisation, the tail
    tamper at the boundary, and the zero-genesis boundary. No `assume`, no `admit`,
-   `--report_assumes error` on. The only premise spent anywhere in the section is `rec_injective`,
-   by `compacted_tail_tamper_detected`, inherited from the theorem it appeals to.
+   `--report_assumes error` on. The only premise spent anywhere in the section is
+   `rec_injective_on` (derived since Phase 197), by `compacted_tail_tamper_detected`, inherited
+   from the theorem it appeals to.
 2. **Differentially tested.** As above, over those pools, never over all inputs.
 3. **Assumed.** Nothing new. The section inherits theorem 3's bridges unchanged — a sequence number
    and a boundary are Peano numerals, so a NEGATIVE `atSeq` (which production refuses as out of
@@ -2820,8 +2826,9 @@ theorems.
   order. It composes two facts. An attestation verifies against at most one head
   (`signature_binds`, below). And a verified chain's head **determines the chain**:
   `same_head_same_chain_from` is the linear chain's own injectivity, walked tip to root — the two
-  tips share a hash, so `rec_injective` makes them one record with one prev-link, which is the head
-  of what is left. A chain is told apart from its own extensions by the **sequence number in the
+  tips share a hash, so `rec_injective_on` makes them one record with one prev-link, which is the
+  head of what is left (for chains whose actors the code emits, `actors_ok` — the derived
+  composite's restriction, since Phase 197). A chain is told apart from its own extensions by the **sequence number in the
   pre-image** (`head_seq_at_least`): a tip minted at index *i* cannot be the tip of a walk that
   passed *i* + 1. Without the sequence in the payload that case would not close.
 - **`signed_head_rejects_splice`.** Replace, insert or drop ONE op and **re-mint the whole chain**
@@ -2919,8 +2926,9 @@ chain-against-its-own-extension case.
 
 **What it cost.** Almost nothing in prover time, and a small budget re-seed. Section 8 is about 420 lines — thirteen
 lemmas and the two theorems — every one an induction over a list or a numeral at the default
-`--z3rlimit 40` with no scoped option, and the new proofs are short appeals to `rec_injective` and
-to section 6's characterisation rather than new case analyses. Both theorems discharged on the
+`--z3rlimit 40` with no scoped option, and the new proofs are short appeals to `rec_injective`
+(as it then was — `rec_injective_on` since Phase 197) and to section 6's characterisation rather
+than new case analyses. Both theorems discharged on the
 first attempt; no repair loop was spent. Five cold quaked runs of the module alone measured 22s,
 22s, 23s, 27s and 23s against the 22s recorded before the section existed; the 27s was taken beside
 sibling gate runs rather than other provers, and a direct invocation carries no contention label to
@@ -2941,8 +2949,13 @@ measured 23s, on a pass the leg itself labelled contended (x1.05), so it is not 
      A `model-bridge` that closes `unscheduled`: `Conformance.attestationLaws` already samples it at
      a host's own sink, and the ladder's discharge relation does not yet name it (above). New with
      this section.
-   - **`rec_injective`** — the linear half of theorem 3's cryptographic premise, still in its
-     bundled form, spent once per record by `same_head_same_chain_from`. Inherited, not new.
+   - **`rec_injective`** — the linear half of theorem 3's cryptographic premise, in its bundled
+     form when this section shipped, spent once per record by `same_head_same_chain_from`.
+     Inherited, not new — and since Phase 197 DERIVED: the section's theorems take
+     `rec_injective_on`, built from `hash_injective`, `op_codec_injective`, the reading, the
+     numeral code and the actor code, over chains whose actors the code emits (`actors_ok`;
+     `signed_head_rejects_splice` carries the condition on its steps and on the splice's own
+     step). What is assumed here is now exactly what theorem 3's DAG arm assumes.
    - Theorem 3's bridges, unchanged: a sequence number is a Peano numeral, and the extractor and
      the F# compiler are trusted.
 4. **Not claimed.**
@@ -2954,6 +2967,122 @@ measured 23s, on a pass the leg itself labelled contended (x1.05), so it is not 
    - **A compacted stream's discarded prefix**, per the paragraph above.
    - **That a host signs at all.** Signing is opt-in; under `noAttestation` there is no signed
      head and nothing to bind.
+
+### The envelope parse — the linear side's premise discharged (Phase 197)
+
+Phase 145 unbundled the DAG arm's premise and left the linear arm's alone, and said why: `rec_hash`
+hashes `{"seq":<n>,"actor":<a>,"op":<o>}` beside the predecessor's hash, a four-way JSON envelope
+rather than `nodeHash`'s two splices, so "the record hash determines the record" was still the
+bundled Phase 136 form, `rec_injective`, taken as one parameter by every linear theorem in
+sections 6, 7 and 8. Section 6b of `Chain.fst` discharges it. The shape is Phase 145's exactly:
+a RESTRICTED composite (`rec_injective_on`, concluding only for actor strings the code emits, as
+`node_injective_on` concludes only for pre-images whose parents are ids and whose actor is one the
+code emits), BUILT by `rec_injective_derived` from named premises — the hash's injectivity, the
+op codec's, the reading of a string as its symbols, the actor code, and one premise new to the
+ladder, the numeral code. Nothing about the record hash is bundled any more, and what the linear
+side assumes is now exactly what the DAG side assumes.
+
+**What the proof is.** `rec_payload_parsed`: two envelopes that are one string carry one sequence,
+one actor and one op encoding. It is three splits in a row, each forced by the FIRST symbol of the
+separator that follows the field:
+
+1. the **sequence** is cut at the first comma — `app_sep_split`, Phase 145's lemma — because a
+   numeral carries no comma (`seq_numeral_code`, which also asks `show` to be injective);
+2. the **actor** is cut at the comma that opens `,"op":` — `splice_split` — because the actor code
+   is prefix-free (`actor_code_prefix_free`, the `code` hypothesis `node_injective_derived` takes
+   inline, named so the linear side can spend it). NOT comma-freedom, which `Actor.encode` does not
+   have: a `Human` with id `a,b` encodes to `{"kind":"human","id":"a,b"}`. The numeral's argument
+   is unavailable for the actor, and the actor's is unnecessary for the numeral;
+3. the **op** is what is left before the closing brace — `app_snoc_inj`, new — and this step needs
+   NOTHING of the op encoding's alphabet: whatever `enc_op o` contains, `x ^ "}" == y ^ "}"`
+   forces `x == y`. So the op codec is asked for injectivity (premise 4, `op_codec_injective`)
+   and for no shape condition at all, which is the answer to the shard's question of what the
+   proof needs of the abstract `enc_op`: only what the ladder already certified.
+
+The skeleton's literals — `{"seq":`, `"actor":`, `"op":` — are cancelled as shared prefixes without
+being read (`app_cancel_left`, new). The two literal facts the proof does need, that `,"actor":`
+and `,"op":` begin with the comma, are discharged by normalising the string literals
+(`assert_norm (",\"actor\":" == "," ^ "\"actor\":")` and its twin), so the reading hypothesis is
+section 1b's plus one symbol, the brace (`reveal "}" == [close]`). `rec_payload_symbols` peels the
+six concatenations with `faithful_cat` and states the envelope's symbol form once, for both sides.
+
+**The finding: the digraphs are not what the proof spends.** The Phase 145 README entry that
+chartered this work, and the shard written from it, both said the new difficulty was that the
+envelope's separators are `":` and `,"` digraphs inside a literal skeleton rather than single
+symbols. They are — and the proof never reads the second symbol of either. Each split is a
+one-symbol split at the comma, and what the digraph's second symbol would buy (a numeral that
+carried a comma could still not spell `"actor":`) is a WEAKER premise than the one taken.
+Comma-freedom of the numeral is therefore recorded as sufficient and true of production
+(`string : int -> string`), not necessary; the differential exhibits the distinction, below.
+What the actor field's self-delimitation is composed with is the numeral's comma-freedom, and the
+composition is the order of the cuts.
+
+**The unrestricted form is refuted, not merely unproved.** `rec_injective` as Phase 136 wrote it,
+over a free actor string, is false of the envelope: the actor `A,"op":B` with op `C` and the actor
+`A` with op `B,"op":C` mint one envelope. That is the ambiguity the restriction excludes, and it
+is why `rec_injective_on` carries `actor_ok` and why the linear theorems now ask it of their
+chains (`actors_ok`, every record's actor one the code emits — what a typed `Actor` supplies,
+since the walker re-encodes it with `Actor.encode`). The cost of the discharge is that hypothesis,
+threaded through `chain_tamper_detected` and its `_verify` corollary, section 7's
+`compacted_tail_tamper_detected`, and section 8's `head_seq_at_least`,
+`same_head_same_chain_from`, `signed_head_binds_chain`, `signed_head_rejects_rewrite` and
+`signed_head_rejects_splice`; the last carries it on its STEPS (`steps_actors_ok`) and on the
+splice's own step (`splice_actor_ok`), with `build_chain_actors_ok` and `apply_splice_actors_ok`
+carrying it to the chains the theorem is stated over. `payload_splice_breaks_chain` states the
+tamper theorem positively on the named premises alone — no composite parameter — which is the
+sentence the phase was chartered with.
+
+**What the differential measures**, in `ProofOracleTests`, beside Phase 145's cases:
+
+- that `rec_payload` IS `OpStream.canonicalConfig.Payload`, byte for byte, over the adversarial
+  actors, seven envelope-hostile op encodings (the closing brace, `,"op":`, a whole envelope) and
+  eight sequences — the parse is a theorem about the model's copy, and this is what makes it a
+  theorem about production's;
+- the parse's conclusion over that population: no two distinct (seq, actor, op) triples share an
+  envelope;
+- the actor premise in the losing direction: the free-actor ambiguity above, exhibited, and shown
+  unreachable from `Actor.encode` outputs because no encoding is another followed by `,"op":`;
+- the numeral premise: `string` is comma-free and injective over 0..2000 and the adversarial
+  sequences; and a thousands-separated renderer (`1,000`) DEFEATS THE FIRST-COMMA CUT — the
+  sequence reads as `1` — while the envelope stays unambiguous, because the bytes after that comma
+  are `000,"actor":` and no skeleton begins with them. A refutation of the proof step, recorded as
+  such rather than presented as a refutation of the envelope;
+- the theorem's arm beside production's walker: every payload splice of a generated chain — one
+  record's content, or its actor-and-op alone, swapped for another record's with the stored hash
+  and prev-link kept — is refused by `verifyChain` and by the oracle alike, reporting the same
+  break, over the work-plan and the reference streams;
+- and the boundary of the discharge: under a hash that folds its payload the same splice is
+  invisible to both walkers. The parse makes the ENVELOPE injective; the record hash is
+  `h prev envelope`; `hash_injective` stays the one premise the linear side assumes, exactly as
+  the DAG's does.
+
+**What it cost.** The module discharged on the first prover run, 16s unquaked at the default
+`--z3rlimit 40` with no scoped option — eleven lemmas, six definitions, and the hypothesis threaded
+through eight existing theorems, about 230 lines. The one repair-loop iteration spent was a
+deliberate falsifier: a scratch copy with the actor-code hypothesis dropped from the parse fails at
+the `splice_split` step (`proper_prefix` unprovable), so the premise is known load-bearing rather
+than assumed so. Three cold quaked runs of the module alone (`--quake 3`, fresh cache directory
+each) measured 19s, 19s and 19s, with one sibling prover process live on the machine (Phase 154's
+worker) — under the 22-27s Phase 193 seeded from, on a module that only grew. The budget is
+deliberately NOT lowered: `contentionSeeding` admits a seed only from an uncontended observation,
+these three were taken beside a live prover, and a budget lowered from a contended afternoon is the
+next contended afternoon's finding. `measuredSeconds` is re-recorded at 19; the 60s budget stands.
+
+**The claims ladder, for this section.**
+
+1. **Proved.** `rec_payload_parsed`, `rec_injective_derived`, `payload_splice_breaks_chain`, the
+   two cancellation lemmas, and the actor-code carriage through sections 7 and 8. No `assume`, no
+   `admit`, `--report_assumes error` on.
+2. **Differentially tested.** The six measurements above, over those populations, never over all
+   inputs; `seq-numeral-code-certified` is the row.
+3. **Assumed.** Exactly theorem 3's: `hash_injective` (now spent by the linear side on
+   `(prevHash, envelope)` pairs and nothing else), `op_codec_injective` (the domain's, certified by
+   the kit's law), the reading (`symbols_faithful` plus the comma, bar and brace symbols), and the
+   two alphabet conditions the differential measures — the actor code prefix-free, the numeral
+   comma-free and `show` injective.
+4. **Not claimed.** Anything about the legacy `legacyActorConfig` payload, which the model does
+   not carry; anything about the DAG's `|` splice beyond what Phase 145 proved; and, as before,
+   collision resistance of any concrete hash.
 
 ## Theorem 4 — `Json.parse` totality, bounded (Phase 146)
 
@@ -5478,14 +5607,15 @@ needs the model to compute a code point from four hex digits, which needs intege
 code, which is finding 2's cost rather than a proof difficulty. Whether it is worth paying is a
 question about the extraction's runtime floor, not about the parser.
 
-**The LINEAR chain payload's splices** — the half Phase 145 deliberately did not take. `rec_hash`
-hashes `{"seq":<n>,"actor":<a>,"op":<o>}`, a four-way splice through a JSON envelope rather than
-`nodeHash`'s two, so `rec_injective` is still the bundled premise Phase 136 wrote. The symbol-level
-machinery it would need is already there (`app_sep_split`, `splice_split`, `symbols_faithful`); what
-is new is that the envelope's separators are `":` and `,"` digraphs inside a literal skeleton rather
-than single characters, so the argument is a parse rather than a split, and the actor field's
-self-delimitation has to be composed with the sequence numeral's. It is the item here with a worked
-precedent sitting beside it.
+_(**The LINEAR chain payload's splices** — the half Phase 145 deliberately did not take — are
+DONE: Phase 197, section 6b of `Chain.fst`, "The envelope parse" under theorem 3. The machinery
+this entry named was the machinery it took (`app_sep_split`, `splice_split`, `symbols_faithful`,
+plus two cancellation lemmas), and the prediction it made was half right: the argument IS a parse
+rather than one split, three splits in a row — but the digraphs turned out not to be what it
+spends. Each cut is forced by the LEADING comma of the separator that follows, the skeleton's
+literals are cancelled as shared prefixes without being read, and the op needs no alphabet
+condition at all because the closing brace cancels. What the actor field's self-delimitation is
+composed with is the numeral's comma-freedom, which is the one premise new to the ladder.)_
 
 _(**The topological order's uniqueness on a spine** was named here and is DONE — Phase 142,
 `spine_order_forced` + `kahn_drain_is_such_an_enumeration`, in section 12 of `DagFold.fst`. **And
