@@ -574,7 +574,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 25 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 26 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -590,7 +590,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 16 rows.
+  `unscheduled` where something could and nobody has. 17 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -628,6 +628,7 @@ over-read.
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
 | `pipeline-step-evaluator-abstract` | `model-bridge` | `unscheduled` |
+| `pipeline-cell-primitives-abstract` | `model-bridge` | `unscheduled` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Five of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -761,8 +762,11 @@ in `coverage-exclusions.json`; it is the decision, and the token is only its kin
 until Phase 154: `Fuaran.Core.DataFrame`'s entry retired the day `Pipeline.fst` gave the package a
 model, because clause 1's second direction fails an exclusion for a package that has since gained
 one — and what that entry declined (the verbs' semantics, left to `incrementalLaws` and its
-siblings) is still declined, as the model's own `pipeline-step-evaluator-abstract` row. The file
-keeps the retirement under `$retired` so the next reader finds the decision where the entry was.
+siblings) is still declined for the twelve verbs that evaluate no expression, as the model's own
+`pipeline-step-evaluator-abstract` row (Phase 234 made the other two, `Filter` and `Derive`, and the
+expression evaluator under them, clauses; the cell primitives are the `pipeline-cell-primitives-abstract`
+row). The file keeps the retirement under `$retired` so the next reader finds the decision where the
+entry was.
 
 Phase 203 was filed naming four reasons and this file carries three, which is a correction and is
 recorded rather than quietly absorbed. **`tooling`** was written for `Fuaran.Core.Idl.Codegen`'s
@@ -5527,17 +5531,29 @@ refused before evaluation" described enforcement that does not exist.)_
 `Pipeline.fst` models the DRIVER clause for clause — the two closed DUs `ColExpr` (thirteen cases)
 and `Transform` (fourteen verbs) with every payload type they carry, the evaluator's row-major
 `Frame`, the local `costOf`, the loop `go`, and `evalPipelineWithInEnv` as the projection it is —
-over ONE parameter: the STEP EVALUATOR. Production's `evalStep resolve env` dispatches fourteen verbs
-to fourteen primitives, and none of that is what the phase is about; the model takes
-`step : frame -> transform -> outcome frame e` with the resolver and the param env closed over, as
-the F# closure closes over them, and every theorem holds for every step evaluator. That is the
-Phase 176 and Phase 186 shape — the pipeline evaluator and the node evaluator were parameters
-there — applied to the driver that those two phases' concrete evaluator sits under. The error type
-is abstract too: the driver reads no error, it threads the step's.
+and, since **Phase 234**, the EXPRESSION EVALUATOR under it: the private `evalExpr` with its four
+inner loops, `evalFilter`, `evalDerive` (with `inferType`, `colIndex` and the replace-or-append),
+`evalStep`'s dispatch, and the `EvalError` DU, every arm in evaluation order with every short
+circuit production takes. Two things are PARAMETERS, and each is an assumption exactly as far as
+the model's header says: the CELL PRIMITIVES (`prims` — the four operator-class primitives as one
+function of the operator, `castCell`, `applyScalar`, `compareCells`; assumed only to be total
+functions of cells, which is what their type says, and hence unable to re-enter the evaluator) and
+the TWELVE VERBS that evaluate no expression (`other_fn`, the resolver and the env closed over as
+the F# closure closes over them; assumed to return a well-formed frame or an error on a well-formed
+frame, which is its type, and to evaluate no expression, which is read off the source and is what
+`costOf` already asserts in charging them nothing). Phase 154 had made the WHOLE step evaluator the
+parameter (`step : frame -> transform -> outcome frame e`, the Phase 176 / 186 shape), which left
+`work_bounded` resting on the host's step cost; the same-task trial's Opus arm modelled the
+evaluator concretely and proved the visit bound over it, and Phase 234 ported that formulation
+into the landed model (branch `phase-154` @ `439fcba`, deleted once it shipped). Every type
+parameter is `Type0` — the trial measured a bare `Type` at seven parameters not finishing in 720s.
 
 ### What is proved
 
-Four theorems and a finding, over any step evaluator, any pipeline and any input frame:
+Four theorems and a finding, over any cell primitives, any twelve-verb evaluator, any param
+environment, any pipeline and any well-formed input frame (the one partial operation on the modelled
+path, `List.item i row` in the `Col` arm, is in range on a well-formed frame by refinement, and so
+are `evalDerive`'s `List.map2` lengths):
 
 1. **`eval_total`** — the counted evaluator returns `Ok` exactly when every step of the walk
    succeeds (`go_ok_iff`), and then the count is the walk's cost, charged step by step where each
@@ -5556,12 +5572,22 @@ Four theorems and a finding, over any step evaluator, any pipeline and any input
    says what the count MEANS. `expr_nodes` counts an expression's nodes, one per constructor
    occurrence through every list it carries (a mutual induction with its two list walks);
    `within_limit` says every expression a `Filter` or a `Derive` carries has at most
-   `Limits.max_expr_nodes` of them. Under it, the expression WORK a walk can cost — `work`, rows
-   times the expression's nodes at each charged step, an upper bound because `evalExpr` is
-   structural and visits a node at most once (`Case` and `Coalesce` short-circuit; nothing
-   revisits) — is at most the count times the limit. `work` is the model's reading and not a
-   quantity production computes; the theorem is that the count production reports bounds it, with
-   the format's own constant.
+   `Limits.max_expr_nodes` of them. Under it, the expression WORK a walk does — `work`, the
+   `evalExpr` invocations the modelled evaluator makes at each charged step — is at most the
+   count times the limit. Since Phase 234 `work` is read off the evaluator, not defined:
+   **`visits_le_nodes`** says one row's evaluation of an expression makes at most `expr_nodes`
+   invocations (`expr_visits` counts them, itself included, following every short circuit exactly
+   as `eval_expr` takes it — a failed left operand, a `Coalesce`'s first non-null, a `Case`'s
+   first true `when`, an `InList`'s first match or null subject, an `ApplyFn`'s first failing
+   argument), a mutual induction over the expression and its three list walks, over any cell
+   primitives; **`rows_visits_le`** lifts it over a step's rows, stopping at the first that fails
+   as both loops do; `step_work_bounded` carries the limit through the multiplication. Phase 154's
+   `work` was rows times nodes by definition, with "`evalExpr` is structural and visits a node at
+   most once" said in a comment; that sentence is now the theorem. For the two
+   expression-evaluating steps the bound is unconditional on any parameter; for the twelve others
+   it rests on their evaluating no expression — the `pipeline-step-evaluator-abstract` row, the
+   same assumption `costOf` makes — and on nothing else. The theorem is that the count production
+   reports bounds the evaluator's work, with the format's own constant.
 4. **`uncounted_is_projection`** — `evalPipelineWithInEnv` is
    `evalPipelineWithInEnvCounted … |> Result.map fst`, discharged by definition, with
    `uncounted_ok_iff` reading it back (the uncounted path succeeds exactly when the walk does, with
@@ -5595,12 +5621,16 @@ performs.
 
 ### The differential
 
-`Proofs.Oracle`'s pipeline family runs the extracted driver beside production with the step
-evaluator instantiated at production's own primitives, one verb at a time through the public entry
-point — `evalPipelineWithInEnv resolve env [ step ]` over the frame crossed back to a `Table` — so
-what is compared is exactly what is modelled: the fold, the cost model and the two closed
-alphabets, with the verb semantics SHARED rather than compared. It compares the TABLE, byte for
-byte through `ColumnCodec.encode` as `transformLaws` does, and the COUNT, or the rendered error.
+`Proofs.Oracle`'s pipeline family runs the extracted driver beside production with both parameters
+instantiated FROM production: each cell primitive read through the public `evalExprInRow` on a
+one-node expression over literals (so the model's `eval_expr` runs production's arithmetic under
+the model's own recursion), and the twelve verbs one at a time through the public entry point —
+`evalPipelineWithInEnv resolve env [ step ]` over the frame crossed back to a `Table`. So every
+`Filter` and `Derive` is evaluated by the MODEL — its loop, its short circuits, its
+replace-or-append — and compared to production's table byte for byte, while the twelve verbs'
+semantics and the primitives are SHARED rather than compared. It compares the TABLE, byte for
+byte through `ColumnCodec.encode` as `transformLaws` does, and the COUNT, or the named
+`EvalError` (case for case through the model's own `eval_error`; the env crosses as `Map.toList`).
 Two pools: the sixteen `conformance/laws/transform-laws.json` vectors, decoded with the shipped
 codec (each file verdict cross-checked against the reference's), and four hundred generated
 pipelines at seed 154 — the vectors' own table recipe (a tie-heavy string key, an int column
@@ -5611,7 +5641,22 @@ literals or params. Every pipeline is also crossed to the model and back and mus
 unchanged, which is the check that the two closed alphabets are the same alphabet. Measured: 416
 compared, 200 evaluated to a table on both sides and 216 refused on both, 65 with a nonzero count,
 285 row evaluations compared in total, 416 round trips, all fourteen verb tags and all thirteen
-expression kinds reached. The model agreed with production on the first run.
+expression kinds reached. The model agreed with production on the first run — and Phase 234's
+concrete evaluator reproduced that tally to the number, on ITS first run, with every `Filter` and
+`Derive` now evaluated by the model.
+
+Since Phase 234 the evaluator is also compared ON ITS OWN, because it is the new thing: the model's
+`eval_expr` against `evalExprInRow`, cell for cell and error for error, over six hundred
+depth-three expressions at seed 234, each on every row of a drawn table — 2,095 expression-row
+pairs, 1,159 evaluating to a cell on both sides and 936 refused on both, all thirteen kinds reached,
+zero disagreements — with `expr_visits` read beside every pair and held to `expr_nodes`
+(`visits_le_nodes`, numerically: zero violations over 3,861 visits against 5,491 nodes), and the
+sample required to reach both a short circuit (557 pairs with visits below nodes) and a full walk
+(1,538 with visits equal to nodes), so the count is known to follow the evaluator rather than the
+tree. `work_bounded` is read numerically over the four hundred pipelines too — `work <= cost * 512`
+on every one within the limit, the count equal to the walk's cost on every `Ok`, and the visits
+strictly exceeding the count on fourteen (most drawn expressions are a single leaf, one visit per
+row).
 
 A float cell crosses as its round-trip `R` text and back, and a `Table` crosses as its row-major
 view — the transpose `toFrame` / `ofFrame` perform — so the bridge can never hand the model a
@@ -5619,54 +5664,83 @@ zero-column frame that still has rows (a `Table` cannot carry one, its row count
 column's length); the generator keeps every `Project` to at least one column for that reason, and
 this is the one shape the differential does not reach.
 
-Two go-reds, one per half of the comparison. The COUNT half: a lock-step step evaluator walks
-production's own pipeline and ignores the transform the model hands it, so every table stays right,
-while the bridge crosses each `Derive` to the model as a `Distinct` — a model whose count skips one
-step kind, the shard's own words — and it must lose on the count and on nothing else, which is
-asserted (every disagreement names the count). The TABLE half: under the faithful evaluator a
-bridge that negates every `Filter`'s predicate hands the model a different pipeline, and the byte
-comparison must see it. Seeded and replayable; the same seed reproduces the same tally, asserted.
+Three go-reds. The COUNT half: a lock-step step evaluator walks production's own pipeline and
+ignores the transform the model hands it, so every table stays right, while the bridge crosses
+each `Derive` to the model as a `Distinct` — a model whose count skips one step kind, the shard's
+own words — and it must lose on the count and on nothing else, which is asserted (every
+disagreement names the count). Since Phase 234 the model asks the parameter about no `Filter`, so
+the cursor walks production's non-`Filter` steps and the model's own Filters keep the two walks
+aligned. The TABLE half: under the faithful evaluator a bridge that negates every `Filter`'s
+predicate hands the model a different pipeline, and the byte comparison must see it. The NODE
+half (Phase 234): a node counter that forgets a `Case`'s `when` / `then` arms — a model that
+under-counts a nested expression — is held to the same visit count the faithful counter is held
+to, and must be exceeded by it (it is, on 88 rows of the sample, and on a stated witness: a `Case`
+whose `when` holds makes five visits against six nodes and an under-count of two). Seeded and
+replayable; the same seed reproduces the same tally, asserted.
 
 ### What it cost
 
-Cold runs of the prover invoked directly on the file with the leg's own flags (rlimit 40, `--quake
-3`, `--report_assumes error`), a fresh per-run cache each time with `Limits` checked into it first
-as the leg has it: **5.4s, 5.8s, 5.9s**, taken beside one other proof worker and a dozen build
-processes on the same machine. Budget **20s** (the minimum — 2 × 5.9 is under it) and floor **2s**
-(half of 5, rounded down), seeded per Phase 148/164's rules and recorded in `modules.json`; the
-phase's own `check.ps1 -Runs 3` leg then read 5s, 6s, 6s through the kit, every run labelled
-contended (x0.83, x0.96, x1.17) and none of them a seed. No
-`--ext context_pruning`, no scoped rlimit, no SMT pattern; the module opens `Limits` for the one
-constant it takes as a premise. **The whole module verified on the first prover run**, which is
-worth recording as a fact about the shape rather than as a boast: the driver is a structural fold,
-the proofs are six inductions over the pipeline list with the step's outcome split in each arm, and
-the only arithmetic is the two `FStar.Math.Lemmas` calls that carry a multiplication by the 512
-constant through a sum (`lemma_mult_le_left`, `distributivity_add_left`) — the one place the SMT
-solver would otherwise have met a nonlinear term. The one structural choice worth a sentence is
-`expr_nodes`: a mutual recursion with its two list walks rather than one function over a work list,
-because the former is what the extractor emits as three `let rec … and …` functions F# accepts,
-and the latter would need a non-structural measure for nothing. The oracle compiles against
+Phase 154's driver-only model cost **5.4s, 5.8s, 5.9s** cold (budget 20s, floor 2s). Phase 234's
+model, with the evaluator in it, cost **17.3s, 17.0s, 16.9s** on three cold runs of the prover
+invoked directly on the file with the leg's own flags (rlimit 40, `--quake 3`, `--report_assumes
+error`) against a cache holding only `Limits`, checked in first as the leg has it. Re-seeded per
+Phase 148/164's rules and recorded in `modules.json`: budget **40s** (2 × 17.3 rounded up to the
+next 10) and floor **8s** (half of 16.9, rounded down). The phase's own `check.ps1 -Runs 3` leg
+then read **23s, 17s, 20s** through the kit, every run labelled contended (x1.10, x0.89, x1.00
+over the eighteen untouched modules, against the x0.80 threshold — other work on the machine) and
+none of them a seed, exactly as Phase 154's three were. No `--ext
+context_pruning`, no scoped rlimit, no SMT pattern, no raised rlimit; the module opens `Limits`
+for the one constant it takes as a premise, and every type parameter is `Type0` (the trial's Opus
+draft declared seven as bare `Type` and did not finish in 720s; `Type0` finished in 21s). **Both
+the driver and the ported evaluator verified on their first prover run**, which is worth recording
+as a fact about the shape: the driver is a structural fold, the evaluator three mutual recursions
+over the closed expression DU (`eval_expr` and its four loops; `expr_visits` and its four, each arm
+re-evaluating the sub-expression to follow the short circuit; `visits_le_nodes` and its four), the
+well-formedness lemmas under `eval_derive` are inductions over the rows, and the arithmetic is the
+three `FStar.Math.Lemmas` calls that carry a multiplication through a sum (`lemma_mult_le_left`,
+`distributivity_add_left` twice) — the places the SMT solver would otherwise have met a nonlinear
+term. The one structural choice worth a sentence is the mutual recursions: `expr_nodes` with its
+two list walks, and the evaluator and its counter with four each, rather than one function over a
+work list, because the former is what the extractor emits as `let rec … and …` functions F#
+accepts, and the latter would need a non-structural measure for nothing. `List.item i row` is the
+refined `nth` (an index proved in range), which extracts to a match F# reports as incomplete — the
+same FS0025 every extracted oracle's projectors already carry. The oracle compiles against
 `Prims.fs` and the `option` shim with nothing added; `fst` is the shim's, as theorem 6's was.
 
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** The four theorems above and the finding
    (`eval_total`, `budget_monotone`, `work_bounded`, `uncounted_is_projection`,
-   `over_limit_not_refused`) with their supporting lemmas (`go_ok_iff`, `go_count`, `go_error`,
-   `go_app`, `go_count_ge`, `step_work_bounded`, `uncounted_ok_iff`), over any step evaluator, any
-   pipeline and any input frame. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3`,
-   `--report_assumes error` on, no `assume`, no `admit`. Opens `Limits`; restates `outcome` and its
-   two list helpers.
+   `over_limit_not_refused`), Phase 234's `visits_le_nodes` and `rows_visits_le` under the third,
+   and their supporting lemmas (`go_ok_iff`, `go_count`, `go_error`, `go_app`, `go_count_ge`,
+   `step_work_bounded`, `uncounted_ok_iff`, the four list-walk halves of `visits_le_nodes`, the
+   well-formedness lemmas under `eval_derive`), over any cell primitives, any twelve-verb
+   evaluator, any param environment, any pipeline and any well-formed input frame. F\* 2026.09.06,
+   Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
+   `admit`. Opens `Limits`; restates `outcome` and the list helpers it needs.
 2. **Differentially tested.** The extracted driver agrees with the shipped counted evaluator over
    the two pools above, with the lock-step forgetful model and the negating bridge each required to
    lose. Agreement is over those pools, never over all inputs, and the verbs are shared with
    production by construction rather than compared.
 3. **Assumed, and stated as such.**
-   - **The step-evaluator premise** (`pipeline-step-evaluator-abstract`, a `model-bridge`,
-     `unscheduled`). The fourteen verbs' semantics are the parameter; nothing here is a claim about
-     any of them, and they stay with the laws the retired `Fuaran.Core.DataFrame` coverage
-     exclusion named. `unscheduled` rather than `permanent` because a model of a verb is possible,
-     verb by verb, on the Phase 176 precedent, and nobody has asked for one.
+   - **The twelve-verb premise** (`pipeline-step-evaluator-abstract`, a `model-bridge`,
+     `unscheduled`; the id predates Phase 234). The twelve verbs that evaluate no expression are the
+     parameter, assumed only what their type says — a well-formed frame or an error, on a
+     well-formed frame — and to evaluate no expression, which is read off the source; nothing here
+     is a claim about any of their semantics, and they stay with the laws the retired
+     `Fuaran.Core.DataFrame` coverage exclusion named. `work_bounded` rests on this row for those
+     twelve steps and on nothing for `Filter` and `Derive`; `eval_total`, `budget_monotone` and
+     `uncounted_is_projection` hold for every evaluator of the type and rest on it for nothing.
+     `unscheduled` rather than `permanent` because a model of a verb is possible, verb by verb, on
+     the Phase 176 precedent — and Phase 234 is the precedent for the two that evaluate an
+     expression.
+   - **The cell-primitives premise** (`pipeline-cell-primitives-abstract`, a `model-bridge`,
+     `unscheduled`, Phase 234). `arith` / `comparison` / `logical` / `stringPred` as one function
+     of the operator, `castCell`, `applyScalar` and `compareCells` are a record the host supplies,
+     assumed only to be total functions of cells — which is what makes them unable to re-enter the
+     evaluator, and is all `visits_le_nodes` needs of them. No theorem reads a cell they produce;
+     what they compute stays with `Conformance.transformLaws`. The differential reads each out of
+     production through `evalExprInRow` on a one-node expression.
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
@@ -5830,9 +5904,14 @@ phase was chartered to leave alone. When it is decided, the theorem's hypothesis
 precondition the driver checks, `over_limit_not_refused` stops being provable, and the differential's
 fourth case is rewritten to assert the refusal.
 
-**The verbs, one at a time** — theorem 14's one bridge (`pipeline-step-evaluator-abstract`,
-`unscheduled`). The driver is proved over an abstract step evaluator; a model of a verb — `Filter`'s
-three-valued predicate over `evalExpr`, or `Limit`'s window — would let the count be related to
-what the verb actually reads, verb by verb, on the Phase 176 precedent of a table algebra with a
-validity mask. Nobody has asked for one; the operator decision above is the natural moment to say
-whether the first is wanted.
+**The verbs, one at a time** — theorem 14's twelve-verb bridge (`pipeline-step-evaluator-abstract`,
+`unscheduled`). Phase 234 modelled the two verbs that evaluate an expression (`Filter`'s
+three-valued keep over `evalExpr`, `Derive`'s replace-or-append) and the evaluator under them, and
+proved the visit bound over it; the twelve that evaluate no expression — `Limit`'s window,
+`GroupBy`'s aggregation, the joins — are still the parameter, and a model of one would let the
+count be related to what the verb actually reads, verb by verb, on the Phase 176 precedent of a
+table algebra with a validity mask. The cell primitives (`pipeline-cell-primitives-abstract`) are
+the other bridge: the integer, boolean and string arms of `arith` / `comparison` / `logical` /
+`stringPred` are modellable clause for clause on the Phase 149 precedent, with the float layout
+left opaque as `canon-numeral-layouts` left it. Nobody has asked for either; the operator decision
+above is the natural moment to say whether the first is wanted.

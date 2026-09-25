@@ -123,13 +123,16 @@ $ErrorActionPreference = 'Stop'
 #                rejection proved justified (maximal, NOT maximum), and the whole result proved
 #                invariant under arrival order for id-distinct input, with the witness that the
 #                hypothesis is needed. Opens DagFold and TreeOps, so it follows both.
-#   Pipeline   — Phase 154, the COUNTED PIPELINE DRIVER: `Fuaran.Core.DataFrame`'s closed
-#                `ColExpr` and `Transform` algebra, `evalPipelineWithInEnvCounted`'s fold and its
-#                cost model clause for clause over an abstract step evaluator — totality (Ok
-#                exactly when every step succeeds, else the first failing step's own error),
-#                the count proved monotone in the pipeline prefix, the expression work bounded by
-#                the count under the §21.8 node limit taken as a HYPOTHESIS, the unenforced limit
-#                recorded as a theorem, and the uncounted entry point as the counted one projected.
+#   Pipeline   — Phase 154, the COUNTED PIPELINE DRIVER, and Phase 234, its EXPRESSION EVALUATOR:
+#                `Fuaran.Core.DataFrame`'s closed `ColExpr` and `Transform` algebra, the private
+#                `evalExpr` with its four loops, `evalFilter`, `evalDerive`, `evalStep`'s dispatch
+#                and `evalPipelineWithInEnvCounted`'s fold with its cost model clause for clause,
+#                over the cell primitives and the twelve non-expression verbs as parameters —
+#                totality (Ok exactly when every step succeeds, else the first failing step's own
+#                error), the count proved monotone in the pipeline prefix, the evaluator's visits
+#                proved at most the expression's nodes, the expression work bounded by the count
+#                under the §21.8 node limit taken as a HYPOTHESIS, the unenforced limit recorded as
+#                a theorem, and the uncounted entry point as the counted one projected.
 #                Opens Limits (the one constant it takes as a premise), so it follows it.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else

@@ -9109,25 +9109,32 @@ let private queryDifferential
 
 
 // ------------------------------------------------------------------------------------------
-// Phase 154 — the COUNTED PIPELINE DRIVER. `proofs/Pipeline.fst` models `Fuaran.Core.DataFrame`'s
-// closed `ColExpr` and `Transform` algebra, `evalPipelineWithInEnvCounted`'s fold and its cost
-// model clause for clause over an ABSTRACT STEP EVALUATOR (the verbs' semantics are the
-// parameter, as Phase 176's pipeline evaluator and Phase 186's node evaluator were);
+// Phase 154 — the COUNTED PIPELINE DRIVER; Phase 234 — its EXPRESSION EVALUATOR made concrete.
+// `proofs/Pipeline.fst` models `Fuaran.Core.DataFrame`'s closed `ColExpr` and `Transform`
+// algebra, the private `evalExpr` with its four inner loops, `evalFilter`, `evalDerive`,
+// `evalStep`'s dispatch and `evalPipelineWithInEnvCounted`'s fold with its cost model, clause
+// for clause, over TWO parameters: the CELL PRIMITIVES (`prims` — `arith` / `comparison` /
+// `logical` / `stringPred` as one function of the operator, `castCell`, `applyScalar`,
+// `compareCells`) and the TWELVE VERBS that evaluate no expression (`other_fn`).
 // `proofs/oracle/Pipeline.fs` is that model extracted. This runs it BESIDE production over the
 // `conformance/laws/transform-laws.json` vectors (decoded with the shipped codec) and a generated
 // sample — the vectors' own draw recipe, WIDENED to reach all fourteen verbs and all thirteen
 // expression kinds, with a `Ref` resolver, a param env, embedded and referenced right-hand
 // sources, and expressions that refuse — comparing the TABLE (byte for byte through
-// `ColumnCodec.encode`) and the COUNT, or the rendered error.
+// `ColumnCodec.encode`) and the COUNT, or the named `EvalError`.
 //
-// The step evaluator the model is handed is production's own, one verb at a time, through the
-// public entry point: `evalPipelineWithInEnv resolve env [ step ]` over the frame crossed back to
-// a `Table`. So what the differential measures is exactly what the theorems are about — the
-// fold, the cost model, and the two closed alphabets — with the primitives shared. A float cell
-// crosses as its round-trip `R` text and back; a `Table` crosses as its row-major view (the
-// transpose `toFrame` / `ofFrame` perform), so the bridge never hands the model a zero-column
-// frame with rows — a `Table` cannot carry one — and the generator keeps every `Project` to at
-// least one column for that reason.
+// Both parameters are instantiated FROM production. Each cell primitive is read through the
+// public `evalExprInRow` on a one-node expression over its literal arguments, so the model's
+// `eval_expr` runs production's arithmetic, coercions and float layout under the model's own
+// recursion — which is what `visits_le_nodes` is about. The twelve verbs are production's own,
+// one verb at a time, through the public entry point: `evalPipelineWithInEnv resolve env [ step ]`
+// over the frame crossed back to a `Table`. So a `Filter` or a `Derive` is evaluated by the MODEL
+// (its loop, its short circuits, its replace-or-append) and compared to production's table byte
+// for byte, while the other twelve are shared rather than compared. A float cell crosses as its
+// round-trip `R` text and back; a `Table` crosses as its row-major view (the transpose `toFrame`
+// / `ofFrame` perform), so the bridge never hands the model a zero-column frame with rows — a
+// `Table` cannot carry one — and the generator keeps every `Project` to at least one column for
+// that reason. The param env crosses as `Map.toList`, the sets-and-maps-are-lists bridge.
 // ------------------------------------------------------------------------------------------
 
 let private pColToModel (t: ColumnType) : ModelPipe.column_type =
@@ -9424,17 +9431,76 @@ let private pPipelineToModel (p: Transform list) : ModelPipe.transform list = pP
 
 let private pRenderError (e: EvalError) : string = sprintf "%A" e
 
-/// The step evaluator the theorems quantify over, instantiated at production's own primitives:
-/// one verb through the public entry point, over the frame crossed back to a `Table`. This is the
-/// faithful instantiation — the model's transform is what is evaluated.
+/// `EvalError` crossed to the model's `eval_error`, case for case — the two closed alphabets.
+let private pErrToModel (e: EvalError) : ModelPipe.eval_error =
+    match e with
+    | UnknownColumn(name, available) -> ModelPipe.UnknownColumn(name, available)
+    | TypeError detail -> ModelPipe.TypeError detail
+    | AggError detail -> ModelPipe.AggError detail
+    | JoinError detail -> ModelPipe.JoinError detail
+    | ArityError(fn, expected, got) -> ModelPipe.ArityError(fn, bigint expected, bigint got)
+    | UnresolvedSource r -> ModelPipe.UnresolvedSource r
+    | OverflowError detail -> ModelPipe.OverflowError detail
+    | UnboundParam(name, bound) -> ModelPipe.UnboundParam(name, bound)
+    | UnpinnedClock grain -> ModelPipe.UnpinnedClock(pFwd pGrains grain)
+
+let private pErrOfModel (e: ModelPipe.eval_error) : EvalError =
+    match e with
+    | ModelPipe.UnknownColumn(name, available) -> UnknownColumn(name, available)
+    | ModelPipe.TypeError detail -> TypeError detail
+    | ModelPipe.AggError detail -> AggError detail
+    | ModelPipe.JoinError detail -> JoinError detail
+    | ModelPipe.ArityError(fn, expected, got) -> ArityError(fn, int expected, int got)
+    | ModelPipe.UnresolvedSource r -> UnresolvedSource r
+    | ModelPipe.OverflowError detail -> OverflowError detail
+    | ModelPipe.UnboundParam(name, bound) -> UnboundParam(name, bound)
+    | ModelPipe.UnpinnedClock grain -> UnpinnedClock(pBack pGrains grain)
+
+/// The param env as the model reads it: `Map.toList`, sorted by key — the sets-and-maps-are-lists
+/// bridge, and exactly the list `UnboundParam` enumerates.
+let private pEnvToModel (env: Map<string, Cell>) : ModelPipe.param_env =
+    env |> Map.toList |> List.map (fun (k, v) -> k, pCellToModel v)
+
+/// A one-node evaluation on production — the way each private primitive is read out through the
+/// public entry point. No column, no param: a literal-only expression reads neither.
+let private pOneNode (e: ColExpr) : ModelPipe.outcome<ModelPipe.cell, ModelPipe.eval_error> =
+    match DataFrame.evalExprInRow Map.empty [] [] e with
+    | Ok c -> ModelPipe.Ok(pCellToModel c)
+    | Error err -> ModelPipe.Error(pErrToModel err)
+
+/// The model's FIRST parameter, instantiated at production's own primitives. `Binary`'s operator
+/// dispatch is read through a two-literal `Binary`, `castCell` through a `Cast` of a literal,
+/// `applyScalar` through an `ApplyFn` over literals, and `compareCells` through a one-item `InList`
+/// — which answers `Bool true` on `Some 0`, `Bool false` on `Some _`, and the incompatible-types
+/// `TypeError` on `None`, the three readings the model's `InList` arm makes of it. The model
+/// never asks `compare` about a `Null` (its arm tests for one first), so the null answers a
+/// one-item `InList` gives are never read.
+let private pPrims: ModelPipe.prims =
+    { ModelPipe.prims.binary =
+        fun op a b -> pOneNode (Binary(pBack pBinOps op, Lit(pCellOfModel a), Lit(pCellOfModel b)))
+      ModelPipe.prims.cast_cell = fun ty c -> pOneNode (Cast(pColOfModel ty, Lit(pCellOfModel c)))
+      ModelPipe.prims.apply_fn =
+        fun fn vs -> pOneNode (ApplyFn(pBack pScalarFns fn, vs |> List.map (pCellOfModel >> Lit)))
+      ModelPipe.prims.compare =
+        fun a b ->
+            match DataFrame.evalExprInRow Map.empty [] [] (InList(Lit(pCellOfModel a), [ Lit(pCellOfModel b) ])) with
+            | Ok(Cell.Bool true) -> FStar_Pervasives_Native.Some 0I
+            | Ok(Cell.Bool false) -> FStar_Pervasives_Native.Some 1I
+            | _ -> FStar_Pervasives_Native.None }
+
+/// The model's SECOND parameter — the twelve verbs that evaluate no expression — instantiated at
+/// production's own, one verb through the public entry point, over the frame crossed back to a
+/// `Table`. This is the faithful instantiation — the model's transform is what is evaluated. (It
+/// answers a `Filter` or a `Derive` too, but the model never asks it one: those two arms are the
+/// model's own.)
 let private pStepOfProduction
     (resolve: string -> Result<Table, EvalError>)
     (env: Map<string, Cell>)
-    : ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string> =
+    : ModelPipe.other_fn =
     fun f t ->
         match DataFrame.evalPipelineWithInEnv resolve env [ pTransformOfModel t ] (pTableOfFrame f) with
         | Ok t' -> ModelPipe.Ok(pFrameOfTable t')
-        | Error e -> ModelPipe.Error(pRenderError e)
+        | Error e -> ModelPipe.Error(pErrToModel e)
 
 /// The faithful step evaluator in the differential's shape — it reads no production pipeline,
 /// because the model's transform is what it evaluates.
@@ -9442,19 +9508,29 @@ let private pFaithfulStep
     (resolve: string -> Result<Table, EvalError>)
     (env: Map<string, Cell>)
     (_: Transform list)
-    : ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string> =
+    : ModelPipe.other_fn =
     pStepOfProduction resolve env
 
 /// The go-red's step evaluator: it walks PRODUCTION's pipeline in lock-step and ignores the
 /// transform the model hands it, so the model's transform reaches `costOf` and nothing else. Behind
 /// a bridge that crosses a `Derive` as a `Distinct`, that is a model whose count skips one step
 /// kind while every table stays right — which is exactly what the count comparison has to catch.
+/// Since Phase 234 the model evaluates every `Filter` itself and asks this parameter about nothing
+/// else, so the cursor walks production's NON-`Filter` steps: the model's own Filters keep the two
+/// walks aligned (the faithful case is what says they agree), and each bridged `Distinct` lands on
+/// the `Derive` it stands for.
 let private pStepLockstep
     (resolve: string -> Result<Table, EvalError>)
     (env: Map<string, Cell>)
     (production: Transform list)
-    : ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string> =
-    let cursor = ref production
+    : ModelPipe.other_fn =
+    let cursor =
+        ref (
+            production
+            |> List.filter (function
+                | Filter _ -> false
+                | _ -> true)
+        )
 
     fun f _ ->
         match cursor.Value with
@@ -9463,8 +9539,11 @@ let private pStepLockstep
 
             match DataFrame.evalPipelineWithInEnv resolve env [ s ] (pTableOfFrame f) with
             | Ok t' -> ModelPipe.Ok(pFrameOfTable t')
-            | Error e -> ModelPipe.Error(pRenderError e)
-        | [] -> ModelPipe.Error "lock-step cursor exhausted: the model asked for a step production does not have"
+            | Error e -> ModelPipe.Error(pErrToModel e)
+        | [] ->
+            ModelPipe.Error(
+                ModelPipe.TypeError "lock-step cursor exhausted: the model asked for a step production does not have"
+            )
 
 let private pVerbTag (t: Transform) : string =
     match t with
@@ -9540,13 +9619,16 @@ let private pCompare
     (resolve: string -> Result<Table, EvalError>)
     (env: Map<string, Cell>)
     (bridge: Transform list -> ModelPipe.transform list)
-    (mkStep: Transform list -> ModelPipe.frame -> ModelPipe.transform -> ModelPipe.outcome<ModelPipe.frame, string>)
+    (mkStep: Transform list -> ModelPipe.other_fn)
     (p: Transform list)
     (input: Table)
     (t: PipeTally)
     : PipeTally =
     let prod = DataFrame.evalPipelineWithInEnvCounted resolve env p input
-    let model = ModelPipe.eval_counted (mkStep p) (bridge p) (pFrameOfTable input)
+
+    let model =
+        ModelPipe.eval_counted pPrims (mkStep p) (pEnvToModel env) (bridge p) (pFrameOfTable input)
+
     let verbs = p |> List.map pVerbTag |> Set.ofList
 
     let exprs =
@@ -9575,17 +9657,22 @@ let private pCompare
                 Some(sprintf "%s: count differs — production %d, model %A" label n m), 1, 0, n
             else
                 None, 1, 0, n
-        | Error e, ModelPipe.Error s ->
-            let r = pRenderError e
-
-            (if r <> s then
-                 Some(sprintf "%s: error differs — production %s, model %s" label r s)
+        | Error e, ModelPipe.Error me ->
+            (if pErrToModel e <> me then
+                 Some(
+                     sprintf
+                         "%s: error differs — production %s, model %s"
+                         label
+                         (pRenderError e)
+                         (pRenderError (pErrOfModel me))
+                 )
              else
                  None),
             0,
             1,
             0
-        | Ok(_, n), ModelPipe.Error s -> Some(sprintf "%s: production evaluated, model refused %s" label s), 1, 0, n
+        | Ok(_, n), ModelPipe.Error me ->
+            Some(sprintf "%s: production evaluated, model refused %s" label (pRenderError (pErrOfModel me))), 1, 0, n
         | Error e, ModelPipe.Ok _ ->
             Some(sprintf "%s: production refused %s, model evaluated" label (pRenderError e)), 0, 1, 0
 
@@ -9844,13 +9931,7 @@ let private pResolveWith (right: Table) : string -> Result<Table, EvalError> =
 /// them), then `trials` generated pipelines at `seed`, each under the resolver and env above.
 let private pipelineDifferential
     (bridge: Transform list -> ModelPipe.transform list)
-    (mkStep:
-        (string -> Result<Table, EvalError>)
-            -> Map<string, Cell>
-            -> Transform list
-            -> ModelPipe.frame
-            -> ModelPipe.transform
-            -> ModelPipe.outcome<ModelPipe.frame, string>)
+    (mkStep: (string -> Result<Table, EvalError>) -> Map<string, Cell> -> Transform list -> ModelPipe.other_fn)
     (seed: int)
     (trials: int)
     : PipeTally =
@@ -9891,6 +9972,84 @@ let private pExprOfNodes (nodes: int) : ColExpr =
             wrap (Binary(Add, acc, Lit(Cell.Int 1))) (k - 1)
 
     wrap (Col "v") ((nodes - 1) / 2)
+
+/// A node counter that FORGETS a `Case`'s nested `when` / `then` arms — the go-red's under-counting
+/// model (Phase 234). It agrees with `expr_nodes` on every other constructor, so only an expression
+/// whose `Case` arms are actually walked can expose it, and the visit count is what does.
+let rec private pUnderCountNodes (e: ColExpr) : int =
+    match e with
+    | Col _
+    | Lit _
+    | Param _
+    | Now _ -> 1
+    | Binary(_, a, b) -> 1 + pUnderCountNodes a + pUnderCountNodes b
+    | Not x
+    | Cast(_, x)
+    | IsNull x
+    | InParam(x, _) -> 1 + pUnderCountNodes x
+    | Coalesce xs
+    | ApplyFn(_, xs) -> 1 + List.sumBy pUnderCountNodes xs
+    | InList(x, items) -> 1 + pUnderCountNodes x + List.sumBy pUnderCountNodes items
+    | Case(_, els) -> 1 + pUnderCountNodes els
+
+/// One row-level comparison (Phase 234): the model's `eval_expr` — production's primitives under
+/// the model's own recursion — against the shipped `evalExprInRow`, over one expression and one
+/// row, returning the disagreement if any, and the model's visit count and node count beside it.
+let private pRowCompare
+    (env: Map<string, Cell>)
+    (cols: Schema)
+    (row: Cell list)
+    (e: ColExpr)
+    : string option * int * int =
+    let prod = DataFrame.evalExprInRow env cols row e
+    let mcols = cols |> List.map (fun (n, t) -> n, pColToModel t)
+    let mrow = row |> List.map pCellToModel
+    let menv = pEnvToModel env
+    let me = pExprToModel e
+    let model = ModelPipe.eval_expr pPrims menv mcols mrow me
+    let visits = int (ModelPipe.expr_visits pPrims menv mcols mrow me)
+    let nodes = int (ModelPipe.expr_nodes me)
+
+    let diff =
+        match prod, model with
+        | Ok c, ModelPipe.Ok mc ->
+            if pCellToModel c <> mc then
+                Some(sprintf "cell differs — production %A, model %A" c (pCellOfModel mc))
+            else
+                None
+        | Error pe, ModelPipe.Error merr ->
+            if pErrToModel pe <> merr then
+                Some(
+                    sprintf
+                        "error differs — production %s, model %s"
+                        (pRenderError pe)
+                        (pRenderError (pErrOfModel merr))
+                )
+            else
+                None
+        | Ok c, ModelPipe.Error merr ->
+            Some(sprintf "production evaluated to %A, model refused %s" c (pRenderError (pErrOfModel merr)))
+        | Error pe, ModelPipe.Ok mc ->
+            Some(sprintf "production refused %s, model evaluated to %A" (pRenderError pe) (pCellOfModel mc))
+
+    diff, visits, nodes
+
+/// The row sample the evaluator differential walks: `trials` expressions of depth three, each on
+/// every row of a freshly drawn table (the vectors' own recipe, so nulls, ties and floats are all
+/// present), under the generated pipelines' env. Seeded and replayable.
+let private pRowSample (seed: int) (trials: int) : (string * Schema * Cell list * ColExpr) list =
+    let mutable rng = ConfRng.ofSeed seed
+
+    [ for i in 1..trials do
+          let table, r1 = pGenTable rng
+          let e, r2 = pGenExpr 3 r1
+          rng <- r2
+
+          let rows =
+              [ for r in 0 .. Table.rowCount table - 1 -> table.Columns |> List.map (fun c -> List.item r c.Cells) ]
+
+          for j, row in List.indexed rows do
+              yield sprintf "expression %d row %d" i j, table.Schema, row, e ]
 
 
 [<Tests>]
@@ -15098,13 +15257,14 @@ let proofOracleTests =
                       (sprintf "%s: the uncounted entry point is the counted one projected" label)
 
                   // and the model's reading of the same identity, over the same input
-                  let step = pStepOfProduction resolve env
+                  let other = pStepOfProduction resolve env
+                  let menv = pEnvToModel env
                   let mp = pPipelineToModel p
                   let mf = pFrameOfTable table
 
                   Expect.equal
-                      (ModelPipe.eval_uncounted step mp mf)
-                      (ModelPipe.result_map fst (ModelPipe.eval_counted step mp mf))
+                      (ModelPipe.eval_uncounted pPrims other menv mp mf)
+                      (ModelPipe.result_map fst (ModelPipe.eval_counted pPrims other menv mp mf))
                       (sprintf "%s: and the model says the same" label)
 
                   checked <- checked + 1
@@ -15165,9 +15325,227 @@ let proofOracleTests =
               // the model agrees: the walk succeeds, so `over_limit_not_refused` applies and it is Ok
               match
                   ModelPipe.eval_counted
+                      pPrims
                       (pStepOfProduction DataFrame.noResolve Map.empty)
+                      (pEnvToModel Map.empty)
                       (pPipelineToModel [ Derive("big", over) ])
                       (pFrameOfTable table)
               with
               | ModelPipe.Ok(_, m) -> Expect.equal m (bigint rows) "the model evaluates it too, at the same count"
-              | ModelPipe.Error s -> failtestf "the model refused the over-limit pipeline: %s" s ]
+              | ModelPipe.Error e ->
+                  failtestf "the model refused the over-limit pipeline: %s" (pRenderError (pErrOfModel e))
+
+          // ---- Phase 234: the expression evaluator, concrete (`proofs/Pipeline.fst` §3, §9) ----
+
+          testCase
+              "the concrete expression evaluator agrees with DataFrame.evalExprInRow cell for cell and error for error over generated expressions and rows, and its visit count never exceeds the node count"
+          <| fun _ ->
+              // The evaluator the pipeline differential above runs inside every Filter and Derive,
+              // compared on its own: one expression, one row, production's primitives under the
+              // model's recursion against the shipped `evalExprInRow`. Beside each comparison the
+              // model's `expr_visits` is read and held to `expr_nodes` — `visits_le_nodes`, on the
+              // sample, numerically — and the sample must reach both a short circuit (visits below
+              // nodes) and a full walk (visits equal to nodes), so the count is known to follow the
+              // evaluator rather than the tree.
+              let sample = pRowSample 234 600
+
+              let results =
+                  sample
+                  |> List.map (fun (label, cols, row, e) ->
+                      let diff, visits, nodes = pRowCompare pEnv cols row e
+                      label, e, diff, visits, nodes)
+
+              let diffs =
+                  results
+                  |> List.choose (fun (label, _, d, _, _) -> d |> Option.map (fun d -> label + ": " + d))
+
+              Expect.isEmpty diffs (sprintf "disagreements:\n%s" (String.concat "\n" diffs))
+
+              let compared = List.length results
+
+              let oks =
+                  sample
+                  |> List.filter (fun (_, cols, row, e) -> Result.isOk (DataFrame.evalExprInRow pEnv cols row e))
+                  |> List.length
+
+              let errs = compared - oks
+              Expect.isGreaterThan compared 1500 (sprintf "expression-row pairs were compared (compared=%d)" compared)
+              Expect.isGreaterThan oks 300 (sprintf "pairs evaluated to a cell on both sides (ok=%d)" oks)
+              Expect.isGreaterThan errs 300 (sprintf "pairs were refused on both sides (err=%d)" errs)
+
+              let violations =
+                  results
+                  |> List.filter (fun (_, _, _, v, n) -> v > n)
+                  |> List.map (fun (l, _, _, v, n) -> sprintf "%s: visits %d > nodes %d" l v n)
+
+              Expect.isEmpty
+                  violations
+                  (sprintf
+                      "`visits_le_nodes` on the sample — a row's visits never exceed the nodes:\n%s"
+                      (String.concat "\n" violations))
+
+              let shortCircuits =
+                  results |> List.filter (fun (_, _, _, v, n) -> v < n) |> List.length
+
+              let fullWalks = results |> List.filter (fun (_, _, _, v, n) -> v = n) |> List.length
+
+              Expect.isGreaterThan
+                  shortCircuits
+                  100
+                  (sprintf "short circuits were reached — visits strictly below nodes (short=%d)" shortCircuits)
+
+              Expect.isGreaterThan
+                  fullWalks
+                  100
+                  (sprintf "full walks were reached — visits equal to nodes (full=%d)" fullWalks)
+
+              let kinds =
+                  results |> List.collect (fun (_, e, _, _, _) -> pExprTags e) |> Set.ofList
+
+              for kind in
+                  [ "Col"
+                    "Lit"
+                    "Param"
+                    "Binary"
+                    "Not"
+                    "Coalesce"
+                    "Case"
+                    "Cast"
+                    "ApplyFn"
+                    "InList"
+                    "IsNull"
+                    "InParam"
+                    "Now" ] do
+                  Expect.isTrue
+                      (Set.contains kind kinds)
+                      (sprintf "the sample reached the %s expression kind (reached: %A)" kind kinds)
+
+              printfn
+                  "evaluator differential: compared=%d ok=%d err=%d shortCircuits=%d fullWalks=%d visits=%d nodes=%d"
+                  compared
+                  oks
+                  errs
+                  shortCircuits
+                  fullWalks
+                  (results |> List.sumBy (fun (_, _, _, v, _) -> v))
+                  (results |> List.sumBy (fun (_, _, _, _, n) -> n))
+
+              Expect.equal
+                  (pRowSample 234 600
+                   |> List.map (fun (l, cols, row, e) -> l, pRowCompare pEnv cols row e))
+                  (results |> List.map (fun (l, _, d, v, n) -> l, (d, v, n)))
+                  "same seed => identical results"
+
+          testCase
+              "a model that under-counts a nested expression's nodes DISAGREES with the evaluator's visit count — the node bound can fail"
+          <| fun _ ->
+              // The teeth. `pUnderCountNodes` is `expr_nodes` with a `Case`'s arms forgotten — a
+              // model that under-counts a nested expression. Held to the same visit count the case
+              // above holds the faithful counter to, it MUST lose: the evaluator walks the arms it
+              // forgot. If this ever passes, the visit count has stopped following the evaluator
+              // and the green run above certifies nothing about `visits_le_nodes`.
+              let losses =
+                  pRowSample 234 600
+                  |> List.choose (fun (label, cols, row, e) ->
+                      let _, visits, _ = pRowCompare pEnv cols row e
+                      let under = pUnderCountNodes e
+
+                      if visits > under then
+                          Some(sprintf "%s: visits %d > under-count %d" label visits under)
+                      else
+                          None)
+
+              Expect.isNonEmpty losses "a model that forgets a Case's arms MUST be exceeded by the visits"
+
+              printfn "evaluator go-red: the under-counting model lost on %d rows" (List.length losses)
+
+              // And one witness, exactly: a `Case` whose `when` holds walks the Case, the when and the
+              // then's three nodes — five visits, never the else — against six nodes and an
+              // under-count of two.
+              let table, _ = pGenTable (ConfRng.ofSeed 234)
+              let row = table.Columns |> List.map (fun c -> List.head c.Cells)
+
+              let nested =
+                  Case([ Lit(Cell.Bool true), Binary(Add, Col "v", Lit(Cell.Int 1)) ], Lit(Cell.Int 0))
+
+              let diff, visits, nodes = pRowCompare pEnv table.Schema row nested
+              Expect.isNone diff "the witness evaluates the same on both sides"
+
+              Expect.equal
+                  visits
+                  5
+                  "five visits: the Case, its when, and the then's three nodes; the else is never read"
+
+              Expect.equal nodes 6 "six nodes, faithfully counted"
+              Expect.equal (pUnderCountNodes nested) 2 "two nodes under the forgetful count"
+              Expect.isTrue (visits <= nodes) "the faithful count bounds the visits"
+              Expect.isTrue (visits > pUnderCountNodes nested) "and the forgetful one does not"
+
+          testCase
+              "`work_bounded` on the shipped primitives — over every generated pipeline within the limit the evaluator's visits are at most the count times `Limits.max_expr_nodes`, and exceed the count where an expression has more than one node"
+          <| fun _ ->
+              // The theorem's numeric shadow on the pipeline sample: `work` (the model's visits over
+              // the walk, read off its own Filter and Derive) against `cost` (the count), with the
+              // format's constant between them — and the strict half, that the visits EXCEED the
+              // count on real expressions, so the bound is a bound on something and not on itself.
+              let mutable rng = ConfRng.ofSeed 154
+              let mutable checkedCount = 0
+              let mutable exceeding = 0
+              let mutable workTotal = 0
+              let mutable costTotal = 0
+
+              for i in 1..400 do
+                  let table, r1 = pGenTable rng
+                  let right, r2 = pGenTable r1
+                  let p, r3 = pGenPipeline r2
+                  rng <- r3
+                  let other = pStepOfProduction (pResolveWith right) pEnv
+                  let menv = pEnvToModel pEnv
+                  let mp = pPipelineToModel p
+                  let mf = pFrameOfTable table
+
+                  if ModelPipe.within_limit mp then
+                      let work = int (ModelPipe.work pPrims other menv mf mp)
+                      let cost = int (ModelPipe.cost (ModelPipe.eval_step pPrims other menv) mf mp)
+
+                      Expect.isTrue
+                          (work <= cost * 512)
+                          (sprintf
+                              "generated %d: work %d exceeds cost %d x 512 — `work_bounded` fails on the sample"
+                              i
+                              work
+                              cost)
+
+                      match ModelPipe.eval_counted pPrims other menv mp mf with
+                      | ModelPipe.Ok(_, m) ->
+                          Expect.equal
+                              (int m)
+                              cost
+                              (sprintf "generated %d: the count is the walk's cost (`eval_total`)" i)
+                      | ModelPipe.Error _ -> ()
+
+                      checkedCount <- checkedCount + 1
+                      workTotal <- workTotal + work
+                      costTotal <- costTotal + cost
+
+                      if work > cost then
+                          exceeding <- exceeding + 1
+
+              Expect.isGreaterThan
+                  checkedCount
+                  300
+                  (sprintf "pipelines within the limit were checkedCount (checkedCount=%d)" checkedCount)
+
+              Expect.isGreaterThan
+                  exceeding
+                  10
+                  (sprintf
+                      "pipelines whose visits exceed their count — the bound is doing work (exceeding=%d; most drawn Filter and Derive expressions are a single leaf, one visit per row, so work equals cost there and the strict half is reached on the multi-node ones)"
+                      exceeding)
+
+              printfn
+                  "work bound: checkedCount=%d exceeding=%d visits=%d count=%d"
+                  checkedCount
+                  exceeding
+                  workTotal
+                  costTotal ]

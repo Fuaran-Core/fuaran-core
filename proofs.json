@@ -2155,13 +2155,13 @@
     {
       "id": "pipeline-eval-total",
       "level": "proved",
-      "claim": "`DataFrame.evalPipelineWithInEnvCounted` is TOTAL, and its two outcomes are characterised: it returns `Ok` exactly when every step of the walk succeeds — and then the count is the walk's cost, charged step by step where each step stands — and otherwise it returns the FIRST failing step's own error, verbatim (`go_ok_iff`, `go_count`, `go_error`). The driver invents no refusal: there is no clause in `go` that produces an `Error` a step did not, which is what makes the §21.8 finding below a theorem rather than an observation. Termination is structural on the pipeline and checked by the prover. Over any step evaluator, any pipeline and any input frame; the verbs' semantics are the model's parameter and no theorem is about one.",
+      "claim": "`DataFrame.evalPipelineWithInEnvCounted` is TOTAL, and its two outcomes are characterised: it returns `Ok` exactly when every step of the walk succeeds — and then the count is the walk's cost, charged step by step where each step stands — and otherwise it returns the FIRST failing step's own error, verbatim (`go_ok_iff`, `go_count`, `go_error`). The driver invents no refusal: there is no clause in `go` that produces an `Error` a step did not, which is what makes the §21.8 finding below a theorem rather than an observation. Termination is structural on the pipeline and checked by the prover — and, since Phase 234, inside a step: the expression evaluator, the filter and the derive are clauses (`eval_expr` with its four loops, `filter_rows`, `eval_derive`, `eval_step`), total by structural recursion over the closed DUs, with the one partial operation on the modelled path (`List.item i row` in the `Col` arm) in range on a well-formed frame by refinement and `evalDerive`'s `List.map2` lengths likewise. Over any cell primitives, any twelve-verb evaluator, any param environment, any pipeline and any well-formed input frame; the twelve verbs' semantics and the cell primitives are the model's parameters and no theorem is about one.",
       "phase": "fuaran-core#154",
       "evidence": {
         "theorem": "eval_total",
         "model": "proofs/Pipeline.fst",
         "prover": "proofs/fstar-pin.json",
-        "supporting": [ "go_ok_iff", "go_count", "go_error", "walk_ok", "first_error", "cost" ]
+        "supporting": [ "go_ok_iff", "go_count", "go_error", "walk_ok", "first_error", "cost", "eval_step", "eval_expr", "filter_rows", "eval_derive" ]
       }
     },
     {
@@ -2179,13 +2179,25 @@
     {
       "id": "pipeline-work-bounded-by-expr-limit",
       "level": "proved",
-      "claim": "Under the §21.8 expression-node limit taken as a HYPOTHESIS on the pipeline — `within_limit`: every expression a `Filter` or a `Derive` carries has at most `Limits.max_expr_nodes` nodes, counted one per constructor occurrence through every list an expression carries (`expr_nodes`) — the expression WORK a walk can cost is at most the count it reports times the limit: `work <= cost * max_expr_nodes` (`work_bounded`, from `step_work_bounded` per step). `work` is the model's reading of what the count stands for — rows times the expression's nodes at each charged step, an upper bound because `evalExpr` is structural on the expression and visits a node at most once — and is not a quantity production computes. The bound is a hypothesis and not a refusal because that is all it is on this tree: see `pipeline-limit-unenforced`.",
-      "phase": "fuaran-core#154",
+      "claim": "Under the §21.8 expression-node limit taken as a HYPOTHESIS on the pipeline — `within_limit`: every expression a `Filter` or a `Derive` carries has at most `Limits.max_expr_nodes` nodes, counted one per constructor occurrence through every list an expression carries (`expr_nodes`) — the expression WORK a walk does is at most the count it reports times the limit: `work <= cost * max_expr_nodes` (`work_bounded`, from `step_work_bounded` per step). Since Phase 234 `work` is NOT a definition: it is the number of `evalExpr` invocations the concretely modelled evaluator makes at each charged step (`rows_visits` over the step's rows, `expr_visits` per row, following every short circuit), and the bound on it is PROVED (`rows_visits_le`, from `visits_le_nodes` — the row below). Phase 154 had defined `work` as rows times nodes and said `evalExpr` visits a node at most once; that sentence is now the theorem. For the two expression-evaluating steps the bound is unconditional on any parameter; for the twelve other verbs it rests on their evaluating no expression (`pipeline-step-evaluator-abstract`), the same assumption `costOf` makes in charging them nothing. The bound is a hypothesis and not a refusal because that is all it is on this tree: see `pipeline-limit-unenforced`.",
+      "phase": "fuaran-core#234",
       "evidence": {
         "theorem": "work_bounded",
         "model": "proofs/Pipeline.fst",
         "prover": "proofs/fstar-pin.json",
-        "supporting": [ "step_work_bounded", "expr_nodes", "within_limit", "work" ]
+        "supporting": [ "step_work_bounded", "rows_visits_le", "rows_visits", "expr_visits", "expr_nodes", "within_limit", "work" ]
+      }
+    },
+    {
+      "id": "pipeline-visits-le-nodes",
+      "level": "proved",
+      "claim": "ONE ROW'S evaluation of an expression makes at most as many `evalExpr` invocations as the expression has nodes (`visits_le_nodes`): `expr_visits` counts the invocations `eval_expr` makes on that row, itself included, following every short circuit exactly as the evaluator takes it — a `Binary` whose left operand fails never evaluates its right, a `Coalesce` stops at the first non-null, a `Case` at the first true `when` and reads its `else` only when none was, an `InList` at the first match and reads no item when its subject is null, an `ApplyFn` at the first failing argument — and it is at most `expr_nodes`. A mutual induction over the expression and its three list walks, over any cell primitives (a function of cells cannot re-enter the evaluator) and any row. Over a step's rows, stopping at the first that fails as `evalFilter` and `evalDerive` do, the invocations are at most rows times nodes (`rows_visits_le`). This is what \"the evaluator is structural and visits a node at most once\" MEANS, proved of the modelled evaluator rather than said of the host's; it is the lemma `work_bounded` stands on, and the Opus arm of Phase 154's same-task trial is where its formulation came from (branch `phase-154`, deleted once this phase shipped).",
+      "phase": "fuaran-core#234",
+      "evidence": {
+        "theorem": "visits_le_nodes",
+        "model": "proofs/Pipeline.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [ "rows_visits_le", "expr_visits", "coalesce_le", "case_le", "in_le", "args_le", "eval_expr" ]
       }
     },
     {
@@ -2214,8 +2226,8 @@
     {
       "id": "pipeline-differential",
       "level": "tested",
-      "claim": "The extracted driver agrees with the shipped `DataFrame.evalPipelineWithInEnvCounted` on the TABLE (byte for byte through `ColumnCodec.encode`) and the COUNT, or on the rendered error, with the step evaluator instantiated at production's own primitives one verb at a time through `evalPipelineWithInEnv resolve env [ step ]` — over the sixteen `conformance/laws/transform-laws.json` vectors decoded with the shipped codec (each file verdict cross-checked against the reference's), and four hundred generated pipelines at seed 154: the vectors' own table recipe, widened in the pipeline to one to four steps over all fourteen verbs and expressions over all thirteen kinds, with a `Ref` resolver, a param env, embedded and referenced right-hand sources, and slots that are literals or params. Every pipeline is also crossed to the model and back and must return unchanged. Two go-reds: a lock-step step evaluator that runs production's own Derive while the bridge crosses it as a Distinct — a model whose count skips one step kind — must lose on the count and on nothing else; and a bridge that negates every Filter under the faithful evaluator must lose on the table. Agreement is over the pools drawn, never over all inputs, and the verb SEMANTICS are shared with production by construction rather than compared.",
-      "phase": "fuaran-core#154",
+      "claim": "The extracted driver agrees with the shipped `DataFrame.evalPipelineWithInEnvCounted` on the TABLE (byte for byte through `ColumnCodec.encode`) and the COUNT, or on the named `EvalError`, with the cell primitives instantiated at production's own (each read through the public `evalExprInRow` on a one-node expression) and the twelve verbs at production's own one verb at a time through `evalPipelineWithInEnv resolve env [ step ]` — so every `Filter` and `Derive` is evaluated by the MODEL's evaluator, loop and short circuits, and compared to production's table — over the sixteen `conformance/laws/transform-laws.json` vectors decoded with the shipped codec (each file verdict cross-checked against the reference's), and four hundred generated pipelines at seed 154: the vectors' own table recipe, widened in the pipeline to one to four steps over all fourteen verbs and expressions over all thirteen kinds, with a `Ref` resolver, a param env, embedded and referenced right-hand sources, and slots that are literals or params. Every pipeline is also crossed to the model and back and must return unchanged. Since Phase 234 the evaluator is also compared ON ITS OWN: the model's `eval_expr` against `evalExprInRow`, cell for cell and error for error, over 2,095 expression-row pairs at seed 234 (six hundred depth-three expressions, each on every row of a drawn table) reaching all thirteen kinds, with `expr_visits` held to `expr_nodes` on every pair and the sample required to reach both a short circuit and a full walk; and `work_bounded`'s inequality is read numerically over the four hundred pipelines, with the visits required to exceed the count on some. Three go-reds: a lock-step step evaluator that runs production's own Derive while the bridge crosses it as a Distinct — a model whose count skips one step kind — must lose on the count and on nothing else; a bridge that negates every Filter under the faithful evaluator must lose on the table; and a node counter that forgets a `Case`'s arms — a model that under-counts a nested expression — must be exceeded by the visit count. Agreement is over the pools drawn, never over all inputs, and the twelve verbs' SEMANTICS and the cell primitives are shared with production by construction rather than compared.",
+      "phase": "fuaran-core#234",
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Pipeline.fst",
@@ -2223,19 +2235,33 @@
           "the pipeline oracle agrees with DataFrame.evalPipelineWithInEnvCounted on table and count over the transform-laws vectors and a generated sample that reaches every verb and every expression kind",
           "a pipeline oracle whose count skips one step kind DISAGREES with DataFrame.evalPipelineWithInEnvCounted on the count and on nothing else — the measurement can fail",
           "`uncounted_is_projection` on the shipped evaluator — evalPipelineWithInEnv is the counted path projected, over the vectors and the sample",
-          "the finding holds on the shipped evaluator — an expression over `Limits.max_expr_nodes` is evaluated, never refused"
+          "the finding holds on the shipped evaluator — an expression over `Limits.max_expr_nodes` is evaluated, never refused",
+          "the concrete expression evaluator agrees with DataFrame.evalExprInRow cell for cell and error for error over generated expressions and rows, and its visit count never exceeds the node count",
+          "a model that under-counts a nested expression's nodes DISAGREES with the evaluator's visit count — the node bound can fail",
+          "`work_bounded` on the shipped primitives — over every generated pipeline within the limit the evaluator's visits are at most the count times `Limits.max_expr_nodes`, and exceed the count where an expression has more than one node"
         ]
       }
     },
     {
       "id": "pipeline-step-evaluator-abstract",
       "level": "assumed",
-      "claim": "THE STEP-EVALUATOR PREMISE. `evalStep resolve env` — the dispatch of fourteen verbs to fourteen primitives: three-valued predicates, group aggregation, windows, pivots, joins, the set operations, the pinned float layout — is the model's PARAMETER (`step : frame -> transform -> outcome frame e`), exactly as Phase 176 made the pipeline evaluator one and Phase 186 the node evaluator. Every theorem holds for every step evaluator, so nothing here is a claim about any verb's semantics; those stay with the laws the retired `Fuaran.Core.DataFrame` coverage exclusion named (`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`) and with `Conformance.transformLaws` at every host. The differential instantiates the parameter at production's own primitives, so the verbs are exercised and shared, not modelled. `unscheduled` rather than `permanent`: a model of the verbs is possible verb by verb (the Phase 176 precedent modelled a table algebra with a validity mask), and nobody has taken it — the operator decision the finding row asks for is the natural moment to decide whether one is wanted.",
-      "phase": "fuaran-core#154",
+      "claim": "THE TWELVE-VERB PREMISE (the id predates Phase 234, when the whole step evaluator was the parameter). `evalStep resolve env`'s twelve arms that evaluate no expression — `Project`, `GroupBy`, `Join`, `Window`, `Pivot`, `Unpivot`, `Sort`, `Distinct`, `Limit`, `Union`, `Intersect`, `Except`: group aggregation, windows, pivots, joins, the set operations — are the model's parameter (`other_fn : wframe -> transform -> outcome wframe eval_error`, the resolver and the env closed over), exactly as Phase 176 made the pipeline evaluator one and Phase 186 the node evaluator; the `Filter` and `Derive` arms are clauses since Phase 234. What is ASSUMED of the twelve is their type — on a well-formed frame each returns a well-formed frame or a named error — and that each evaluates NO expression, which is a fact about the source (those arms carry no `ColExpr` and reach neither `evalExpr` nor `evalExprInRow`) and what `costOf` already asserts in charging them nothing; `work` charges them no expression work on that basis, so `work_bounded` rests on this row for those steps and on nothing for the other two. Every theorem holds for every such evaluator, so nothing here is a claim about any of the twelve verbs' semantics; those stay with the laws the retired `Fuaran.Core.DataFrame` coverage exclusion named (`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`) and with `Conformance.transformLaws` at every host. The differential instantiates the parameter at production's own primitives, so the verbs are exercised and shared, not modelled. `unscheduled` rather than `permanent`: a model of a verb is possible verb by verb (the Phase 176 precedent modelled a table algebra with a validity mask; Phase 234 is the precedent for the two that evaluate an expression), and nobody has taken one.",
+      "phase": "fuaran-core#234",
       "class": "model-bridge",
       "closes": "unscheduled",
       "evidence": {
-        "assumption": "the step evaluator the driver folds with is a parameter; the fourteen verbs' semantics are neither modelled nor claimed"
+        "assumption": "the twelve verbs that evaluate no expression are a parameter typed to return a well-formed frame or an error; their semantics are neither modelled nor claimed, and that they evaluate no expression is read off the source, not proved"
+      }
+    },
+    {
+      "id": "pipeline-cell-primitives-abstract",
+      "level": "assumed",
+      "claim": "THE CELL-PRIMITIVES PREMISE. The four operator-class primitives `evalExpr`'s `Binary` arm dispatches to (`arith` / `comparison` / `logical` / `stringPred`, taken as ONE function of the operator, which is what the arm's `match op with …` makes of them), `castCell`, `applyScalar` and `compareCells` are the model's parameter (`prims`, a record of four functions): the arithmetic, the coercions and the pinned float layout, over a `cell` whose float is an opaque carrier (`column-cell-carrier-opaque`). What is ASSUMED of them is only their type — each is a total function of its arguments returning a cell or a named error — and, because a function of cells cannot call `evalExpr`, that none of them evaluates an expression; no theorem reads a cell they produce, `eval_expr` threads their outcome and nothing else, and `visits_le_nodes` holds for every such record. The differential instantiates the record at production's own primitives, each read through the public `evalExprInRow` on a one-node expression over literals, so the model's evaluator runs production's arithmetic under the model's recursion. What a primitive computes stays with `Conformance.transformLaws` at every host. `unscheduled` rather than `permanent`: the integer, boolean and string arms are modellable clause for clause on the Phase 149 precedent (`canon-numeral-layouts` kept only the float layout opaque), and nobody has taken them.",
+      "phase": "fuaran-core#234",
+      "class": "model-bridge",
+      "closes": "unscheduled",
+      "evidence": {
+        "assumption": "the cell primitives are a record of total functions the host supplies; what they compute is neither modelled nor claimed, and that none of them evaluates an expression is a fact of their type"
       }
     }
   ]
