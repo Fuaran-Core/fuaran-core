@@ -1,5 +1,59 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-25 — D57: a theorem over the CONCRETE pipeline driver is taken — Phase 154 supersedes, for `Fuaran.Core.DataFrame`, D14's "declined as a domain's cost" and Phase 203's `law-tested-by-design` exclusion
+
+**Decided (operator, 2026-09-25; Phase 154).** `proofs/Pipeline.fst` models `Fuaran.Core.DataFrame`'s
+counted pipeline driver — the closed `ColExpr` and `Transform` algebra with every payload type,
+`evalPipelineWithInEnvCounted`'s `costOf` and `go` clause for clause, and `evalPipelineWithInEnv` as
+the projection it is — over ONE parameter, the step evaluator, and proves it total
+(`eval_total`), budget-monotone in the pipeline prefix (`budget_monotone`), bounded in expression
+work under the §21.8 node limit taken as a hypothesis (`work_bounded`), and identical to the
+uncounted entry point (`uncounted_is_projection`). The package therefore HAS a model, attributed to it
+in `proofs/modules.json`, and the `Fuaran.Core.DataFrame` entry in `proofs/coverage-exclusions.json`
+— Phase 203's `law-tested-by-design`, which read "a theorem over the concrete pipeline is declined
+as a domain's cost, per D14" — is RETIRED, because clause 1 of the coverage predicate fails an
+exclusion for a package that has since gained a model, and because the sentence it carried is no
+longer the decision.
+
+**What this supersedes, exactly.** D14 (and D41, which carried it into `proofs/`) says a
+VOCABULARY is the domain's contract and a proof over a domain's kinds is that domain's cost imposed
+on every other commit. The exclusion read that rule onto the dataframe algebra. D49 has since
+settled that the algebra belongs in Core and that the reference evaluator is its MEANING rather
+than a runtime — so the evaluator's driver is substrate, not a domain's vocabulary, and a theorem
+about it is a property of the engine that the substrate can honestly cite. The Program tier's
+budget-monotonicity theorem (`fuaran#1716`) shipped with no Core-evaluator row, neither proving nor
+axiomatising this driver; this entry is what lets a later consumer cite `pipeline-eval-total` and
+`pipeline-budget-monotone` as stated rather than as an axiom about them. D14 and D41 stand
+unchanged for what they are about: no vocabulary moves here, and the generated `proofs/` modules
+still prove the F\* backend over the certification set and nothing about any domain's kinds.
+
+**What is NOT taken, and stays a recorded decision.** The fourteen verbs' SEMANTICS —
+`evalStep resolve env`'s dispatch to three-valued predicates, group aggregation, windows, pivots,
+joins, the set operations and the pinned float layout — are the model's parameter, and every theorem
+holds for every step evaluator. What the retired exclusion declined is therefore still declined,
+only now as the model's own ladder row (`pipeline-step-evaluator-abstract`, a `model-bridge`,
+`unscheduled`) rather than as an exclusion of the whole package: the laws the entry named
+(`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`, and `transformLaws` at every host)
+remain where the verbs are held. `unscheduled` rather than `permanent`, because a verb can be
+modelled verb by verb on the Phase 176 precedent and nobody has asked for one.
+
+**Two findings the theorem read off the tree, recorded rather than fixed.** (1) `Limits.max_expr_nodes`
+(§21.8, 512) is enforced NOWHERE under `src/` — `over_limit_not_refused` says so as a theorem, and
+the differential asserts it on the shipped evaluator with a 513-node expression. Whether a
+conformant host must refuse such a pipeline before evaluation is §21.2's question for a later
+operator act; enforcing it changes what a public function accepts and touches the hot path the phase
+was chartered to leave alone. (2) The `counted_agrees` the phase was chartered with relates one path
+to itself: `evalPipelineWithInEnv` is `evalPipelineWithInEnvCounted |> Result.map fst`, so the ladder
+carries the identity and no agreement lemma. Zero-impact held: nothing under `src/` changed.
+
+**How this was decided.** The phase ran as an operator-requested same-task trial — two workers on
+two models from one base commit, and the operator chose which arm lands — and the retirement of
+the exclusion is the one act in it that outlives the phase, which is why it is an entry here and not
+a line in a note. Theorem 14 in `proofs/README.md` carries the statements, the differential (the
+sixteen `transform-laws.json` vectors and four hundred generated pipelines reaching every verb and
+every expression kind) and the cost; `proofs/coverage-exclusions.json` keeps the retirement under
+`$retired` and points here.
+
 ## 2026-09-24 — D56: a member's READ is a named, opaque reader with one value lemma — the k=16 round trip discharges under `--z3rlimit 40` (continues D54)
 
 **Decided (Phase 224).** A conditional member of a suffixed constructor (D52) whose read calls
