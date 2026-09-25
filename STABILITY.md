@@ -562,6 +562,23 @@ and do not verify — a tampered, dangling-parent, or cyclic input decodes to a 
 `fromJsonlVerified` (Phase 13) to gate the load on `verifyChain` / `verifyDag`, or call the verifier
 explicitly before trusting a decoded stream/DAG.
 
+**Compaction reads the boundary, it does not check it — verify, then compact (Phase 227).**
+`OpStream.compact` / `compactChainOnly` (and their `...With` forms) read the boundary record's hash
+and TRUST it. The compacted stream verifies exactly when the original does only over a prefix that
+was verified BEFORE it was discarded (`compact_preserves_verify` / `compact_verifies_iff_original`,
+`proofs/Chain.fst`). A tamper in the prefix of an unverified stream survives compaction, verifies
+across, and cannot be found once the prefix is gone. A host that compacts an unverified stream has
+compacted whatever it was handed, so run `verifyChain` / `verifyChainWith cfg` first.
+
+**A snapshot at sequence zero carries the configured genesis (Phase 227).** The boundary hash at zero
+is the genesis every chain walker starts from. `snapshotAtOptWith cfg` / `compactWith cfg` /
+`compactChainOnlyWith cfg` write `cfg.Genesis` there. The canonical entry points (`snapshotAt`,
+`snapshotAtOpt`, `snapshotAtChainOnly`, `compact`, `compactChainOnly`) write `""`, which is
+`canonicalConfig.Genesis` and `legacyActorConfig.Genesis`. So under both shipped configs every
+snapshot byte is unchanged. A stream appended under a config with any other genesis must compact
+through the `...With` form under that config. The canonical form's snapshot at zero does not verify
+across such a stream.
+
 ### Chain pre-image portability
 
 The chain pre-image is pluggable via `StreamConfig.Payload` (`int -> Actor -> string -> string`,
@@ -2490,6 +2507,33 @@ and the roster export stays `schema: 4`. Its `adequacy` cell reads `guarded-reac
 where it read `unconditional`. The ratchet Phase 220 left in the suite, six permitted violators
 asserted exactly, is now the plain property. Every family `Families.refusalAudit` classes `Drawn`
 is `Guarded`, with no exceptions.
+
+### A snapshot at sequence zero carries the configured genesis — `snapshotAtOptWith`, `compactWith`, `compactChainOnlyWith` (Phase 227) — ADDITIVE
+
+**What changed.** `Fuaran.Core.OpStream` gains three members. Each takes a `StreamConfig` first and
+seeds the boundary hash at sequence zero with `cfg.Genesis`:
+
+- `snapshotAtOptWith`
+- `compactWith`
+- `compactChainOnlyWith`
+
+Until now `snapshotAtOpt` wrote the literal `""` there. Every chain walker starts from `cfg.Genesis`,
+so under a non-empty genesis the compaction at zero of an intact stream failed `verifyAcross`
+(Phase 191's `compact_at_zero_needs_the_empty_genesis`). The existing entry points keep their
+signatures and are the canonical config's instantiation. The surface gate classes the move additive
+(3 additions, nothing retyped), so it rides this draft.
+
+**What it costs a pinned consumer: nothing.** Both shipped configs carry the empty genesis, so every
+byte the existing entry points emit is unchanged. A digest vector and a value-for-value equality at
+every boundary pin that (`Proofs.Oracle`). A domain that appends under its own `StreamConfig` with a
+non-empty genesis should compact through `compactWith cfg`. The canonical `compact` still writes
+`""` at zero.
+
+**The obligation it does not remove: verify, then compact.** See "Hash-chain integrity posture". The
+boundary hash is read and trusted, so the compacted stream's verdict equals the original's only over
+a prefix verified first. The proof side moved in the same commit. The model's `compact` takes the
+genesis, `compact_preserves_verify` drops its genesis condition, and the finding is restated as
+`compact_at_zero_verifies_under_any_genesis`. DECISIONS.md DXX has the ruling and the declined option.
 
 ## 0.30.1 — draft
 

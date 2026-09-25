@@ -2596,6 +2596,7 @@ let private snapshotDifferential
                     showPos
                     (modelPay mode stateEnc)
                     apply
+                    OpStream.canonicalConfig.Genesis
                     gen.State0
                     (toChainRecords rs)
                     (posOfInt n)
@@ -12603,11 +12604,14 @@ let proofOracleTests =
                       "the prefix is where the break is, which is the other conjunct of the split"
 
           testCase
-              "under a NON-EMPTY genesis a compaction at sequence zero does not verify across — snapshotAt hard-wires the empty one"
+              "under a NON-EMPTY genesis a compaction at sequence zero verifies across — compactWith carries the configured genesis"
           <| fun _ ->
-              // `compact_at_zero_needs_the_empty_genesis`, measured on production. Both shipped
-              // configs have the empty genesis, so nothing shipped meets this; `StreamConfig` is a
-              // public record, so a domain can.
+              // Phase 227 closed Phase 191's finding. `compact_at_zero_verifies_under_any_genesis`,
+              // measured on production: a stream appended under a config whose genesis is not `""`,
+              // compacted through `compactWith` / `compactChainOnlyWith` with that config, verifies
+              // across at EVERY boundary, zero included — and the model, handed the same genesis,
+              // agrees with production value for value. Until 227 the snapshot at zero said `""` and
+              // the first tail record linked to the genesis, so zero did not verify.
               let cfg =
                   { OpStream.canonicalConfig with
                       Genesis = "g0" }
@@ -12622,32 +12626,143 @@ let proofOracleTests =
                       rs <- rs'
                   | Error e -> failtestf "append refused: %s" e
 
+              Expect.hasLength rs 2 "both appends were accepted"
+
               Expect.isTrue
                   (OpStream.verifyChainWith cfg OpStream.defaultHash planW rs)
                   "the stream verifies under its own config"
 
-              let acrossAt (n: int) : bool * bool =
-                  match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs n with
-                  | Error e -> failtestf "compact refused an intact stream: %s" e
-                  | Ok(snap, tail) ->
-                      OpStream.verifyAcrossWith cfg OpStream.defaultHash planHash planW snap tail,
-                      Chain.verify_across
-                          OpStream.defaultHash
-                          showPos
-                          planW.Encode
-                          (Chain.snap_payload showPos planHash)
-                          (toModelSnapshot snap)
-                          (toChainRecords tail)
+              let prodWith (mode: SnapshotMode) (n: int) =
+                  match mode with
+                  | StateHashed -> OpStream.compactWith cfg OpStream.defaultHash planHash planW planLaneGen.State0 rs n
+                  | ChainOnly -> OpStream.compactChainOnlyWith cfg OpStream.defaultHash planW planLaneGen.State0 rs n
+
+              for mode in [ StateHashed; ChainOnly ] do
+                  for n in 0 .. List.length rs do
+                      let p = prodWith mode n
+
+                      let m =
+                          Chain.compact
+                              OpStream.defaultHash
+                              showPos
+                              (modelPay mode planHash)
+                              (chainApply planW)
+                              cfg.Genesis
+                              planLaneGen.State0
+                              (toChainRecords rs)
+                              (posOfInt n)
+
+                      Expect.equal
+                          (prodCompactVerdict p)
+                          (modelCompactVerdict m)
+                          (sprintf "%A at %d: the model under the same genesis is production" mode n)
+
+                      match p with
+                      | Error e -> failtestf "%A at %d: compact refused an intact stream: %s" mode n e
+                      | Ok(snap, tail) ->
+                          if n = 0 then
+                              Expect.equal
+                                  snap.PrevHash
+                                  cfg.Genesis
+                                  "at zero the boundary hash is the configured genesis"
+
+                          // `cfg` differs from the canonical config in its genesis only, and the
+                          // boundary walker reads the genesis nowhere (it walks from `snap.PrevHash`),
+                          // so the canonical-payload verifiers are the config's own here.
+                          let pAcross = prodVerifyAcross mode OpStream.defaultHash planHash planW snap tail
+
+                          let mAcross =
+                              Chain.verify_across
+                                  OpStream.defaultHash
+                                  showPos
+                                  planW.Encode
+                                  (modelPay mode planHash)
+                                  (toModelSnapshot snap)
+                                  (toChainRecords tail)
+
+                          Expect.equal
+                              (pAcross, mAcross)
+                              (true, true)
+                              (sprintf "%A at %d: the compaction of an intact stream verifies across" mode n)
+
+                          // `compact_preserves_verify`, held of production under the config, with no
+                          // condition on the genesis left in it.
+                          Expect.equal
+                              (OpStream.verifyChainWith cfg OpStream.defaultHash planW rs)
+                              (OpStream.verifyChainWith cfg OpStream.defaultHash planW (List.truncate n rs)
+                               && pAcross)
+                              (sprintf "%A at %d: the split holds under the configured genesis" mode n)
+
+              // The canonical entry point is the `""` instantiation and says so: handed this stream it
+              // still snapshots `""` at zero, which is why a host on another genesis compacts through
+              // `compactWith`. Past zero the two agree — the boundary hash is a stored one.
+              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 0 with
+              | Error e -> failtestf "compact refused an intact stream: %s" e
+              | Ok(snap, tail) ->
+                  Expect.equal snap.PrevHash "" "the canonical compact seeds the canonical genesis"
+
+                  Expect.isFalse
+                      (OpStream.verifyAcrossWith cfg OpStream.defaultHash planHash planW snap tail)
+                      "so it is not the compaction of a g0 stream at zero"
 
               Expect.equal
-                  (acrossAt 0)
-                  (false, false)
-                  "at zero the snapshot says \"\" and the first record links to the genesis"
+                  (OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1)
+                  (prodWith StateHashed 1)
+                  "past zero the canonical compact and compactWith cfg are the same value"
 
-              Expect.equal
-                  (acrossAt 1)
-                  (true, true)
-                  "past zero the boundary hash is a stored one and the genesis never reaches it"
+          testCase
+              "the shipped configurations snapshot byte-identically — compact is compactWith canonicalConfig, pinned by a vector"
+          <| fun _ ->
+              // Phase 227's additive half: threading the genesis moved no byte any released entry point
+              // emits. Both shipped configs carry the empty genesis, so `compact` / `compactChainOnly`
+              // / `snapshotAtOpt` are `...With` at either one, value for value, at every boundary — and
+              // the snapshots at zero of a fixed stream are pinned by digest, so a later move of either
+              // entry point's bytes goes red here rather than in a consumer's cache.
+              let rs =
+                  chainUnder
+                      OpStream.defaultHash
+                      planW
+                      planLaneGen.State0
+                      (Human "writer")
+                      [ AddItem("v1", "one"); AddItem("v2", "two") ]
+
+              Expect.hasLength rs 2 "both appends were accepted"
+
+              for cfg in [ OpStream.canonicalConfig; OpStream.legacyActorConfig ] do
+                  Expect.equal cfg.Genesis "" "a shipped config carries the empty genesis"
+
+                  for n in 0 .. List.length rs + 1 do
+                      Expect.equal
+                          (OpStream.compactWith cfg OpStream.defaultHash planHash planW planLaneGen.State0 rs n)
+                          (OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs n)
+                          (sprintf "compact at %d" n)
+
+                      Expect.equal
+                          (OpStream.compactChainOnlyWith cfg OpStream.defaultHash planW planLaneGen.State0 rs n)
+                          (OpStream.compactChainOnly OpStream.defaultHash planW planLaneGen.State0 rs n)
+                          (sprintf "compactChainOnly at %d" n)
+
+                      Expect.equal
+                          (OpStream.snapshotAtOptWith
+                              cfg
+                              OpStream.defaultHash
+                              (Some planHash)
+                              planW
+                              planLaneGen.State0
+                              rs
+                              n)
+                          (OpStream.snapshotAtOpt OpStream.defaultHash (Some planHash) planW planLaneGen.State0 rs n)
+                          (sprintf "snapshotAtOpt at %d" n)
+
+              match
+                  OpStream.snapshotAt OpStream.defaultHash planHash planW planLaneGen.State0 rs 0,
+                  OpStream.snapshotAtChainOnly OpStream.defaultHash planW planLaneGen.State0 rs 0
+              with
+              | Ok strict, Ok chainOnly ->
+                  Expect.equal strict.PrevHash "" "the canonical boundary hash at zero"
+                  Expect.equal strict.Hash "299b31aa" "the strict snapshot at zero, pinned"
+                  Expect.equal chainOnly.Hash "92f95a5f" "the chain-only snapshot at zero, pinned"
+              | a, b -> failtestf "snapshot at zero refused: %A / %A" a b
 
           // ---- Phase 193 — the signed head: head, attestHead, verifyAttestation, and the re-mint ----
 

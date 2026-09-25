@@ -1764,12 +1764,15 @@ let payload_splice_breaks_chain
        premise it needs. `compacted_tail_tamper_detected` is section 6's tamper theorem restated
        at the boundary: nothing about it needed the walk to start at genesis.
 
-   One boundary is a finding rather than a modelling choice. `snapshotAtOpt` hard-wires the
-   boundary hash at sequence zero to `""`, where the walkers start from `cfg.Genesis`. Both shipped
-   configs have the empty genesis, so nothing shipped is affected — but `StreamConfig` is a public
-   record, and `compact_at_zero_needs_the_empty_genesis` proves that under any OTHER genesis a
-   compaction at zero of an intact non-empty stream does not verify across. The theorem carries
-   the condition (`n == PZero ==> genesis == ""`) rather than hiding it.
+   One boundary was a finding rather than a modelling choice, and Phase 227 closed it. Phase 191's
+   `snapshotAtOpt` hard-wired the boundary hash at sequence zero to `""`, where the walkers start
+   from `cfg.Genesis`, and `compact_at_zero_needs_the_empty_genesis` proved that under any other
+   genesis a compaction at zero of an intact non-empty stream did not verify across. Production now
+   threads the config (`snapshotAtOptWith cfg`, `compactWith`, `compactChainOnlyWith`; the canonical
+   entry points are the `""` instantiation, byte for byte), so `compact` here takes the genesis, the
+   split theorem carries no condition on it, and the finding is restated as the positive
+   `compact_at_zero_verifies_under_any_genesis`. What remains a PREMISE, and is stated where a host
+   reads it, is the ordering: verify, then compact.
 
    Production's two entry points differ only in the snapshot's hash PAYLOAD (state-hashed or
    chain-only), so the payload is a parameter here and the two are two instantiations
@@ -1838,8 +1841,9 @@ let rec within (#a: Type) (n: pos) (l: list a) : Tot bool (decreases l) =
   | PSucc _, [] -> false
   | PSucc m, _ :: t -> within m t
 
-(* F#: `if atSeq = 0 then "" else (List.item (atSeq - 1) records).Hash`, as a walk carrying the
-   running hash — called with `""`, which is production's literal and NOT `cfg.Genesis`. *)
+(* F#: `if atSeq = 0 then cfg.Genesis else (List.item (atSeq - 1) records).Hash`, as a walk
+   carrying the running hash — called with the config's genesis (Phase 227; `""` under the two
+   shipped configs, which is what the canonical `snapshotAtOpt` passes). *)
 let rec hash_at_boundary (#op: eqtype) (prev: string) (n: pos) (rs: list (record op))
   : Tot string (decreases rs) =
   match n, rs with
@@ -1869,10 +1873,12 @@ type compacted (op: eqtype) (st: Type) =
   | CompactRefused : string -> compacted op st
   | Compacted : snapshot st -> list (record op) -> compacted op st
 
-(* F#: `OpStream.compact` / `compactChainOnly` over `snapshotAtOpt`, clause for clause: the range
-   check, the prefix replay, the boundary hash, the snapshot's own hash, and `List.skip` for the
-   tail. `pay` is `snapPayloadWith stateEncode` — `snap_payload show enc` or
-   `snap_payload_chain_only show`. The two refusal messages are production's, verbatim. *)
+(* F#: `OpStream.compactWith` / `compactChainOnlyWith` over `snapshotAtOptWith cfg`, clause for
+   clause: the range check, the prefix replay, the boundary hash, the snapshot's own hash, and
+   `List.skip` for the tail. `genesis` is `cfg.Genesis` — `compact` / `compactChainOnly` are the
+   canonical config's instantiation, `genesis = ""`. `pay` is `snapPayloadWith stateEncode` —
+   `snap_payload show enc` or `snap_payload_chain_only show`. The two refusal messages are
+   production's, verbatim. *)
 let compact
   (#op: eqtype)
   (#st: Type)
@@ -1881,6 +1887,7 @@ let compact
   (show: pos -> string)
   (pay: pos -> st -> string)
   (apply: op -> st -> applied st rej)
+  (genesis: string)
   (s0: st)
   (rs: list (record op))
   (n: pos)
@@ -1891,7 +1898,7 @@ let compact
     match replay apply s0 (take n rs) with
     | Halted i _ -> CompactRefused ("OpStream.snapshotAt: prefix replay failed at " ^ show i)
     | Replayed s ->
-      let prev = hash_at_boundary "" n rs in
+      let prev = hash_at_boundary genesis n rs in
       Compacted ({ sseq = n; sstate = s; sprev = prev; shash = h prev (pay n s) }) (drop n rs)
 
 (* F#: `OpStream.replayFrom` — `replay w snap.State tail`, numbering from ZERO again. *)
@@ -2019,13 +2026,14 @@ let replay_from_snapshot_eq
   (show: pos -> string)
   (pay: pos -> st -> string)
   (apply: op -> st -> applied st rej)
+  (genesis: string)
   (s0: st)
   (rs: list (record op))
   (n: pos)
   (snap: snapshot st)
   (tail: list (record op))
   : Lemma
-    (requires compact h show pay apply s0 rs n == Compacted snap tail)
+    (requires compact h show pay apply genesis s0 rs n == Compacted snap tail)
     (ensures replay apply s0 rs == offset n (replay_from apply snap tail)) =
   replay_go_split apply PZero s0 rs n;
   padd_zero n;
@@ -2041,6 +2049,7 @@ let replay_from_snapshot_state
   (show: pos -> string)
   (pay: pos -> st -> string)
   (apply: op -> st -> applied st rej)
+  (genesis: string)
   (s0: st)
   (rs: list (record op))
   (n: pos)
@@ -2049,10 +2058,10 @@ let replay_from_snapshot_state
   (s: st)
   : Lemma
     (requires
-      compact h show pay apply s0 rs n == Compacted snap tail /\
+      compact h show pay apply genesis s0 rs n == Compacted snap tail /\
       replay_from apply snap tail == Replayed s)
     (ensures replay apply s0 rs == Replayed s) =
-  replay_from_snapshot_eq h show pay apply s0 rs n snap tail
+  replay_from_snapshot_eq h show pay apply genesis s0 rs n snap tail
 
 (* THEOREM. `compact` refuses an in-range boundary exactly when the ORIGIN's replay halts inside
    the prefix — and the origin halts at the same index with the same rejection. So a refused
@@ -2065,6 +2074,7 @@ let compact_refusal_is_the_origins
   (show: pos -> string)
   (pay: pos -> st -> string)
   (apply: op -> st -> applied st rej)
+  (genesis: string)
   (s0: st)
   (rs: list (record op))
   (n: pos)
@@ -2073,8 +2083,8 @@ let compact_refusal_is_the_origins
     (ensures
       (match replay apply s0 (take n rs) with
        | Halted j e ->
-         replay apply s0 rs == Halted j e /\ CompactRefused? (compact h show pay apply s0 rs n)
-       | Replayed _ -> Compacted? (compact h show pay apply s0 rs n))) =
+         replay apply s0 rs == Halted j e /\ CompactRefused? (compact h show pay apply genesis s0 rs n)
+       | Replayed _ -> Compacted? (compact h show pay apply genesis s0 rs n))) =
   replay_go_split apply PZero s0 rs n
 
 (* ---- the boundary, and the walker across it ---- *)
@@ -2104,7 +2114,8 @@ let rec chain_ok_split
     padd_succ i m
 
 (* Past sequence zero the boundary hash is a stored one, so what the walk was seeded with —
-   production's `""`, or a config's genesis — does not reach it. *)
+   the canonical `""`, or a config's genesis — does not reach it: the canonical `compact` and
+   `compactWith cfg` agree at every boundary past zero, whatever `cfg.Genesis` is. *)
 let boundary_ignores_the_seed
   (#op: eqtype)
   (p: string)
@@ -2118,7 +2129,8 @@ let boundary_ignores_the_seed
 
 (* THEOREM (Phase 191). The original verifies exactly when its discarded prefix verifies AND the
    compaction verifies across its boundary. Nothing is assumed of the hash: this is the walker's
-   own arithmetic. The genesis condition is production's — see the section header. *)
+   own arithmetic. Since Phase 227 the compaction is seeded with the SAME genesis the walker is,
+   so no condition on the genesis remains — see the section header. *)
 let compact_preserves_verify
   (#op: eqtype)
   (#st: Type)
@@ -2136,8 +2148,7 @@ let compact_preserves_verify
   (tail: list (record op))
   : Lemma
     (requires
-      compact h show pay apply s0 rs n == Compacted snap tail /\
-      (n == PZero ==> genesis == ""))
+      compact h show pay apply genesis s0 rs n == Compacted snap tail)
     (ensures
       verify_chain h show enc_op genesis rs ==
       (verify_chain h show enc_op genesis (take n rs) &&
@@ -2145,10 +2156,7 @@ let compact_preserves_verify
   chain_break_none_iff h show enc_op genesis PZero rs;
   chain_break_none_iff h show enc_op genesis PZero (take n rs);
   chain_ok_split h show enc_op genesis PZero rs n;
-  padd_zero n;
-  (match n with
-   | PZero -> ()
-   | PSucc _ -> boundary_ignores_the_seed genesis "" n rs)
+  padd_zero n
 
 (* COROLLARY — the chartered sentence, with the premise it needs: over a prefix that verified, the
    compacted stream verifies exactly when the original does. Without the premise it is false, and
@@ -2172,17 +2180,20 @@ let compact_verifies_iff_original
   (tail: list (record op))
   : Lemma
     (requires
-      compact h show pay apply s0 rs n == Compacted snap tail /\
-      (n == PZero ==> genesis == "") /\
+      compact h show pay apply genesis s0 rs n == Compacted snap tail /\
       verify_chain h show enc_op genesis (take n rs))
     (ensures
       verify_across h show enc_op pay snap tail == verify_chain h show enc_op genesis rs) =
   compact_preserves_verify h show enc_op pay apply genesis s0 rs n snap tail
 
-(* THEOREM — the boundary production leaves open. Under a genesis that is not `""`, the compaction
-   at sequence zero of an intact non-empty stream does NOT verify across: the first tail record
-   links to the genesis, and the snapshot says `""`. *)
-let compact_at_zero_needs_the_empty_genesis
+(* THEOREM (Phase 227) — the boundary Phase 191 found open, closed. A compaction at sequence zero
+   carries the configured genesis as its boundary hash, so the compaction at zero of a stream that
+   verifies from that genesis verifies across, under EVERY genesis. Phase 191 proved the negative
+   (`compact_at_zero_needs_the_empty_genesis`: under a non-empty genesis it did NOT verify, because
+   the snapshot said `""`); this is its positive restatement, and needs no premise but the
+   stream's own verification. It is `compact_preserves_verify` at `n = PZero`, where the discarded
+   prefix is empty and verifies trivially. *)
+let compact_at_zero_verifies_under_any_genesis
   (#op: eqtype)
   (#st: Type)
   (#rej: Type)
@@ -2198,12 +2209,11 @@ let compact_at_zero_needs_the_empty_genesis
   (tail: list (record op))
   : Lemma
     (requires
-      compact h show pay apply s0 rs PZero == Compacted snap tail /\
-      Cons? rs /\
-      verify_chain h show enc_op genesis rs /\
-      ~(genesis == ""))
-    (ensures not (verify_across h show enc_op pay snap tail)) =
-  chain_break_none_iff h show enc_op genesis PZero rs
+      compact h show pay apply genesis s0 rs PZero == Compacted snap tail /\
+      verify_chain h show enc_op genesis rs)
+    (ensures verify_across h show enc_op pay snap tail) =
+  compact_preserves_verify h show enc_op pay apply genesis s0 rs PZero snap tail;
+  chain_break_none_iff h show enc_op genesis PZero ([] <: list (record op))
 
 (* COROLLARY — section 6's tamper theorem, at the boundary. A compacted stream that verified
    across, with one TAIL record's content changed and its addressing left alone, no longer does.
