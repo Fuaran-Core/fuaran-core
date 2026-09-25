@@ -35,6 +35,12 @@ Every packable package carries a committed baseline of its public contract at
 line per externally-visible type, member, record field and union case. The `Public surface` test
 family renders each package afresh on every gate run and diffs it against its baseline.
 
+**Field names are part of the surface (Phase 237).** A record field has always rendered by name.
+A union case renders each field as `name: Type` in declaration order. A consumer that constructs or
+matches a case by field name (`TargetNotAContainer(target = …)`) stops compiling when that name
+changes. So a union field rename is a `retype`, which is breaking, and the report names the case
+and both names. Before Phase 237 a case rendered its field types only, and a rename moved nothing.
+
 **The gate refuses an UNCLASSIFIED move, never a breaking one.** Additive or breaking, a move whose
 baseline moved with it passes; what fails is a surface that moved while its baseline stood still.
 The estate's record-widening dispensation stands — widening is permitted, widening *in silence* is
@@ -77,6 +83,16 @@ rather than arguable.
 The family prints the class of every baseline that has moved **since the newest `vX.Y.Z` tag** —
 the "ride or advance" line that entries in this document wrote by hand until now. A package whose
 baseline the newest tag does not carry is reported as a first snapshot rather than as unchanged.
+
+**A tag cut before Phase 237 is read without field names, and the report says so.** Its baselines
+carry nameless union cases. Compared with today's named ones, they would report every carrying
+case as a `retype` that no consumer ever saw. So when the tagged baseline predates the names, the
+report strips them from the current surface before it classifies. It prints a line for that
+package: a field rename since that tag is not visible to the comparison, just as it was invisible
+to the gate then. **This normalisation expires by itself.** The first tag cut after Phase 237
+carries named baselines, and nothing is stripped against it. **The live gate never normalises.** A
+committed baseline without names reads as moved against today's render. So a stale baseline cannot
+hide a rename.
 
 Three boundaries, named rather than assumed:
 
@@ -2734,6 +2750,29 @@ surface gate classes the OpStream move additive, so it rides this draft. A test 
 pins the pair from outside the package. It uses a config with its own payload format and a
 non-empty genesis, and checks every boundary, zero included. A one-byte change to any tail record's
 hash or back-link fails the verification.
+
+### The public-surface gate sees a union field rename, and classes it `retype` (Phase 237) — NO PACKAGE MOVES (the gate's own baseline format)
+
+**What changed.** The `api/<package>.txt` baselines now render each union case's field NAMES beside
+their types: `union-case Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer #2(target: !0,
+kindTag: System.String)` where the token read `#2(!0, System.String)`. The Phase 228 entry above
+could only STATE its rename's class, because the gate printed nothing for it. A rename now keeps
+the token's identity and changes its text, so the classifier pairs it into one `retype`, which is
+breaking. The report names the case and both field names:
+`field rename on …NewTargetNotAContainer: parent -> target`. Record fields already rendered by
+name (`record-field X.Alpha #0 : System.Int32`), so they did not change.
+
+**What it costs a pinned consumer: nothing.** No package source changed. The one-time regeneration
+moved 16 of the 20 baselines. The other four publish no union case with fields. Every moved line
+is a `union-case` token, and each file with its names stripped is byte-identical to its
+predecessor. So the regeneration added names and moved nothing else. It rides this draft.
+
+**Where the names come from, measured.** The case factory's parameter names are a lossy spelling
+of the field names (`target` is emitted as `_target`), so the renderer does not read them. It reads
+the field properties' `CompilationMappingAttribute(Field, variant, seq)` instead. For a multi-case
+union those properties are on the case class, and for a single-case or struct union they are on the
+union type. A test fails any carrying case whose fields the renderer could not name, so a fallback
+to types alone cannot quietly bring the blindness back.
 
 ## 0.30.1 — draft
 
