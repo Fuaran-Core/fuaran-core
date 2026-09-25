@@ -25,8 +25,9 @@ let main argv =
     // third argument is the corpus manifest, read solely for the §11.0 host
     // roster once it carries one — until then the declared roster is used and the
     // report says so.
-    // Write the transform-parity family's reference vectors, for the hosts that
-    // ship their own dataframe evaluator:
+    // Write every law set Core is the reference for — the transform-parity
+    // family's reference vectors and (Phase 235, moved from the UI tier) the
+    // capabilityLaws vectors:
     //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws [<dir>]
     // With no argument (Phase 172) the target is THIS repository's committed
     // `conformance/` — the source of truth the default suite certifies against.
@@ -38,7 +39,10 @@ let main argv =
     | "--emit-laws" :: rest ->
         let dir = emitTarget rest
         LawVectorExport.write dir
-        printfn "Wrote %s" (LawVectorExport.transformPath dir)
+
+        for path, _ in LawVectorExport.emitted dir do
+            printfn "Wrote %s" path
+
         0
     // Phase 139 — write the `apply/` family (the skeleton-op apply contract: one
     // vector per validator clause per op, Batch atomicity, the id-collision

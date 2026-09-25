@@ -2735,6 +2735,26 @@ pins the pair from outside the package. It uses a config with its own payload fo
 non-empty genesis, and checks every boundary, zero included. A one-byte change to any tail record's
 hash or back-link fails the verification.
 
+### Core emits every law set it is the reference for — `capability-laws.json` moves out of the UI tier (Phase 235) — ADDITIVE (tests and corpus only)
+
+**What changed.** `--emit-laws` now writes TWO files under `conformance/laws/`: `transform-laws.json`,
+as before, and `capability-laws.json`, the `capabilityLaws` vectors the UI tier's test project used
+to export against its own Core pin. The renderer moved unchanged, member for member, and the suite
+certifies the committed file the way it certifies the transform one: every vector is read back
+through the public codecs and recomputed, and the file is held to a fresh render. `copies.json`
+declares the corpus copy. No package's public surface moves; this is test-project code and data.
+
+**The corpus copy LAGS, by ruling, and its owner is fuaran#1860.** Phase 225 changed every capture
+key's value, and this file pins literal keys. So the committed file here carries the `0.31.0` keys,
+and the corpus copy still carries the `0.30.0` ones, which is what the TS and Go ports and the UI
+tier's pinned kit certify against today. Re-syncing the copy now would redden those hosts before
+their ports move. fuaran#1860 re-syncs it with both ports at the UI tier's Core pin raise. Until
+then `roadmapctl copies` names the copy stale. The in-suite leg reads it as the recorded lag and
+never fails for it: every line must be byte-identical to this renderer's output, except the stamp
+and the `key` value of the twelve `invocationKey` vectors. Any other difference is still a
+divergence and is reported as one, fatal where the leg is asked for. The transform leg is unchanged
+and strict.
+
 ## 0.30.1 — draft
 
 **This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries
