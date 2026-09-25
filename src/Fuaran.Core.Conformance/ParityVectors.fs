@@ -120,6 +120,13 @@ let vectors: (string * string) list =
       "fnv1a/unicode", Hash.fnv1a unicodeSample
       "fnv1a/a80", Hash.fnv1a (String.replicate 80 "a")
 
+      // ---- Hash.canonicalFields — the capture keys' injective pre-image (Phase 225) ----
+      // Printed as the UTF-8 hex of the pre-image, because the pre-image itself carries the two
+      // control characters the encoding is made of and the emitted line must stay ASCII.
+      "canonicalFields/plain", hexOf (Hash.utf8Bytes (Hash.canonicalFields [ "a"; "b" ]))
+      "canonicalFields/symbols",
+      hexOf (Hash.utf8Bytes (Hash.canonicalFields [ "a" + Hash.foldSep + "b"; Hash.fieldEsc; ""; "=#" ]))
+
       // ---- Hash.sha256* — the pinned pure FIPS 180-4 digest (D15) ----
       "sha256/empty", Hash.sha256Hex ""
       "sha256/abc", Hash.sha256Hex "abc"

@@ -26,7 +26,9 @@
    value-space check needs — `System.Int32.TryParse`, `System.Double.TryParse` against a float
    range, and `String.Length` — are a `readers` record: the space vocabulary is modelled, the
    lexical parsers behind two of its five constructors are not, and a float range's bounds cross
-   as opaque carriers. `Hash.fnv1a` (`invocationKey`) and the two codecs are outside the model.
+   as opaque carriers. The two codecs are outside the model; `invocationKey` entered it with
+   Phase 225 (section 12), over a `key_renderers` record — `Hash.fnv1a`, the address comparator
+   and `Hash.canonicalField` — for the same reason.
 
    WHAT IS PROVED, over any witness, any readers, any registry and any host body:
 
@@ -64,13 +66,19 @@
        identity, and `covers` is the order it is least for. `audit_effect_join` carries that to
        the audit: the observed effect covers every node's declared class, an `Ok` audit says the
        root covers every descendant, and an `Error` audit exhibits a descendant it does not.
+     - `invocation_key_injective` (Phase 225) — the capture key's pre-image is INJECTIVE: two
+       argument lists with one address-sorted canonical string are one sorted list and hold the
+       same bindings, so distinct argument sets have distinct pre-images whatever their values
+       contain. Proved over a reading of a string as its symbols (`symbols_faithful`, the one
+       `Chain.fst` takes) and an escaper premise (`field_faithful`), named in `key_premises`.
 
    WHAT IS NOT CLAIMED. Anything about a domain's `Bind` — that a bound hole is cleared, that a
    slot's inner tree is where `compose` put it — which is the witness contract
    (`lawful-abstract-witness`). Anything about the two lexical parsers or a float range beyond
    the envelope the readers premise states (`capability-scalar-readers-abstract`). The ORDER
    `Registry.enumerate` returns — production's `Map` sorts by id, the model holds a finite map
-   as a list, and the theorem is about membership. `invocationKey`, `CapabilityCodec`, the
+   as a list, and the theorem is about membership. Whether two distinct capture-key pre-images
+   HASH apart (a claim about FNV-1a). `CapabilityCodec`, the
    `FunctionRegistry`, `ContentPack` and `CapabilityPipeline` surfaces, and `applyMemo`.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
@@ -1350,3 +1358,206 @@ let audit_effect_join (#node:Type) (w:witness node) (n:node)
   = covers_refl (observed_effect w n);
     observed_least w n (observed_effect w n);
     observed_least w n (w.eff n)
+
+(* ======================================================================================
+   12. THE SEVENTH THEOREM (Phase 225) — `Capability.invocationKey`'s pre-image is INJECTIVE:
+       distinct argument sets have distinct pre-images. The capture key was outside this model
+       until Phase 225; it enters it with the canonicaliser both seams now share.
+   ====================================================================================== *)
+
+(* The host functions the capture key is written through. F#: `Hash.fnv1a`, the ordinal order
+   `List.sortBy fst` compares addresses by, and `Hash.canonicalField` — one field of the
+   pre-image, escaped and terminated — the same canonicaliser `Query.invocationKey` uses, which
+   is the point of Phase 225: one encoding, so the two seams cannot drift apart again. *)
+noeq type key_renderers = {
+  k_hash:    string -> string;
+  k_addr_le: string -> string -> bool;
+  k_field:   string -> string
+}
+
+(* F#: `List.sortBy fst`'s insertion step — a STABLE sort. *)
+let rec insert_binding (kr:key_renderers) (x:(string & string)) (l:invocation)
+  : Tot invocation =
+  match l with
+  | [] -> [x]
+  | y :: t ->
+    let (xa, _) = x in
+    let (ya, _) = y in
+    if kr.k_addr_le xa ya then x :: l else y :: insert_binding kr x t
+
+(* F#: `args |> List.sortBy fst`. *)
+let rec sort_bindings (kr:key_renderers) (l:invocation) : Tot invocation =
+  match l with
+  | [] -> []
+  | x :: t -> insert_binding kr x (sort_bindings kr t)
+
+(* F#: `List.collect (fun (a, v) -> [ a; v ])` — two fields per binding. *)
+let rec binding_fields (l:invocation) : Tot (list string) =
+  match l with
+  | [] -> []
+  | (a, v) :: t -> a :: v :: binding_fields t
+
+(* F#: `Hash.canonicalFields` — `List.map canonicalField |> String.concat ""`. *)
+let rec key_fields (kr:key_renderers) (l:list string) : Tot string =
+  match l with
+  | [] -> ""
+  | x :: t -> kr.k_field x ^ key_fields kr t
+
+(* The canonical pre-image of an (address-sorted) argument list. *)
+let key_canonical (kr:key_renderers) (l:invocation) : Tot string =
+  key_fields kr (binding_fields l)
+
+(* F#: `Capability.invocationKey`. *)
+let invocation_key (kr:key_renderers) (c:capability) (a:invocation) : Tot string =
+  c.c_id ^ "#" ^ kr.k_hash (key_canonical kr (sort_bindings kr a))
+
+(* HOW A STRING IS READ — the reading `Chain.fst` and `Query.fst` take, restated because this
+   module opens nothing: concatenation is symbol-list append, and equal symbols are one string.
+   A HYPOTHESIS in the `requires` of the lemmas that spend it, never an `assume`. *)
+[@@ noextract_to "FSharp"]
+let symbols_faithful (#sym:eqtype) (reveal:string -> list sym) : prop =
+  (forall (s t:string). reveal (s ^ t) == app (reveal s) (reveal t)) /\
+  (forall (s t:string). reveal s == reveal t ==> s == t)
+
+(* F#: `Hash.canonicalField`'s escaper at the symbol level — `e` (U+0010) before every `e` and
+   every terminator `t` (U+0001, `Hash.foldSep`) the field carries. *)
+[@@ noextract_to "FSharp"]
+let rec esc (#sym:eqtype) (e t:sym) (l:list sym) : Tot (list sym) =
+  match l with
+  | [] -> []
+  | x :: r -> if x = e || x = t then e :: x :: esc e t r else x :: esc e t r
+
+[@@ noextract_to "FSharp"]
+let rec enc (#sym:eqtype) (e t:sym) (l:list (list sym)) : Tot (list sym) =
+  match l with
+  | [] -> []
+  | x :: r -> app (esc e t x) (t :: enc e t r)
+
+(* THE ESCAPER PREMISE — `Hash.canonicalField` is `esc` then one terminator, read as symbols. *)
+[@@ noextract_to "FSharp"]
+let field_faithful (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (field:string -> string)
+  : prop =
+  forall (s:string). reveal (field s) == app (esc e t (reveal s)) [t]
+
+(* Every premise the theorem spends. No numeral layout is among them: a capability argument is
+   already a string. *)
+[@@ noextract_to "FSharp"]
+let key_premises (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (kr:key_renderers) : prop =
+  symbols_faithful reveal /\ reveal "" == [] /\ ~(e == t) /\ field_faithful reveal e t kr.k_field
+
+let app_cons_nonempty (#a:Type) (y:list a) (h:a) (r:list a)
+  : Lemma (Cons? (app y (h :: r))) =
+  match y with
+  | [] -> ()
+  | _ :: _ -> ()
+
+let rec app_assoc (#a:Type) (x y z:list a)
+  : Lemma (app (app x y) z == app x (app y z)) =
+  match x with
+  | [] -> ()
+  | _ :: t -> app_assoc t y z
+
+(* The split point is forced: the first UNESCAPED terminator ends each field. *)
+let rec esc_split (#sym:eqtype) (e t:sym) (x r1 y r2:list sym)
+  : Lemma (requires ~(e == t) /\ app (esc e t x) (t :: r1) == app (esc e t y) (t :: r2))
+          (ensures x == y /\ r1 == r2) (decreases x) =
+  match x, y with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: xt, _ :: yt -> esc_split e t xt r1 yt r2
+
+let rec enc_injective (#sym:eqtype) (e t:sym) (l1 l2:list (list sym))
+  : Lemma (requires ~(e == t) /\ enc e t l1 == enc e t l2) (ensures l1 == l2) =
+  match l1, l2 with
+  | [], [] -> ()
+  | [], y :: q -> app_cons_nonempty (esc e t y) t (enc e t q)
+  | x :: r, [] -> app_cons_nonempty (esc e t x) t (enc e t r)
+  | x :: r, y :: q ->
+    esc_split e t x (enc e t r) y (enc e t q);
+    enc_injective e t r q
+
+[@@ noextract_to "FSharp"]
+let rec symbols (#sym:eqtype) (reveal:string -> list sym) (l:list string)
+  : Tot (list (list sym)) =
+  match l with
+  | [] -> []
+  | x :: t -> reveal x :: symbols reveal t
+
+let rec symbols_injective (#sym:eqtype) (reveal:string -> list sym) (l1 l2:list string)
+  : Lemma (requires symbols_faithful reveal /\ symbols reveal l1 == symbols reveal l2)
+          (ensures l1 == l2) =
+  match l1, l2 with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: t1, _ :: t2 -> symbols_injective reveal t1 t2
+
+let rec reveal_key_fields (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
+  (kr:key_renderers) (l:list string)
+  : Lemma (requires symbols_faithful reveal /\ reveal "" == [] /\
+                    field_faithful reveal e t kr.k_field)
+          (ensures reveal (key_fields kr l) == enc e t (symbols reveal l)) =
+  match l with
+  | [] -> ()
+  | x :: r ->
+    reveal_key_fields reveal e t kr r;
+    app_assoc (esc e t (reveal x)) [t] (reveal (key_fields kr r))
+
+(* `Hash.canonicalFields` is injective on field lists. Proved, not assumed. *)
+let key_fields_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
+  (kr:key_renderers) (l1 l2:list string)
+  : Lemma (requires key_premises reveal e t kr /\ key_fields kr l1 == key_fields kr l2)
+          (ensures l1 == l2) =
+  reveal_key_fields reveal e t kr l1;
+  reveal_key_fields reveal e t kr l2;
+  enc_injective e t (symbols reveal l1) (symbols reveal l2);
+  symbols_injective reveal l1 l2
+
+(* Two fields per binding, so the flattening is injective. *)
+let rec binding_fields_injective (a1 a2:invocation)
+  : Lemma (requires binding_fields a1 == binding_fields a2) (ensures a1 == a2) =
+  match a1, a2 with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: t1, _ :: t2 -> binding_fields_injective t1 t2
+
+(* Decidable membership of a binding. *)
+let rec mem_binding (x:(string & string)) (l:invocation) : Tot bool =
+  match l with
+  | [] -> false
+  | y :: t -> x = y || mem_binding x t
+
+let rec insert_binding_mem (kr:key_renderers) (x:(string & string)) (l:invocation)
+  (y:(string & string))
+  : Lemma (mem_binding y (insert_binding kr x l) = (y = x || mem_binding y l)) =
+  match l with
+  | [] -> ()
+  | _ :: t -> insert_binding_mem kr x t y
+
+let rec sort_bindings_mem (kr:key_renderers) (l:invocation) (y:(string & string))
+  : Lemma (mem_binding y (sort_bindings kr l) = mem_binding y l) =
+  match l with
+  | [] -> ()
+  | x :: t -> sort_bindings_mem kr t y; insert_binding_mem kr x (sort_bindings kr t) y
+
+(* THE SEVENTH THEOREM. F#: `Capability.invocationKey`'s pre-image. Two argument lists whose
+   address-sorted canonical strings agree ARE the same sorted list, and so hold exactly the same
+   bindings: distinct argument sets have distinct pre-images, whatever their values contain —
+   `=`, `U+0001` and `U+0010` included, which is where the pre-225 join (`addr=value` pairs on
+   `U+0001`) collided. No premise about the comparator; whether distinct pre-images HASH apart is
+   a claim about FNV-1a and is not made. *)
+let invocation_key_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
+  (kr:key_renderers) (a a':invocation)
+  : Lemma (requires key_premises reveal e t kr /\
+                    key_canonical kr (sort_bindings kr a) == key_canonical kr (sort_bindings kr a'))
+          (ensures sort_bindings kr a == sort_bindings kr a' /\
+                   (forall (x:(string & string)). mem_binding x a = mem_binding x a')) =
+  key_fields_injective reveal e t kr (binding_fields (sort_bindings kr a))
+    (binding_fields (sort_bindings kr a'));
+  binding_fields_injective (sort_bindings kr a) (sort_bindings kr a');
+  let aux (x:(string & string)) : Lemma (mem_binding x a = mem_binding x a') =
+    sort_bindings_mem kr a x; sort_bindings_mem kr a' x
+  in
+  FStar.Classical.forall_intro aux

@@ -574,7 +574,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 26 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 27 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -590,7 +590,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 17 rows.
+  `unscheduled` where something could and nobody has. 18 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -623,6 +623,7 @@ over-read.
 | `column-cell-carrier-opaque` | `model-bridge` | `permanent` |
 | `column-transform-evaluator-abstract` | `model-bridge` | `unscheduled` |
 | `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
+| `capability-key-renderers-abstract` | `model-bridge` | `permanent` |
 | `propagation-order-distinct` | `model-bridge` | `unscheduled` |
 | `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLaws` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
@@ -4838,6 +4839,29 @@ the F# lambda it stands for, and the module discharged on the next run. The extr
 byte-identical to a fresh one on the first leg run; the oracle compiles against `Prims.fs` and the
 `option` shim with nothing added.
 
+### What Phase 225 added here: the capture key, and one canonicaliser for both seams
+
+`Capability.invocationKey` was outside this model until Phase 225 (section 12 of the model now).
+Phase 187's second finding said both seams joined their `addr=value` pairs "on the empty string";
+of this seam that was not quite true — it joined them on `U+0001` — and it collided all the same,
+because a value can carry that byte: `[a = "1␁b=2"]` and `[a = "1"; b = "2"]` shared a pre-image.
+Both seams now build their pre-image through ONE canonicaliser, `Hash.canonicalFields`: every
+field escaped (`U+0010` before each `U+0010` and `U+0001` it carries) and terminated by `U+0001`,
+two fields per binding here, three (name, cell tag, cell payload) in `Query`.
+`invocation_key_injective` is the seventh theorem: two argument lists with one address-sorted
+canonical string are one sorted list and hold the same bindings. It is proved at the symbol level
+— the first unescaped terminator is forced to be each field's end (`esc_split`), so the field list
+is recovered (`enc_injective`) and two fields per binding recover the bindings — and lifted to
+strings over the same reading `Chain.fst` takes for its splices (`symbols_faithful`), restated here
+because the module opens nothing. It needs no premise about the comparator: the sort is a
+function, and equal outputs are all the argument reads.
+
+The differential gained the key: the escaper case compares the extracted `invocation_key` with
+production's byte for byte over invocations drawn from an adversarial alphabet (both encoding
+symbols, `=`, `#`, empty values), and round-trips `Hash.canonicalFields` through an independently
+written decoder, with a bare separator as the go-red. The module's cost moved from 6-8s to about
+18s on a loaded machine (see `modules.json`).
+
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** The six theorems above plus the characterisations
@@ -4847,8 +4871,10 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
    `register_keeps_distinct`, `rejected_never_bound`, `undeclared_address_refused`,
    `same_name_no_capture`, `signature_excluding_exact`, `data_holes_all_data`, `observed_least`,
    `audit_effect_join`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
-   `dispatch_never_ok_failed` — Phase 210) and the finding
-   (`slot_hole_uninvocable`, `slot_entry_shape`), over any
+   `dispatch_never_ok_failed` — Phase 210), the finding
+   (`slot_hole_uninvocable`, `slot_entry_shape`) and, since Phase 225, the capture key's
+   injectivity (`invocation_key_injective`, with `esc_split`, `enc_injective`,
+   `key_fields_injective` and `binding_fields_injective` under it), over any
    witness, any readers, any registry and any host body. F\* 2026.09.06, Z3 4.13.3, every query
    3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it
    opens nothing and restates `outcome` and its list helpers as `ColumnOps.fst` does.
@@ -4861,6 +4887,12 @@ byte-identical to a fresh one on the first leg run; the oracle compiles against 
      as opaque carriers. Every validation theorem is about the envelope — which entry a value is
      checked against, which refusal names it, that the body waits on the answer — and nothing
      about the two numeral grammars, which is theorem 4's cost and not this theorem's.
+   - **The key renderers premise** (`capability-key-renderers-abstract`, a `model-bridge`,
+     permanent; Phase 225). The hash, the address comparator and `Hash.canonicalField` are
+     parameters. `invocation_key_injective` needs of them only that the escaper is `esc` then one
+     terminator when a string is read as its symbols (`field_faithful` over `symbols_faithful`),
+     and the escaper case measures exactly that on the shipped function. Nothing is said about
+     whether two distinct pre-images hash apart.
    - **The witness**, which is the standing `lawful-abstract-witness` obligation and not a second
      row: nothing here says what a domain's `Bind` does, and `compositionLaws` /
      `functionVerifyLaws` are where a domain's `Bind` is sampled.
@@ -5249,11 +5281,43 @@ bindings — `Hash.fs` already names one for the content-hash folds, U+0001, for
 — which changes every existing capture key and is therefore a journal-compatibility decision
 rather than a tidy-up. Both are on the "Next" list below.
 
+### What Phase 225 changed here: the second finding is closed
+
+Phase 225 took the ruling this section deferred (the operator's, 2026-09-25, recorded as a
+`DECISIONS.md` entry): an OUTRIGHT change of the key's pre-image, with no versioned scheme, because
+the census found no host that journals these keys — so a change orphans nothing. The pre-image is
+now `Hash.canonicalFields`, the one canonicaliser `Capability.invocationKey` also builds through:
+three fields per binding (name, a one-letter cell tag, the cell's rendering — a `Null` is tag `n`
+with an empty payload, replacing the non-ASCII literal the `renderers` record used to carry), each
+escaped and terminated. `key_collision` is gone from the model because it is no longer true, and
+the fifth theorem replaced it (section 8b):
+
+- `invocation_key_injective` — two argument lists whose name-sorted canonical strings agree are
+  the same sorted list and hold the same bindings: distinct argument sets have distinct
+  pre-images, for every declaration, accepted or not. No comparator premise.
+- Under it, `esc_split` (the first unescaped terminator is each field's end), `enc_injective`,
+  `fields_injective`, `cell_fields_injective`, `arg_fields_injective` and `canonical_injective`.
+
+What it spends is named once, in `key_premises`: the symbol reading of a string
+(`symbols_faithful`), the escaper premise (`field_faithful`), and injectivity of the int and float
+renderers ON THE MODEL'S CARRIERS. The last is false of production at exactly one pair and the row
+says so: `Canon.canonicalFloat` renders `-0.0` and `0.0` alike, so those two share a key — and
+production's own `Cell` equality calls them equal, which the closure case pins beside the claim.
+
+The shipped seam's case moved from "the finding holds" to "the finding is closed", by name: the
+two exhibits (`collision_one`, `collision_two`) key apart, the capability seam's `U+0001` exhibit
+and `CapabilityPipeline.nodeInvocationKey`'s two (its args joined `addr=L:value` on the empty
+string, and its readable prefix spliced two ids on `#`) key apart, and the model's key is still
+production's. One measurement lesson: the query differential's generator draws no character of the
+encoding, so it could not tell an escaping `field` from a bare one — measured, a `field` that only
+appends the terminator left it green. The escaper case, over an adversarial alphabet, is what goes
+red on that, and it is why that case exists.
+
 ### The differential
 
 `Proofs.Oracle`'s query family runs the extracted model beside production with the model's result
 payload instantiated at production's own `QueryResult`, so a settled page crosses untranslated, and
-the renderers instantiated at production's own four calls. It draws from the generator `queryLaws`
+the renderers instantiated at production's own five calls. It draws from the generator `queryLaws`
 uses (`ConfRng`), WIDENED from that family's one fixed declaration. Over 300 generated registries at
 seed 1871 — up to three declarations from a three-id pool, each with up to three params over all
 six column types, names drawn WITH replacement so a repeated param name arises and first-wins is
@@ -5305,8 +5369,9 @@ the `renderers` record so the model and its extraction stay ASCII. The oracle co
    `unbound_required_truthful`, `no_such_iff_unregistered`, `registered_dispatches`,
    `register_refuses_duplicate`, `register_extends`, `register_keeps_distinct`, `sorted_unique`,
    `invocation_key_id_only`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
-   `dispatch_never_ok_failed`) and the two findings (`all_null_accepted`, `key_collision`), over any
-   registry, any renderers and any host resolver. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `dispatch_never_ok_failed`), the first finding (`all_null_accepted`) and, since Phase 225, the
+   capture key's injectivity (`invocation_key_injective` and the six lemmas under it) where the
+   second finding (`key_collision`) stood, over any registry, any renderers and any host resolver. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
    `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it opens
    nothing and restates `outcome`, `deferred` and its list helpers as `Capability.fst` does.
 2. **Differentially tested.** The extracted model agrees with the seam over the pools above, with
@@ -5314,10 +5379,13 @@ the `renderers` record so the model and its extraction stay ASCII. The oracle co
    those pools, never over all inputs.
 3. **Assumed, and stated as such.**
    - **The renderers premise** (`query-renderers-abstract`, a `model-bridge`, permanent). The int
-     and float renderers, the hash and the name comparator are parameters; a float cell crosses as
-     an opaque carrier. `invocation_key_deterministic` states the one thing it needs of them — the
-     comparator is a total order — as a hypothesis, and NOTHING here says two different canonical
-     strings hash apart: that is a claim about FNV-1a and is not made.
+     and float renderers, the hash, the name comparator and (Phase 225) the field escaper are
+     parameters; a float cell crosses as an opaque carrier. `invocation_key_deterministic` states
+     the one thing it needs of them — the comparator is a total order — as a hypothesis;
+     `invocation_key_injective` states its needs in `key_premises`, one of which (the float
+     renderer injective on carriers) fails at `-0`/`0`, a pair production's `Cell` equality
+     identifies. NOTHING here says two different canonical strings hash apart: that is a claim
+     about FNV-1a and is not made.
    - **The resolver**, which is not a row because nothing is assumed of it: every theorem holds
      for every resolver, and none is about one.
    - **Sets and maps are lists**, the standing `sets-are-lists` bridge and not a second row.
@@ -5754,15 +5822,13 @@ Phase 209. The resolver now answers for `deps[id]` and nothing else, a read outs
 it cost — one parameter, one permanent bridge — and why the projection through a data value was the
 mechanism rather than functional extensionality.)_
 
-**A separator in the capture key's canonical string** — theorem 12's second finding
-(`query-key-collision`), and the one with a data consequence. `Query.invocationKey` and
-`Capability.invocationKey` both join their `name=value` pairs on the empty string, so two different
-accepted argument sets can share a pre-image and therefore a capture key under any hash. The fix is
-one character — a separator no `cellKey` can emit, which `Hash.fs` already names for the
-content-hash folds — and its cost is not in the code: every capture key already journalled moves,
-so it needs a decision about existing journals before it needs a patch. When it lands,
-`key_collision` stops being provable, which is the point: the row is replaced by the injectivity
-of the canonical string, and the differential's fourth case is rewritten with it.
+_(**A separator in the capture key's canonical string** — theorem 12's second finding — was on
+this list and is DONE: Phase 225. The operator ruled for an outright change after a census found
+no host journalling these keys; both seams and `CapabilityPipeline.nodeInvocationKey` build their
+pre-image through `Hash.canonicalFields`, escaped and terminated fields rather than a bare
+separator (which a string value can spell), and `key_collision` was replaced by
+`invocation_key_injective` in `Query.fst` and `Capability.fst`. Theorem 12's "What Phase 225
+changed here" section carries the rest.)_
 
 **`Required` meaning a VALUE** — theorem 12's first finding (`query-all-null-accepted`).
 `validateParams` accepts a required param bound to `Null`, against `QueryParam`'s own doc comment.

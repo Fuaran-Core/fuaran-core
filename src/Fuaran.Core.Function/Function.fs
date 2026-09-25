@@ -963,15 +963,19 @@ module Capability =
     let determinismTag (c: Capability) : string = Effect.determinismTag c.Determinism
 
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic invocation
-    /// under: the capability id + a hash of the canonical (addr-sorted) arg string. So two
-    /// invocations with the same args replay the same captured value, and different args do not
-    /// collide. A consumer threads this as `OpStream.captureEffect`'s `eff` argument.
+    /// under: the capability id + a hash of the canonical (addr-sorted) pre-image, built through
+    /// `Hash.canonicalFields` — two fields per binding (addr, value). So two invocations with the
+    /// same args replay the same captured value, and the pre-image is INJECTIVE (Phase 225,
+    /// `invocation_key_injective` in `proofs/Capability.fst`): distinct argument sets never share
+    /// one, whatever their values contain. That two distinct pre-images hash apart is a property
+    /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `OpStream.captureEffect`'s
+    /// `eff` argument.
     let invocationKey (c: Capability) (args: (string * string) list) : string =
         let canonical =
             args
             |> List.sortBy fst
-            |> List.map (fun (a, v) -> a + "=" + v)
-            |> String.concat ""
+            |> List.collect (fun (a, v) -> [ a; v ])
+            |> Hash.canonicalFields
 
         c.Id + "#" + Hash.fnv1a canonical
 
@@ -1856,26 +1860,33 @@ module CapabilityPipeline =
     /// Enumerate the pipeline's nodes in declaration (topological) order — the stable discovery surface.
     let enumerate (p: CapabilityPipeline) : PipelineNode list = p.Nodes
 
-    /// The Phase-27 capture key a node's realized result is journalled under: capability/source id + node
-    /// id + a hash of the canonical (addr-sorted) arg references. A consumer threads this as
-    /// `OpStream.captureEffect`'s `eff` argument, so the whole dataflow replays byte-identically.
+    /// The Phase-27 capture key a node's realized result is journalled under: a readable prefix
+    /// (`source#<id>#` / `<capId>#<id>#`) + a hash of the node's canonical pre-image. A consumer
+    /// threads this as `OpStream.captureEffect`'s `eff` argument, so the whole dataflow replays
+    /// byte-identically. Since Phase 225 the hashed pre-image goes through `Hash.canonicalFields`
+    /// and covers EVERY component — the ids as well as the arg references, each binding three
+    /// fields (addr, `L`/`N`, value) and the bindings in sorted order — so it is injective: two
+    /// nodes share a pre-image only when they share every component, whatever `#` or `=` an id or
+    /// a literal contains. (It joined `addr=L:value` on the empty string before, the collision
+    /// `Query.invocationKey`'s `key_collision` finding named.)
     let nodeInvocationKey (n: PipelineNode) : string =
         match n with
-        | Source(id, dref, _) -> "source#" + id + "#" + dref
+        | Source(id, dref, _) -> "source#" + id + "#" + Hash.fnv1a (Hash.canonicalFields [ id; dref ])
         | Invoke(id, capId, _, args) ->
-            let canon =
+            let bindings =
                 args
                 |> List.map (fun (a, s) ->
-                    let tag =
-                        match s with
-                        | Literal v -> "L:" + v
-                        | FromNode up -> "N:" + up
-
-                    a + "=" + tag)
+                    match s with
+                    | Literal v -> Hash.canonicalFields [ a; "L"; v ]
+                    | FromNode up -> Hash.canonicalFields [ a; "N"; up ])
                 |> List.sort
                 |> String.concat ""
 
-            capId + "#" + id + "#" + Hash.fnv1a canon
+            capId
+            + "#"
+            + id
+            + "#"
+            + Hash.fnv1a (Hash.canonicalFields [ capId; id ] + bindings)
 
     // ---- wire codec ----
 

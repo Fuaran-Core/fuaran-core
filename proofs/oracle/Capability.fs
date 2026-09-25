@@ -1698,6 +1698,94 @@ let rec all_covered : effect_class  ->  Prims.list<effect_class>  ->  Prims.bool
      ((covers c x) && (all_covered c t))
      end))
 
+type key_renderers = {k_hash : Prims.string  ->  Prims.string; k_addr_le : Prims.string  ->  Prims.string  ->  Prims.bool; k_field : Prims.string  ->  Prims.string}
+
+
+let __proj__Mkkey_renderers__item__k_hash : key_renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
+| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field} -> begin
+     k_hash
+     end))
+
+
+let __proj__Mkkey_renderers__item__k_addr_le : key_renderers  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
+| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field} -> begin
+     k_addr_le
+     end))
+
+
+let __proj__Mkkey_renderers__item__k_field : key_renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
+| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field} -> begin
+     k_field
+     end))
+
+
+let rec insert_binding : key_renderers  ->  (Prims.string * Prims.string)  ->  invocation  ->  invocation = (fun ( kr  :  key_renderers ) ( x  :  (Prims.string * Prims.string) ) ( l  :  invocation ) -> (match (l) with
+| [] -> begin
+     (x)::[]
+     end
+| (y)::t -> begin
+     (
+
+let uu___ = x
+in (match (uu___) with
+| (xa, uu___1) -> begin
+     (
+
+let uu___2 = y
+in (match (uu___2) with
+| (ya, uu___3) -> begin
+      
+if (kr.k_addr_le xa ya) then begin
+     (x)::l
+     end else begin
+     (y)::(insert_binding kr x t)
+     end
+     end))
+     end))
+     end))
+
+
+let rec sort_bindings : key_renderers  ->  invocation  ->  invocation = (fun ( kr  :  key_renderers ) ( l  :  invocation ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+     (insert_binding kr x (sort_bindings kr t))
+     end))
+
+
+let rec binding_fields : invocation  ->  Prims.list<Prims.string> = (fun ( l  :  invocation ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| ((a, v))::t -> begin
+     (a)::(v)::(binding_fields t)
+     end))
+
+
+let rec key_fields : key_renderers  ->  Prims.list<Prims.string>  ->  Prims.string = (fun ( kr  :  key_renderers ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     ""
+     end
+| (x)::t -> begin
+     (Prims.strcat (kr.k_field x) (key_fields kr t))
+     end))
+
+
+let key_canonical : key_renderers  ->  invocation  ->  Prims.string = (fun ( kr  :  key_renderers ) ( l  :  invocation ) -> (key_fields kr (binding_fields l)))
+
+
+let invocation_key : key_renderers  ->  capability  ->  invocation  ->  Prims.string = (fun ( kr  :  key_renderers ) ( c  :  capability ) ( a  :  invocation ) -> (Prims.strcat c.c_id (Prims.strcat "#" (kr.k_hash (key_canonical kr (sort_bindings kr a))))))
+
+
+let rec mem_binding : (Prims.string * Prims.string)  ->  invocation  ->  Prims.bool = (fun ( x  :  (Prims.string * Prims.string) ) ( l  :  invocation ) -> (match (l) with
+| [] -> begin
+     false
+     end
+| (y)::t -> begin
+     ((Prims.op_Equals x y) || (mem_binding x t))
+     end))
+
 
 
 

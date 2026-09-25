@@ -65,6 +65,30 @@ module Hash =
     /// Named once here so the parity-relevant constant is defined in a single place.
     let foldSep = ""
 
+    /// The escape character `canonicalField` writes before a `foldSep` or a `fieldEsc` a field
+    /// carries: `U+0010` (DLE, the data-link escape). Named beside `foldSep` so the two symbols of
+    /// the field encoding are defined in one place.
+    let fieldEsc = "\u0010"
+
+    /// ONE field of an injective canonical pre-image (Phase 225): the field with every `fieldEsc`
+    /// and every `foldSep` it carries escaped by a preceding `fieldEsc`, then terminated by
+    /// `foldSep`. The first UNESCAPED `foldSep` is therefore always the end of the field, whatever
+    /// the field contains — which a bare separator cannot promise, because a string value can
+    /// spell one. Escaping `fieldEsc` first is what keeps the escapes the second replacement
+    /// inserts from being escaped again.
+    let canonicalField (s: string) : string =
+        s.Replace(fieldEsc, fieldEsc + fieldEsc).Replace(foldSep, fieldEsc + foldSep)
+        + foldSep
+
+    /// The canonical pre-image of a field sequence: each field through `canonicalField`, then
+    /// concatenated. INJECTIVE — two field lists with one pre-image are one list — which is
+    /// proved of this encoding (`invocation_key_injective` in `proofs/Query.fst` and
+    /// `proofs/Capability.fst`). Both capture-key seams (`Query.invocationKey`,
+    /// `Capability.invocationKey`) and `CapabilityPipeline.nodeInvocationKey` build their
+    /// pre-image through it, so the three cannot drift apart again.
+    let canonicalFields (fields: string list) : string =
+        fields |> List.map canonicalField |> String.concat ""
+
     // ---------------------------------------------------------------------------------------------
     //  SHA-256 (FIPS 180-4) — the spine's ONE cryptographic digest.
     //

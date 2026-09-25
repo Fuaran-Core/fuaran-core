@@ -1,5 +1,80 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-25 — D__225__: the capture key's pre-image becomes injective by an OUTRIGHT change — no versioned key scheme, because no host journals these keys
+
+**Decided (operator, 2026-09-25; Phase 225).** Ruling **(B)**. `Query.invocationKey` and
+`Capability.invocationKey` build their pre-image through ONE canonicaliser, `Hash.canonicalFields`,
+and the new key replaces the old one. There is no versioned prefix and no read-both window.
+`CapabilityPipeline.nodeInvocationKey` goes through the same canonicaliser: it had the identical
+defect in the same file, and leaving it open would have been knowingly shipped debt. The change is
+BREAKING in the draft `0.31.0` (a key's value is a contract). `STABILITY.md` states what a host with
+a persisted journal does at the pin bump.
+
+**The finding it closes.** Phase 187's `key_collision`: the pre-image spliced `name=value` pairs
+together, so a string value could spell the next binding, and `[a = "1b=s2"]` and
+`[a = "1"; b = "2"]` shared a key. The finding said both seams joined "on the empty string". That
+was true of `Query` and of the pipeline's node key, but NOT of `Capability`, which joined on
+`U+0001`. It collided anyway, because a value can carry that byte.
+
+**The census the ruling rested on.** The shard assumed a persisted consumer: that the UI host
+journals effects under this key in its SQLite sink, and that a key change would orphan them. That
+premise is false. Every caller of either `invocationKey` outside this repository was searched for,
+along with every call that passes a key as `OpStream.captureEffect`'s `eff` argument.
+
+| Consumer | Threads the key into a capture? | Journal outlives a process? |
+|---|---|---|
+| The UI host's SQLite op-stream sink | No | Yes — its `op_invocation` table persists, but it holds a caller-chosen idempotency key (a command or request id), never this key |
+| The UI host's in-memory sink | No | No |
+| The UI host's AI-tools capability invoker | No — a doc comment says a host "should" journal under this key, and nothing does | n/a |
+| The domain libraries and the coordination plane | No — doc-comment mentions of the capture seam only | n/a |
+| Other language hosts (TypeScript, Go) | They reimplement the key, and test against a law corpus pinning ten literal capability keys | No |
+| This repository's own laws (`capabilityLaws`, `queryLaws`, the pipeline family) | Yes, in-process, capture then replay | No |
+
+**No persisted journal holds either key, so an outright change orphans nothing.** The cost the shard
+did not price is the cross-host one in the last-but-one row. The law corpus is derived from the
+pinned Core release and the ports must match it. That is follow-through at the consumer's pin raise,
+in its own change-set, and is tracked there. It is not a reason to keep a colliding key here.
+
+**The options declined.**
+
+- **(A) A versioned key scheme** (a `#2#` prefix, the old form read and never written, one
+  deprecation window). Declined because it protects nothing: no journal exists to read the old form
+  from. It would also add permanent surface, a second key form every host must recognise, to serve
+  a population the census measured at zero. If a persisted consumer appears before `0.31.0` is
+  tagged, this is the decision to revisit.
+- **(C) A refused precondition.** Keep the join, refuse at `validateParams` / `validateArgs` any
+  value containing the join's characters, and keep `key_collision` as a pinned negative. Declined:
+  it rejects legitimate values (a filter string with an `=` in it) to protect an internal encoding,
+  which bends the wrong side. It would also have had to refuse `U+0001` on the capability seam and
+  `=`, `L:` and `N:` shapes on the pipeline's.
+
+**The encoding, and why a bare separator was not enough.** The README's "Next" item proposed "a
+separator no `cellKey` can emit". A bare `U+0001` is not that: a `Str` cell can emit anything, and
+the capability seam already demonstrated it. So every field is ESCAPED and TERMINATED:
+- `U+0010` (DLE) is written before each `U+0010` and each `U+0001` the field carries;
+- `U+0001` (`Hash.foldSep`) then ends the field.
+
+A cell becomes two fields (a one-letter tag and its rendering), so no claim about distinct literal
+prefixes is needed. The literal `∅` a `Null` used to render as is gone; a `Null` is tag `n` with an
+empty payload.
+
+**What is proved, and what it spends.** `invocation_key_injective` is proved in `proofs/Query.fst` and in
+`proofs/Capability.fst` (where the key is new to the model): two argument lists with one sorted
+canonical string are one sorted list and hold the same bindings. It needs no comparator premise.
+Its premises are named once, in `key_premises`:
+- the reading of a string as its symbols that `Chain.fst` already takes;
+- the escaper premise, measured on the shipped function by a round trip through an independently
+  written decoder over adversarial fields, with a bare separator as the go-red;
+- on the query seam, injectivity of the int and float renderers on the model's carriers.
+
+That last premise is FALSE at one pair, and the `query-renderers-abstract` row says so.
+`canonicalFloat` renders `-0.0` and `0.0` alike, so those two keys agree. Production's own `Cell`
+equality calls them equal too, and the closure test pins both facts together.
+
+**A measurement lesson worth keeping.** The query differential compares the capture key byte for byte and
+stayed GREEN under a `field` that only appended the terminator: its generator draws no character of
+the encoding. The escaper case exists because of that measurement, and it goes red on that `field`.
+
 ## 2026-09-25 — D57: a theorem over the CONCRETE pipeline driver is taken — Phase 154 supersedes, for `Fuaran.Core.DataFrame`, D14's "declined as a domain's cost" and Phase 203's `law-tested-by-design` exclusion
 
 **Decided (operator, 2026-09-25; Phase 154).** `proofs/Pipeline.fst` models `Fuaran.Core.DataFrame`'s

@@ -599,65 +599,89 @@ let determinism_tag : determinism_source  ->  Prims.string = (fun ( d  :  determ
 
 let determinism_tag_of : query  ->  Prims.string = (fun ( q  :  query ) -> (determinism_tag q.q_effect.determinism))
 
-type renderers = {render_int : Prims.int  ->  Prims.string; render_float : Prims.string  ->  Prims.string; hash : Prims.string  ->  Prims.string; name_le : Prims.string  ->  Prims.string  ->  Prims.bool; null_key : Prims.string}
+type renderers = {render_int : Prims.int  ->  Prims.string; render_float : Prims.string  ->  Prims.string; hash : Prims.string  ->  Prims.string; name_le : Prims.string  ->  Prims.string  ->  Prims.bool; field : Prims.string  ->  Prims.string}
 
 
 let __proj__Mkrenderers__item__render_int : renderers  ->  Prims.int  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; null_key = null_key} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
      render_int
      end))
 
 
 let __proj__Mkrenderers__item__render_float : renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; null_key = null_key} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
      render_float
      end))
 
 
 let __proj__Mkrenderers__item__hash : renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; null_key = null_key} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
      hash
      end))
 
 
 let __proj__Mkrenderers__item__name_le : renderers  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; null_key = null_key} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
      name_le
      end))
 
 
-let __proj__Mkrenderers__item__null_key : renderers  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; null_key = null_key} -> begin
-     null_key
+let __proj__Mkrenderers__item__field : renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
+     field
      end))
 
 
-let cell_key : renderers  ->  cell  ->  Prims.string = (fun ( rn  :  renderers ) ( c  :  cell ) -> (match (c) with
+let cell_tag : cell  ->  Prims.string = (fun ( c  :  cell ) -> (match (c) with
+| Int (uu___) -> begin
+     "i"
+     end
+| Float (uu___) -> begin
+     "f"
+     end
+| Bool (uu___) -> begin
+     "b"
+     end
+| Str (uu___) -> begin
+     "s"
+     end
+| Date (uu___) -> begin
+     "d"
+     end
+| Timestamp (uu___) -> begin
+     "t"
+     end
+| Null -> begin
+     "n"
+     end))
+
+
+let cell_payload : renderers  ->  cell  ->  Prims.string = (fun ( rn  :  renderers ) ( c  :  cell ) -> (match (c) with
 | Int (v) -> begin
-     (Prims.strcat "i" (rn.render_int v))
+     (rn.render_int v)
      end
 | Float (v) -> begin
-     (Prims.strcat "f" (rn.render_float v))
+     (rn.render_float v)
      end
 | Bool (v) -> begin
-     (Prims.strcat "b" ( 
+      
 if v then begin
      "1"
      end else begin
      "0"
-     end))
+     end
      end
 | Str (v) -> begin
-     (Prims.strcat "s" v)
+     v
      end
 | Date (v) -> begin
-     (Prims.strcat "d" v)
+     v
      end
 | Timestamp (v) -> begin
-     (Prims.strcat "t" v)
+     v
      end
 | Null -> begin
-     rn.null_key
+     ""
      end))
 
 
@@ -696,13 +720,25 @@ let rec sort_args : renderers  ->  arguments  ->  arguments = (fun ( rn  :  rend
      end))
 
 
-let rec canonical : renderers  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( l  :  arguments ) -> (match (l) with
+let rec arg_fields : renderers  ->  arguments  ->  Prims.list<Prims.string> = (fun ( rn  :  renderers ) ( l  :  arguments ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| ((n, v))::t -> begin
+     (n)::((cell_tag v))::((cell_payload rn v))::(arg_fields rn t)
+     end))
+
+
+let rec fields : renderers  ->  Prims.list<Prims.string>  ->  Prims.string = (fun ( rn  :  renderers ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
 | [] -> begin
      ""
      end
-| ((n, v))::t -> begin
-     (Prims.strcat (Prims.strcat n (Prims.strcat "=" (cell_key rn v))) (canonical rn t))
+| (x)::t -> begin
+     (Prims.strcat (rn.field x) (fields rn t))
      end))
+
+
+let canonical : renderers  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( l  :  arguments ) -> (fields rn (arg_fields rn l)))
 
 
 let invocation_key : renderers  ->  query  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) -> (Prims.strcat q.q_id (Prims.strcat "#" (rn.hash (canonical rn (sort_args rn a))))))

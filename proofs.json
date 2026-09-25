@@ -1864,6 +1864,17 @@
       }
     },
     {
+      "id": "capability-invocation-key-injective",
+      "level": "proved",
+      "claim": "`Capability.invocationKey`'s pre-image is INJECTIVE (Phase 225; the key entered the model with it): two argument lists whose address-sorted canonical strings agree ARE the same sorted list and hold exactly the same bindings (`invocation_key_injective`), so distinct argument sets have distinct pre-images whatever their values contain, with no premise about the address comparator. The pre-image is `Hash.canonicalFields` over two fields per binding (address, value) — the canonicaliser `Query.invocationKey` also builds through, so the two seams cannot drift apart again. The pre-225 join spliced `addr=value` pairs on `U+0001` (not on the empty string, as Phase 187's finding said of both seams: it was true of `Query` only), so `[a = \"1\\u0001b=2\"]` and `[a = \"1\"; b = \"2\"]` shared a pre-image; they key apart on production now. What it spends is named in `key_premises` — the symbol reading of a string and the escaper premise (`capability-key-renderers-abstract`); no numeral layout is among them, because a capability argument is already a string. Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made.",
+      "phase": "fuaran-core#225",
+      "evidence": {
+        "theorem": "invocation_key_injective",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "function-totality-law",
       "level": "proved",
       "claim": "Law 1, totality. `isTotal` over the derived signature answers exactly the guard `apply` and `curry` run first: when some data hole is an unbounded repeat both refuse with `NonTotal` at the FIRST such hole's address (`guard_total_shape`), and the refusal is the same under ANY `Bind` whatsoever (`rejected_never_bound`) — the witness was never asked to bind, which is \"rejected, never run\" made precise. Action holes are total and their filtering off the data axis changes nothing (`data_total`).",
@@ -1910,7 +1921,7 @@
     {
       "id": "capability-differential",
       "level": "tested",
-      "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, an accepted `Deferred` ENVELOPE rendered case for case (Phase 210: the draw reaches a settling, a pending and a failing body, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Agreement is over the pools drawn, never over all inputs.",
+      "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, an accepted `Deferred` ENVELOPE rendered case for case (Phase 210: the draw reaches a settling, a pending and a failing body, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Since Phase 225 the capture key too: the extracted `invocation_key` agrees with `Capability.invocationKey` byte for byte over invocations drawn from an adversarial alphabet (both symbols of the key encoding, `=`, `#`, empty values), in the escaper case. Agreement is over the pools drawn, never over all inputs.",
       "phase": "fuaran-core#177",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -1919,7 +1930,9 @@
           "the function oracle agrees with Function.signature, apply, curry, compose and auditEffect over generated artifacts and argument sets",
           "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations",
           "a capability oracle handed a BLIND int reader DISAGREES with Capability.validateArgs and Function.apply — the measurement can fail",
-          "no handler runs on a refused dispatch — `unregistered_refused` and `validate_before_invoke`, on the shipped seam"
+          "no handler runs on a refused dispatch — `unregistered_refused` and `validate_before_invoke`, on the shipped seam",
+          "the second finding is CLOSED on the shipped seam — `invocation_key_injective`, in both seams and the pipeline",
+          "the escaper premise holds of Hash.canonicalFields, and a separator WITHOUT an escape refutes it — the measurement can fail"
         ]
       }
     },
@@ -1932,6 +1945,17 @@
       "closes": "permanent",
       "evidence": {
         "assumption": "the three scalar readers behind Space.validate are host functions the model takes as parameters; a float range's bounds are opaque carriers"
+      }
+    },
+    {
+      "id": "capability-key-renderers-abstract",
+      "level": "assumed",
+      "claim": "THE KEY RENDERERS PREMISE (Phase 225). `Capability.invocationKey` reaches for three host functions — `Hash.fnv1a`, the ordinal string order `List.sortBy fst` compares addresses by, and `Hash.canonicalField` — and the model takes them as a `key_renderers` record. The stable address sort, the two-fields-per-binding flattening and the field concatenation are modelled; the hash, the comparator and the escaper are not. `invocation_key_injective` states what it needs of them in `key_premises`: that the escaper is `esc` then one terminator when a string is read as its symbols (`field_faithful`), with `symbols_faithful` the reading itself — two facts true of `System.String` by construction, the same reading `Chain.fst` takes for its splices. The escaper clause is measured on the shipped function by the round trip through an independently written decoder over adversarial fields, with a bare separator as its go-red. Nothing is claimed about the hash. Permanent: a model of the escaper is a model of `String.Replace` over UTF-16 code units, and F*'s `string` is primitive.",
+      "phase": "fuaran-core#225",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the hash, the address comparator and the field escaper behind Capability.invocationKey are host functions the model takes as parameters; the escaper is assumed to be esc-then-terminator over a symbol reading of strings where a theorem needs it"
       }
     },
     {
@@ -2115,12 +2139,12 @@
       }
     },
     {
-      "id": "query-key-collision",
+      "id": "query-invocation-key-injective",
       "level": "proved",
-      "claim": "THE SECOND FINDING. `invocationKey`'s canonical string joins `name=cellKey` pairs with NO separator, so a string cell can spell the next binding: for one declaration (`a` required, `b` optional, both strings) the two DIFFERENT accepted argument sets `[a = \"1b=s2\"]` and `[a = \"1\"; b = \"2\"]` share the canonical string `a=s1b=s2`, and therefore share a capture key under EVERY hash — the collision is in the pre-image, before `Hash.fnv1a` is consulted. The only premise is that the comparator puts `a` before `b`. The doc comment's \"different args do not collide\" is false, and a replay keyed this way serves one invocation's captured rows for the other. `Capability.invocationKey` builds its canonical string the same way (`addr=value`, joined on the empty string) and is outside Phase 177's model; the same shape applies there. Asserted on the shipped seam by the differential's fourth case. Reported, not fixed here: the fix shape — a separator no `cellKey` can emit, which `Hash.fs` already names for the content-hash folds (U+0001) — changes every existing capture key, so it is a journal-compatibility decision and not a tidy-up.",
-      "phase": "fuaran-core#187",
+      "claim": "THE SECOND FINDING, CLOSED (Phase 225; it was `key_collision`). `Query.invocationKey`'s pre-image is INJECTIVE: two argument lists whose name-sorted canonical strings agree ARE the same sorted list and hold exactly the same bindings (`invocation_key_injective`), so distinct argument sets have distinct pre-images, for every declaration, accepted or not, and with no premise about the name comparator. The pre-image is `Hash.canonicalFields` over three fields per binding (name, cell tag, cell payload): every field is escaped (`U+0010` before each `U+0010` and `U+0001` it carries) and terminated by `U+0001`, so the first unescaped terminator ends each field (`esc_split`), the field list is recovered (`fields_injective`), and three fields per binding recover the bindings (`arg_fields_injective`). The pre-225 join of `name=cellKey` pairs on the empty string let `[a = \"1b=s2\"]` and `[a = \"1\"; b = \"2\"]` share `a=s1b=s2`; those two exhibits now key apart on production. What it spends is named in `key_premises`: the Chain-style reading of a string as its symbols (`symbols_faithful`), the escaper premise (`field_faithful`, measured by the round-trip case), and injectivity of the int and float renderers over the model's carriers (`query-renderers-abstract` says where the float one fails). Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made.",
+      "phase": "fuaran-core#225",
       "evidence": {
-        "theorem": "key_collision",
+        "theorem": "invocation_key_injective",
         "model": "proofs/Query.fst",
         "prover": "proofs/fstar-pin.json"
       }
@@ -2128,7 +2152,7 @@
     {
       "id": "query-differential",
       "level": "tested",
-      "claim": "The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so first-wins is compared, and argument sets that bind, skip, null, mistype, repeat and reverse. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and on nothing else. Agreement is over the pools drawn, never over all inputs.",
+      "claim": "The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so first-wins is compared, and argument sets that bind, skip, null, mistype, repeat and reverse. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and on nothing else. Agreement is over the pools drawn, never over all inputs. The generator draws no character of the key encoding, so it cannot tell an escaping `field` from a bare one (measured, Phase 225: a `field` that only appends the terminator leaves it green); the escaper case compares the capture key over string cells drawn from an adversarial alphabet, and it goes red on exactly that.",
       "phase": "fuaran-core#187",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -2137,19 +2161,21 @@
           "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets",
           "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail",
           "no resolver runs on a refused dispatch — `unregistered_refused` and `validate_before_resolve`, on the shipped seam",
-          "the two findings hold on the shipped seam — `all_null_accepted` and `key_collision`"
+          "the first finding holds on the shipped seam — `all_null_accepted`",
+          "the second finding is CLOSED on the shipped seam — `invocation_key_injective`, in both seams and the pipeline",
+          "the escaper premise holds of Hash.canonicalFields, and a separator WITHOUT an escape refutes it — the measurement can fail"
         ]
       }
     },
     {
       "id": "query-renderers-abstract",
       "level": "assumed",
-      "claim": "THE RENDERERS PREMISE. `invocationKey` reaches for four host functions — `string` on an `int`, `Canon.canonicalFloat`, `Hash.fnv1a`, and the ordinal string order `List.sortBy fst` compares names by — and the model takes them as a `renderers` record, with `cellKey`'s one non-ASCII literal (its rendering of a `Null`) riding beside them and a float cell crossing as an opaque carrier (its round-trip `R` text). The clause structure of `cellKey`, the stable name sort and the separator-free join are modelled; the two numeral layouts, the hash and the comparator are not. `invocation_key_deterministic` therefore states what it needs of the comparator — that it is a total order — as a hypothesis, and says nothing about whether two different canonical strings hash apart, which is a claim about FNV-1a and is not made. `key_collision` needs none of it beyond `a` sorting before `b`. The differential instantiates the record at production's own four calls, so the envelope is compared and the renderers are exercised, not modelled. Permanent: `Canon.canonicalFloat` is theorem 7's numeral-layout bridge already (`canon-numeral-layouts`), and a model of the ordinal comparator is a model of UTF-16 code-unit order.",
+      "claim": "THE RENDERERS PREMISE. `invocationKey` reaches for five host functions — `string` on an `int`, `Canon.canonicalFloat`, `Hash.fnv1a`, the ordinal string order `List.sortBy fst` compares names by, and (since Phase 225) `Hash.canonicalField`, one escaped, terminated field of the pre-image — and the model takes them as a `renderers` record, with a float cell crossing as an opaque carrier (its round-trip `R` text). The clause structure of the tag/payload split, the stable name sort and the field concatenation are modelled; the two numeral layouts, the hash, the comparator and the escaper are not. `invocation_key_deterministic` states what it needs of the comparator — that it is a total order — as a hypothesis. `invocation_key_injective` states what it needs of the rest in `key_premises`: the escaper is `esc` then one terminator when a string is read as its symbols (`field_faithful`, with `symbols_faithful` the reading itself — two facts true of `System.String` by construction), and the int and float renderers are injective on the model's carriers. THAT LAST CLAUSE IS FALSE OF PRODUCTION AT ONE PAIR, and it is said here rather than hidden: `Canon.canonicalFloat` renders both `-0.0` and `0.0` as `0` (the `canonicalFloat/neg-zero` parity vector), so the carriers `-0` and `0` share a pre-image. Production's own `Cell` equality identifies the two (IEEE `-0.0 = 0.0`), so the shared key is between argument sets production calls EQUAL — pinned on the shipped seam by the closure case — but the theorem is about carriers and that pair is outside it. Nothing is claimed about whether two different canonical strings hash apart, which is a claim about FNV-1a. The differential instantiates the record at production's own five calls, so the envelope is compared and the renderers are exercised, not modelled. Permanent: `Canon.canonicalFloat` is theorem 7's numeral-layout bridge already (`canon-numeral-layouts`), a model of the ordinal comparator is a model of UTF-16 code-unit order, and a model of the escaper is a model of `String.Replace` over UTF-16 code units.",
       "phase": "fuaran-core#187",
       "class": "model-bridge",
       "closes": "permanent",
       "evidence": {
-        "assumption": "the int and float renderers, the hash and the name comparator behind invocationKey are host functions the model takes as parameters; the comparator is assumed a total order where a theorem needs one"
+        "assumption": "the int and float renderers, the hash, the name comparator and the field escaper behind invocationKey are host functions the model takes as parameters; the comparator is assumed a total order, the escaper is assumed to be esc-then-terminator over a symbol reading of strings, and the int and float renderers are assumed injective on carriers, where a theorem needs each (the float one fails at -0/0, a pair production's Cell equality identifies)"
       }
     },
     {

@@ -2491,6 +2491,50 @@ where it read `unconditional`. The ratchet Phase 220 left in the suite, six perm
 asserted exactly, is now the plain property. Every family `Families.refusalAudit` classes `Drawn`
 is `Guarded`, with no exceptions.
 
+### Every capture key's pre-image is injective, through one canonicaliser — `Hash.canonicalFields` (Phase 225) — BREAKING (a key's VALUE), with two additive members
+
+**What changed.** Three functions compute the Phase 27 capture key a host journals a
+non-deterministic result under, and all three now build its pre-image through ONE new canonicaliser,
+`Hash.canonicalFields`:
+
+- `Query.invocationKey`: three fields per binding (name, a one-letter cell tag, the cell's
+  rendering). A `Null` is now tag `n` with an empty payload, where it used to be the literal `∅`.
+- `Capability.invocationKey`: two fields per binding (address, value).
+- `CapabilityPipeline.nodeInvocationKey`: its hashed pre-image now covers the node's ids as well as
+  its arg references, three fields per binding. A `Source` node's key is `source#<id>#<hash>` rather
+  than `source#<id>#<dataRef>`.
+
+Every field is escaped (`U+0010` before each `U+0010` and `U+0001` it carries) and terminated by
+`U+0001` (`Hash.foldSep`). So the first unescaped terminator always ends a field, whatever a string
+value contains. The old pre-images spliced `name=value` pairs together: on the empty string in
+`Query` and the pipeline, and on `U+0001` in `Capability`. A value could therefore spell the next
+binding, and two DIFFERENT argument sets shared a key. Injectivity is now proved of both seams
+(`invocation_key_injective` in `proofs/Query.fst` and `proofs/Capability.fst`) and pinned on the
+shipped seam.
+
+`Hash` gains `fieldEsc` and `canonicalField` beside `canonicalFields`. These are ADDITIVE members,
+in `api/Fuaran.Core.Tree.txt`.
+
+**Why this is BREAKING and cannot ride a patch slot.** The key's type, name and arguments did not
+change, but its VALUE did, for every argument set. A key's value is a contract: the Phase 27 replay
+posture published "same args, same key", and a host that journals effects under a key reads them
+back by that key.
+
+**What a host with a PERSISTED journal does at the pin bump.**
+- A journal written under a pre-0.31.0 key MISSES on every lookup after the bump. It is a silent
+  replay-miss, never a wrong-value replay: the old key names no entry the new code will ask for.
+- A host that needs those captures replays them from its own records, or re-captures them live, and
+  treats the pre-bump journal as read-only history.
+- No compatibility window ships (no versioned `#2#` prefix, no read-both period). This was the
+  operator's ruling on the census: no host journals these keys today, so a window would protect
+  nothing and would add permanent surface. See `DECISIONS.md` D__225__.
+- A host whose journal lives only for one process (an in-memory sink) is unaffected.
+
+**What else moves with it.** The cross-host law corpus pins literal capability keys, and the other
+language ports reimplement the key. Both follow this release at their consumer's Core pin raise, in
+that consumer's own change-set. Nothing in this repository's published corpus
+(`conformance/laws/transform-laws.json`) moves.
+
 ## 0.30.1 — draft
 
 **This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries

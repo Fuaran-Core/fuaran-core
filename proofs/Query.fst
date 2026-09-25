@@ -7,8 +7,8 @@
 
      - the DECLARATION vocabulary (`QueryParam` / `Query` / `QueryError`, with the `ColumnType`
        and `Cell` constructors and the `EffectClass` a declaration carries) and `Query`'s four
-       functions: the internal `cellType`, `determinismTag`, the private `cellKey` with
-       `invocationKey` over it, `validateParams` (its local `checkArgs` walk and its
+       functions: the internal `cellType`, `determinismTag`, the private `cellFields` with
+       `invocationKey` over it (through `Hash.canonicalFields`, Phase 225), `validateParams` (its local `checkArgs` walk and its
        required-params step) and `invoke`;
      - the REGISTRY: `QueryRegistry.empty` / `register` / `tryFind` / `enumerate` / `dispatch`;
      - the `Deferred<'T>` envelope the resolver answers in (Phase 198) — its three cases, and
@@ -18,10 +18,9 @@
    is an argument of `invoke` and `dispatch` and stays outside every claim: nothing here is a
    theorem about any resolver, and the result payload is an abstract type. The RENDERERS the
    capture key is written through — `string` on an int, `Canon.canonicalFloat`, `Hash.fnv1a`,
-   and the ordinal string order `List.sortBy fst` sorts by — are a `renderers` record, as Phase
-   177 made the three scalar readers one; a float cell crosses as an opaque carrier, and
-   `cellKey`'s one non-ASCII literal (its rendering of a `Null`) rides in the same record so the
-   model's text stays ASCII. And a declaration's `Source` is an opaque carrier too: the seam
+   the ordinal string order `List.sortBy fst` sorts by, and (Phase 225) `Hash.canonicalField` —
+   are a `renderers` record, as Phase 177 made the three scalar readers one; a float cell
+   crosses as an opaque carrier. And a declaration's `Source` is an opaque carrier too: the seam
    never reads it.
 
    WHAT IS PROVED, over any registry, any renderers and any resolver:
@@ -45,21 +44,28 @@
        sharing an id, and two argument lists binding the same names to the same cells in ANY
        order, key identically. That the key reads no resolver answer and no clock is its TYPE —
        it is handed neither — and is said here rather than dressed as a lemma.
+     - `invocation_key_injective` (Phase 225) — the capture key's pre-image is INJECTIVE: two
+       argument lists with one name-sorted canonical string are one sorted list and hold the same
+       bindings, so distinct argument sets have distinct pre-images. It is proved over a reading
+       of a string as its symbols (`symbols_faithful`, the reading `Chain.fst` takes) and states
+       what it needs of the host functions in `key_premises` (section 8b).
 
-   THE TWO FINDINGS read off the model, each proved and each asserted on the shipped seam:
+   THE FINDINGS read off the model, each proved and asserted on the shipped seam:
 
      - `all_null_accepted` — EVERY declaration, whatever it marks required, accepts the argument
        set binding each param to `Null`. `Required` constrains the presence of a NAME, never of
        a value: `QueryParam`'s doc comment says a bound cell may "be `Null` when not required",
        and the code accepts it when required as well.
-     - `key_collision` — the canonical string joins `name=cellKey` pairs with NO separator, so
-       two DISTINCT accepted argument sets for one declaration can share a canonical string, and
-       therefore a capture key, before any hash is taken. "Different args do not collide" is
-       false of the pre-image.
+     - `key_collision` was the second, until Phase 225 closed it: the canonical string joined
+       `name=cellKey` pairs with NO separator, so two distinct accepted argument sets could share
+       it. The lemma is gone because it is no longer true; `invocation_key_injective` is what
+       replaced it, and the two exhibits it was stated on (`collision_one`, `collision_two`) stay
+       below so the shipped seam's closure case can name them.
 
-   WHAT IS NOT CLAIMED. Anything about a resolver. Anything about the four renderers beyond the
-   total-order premise `invocation_key_deterministic` states for the comparator
-   (`query-renderers-abstract`). The ORDER `enumerate` returns — production's `Map` sorts by id,
+   WHAT IS NOT CLAIMED. Anything about a resolver. Anything about the five renderers beyond the
+   total-order premise `invocation_key_deterministic` states for the comparator and the
+   `key_premises` `invocation_key_injective` states (`query-renderers-abstract`) — in particular
+   nothing about whether two distinct pre-images hash apart. The ORDER `enumerate` returns — production's `Map` sorts by id,
    the model holds the map as a list, and the theorem is about membership. `QueryCodec`.
 
    HOW TO READ IT. Every definition names its F# counterpart. The module is SELF-CONTAINED like
@@ -179,7 +185,7 @@ type query_error =
 type arguments = list (string & cell)
 
 (* ======================================================================================
-   2. `Query.cellType`, `determinismTag`, and the capture key — `cellKey` / `invocationKey`,
+   2. `Query.cellType`, `determinismTag`, and the capture key — `cellFields` / `invocationKey`,
       written through the renderers the F# reaches for.
    ====================================================================================== *)
 
@@ -205,28 +211,43 @@ let determinism_tag (d:determinism_source) : Tot string =
 (* F#: `Query.determinismTag`. *)
 let determinism_tag_of (q:query) : Tot string = determinism_tag q.q_effect.determinism
 
-(* The four host functions the capture key is written through. F#: `string v` on an `int`,
-   `Canon.canonicalFloat`, `Hash.fnv1a`, and the ordinal order `List.sortBy fst` compares names
-   by. `null_key` is `cellKey`'s rendering of a `Null` — a one-character literal in the F#,
-   carried here so the model's text stays ASCII. *)
+(* The host functions the capture key is written through. F#: `string v` on an `int`,
+   `Canon.canonicalFloat`, `Hash.fnv1a`, the ordinal order `List.sortBy fst` compares names by,
+   and `Hash.canonicalField` — ONE field of the canonical pre-image, escaped and terminated
+   (Phase 225). The escaper is a host function here for the reason the hash is: the model's
+   `string` is primitive, so what it does to a field's symbols is stated as the premise
+   `field_faithful` (section 8b) rather than computed. *)
 noeq type renderers = {
   render_int:   int -> string;
   render_float: string -> string;
   hash:         string -> string;
   name_le:      string -> string -> bool;
-  null_key:     string
+  field:        string -> string
 }
 
-(* F#: `Query.cellKey`. *)
-let cell_key (rn:renderers) (c:cell) : Tot string =
+(* F#: `Query.cellFields`, first component — the cell's constructor as a one-letter tag. A
+   `Null` is tagged `n` and carries an empty payload (Phase 225; it was the one-character
+   literal `"∅"` with no payload before). *)
+let cell_tag (c:cell) : Tot string =
   match c with
-  | Int v -> "i" ^ rn.render_int v
-  | Float v -> "f" ^ rn.render_float v
-  | Bool v -> "b" ^ (if v then "1" else "0")
-  | Str v -> "s" ^ v
-  | Date v -> "d" ^ v
-  | Timestamp v -> "t" ^ v
-  | Null -> rn.null_key
+  | Int _ -> "i"
+  | Float _ -> "f"
+  | Bool _ -> "b"
+  | Str _ -> "s"
+  | Date _ -> "d"
+  | Timestamp _ -> "t"
+  | Null -> "n"
+
+(* F#: `Query.cellFields`, second component — the cell's scalar rendering. *)
+let cell_payload (rn:renderers) (c:cell) : Tot string =
+  match c with
+  | Int v -> rn.render_int v
+  | Float v -> rn.render_float v
+  | Bool v -> if v then "1" else "0"
+  | Str v -> v
+  | Date v -> v
+  | Timestamp v -> v
+  | Null -> ""
 
 (* F#: `List.sortBy fst`'s insertion step — a STABLE sort, so a binding lands before the first
    binding whose name is not below its own. *)
@@ -244,12 +265,25 @@ let rec sort_args (rn:renderers) (l:arguments) : Tot arguments =
   | [] -> []
   | x :: t -> insert_arg rn x (sort_args rn t)
 
-(* F#: `List.map (fun (n, v) -> n + "=" + cellKey v) |> String.concat ""` — NO separator
-   between one binding and the next, which is what `key_collision` reads off. *)
-let rec canonical (rn:renderers) (l:arguments) : Tot string =
+(* F#: `List.collect (fun (n, v) -> let tag, payload = cellFields v in [ n; tag; payload ])` —
+   every binding is exactly three fields, which is what makes the flattening injective. *)
+let rec arg_fields (rn:renderers) (l:arguments) : Tot (list string) =
+  match l with
+  | [] -> []
+  | (n, v) :: t -> n :: cell_tag v :: cell_payload rn v :: arg_fields rn t
+
+(* F#: `Hash.canonicalFields` — `List.map canonicalField |> String.concat ""`. The ONE
+   canonicaliser both seams build their pre-image through (Phase 225). *)
+let rec fields (rn:renderers) (l:list string) : Tot string =
   match l with
   | [] -> ""
-  | (n, v) :: t -> (n ^ "=" ^ cell_key rn v) ^ canonical rn t
+  | x :: t -> rn.field x ^ fields rn t
+
+(* The canonical pre-image of a (name-sorted) argument list. Before Phase 225 this joined
+   `name=cellKey` pairs on the empty string, and `key_collision` read a shared pre-image off two
+   different argument sets; every field is now self-delimiting, and `invocation_key_injective`
+   (section 8b) is the theorem that replaced the finding. *)
+let canonical (rn:renderers) (l:arguments) : Tot string = fields rn (arg_fields rn l)
 
 (* F#: `Query.invocationKey`. *)
 let invocation_key (rn:renderers) (q:query) (a:arguments) : Tot string =
@@ -759,6 +793,183 @@ let invocation_key_id_only (rn:renderers) (q q':query) (a:arguments)
   = ()
 
 (* ======================================================================================
+   8b. THE FIFTH THEOREM (Phase 225) — the capture key's pre-image is INJECTIVE: two argument
+       lists with one canonical string are one list, so distinct argument sets have distinct
+       pre-images. It replaced `key_collision`, the finding that the pre-image joined
+       `name=cellKey` pairs on the empty string.
+   ====================================================================================== *)
+
+(* HOW A STRING IS READ. F*'s `string` is primitive and `^` is opaque, so no argument about
+   where one field ends is possible without a reading of a string as its symbols — the same
+   reading `Chain.fst` takes for its splices, restated here because this module opens nothing.
+   `symbols_faithful reveal` says two things true of `System.String` by construction:
+   concatenation is symbol-list append, and two strings with the same symbols are one string.
+   It is a HYPOTHESIS in the `requires` of the lemmas that spend it, never an `assume`. *)
+[@@ noextract_to "FSharp"]
+let rec app (#a:Type) (x y:list a) : Tot (list a) =
+  match x with
+  | [] -> y
+  | h :: t -> h :: app t y
+
+[@@ noextract_to "FSharp"]
+let symbols_faithful (#sym:eqtype) (reveal:string -> list sym) : prop =
+  (forall (s t:string). reveal (s ^ t) == app (reveal s) (reveal t)) /\
+  (forall (s t:string). reveal s == reveal t ==> s == t)
+
+(* F#: `Hash.canonicalField`'s escaper, at the symbol level. The escape symbol `e` (U+0010, DLE)
+   is written before every `e` and every terminator `t` (U+0001, `Hash.foldSep`) the field
+   carries; every other symbol passes through. *)
+[@@ noextract_to "FSharp"]
+let rec esc (#sym:eqtype) (e t:sym) (l:list sym) : Tot (list sym) =
+  match l with
+  | [] -> []
+  | x :: r -> if x = e || x = t then e :: x :: esc e t r else x :: esc e t r
+
+(* F#: `Hash.canonicalFields` at the symbol level — each field escaped, then terminated. *)
+[@@ noextract_to "FSharp"]
+let rec enc (#sym:eqtype) (e t:sym) (l:list (list sym)) : Tot (list sym) =
+  match l with
+  | [] -> []
+  | x :: r -> app (esc e t x) (t :: enc e t r)
+
+(* THE ESCAPER PREMISE: production's `Hash.canonicalField` is `esc` then one terminator, read as
+   symbols. A statement about a host function, like the hash's — and measured on the shipped
+   seam by the decoder round trip in `ProofOracleTests`, over fields carrying both symbols. *)
+[@@ noextract_to "FSharp"]
+let field_faithful (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (field:string -> string)
+  : prop =
+  forall (s:string). reveal (field s) == app (esc e t (reveal s)) [t]
+
+[@@ noextract_to "FSharp"]
+let injective (#a:eqtype) (f:a -> string) : prop = forall (x y:a). f x == f y ==> x == y
+
+(* Every premise the injectivity theorem spends, named once. The two renderer clauses are the
+   only claims about a numeral layout, and they are claims about the CARRIERS the model's cells
+   hold (an int, a float's round-trip text), not about IEEE equality. *)
+[@@ noextract_to "FSharp"]
+let key_premises (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers) : prop =
+  symbols_faithful reveal /\ reveal "" == [] /\ ~(e == t) /\ field_faithful reveal e t rn.field /\
+  injective rn.render_int /\ injective rn.render_float
+
+(* ---- the symbol level ---- *)
+
+let app_cons_nonempty (#a:Type) (y:list a) (h:a) (r:list a)
+  : Lemma (Cons? (app y (h :: r))) =
+  match y with
+  | [] -> ()
+  | _ :: _ -> ()
+
+let rec app_assoc (#a:Type) (x y z:list a)
+  : Lemma (app (app x y) z == app x (app y z)) =
+  match x with
+  | [] -> ()
+  | _ :: t -> app_assoc t y z
+
+(* Two escaped fields, each followed by the terminator: the split point is forced, because the
+   first UNESCAPED terminator is the end of each field. *)
+let rec esc_split (#sym:eqtype) (e t:sym) (x r1 y r2:list sym)
+  : Lemma (requires ~(e == t) /\ app (esc e t x) (t :: r1) == app (esc e t y) (t :: r2))
+          (ensures x == y /\ r1 == r2) (decreases x) =
+  match x, y with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: xt, _ :: yt -> esc_split e t xt r1 yt r2
+
+let rec enc_injective (#sym:eqtype) (e t:sym) (l1 l2:list (list sym))
+  : Lemma (requires ~(e == t) /\ enc e t l1 == enc e t l2) (ensures l1 == l2) =
+  match l1, l2 with
+  | [], [] -> ()
+  | [], y :: q -> app_cons_nonempty (esc e t y) t (enc e t q)
+  | x :: r, [] -> app_cons_nonempty (esc e t x) t (enc e t r)
+  | x :: r, y :: q ->
+    esc_split e t x (enc e t r) y (enc e t q);
+    enc_injective e t r q
+
+(* ---- lifting it to the strings production concatenates ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec symbols (#sym:eqtype) (reveal:string -> list sym) (l:list string)
+  : Tot (list (list sym)) =
+  match l with
+  | [] -> []
+  | x :: t -> reveal x :: symbols reveal t
+
+let rec symbols_injective (#sym:eqtype) (reveal:string -> list sym) (l1 l2:list string)
+  : Lemma (requires symbols_faithful reveal /\ symbols reveal l1 == symbols reveal l2)
+          (ensures l1 == l2) =
+  match l1, l2 with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: t1, _ :: t2 -> symbols_injective reveal t1 t2
+
+let rec reveal_fields (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
+  (l:list string)
+  : Lemma (requires symbols_faithful reveal /\ reveal "" == [] /\ field_faithful reveal e t rn.field)
+          (ensures reveal (fields rn l) == enc e t (symbols reveal l)) =
+  match l with
+  | [] -> ()
+  | x :: r ->
+    reveal_fields reveal e t rn r;
+    app_assoc (esc e t (reveal x)) [t] (reveal (fields rn r))
+
+(* `Hash.canonicalFields` is injective on field lists. Proved, not assumed. *)
+let fields_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
+  (l1 l2:list string)
+  : Lemma (requires key_premises reveal e t rn /\ fields rn l1 == fields rn l2)
+          (ensures l1 == l2) =
+  reveal_fields reveal e t rn l1;
+  reveal_fields reveal e t rn l2;
+  enc_injective e t (symbols reveal l1) (symbols reveal l2);
+  symbols_injective reveal l1 l2
+
+(* A cell's tag and payload determine the cell. *)
+let cell_fields_injective (rn:renderers) (c c':cell)
+  : Lemma (requires injective rn.render_int /\ injective rn.render_float /\
+                    cell_tag c == cell_tag c' /\ cell_payload rn c == cell_payload rn c')
+          (ensures c == c') = ()
+
+(* Three fields per binding, so the flattening is injective. *)
+let rec arg_fields_injective (rn:renderers) (a1 a2:arguments)
+  : Lemma (requires injective rn.render_int /\ injective rn.render_float /\
+                    arg_fields rn a1 == arg_fields rn a2)
+          (ensures a1 == a2) =
+  match a1, a2 with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | (_, v1) :: t1, (_, v2) :: t2 ->
+    cell_fields_injective rn v1 v2;
+    arg_fields_injective rn t1 t2
+
+(* The canonical string is injective on argument lists — any lists, sorted or not. *)
+let canonical_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
+  (a1 a2:arguments)
+  : Lemma (requires key_premises reveal e t rn /\ canonical rn a1 == canonical rn a2)
+          (ensures a1 == a2) =
+  fields_injective reveal e t rn (arg_fields rn a1) (arg_fields rn a2);
+  arg_fields_injective rn a1 a2
+
+(* THE FIFTH THEOREM. F#: `Query.invocationKey`'s pre-image. Two argument lists whose
+   name-sorted canonical strings agree ARE the same sorted list, and so hold exactly the same
+   bindings: distinct argument sets have distinct pre-images, for every declaration, accepted or
+   not. It needs no premise about the comparator — the sort is a function, and equal outputs are
+   all the argument reads. Whether two distinct pre-images HASH apart is a claim about FNV-1a and
+   is not made (`query-renderers-abstract`). *)
+let invocation_key_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
+  (a a':arguments)
+  : Lemma (requires key_premises reveal e t rn /\
+                    canonical rn (sort_args rn a) == canonical rn (sort_args rn a'))
+          (ensures sort_args rn a == sort_args rn a' /\
+                   (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  canonical_injective reveal e t rn (sort_args rn a) (sort_args rn a');
+  let aux (x:(string & cell)) : Lemma (mem_arg x a = mem_arg x a') =
+    sort_mem rn a x; sort_mem rn a' x
+  in
+  FStar.Classical.forall_intro aux
+
+(* ======================================================================================
    9. THE FINDINGS.
    ====================================================================================== *)
 
@@ -824,28 +1035,13 @@ let all_null_accepted (q:query)
     nulls_bind_all q.q_params (nulls_of q.q_params);
     validate_params_exact q (nulls_of q.q_params)
 
-(* The declaration the second finding is exhibited on: `a` required, `b` optional, both strings. *)
+(* The declaration the former second finding (`key_collision`, closed by Phase 225) was exhibited
+   on: `a` required, `b` optional, both strings. The two argument sets below shared a pre-image
+   before Phase 225; `invocation_key_injective` says they no longer can, and the shipped seam's
+   closure case keys them apart. *)
 let collision_params : list query_param =
   [ { p_name = "a"; p_type = StringType; p_required = true };
     { p_name = "b"; p_type = StringType; p_required = false } ]
 
 let collision_one : arguments = [ ("a", Str "1b=s2") ]
 let collision_two : arguments = [ ("a", Str "1"); ("b", Str "2") ]
-
-(* THE SECOND FINDING. `canonical` joins `name=cellKey` pairs with no separator, so a string
-   cell can spell the NEXT binding. Both argument sets below are accepted by one declaration,
-   they are different sets, and they share a canonical string — so they share a capture key
-   under EVERY hash, and a replay would serve one's captured rows for the other. The only
-   premise is that the comparator puts "a" before "b". *)
-let key_collision (rn:renderers) (q:query)
-  : Lemma (requires q.q_params == collision_params /\ rn.name_le "a" "b")
-          (ensures validate_params q collision_one == Ok () /\
-                   validate_params q collision_two == Ok () /\
-                   collision_one =!= collision_two /\
-                   invocation_key rn q collision_one == invocation_key rn q collision_two)
-  = assert_norm (validate_params q collision_one == Ok ());
-    assert_norm (validate_params q collision_two == Ok ());
-    assert_norm (sort_args rn collision_one == collision_one);
-    assert (sort_args rn collision_two == collision_two);
-    assert_norm (canonical rn collision_one == "a=s1b=s2");
-    assert_norm (canonical rn collision_two == "a=s1b=s2")

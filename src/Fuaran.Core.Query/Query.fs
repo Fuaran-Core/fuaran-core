@@ -112,27 +112,34 @@ module Query =
     let determinismTag (q: Query) : string =
         Effect.determinismTag q.Effect.Determinism
 
-    /// A canonical scalar rendering of a bound `Cell`, for the capture key (a `Null` is `"∅"`).
-    let private cellKey (c: Cell) : string =
+    /// A bound `Cell` as two fields of the capture key's pre-image: a one-letter constructor tag
+    /// and the scalar rendering (a `Null` is tag `n` with an empty payload).
+    let private cellFields (c: Cell) : string * string =
         match c with
-        | Int v -> "i" + string v
-        | Float v -> "f" + Canon.canonicalFloat v
-        | Bool v -> "b" + (if v then "1" else "0")
-        | Str v -> "s" + v
-        | Date v -> "d" + v
-        | Timestamp v -> "t" + v
-        | Null -> "∅"
+        | Int v -> "i", string v
+        | Float v -> "f", Canon.canonicalFloat v
+        | Bool v -> "b", (if v then "1" else "0")
+        | Str v -> "s", v
+        | Date v -> "d", v
+        | Timestamp v -> "t", v
+        | Null -> "n", ""
 
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic query under:
-    /// the query id + a hash of the canonical (name-sorted) param string. Same args replay the same
-    /// captured rows; different args do not collide. A consumer threads this as
-    /// `OpStream.captureEffect`'s `eff` argument (the `Capability.invocationKey` pattern).
+    /// the query id + a hash of the canonical (name-sorted) pre-image, built through
+    /// `Hash.canonicalFields` — three fields per binding (name, cell tag, cell payload). Same args
+    /// replay the same captured rows. The pre-image is INJECTIVE (Phase 225,
+    /// `invocation_key_injective` in `proofs/Query.fst`): distinct argument sets never share one,
+    /// whatever their string cells contain. That two distinct pre-images hash apart is a property
+    /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `OpStream.captureEffect`'s
+    /// `eff` argument (the `Capability.invocationKey` pattern).
     let invocationKey (q: Query) (args: (string * Cell) list) : string =
         let canonical =
             args
             |> List.sortBy fst
-            |> List.map (fun (n, v) -> n + "=" + cellKey v)
-            |> String.concat ""
+            |> List.collect (fun (n, v) ->
+                let tag, payload = cellFields v
+                [ n; tag; payload ])
+            |> Hash.canonicalFields
 
         q.Id + "#" + Hash.fnv1a canonical
 

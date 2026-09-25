@@ -9,6 +9,8 @@ ctor Fuaran.Core.NodeWitness`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, !1>,
 ctor Fuaran.Core.Tree+NodeIndex`2..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, !1>, !1, System.String)
 field Fuaran.Core.Tree+WellFormed`1+Tags.RepeatedId : System.Int32 (literal)
 field Fuaran.Core.Tree+WellFormed`1+Tags.Structural : System.Int32 (literal)
+method Fuaran.Core.Hash.canonicalField(System.String) : System.String
+method Fuaran.Core.Hash.canonicalFields(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : System.String
 method Fuaran.Core.Hash.fnv1a(System.String) : System.String
 method Fuaran.Core.Hash.sha256Bytes(System.Byte[]) : System.Byte[]
 method Fuaran.Core.Hash.sha256Hex(System.String) : System.String
@@ -44,6 +46,7 @@ method Fuaran.Core.Tree.tryFind`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Co
 method Fuaran.Core.Tree.tryPick`3(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpOption`1<!!2>>, !!0) : Microsoft.FSharp.Core.FSharpOption`1<!!2>
 method Fuaran.Core.Tree.updateNode`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!0>, !!0) : Microsoft.FSharp.Core.FSharpOption`1<!!0>
 method Fuaran.Core.Tree.wellFormed`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0) : Fuaran.Core.Tree+WellFormed`1<!!1>
+property Fuaran.Core.Hash.fieldEsc : System.String { get }
 property Fuaran.Core.Hash.foldSep : System.String { get }
 record-field Fuaran.Core.IdWitness`1.Equals #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>>
 record-field Fuaran.Core.IdWitness`1.OfString #1 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, !0>

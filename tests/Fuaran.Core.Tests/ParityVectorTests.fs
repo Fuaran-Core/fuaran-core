@@ -27,6 +27,10 @@ let private expected: (string * string) list =
       "fnv1a/foldSep-join", "32f61fef"
       "fnv1a/unicode", "a721136a"
       "fnv1a/a80", "5143e6d5"
+      // Phase 225: the pre-image as UTF-8 hex. `symbols` is hand-checkable: `a` DLE SOH `b` SOH,
+      // DLE DLE SOH, SOH, `=#` SOH — every carried symbol escaped, every field terminated.
+      "canonicalFields/plain", "61016201"
+      "canonicalFields/symbols", "6110016201101001013d2301"
       "sha256/empty", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       "sha256/abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
       "sha256/two-block", "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
@@ -75,6 +79,7 @@ let private expected: (string * string) list =
 /// same argument `SampleAdequacy` makes for a generated sample, applied to a committed one.
 let private families =
     [ "fnv1a/"
+      "canonicalFields/"
       "sha256/"
       "utf8Bytes/"
       "canonicalFloat/"

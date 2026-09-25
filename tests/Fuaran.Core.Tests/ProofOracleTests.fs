@@ -8612,8 +8612,8 @@ let private queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query 
 
 let private queryToModel (q: Query) : ModelQuery.query = queryToModelWith true q
 
-/// Production's own four calls. `compare` on two F# strings is ordinal, which is what
-/// `List.sortBy fst` sorts a name by.
+/// Production's own five calls. `compare` on two F# strings is ordinal, which is what
+/// `List.sortBy fst` sorts a name by; `field` is the Phase 225 canonicaliser both seams share.
 let private queryRenderers: ModelQuery.renderers =
     { ModelQuery.renderers.render_int = fun (n: bigint) -> string (int n)
       ModelQuery.renderers.render_float =
@@ -8621,13 +8621,81 @@ let private queryRenderers: ModelQuery.renderers =
             Canon.canonicalFloat (System.Double.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
       ModelQuery.renderers.hash = Hash.fnv1a
       ModelQuery.renderers.name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
-      ModelQuery.renderers.null_key = "∅" }
+      ModelQuery.renderers.field = Hash.canonicalField }
 
 /// The ORDER-BLIND comparator the second go-red uses: everything is below everything, so the
 /// model's insertion sort leaves the caller's order standing.
 let private orderBlindRenderers: ModelQuery.renderers =
     { queryRenderers with
         name_le = fun (_: string) (_: string) -> true }
+
+// ---- Phase 225: the capture key's pre-image is injective, in both seams ----
+
+/// A DECODER for `Hash.canonicalFields`, written here from the encoding's definition rather than
+/// from production: `U+0010` makes the next character literal (it may only precede `U+0010` or
+/// `U+0001`), and the first unescaped `U+0001` ends a field. `decodeFields (canonicalFields l) =
+/// Some l` for every `l` is the injectivity the models' `field_faithful` premise buys, measured
+/// on the shipped function rather than assumed of it.
+let private decodeFields (s: string) : string list option =
+    let sb = System.Text.StringBuilder()
+
+    let rec go (i: int) (acc: string list) : string list option =
+        if i = s.Length then
+            if sb.Length = 0 then Some(List.rev acc) else None
+        else
+            let c = s.[i]
+
+            if c = '\u0010' then
+                if i + 1 < s.Length && (s.[i + 1] = '\u0010' || s.[i + 1] = '\u0001') then
+                    sb.Append(s.[i + 1]) |> ignore
+                    go (i + 2) acc
+                else
+                    None
+            elif c = '\u0001' then
+                let f = sb.ToString()
+                sb.Clear() |> ignore
+                go (i + 1) (f :: acc)
+            else
+                sb.Append(c) |> ignore
+                go (i + 1) acc
+
+    go 0 []
+
+/// The adversarial alphabet the round trip draws fields from: both symbols of the encoding, the
+/// two characters every pre-225 join spliced on (`=` and `#`), a non-ASCII character, and the
+/// empty string, so an empty field and an empty list are both drawn.
+let private adversarialPieces =
+    [| "a"; "b"; "="; "#"; "\u0001"; "\u0010"; "∅"; "" |]
+
+let private genAdversarialField (r: ConfRng.T) : string * ConfRng.T =
+    let n, r1 = ConfRng.intBelow 5 r
+    let mutable rng = r1
+    let sb = System.Text.StringBuilder()
+
+    for _ in 1..n do
+        let k, r2 = ConfRng.intBelow adversarialPieces.Length rng
+        rng <- r2
+        sb.Append(adversarialPieces.[k]) |> ignore
+
+    sb.ToString(), rng
+
+let private genAdversarialFields (r: ConfRng.T) : string list * ConfRng.T =
+    let n, r1 = ConfRng.intBelow 5 r
+    let mutable rng = r1
+
+    let fields =
+        [ for _ in 1..n do
+              let f, r2 = genAdversarialField rng
+              rng <- r2
+              f ]
+
+    fields, rng
+
+/// Production's own three calls, for the capability model's capture key (Phase 225).
+let private capKeyRenderers: ModelCap.key_renderers =
+    { ModelCap.key_renderers.k_hash = Hash.fnv1a
+      ModelCap.key_renderers.k_addr_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
+      ModelCap.key_renderers.k_field = Hash.canonicalField }
 
 let private prodQueryErrRender (e: QueryError) : string =
     match e with
@@ -14803,11 +14871,12 @@ let proofOracleTests =
 
               Expect.equal (ModelQuery.ids (ModelQuery.enumerate mreg)) [ "q-t" ] "and enumerates the registered one"
 
-          testCase "the two findings hold on the shipped seam — `all_null_accepted` and `key_collision`"
+          testCase "the first finding holds on the shipped seam — `all_null_accepted`"
           <| fun _ ->
-              // THE FINDINGS, pinned on production so that a fix turns this case red and sends its
-              // author to the two ladder rows (`query-all-null-accepted`, `query-key-collision`)
-              // and the README's theorem 12 section, which is where each is argued.
+              // THE FIRST FINDING, pinned on production so that a fix turns this case red and sends
+              // its author to the ladder row (`query-all-null-accepted`) and the README's theorem 12
+              // section, which is where it is argued. The second finding, `key_collision`, was
+              // pinned here beside it until Phase 225 closed it; its closure is the next case.
               let q: Query =
                   { Id = "q-f"
                     Params =
@@ -14867,29 +14936,223 @@ let proofOracleTests =
 
               Expect.isTrue ran.Value "and it ran"
 
-              // `key_collision`: two DIFFERENT accepted argument sets, one canonical string.
+          testCase
+              "the second finding is CLOSED on the shipped seam — `invocation_key_injective`, in both seams and the pipeline"
+          <| fun _ ->
+              // Phase 225. `key_collision` was pinned here as "the finding holds"; the pre-image now
+              // goes through `Hash.canonicalFields`, the models prove it injective
+              // (`invocation_key_injective` in `Query.fst` and `Capability.fst`), and this case pins
+              // the CLOSURE on production: the pre-225 exhibits key apart, the model's key is still
+              // production's, and the premise the proofs take of the escaper is measured.
+              let q: Query =
+                  { Id = "q-f"
+                    Params =
+                      [ { Name = "a"
+                          Type = StringType
+                          Required = true }
+                        { Name = "b"
+                          Type = StringType
+                          Required = false } ]
+                    ResultSchema = [ "n", IntType ]
+                    Effect =
+                      { Host = ReadsHost
+                        Determinism = Network }
+                    Source = Ref "src-f"
+                    TimeoutMs = None
+                    PageSize = None }
+
+              let mq = queryToModel q
               let one = [ "a", Cell.Str "1b=s2" ]
               let two = [ "a", Cell.Str "1"; "b", Cell.Str "2" ]
               Expect.equal (qArgsToModel one) ModelQuery.collision_one "the first set IS the model's exhibit"
               Expect.equal (qArgsToModel two) ModelQuery.collision_two "the second set IS the model's exhibit"
               Expect.equal (Query.validateParams q one) (Ok()) "the first set is accepted"
               Expect.equal (Query.validateParams q two) (Ok()) "the second set is accepted"
-              Expect.notEqual one two "they are different argument sets"
 
-              Expect.equal
-                  (Query.invocationKey q one)
-                  (Query.invocationKey q two)
-                  "and they share a capture key — the canonical string has no separator between bindings"
-
-              Expect.equal
+              Expect.notEqual
                   (ModelQuery.canonical queryRenderers ModelQuery.collision_one)
                   (ModelQuery.canonical queryRenderers ModelQuery.collision_two)
-                  "because the PRE-IMAGE is already the same string, before any hash is taken"
+                  "the two exhibits no longer share a PRE-IMAGE"
+
+              Expect.notEqual
+                  (Query.invocationKey q one)
+                  (Query.invocationKey q two)
+                  "and so no longer share a capture key on production"
 
               Expect.equal
                   (ModelQuery.invocation_key queryRenderers mq ModelQuery.collision_one)
                   (Query.invocationKey q one)
-                  "and the model's key for it is production's"
+                  "and the model's key is still production's"
+
+              // The one place the float renderer's injectivity premise fails, pinned so it cannot
+              // be forgotten: `Canon.canonicalFloat` renders -0.0 and 0.0 alike, so the two share a
+              // key — and production's own `Cell` equality calls them EQUAL (IEEE -0.0 = 0.0), so the
+              // sharing is between argument sets production does not tell apart
+              // (`query-renderers-abstract`).
+              let qz: Query =
+                  { q with
+                      Id = "q-z"
+                      Params =
+                          [ { Name = "x"
+                              Type = FloatType
+                              Required = true } ] }
+
+              Expect.equal
+                  [ "x", Cell.Float -0.0 ]
+                  [ "x", Cell.Float 0.0 ]
+                  "production calls the two argument sets equal"
+
+              Expect.equal
+                  (Query.invocationKey qz [ "x", Cell.Float -0.0 ])
+                  (Query.invocationKey qz [ "x", Cell.Float 0.0 ])
+                  "and keys them alike"
+
+              // The capability seam's pre-225 join spliced `addr=value` pairs on U+0001, so its
+              // collision needed that byte in a value — the shard said "no separator", which was
+              // true of `Query` and not of `Capability`. Both exhibits, keyed apart.
+              let cap =
+                  Capability.create "cap-k" (fst (genCapSignature "k" (ConfRng.ofSeed 225))) Server
+
+              let cOne = [ "a", "1\u0001b=2" ]
+              let cTwo = [ "a", "1"; "b", "2" ]
+              let cThree = [ "a", "1b=2" ]
+
+              Expect.notEqual
+                  (Capability.invocationKey cap cOne)
+                  (Capability.invocationKey cap cTwo)
+                  "a value carrying the old join byte no longer spells the next binding"
+
+              Expect.notEqual
+                  (Capability.invocationKey cap cThree)
+                  (Capability.invocationKey cap cTwo)
+                  "nor does one carrying `=`"
+
+              Expect.equal
+                  (Capability.invocationKey cap [ "b", "2"; "a", "1" ])
+                  (Capability.invocationKey cap cTwo)
+                  "and the key is still blind to the caller's order"
+
+              // The pipeline's node key joined `addr=L:value` on the empty string; its readable
+              // prefix spliced two ids on `#`. Both collisions, closed.
+              let node args =
+                  Invoke("n", "cap-k", IntRange(0, 1), args)
+
+              Expect.notEqual
+                  (CapabilityPipeline.nodeInvocationKey (node [ "a", Literal "1b=L:2" ]))
+                  (CapabilityPipeline.nodeInvocationKey (node [ "a", Literal "1"; "b", Literal "2" ]))
+                  "a literal no longer spells the next binding"
+
+              Expect.notEqual
+                  (CapabilityPipeline.nodeInvocationKey (node [ "a", Literal "x" ]))
+                  (CapabilityPipeline.nodeInvocationKey (node [ "a", FromNode "x" ]))
+                  "a literal and an upstream reference with the same text key apart"
+
+              Expect.notEqual
+                  (CapabilityPipeline.nodeInvocationKey (Invoke("b#n", "cap", IntRange(0, 1), [])))
+                  (CapabilityPipeline.nodeInvocationKey (Invoke("n", "cap#b", IntRange(0, 1), [])))
+                  "two ids a `#` splices alike hash apart"
+
+              Expect.notEqual
+                  (CapabilityPipeline.nodeInvocationKey (Source("a#b", "c", IntRange(0, 1))))
+                  (CapabilityPipeline.nodeInvocationKey (Source("a", "b#c", IntRange(0, 1))))
+                  "and so do two sources"
+
+              Expect.equal
+                  (CapabilityPipeline.nodeInvocationKey (node [ "b", Literal "2"; "a", Literal "1" ]))
+                  (CapabilityPipeline.nodeInvocationKey (node [ "a", Literal "1"; "b", Literal "2" ]))
+                  "and the node key is still blind to the caller's order"
+
+          testCase
+              "the escaper premise holds of Hash.canonicalFields, and a separator WITHOUT an escape refutes it — the measurement can fail"
+          <| fun _ ->
+              // `field_faithful` (Query.fst section 8b, Capability.fst section 12) says production's
+              // `canonicalField` is the modelled escaper followed by one terminator. What the
+              // injectivity theorems SPEND of it is that the encoding decodes: a round trip through
+              // an independently written decoder over adversarial field lists — both symbols, `=`,
+              // `#`, empty fields and empty lists — is that property measured. The go-red is the
+              // encoding the shard's first reading proposed, a bare U+0001 separator: it must lose.
+              let mutable rng = ConfRng.ofSeed 2251
+              let mutable drawn = 0
+              let mutable withSymbols = 0
+              let mutable bareLost = 0
+
+              for _ in 1..2000 do
+                  let fields, r = genAdversarialFields rng
+                  rng <- r
+                  drawn <- drawn + 1
+
+                  if fields |> List.exists (fun f -> f.Contains "\u0001" || f.Contains "\u0010") then
+                      withSymbols <- withSymbols + 1
+
+                  Expect.equal
+                      (decodeFields (Hash.canonicalFields fields))
+                      (Some fields)
+                      (sprintf "canonicalFields decodes back to %A" fields)
+
+                  Expect.equal
+                      (Hash.canonicalFields fields)
+                      (fields |> List.map Hash.canonicalField |> String.concat "")
+                      "canonicalFields is canonicalField, concatenated"
+
+                  let bare = fields |> List.map (fun f -> f + Hash.foldSep) |> String.concat ""
+
+                  if decodeFields bare <> Some fields then
+                      bareLost <- bareLost + 1
+
+              Expect.isGreaterThan withSymbols 200 "the draw put an encoding symbol inside a field often"
+              Expect.isGreaterThan bareLost 0 "and a bare separator loses on it — the round trip can fail"
+
+              // The capability model's key agrees with production's over adversarial invocations,
+              // byte for byte, and is held still under a reversal of distinct addresses.
+              let cap =
+                  Capability.create "cap-k" (fst (genCapSignature "k" (ConfRng.ofSeed 225))) Server
+
+              let mcap = capToModel cap
+              let mutable compared = 0
+
+              for _ in 1..500 do
+                  let fields, r = genAdversarialFields rng
+                  rng <- r
+                  let args = fields |> List.mapi (fun i v -> sprintf "h%d" (i % 3), v)
+                  compared <- compared + 1
+
+                  Expect.equal
+                      (ModelCap.invocation_key capKeyRenderers mcap args)
+                      (Capability.invocationKey cap args)
+                      (sprintf "the capability model's key is production's on %A" args)
+
+              Expect.equal compared 500 "every drawn invocation was compared"
+
+              // And the query model's key agrees with production's over string cells drawn from the
+              // same alphabet. The query differential's own generator draws no encoding symbol, so
+              // it cannot tell an escaping field from a bare one — measured: a `field` that only
+              // appends the terminator leaves it green. These rows are what can.
+              let qa: Query =
+                  { Id = "q-adv"
+                    Params = []
+                    ResultSchema = [ "n", IntType ]
+                    Effect =
+                      { Host = ReadsHost
+                        Determinism = Network }
+                    Source = Ref "src-adv"
+                    TimeoutMs = None
+                    PageSize = None }
+
+              let mqa = queryToModel qa
+              let mutable qCompared = 0
+
+              for _ in 1..500 do
+                  let fields, r = genAdversarialFields rng
+                  rng <- r
+                  let args = fields |> List.mapi (fun i v -> sprintf "p%d" (i % 3), Cell.Str v)
+                  qCompared <- qCompared + 1
+
+                  Expect.equal
+                      (ModelQuery.invocation_key queryRenderers mqa (qArgsToModel args))
+                      (Query.invocationKey qa args)
+                      (sprintf "the query model's key is production's on %A" args)
+
+              Expect.equal qCompared 500 "every drawn argument set was compared"
 
           // ---- Phase 186: the incremental promise (proofs/Propagation.fst) ----
 
