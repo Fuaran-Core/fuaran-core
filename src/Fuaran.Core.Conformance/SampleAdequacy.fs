@@ -401,7 +401,23 @@ module SampleAdequacy =
           // `explainRejection` and the rejected arms of the allow / approve parity read a reducer
           // rejection only when the caller's op generator draws one; the decision axis, the unknown
           // tool and the unknown proposal id are built.
-          "Conformance.aiSurfaceLaws", Guarded [ "accepted"; "refused" ]
+          //
+          // Phase 246 — `aiSurfaceLaws` runs the DOMAIN'S `Decide`, so which proposal arm a drawn op
+          // reaches is the domain's policy's answer: a policy that never parks or never denies
+          // leaves those arms untested, and one that allows everything is exactly that. The kit-
+          // policy form rolls the decision itself and keeps the two Phase 223 dimensions.
+          "Conformance.aiSurfaceLaws", Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ]
+          "Conformance.aiSurfaceLawsUnderKitPolicy", Guarded [ "accepted"; "refused" ]
+          // Phase 246 — the seam families at a domain's seam: every outcome is a call the domain's
+          // generator DRAWS, so each of the three is a dimension the run can miss.
+          "Conformance.capabilityLawsWith", Guarded [ "settled"; "pending"; "refused" ]
+          "Conformance.queryLawsWith", Guarded [ "settled"; "pending"; "refused" ]
+          // The default-deny arms are BUILT, but per drawn `Invoke` node — a generator of Source-only
+          // pipelines builds none of them.
+          "Conformance.capabilityPipelineLawsWith", Guarded [ "invoke node" ]
+          // `evalFrom` answers every change but a value edit by evaluating in full, so only a value
+          // edit can tell the incremental path from the full one.
+          "Conformance.incrementalLawsWith", Guarded [ "value edit" ]
           // The Error/Error arm of the parity law is reached only when the caller's generator yields
           // a pipeline the reference refuses.
           "Conformance.transformLaws", Guarded [ "accepted"; "refused" ]

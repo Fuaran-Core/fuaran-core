@@ -282,7 +282,34 @@ let private runs =
            run
                "Conformance.aiSurfaceLaws"
                200
-               (Conformance.aiSurfaceLaws AiSurfaceTests.witness AiSurfaceTests.genNoteOp AiSurfaceTests.state0 1234 200)
+               (Conformance.aiSurfaceLaws
+                   AiSurfaceTests.policedWitness
+                   AiSurfaceTests.genNoteOp
+                   AiSurfaceTests.state0
+                   1234
+                   200)
+           run
+               "Conformance.aiSurfaceLawsUnderKitPolicy"
+               200
+               (Conformance.aiSurfaceLawsUnderKitPolicy
+                   AiSurfaceTests.witness
+                   AiSurfaceTests.genNoteOp
+                   AiSurfaceTests.state0
+                   1234
+                   200)
+           // Phase 246 — the seam families at the reference domain's seam.
+           run
+               "Conformance.capabilityLawsWith"
+               300
+               (Conformance.capabilityLawsWith WitnessTakingFamiliesTests.capabilityWitness 2460 300)
+           run
+               "Conformance.queryLawsWith"
+               300
+               (Conformance.queryLawsWith WitnessTakingFamiliesTests.queryWitness 2461 300)
+           run
+               "Conformance.capabilityPipelineLawsWith"
+               200
+               (Conformance.capabilityPipelineLawsWith WitnessTakingFamiliesTests.pipelineWitness 2462 200)
 
            // ---- the fixture-only families: the kit supplies its own sample ----
            run
@@ -320,9 +347,20 @@ let private runs =
            run "Conformance.packLoadingLaws" 200 (Conformance.packLoadingLaws 4242 200)
            run "Conformance.aggregateParityLaws" 200 (Conformance.aggregateParityLaws 4242 200)
            run "Conformance.columnarOpLaws" 200 (Conformance.columnarOpLaws 4242 200)
-           run "Conformance.columnarOpLawsWith" 200 (Conformance.columnarOpLawsWith ColumnOps.invert 4242 200)
+           run
+               "Conformance.columnarOpLawsWith"
+               200
+               (Conformance.columnarOpLawsWith ColumnOps.invert Conformance.columnarOpStreamGen 4242 200)
            run "Conformance.columnarValidatorLaws" 200 (Conformance.columnarValidatorLaws 4242 200)
            run "Conformance.incrementalLaws" 200 (Conformance.incrementalLaws 4242 200)
+           run
+               "Conformance.incrementalLawsWith"
+               200
+               (Conformance.incrementalLawsWith
+                   WitnessTakingFamiliesTests.incrementalPipelines
+                   Conformance.columnarOpStreamGen
+                   4242
+                   200)
            run "Conformance.paramLaws" 200 (Conformance.paramLaws 7714 200)
            run "Conformance.schemaWalkLaws" 300 (Conformance.schemaWalkLaws 1121 300)
            run "Conformance.deferredLaws" 200 (Conformance.deferredLaws 4242 200)
@@ -401,7 +439,7 @@ let cases () : (string * CaseCount) list =
 let private drawnRefusalSix: (string * string list) list =
     [ "Conformance.casLaws", [ "accepted"; "refused" ]
       "Conformance.idempotencyLaws", [ "accepted"; "refused" ]
-      "Conformance.aiSurfaceLaws", [ "accepted"; "refused" ]
+      "Conformance.aiSurfaceLaws", [ "accepted"; "refused"; "allowed"; "parked"; "denied" ]
       "Conformance.transformLaws", [ "accepted"; "refused" ]
       "Conformance.columnarValidatorLaws", [ "null cell"; "out-of-range cell" ]
       "Conformance.diffContainedLaws", [ "accepted"; "refused" ] ]
@@ -426,7 +464,12 @@ let private drawnRefusalSixRuns: (string * (int * (int -> LawResult list))) list
       "Conformance.aiSurfaceLaws",
       (200,
        fun seed ->
-           Conformance.aiSurfaceLaws AiSurfaceTests.witness AiSurfaceTests.genNoteOp AiSurfaceTests.state0 seed 200)
+           Conformance.aiSurfaceLaws
+               AiSurfaceTests.policedWitness
+               AiSurfaceTests.genNoteOp
+               AiSurfaceTests.state0
+               seed
+               200)
       "Conformance.transformLaws",
       (LawVectorExport.iterations,
        fun seed ->

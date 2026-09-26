@@ -50,8 +50,9 @@ module Families =
         /// capability cannot run it at all, so `certify` cannot fold it in.
         | NeedsWitnessCapability
         /// The family certifies a SEAM not every domain has — a columnar layer, a capability
-        /// registry, a lease axis. It runs from the kit's own fixtures and needs nothing from the
-        /// domain, so what makes it opt-in is relevance, never cost.
+        /// registry, a lease axis. It runs from the kit's own fixtures, or (Phase 246) takes only a
+        /// witness type the base run already demands — a columnar `StreamGen` — so what makes it
+        /// opt-in is relevance, never cost.
         | SeamNotEveryDomainHas
         /// The family takes exactly the base run's witness and asks for MORE than the base
         /// contract promises — footprint independence, concurrent apply, arbitration. A domain
@@ -181,6 +182,13 @@ module Families =
           c "encoderInjectivityLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
           c "projectionLaws" [ "ProjectionWitness" ] (Some NeedsWitnessCapability) []
           c "aiSurfaceLaws" [ "AiSurfaceWitness" ] (Some NeedsWitnessCapability) []
+          c "aiSurfaceLawsUnderKitPolicy" [ "AiSurfaceWitness" ] (Some NeedsWitnessCapability) []
+
+          // Phase 246 — the seam families at a DOMAIN'S seam. Their fixture-bound forms below take
+          // only a seed and certify Core's own fixtures, which is what they are for.
+          c "capabilityLawsWith" [ "CapabilitySeamWitness" ] (Some NeedsWitnessCapability) []
+          c "queryLawsWith" [ "QuerySeamWitness" ] (Some NeedsWitnessCapability) []
+          c "capabilityPipelineLawsWith" [ "CapabilityPipelineWitness" ] (Some NeedsWitnessCapability) []
 
           c
               "keyedChildrenLaws"
@@ -210,9 +218,12 @@ module Families =
           c "packLoadingLaws" none (Some SeamNotEveryDomainHas) []
           c "aggregateParityLaws" none (Some SeamNotEveryDomainHas) []
           c "columnarOpLaws" none (Some SeamNotEveryDomainHas) []
-          c "columnarOpLawsWith" none (Some SeamNotEveryDomainHas) []
+          // Phase 246 — the columnar pair at a domain's `StreamGen<ColumnOp, Table>`. `StreamGen` is
+          // a base-run witness, so the reason stays `SeamNotEveryDomainHas`.
+          c "columnarOpLawsWith" [ "StreamGen" ] (Some SeamNotEveryDomainHas) []
           c "columnarValidatorLaws" none (Some SeamNotEveryDomainHas) []
           c "incrementalLaws" none (Some SeamNotEveryDomainHas) []
+          c "incrementalLawsWith" [ "StreamGen" ] (Some SeamNotEveryDomainHas) []
           c "paramLaws" none (Some SeamNotEveryDomainHas) []
           c "schemaWalkLaws" none (Some SeamNotEveryDomainHas) []
           c "deferredLaws" none (Some SeamNotEveryDomainHas) []
@@ -355,7 +366,23 @@ module Families =
           r
               "Conformance.aiSurfaceLaws"
               Drawn
-              "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one; unknown tool, deny and unknown id are built"
+              "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one, and since Phase 246 the deny and park arms are reached only when the domain's own Decide chooses them; unknown tool and unknown id are built"
+          r
+              "Conformance.aiSurfaceLawsUnderKitPolicy"
+              Drawn
+              "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one; the kit rolls the decision, and unknown tool and unknown id are built"
+          r
+              "Conformance.capabilityLawsWith"
+              Drawn
+              "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused"
+          r
+              "Conformance.queryLawsWith"
+              Drawn
+              "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused"
+          r
+              "Conformance.capabilityPipelineLawsWith"
+              Built
+              "the unregistered-capability and undeclared-argument pipelines are built from every drawn Invoke node; guarded on invoke node"
           r
               "Conformance.propagationEvaluatorLaws"
               Drawn
@@ -391,12 +418,16 @@ module Families =
           r
               "Conformance.columnarOpLawsWith"
               Drawn
-              "the refusal arms are picked by the kit's own roll; guarded on invert's refusal population"
+              "the refused ops are drawn by the caller's StreamGen (columnarOpLaws: the kit's own roll); guarded on invert's refusal population"
           r
               "Conformance.columnarValidatorLaws"
               Drawn
               "null and out-of-range faults are injected by the kit's own roll, and a fault-free draw satisfies the count laws trivially"
           r "Conformance.incrementalLaws" NoRefusal "an Error is only skipped"
+          r
+              "Conformance.incrementalLawsWith"
+              NoRefusal
+              "an op the table refuses and a pipeline that does not evaluate are only skipped"
           r "Conformance.paramLaws" Built "one paramsOf member is dropped each iteration and must refuse UnboundParam"
           r "Conformance.schemaWalkLaws" NoRefusal "an evaluator rejection is skipped"
           r "Conformance.deferredLaws" Built "the fixed Failed case must yield Error"

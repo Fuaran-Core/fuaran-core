@@ -51,7 +51,7 @@
       "reason": "law-tested-by-design",
       "family": "Conformance.aiSurfaceLaws",
       "phase": "fuaran-core#203",
-      "note": "The proposal surface — pattern bank, proposals, decide/submit plumbing. The family drives the decision axis itself (it substitutes its own `Decide` per draw to reach all three outcomes) so the plumbing is certified for any policy, and the domain's own `Decide` is sampled for totality beside it. The one part of this strand that IS proved is arbitration, and it is proved where it lives: `Arbitration` ships in `Fuaran.Core.Ops` and carries `proofs/Arbitrate.fst` — which is why this entry is about the surface and not about the algorithm behind it."
+      "note": "The proposal surface — pattern bank, proposals, decide/submit plumbing. The family runs the domain's own `Decide` (Phase 246) and is starved unless that policy allows, parks and denies something the generator draws; `Conformance.aiSurfaceLawsUnderKitPolicy` is the variant that swaps in the kit's policy to certify the plumbing for any policy. The one part of this strand that IS proved is arbitration, and it is proved where it lives: `Arbitration` ships in `Fuaran.Core.Ops` and carries `proofs/Arbitrate.fst` — which is why this entry is about the surface and not about the algorithm behind it."
     },
     {
       "package": "Fuaran.Core.Column",

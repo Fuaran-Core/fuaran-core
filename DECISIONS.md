@@ -1,5 +1,61 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-26 — D67: the witness-taking families extend the teeth seam rather than mint a second name; `aiSurfaceLaws` runs the domain's `Decide`, and the kit's policy is the named variant
+
+**Decided (Phase 246; the member extension confirmed by the operator the same day).** Downstream
+consumers' measurements (Phase 246) found that the families a domain most needs could not see the
+domain: the seam families take a seed and certify this repository's own fixtures, and
+`aiSurfaceLaws` substituted the kit's `Decide` for the domain's. Each planted defect passed: a host
+that ran the body before the registry refused, and a policy that allowed every write. Phase 246 adds
+the witness-taking forms beside the fixture-bound ones. Three calls in it needed recording.
+
+**1. `columnarOpLawsWith` gains the generator; no second name is minted.** The name the phase asked
+for was already taken by Phase 181's injectable-`invert` seam. Two readings were available: mint a
+new name for the witness-taking form, or extend the member that holds the name. The member is
+extended, on the precedent the shard itself cited: `concurrencyLawsWith` takes the teeth seam
+(`footprintOf`) AND the domain's witness in one entry point, and a domain passes the shipped
+function for the seam. So:
+
+```fsharp
+// 0.31.0
+columnarOpLawsWith (invertUnderTest) (seed) (iterations)
+// 0.32.0
+columnarOpLawsWith (invertUnderTest) (gen: StreamGen<ColumnOp, Table>) (seed) (iterations)
+```
+
+The surface gate classes it `retype`, a breaking move for that member. It rides the `0.32.0` draft
+because that draft is already breaking (D65). A second name would have left two entry points that
+differ only in which half of the same parameter list they expose, and a reader choosing between them
+would have to learn that from the documentation rather than from the signature. `columnarOpLaws`
+keeps its signature and its sample exactly. `Conformance.columnarOpStreamGen` is the kit's reference
+generator in the shape the new parameter takes. It is not `columnarOpLaws`' own sample, which reads
+the evolving table and so cannot be a `StreamGen`.
+
+**2. The seam witnesses are new composing records, not fields on frozen ones.**
+`CapabilitySeamWitness`, `QuerySeamWitness` and `CapabilityPipelineWitness` compose the seam's own
+types, as STABILITY's witness-freeze section prescribes ("compose, never grow"). Each carries the
+host's `Dispatch` beside the registry and the body. The planted defect lives in the host's wiring,
+and a family that called `Registry.dispatch` itself would certify Core's dispatch a second time and
+never see it. A host that delegates to Core passes `Registry.dispatch registry`.
+
+**3. `aiSurfaceLaws` runs the domain's `Decide`, and the old behaviour is a variant named for what it
+does.** The family submits each drawn op as the actor `"author"` through the domain's policy. Its
+adequacy guard counts the decisions that policy reached (allowed, parked, denied), so a policy that
+never parks or never denies anything drawn is starved: RED, because the gate was never exercised at
+that domain. Core cannot know which of a domain's ops write, so this is the claim the family can
+make honestly. It does not claim the policy is right. It claims that a green run exercised the
+policy's gate. `aiSurfaceLawsUnderKitPolicy` is the pre-`0.32.0` family unchanged. It is never the
+default, because its green says nothing about the policy, and its name says so. This is a VERDICT
+change on an existing family, which Phase 220 classed breaking whatever the member's surface class.
+A domain that was green only because the kit rolled its decisions can turn red. The other direction
+exists too, and is why the variant is kept rather than deleted: a proposal arm the kit reached with
+an op the domain's policy never routes there is no longer exercised on that op, so a plumbing fault
+found only that way is the variant's to find.
+
+**Declined: guarding the cross product** (every decision against both reducer outcomes). A domain
+whose policy denies only ops the reducer would refuse anyway is legitimate. Demanding every cell
+would starve it for a property of its policy rather than a gap in its generator.
+
 ## 2026-09-26 — D66: the compute layer becomes its own repository — `Column` stays, `DataFrame` and `Column.Ops` leave under the same ids; D51 is the rule that draws the line, and D49 is amended to the question it answered
 
 **Decided (operator, 2026-09-26).** `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` will be

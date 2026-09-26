@@ -150,6 +150,56 @@ type StreamGen<'Op, 'State> =
     { State0: 'State
       Op: ConfRng.T -> 'Op * ConfRng.T }
 
+// ---- Phase 246: the seam witnesses ----
+//
+// The seam families (`capabilityLaws`, `queryLaws`, `capabilityPipelineLaws`) take a seed and
+// certify Core's own fixtures, so a domain's registry, body and host dispatch are out of their
+// reach: downstream consumers' measurements (Phase 246) planted a host that ran the body before the
+// registry refused, and every seam family stayed green. These three records are what a domain hands
+// the witness-taking forms instead. They COMPOSE the seam's own types rather than growing any
+// frozen witness (STABILITY's "compose, never grow").
+
+/// A domain's capability seam, as `Conformance.capabilityLawsWith` certifies it (Phase 246).
+///
+/// - `Registry` — the registry the domain dispatches against. The laws read it as the ORACLE: a
+///   call whose id is registered and whose arguments `Capability.validateArgs` accepts must reach
+///   the body, and every other call must be refused with the registry's own error.
+/// - `Body` — the domain's body, handed the call's arguments first, in the shape
+///   `Registry.dispatch` wants after them. The kit wraps it to count how often it runs.
+/// - `Dispatch` — the domain's HOST path: the function its surface actually calls to invoke a
+///   capability, handed the id, the arguments and the body to run. A host that delegates to Core
+///   passes `Registry.dispatch registry`; a host with its own wiring passes that wiring, which is the
+///   point — a defect in it (a body run before the registry refuses) is what the family can see.
+/// - `GenCall` — the calls a model could make: registered and invented ids, arguments in space, out
+///   of space, missing and stray. The family is starved unless it reaches a settled, a pending and a
+///   refused dispatch.
+type CapabilitySeamWitness<'v> =
+    { Registry: CapabilityRegistry
+      Body: (string * string) list -> Capability -> unit -> Deferred<'v>
+      Dispatch:
+          string -> (string * string) list -> (Capability -> unit -> Deferred<'v>) -> Result<Deferred<'v>, InvokeError>
+      GenCall: ConfRng.T -> (string * (string * string) list) * ConfRng.T }
+
+/// A domain's query seam, as `Conformance.queryLawsWith` certifies it (Phase 246) — the query
+/// mirror of `CapabilitySeamWitness`: `Queries` is the oracle, `Resolver` the domain's resolver
+/// (handed the call's arguments first), `Dispatch` the host path (`QueryRegistry.dispatch queries`
+/// for a host that delegates to Core), and `GenQuery` the calls a model could make.
+type QuerySeamWitness =
+    { Queries: QueryRegistry
+      Resolver: (string * Cell) list -> Query -> Deferred<QueryResult>
+      Dispatch:
+          string
+              -> (string * Cell) list
+              -> (Query -> Deferred<QueryResult>)
+              -> Result<Deferred<QueryResult>, QueryError>
+      GenQuery: ConfRng.T -> (string * (string * Cell) list) * ConfRng.T }
+
+/// A domain's capability pipelines, as `Conformance.capabilityPipelineLawsWith` certifies them
+/// (Phase 246): the registry they compose against, and the pipelines the domain builds.
+type CapabilityPipelineWitness =
+    { PipelineRegistry: CapabilityRegistry
+      GenPipeline: ConfRng.T -> CapabilityPipeline * ConfRng.T }
+
 // `LawResult` — one law's verdict — is defined in `SampleAdequacy.fs`, which is compiled ahead of
 // this file. It moved there in Phase 121 for one reason: the adequacy guard produces `LawResult`s
 // like every family here does, and every family here declares its demands through the guard, so the
@@ -1953,6 +2003,172 @@ module Conformance =
             Passed = slotted.IsNone
             Counterexample = slotted } ]
 
+    /// The capability-seam laws at a DOMAIN'S seam (Phase 246). `capabilityLaws` beside it builds
+    /// its own capabilities from the seed and certifies Core's `Registry.dispatch`; it cannot see a
+    /// domain's registry, body or host path, so a host that runs the body before the registry
+    /// refuses leaves it green. This form runs the domain's own `CapabilitySeamWitness` — every call
+    /// the witness's generator draws goes through the witness's `Dispatch` with its `Body`, counted —
+    /// and certifies:
+    ///
+    ///  - **three outcomes** — every dispatch settles (`Ok(Ready _)`), stays pending (`Ok Pending`)
+    ///    or is refused typed (`Error _`); `Ok(Failed _)` never escapes, and a `BodyFailed` carries the
+    ///    body's own failure and nothing else;
+    ///  - **a refusal precedes the body** — a typed refusal ran no body, and a settled, pending or
+    ///    body-failed dispatch ran it exactly once;
+    ///  - **the host is the registry's** — a call reaches the body iff its id is registered and
+    ///    `Capability.validateArgs` accepts its arguments, and a refused call carries the error the
+    ///    registry itself gives (`NoSuchCapability` naming the registered ids, or the validation
+    ///    error), so a host can neither add a refusal nor drop one.
+    ///
+    /// **Vacuity.** The guard counts settled, pending and refused-before-the-body dispatches over the
+    /// drawn calls; a generator that never reaches one of the three is starved, and the family says
+    /// so rather than reporting green. A thrown `Body` or `Dispatch` is a failure of the first law.
+    let capabilityLawsWith (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable outcomes = None
+        let mutable precedes = None
+        let mutable agreement = None
+        let mutable settled = 0
+        let mutable pending = 0
+        let mutable refused = 0
+
+        let known = Registry.enumerate w.Registry |> List.map (fun c -> c.Id)
+
+        for i in 0 .. iterations - 1 do
+            let (id, args), r' = w.GenCall rng
+            rng <- r'
+
+            let runs = ref 0
+            let answered = ref None
+
+            let counted (c: Capability) () =
+                runs.Value <- runs.Value + 1
+                let a = w.Body args c ()
+                answered.Value <- Some a
+                a
+
+            let outcome =
+                try
+                    Ok(w.Dispatch id args counted)
+                with ex ->
+                    Error ex.Message
+
+            match outcome with
+            | Error m ->
+                if outcomes.IsNone then
+                    outcomes <- Some(sprintf "seed=%d iter=%d: dispatching %s threw: %s" seed i id m)
+            | Ok o ->
+                // ---- three outcomes ----
+                (match o, answered.Value with
+                 | Ok(Failed m), _ ->
+                     if outcomes.IsNone then
+                         outcomes <- Some(sprintf "seed=%d iter=%d: Ok(Failed %s) escaped the seam for %s" seed i m id)
+                 | Error(BodyFailed m), Some(Failed fm) when m = fm -> ()
+                 | Error(BodyFailed m), a ->
+                     if outcomes.IsNone then
+                         outcomes <-
+                             Some(
+                                 sprintf "seed=%d iter=%d: BodyFailed %s for %s, but the body answered %A" seed i m id a
+                             )
+                 | _ -> ())
+
+                // ---- a refusal precedes the body ----
+                match o with
+                | Ok(Ready _)
+                | Ok Pending
+                | Error(BodyFailed _) ->
+                    (match o with
+                     | Ok(Ready _) -> settled <- settled + 1
+                     | Ok Pending -> pending <- pending + 1
+                     | _ -> ())
+
+                    if runs.Value <> 1 && precedes.IsNone then
+                        precedes <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A was dispatched and the body ran %d time(s)"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    runs.Value
+                            )
+                | Error e ->
+                    refused <- refused + 1
+
+                    if runs.Value <> 0 && precedes.IsNone then
+                        precedes <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A was refused (%A) after the body ran %d time(s)"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    e
+                                    runs.Value
+                            )
+                | Ok(Failed _) -> ()
+
+                // ---- the host is the registry's ----
+                let admitted =
+                    match Registry.tryFind id w.Registry with
+                    | None -> Error(NoSuchCapability(id, known))
+                    | Some c -> Capability.validateArgs c args
+
+                let expected =
+                    match admitted, answered.Value with
+                    | Error e, _ -> Some(Error e)
+                    | Ok(), Some(Ready v) -> Some(Ok(Ready v))
+                    | Ok(), Some Pending -> Some(Ok Pending)
+                    | Ok(), Some(Failed m) -> Some(Error(BodyFailed m))
+                    | Ok(), None -> None
+
+                match expected with
+                | Some e when e = o -> ()
+                | Some e ->
+                    if agreement.IsNone then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A — the registry answers %A, the host answered %A"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    e
+                                    o
+                            )
+                | None ->
+                    if agreement.IsNone then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A is admitted by the registry, and the host answered %A without running the body"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    o
+                            )
+
+        [ { Law =
+              "capability dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes"
+            Passed = outcomes.IsNone
+            Counterexample = outcomes }
+          { Law = "a refusal precedes the body at the domain's host (refused: no body; dispatched: exactly one)"
+            Passed = precedes.IsNone
+            Counterexample = precedes }
+          { Law =
+              "the domain's host agrees with its registry (reaches the body iff admitted; refuses with the registry's error)"
+            Passed = agreement.IsNone
+            Counterexample = agreement }
+          SampleAdequacy.reached
+              "Conformance.capabilityLawsWith"
+              "dispatch outcome"
+              seed
+              [ "settled", settled; "pending", pending; "refused", refused ] ]
+
     /// Certify the `Fuaran.Core.Query` data-acquisition seam (Phase 46): typed-param validation
     /// (in-type accepts; wrong-type + unknown reject; since Phase 226 the all-`Null` argument set,
     /// built from the declaration, is refused as `RequiredParamsNull` naming every required param,
@@ -2209,6 +2425,170 @@ module Conformance =
           { Law = "a resolver failure is a typed ExecutionFailed, never Ok(Failed _)"
             Passed = typedFailure.IsNone
             Counterexample = typedFailure } ]
+
+    /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsWith`'s three laws, over
+    /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`
+    /// with its `Resolver`, counted, and the family certifies that a dispatch has exactly three
+    /// outcomes (`Ok(Failed _)` never escapes, and an `ExecutionFailed` carries the resolver's own
+    /// failure), that **a refused dispatch runs no resolver** (and a dispatched one runs it exactly
+    /// once), and that the host agrees with the registry: a call reaches the resolver iff its id is
+    /// registered and `Query.validateParams` accepts its arguments, and a refused call carries the
+    /// registry's own error. `queryLaws` beside it certifies Core's seam at Core's fixtures and
+    /// cannot see any of this.
+    ///
+    /// **Vacuity.** Guarded on the three outcomes — settled, pending and refused before the
+    /// resolver — each of which the domain's generator must reach.
+    let queryLawsWith (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable outcomes = None
+        let mutable precedes = None
+        let mutable agreement = None
+        let mutable settled = 0
+        let mutable pending = 0
+        let mutable refused = 0
+
+        let known = QueryRegistry.enumerate w.Queries |> List.map (fun q -> q.Id)
+
+        for i in 0 .. iterations - 1 do
+            let (id, args), r' = w.GenQuery rng
+            rng <- r'
+
+            let runs = ref 0
+            let answered = ref None
+
+            let counted (q: Query) =
+                runs.Value <- runs.Value + 1
+                let a = w.Resolver args q
+                answered.Value <- Some a
+                a
+
+            let outcome =
+                try
+                    Ok(w.Dispatch id args counted)
+                with ex ->
+                    Error ex.Message
+
+            match outcome with
+            | Error m ->
+                if outcomes.IsNone then
+                    outcomes <- Some(sprintf "seed=%d iter=%d: dispatching %s threw: %s" seed i id m)
+            | Ok o ->
+                // ---- three outcomes ----
+                (match o, answered.Value with
+                 | Ok(Failed m), _ ->
+                     if outcomes.IsNone then
+                         outcomes <- Some(sprintf "seed=%d iter=%d: Ok(Failed %s) escaped the seam for %s" seed i m id)
+                 | Error(ExecutionFailed(m, _)), Some(Failed fm) when m = fm -> ()
+                 | Error(ExecutionFailed(m, _)), a ->
+                     if outcomes.IsNone then
+                         outcomes <-
+                             Some(
+                                 sprintf
+                                     "seed=%d iter=%d: ExecutionFailed %s for %s, but the resolver answered %A"
+                                     seed
+                                     i
+                                     m
+                                     id
+                                     a
+                             )
+                 | _ -> ())
+
+                // ---- a refused dispatch runs no resolver ----
+                match o with
+                | Ok(Ready _)
+                | Ok Pending
+                | Error(ExecutionFailed _) ->
+                    (match o with
+                     | Ok(Ready _) -> settled <- settled + 1
+                     | Ok Pending -> pending <- pending + 1
+                     | _ -> ())
+
+                    if runs.Value <> 1 && precedes.IsNone then
+                        precedes <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A was dispatched and the resolver ran %d time(s)"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    runs.Value
+                            )
+                | Error e ->
+                    refused <- refused + 1
+
+                    if runs.Value <> 0 && precedes.IsNone then
+                        precedes <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A was refused (%A) after the resolver ran %d time(s)"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    e
+                                    runs.Value
+                            )
+                | Ok(Failed _) -> ()
+
+                // ---- the host is the registry's ----
+                let admitted =
+                    match QueryRegistry.tryFind id w.Queries with
+                    | None -> Error(NoSuchQuery(id, known))
+                    | Some q -> Query.validateParams q args
+
+                let expected =
+                    match admitted, answered.Value with
+                    | Error e, _ -> Some(Error e)
+                    | Ok(), Some(Ready v) -> Some(Ok(Ready v))
+                    | Ok(), Some Pending -> Some(Ok Pending)
+                    | Ok(), Some(Failed m) -> Some(Error(ExecutionFailed(m, [])))
+                    | Ok(), None -> None
+
+                match expected with
+                | Some e when e = o -> ()
+                | Some e ->
+                    if agreement.IsNone then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A — the registry answers %A, the host answered %A"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    e
+                                    o
+                            )
+                | None ->
+                    if agreement.IsNone then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s %A is admitted by the registry, and the host answered %A without running the resolver"
+                                    seed
+                                    i
+                                    id
+                                    args
+                                    o
+                            )
+
+        [ { Law =
+              "query dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes"
+            Passed = outcomes.IsNone
+            Counterexample = outcomes }
+          { Law = "a refused dispatch runs no resolver at the domain's host (refused: none; dispatched: exactly one)"
+            Passed = precedes.IsNone
+            Counterexample = precedes }
+          { Law =
+              "the domain's host agrees with its query registry (reaches the resolver iff admitted; refuses with the registry's error)"
+            Passed = agreement.IsNone
+            Counterexample = agreement }
+          SampleAdequacy.reached
+              "Conformance.queryLawsWith"
+              "dispatch outcome"
+              seed
+              [ "settled", settled; "pending", pending; "refused", refused ] ]
 
     /// The composition sample (Phase 47) a domain supplies per draw to certify cross-witness
     /// `composeAcross`. `Outer` is an `'A`-function carrying TWO independent typed slots (`SlotA`,
@@ -3405,13 +3785,85 @@ module Conformance =
     // `Fuaran.Core.OpStream` `StreamWitness` (no core change — the witness-free data strand survives the
     // op-stream adoption).
 
-    /// The columnar op-algebra laws (Phase 31) with an **injectable `invert`** (Phase 181) — the teeth
-    /// seam, on `concurrencyLawsWith`'s pattern: a test injects the PRE-Phase-181 `invert` clause (the
-    /// one that answered `RemoveColumn col.Name` for an `InsertColumn` without reading the pre-state) and
-    /// watches the inverse-only-for-applicable law bite. Domains call `columnarOpLaws`, which pins this
-    /// to the shipped `ColumnOps.invert`.
-    let columnarOpLawsWith
+    // Phase 246 — the kit's own sample, lifted out of the family so the witness-taking form can run
+    // the same laws over a DOMAIN'S generator. `columnarOpLaws` still runs exactly this pair.
+
+    let private columnarKitTable: Table =
+        { Schema = [ "a", IntType; "b", IntType ]
+          Columns =
+            [ Column.create "a" IntType [ Int 1; Int 2; Int 3 ]
+              Column.create "b" IntType [ Int 4; Int 5; Int 6 ] ] }
+
+    // a (possibly-invalid) op generated against the current table state
+    let private columnarKitOp (t: Table) (r: ConfRng.T) : ColumnOp * ConfRng.T =
+        let rc = Table.rowCount t
+        let names = Table.columnNames t
+        let kind, r1 = ConfRng.intBelow 7 r
+
+        match kind with
+        | 0 ->
+            let v, r2 = ConfRng.intBelow 100 r1
+
+            if List.isEmpty names || rc = 0 then
+                InsertColumn(0, Column.create "a" IntType [ Int v; Int v; Int v ]), r2
+            else
+                let ci, r3 = ConfRng.intBelow (List.length names) r2
+                let row, r4 = ConfRng.intBelow rc r3
+                SetCell(List.item ci names, row, Int v), r4
+        | 1 ->
+            let v, r2 = ConfRng.intBelow 100 r1
+
+            if List.isEmpty names then
+                InsertColumn(0, Column.create "a" IntType []), r2
+            else
+                let ci, r3 = ConfRng.intBelow (List.length names) r2
+                let nm = List.item ci names
+                SetColumn(Column.create nm IntType (List.replicate rc (Int v))), r3
+        | 2 ->
+            let id, r2 = ConfRng.intBelow 1000 r1
+            let v, r3 = ConfRng.intBelow 100 r2
+            let len = if List.isEmpty names then 3 else rc
+
+            InsertColumn(List.length names, Column.create ("c" + string id) IntType (List.replicate len (Int v))), r3
+        | 3 ->
+            if List.isEmpty names then
+                InsertColumn(0, Column.create "a" IntType [ Int 0; Int 0; Int 0 ]), r1
+            else
+                let ci, r2 = ConfRng.intBelow (List.length names) r1
+                RemoveColumn(List.item ci names), r2
+        | 4 ->
+            let v, r2 = ConfRng.intBelow 100 r1
+            AppendRows([ names |> List.map (fun n -> n, Int v) ]), r2
+        | 5 ->
+            // Phase 181 — an insert the table MUST refuse as a duplicate. The four arms above draw
+            // ops the table usually accepts, so without this the inverse-only-for-applicable law
+            // below would be certified over a sample that never reaches the shape it is about.
+            let v, r2 = ConfRng.intBelow 100 r1
+
+            if List.isEmpty names then
+                InsertColumn(0, Column.create "a" IntType [ Int v; Int v; Int v ]), r2
+            else
+                let ci, r3 = ConfRng.intBelow (List.length names) r2
+                let nm = List.item ci names
+                InsertColumn(0, Column.create nm IntType (List.replicate rc (Int v))), r3
+        | _ ->
+            // Phase 181 — a `SetCell` the table MUST refuse on the VALUE. `invert`'s pre-181
+            // `SetCell` clause read the column and the row but never the value, so this is the
+            // second shape where a refused op had a live inverse.
+            if List.isEmpty names || rc = 0 then
+                AppendRows([]), r1
+            else
+                let ci, r2 = ConfRng.intBelow (List.length names) r1
+                let row, r3 = ConfRng.intBelow rc r2
+                SetCell(List.item ci names, row, Str "wrong"), r3
+
+    /// The shared body of `columnarOpLaws` and `columnarOpLawsWith`: the laws over a base table and
+    /// a table-reading op source. `family` names the guard's owner.
+    let private columnarOpRun
+        (family: string)
         (invertUnderTest: ColumnOp -> Table -> Result<ColumnOp, ColumnRejection>)
+        (baseTable: Table)
+        (genColOp: Table -> ConfRng.T -> ColumnOp * ConfRng.T)
         (seed: int)
         (iterations: int)
         : LawResult list =
@@ -3426,76 +3878,6 @@ module Conformance =
 
         let hashFn = OpStream.defaultHash
         let sw = ColumnOps.streamWitness
-
-        let baseTable: Table =
-            { Schema = [ "a", IntType; "b", IntType ]
-              Columns =
-                [ Column.create "a" IntType [ Int 1; Int 2; Int 3 ]
-                  Column.create "b" IntType [ Int 4; Int 5; Int 6 ] ] }
-
-        // a (possibly-invalid) op generated against the current table state
-        let genColOp (t: Table) (r: ConfRng.T) : ColumnOp * ConfRng.T =
-            let rc = Table.rowCount t
-            let names = Table.columnNames t
-            let kind, r1 = ConfRng.intBelow 7 r
-
-            match kind with
-            | 0 ->
-                let v, r2 = ConfRng.intBelow 100 r1
-
-                if List.isEmpty names || rc = 0 then
-                    InsertColumn(0, Column.create "a" IntType [ Int v; Int v; Int v ]), r2
-                else
-                    let ci, r3 = ConfRng.intBelow (List.length names) r2
-                    let row, r4 = ConfRng.intBelow rc r3
-                    SetCell(List.item ci names, row, Int v), r4
-            | 1 ->
-                let v, r2 = ConfRng.intBelow 100 r1
-
-                if List.isEmpty names then
-                    InsertColumn(0, Column.create "a" IntType []), r2
-                else
-                    let ci, r3 = ConfRng.intBelow (List.length names) r2
-                    let nm = List.item ci names
-                    SetColumn(Column.create nm IntType (List.replicate rc (Int v))), r3
-            | 2 ->
-                let id, r2 = ConfRng.intBelow 1000 r1
-                let v, r3 = ConfRng.intBelow 100 r2
-                let len = if List.isEmpty names then 3 else rc
-
-                InsertColumn(List.length names, Column.create ("c" + string id) IntType (List.replicate len (Int v))),
-                r3
-            | 3 ->
-                if List.isEmpty names then
-                    InsertColumn(0, Column.create "a" IntType [ Int 0; Int 0; Int 0 ]), r1
-                else
-                    let ci, r2 = ConfRng.intBelow (List.length names) r1
-                    RemoveColumn(List.item ci names), r2
-            | 4 ->
-                let v, r2 = ConfRng.intBelow 100 r1
-                AppendRows([ names |> List.map (fun n -> n, Int v) ]), r2
-            | 5 ->
-                // Phase 181 — an insert the table MUST refuse as a duplicate. The four arms above draw
-                // ops the table usually accepts, so without this the inverse-only-for-applicable law
-                // below would be certified over a sample that never reaches the shape it is about.
-                let v, r2 = ConfRng.intBelow 100 r1
-
-                if List.isEmpty names then
-                    InsertColumn(0, Column.create "a" IntType [ Int v; Int v; Int v ]), r2
-                else
-                    let ci, r3 = ConfRng.intBelow (List.length names) r2
-                    let nm = List.item ci names
-                    InsertColumn(0, Column.create nm IntType (List.replicate rc (Int v))), r3
-            | _ ->
-                // Phase 181 — a `SetCell` the table MUST refuse on the VALUE. `invert`'s pre-181
-                // `SetCell` clause read the column and the row but never the value, so this is the
-                // second shape where a refused op had a live inverse.
-                if List.isEmpty names || rc = 0 then
-                    AppendRows([]), r1
-                else
-                    let ci, r2 = ConfRng.intBelow (List.length names) r1
-                    let row, r3 = ConfRng.intBelow rc r2
-                    SetCell(List.item ci names, row, Str "wrong"), r3
 
         // The four ops an inverse can exist for — the two that never have one are skipped by the
         // coverage count below, since a law about refused ops learns nothing from them.
@@ -3620,10 +4002,56 @@ module Conformance =
           // The law above is about REFUSED ops, so a run that refused no invertible op certifies
           // nothing by it — and would report a hollow green. Phase 121's guard says so instead.
           SampleAdequacy.reached
-              "columnarOpLaws"
+              family
               "invert's refusal population"
               seed
               [ "refused invertible op", refusedStructural ] ]
+
+    /// The kit's reference `StreamGen<ColumnOp, Table>` (Phase 246): the fixture table
+    /// `columnarOpLaws` starts from, and ops drawn WITHOUT reading the current table — so it is the
+    /// shape a domain hands `columnarOpLawsWith`, and it reaches every population those laws read
+    /// (accepted edits of every kind, a duplicate insert and a mistyped cell the table refuses). It
+    /// is not `columnarOpLaws`' own sample: that one reads the evolving table, which a `StreamGen`
+    /// cannot.
+    let columnarOpStreamGen: StreamGen<ColumnOp, Table> =
+        { State0 = columnarKitTable
+          Op =
+            fun r ->
+                let names = [ "a"; "b"; "c0" ]
+                let kind, r1 = ConfRng.intBelow 7 r
+                let nm, r2 = ConfRng.choose names r1
+                let v, r3 = ConfRng.intBelow 100 r2
+                let row, r4 = ConfRng.intBelow 4 r3
+
+                match kind with
+                | 0 -> SetCell(nm, row, Int v), r4
+                | 1 -> SetColumn(Column.create nm IntType (List.replicate 3 (Int v))), r4
+                | 2 ->
+                    InsertColumn(row % 3, Column.create ("c" + string (v % 3)) IntType (List.replicate 3 (Int v))), r4
+                | 3 -> RemoveColumn nm, r4
+                | 4 -> AppendRows [ [ "a", Int v; "b", Int v ] ], r4
+                | 5 -> InsertColumn(0, Column.create nm IntType (List.replicate 3 (Int v))), r4
+                | _ -> SetCell(nm, row % 3, Str "wrong"), r4 }
+
+    /// The columnar op-algebra laws at a DOMAIN'S generator (Phase 246), with the **injectable
+    /// `invert`** Phase 181 gave it — the `concurrencyLawsWith` shape: the domain's witness and the
+    /// teeth seam in one entry point. It runs `columnarOpLaws`' laws with `gen.State0` as the base
+    /// table and `gen.Op` as the op source: apply totality, `canApply ≡ apply`, `apply ∘ invert = id`,
+    /// an inverse only for an applicable op, and the table-edit stream's `verifyChain` and replay.
+    /// A domain passes `ColumnOps.invert`; a test hands in a defective `invert` and watches the
+    /// inverse-only-for-applicable law bite.
+    ///
+    /// **Vacuity.** Guarded on the refused invertible ops the generator draws, as `columnarOpLaws` is.
+    ///
+    /// **Changed in `0.32.0`:** it took `invertUnderTest seed iterations` and ran the kit's fixture
+    /// sample. A caller that wants the kit's sample passes `Conformance.columnarOpStreamGen`.
+    let columnarOpLawsWith
+        (invertUnderTest: ColumnOp -> Table -> Result<ColumnOp, ColumnRejection>)
+        (gen: StreamGen<ColumnOp, Table>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        columnarOpRun "Conformance.columnarOpLawsWith" invertUnderTest gen.State0 (fun _ r -> gen.Op r) seed iterations
 
     /// The columnar op-algebra laws (Phase 31). Self-contained — over a seed-replayable sample it evolves
     /// an all-int reference `Table` by random ops and certifies: **apply totality** (never throws —
@@ -3634,7 +4062,7 @@ module Conformance =
     /// hollow green); and that the table-edit stream built via `OpStream.append` over the columnar
     /// `StreamWitness` **verifies** and **replays** back to the live state from the base table.
     let columnarOpLaws (seed: int) (iterations: int) : LawResult list =
-        columnarOpLawsWith ColumnOps.invert seed iterations
+        columnarOpRun "columnarOpLaws" ColumnOps.invert columnarKitTable columnarKitOp seed iterations
 
     // ---- columnar validator (Phase 37) ----
     // The teeth on the `ColumnValidator` surface: stock rules over a `Table` emit located, severity-
@@ -3867,6 +4295,76 @@ module Conformance =
           { Law = "a columnar op's changeOf drives evalFrom equivalently (edit-stream incremental re-eval)"
             Passed = opDriven.IsNone
             Counterexample = opDriven } ]
+
+    /// The incremental-equivalence law at a DOMAIN'S pipelines and tables (Phase 246).
+    /// `incrementalLaws` beside it draws the kit's own `(a, b, c)` tables and six fixed pipelines;
+    /// this form runs the domain's: each iteration starts from `gen.State0` and draws up to seven ops
+    /// from `gen.Op`, and for every op the table ACCEPTS it evaluates one of the domain's `pipelines`
+    /// over the table before the edit and certifies that
+    /// `DataFrame.evalFrom prior (ColumnOps.changeOf op) pipeline after` equals
+    /// `DataFrame.evalPipeline pipeline after` — the edit-stream incremental path is the full
+    /// evaluation, at the domain's own shapes. An op the table refuses moves nothing and is skipped,
+    /// and so is a pipeline that does not evaluate over the table before the edit (there is no prior
+    /// to reuse).
+    ///
+    /// **Vacuity.** `evalFrom` can only differ from a full evaluation on a VALUE edit — every other
+    /// change it answers by evaluating in full — so the guard counts accepted value edits
+    /// (`SetCell` / `SetColumn`) that reached the comparison. A domain whose generator never edits a
+    /// value certifies nothing here, and the family says so. An empty `pipelines` list is starved the
+    /// same way.
+    let incrementalLawsWith
+        (pipelines: Transform list list)
+        (gen: StreamGen<ColumnOp, Table>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable equivalence = None
+        let mutable valueEdits = 0
+
+        for i in 0 .. iterations - 1 do
+            let mutable state = gen.State0
+
+            for _ in 0..6 do
+                let op, r1 = gen.Op rng
+                rng <- r1
+
+                match ColumnOps.apply op state, pipelines with
+                | Ok after, _ :: _ ->
+                    let pipeline, r2 = ConfRng.choose pipelines rng
+                    rng <- r2
+
+                    (match DataFrame.evalPipeline pipeline state with
+                     | Ok prior ->
+                         let change = ColumnOps.changeOf op
+
+                         (match change with
+                          | ColumnValuesChanged _ -> valueEdits <- valueEdits + 1
+                          | _ -> ())
+
+                         let viaIncr = DataFrame.evalFrom prior change pipeline after
+                         let viaFull = DataFrame.evalPipeline pipeline after
+
+                         if viaIncr <> viaFull && equivalence.IsNone then
+                             equivalence <-
+                                 Some(
+                                     sprintf
+                                         "seed=%d iter=%d: evalFrom ≠ evalPipeline after %A (pipeline=%A)"
+                                         seed
+                                         i
+                                         op
+                                         pipeline
+                                 )
+                     | Error _ -> ())
+
+                    state <- after
+                | Ok after, [] -> state <- after
+                | Error _, _ -> ()
+
+        [ { Law = "at the domain's pipelines, evalFrom over an edit's changeOf is byte-identical to a full evalPipeline"
+            Passed = equivalence.IsNone
+            Counterexample = equivalence }
+          SampleAdequacy.reached "Conformance.incrementalLawsWith" "value edit" seed [ "value edit", valueEdits ] ]
 
     /// The `ColExpr.Param` + evaluation-environment laws (Phase 77) — the teeth on the parameterised
     /// `DataFrame` evaluator, the substrate a UI tier binds a filter/state value into. Self-contained
@@ -4419,6 +4917,132 @@ module Conformance =
               { Law = "a pipeline node replays byte-identically via the Phase 27 capture seam"
                 Passed = replay.IsNone
                 Counterexample = replay } ]
+
+    /// The capability-pipeline laws at a DOMAIN'S pipelines and registry (Phase 246).
+    /// `capabilityPipelineLaws` beside it builds a fixed two-node pipeline over a fixed registry and
+    /// certifies Core's type-checker and codec there; this form runs the domain's own
+    /// `CapabilityPipelineWitness` and certifies, for every pipeline its generator draws:
+    ///
+    ///  - **composition** — `CapabilityPipeline.typeCheck` accepts it against the domain's registry
+    ///    (a pipeline the domain builds that does not compose at its own registry is the defect);
+    ///  - **wire round-trip** — `decode (encode p) = Ok p`;
+    ///  - **node keys** — no two of its nodes share a `nodeInvocationKey`, so the per-node capture
+    ///    journal the Phase-27 seam keeps cannot hand one node another's recorded value;
+    ///  - **default deny, built** — for every `Invoke` node, the pipeline with that node naming a
+    ///    capability the registry does not hold is refused `PipelineNoSuchCapability`, and the
+    ///    pipeline with that node binding an argument no hole declares is refused
+    ///    `PipelineUnknownArg`. Both are BUILT from the drawn pipeline, never drawn.
+    ///
+    /// `deferredLaws` has no witness-taking form and needs none: it is over the `Deferred` envelope
+    /// alone, which no domain supplies.
+    ///
+    /// **Vacuity.** The default-deny arms are built per `Invoke` node, so a generator whose pipelines
+    /// carry none builds nothing; the guard counts the `Invoke` nodes reached.
+    let capabilityPipelineLawsWith (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable composes = None
+        let mutable roundtrip = None
+        let mutable keys = None
+        let mutable deny = None
+        let mutable invokeNodes = 0
+
+        let absentCapability =
+            let rec fresh (s: string) =
+                if Option.isSome (Registry.tryFind s w.PipelineRegistry) then
+                    fresh (s + "_")
+                else
+                    s
+
+            fresh "__no_such_capability__"
+
+        let strayArg = "__no_such_hole__"
+
+        for i in 0 .. iterations - 1 do
+            let p, r' = w.GenPipeline rng
+            rng <- r'
+
+            (match CapabilityPipeline.decode (CapabilityPipeline.encode p) with
+             | Ok p2 when p2 = p -> ()
+             | other ->
+                 if roundtrip.IsNone then
+                     roundtrip <-
+                         Some(sprintf "seed=%d iter=%d: the pipeline did not round-trip the wire (%A)" seed i other))
+
+            let nodeKeys = p.Nodes |> List.map CapabilityPipeline.nodeInvocationKey
+
+            if List.length (List.distinct nodeKeys) <> List.length nodeKeys && keys.IsNone then
+                keys <- Some(sprintf "seed=%d iter=%d: two nodes share an invocation key: %A" seed i nodeKeys)
+
+            match CapabilityPipeline.typeCheck w.PipelineRegistry p with
+            | Error e ->
+                if composes.IsNone then
+                    composes <-
+                        Some(sprintf "seed=%d iter=%d: the pipeline does not compose at its registry: %A" seed i e)
+            | Ok() ->
+                let replaceAt (k: int) (n: PipelineNode) =
+                    { Nodes = p.Nodes |> List.mapi (fun j m -> if j = k then n else m) }
+
+                p.Nodes
+                |> List.iteri (fun k n ->
+                    match n with
+                    | Source _ -> ()
+                    | Invoke(nid, capId, outT, args) ->
+                        invokeNodes <- invokeNodes + 1
+
+                        match
+                            CapabilityPipeline.typeCheck
+                                w.PipelineRegistry
+                                (replaceAt k (Invoke(nid, absentCapability, outT, args)))
+                        with
+                        | Error(PipelineNoSuchCapability(c, _)) when c = absentCapability -> ()
+                        | other ->
+                            if deny.IsNone then
+                                deny <-
+                                    Some(
+                                        sprintf
+                                            "seed=%d iter=%d: node %s naming an unregistered capability was not refused: %A"
+                                            seed
+                                            i
+                                            nid
+                                            other
+                                    )
+
+                        match
+                            CapabilityPipeline.typeCheck
+                                w.PipelineRegistry
+                                (replaceAt k (Invoke(nid, capId, outT, args @ [ strayArg, Literal "0" ])))
+                        with
+                        | Error(PipelineUnknownArg(m, a)) when m = nid && a = strayArg -> ()
+                        | other ->
+                            if deny.IsNone then
+                                deny <-
+                                    Some(
+                                        sprintf
+                                            "seed=%d iter=%d: node %s binding an undeclared argument was not refused: %A"
+                                            seed
+                                            i
+                                            nid
+                                            other
+                                    ))
+
+        [ { Law = "every pipeline the domain builds type-checks against its own registry"
+            Passed = composes.IsNone
+            Counterexample = composes }
+          { Law = "a domain pipeline round-trips the wire"
+            Passed = roundtrip.IsNone
+            Counterexample = roundtrip }
+          { Law = "no two nodes of a domain pipeline share an invocation key"
+            Passed = keys.IsNone
+            Counterexample = keys }
+          { Law =
+              "default deny at the domain's pipelines (an unregistered capability and an undeclared argument are each refused by name)"
+            Passed = deny.IsNone
+            Counterexample = deny }
+          SampleAdequacy.reached
+              "Conformance.capabilityPipelineLawsWith"
+              "built default-deny arm"
+              seed
+              [ "invoke node", invokeNodes ] ]
 
     // ---- incremental capability-pipeline evaluation (Phase 62) ----
     // The teeth on `CapabilityPipeline.evalFrom`: the incremental path re-invokes only the
@@ -6192,10 +6816,20 @@ module Conformance =
     ///    proposal id and a double-decide are named failures; and a reducer rejection renders
     ///    non-empty agent-readable guidance through `Explain`.
     ///
-    /// `'State` and `'Op` need equality. The decision axis is driven by the kit (it substitutes its
-    /// own `Decide` per draw to exercise all three outcomes), so the *plumbing* is certified for any
-    /// policy; the domain's own `Decide` is sampled for totality alongside.
-    let aiSurfaceLaws
+    /// `'State` and `'Op` need equality.
+    ///
+    /// **The decision is the DOMAIN'S (Phase 246).** Every drawn op is submitted as the actor
+    /// `"author"` through the domain's own `Decide`, and the proposal-soundness arm that runs is the
+    /// one that policy chose. Until `0.32.0` the kit substituted its own `Decide` per draw, so the
+    /// plumbing was certified for any policy and the domain's policy was sampled only for totality:
+    /// a policy that allowed every write passed. Now the guard also counts the decisions the domain's
+    /// policy reached — allowed, parked for approval, denied — and a policy that never parks or never
+    /// denies anything the generator draws is starved, RED rather than green: the gate was never
+    /// exercised at this domain. `aiSurfaceLawsUnderKitPolicy` is the old behaviour, named for what it
+    /// does; it certifies the plumbing and says nothing about the domain's policy.
+    let private aiSurfaceRun
+        (family: string)
+        (kitPolicy: bool)
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (state0: 'State)
@@ -6215,6 +6849,12 @@ module Conformance =
         // rejection, which a generator that draws only applicable ops never reaches.
         let mutable accepted = 0
         let mutable refused = 0
+        // Phase 246 — the decisions the policy under test reached. Under the domain's policy these are
+        // the gate's populations: an arm no drawn op reaches is an arm the family never tested.
+        let mutable allowed = 0
+        let mutable parked = 0
+        let mutable denied = 0
+        let author = "author"
 
         // ---- read-tool discipline (state-fixed — checked once, not per draw) ----
 
@@ -6321,8 +6961,8 @@ module Conformance =
             // the domain's own Decide + Apply are total (sampled, never throw).
             let direct =
                 try
-                    w.Decide "conformance" op |> ignore
-                    Some(w.Apply op state0)
+                    let domainDecision = w.Decide (if kitPolicy then "conformance" else author) op
+                    Some(w.Apply op state0, domainDecision)
                 with ex ->
                     if proposals.IsNone then
                         proposals <- Some(sprintf "seed=%d iter=%d: Decide/Apply threw: %s" seed i ex.Message)
@@ -6331,7 +6971,7 @@ module Conformance =
 
             match direct with
             | None -> ()
-            | Some direct ->
+            | Some(direct, domainDecision) ->
                 // a reducer rejection renders non-empty guidance through Explain.
                 (match direct with
                  | Error rej ->
@@ -6341,15 +6981,31 @@ module Conformance =
                          proposals <- Some(sprintf "seed=%d iter=%d: explainRejection rendered empty guidance" seed i)
                  | Ok _ -> accepted <- accepted + 1)
 
-                let dRoll, r5 = ConfRng.intBelow 3 rng
-                rng <- r5
+                // the decision under test: the kit's roll, or the domain's own policy (Phase 246).
+                let decision =
+                    if kitPolicy then
+                        let dRoll, r5 = ConfRng.intBelow 3 rng
+                        rng <- r5
 
-                match dRoll with
-                | 0 ->
+                        match dRoll with
+                        | 0 -> Allow
+                        | 1 -> NeedsApproval
+                        | _ -> Deny "policy says no"
+                    else
+                        domainDecision
+
+                let wUnder =
+                    if kitPolicy then
+                        wDriven decision
+                    else
+                        { wDriven decision with
+                            Decide = w.Decide }
+
+                match decision with
+                | Allow ->
+                    allowed <- allowed + 1
                     // Allow: submit applies exactly what the reducer applies.
-                    match
-                        Proposals.submit (wDriven Allow) "author" "t0" None [ op ] Proposals.Queue.empty state0, direct
-                    with
+                    match Proposals.submit wUnder author "t0" None [ op ] Proposals.Queue.empty state0, direct with
                     | Proposals.SubmitApplied s', Ok sd ->
                         if s' <> sd && proposals.IsNone then
                             proposals <- Some(sprintf "seed=%d iter=%d: an allowed submit ≠ direct apply" seed i)
@@ -6364,11 +7020,12 @@ module Conformance =
                                         i
                                         other
                                 )
-                | 1 ->
+                | NeedsApproval ->
+                    parked <- parked + 1
                     // NeedsApproval: parks without applying; approval applies (or stays pending).
-                    let wi = wDriven NeedsApproval
+                    let wi = wUnder
 
-                    match Proposals.submit wi "author" "t0" (Some "intent") [ op ] Proposals.Queue.empty state0 with
+                    match Proposals.submit wi author "t0" (Some "intent") [ op ] Proposals.Queue.empty state0 with
                     | Proposals.SubmitProposed(q, id) ->
                         if applyCalls.Value <> 0 && proposals.IsNone then
                             proposals <- Some(sprintf "seed=%d iter=%d: parking a proposal invoked the reducer" seed i)
@@ -6422,18 +7079,10 @@ module Conformance =
                         if proposals.IsNone then
                             proposals <-
                                 Some(sprintf "seed=%d iter=%d: NeedsApproval did not park the submit (%A)" seed i other)
-                | _ ->
+                | Deny _ ->
+                    denied <- denied + 1
                     // Deny: refused, and the reducer is never invoked.
-                    match
-                        Proposals.submit
-                            (wDriven (Deny "policy says no"))
-                            "author"
-                            "t0"
-                            None
-                            [ op ]
-                            Proposals.Queue.empty
-                            state0
-                    with
+                    match Proposals.submit wUnder author "t0" None [ op ] Proposals.Queue.empty state0 with
                     | Proposals.SubmitDenied _ ->
                         if applyCalls.Value <> 0 && proposals.IsNone then
                             proposals <- Some(sprintf "seed=%d iter=%d: a denied submit invoked the reducer" seed i)
@@ -6463,14 +7112,56 @@ module Conformance =
           { Law = "pattern resolution is deterministic (an anchor-built intent resolves, identically every time)"
             Passed = patterns.IsNone
             Counterexample = patterns }
-          { Law = "proposal soundness (approved applies via the domain reducer; denied/rejected never mutates)"
+          { Law =
+              if kitPolicy then
+                  "proposal soundness (approved applies via the domain reducer; denied/rejected never mutates)"
+              else
+                  "proposal soundness under the domain's own policy (approved applies via the domain reducer; denied/rejected never mutates)"
             Passed = proposals.IsNone
             Counterexample = proposals }
           // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A generator that
           // draws no op the reducer rejects leaves the guidance law and the rejected-parity arms
           // certified by nothing; one that draws nothing applicable leaves the applied-parity arms so.
-          SampleAdequacy.reached "Conformance.aiSurfaceLaws" "accepted op" seed [ "accepted", accepted ]
-          SampleAdequacy.reached "Conformance.aiSurfaceLaws" "rejected op" seed [ "refused", refused ] ]
+          SampleAdequacy.reached family "accepted op" seed [ "accepted", accepted ]
+          SampleAdequacy.reached family "rejected op" seed [ "refused", refused ] ]
+        // Phase 246 — under the domain's policy, the decisions it reached. The kit's roll reaches all
+        // three by construction, so the kit-policy form carries no such line.
+        @ (if kitPolicy then
+               []
+           else
+               [ SampleAdequacy.reached
+                     family
+                     "policy decision"
+                     seed
+                     [ "allowed", allowed; "parked", parked; "denied", denied ] ])
+
+    /// The AI-surface laws (Phase 59) at the domain's OWN policy — see `aiSurfaceRun` above for the
+    /// four laws. Since `0.32.0` (Phase 246) the decision each drawn op meets is the witness's
+    /// `Decide`, and the family is starved unless that policy allows, parks and denies something the
+    /// generator draws. `aiSurfaceLawsUnderKitPolicy` is the pre-`0.32.0` behaviour.
+    let aiSurfaceLaws
+        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
+        (genOp: ConfRng.T -> 'Op * ConfRng.T)
+        (state0: 'State)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        aiSurfaceRun "Conformance.aiSurfaceLaws" false w genOp state0 seed iterations
+
+    /// The AI-surface laws with the KIT'S policy swapped in for the domain's (Phase 246 names it;
+    /// it is `aiSurfaceLaws` as it stood before `0.32.0`). Per draw the kit rolls `Allow`,
+    /// `NeedsApproval` or `Deny` itself, so every proposal arm is exercised for ANY policy — which
+    /// certifies the proposal plumbing and says nothing about the domain's `Decide`, sampled here
+    /// only for totality. A policy that allows every write passes it. Run it beside `aiSurfaceLaws`
+    /// when the plumbing is the question, never instead of it.
+    let aiSurfaceLawsUnderKitPolicy
+        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
+        (genOp: ConfRng.T -> 'Op * ConfRng.T)
+        (state0: 'State)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        aiSurfaceRun "Conformance.aiSurfaceLawsUnderKitPolicy" true w genOp state0 seed iterations
 
     // ---- integrity & provenance conformance (Wave 17) ----
     // Rebuild a chain's hashes from its `(seq, actor, op)` pre-images under the canonical binding —

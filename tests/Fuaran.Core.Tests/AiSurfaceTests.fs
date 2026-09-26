@@ -84,6 +84,19 @@ let witness: AiSurfaceWitness<NoteState, NoteOp, NoteRej> =
 
 let state0 = { Notes = [ "n1", "hello" ] }
 
+/// Phase 246 — the reference domain's WRITE POLICY. `witness` above allows everything, which is the
+/// planted defect `aiSurfaceLaws` now turns red on; this is the policy the family is run at. A
+/// removal needs approval, and an add is allowed or denied by its id's last digit, so each of the
+/// three decisions meets the ops `genNoteOp` draws.
+let notePolicy (_: string) (op: NoteOp) : PolicyDecision =
+    match op with
+    | RemoveNote _ -> NeedsApproval
+    | AddNote(id, _) when id.Length > 0 && int id.[id.Length - 1] % 2 = 1 -> Deny "odd note ids are reserved"
+    | AddNote _ -> Allow
+
+/// The reference witness with its policy.
+let policedWitness = { witness with Decide = notePolicy }
+
 /// A shape-only empty witness — the GP6 boundary probe: the core must supply
 /// zero read tools, zero op kinds, zero patterns, and no guidance content.
 let private emptyWitness: AiSurfaceWitness<unit, string, string> =
@@ -302,13 +315,42 @@ let tests =
                   "m"
                   "the core invents no alternatives — the domain enumerates them"
 
-          testCase "aiSurfaceLaws certify the reference witness green (seed-replayable)"
+          testCase "aiSurfaceLaws certify the reference witness green at its own policy (seed-replayable)"
           <| fun _ ->
-              let results = Conformance.aiSurfaceLaws witness genNoteOp state0 1234 200
+              let results = Conformance.aiSurfaceLaws policedWitness genNoteOp state0 1234 200
 
-              Expect.equal (List.length results) 6 "four subject laws, and the two Phase 223 guards"
+              Expect.equal
+                  (List.length results)
+                  7
+                  "four subject laws, the two Phase 223 guards, and the Phase 246 policy-decision guard"
 
               for r in results do
+                  Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+
+          testCase "Phase 246 — an allow-all policy turns aiSurfaceLaws RED; the kit-policy variant stays green"
+          <| fun _ ->
+              // The planted defect downstream consumers measured: a policy that allows every write.
+              // `witness` IS that policy. Run at the domain's own Decide, the park and deny arms are
+              // never reached and the family says so; run with the kit's policy swapped in, every arm
+              // is exercised by the kit's own roll and the family is green — about the plumbing, and
+              // saying nothing about the policy, which is why that form is named for what it does.
+              let domain = Conformance.aiSurfaceLaws witness genNoteOp state0 1234 200
+
+              Expect.equal
+                  (domain |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLaws"
+                    + "the sample reached every policy decision the laws distinguish" ]
+                  "exactly the policy-decision guard is red"
+
+              match domain |> List.tryPick (fun r -> r.Counterexample) with
+              | Some c -> Expect.stringContains c "never reached parked, denied" "and it names the unreached decisions"
+              | None -> failtest "a red guard carries its counterexample"
+
+              let kit = Conformance.aiSurfaceLawsUnderKitPolicy witness genNoteOp state0 1234 200
+
+              Expect.equal (List.length kit) 6 "four subject laws and the two Phase 223 guards"
+
+              for r in kit do
                   Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
 
           testCase
@@ -326,7 +368,8 @@ let tests =
                   else
                       RemoveNote "n1", r1
 
-              let results = Conformance.aiSurfaceLaws witness applicableOnly state0 1234 200
+              let results =
+                  Conformance.aiSurfaceLaws policedWitness applicableOnly state0 1234 200
 
               Expect.equal
                   (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))

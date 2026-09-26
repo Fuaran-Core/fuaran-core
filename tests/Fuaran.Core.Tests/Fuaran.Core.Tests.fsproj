@@ -220,6 +220,10 @@
          kept, so the roster's `cases` column is a run rather than a declaration. BEFORE
          ConformanceFamiliesTests.fs, which renders the generated artefacts from it, and after
          every test module whose witnesses and fixtures it reuses rather than duplicates. -->
+    <!-- Phase 246 — the witness-taking families, their planted defects, and the reference seam
+         witnesses the census below runs them over. BEFORE ConformanceVacuityTests.fs, which reuses
+         those witnesses. -->
+    <Compile Include="WitnessTakingFamiliesTests.fs" />
     <Compile Include="ConformanceVacuityTests.fs" />
     <Compile Include="ConformanceFamiliesTests.fs" />
     <!-- Phase 185, retargeted by Phase 217 — the Fable surface's membership derived rather than

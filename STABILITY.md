@@ -2348,7 +2348,8 @@ measurement, the compat promise, and the migration route if the flip is ever wan
 consumer's contract and nothing rides it. Phase 250 adds a case to the closed `SkeletonOp` union,
 which the surface gate classes `union-widening`, and a breaking change opens a minor slot rather
 than a patch one. Every other member this phase adds is classed `additive` by the gate and rides
-the slot beside it. `<Version>` and the laws corpus here (`conformance/laws/*.json`) were re-stamped
+the slot beside it. Phase 246 adds two more breaking moves, a `retype` of `columnarOpLawsWith` and
+a verdict change on `aiSurfaceLaws`, and both ride the slot for the same reason. `<Version>` and the laws corpus here (`conformance/laws/*.json`) were re-stamped
 in the same commit as the version move, per `docs/conformance-corpus.md`; the byte copy in the
 shared wire-format corpus is re-synced separately.
 
@@ -2480,6 +2481,104 @@ its new rows, a column edit is the rows whose cell moved, and a schema or whole-
 apply. On the consumer's sheet, a one-cell edit of a 1,000-row source re-evaluated one row of the
 row-local node. `changeOf`'s column invalidation re-evaluated every row of it. The docs'
 "What it costs on the clock" section carries the measured numbers and where full evaluation wins.
+
+### Witness-taking law families — the seam, AI-surface and columnar families certify the domain (Phase 246)
+
+The source is downstream consumers' measurements (Phase 246). The four seam families took a seed
+and certified this repository's own fixtures. A host that ran the body before the registry refused
+passed every one of them while a domain-side law went red. `aiSurfaceLaws` took the domain's witness
+and swapped in the kit's `Decide`, so a policy that allowed every write passed it. The columnar pair
+ran on the kit's fixtures with an empty witness list. Each fixture-bound family stays as it is, for
+the kit's own census. Each gains a form that takes the domain. The suite reproduces both planted
+defects (`WitnessTakingFamiliesTests`, `AiSurfaceTests`). Each witness-taking family goes RED on its
+defect, and the fixture-bound family beside it stays green on the same domain.
+
+#### `capabilityLawsWith`, `queryLawsWith`, `capabilityPipelineLawsWith` and their witnesses — additive
+
+Three composing witness records, per "compose, never grow" above:
+
+- `CapabilitySeamWitness<'v>`: `Registry`, `Body` (handed the call's arguments, then the
+  capability), `Dispatch` (the host's path; `Registry.dispatch registry` for a host that delegates
+  to Core) and `GenCall`.
+- `QuerySeamWitness`: `Queries`, `Resolver`, `Dispatch` (`QueryRegistry.dispatch queries`) and
+  `GenQuery`.
+- `CapabilityPipelineWitness`: `PipelineRegistry` and `GenPipeline`.
+
+`capabilityLawsWith` and `queryLawsWith` send every drawn call through the witness's `Dispatch`
+with its body counted. Three laws hold there. **Three outcomes**: `Ok(Failed _)` never escapes, and
+`BodyFailed` / `ExecutionFailed` carries the body's own failure. **A refusal precedes the body**: a
+typed refusal ran no body, and a dispatched call ran it exactly once. **The host is the registry's**:
+a call reaches the body iff it is registered and its arguments validate, and a refused call carries
+the registry's own error. Each is `Guarded [ "settled"; "pending"; "refused" ]`, so a generator that
+misses one of the three outcomes is starved.
+
+`capabilityPipelineLawsWith` checks every drawn pipeline. It must type-check against the domain's
+registry, round-trip the wire, and give each node its own invocation key. Its default-deny arms are
+BUILT per `Invoke` node: that node naming an unregistered capability, and that node binding an
+undeclared argument, must each be refused by name. It is `Guarded [ "invoke node" ]`. `deferredLaws`
+has no witness-taking form, because it is over the envelope alone.
+
+#### `aiSurfaceLaws` runs the domain's `Decide` — a VERDICT change, BREAKING whatever the surface gate says
+
+**What changed.** Each drawn op is submitted as the actor `"author"` through the witness's own
+`Decide`. The proposal arm that runs is the one that policy chose. The guard gains a dimension,
+`Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ]`. A policy that never parks or
+never denies anything the generator draws is starved, and RED. An allow-all policy is exactly that.
+The family's signature did not move, and the surface gate prints nothing for it. By the reading
+`0.31.0` applied to `certify` (Phase 220), a verdict change on a certifying family is breaking whatever
+its member's surface class. It rides this draft because the draft is already breaking (`UpdateNode`
+above).
+
+**The escape hatch: `aiSurfaceLawsUnderKitPolicy`** (additive). This is `aiSurfaceLaws` as it stood
+at `0.31.0`: the kit rolls `Allow`, `NeedsApproval` or `Deny` per draw. It certifies the proposal
+plumbing for any policy and says nothing about the domain's. It is named for what it does, and it is
+never the default.
+
+**What adopting it costs.** A domain whose reference policy allows everything, or never parks, turns
+red. Give the reference run a policy that reaches all three decisions over the ops its generator
+draws. Where only the plumbing is in question, run `aiSurfaceLawsUnderKitPolicy` beside it; one line
+changes. `proofs/coverage-exclusions.json`'s entry for the family says the same.
+
+#### `columnarOpLawsWith` takes the domain's generator — BREAKING for that member, `retype`
+
+**What changed.** The Phase 181 teeth seam gains the domain's `StreamGen<ColumnOp, Table>`. That is
+`concurrencyLawsWith`'s shape: the injectable seam and the domain's witness in one entry point
+(DECISIONS D67).
+
+```fsharp
+// 0.31.0
+Conformance.columnarOpLawsWith (invertUnderTest: ColumnOp -> Table -> Result<ColumnOp, ColumnRejection>) (seed: int) (iterations: int)
+// 0.32.0
+Conformance.columnarOpLawsWith (invertUnderTest: ColumnOp -> Table -> Result<ColumnOp, ColumnRejection>) (gen: StreamGen<ColumnOp, Table>) (seed: int) (iterations: int)
+```
+
+The surface gate classes it `retype`. It rides this draft because the draft is already breaking.
+`columnarOpLaws` keeps its signature and its sample exactly.
+
+**Migration, one line.** A caller that ran the kit's sample with its own `invert` now passes the
+kit's reference generator:
+`Conformance.columnarOpLawsWith invert Conformance.columnarOpStreamGen seed iterations`.
+`columnarOpStreamGen` (additive) is a `StreamGen` over `columnarOpLaws`' fixture table and reaches
+every population the laws read. It is not that family's own sample, which reads the evolving table
+and so cannot be a `StreamGen`. A domain passes `ColumnOps.invert` and its own generator.
+
+#### `incrementalLawsWith` — additive
+
+`incrementalLawsWith (pipelines: Transform list list) (gen: StreamGen<ColumnOp, Table>)` evolves
+the domain's table by the domain's ops. For each op the table accepts, it certifies that
+`DataFrame.evalFrom` over `ColumnOps.changeOf op` equals a full `evalPipeline` at one of the domain's
+pipelines. `evalFrom` answers every change but a value edit by evaluating in full, so the guard is
+`Guarded [ "value edit" ]`.
+
+#### The roster and the counts
+
+Every new family has a roster record naming its witness (`CapabilitySeamWitness`,
+`QuerySeamWitness`, `CapabilityPipelineWitness`, or `StreamGen` for the columnar pair). Each also
+has a refusal-audit row and a census class. None discharges a `proofs.json` obligation; each
+certifies rather than answering for an open assumption. The generated
+`docs/conformance-families.md` shows each family's cases at this repository's reference witness,
+through the Phase 196 `cases` column. The pass-path counts Phase 245 proposes are not part of this
+entry.
 
 ## 0.31.0 — released 2026-09-26 as `v0.31.0`
 

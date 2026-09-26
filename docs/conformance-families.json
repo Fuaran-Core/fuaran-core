@@ -28,6 +28,18 @@
       "refusal": "drawn"
     },
     {
+      "id": "Conformance.aiSurfaceLawsUnderKitPolicy",
+      "module": "Conformance",
+      "entry": "aiSurfaceLawsUnderKitPolicy",
+      "witness": ["AiSurfaceWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "800",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.arbitrationLaws",
       "module": "Conformance",
       "entry": "arbitrationLaws",
@@ -88,6 +100,18 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.capabilityLawsWith",
+      "module": "Conformance",
+      "entry": "capabilityLawsWith",
+      "witness": ["CapabilitySeamWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.capabilityPipelineIncrementalLaws",
       "module": "Conformance",
       "entry": "capabilityPipelineIncrementalLaws",
@@ -109,6 +133,18 @@
       "discharges": [],
       "cases": "600",
       "adequacy": "unconditional",
+      "refusal": "built"
+    },
+    {
+      "id": "Conformance.capabilityPipelineLawsWith",
+      "module": "Conformance",
+      "entry": "capabilityPipelineLawsWith",
+      "witness": ["CapabilityPipelineWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "800",
+      "adequacy": "guarded-reached",
       "refusal": "built"
     },
     {
@@ -175,7 +211,7 @@
       "id": "Conformance.columnarOpLawsWith",
       "module": "Conformance",
       "entry": "columnarOpLawsWith",
-      "witness": [],
+      "witness": ["StreamGen"],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
@@ -423,6 +459,18 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.incrementalLawsWith",
+      "module": "Conformance",
+      "entry": "incrementalLawsWith",
+      "witness": ["StreamGen"],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "200",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.keyedChildrenLaws",
       "module": "Conformance",
       "entry": "keyedChildrenLaws",
@@ -600,6 +648,18 @@
       "cases": "1400",
       "adequacy": "unconditional",
       "refusal": "built"
+    },
+    {
+      "id": "Conformance.queryLawsWith",
+      "module": "Conformance",
+      "entry": "queryLawsWith",
+      "witness": ["QuerySeamWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.reconcileLaws",

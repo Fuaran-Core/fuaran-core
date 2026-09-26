@@ -52,25 +52,28 @@ run can miss it. `drawn-miss-is-red` — drawn, but a law demands the refused ca
 run that misses it fails. `drawn` — drawn, and a run that misses it stays green unless
 the family is guarded, which is what the `Adequacy` cell beside it answers.
 
-65 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
+70 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
 
 | Family | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|
 | `Conformance.aggregateParityLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 | `unconditional` | `none` |
 | `Conformance.aiSurfaceLaws` | opt-in | `needs-witness-capability` | `AiSurfaceWitness` | — | 800 | `guarded-reached` | `drawn` |
+| `Conformance.aiSurfaceLawsUnderKitPolicy` | opt-in | `needs-witness-capability` | `AiSurfaceWitness` | — | 800 | `guarded-reached` | `drawn` |
 | `Conformance.arbitrationLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1800 | `guarded-reached` | `drawn` |
 | `Conformance.attestationLaws` | opt-in | `needs-witness-capability` | `StreamWitness`, `StreamGen`, `IAttestationSink` | — | 1000 | `guarded-reached` | `built` |
 | `Conformance.attributedLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
 | `Conformance.canonicalFloatLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1500 | `unconditional` | `none` |
 | `Conformance.capabilityLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1600 | `unconditional` | `built` |
+| `Conformance.capabilityLawsWith` | opt-in | `needs-witness-capability` | `CapabilitySeamWitness` | — | 900 | `guarded-reached` | `drawn` |
 | `Conformance.capabilityPipelineIncrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `guarded-reached` | `none` |
 | `Conformance.capabilityPipelineLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
+| `Conformance.capabilityPipelineLawsWith` | opt-in | `needs-witness-capability` | `CapabilityPipelineWitness` | — | 800 | `guarded-reached` | `built` |
 | `Conformance.captureReplayLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
 | `Conformance.casLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `guarded-reached` | `drawn` |
 | `Conformance.chainBreakReasonLaws` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
 | `Conformance.codecInjectivityLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `none` |
 | `Conformance.columnarOpLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1200 | `guarded-reached` | `drawn` |
-| `Conformance.columnarOpLawsWith` | opt-in | `seam-not-every-domain-has` | — | — | 1200 | `guarded-reached` | `drawn` |
+| `Conformance.columnarOpLawsWith` | opt-in | `seam-not-every-domain-has` | `StreamGen` | — | 1200 | `guarded-reached` | `drawn` |
 | `Conformance.columnarValidatorLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 | `guarded-reached` | `drawn` |
 | `Conformance.compositionLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 | `unconditional` | `none` |
 | `Conformance.compositionPilot` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 1200 | `unconditional` | `none` |
@@ -91,6 +94,7 @@ the family is guarded, which is what the `Adequacy` cell beside it answers.
 | `Conformance.hashFnLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
 | `Conformance.idempotencyLaws` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 800 | `guarded-reached` | `drawn` |
 | `Conformance.incrementalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 400 | `unconditional` | `none` |
+| `Conformance.incrementalLawsWith` | opt-in | `seam-not-every-domain-has` | `StreamGen` | — | 200 | `guarded-reached` | `none` |
 | `Conformance.keyedChildrenLaws` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | `witness-surface-scope` | 600 | `guarded-reached` | `built` |
 | `Conformance.memoLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 | `unconditional` | `none` |
 | `Conformance.memoSoundnessLaws` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 100 | `unconditional` | `none` |
@@ -106,6 +110,7 @@ the family is guarded, which is what the `Adequacy` cell beside it answers.
 | `Conformance.propagationEvaluatorLaws` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-change-set-and-prior` | 600 | `guarded-reached` | `drawn` |
 | `Conformance.propagationEvaluatorLawsWith` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-prior-blind` | 720 | `guarded-reached` | `drawn` |
 | `Conformance.queryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1400 | `unconditional` | `built` |
+| `Conformance.queryLawsWith` | opt-in | `needs-witness-capability` | `QuerySeamWitness` | — | 900 | `guarded-reached` | `drawn` |
 | `Conformance.reconcileLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 | `guarded-reached` | `drawn` |
 | `Conformance.reducer` | base run | — | `StreamGen` | — | 400 | `guarded-reached` | `drawn` |
 | `Conformance.registryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
