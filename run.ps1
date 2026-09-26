@@ -29,4 +29,8 @@ if (-not $SkipTests) {
     # Phase 128 — the C# facade's conformance report (see ./verify.ps1 for what it certifies).
     dotnet run --project tests/Fuaran.Core.CSharp.Proof --no-build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Phase 257 — the dataframe half of the facade, over its own assembly.
+    dotnet run --project tests/Fuaran.Core.DataFrame.CSharp.Proof --no-build
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
