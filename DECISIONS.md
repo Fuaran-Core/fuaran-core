@@ -1,5 +1,62 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-26 — D66: the compute layer becomes its own repository — `Column` stays, `DataFrame` and `Column.Ops` leave under the same ids; D51 is the rule that draws the line, and D49 is amended to the question it answered
+
+**Decided (operator, 2026-09-26).** `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` will be
+produced by a repository of their own in the same public organisation, under the SAME package ids
+and namespaces, together with the columnar law families (a compute-side conformance package), the
+dataframe half of the C# facade, the two proof models that cover them (`ColumnOps.fst`,
+`Pipeline.fst`) and ownership of the transform law vectors the other hosts certify against.
+`Fuaran.Core.Column` stays here. So do `Query`, `Validator`, `Propagation` and every other spine
+package. The operator's words were that this is the correct long-term shape and that its cost is
+accepted now because it will never be cheaper. This entry records the ruling and the reasons; the
+work is a sequence of phases, and nothing moves before Phase 250 has landed (it has: `64d0b5a`).
+
+**The rule that draws the line is D51, not a new one.** Membership here is genericity over the
+witness. `Column` passes: a fixed scalar set with a validity mask and a canonical wire is what every
+seam needs and no domain owns — `Query` returns a `Table`, `Validator` carries a columnar rule family
+over one, the facade reads one. The compute layer does not pass. A transform algebra with a pure
+reference evaluator, an incremental engine with a measured cost model and an op algebra over tables
+are a concrete engine with pinned semantics, witness-free by construction (the README has said "no
+witness" of the strand since the roster was written). It sat here as a standing exception to the
+rule, and this entry ends the exception rather than restating it.
+
+**D49 is amended, not reversed.** Its three reasons — several consuming tiers with none above the
+others, a dependency set that is this spine and nothing else, a binding rather than a node in every
+consumer — all still hold, and all are satisfied equally by a sibling repository in the same
+organisation. What they rule out is homing the algebra in a consumer tier. They never ruled on
+"beside this repository", and that is the question this entry answers. D49's honest reading of the
+reference evaluator against the no-evaluator principle is unchanged and travels with the code.
+
+**Why the answer is "beside", and the decisive reason is the version number.** This spine should
+break almost never; its programme is stability, laws and proofs. The compute layer will break
+repeatedly, because closing the O(n) floor a downstream consumer measured (Phase 250's source: the
+row-preserving incremental refresh lost to full evaluation at every size above a thousand rows) and
+making the three-strand composition a contract is a performance programme, and performance
+programmes change shapes. One `<Version>` over both forces either false breaks on the spine or
+held-back compute. Phase 250 riding a breaking draft of this repository to add a skeleton-op case
+for a spreadsheet's benefit is the first instance. Two audiences follow from the same fact: the
+substrate's reader wants the witness pattern, the laws and the proofs; the compute layer's reader
+wants a typed dataframe for F# and Fable with a certified incremental evaluator, and compares it
+against the dataframe libraries they would otherwise pick.
+
+**What follows, in order, each its own phase.** (1) The boundary is prepared HERE first, on D62's
+pattern: the columnar families and the dataframe facade split into their own assemblies inside this
+repository, and a test refuses any spine assembly that references `DataFrame` or `Column.Ops` — so
+the cut is a copy, not an untangling. (2) The repository is created and filled, adopts the proof-leg
+kit by copy and declares the corpus copy of the transform laws as ITS derived file. (3) Its first
+release opens at the next minor above this repository's last emission of the two ids, so every
+consumer's floor stays monotone; consumers pin a second producer property. (4) The strand is
+removed from here on a BREAKING draft whose `STABILITY.md` entry says "moved, not removed" and names
+the producer and version the ids continue at; D62 is amended to name that repository as the
+specification owner for the compute subsystems the other hosts twin.
+
+**What this entry does NOT decide.** Whether `Query` follows later (it returns a `Table` over
+`Column` and sits over `Function`; today it stays, and a future query planner needing the transform
+algebra is the trigger to revisit). The repository's name. Whether the proof leg runs in its CI from
+the first commit. Each is an open question on the plan that sequences this work, and each is
+answered at the stage that needs it.
+
 ## 2026-09-26 — D65: `UpdateNode of node: 'Node` — one field, content not structure, and an unknown-parent write in its footprint; classed `union-widening`, so it opens the `0.32.0` slot
 
 **Decided (operator, 2026-09-26; executed by Phase 250).** `SkeletonOp` gains an in-place update,
