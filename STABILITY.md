@@ -2342,9 +2342,9 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.32.0 — DRAFT
+## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
-**It is a MINOR slot because the change that opens it is BREAKING.** `0.31.0` is tagged, so it is a
+**It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a
 consumer's contract and nothing rides it. Phase 250 adds a case to the closed `SkeletonOp` union,
 which the surface gate classes `union-widening`, and a breaking change opens a minor slot rather
 than a patch one. Every other member this phase adds is classed `additive` by the gate and rides
@@ -2354,6 +2354,12 @@ packages, which the gate classes `removal` for `Fuaran.Core.Conformance` and `Fu
 both ride the slot too. `<Version>` and the laws corpus here (`conformance/laws/*.json`) were re-stamped
 in the same commit as the version move, per `docs/conformance-corpus.md`; the byte copy in the
 shared wire-format corpus is re-synced separately.
+
+**Release record.** Phases 250, 246, 256 and 257 ship in it. The cut-time Fable gate ran green against the
+candidate on 2026-09-26 — `fuaran-dotnet`'s `tests/core-fable/core-fable.ps1 -CoreVersion 0.32.0` from the
+local candidate feed: 22 packages on the surface (18 referenced, 4 excused), the compile leg and 166/166
+parity vectors byte-identical on both pipelines. Two package ids are new in this release,
+`Fuaran.Core.DataFrame.Conformance` and `Fuaran.Core.DataFrame.CSharp` (Phase 257).
 
 The phase's source is a downstream spreadsheet-shaped consumer's measurement (Phase 250). It built
 a sheet over `Column.Ops`, `DataFrame.Incremental` and `Propagation`, and found five places where
