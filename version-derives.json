@@ -1,6 +1,7 @@
 {
   "kind": "version",
   "producer": "fuaran-core",
+  "$note": "Phase 257 (DECISIONS.md D66, D68): the transform-laws.json row is the COMPUTE STRAND's. It certifies the Fuaran.Core.DataFrame reference evaluator, and it leaves this file with that package in Phase 258, when the compute repository declares it as its own derived file. The engine reads derive entries against a closed key set, so the marking is this note rather than a field on the row. The other two rows stay here.",
   "derives": [
     {
       "emit": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws",

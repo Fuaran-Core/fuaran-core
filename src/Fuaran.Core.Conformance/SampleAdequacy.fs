@@ -320,19 +320,14 @@ module SampleAdequacy =
     /// `WireNullTolerance` is deliberately absent: it runs a FIXED vector corpus, so it has no
     /// sample that could miss anything, and enrolling a family with no sample would make the census
     /// claim something weaker than it does.
+    ///
+    /// Since Phase 257 this is THIS package's share. The families that read the dataframe layer
+    /// ship from `Fuaran.Core.DataFrame.Conformance`, and their rows ship with them, in
+    /// `DataFrameFamilies.roster`; the kit's suite holds the two shares together equal to the
+    /// composed roster.
     let census: (string * AdequacyClass) list =
         [
           // ---- guarded: a law branches on something the sample can miss ----
-          // Phase 212 — the third dimension is the shape that let a wrong answer reach a published
-          // release: a ROW-LOCAL step reading a column a cross-row step appended, per producer
-          // class. The corpus carried ten window-bearing pipelines and not one of them, so the
-          // family that exists to see that defect certified green against an evaluator carrying it.
-          "IncrementalDelta.lawsWith", Guarded [ "refresh class"; "cross-row column read"; "source rows" ]
-          "IncrementalDelta.laws",
-          Guarded
-              [ "refresh class"
-                "cross-row column read"
-                "source rows (delegates to lawsWith)" ]
           "FoldConfluence.laneFoldLawsWith", Guarded [ "lane-fold outcome" ]
           "FoldConfluence.laneFoldLaws", Guarded [ "lane-fold outcome (delegates to laneFoldLawsWith)" ]
           "Conformance.footprintLaws", Guarded [ "script-pair independence" ]
@@ -353,14 +348,8 @@ module SampleAdequacy =
           // path, not only priming) and a clean node reused from it. It runs the family above first,
           // so the reference arms carry that family's guard too.
           "Conformance.propagationEvaluatorLawsWith", Guarded [ "evaluator edit"; "prior-aware edit" ]
-          // Phase 181. Every other arm is BUILT each iteration — an op applied, inverted, chained
-          // and replayed — but the inverse-only-for-applicable law is about the ops the table
-          // REFUSES, and whether the generator refused an INVERTIBLE one is a property of the run.
-          "Conformance.columnarOpLawsWith", Guarded [ "invert's refusal population" ]
-          "Conformance.columnarOpLaws", Guarded [ "invert's refusal population (delegates to columnarOpLawsWith)" ]
           "Conformance.concurrencyLawsWith", Guarded [ "independent pair (its own Phase 80 vacuity guard)" ]
           "Conformance.concurrencyLaws", Guarded [ "independent pair (delegates to concurrencyLawsWith)" ]
-          "Conformance.schemaWalkLaws", Guarded [ "derivation verdict (its own parity vacuity guard)" ]
           // Phase 161. Every arm is BUILT — a perturbed child list, an operation over a drawn tree,
           // a graft carrying its own interior offender — but whether the WITNESS honours the rebuild
           // is drawn, and a witness whose `ReplaceChildren` is partial on leaves reaches none of
@@ -415,12 +404,6 @@ module SampleAdequacy =
           // The default-deny arms are BUILT, but per drawn `Invoke` node — a generator of Source-only
           // pipelines builds none of them.
           "Conformance.capabilityPipelineLawsWith", Guarded [ "invoke node" ]
-          // `evalFrom` answers every change but a value edit by evaluating in full, so only a value
-          // edit can tell the incremental path from the full one.
-          "Conformance.incrementalLawsWith", Guarded [ "value edit" ]
-          // The Error/Error arm of the parity law is reached only when the caller's generator yields
-          // a pipeline the reference refuses.
-          "Conformance.transformLaws", Guarded [ "accepted"; "refused" ]
           // The kit draws its own sample here, and a fault-free draw satisfies the soundness law as
           // 0 = 0. The roll is stratified by iteration index, so three iterations reach both faults;
           // a shorter run can still miss them, which is why the class is not `Unconditional`.
@@ -453,12 +436,8 @@ module SampleAdequacy =
           Unconditional "each iteration queries matching and non-matching signatures on a built registry"
           "Conformance.packLoadingLaws",
           Unconditional "each iteration loads a pack and refuses a stale pin and an unknown base"
-          "Conformance.aggregateParityLaws",
-          Unconditional "each iteration compares aggregate against a single-group groupBy on the same column"
-          "Conformance.incrementalLaws",
-          Unconditional "each iteration compares evalFrom against a full evalPipeline over the same change"
-          "Conformance.paramLaws",
-          Unconditional "each iteration binds a param, leaves one unbound, and round-trips the pipeline"
+          "Conformance.aggregateNullSkipLaws",
+          Unconditional "each iteration aggregates Count and Sum over a drawn column and its present-only projection"
           "Conformance.deferredLaws", Unconditional "each iteration round-trips Pending, Ready and Failed"
           "Conformance.capabilityPipelineLaws",
           Unconditional "each iteration type-checks a well-typed and an ill-typed edge"
@@ -480,12 +459,6 @@ module SampleAdequacy =
           Unconditional "the budget IS the sample size, and it is the caller's own declared parameter"
           "Conformance.attributedLaws",
           Unconditional "each iteration lifts, re-attributes and round-trips the same stream"
-          "Conformance.slotParamLaws",
-          Unconditional
-              "each iteration BUILDS the bound, substituted, unbound, mistyped and literal-only runs over the same drawn table — the draw varies the table, the page size and which column is ordered on, never which branch is taken"
-          "Conformance.nowLaws",
-          Unconditional
-              "each iteration BUILDS both grains, a clock-bearing pipeline and a clock-free one over the same input, and runs the constant-witness, counting-witness and unpinned cases — the draw varies the reading and the row count, never which branch is taken"
           "Conformance.chainBreakReasonLaws",
           Unconditional
               "each iteration BUILDS all three break kinds on both walkers — a renumbered sequence, a repointed prev-link, and a payload tampered with its sequence and link left intact — rather than drawing them, and the family's own last two laws fail if any kind was not actually observed"

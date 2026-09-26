@@ -291,10 +291,7 @@ let containerLawTests =
 
               Expect.equal (List.length adequacy) 1 "exactly one adequacy law"
 
-              match
-                  SampleAdequacy.census
-                  |> List.tryFind (fun (n, _) -> n = "Conformance.containerLaws")
-              with
+              match KitRoster.census |> List.tryFind (fun (n, _) -> n = "Conformance.containerLaws") with
               | Some(_, Guarded _) -> ()
               | Some(_, Unconditional why) -> failtestf "censused Unconditional (%s) but it emits a guard" why
               | None -> failtest "Conformance.containerLaws is missing from SampleAdequacy.census"

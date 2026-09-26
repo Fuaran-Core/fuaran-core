@@ -85,8 +85,16 @@ internal static class Surface
             return true;
         }
 
-        return assembly.StartsWith("Fuaran.Core.", StringComparison.Ordinal) && assembly != "Fuaran.Core.CSharp";
+        return assembly.StartsWith("Fuaran.Core.", StringComparison.Ordinal) && !FacadeAssemblies.Contains(assembly);
     }
+
+    // The C# facade assemblies — the only `Fuaran.Core.*` assemblies whose types are not F#. Two since
+    // Phase 257, when the dataframe half moved to its own assembly; each proof scans its own.
+    private static readonly HashSet<string> FacadeAssemblies = new(StringComparer.Ordinal)
+    {
+        "Fuaran.Core.CSharp",
+        "Fuaran.Core.DataFrame.CSharp",
+    };
 
     private static IEnumerable<(Type Type, string Where)> SignatureTypes(MemberInfo member)
     {

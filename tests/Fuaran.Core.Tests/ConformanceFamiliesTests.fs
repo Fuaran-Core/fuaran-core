@@ -18,7 +18,7 @@
 //   * OPT-IN — read off `certify` / `certifyStream`'s own source: a family either appears in an
 //     aggregate's body or it does not.
 //   * DISCHARGES — held equal, both directions, to the claims ladder's `dischargedBy` rows.
-//   * CENSUS — held equal to `SampleAdequacy.census`, so the adequacy declaration and the roster
+//   * CENSUS — held equal to `KitRoster.census`, so the adequacy declaration and the roster
 //     can no longer name different sets.
 //   * ARTEFACTS — the generated `docs/conformance-families.md` and `.json` compared to what the
 //     roster renders now, naming the command that regenerates them.
@@ -44,22 +44,37 @@ open Fuaran.Core
 [<Literal>]
 let private guardModule = "Fuaran.Core.SampleAdequacy"
 
-/// Every public law entry point the kit ships, found by REFLECTION OVER RETURN TYPE across the
-/// whole assembly. A law family is an entry point that answers with `LawResult list`; that is
-/// what the type says, and unlike a naming convention it cannot be spelled around.
+/// Phase 257 — the dataframe families' own home. The roster keys them by the spellings a consumer
+/// calls today, `Conformance.<family>`, which the forwarding module in the same assembly carries;
+/// the home module is held to that forwarding module member for member by its own test below,
+/// so it is excluded here rather than rostered twice. Phase 258 removes the forwards and re-keys
+/// the roster to this module.
+[<Literal>]
+let private forwardedHome = "Fuaran.Core.DataFrameConformance"
+
+/// The law entry points one module declares, by REFLECTION OVER RETURN TYPE.
+let lawMethods (t: Type) : MethodInfo list =
+    [ for m in t.GetMethods(BindingFlags.Public ||| BindingFlags.Static ||| BindingFlags.DeclaredOnly) do
+          let rt = m.ReturnType
+
+          if
+              rt.IsGenericType
+              && rt.GetGenericTypeDefinition() = typedefof<list<_>>
+              && rt.GenericTypeArguments[0] = typeof<LawResult>
+          then
+              yield m ]
+
+/// Every public law entry point the kit ships, found by REFLECTION OVER RETURN TYPE across both
+/// of its assemblies (Phase 257). A law family is an entry point that answers with `LawResult
+/// list`; that is what the type says, and unlike a naming convention it cannot be spelled around.
+/// Two assemblies can each declare a module of the same name — the forwards do exactly that — so
+/// a key found twice is REFUSED rather than silently overwritten: two families under one roster
+/// key is precisely the ambiguity a consumer's call would resolve by reference order.
 let private shipped () : Map<string, MethodInfo> =
-    let asm = typeof<LawResult>.Assembly
-
-    [ for t in asm.GetTypes() do
-          if t.IsPublic && t.FullName <> guardModule then
-              for m in t.GetMethods(BindingFlags.Public ||| BindingFlags.Static ||| BindingFlags.DeclaredOnly) do
-                  let rt = m.ReturnType
-
-                  if
-                      rt.IsGenericType
-                      && rt.GetGenericTypeDefinition() = typedefof<list<_>>
-                      && rt.GenericTypeArguments[0] = typeof<LawResult>
-                  then
+    let found =
+        [ for asm in KitRoster.assemblies do
+              for t in asm.GetTypes() do
+                  if t.IsPublic && t.FullName <> guardModule && t.FullName <> forwardedHome then
                       let moduleName =
                           let n = t.FullName
 
@@ -68,8 +83,15 @@ let private shipped () : Map<string, MethodInfo> =
                           else
                               n
 
-                      yield moduleName + "." + m.Name, m ]
-    |> Map.ofList
+                      for m in lawMethods t -> moduleName + "." + m.Name, m ]
+
+    let twice =
+        found |> List.countBy fst |> List.filter (fun (_, n) -> n > 1) |> List.map fst
+
+    if not (List.isEmpty twice) then
+        failtestf "these roster keys are declared by more than one shipped module: %A" twice
+
+    Map.ofList found
 
 /// The witness and generator types an entry point demands, in parameter order: every parameter
 /// whose type name ends in `Witness`, `Gen` or `Sink`. A function parameter, a seed and a corpus
@@ -193,8 +215,8 @@ module Export =
     let write (dir: string) =
         Directory.CreateDirectory dir |> ignore
         let measured = cases ()
-        File.WriteAllText(markdownPath dir, Families.toMarkdownWith measured)
-        File.WriteAllText(jsonPath dir, Families.toJsonWith measured)
+        File.WriteAllText(markdownPath dir, KitRoster.toMarkdownWith measured)
+        File.WriteAllText(jsonPath dir, KitRoster.toJsonWith measured)
 
 // ---------------------------------------------------------------------------
 
@@ -210,7 +232,7 @@ let familiesTests =
               // module exists: quantified over the ASSEMBLY and over the RETURN TYPE, so neither a
               // new module nor a name that does not end in `Laws` can hide a family.
               let missing, phantom =
-                  compareRoster (Set.ofList Families.ids) (shipped () |> Map.toList |> List.map fst |> Set.ofList)
+                  compareRoster (Set.ofList KitRoster.ids) (shipped () |> Map.toList |> List.map fst |> Set.ofList)
 
               Expect.isEmpty
                   missing
@@ -219,6 +241,58 @@ let familiesTests =
                       missing)
 
               Expect.isEmpty phantom (sprintf "these Families records name no shipped law entry point: %A" phantom)
+
+          testCase
+              "every dataframe family is forwarded under its pre-split spelling, and every forward reaches its home"
+          <| fun _ ->
+              // Phase 257 — the forwards are what keep `Conformance.<family>` compiling for a
+              // consumer that references both packages. Held member for member, both directions,
+              // by name and parameter types, so a family added to its home without a forward (or a
+              // forward left behind by a removed family) fails here; then each seed-and-iterations
+              // forward is RUN beside its home, so a forward that called the wrong family does too.
+              let dfAsm = KitRoster.assemblies |> List.last
+
+              let membersOf (fullName: string) =
+                  match dfAsm.GetType fullName with
+                  | null -> failtestf "%s is not in %s" fullName (dfAsm.GetName().Name)
+                  | t ->
+                      t.GetMethods(BindingFlags.Public ||| BindingFlags.Static ||| BindingFlags.DeclaredOnly)
+                      |> Array.map (fun m ->
+                          m.Name
+                          + "("
+                          + (m.GetParameters()
+                             |> Array.map (fun p -> p.ParameterType.Name)
+                             |> String.concat ",")
+                          + ")")
+                      |> Set.ofArray
+
+              let home = membersOf forwardedHome
+              let forwards = membersOf "Fuaran.Core.Conformance"
+              let unforwarded, orphaned = compareRoster forwards home
+
+              Expect.isEmpty
+                  unforwarded
+                  "these DataFrameConformance members have no forward in the Conformance module beside them"
+
+              Expect.isEmpty orphaned "these forwards name no DataFrameConformance member"
+
+              let homeType = dfAsm.GetType forwardedHome
+              let fwdType = dfAsm.GetType "Fuaran.Core.Conformance"
+
+              for m in lawMethods homeType do
+                  let ps = m.GetParameters() |> Array.map _.ParameterType
+
+                  if ps = [| typeof<int>; typeof<int> |] then
+                      let run (t: Type) =
+                          t.GetMethod(m.Name, ps).Invoke(null, [| box 20260926; box 3 |]) :?> LawResult list
+
+                      Expect.equal
+                          (run fwdType)
+                          (run homeType)
+                          (sprintf
+                              "Conformance.%s must answer exactly what DataFrameConformance.%s answers"
+                              m.Name
+                              m.Name)
 
           testCase "the roster comparison goes red in both directions"
           <| fun _ ->
@@ -239,14 +313,14 @@ let familiesTests =
           testCase "the roster carries no duplicate id, and every field is populated"
           <| fun _ ->
               let dupes =
-                  Families.ids
+                  KitRoster.ids
                   |> List.countBy id
                   |> List.filter (fun (_, n) -> n > 1)
                   |> List.map fst
 
               Expect.isEmpty dupes (sprintf "duplicate roster ids: %A" dupes)
 
-              for f in Families.families do
+              for f in KitRoster.families do
                   Expect.equal f.Id (f.Module + "." + f.Entry) (sprintf "%s: the id is the qualified entry point" f.Id)
                   Expect.isNotEmpty f.Module (sprintf "%s: a family names its module" f.Id)
                   Expect.isNotEmpty f.Entry (sprintf "%s: a family names its entry point" f.Id)
@@ -257,7 +331,7 @@ let familiesTests =
               // the signature — so it is read back off the signature rather than trusted.
               let ship = shipped ()
 
-              for f in Families.families do
+              for f in KitRoster.families do
                   match Map.tryFind f.Id ship with
                   | None -> failtestf "%s is not a shipped entry point" f.Id
                   | Some m ->
@@ -272,7 +346,7 @@ let familiesTests =
               // `Families`, so the first half of this cannot fail while that derivation stands —
               // it is here to fail LOUDLY if someone ever re-introduces the two as independent
               // fields, which is the shape that let a family be opt-in with no stated reason.
-              for f in Families.families do
+              for f in KitRoster.families do
                   Expect.equal
                       f.OptIn
                       (Option.isSome f.Reason)
@@ -299,12 +373,12 @@ let familiesTests =
               // read back rather than trusted: a family demanding a witness outside the base run's
               // sets is exactly that case, and a family inside them is not.
               let baseWitnesses =
-                  Families.families
+                  KitRoster.families
                   |> List.filter (fun f -> not f.OptIn)
                   |> List.collect (fun f -> f.Witness)
                   |> Set.ofList
 
-              for f in Families.families do
+              for f in KitRoster.families do
                   let beyondBase =
                       f.Witness |> List.exists (fun w -> not (Set.contains w baseWitnesses))
 
@@ -329,7 +403,7 @@ let familiesTests =
               // record moving would leave the roster telling a domain to call something it already
               // gets, or worse, that it need not call something it does not.
               let conformance =
-                  Families.families |> List.filter (fun f -> f.Module = "Conformance")
+                  KitRoster.families |> List.filter (fun f -> f.Module = "Conformance")
 
               let entries = conformance |> List.map (fun f -> f.Entry)
 
@@ -352,7 +426,7 @@ let familiesTests =
               // No aggregate exists outside `Conformance`, so every family in another module is
               // opt-in by construction — stated rather than assumed, since a second aggregate
               // would silently invalidate the check above.
-              for f in Families.families |> List.filter (fun f -> f.Module <> "Conformance") do
+              for f in KitRoster.families |> List.filter (fun f -> f.Module <> "Conformance") do
                   Expect.isTrue f.OptIn (sprintf "%s is outside Conformance, so no aggregate can run it" f.Id)
 
           testCase "the discharge relation is the claims ladder's, seen from the other side"
@@ -368,7 +442,7 @@ let familiesTests =
 
               Expect.equal
                   (ladder |> List.sort)
-                  (Families.obligations |> List.sort)
+                  (KitRoster.obligations |> List.sort)
                   "Fuaran.Core.Families.obligations and proofs.json's `dischargedBy` rows are one relation; they disagree"
 
           testCase "the adequacy census and the roster name the same families"
@@ -376,10 +450,14 @@ let familiesTests =
               // Two declarations over one set. Until this phase they were kept by two different
               // rules and the census was the loser: `opAlgebra`, `reducer` and `compositionPilot`
               // were absent from it, and it is the census a projection reads as the roster.
-              let censused = SampleAdequacy.census |> List.map fst |> Set.ofList
-              let missing, phantom = compareRoster censused (Set.ofList Families.ids)
+              let censused = KitRoster.census |> List.map fst |> Set.ofList
+              let missing, phantom = compareRoster censused (Set.ofList KitRoster.ids)
 
-              Expect.isEmpty missing (sprintf "these roster families have no SampleAdequacy.census row: %A" missing)
+              Expect.isEmpty
+                  missing
+                  (sprintf
+                      "these roster families have no census row (SampleAdequacy.census or DataFrameFamilies.census): %A"
+                      missing)
 
               Expect.isEmpty phantom (sprintf "these census rows name no roster family: %A" phantom)
 
@@ -395,7 +473,7 @@ let familiesTests =
 
               Expect.equal
                   (OwnedConformance.fingerprint (File.ReadAllText path))
-                  (OwnedConformance.fingerprint (Families.toMarkdownWith (Export.cases ())))
+                  (OwnedConformance.fingerprint (KitRoster.toMarkdownWith (Export.cases ())))
                   "the committed docs/conformance-families.md is not what the roster renders — re-run `--emit-families` and commit it"
 
           testCase "the generated docs/conformance-families.json is what the roster renders"
@@ -410,7 +488,7 @@ let familiesTests =
 
               Expect.equal
                   (OwnedConformance.fingerprint (File.ReadAllText path))
-                  (OwnedConformance.fingerprint (Families.toJsonWith (Export.cases ())))
+                  (OwnedConformance.fingerprint (KitRoster.toJsonWith (Export.cases ())))
                   "the committed docs/conformance-families.json is not what the roster renders — re-run `--emit-families` and commit it"
 
           testCase "the JSON export carries the documented shape, for every family"
@@ -418,18 +496,34 @@ let familiesTests =
               // The shape is a contract `STABILITY.md` documents and an offline projection reads,
               // so it is asserted rather than left to the renderer. Not a JSON parse: the point is
               // that the exact member spellings a reader keys off are present.
-              let json = Families.toJsonWith (Export.cases ())
+              let json = KitRoster.toJsonWith (Export.cases ())
 
               Expect.stringContains json "\"kind\": \"fuaran.core.conformance.families\"" "the export names its kind"
-              Expect.stringContains json "\"schema\": 4" "the export carries a schema version"
+              Expect.stringContains json "\"schema\": 5" "the export carries a schema version"
 
               Expect.stringContains
                   json
-                  "\"package\": \"Fuaran.Core.Conformance\""
-                  "the export names the package it is about"
+                  "\"packages\": [\"Fuaran.Core.Conformance\", \"Fuaran.Core.DataFrame.Conformance\"]"
+                  "the export names the packages it composes (Phase 257)"
 
-              for f in Families.families do
+              for f in KitRoster.families do
                   Expect.stringContains json ("\"id\": \"" + f.Id + "\"") (sprintf "%s appears in the export" f.Id)
+
+                  Expect.stringContains
+                      json
+                      ("\"id\": \""
+                       + f.Id
+                       + "\",
+      \"module\": \""
+                       + f.Module
+                       + "\",
+      \"entry\": \""
+                       + f.Entry
+                       + "\",
+      \"package\": \""
+                       + (KitRoster.packageOf f.Id |> Option.defaultValue "?")
+                       + "\"")
+                      (sprintf "%s names the package it ships from" f.Id)
 
               for member_ in
                   [ "\"module\":"
@@ -449,7 +543,7 @@ let familiesTests =
               // The export is what an offline reader consumes, so "documented shape" has to mean a
               // reader can actually recover the roster from it — not merely that the right
               // substrings appear. Parsed with the kit's own portable JSON parser and rebuilt into
-              // `LawFamily` records, it must equal `Families.families` exactly. This is the leg
+              // `LawFamily` records, it must equal `KitRoster.families` exactly. This is the leg
               // that would catch an escaping bug, a member dropped by a renderer edit, or a
               // `witness` list silently flattened to a string.
               let mk id m entry witness optIn reason discharges : Families.LawFamily =
@@ -470,7 +564,7 @@ let familiesTests =
                           | other -> failtestf "expected a string in an array, got %A" other)
                   | other -> failtestf "expected an array, got %A" other
 
-              match Json.parse (Families.toJsonWith (Export.cases ())) with
+              match Json.parse (KitRoster.toJsonWith (Export.cases ())) with
               | Error e -> failtestf "the export does not parse as JSON: %s" e
               | Ok(JObj top) ->
                   let member_ name =
@@ -479,8 +573,12 @@ let familiesTests =
                       | None -> failtestf "the export carries no `%s`" name
 
                   Expect.equal (member_ "kind") (JStr "fuaran.core.conformance.families") "kind"
-                  Expect.equal (member_ "schema") (JInt 4) "schema"
-                  Expect.equal (member_ "package") (JStr "Fuaran.Core.Conformance") "package"
+                  Expect.equal (member_ "schema") (JInt 5) "schema"
+
+                  Expect.equal
+                      (member_ "packages")
+                      (JArr(KitRoster.rosters |> List.map (fun r -> JStr r.Package)))
+                      "packages"
 
                   let rebuilt =
                       match member_ "families" with
@@ -525,14 +623,14 @@ let familiesTests =
 
                   Expect.equal
                       rebuilt
-                      (Families.families |> List.sortBy (fun f -> f.Id))
+                      (KitRoster.families |> List.sortBy (fun f -> f.Id))
                       "the roster recovered from the export is the roster it was rendered from"
               | Ok other -> failtestf "the export is not a JSON object: %A" other
 
           testCase "both renderings are sorted by id, so a diff shows only what moved"
           <| fun _ ->
-              let sorted = Families.ids
-              let md = Families.toMarkdownWith (Export.cases ())
+              let sorted = KitRoster.ids
+              let md = KitRoster.toMarkdownWith (Export.cases ())
 
               let positions =
                   sorted
@@ -544,7 +642,7 @@ let familiesTests =
               let jsonPositions =
                   sorted
                   |> List.map (fun id ->
-                      (Families.toJsonWith (Export.cases ()))
+                      (KitRoster.toJsonWith (Export.cases ()))
                           .IndexOf("\"id\": \"" + id + "\"", StringComparison.Ordinal))
 
               Expect.equal jsonPositions (List.sort jsonPositions) "the JSON families array is in id order" ]

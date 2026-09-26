@@ -8,6 +8,7 @@
     <Project Path="src/Fuaran.Core.Observer/Fuaran.Core.Observer.fsproj" />
     <Project Path="src/Fuaran.Core.Function/Fuaran.Core.Function.fsproj" />
     <Project Path="src/Fuaran.Core.Conformance/Fuaran.Core.Conformance.fsproj" />
+    <Project Path="src/Fuaran.Core.DataFrame.Conformance/Fuaran.Core.DataFrame.Conformance.fsproj" />
     <Project Path="src/Fuaran.Core.OpStream.Dag/Fuaran.Core.OpStream.Dag.fsproj" />
     <Project Path="src/Fuaran.Core.Column/Fuaran.Core.Column.fsproj" />
     <Project Path="src/Fuaran.Core.DataFrame/Fuaran.Core.DataFrame.fsproj" />
@@ -20,11 +21,13 @@
     <Project Path="src/Fuaran.Core.AiSurface/Fuaran.Core.AiSurface.fsproj" />
     <Project Path="src/Fuaran.Core.Propagation/Fuaran.Core.Propagation.fsproj" />
     <Project Path="src/Fuaran.Core.CSharp/Fuaran.Core.CSharp.csproj" />
+    <Project Path="src/Fuaran.Core.DataFrame.CSharp/Fuaran.Core.DataFrame.CSharp.csproj" />
     <Project Path="src/Fuaran.Core.Idl.Cli/Fuaran.Core.Idl.Cli.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj" />
     <Project Path="tests/Fuaran.Core.CSharp.Proof/Fuaran.Core.CSharp.Proof.csproj" />
+    <Project Path="tests/Fuaran.Core.DataFrame.CSharp.Proof/Fuaran.Core.DataFrame.CSharp.Proof.csproj" />
   </Folder>
   <Folder Name="/proofs/">
     <Project Path="proofs/oracle/Fuaran.Core.Proofs.Oracle.fsproj" />

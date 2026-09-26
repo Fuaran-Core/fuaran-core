@@ -874,10 +874,20 @@ module FStarTarget =
     /// re-binds the suffix chain in its BODY, where a `match` in a `let`'s argument is a
     /// computation F* splits the verification condition on, one factor of two per member: 58.6
     /// units of rlimit for the first lookup at k=16. An application has no arms to split.
+    ///
+    /// Phase 256: for an omit-at-default member whose slot is NOT a leaf — a list, map, record,
+    /// union or node, whose encoder is itself in the mutual family — the member's ENCODING is a
+    /// third argument, built here on the member binder. Phase 222's wrapper encoded `v` itself
+    /// under `(decreases v)`, a recursive call on the very value it decreases on, which the
+    /// prover refuses (`Failed to prove: v << v`); here the recursion is on the member, a strict
+    /// subterm of the value the calling encoder decreases on, and the wrapper calls nothing. A
+    /// leaf slot's encoding calls nothing in the family, so its wrapper keeps the two-argument
+    /// shape and every model with no non-leaf default is byte-identical.
     let private encOption (m: Member) (v: string) =
         match m.Presence with
         | Some None -> sprintf "(%s #num #flt %s)" (optEncoderName m.Slot) v
-        | Some(Some d) -> sprintf "(%s #num #flt (%s) %s)" (dfltEncoderName m.Slot) d v
+        | Some(Some d) when leafSlot m.Slot -> sprintf "(%s #num #flt (%s) %s)" (dfltEncoderName m.Slot) d v
+        | Some(Some d) -> sprintf "(%s #num #flt (%s) %s (%s))" (dfltEncoderName m.Slot) d v (encApplied m.Slot v)
         | None -> invalidArg "m" "only a conditional member has an optional encoding"
 
     /// One link of a suffixed member list: the local the encoder binds it to, the suffix it
@@ -1582,6 +1592,20 @@ module FStarTarget =
                     )
 
                     line (sprintf "  match o with | None -> None | Some w -> Some (%s)" (encApplied s "w"))
+                elif not (leafSlot s) then
+                    // Phase 256 — a non-leaf slot's wrapper RECEIVES the encoding (see `encOption`):
+                    // encoding `v` here would recurse on the value this definition decreases on.
+                    line (
+                        encHead (
+                            sprintf
+                                "%s (#num #flt: eqtype) (d: %s) (v: %s) (e: jval num flt) : Tot (option (jval num flt)) (decreases v) ="
+                                (dfltEncoderName s)
+                                ty
+                                ty
+                        )
+                    )
+
+                    line "  if v = d then None else Some e"
                 else
                     line (
                         encHead (

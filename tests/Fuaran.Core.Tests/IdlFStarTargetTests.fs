@@ -405,6 +405,50 @@ let private gridAt (k: int) : Idl =
                 Annotations = Annotations.Empty } ]
         NodeFields = [] }
 
+/// Phase 256 — a SUFFIXED constructor (two or more conditional members, so its links apply the
+/// per-slot option encoders of Phase 222) carrying an omit-at-default member of every slot whose
+/// encoder is a member of the encoder's mutual family: a list, a map, a record and a union, each
+/// at its declared default. `flag` is the leaf control — a scalar default, whose wrapper was
+/// never at fault — and `note` is an optional member beside them. The list's element is a node,
+/// so the vocabulary is a tree and not a flat record. Written by hand, not cut down from a
+/// consumer's vocabulary: `fuaran#1860` met the defect at `Embed.permissions` (a list of an enum,
+/// defaulting to `[]`), and every slot below fails the pinned prover the same way against the
+/// 0.31.0 emitter — measured one slot per run, `Error 19 ... Failed to prove: v << v`.
+let private defaultedFamilyIdl: Idl =
+    let field name t opt =
+        { Name = name
+          Type = t
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    { uiScaleIdl with
+        Kinds =
+            [ { Tag = "Holder"
+                Category = "Display"
+                Fields =
+                  [ field "items" (TList TNode) (OmitDefault(VList []))
+                    field "table" (TMap TStr) (OmitDefault(VMap []))
+                    field "at" (TRecord "Pt") (OmitDefault(VRecord [ "x", VStr "o" ]))
+                    field "src" (TUnion("Src", [])) (OmitDefault(VUnion("Lit", [ "text", VStr "" ])))
+                    field "flag" TBool (OmitDefault(VBool false))
+                    field "note" TStr Optional ]
+                Annotations = Annotations.Empty }
+              { Tag = "Leaf"
+                Category = "Display"
+                Fields = [ field "text" TStr Required ]
+                Annotations = Annotations.Empty } ]
+        Records =
+            [ { Name = "Pt"
+                Fields = [ field "x" TStr Required ] } ]
+        Unions =
+            [ { Name = "Src"
+                Params = []
+                Cases =
+                  [ { Tag = "Lit"
+                      Fields = [ field "text" TStr Required ]
+                      Annotations = Annotations.Empty } ] } ]
+        NodeFields = [] }
+
 /// The model text over a vocabulary, every expressible kind selected, or a failed test.
 let private modelOver (idl: Idl) : string =
     match FStarTarget.vocabularyModule "M" idl (selection idl) with
@@ -1033,6 +1077,96 @@ let idlFStarTargetTests =
                   (proofsOver uiScaleIdl)
                   "sk_vkind__Grid__c00__hit #num #flt (enc_opt_str #num #flt f0)"
                   "and the lookups cite their steps at the same application, so the body re-binds no `match`"
+
+          testCase
+              "a defaulted list, map, record or union member's wrapper RECEIVES its encoding — the family recursion stays on the member, which is what lets F* see it terminate"
+          <| fun _ ->
+              // Phase 256. Phase 222's omit-at-default wrapper took the member and encoded it
+              // itself — `if v = d then None else Some (JArr (enc_items_l_node v))` under
+              // `(decreases v)` — which, for a slot whose encoder is in the mutual family, is a
+              // recursive call on the SAME value the wrapper decreases on. The pinned prover
+              // refuses it (`Error 19 ... Failed to prove: v << v`), so every vocabulary with such
+              // a member in a suffixed constructor emitted a model that does not check; the first
+              // was `fuaran#1860`'s. The encoding is now built at the CALL SITE, on the member
+              // itself — a strict subterm of the value the calling encoder decreases on — and the
+              // wrapper only chooses between it and absence. Each assertion below fails against
+              // the 0.31.0 emitter (the go-red: the wrapper takes two value arguments and encodes
+              // `v`) and holds against this one, whose model and proof script check under
+              // `--report_assumes error` (STABILITY.md, 0.32.0).
+              let model = modelOver defaultedFamilyIdl
+              let holder = encoderArm "Holder" model
+
+              for helper, fieldName, encoded, dflt in
+                  [ "enc_dflt_l_node", "items", "JArr (enc_items_l_node %s)", "[]"
+                    "enc_dflt_m_str", "table", "JObj (enc_entries_m_str %s)", "[]"
+                    "enc_dflt_r_pt", "at", "enc_r_pt %s", "(C__r_pt__Mk (\"o\"))"
+                    "enc_dflt_u_src", "src", "enc_u_src %s", "(C__u_src__Lit (\"\"))" ] do
+                  let call =
+                      Regex.Match(
+                          holder,
+                          sprintf
+                              @"sfx_vkind__Holder__%s #num #flt \(%s #num #flt \(%s\) (f[0-9]+) \((.*?)\)\) "
+                              fieldName
+                              helper
+                              (Regex.Escape dflt)
+                      )
+
+                  Expect.isTrue
+                      call.Success
+                      (sprintf
+                          "`%s` is applied to its default, the member and the member's ENCODING: %s"
+                          fieldName
+                          holder)
+
+                  Expect.equal
+                      call.Groups[2].Value
+                      (encoded.Replace("%s", call.Groups[1].Value))
+                      (sprintf "`%s`'s encoding is built at the call site, on the member binder itself" fieldName)
+
+                  let head =
+                      Regex.Match(model, sprintf @"(?m)^and %s \(#num #flt: eqtype\) (.*) =\n(.*)$" helper)
+
+                  Expect.isTrue head.Success (sprintf "`%s` is emitted as a member of the encoder family" helper)
+
+                  Expect.stringContains
+                      head.Groups[1].Value
+                      "(e: jval num flt)"
+                      (sprintf "`%s` takes the encoding as an argument" helper)
+
+                  Expect.equal
+                      head.Groups[2].Value
+                      "  if v = d then None else Some e"
+                      (sprintf "`%s` calls nothing: it only chooses between the encoding and absence" helper)
+
+              // The leaf control: a scalar default's wrapper was never at fault — its encoding
+              // calls nothing in the family — and keeps the Phase 222 shape byte for byte, which is
+              // why every committed certification model regenerates unchanged (the generation diff
+              // above is that assertion).
+              Expect.isTrue
+                  (Regex.IsMatch(
+                      holder,
+                      @"sfx_vkind__Holder__flag #num #flt \(enc_dflt_bool #num #flt \(false\) f[0-9]+\) "
+                  ))
+                  (sprintf "a leaf default keeps the two-argument application: %s" holder)
+
+              Expect.stringContains
+                  model
+                  "and enc_dflt_bool (#num #flt: eqtype) (d: bool) (v: bool) : Tot (option (jval num flt)) (decreases v) =\n  if v = d then None else Some (JBool v)\n"
+                  "and its wrapper still encodes the value itself"
+
+              // The certification set reaches NONE of the four family-slot wrappers, which is why
+              // Core's own proof leg stayed green over a defect every such consumer met. Pinned so
+              // that the day a certification vocabulary does reach one, the committed model carries
+              // the Phase 256 shape under the prover, and this line is the one to revisit.
+              for g in generated do
+                  match FStarTarget.vocabularyModule g.Module g.Idl (selection g.Idl) with
+                  | Error e -> failtestf "%s: the target refused it: %s" g.Module (CodegenError.describe e)
+                  | Ok text ->
+                      Expect.isFalse
+                          (Regex.IsMatch(text, @"(?m)^and enc_dflt_(l|m|r|u)_"))
+                          (sprintf
+                              "%s reaches no defaulted list, map, record or union member in a suffixed constructor"
+                              g.Module)
 
           testCase
               "a suffixed constructor's leaf members are DECODED through named, opaque readers, and the round trip cites one value lemma per reader"

@@ -59,6 +59,14 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# Phase 257 — the dataframe half of the facade (`ColExpr`, `Transform`) ships from its own assembly,
+# Fuaran.Core.DataFrame.CSharp, and proves the same four legs over its own surface.
+dotnet run --project tests/Fuaran.Core.DataFrame.CSharp.Proof --no-build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '==== verify: C# dataframe facade proof FAILED its conformance report' -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
 if ($Proofs) {
     pwsh ./proofs/check.ps1 -Runs 3 -SkipOracleHost
     if ($LASTEXITCODE -ne 0) {

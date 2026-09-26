@@ -8,6 +8,9 @@
   <ItemGroup>
     <Compile Include="Reference.fs" />
     <Compile Include="Reference2.fs" />
+    <!-- Phase 257 — the law-family roster as the suite reads it: both packages' shares composed.
+         Early, because every roster and census check below reads it. -->
+    <Compile Include="KitRoster.fs" />
     <!-- The `Hash` pin suite — the FIPS 180-4 known-answer vectors and platform byte-equality for
          SHA-256, plus the pinned FNV-1a values. First: everything below folds through one or the
          other, so a digest defect should surface as itself rather than as a downstream mismatch. -->
@@ -246,6 +249,9 @@
          derivation of "what ships" and Snapshots.fs for the repository root, so it follows
          both; appended at the end of the list (append-only registration). -->
     <Compile Include="PublicSurfaceTests.fs" />
+    <!-- Phase 257 — the compute boundary: no spine project or built spine assembly references
+         DataFrame or Column.Ops. After PublicSurfaceTests, whose assembly locator it reuses. -->
+    <Compile Include="ComputeBoundaryTests.fs" />
     <!-- Phase 206 — the wall-clock scaling gate: a RATIO between two row counts for the reference
          evaluator, `Delta.diff` and the incremental refresh, plus the inequality the incremental
          seam exists to make (a restricted refresh beats the full evaluation on the clock). Reads
@@ -289,6 +295,7 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Observer\Fuaran.Core.Observer.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Conformance\Fuaran.Core.Conformance.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.DataFrame.Conformance\Fuaran.Core.DataFrame.Conformance.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.OpStream.Dag\Fuaran.Core.OpStream.Dag.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.DataFrame\Fuaran.Core.DataFrame.fsproj" />

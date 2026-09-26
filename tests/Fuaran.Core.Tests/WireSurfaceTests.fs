@@ -342,6 +342,9 @@ let internal notWire: (string * string) list =
       "Fuaran.Core.Conformance",
       "a law kit; the law corpus it exports is pinned by its own emission test (`--emit-laws`)"
       "Fuaran.Core.CSharp", "a C# facade over packages baselined here; it emits through them"
+      "Fuaran.Core.DataFrame.Conformance",
+      "the law families over the dataframe layer; the transform law corpus is pinned by the kit's emission test (`--emit-laws`)"
+      "Fuaran.Core.DataFrame.CSharp", "the dataframe half of the C# facade; it emits through the packages it wraps"
       "Fuaran.Core.Idl.Cli", "a command-line host over Fuaran.Core.Idl; it emits through it" ]
 
 /// Build every document of one root: `(name, emitted bytes)`, plus the construction logs for the

@@ -16,6 +16,18 @@
       "note": "The C# authoring facade. It constructs the same values the F# packages construct, through a syntax a .NET-only consumer can state — so every claim a theorem here would make is a claim about `Fuaran.Core.Tree` and `Fuaran.Core.Ops`, which are modelled. What is genuinely its own is the MAPPING from the fluent surface to those values, which is one line per case and is held by the certification tests rather than by a model. It is an ordinary entry rather than a project type the derivation filters out, on the Phase 185 rule: a package excused by the shape of the derivation is excused with no reason on the record."
     },
     {
+      "package": "Fuaran.Core.DataFrame.CSharp",
+      "reason": "facade",
+      "phase": "fuaran-core#257",
+      "note": "The dataframe half of the C# authoring facade, split out of `Fuaran.Core.CSharp` by Phase 257 with no change to what it is. It constructs the `ColExpr` and `Transform` values `Fuaran.Core.DataFrame` constructs, so every claim a theorem here would make is a claim about that package, which `proofs/Pipeline.fst` models. What is its own is the one-line-per-case MAPPING, held by its certification tests (`tests/Fuaran.Core.DataFrame.CSharp.Proof`) for the reason its parent's is."
+    },
+    {
+      "package": "Fuaran.Core.DataFrame.Conformance",
+      "reason": "content-free-seam",
+      "phase": "fuaran-core#257",
+      "note": "The law families over the dataframe layer, split out of the kit by Phase 257 (DECISIONS.md D68), and excused for the kit's own reason: a family states an obligation, so a model of `columnarOpLaws` would be a model of the statement of one. The computation those families certify is modelled where it lives — `proofs/ColumnOps.fst` for `Fuaran.Core.Column.Ops` and `proofs/Pipeline.fst` for `Fuaran.Core.DataFrame` — and what can be checked about the families themselves (that the roster is complete, that each runs at a reference witness, that each forward reaches its home) `ConformanceFamiliesTests` and `ConformanceVacuityTests` check."
+    },
+    {
       "package": "Fuaran.Core.Idl.Cli",
       "reason": "facade",
       "phase": "fuaran-core#203",
@@ -56,9 +68,9 @@
     {
       "package": "Fuaran.Core.Column",
       "reason": "law-tested-by-design",
-      "family": "Conformance.aggregateParityLaws",
+      "family": "Conformance.aggregateNullSkipLaws",
       "phase": "fuaran-core#203",
-      "note": "Cells, column types, the table and the codec. The table algebra IS reached by a model — `proofs/ColumnOps.fst` is stated over a table with a validity mask — but that model is attributed to `Fuaran.Core.Column.Ops`, whose operations it is about, and attributing it here as well would let this package's own two gaps hide behind it. They are named instead: `Column.aggregate` is held by the family above, as the single source the DataFrame `GroupBy` calls; and `ColumnCodec` has NO theorem — its injectivity is a law (`Conformance.codecInjectivityLaws`) a domain runs, not a proof this repository carries. An operator who wants the codec proved deletes this entry."
+      "note": "Cells, column types, the table and the codec. The table algebra IS reached by a model — `proofs/ColumnOps.fst` is stated over a table with a validity mask — but that model is attributed to `Fuaran.Core.Column.Ops`, whose operations it is about, and attributing it here as well would let this package's own two gaps hide behind it. They are named instead: `Column.aggregate` is held by the family above, which pins its null-skip semantics; its parity with the DataFrame `GroupBy`, for which it is the single source, is held from the dataframe side by `Conformance.aggregateParityLaws` in `Fuaran.Core.DataFrame.Conformance` (Phase 257 split the two); and `ColumnCodec` has NO theorem — its injectivity is a law (`Conformance.codecInjectivityLaws`) a domain runs, not a proof this repository carries. An operator who wants the codec proved deletes this entry."
     }
   ],
   "$retired": "Phase 154 RETIRED the `Fuaran.Core.DataFrame` entry (`law-tested-by-design`, citing `Conformance.incrementalLaws`, filed by Phase 203): the package has a model now — `proofs/Pipeline.fst`, the counted pipeline driver over an abstract step evaluator — and clause 1's second direction fails an exclusion for a package that has since gained one. What that entry declined is still declined and is still a recorded decision, only now it is the model's own: the fourteen verb SEMANTICS are the step evaluator, a parameter, and stay with the laws the entry named (`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`) rather than with a theorem — see `pipeline-step-evaluator-abstract` in `../proofs.json` and theorem 14 in `README.md`. The supersession of D14's reading for this package is `DECISIONS.md` D57 (operator decision 2026-09-25), which is where the decision lives; an operator who wants a verb proved reads that row and that entry, not this file."

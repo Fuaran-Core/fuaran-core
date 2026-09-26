@@ -13,5 +13,10 @@
     "package": "Fuaran.Core.CSharp",
     "reason": "A C# assembly is not Fable-compiled, so there is no compile for this gate to run. STABILITY.md says so where the package was introduced: the FSharp.Core-only and Fable-clean claim is about the F# packages, and this facade exists precisely to serve the .NET-only consumer that cannot state its authoring surface in F#. Listed rather than filtered out by project type, so the excusal is on the record instead of hiding in the shape of the derivation.",
     "phase": "128"
+  },
+  {
+    "package": "Fuaran.Core.DataFrame.CSharp",
+    "reason": "The dataframe half of the C# facade, split out of Fuaran.Core.CSharp by Phase 257 with no change to what it is: a C# assembly, which is not Fable-compiled, so there is no compile for this gate to run. It is excused for exactly the reason its parent is, and listed rather than filtered out by project type for the same reason: so the excusal is on the record.",
+    "phase": "257"
   }
 ]

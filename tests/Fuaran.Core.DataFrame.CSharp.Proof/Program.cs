@@ -1,22 +1,18 @@
 // ============================================================================
-//  Fuaran.Core.CSharp.Proof (Phase 128) — the C# facade's conformance report.
+//  Fuaran.Core.DataFrame.CSharp.Proof (Phase 257) — the dataframe half of the C#
+//  facade proves its own coverage, over its own assembly, with the same four legs
+//  as tests/Fuaran.Core.CSharp.Proof:
 //
-//  Four legs, and each answers a question the others cannot:
-//
-//   1. AUTHORING  — a C# consumer builds and reads the column layer, the JSON
-//                   model and the hole family by hand.
+//   1. AUTHORING  — a C# consumer builds and reads a pipeline by hand, and what it
+//                   builds goes through Core's own codec and comes back.
 //   2. ROUND TRIP — read-then-rebuild is the identity over a generated sample.
-//   3. COVERAGE   — that sample reached every case of every union it claims to
-//                   cover, read off the F# TYPE rather than from a written-down
-//                   number.
-//   4. SURFACE    — no public member mentions an F# type except the two declared
-//                   bridge names, with decoys proving the check can go red.
+//   3. COVERAGE   — that sample reached every case of every dataframe union,
+//                   read off the F# TYPE rather than from a written-down number.
+//   4. SURFACE    — no public member of Fuaran.Core.DataFrame.CSharp mentions an
+//                   F# type except the two declared bridge names, with decoys
+//                   proving the check can go red.
 //
-//  The dataframe half of the facade (`ColExpr`, `Transform`) ships from its own
-//  assembly since Phase 257 and proves the same four legs in
-//  tests/Fuaran.Core.DataFrame.CSharp.Proof, over its own assembly's surface.
-//
-//  Exit 0 on green, 1 on any failure. Run by `./verify.ps1` and `./run.ps1`.
+//  Exit 0 on green, 1 on any failure.
 // ============================================================================
 
 using Fuaran.Core.CSharp.Proof;
@@ -24,18 +20,18 @@ using Fuaran.Core.CSharp.Proof;
 var check = new Check();
 var coverage = new Coverage();
 
-Console.WriteLine("Fuaran.Core.CSharp — facade conformance report");
+Console.WriteLine("Fuaran.Core.DataFrame.CSharp — facade conformance report");
 Console.WriteLine(new string('-', 62));
 
-Authoring.Run(check);
-Console.WriteLine($"  authoring      : a C# consumer builds and reads the column layer, JSON and the hole family");
+DataFrameAuthoring.Run(check);
+Console.WriteLine($"  authoring      : a C# consumer builds, reads and round-trips a pipeline");
 
-RoundTrip.Run(check, coverage);
-Console.WriteLine($"  round trip     : {RoundTrip.Iterations} iterations x 8 families");
+DataFrameRoundTrip.Run(check, coverage);
+Console.WriteLine($"  round trip     : {DataFrameRoundTrip.Iterations} iterations x 2 families");
 
 var shortfalls = new List<string>();
 
-foreach (var union in RoundTrip.CoveredUnions)
+foreach (var union in DataFrameRoundTrip.CoveredUnions)
 {
     var missing = coverage.Missing(union);
 
@@ -51,14 +47,14 @@ check.That(
         + string.Join(" | ", shortfalls)
 );
 
-var reached = RoundTrip.CoveredUnions.Sum(coverage.Reached);
-var declared = RoundTrip.CoveredUnions.Sum(Coverage.Declared);
+var reached = DataFrameRoundTrip.CoveredUnions.Sum(coverage.Reached);
+var declared = DataFrameRoundTrip.CoveredUnions.Sum(Coverage.Declared);
 Console.WriteLine(
-    $"  coverage       : {reached}/{declared} cases across {RoundTrip.CoveredUnions.Count} unions"
+    $"  coverage       : {reached}/{declared} cases across {DataFrameRoundTrip.CoveredUnions.Count} unions"
 );
 
 Surface.ProveItGoesRed(check);
-var scan = Surface.Scan(typeof(Fuaran.Core.CSharp.CellValue).Assembly.GetExportedTypes());
+var scan = Surface.Scan(typeof(Fuaran.Core.CSharp.Expr).Assembly.GetExportedTypes());
 
 foreach (var violation in scan.Violations)
 {

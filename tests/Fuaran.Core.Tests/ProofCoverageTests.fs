@@ -500,7 +500,7 @@ let private liveReasons (root: JsonElement) =
     root.GetProperty("reasons").EnumerateObject() |> Seq.map _.Name |> Set.ofSeq
 
 let private liveLaws () =
-    Fuaran.Core.Families.families
+    KitRoster.families
     |> List.filter (fun f -> f.Module = "Conformance")
     |> List.map _.Entry
     |> Set.ofList
