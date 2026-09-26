@@ -2653,6 +2653,48 @@ holds `Conformance` in the new package to `DataFrameConformance` member for memb
 proof scans its own assembly (`tests/Fuaran.Core.CSharp.Proof`,
 `tests/Fuaran.Core.DataFrame.CSharp.Proof`).
 
+### The F* target's omit-at-default wrapper terminates for a list, map, record or union member (Phase 256) — `none` on the API, a fix in what it emits
+
+**The defect.** Phase 222 (`0.31.0`) gave each suffixed constructor's omit-at-default member a
+per-slot wrapper in the encoder's mutual family, `enc_dflt_<slot> (d) v`, which tested the default
+and encoded `v` itself under `(decreases v)`. For a leaf slot the encoding calls nothing, so that
+was sound. For a slot whose encoder is itself in the family — a list, a map, a record or a union —
+it is a recursive call on the very value the wrapper decreases on, and the pinned prover refuses
+the whole model: `Error 19 ... Could not prove termination of this recursive call ... Failed to
+prove: v << v`. Core's own certification vocabularies reach no such member, so Core's proof leg
+stayed green. `fuaran#1860` met it at `Embed.permissions`, a list defaulting to `[]`, and held
+`Fuaran.Core.Idl.Codegen` at `0.30.0` with a recorded cohort lag.
+
+**What changed.** For a non-leaf slot the wrapper now RECEIVES the member's encoding as a third
+argument, built at the call site on the member binder:
+`enc_dflt_l_x #num #flt ([]) f1 (JArr (enc_items_l_x f1))`, and the wrapper is
+`if v = d then None else Some e`. The recursion is on `f1`, a strict subterm of the value the
+calling encoder decreases on, and the wrapper calls nothing. The argument is still an application,
+so Phase 222's reason for the wrapper holds. A leaf slot's wrapper (`enc_dflt_str`, `enc_dflt_bool`,
+an enum's) keeps its two-argument shape byte for byte.
+
+**The class.** The surface gate reads `none` on `api/Fuaran.Core.Idl.Codegen.txt`: no signature
+moves, only the text `vocabularyModule` / `proofsModule` return. The change is confined to
+vocabularies with a defaulted list, map, record or union member in a constructor with at least
+`presenceSplitAt` conditional members. Every such model emitted by `0.31.0` failed the prover, so
+there is no verified model, and no hand-written lemma over one, whose meaning this moves. It rides
+the `0.32.0` draft.
+
+**Which consumer vocabularies it affects.** Core's three committed models regenerate byte-identical;
+the generation diff is that assertion, and `IdlFStarTargetTests` pins that the certification set
+reaches no non-leaf wrapper. `fuaran-dotnet`'s UI vocabulary is the known consumer. Regenerated with
+this emitter, its model changes on three lines, the `Embed.permissions` wrapper and its one call
+site, and it checks. `fuaran#1874` raises that pin and regenerates once this version is released.
+
+**Evidence.** Pinned prover (F* `v2026.09.06`), `--z3rlimit 40 --report_assumes error`, one slot
+per run. Against the `0.31.0` emitter a suffixed fixture with a defaulted list, map, record or union
+member is red at the wrapper's recursive call, each run on its own, and so is `fuaran-dotnet`'s
+regenerated model at the same site. Against this emitter the fixture carrying all four, a leaf
+default and an optional member checks, model and proof script, at `--quake 3`. The list-only and
+map-only fixtures check too, and so does `fuaran-dotnet`'s model. The fixture is
+`defaultedFamilyIdl` in `IdlFStarTargetTests`, and its text-level pin fails against the `0.31.0`
+emitter.
+
 ## 0.31.0 — released 2026-09-26 as `v0.31.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.**
