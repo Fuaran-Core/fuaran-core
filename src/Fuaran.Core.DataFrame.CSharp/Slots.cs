@@ -1,5 +1,5 @@
 // ============================================================================
-//  Fuaran.Core.CSharp — the scalar slots (Phase 125), a facade over
+//  Fuaran.Core.DataFrame.CSharp — the scalar slots (Phase 125), a facade over
 //  `Fuaran.Core.Slot<'T>`.
 //
 //  A `Limit`'s count and a `Sort` key's column are LITERAL-OR-PARAMETER as of

@@ -1,5 +1,107 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-26 — D68: the compute boundary is prepared inside Core — two assemblies cut beside the leaving ones, the families keep their spelling through a same-named forwarding module, and the facade half keeps its namespace
+
+**Decided (Phase 257).** D66 moves `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` to a
+repository of their own, and asks for the line to be drawn here first so the move is a copy of
+whole assemblies. Two packages crossed it: `Fuaran.Core.Conformance` referenced both, and
+`Fuaran.Core.CSharp` referenced `DataFrame`. After this phase neither does, and
+`ComputeBoundaryTests` refuses any spine assembly that reaches the compute side again. The work
+needed five calls.
+
+**1. What moves is decided by a mechanical rule.** A family that reads `DataFrame` or
+`Column.Ops` ships from `Fuaran.Core.DataFrame.Conformance`. Everything else stays in the kit. The
+phase named seven families; the rule moves eleven, plus `IncrementalDelta`:
+
+- `transformLaws`, `aggregateParityLaws` (the `GroupBy` half; see 4), `columnarOpLaws`,
+  `columnarOpLawsWith`, `columnarOpStreamGen`, `incrementalLaws` and `incrementalLawsWith`;
+- `paramLaws`, `schemaWalkLaws`, `nowLaws` and `slotParamLaws`. The phase did not name these four,
+  but each evaluates a pipeline through the `DataFrame` reference evaluator;
+- `IncrementalDelta` (`laws`, `lawsWith`), moved whole under its own module name.
+
+`columnarValidatorLaws` stays because it is over `Column`, which stays. `ParityVectors` stays
+whole. The phase expected compute rows in it, but it has none: every vector is a hash, a canonical
+float, a JSON rendering, a chain hash, a `ConfRng` draw or a `Schema` fingerprint.
+
+**2. The families keep their spelling through a second module named `Fuaran.Core.Conformance`.**
+The home of the moved families is the module `DataFrameConformance`. The same assembly also
+declares a module `Fuaran.Core.Conformance` whose every member is a one-line call to its home.
+F# resolves a qualified name against every module of that name in the referenced assemblies, so a
+consumer that references both packages keeps compiling unchanged. This was measured, not assumed,
+for three consumer shapes: `open Fuaran.Core` then `Conformance.x`; a module abbreviation
+`module K = Fuaran.Core.Conformance` then `K.x`, which is the shape fuaran-dotnet uses; and fully
+qualified `Fuaran.Core.Conformance.x`. It holds on .NET, and under Fable 5 in a two-package probe
+whose output ran under node. Two modules of one name in ONE compilation are refused (FS0248). Across two packages they
+are not, on either side; the Fable probe is the evidence for the transpiled one. This
+repository's own suite now compiles through the forwards, so they are exercised on every run. A
+test holds them to the home module member for member, and runs each seed-and-iterations forward
+beside its home.
+
+Four alternatives were declined:
+
+- **An `[<AutoOpen>]` module wrapping a nested `Conformance`.** This was the obvious extension
+  shape. It resolves only through `open`: the abbreviation and the fully-qualified forms both fail
+  (FS0039, measured), and the abbreviation is exactly the form the largest consumer uses.
+- **Type-forwarders or forwards inside the kit.** Either would make the kit reference the new
+  assembly, which is the upward reference the boundary test exists to refuse.
+- **No forwards, with every consumer renaming in its raise.** It is honest but costs every consumer
+  the rename now, when it can be taken once, with the removal, in Phase 258.
+- **Making the same-named module the permanent home.** It would spare consumers any rename. But it
+  leaves one module name split across two independently versioned repositories for good. A family
+  added on either side with a name the other side already uses would then resolve by reference
+  order. That is the collision this repository's 0.11.0 entry named for types.
+
+**What a consumer pays.** It adds one PackageReference, `Fuaran.Core.DataFrame.Conformance`, and
+changes no source. The surface gate classes `Fuaran.Core.Conformance` and `Fuaran.Core.CSharp` as
+`removal`, because a binary compiled against 0.31.0 that calls a moved member does not find it.
+Both ride the standing 0.32.0 draft, which is breaking already (D65, D67). The roster keeps the
+spellings consumers call today (`Conformance.<family>`, `IncrementalDelta.<entry>`), so a census
+has no renamed rows. There is one exception, and it is the consumer's one-line change in its raise:
+a census that reflects over the kit's assembly alone must reflect over both. fuaran-dotnet's
+census reads `typeof<LawResult>.Assembly` for four module names, so until it widens it will report
+`IncrementalDelta` missing.
+
+**What Phase 258 removes.** It removes `Forwards.fs`. It re-keys the moved rows from
+`Conformance.<family>` to `DataFrameConformance.<family>`; that re-keying is the census rename, and
+it is taken once. The families fuaran-dotnet's census adopts at 0.31.0 that it touches are
+`aggregateParityLaws`, `columnarOpLaws`, `columnarOpLawsWith`, `incrementalLaws`, `paramLaws`,
+`schemaWalkLaws`, `nowLaws`, `slotParamLaws`, `IncrementalDelta.laws` and
+`IncrementalDelta.lawsWith`. `IncrementalDelta` keeps its name. `transformLaws` is a `Not used`
+row there. `incrementalLawsWith` is new in 0.32.0 and has no row yet.
+
+**3. The roster is declared per package and composed by its reader.** `Families` cannot name
+families in a package it does not reference. So each package declares its own share as a
+`Families.Roster` (`Families.roster`, `DataFrameFamilies.roster`), and each share carries the same
+record, refusal-audit and census rows it carried before. The renderings take a list of rosters
+(`toJsonOf` / `toMarkdownOf`). The generated `docs/conformance-families.*` are rendered from both
+shares, with the package each family ships from. The JSON's `package` became `packages` plus a
+per-family `package`, and `schema` reads 5. The suite composes the two shares in one place
+(`tests/Fuaran.Core.Tests/KitRoster.fs`). Every completeness check (reflection over return type,
+census, refusal audit, reference runs) now quantifies over both assemblies. A roster key declared
+by two shipped modules is refused rather than overwritten.
+
+**4. Aggregate parity keeps one name on each side.** Parity is the comparison with a single-group
+`GroupBy`, so that half is the dataframe layer's. It keeps the name `aggregateParityLaws` and
+moves. The null-skip law reads `Column` alone and stays in the kit as `aggregateNullSkipLaws`. A
+consumer calling `aggregateParityLaws` now runs one law where it ran two, and adopts
+`aggregateNullSkipLaws` to keep the other. The proof-coverage exclusion that cited
+`aggregateParityLaws` for `Fuaran.Core.Column` now cites `aggregateNullSkipLaws`, the half that
+stays with `Column`.
+
+**5. The facade half keeps its namespace, and each facade proves itself.** `Expr`, `Step`,
+`Pipeline`, the slot types and the five dataframe vocabularies moved to
+`Fuaran.Core.DataFrame.CSharp`, still in `Fuaran.Core.CSharp`. A C# consumer adds one reference and
+changes no source. The half that stays declares a public `Vocabulary` bridge (`ToCore` /
+`FromCore` for `ColumnKind` and `AggregateFunction`). An enum cannot carry the bridge pair itself,
+and the dataframe half needs those two mappings. A bridge keeps one mapping; a copy would be a
+second place for a new column type to be missed. The internal F#-interop helpers are copied, not
+shared. Sharing them through `InternalsVisibleTo` would bind the leaving assembly to the staying
+one's internals across a repository boundary, and making them public would put F# types on
+non-bridge members. The facade proof is split in two, and each project scans its own assembly's
+surface and its own unions' coverage. The partial generator and rebuild walk, the check ledger,
+the coverage walk and the surface rule are compiled into the second project by link, so each has
+one copy. Phase 258 copies them rather than untangling them.
+
 ## 2026-09-26 — D67: the witness-taking families extend the teeth seam rather than mint a second name; `aiSurfaceLaws` runs the domain's `Decide`, and the kit's policy is the named variant
 
 **Decided (Phase 246; the member extension confirmed by the operator the same day).** Downstream

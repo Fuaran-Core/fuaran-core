@@ -14,7 +14,10 @@
 //  here rather than in a downstream veneer months later.
 //
 //  Its falsifier is concrete and was exercised: swapping the two operands in the
-//  `Binary` rebuild, or dropping the else-branch of `Case`, reddens it.
+//  `Binary` rebuild, or dropping the else-branch of `Case`, reddens it. Since
+//  Phase 257 those two legs are the dataframe facade's, in
+//  tests/Fuaran.Core.DataFrame.CSharp.Proof; this file keeps the column layer, the
+//  wire JSON model and the hole family.
 // ============================================================================
 
 namespace Fuaran.Core.CSharp.Proof;
@@ -29,20 +32,31 @@ internal static class RoundTrip
 
         for (var i = 0; i < Iterations; i++)
         {
-            var expr = gen.Expression(i, depth: 3);
-            var core = expr.ToCore();
-            coverage.Visit(core);
+            // Phase 257 — the column layer, which the dataframe legs reached on this facade's behalf
+            // until they moved to their own proof: a cell, a source (an embedded table reaches every
+            // column kind), and an aggregate function through the declared `Vocabulary` bridge.
+            var cell = gen.Cell();
+            var cellCore = cell.ToCore();
+            coverage.Visit(cellCore);
             check.That(
-                Rebuild.Expression(Expr.FromCore(core)).ToCore().Equals(core),
-                $"expression round trip failed at iteration {i}: `{core}`"
+                Rebuild.Cell(CellValue.FromCore(cellCore)).ToCore().Equals(cellCore),
+                $"cell round trip failed at iteration {i}: `{cellCore}`"
             );
 
-            var pipeline = gen.PipelineOf(i);
-            var pipelineCore = pipeline.ToCore();
-            coverage.Visit(pipelineCore);
+            var source = gen.Source();
+            var sourceCore = source.ToCore();
+            coverage.Visit(sourceCore);
             check.That(
-                Rebuild.PipelineOf(Pipeline.FromCore(pipelineCore)).ToCore().Equals(pipelineCore),
-                $"pipeline round trip failed at iteration {i}: `{pipelineCore}`"
+                Rebuild.Source(SourceValue.FromCore(sourceCore)).ToCore().Equals(sourceCore),
+                $"source round trip failed at iteration {i}: `{sourceCore}`"
+            );
+
+            var aggregate = gen.Aggregate();
+            var aggregateCore = Vocabulary.ToCore(aggregate);
+            coverage.Visit(aggregateCore);
+            check.That(
+                Vocabulary.ToCore(Vocabulary.FromCore(aggregateCore)).Equals(aggregateCore),
+                $"aggregate function round trip failed at iteration {i}: `{aggregateCore}`"
             );
 
             var json = gen.Json(i, depth: 3);
@@ -91,15 +105,6 @@ internal static class RoundTrip
     internal static IReadOnlyList<Type> CoveredUnions { get; } =
         new[]
         {
-            typeof(ColExpr),
-            typeof(Transform),
-            // Phase 125 — the two `Slot` instantiations the algebra uses, and the grain a `Now`
-            // carries. Listed for the same reason every other union here is: a sample that never
-            // built a `Slot.Param` would let the round-trip law report green about a case it never
-            // saw, and the whole point of the slot is the param.
-            typeof(Slot<string>),
-            typeof(Slot<int>),
-            typeof(NowGrain),
             typeof(Cell),
             typeof(ColumnType),
             typeof(DataSource),
@@ -108,11 +113,6 @@ internal static class RoundTrip
             typeof(HoleKind),
             typeof(HostEffect),
             typeof(DeterminismSource),
-            typeof(BinOp),
-            typeof(ScalarFn),
             typeof(AggFn),
-            typeof(JoinKind),
-            typeof(SortDir),
-            typeof(WindowFn),
         };
 }

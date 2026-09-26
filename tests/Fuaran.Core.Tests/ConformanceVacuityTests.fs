@@ -345,6 +345,7 @@ let private runs =
            run "Conformance.queryLaws" 200 (Conformance.queryLaws 4242 200)
            run "Conformance.registryLaws" 200 (Conformance.registryLaws 4242 200)
            run "Conformance.packLoadingLaws" 200 (Conformance.packLoadingLaws 4242 200)
+           run "Conformance.aggregateNullSkipLaws" 200 (Conformance.aggregateNullSkipLaws 4242 200)
            run "Conformance.aggregateParityLaws" 200 (Conformance.aggregateParityLaws 4242 200)
            run "Conformance.columnarOpLaws" 200 (Conformance.columnarOpLaws 4242 200)
            run
@@ -423,9 +424,12 @@ let private runs =
 /// than passed, because the census is the single declaration and this file must not become a
 /// second one.
 let private classOf (id: string) : AdequacyClass =
-    match SampleAdequacy.census |> List.tryFind (fun (k, _) -> k = id) with
+    match KitRoster.census |> List.tryFind (fun (k, _) -> k = id) with
     | Some(_, k) -> k
-    | None -> failwithf "%s has no SampleAdequacy.census row — the roster and the census disagree" id
+    | None ->
+        failwithf
+            "%s has no census row (SampleAdequacy.census or DataFrameFamilies.census) — the roster and the census disagree"
+            id
 
 /// The measured census: one `CaseCount` per family, in roster order. This is what the generated
 /// `docs/conformance-families.{md,json}` render their `cases` column from.
@@ -492,7 +496,7 @@ let vacuityTests =
               // missing run is a family measured by nobody, and a run naming nothing is a census
               // cell for a family that no longer exists.
               let ran = runs.Value |> List.map (fun r -> r.Id) |> Set.ofList
-              let rostered = Set.ofList Families.ids
+              let rostered = Set.ofList KitRoster.ids
 
               Expect.isEmpty
                   (Set.difference rostered ran |> Set.toList)
@@ -641,12 +645,12 @@ let vacuityTests =
               // The audit is data so the next audit can diff it; a family missing from it is a
               // family nobody asked the question of, and a row naming nothing is a verdict about a
               // family that no longer exists.
-              let audited = Families.refusalAudit |> List.map (fun a -> a.Family)
-              let rostered = Set.ofList Families.ids
+              let audited = KitRoster.refusalAudit |> List.map (fun a -> a.Family)
+              let rostered = Set.ofList KitRoster.ids
 
               Expect.isEmpty
                   (Set.difference rostered (Set.ofList audited) |> Set.toList)
-                  "these law families have no Families.refusalAudit row — audit each in the commit that ships it"
+                  "these law families have no refusal-audit row (Families.refusalAudit or DataFrameFamilies.refusalAudit) — audit each in the commit that ships it"
 
               Expect.isEmpty
                   (Set.difference (Set.ofList audited) rostered |> Set.toList)
@@ -654,7 +658,7 @@ let vacuityTests =
 
               Expect.equal (List.length audited) (Set.count (Set.ofList audited)) "one row per family"
 
-              for a in Families.refusalAudit do
+              for a in KitRoster.refusalAudit do
                   Expect.isTrue (a.Why.Trim().Length > 10) (sprintf "%s carries no usable evidence" a.Family)
 
           testCase "every family whose refusals a run can silently miss is Guarded"
@@ -667,7 +671,7 @@ let vacuityTests =
               // Phase 220 shipped this as a ratchet naming six permitted violators; Phase 223 guarded
               // all six and emptied it, so there are no exceptions left to name.
               let unguardedDrawn =
-                  Families.refusalAudit
+                  KitRoster.refusalAudit
                   |> List.filter (fun a -> a.Population = Families.Drawn)
                   |> List.filter (fun a ->
                       match classOf a.Family with
@@ -688,14 +692,14 @@ let vacuityTests =
 
               for id in [ "Conformance.opAlgebra"; "Conformance.reducer" ] do
                   Expect.equal
-                      (Families.tryRefusal id |> Option.map (fun a -> a.Population))
+                      (KitRoster.tryRefusal id |> Option.map (fun a -> a.Population))
                       (Some Families.Drawn)
                       (sprintf "%s is audited Drawn" id)
 
                   Expect.equal (classOf id) (Guarded [ "accepted"; "refused" ]) (sprintf "%s is censused Guarded" id)
 
                   Expect.equal
-                      (Families.adequacyToken measured id)
+                      (KitRoster.adequacyToken measured id)
                       "guarded-reached"
                       (sprintf "%s reached both sides at the reference witness" id)
 
@@ -707,14 +711,14 @@ let vacuityTests =
 
               for id, dims in drawnRefusalSix do
                   Expect.equal
-                      (Families.tryRefusal id |> Option.map (fun a -> a.Population))
+                      (KitRoster.tryRefusal id |> Option.map (fun a -> a.Population))
                       (Some Families.Drawn)
                       (sprintf "%s is audited Drawn" id)
 
                   Expect.equal (classOf id) (Guarded dims) (sprintf "%s is censused Guarded" id)
 
                   Expect.equal
-                      (Families.adequacyToken measured id)
+                      (KitRoster.adequacyToken measured id)
                       "guarded-reached"
                       (sprintf "%s reached every guarded dimension at the reference witness" id)
 
@@ -731,7 +735,7 @@ let vacuityTests =
                       let measured = [ id, SampleAdequacy.cases id (classOf id) iterations (runAt seed) ]
 
                       Expect.equal
-                          (Families.adequacyToken measured id)
+                          (KitRoster.adequacyToken measured id)
                           "guarded-reached"
                           (sprintf "%s at seed %d, %d iterations" id seed iterations)
 
@@ -760,7 +764,7 @@ let vacuityTests =
           <| fun _ ->
               // A consumer that handed the renderer no run has not measured zero cases; it has
               // measured nothing. Collapsing the two would let the second read as the first.
-              let declarationOnly = Families.toMarkdown ()
+              let declarationOnly = KitRoster.toMarkdown ()
 
               Expect.stringContains
                   declarationOnly

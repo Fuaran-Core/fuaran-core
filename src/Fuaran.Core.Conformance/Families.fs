@@ -209,23 +209,16 @@ module Families =
               [ "propagation-prior-blind" ]
 
           c "captureReplayLaws" none (Some SeamNotEveryDomainHas) []
-          c "transformLaws" none (Some SeamNotEveryDomainHas) []
           c "constructThenEncodeLaws" none (Some SeamNotEveryDomainHas) []
           c "hashFnAdversarialLaws" none (Some SeamNotEveryDomainHas) []
           c "capabilityLaws" none (Some SeamNotEveryDomainHas) []
           c "queryLaws" none (Some SeamNotEveryDomainHas) []
           c "registryLaws" none (Some SeamNotEveryDomainHas) []
           c "packLoadingLaws" none (Some SeamNotEveryDomainHas) []
-          c "aggregateParityLaws" none (Some SeamNotEveryDomainHas) []
-          c "columnarOpLaws" none (Some SeamNotEveryDomainHas) []
-          // Phase 246 — the columnar pair at a domain's `StreamGen<ColumnOp, Table>`. `StreamGen` is
-          // a base-run witness, so the reason stays `SeamNotEveryDomainHas`.
-          c "columnarOpLawsWith" [ "StreamGen" ] (Some SeamNotEveryDomainHas) []
+          // Phase 257 — the `Column.aggregate` half of what was `aggregateParityLaws`; the parity
+          // half ships from `Fuaran.Core.DataFrame.Conformance` with the other dataframe families.
+          c "aggregateNullSkipLaws" none (Some SeamNotEveryDomainHas) []
           c "columnarValidatorLaws" none (Some SeamNotEveryDomainHas) []
-          c "incrementalLaws" none (Some SeamNotEveryDomainHas) []
-          c "incrementalLawsWith" [ "StreamGen" ] (Some SeamNotEveryDomainHas) []
-          c "paramLaws" none (Some SeamNotEveryDomainHas) []
-          c "schemaWalkLaws" none (Some SeamNotEveryDomainHas) []
           c "deferredLaws" none (Some SeamNotEveryDomainHas) []
           c "capabilityPipelineLaws" none (Some SeamNotEveryDomainHas) []
           c "capabilityPipelineIncrementalLaws" none (Some SeamNotEveryDomainHas) []
@@ -234,14 +227,9 @@ module Families =
           c "canonicalFloatLaws" none (Some SeamNotEveryDomainHas) []
           c "chainBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
           c "dagBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
-          c "nowLaws" none (Some SeamNotEveryDomainHas) []
-          c "slotParamLaws" none (Some SeamNotEveryDomainHas) []
 
           f "FoldConfluence" "laneFoldLaws" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) []
-          f "FoldConfluence" "laneFoldLawsWith" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) []
-
-          f "IncrementalDelta" "laws" none (Some SeamNotEveryDomainHas) []
-          f "IncrementalDelta" "lawsWith" none (Some SeamNotEveryDomainHas) [] ]
+          f "FoldConfluence" "laneFoldLawsWith" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) [] ]
 
     /// The roster's keys, sorted — the enumeration a census, a ladder or a projection quantifies
     /// over.
@@ -395,10 +383,6 @@ module Families =
           // ---- the fixture-only families ----
           r "Conformance.captureReplayLaws" Built "the tampered capture and the misordered replay are built"
           r
-              "Conformance.transformLaws"
-              Drawn
-              "the Error/Error parity arm is reached only when the caller's generator yields an evaluation error"
-          r
               "Conformance.constructThenEncodeLaws"
               NoRefusal
               "Reject corpus cases are filtered out; a Construct Error only fails a law"
@@ -411,25 +395,13 @@ module Families =
           r "Conformance.registryLaws" Built "an unregistered id and an out-of-space arg are built"
           r "Conformance.packLoadingLaws" Built "a stale-version pack and an unknown base are built"
           r
-              "Conformance.aggregateParityLaws"
+              "Conformance.aggregateNullSkipLaws"
               NoRefusal
-              "an Error only lands in a parity bucket, and the kit draws no type that can raise one"
-          r "Conformance.columnarOpLaws" Drawn "delegates to columnarOpLawsWith"
-          r
-              "Conformance.columnarOpLawsWith"
-              Drawn
-              "the refused ops are drawn by the caller's StreamGen (columnarOpLaws: the kit's own roll); guarded on invert's refusal population"
+              "an aggregate Error only fails the law, and the kit draws no type that can raise one"
           r
               "Conformance.columnarValidatorLaws"
               Drawn
               "null and out-of-range faults are injected by the kit's own roll, and a fault-free draw satisfies the count laws trivially"
-          r "Conformance.incrementalLaws" NoRefusal "an Error is only skipped"
-          r
-              "Conformance.incrementalLawsWith"
-              NoRefusal
-              "an op the table refuses and a pipeline that does not evaluate are only skipped"
-          r "Conformance.paramLaws" Built "one paramsOf member is dropped each iteration and must refuse UnboundParam"
-          r "Conformance.schemaWalkLaws" NoRefusal "an evaluator rejection is skipped"
           r "Conformance.deferredLaws" Built "the fixed Failed case must yield Error"
           r "Conformance.capabilityPipelineLaws" Built "the fixed ill-typed pipeline must refuse EdgeTypeMismatch"
           r "Conformance.capabilityPipelineIncrementalLaws" NoRefusal "an eval Error only records a failure"
@@ -441,24 +413,45 @@ module Families =
           r "Conformance.canonicalFloatLaws" NoRefusal "no refused outcome is read"
           r "Conformance.chainBreakReasonLaws" Built "all three break kinds are built each iteration"
           r "Conformance.dagBreakReasonLaws" Built "both break kinds are built each iteration"
-          r "Conformance.nowLaws" Built "the unpinned clock must refuse UnpinnedClock, built each iteration"
-          r "Conformance.slotParamLaws" Built "the unbound and mistyped slots are built each iteration"
 
           // ---- outside `Conformance` ----
           r "FoldConfluence.laneFoldLaws" Drawn "delegates to laneFoldLawsWith"
           r
               "FoldConfluence.laneFoldLawsWith"
               Drawn
-              "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome"
-          r "IncrementalDelta.laws" Drawn "delegates to lawsWith"
-          r
-              "IncrementalDelta.lawsWith"
-              Drawn
-              "declined pipelines are picked from a fixed menu by the kit's roll; guarded on refresh class" ]
+              "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome" ]
 
     /// The audit row for one family, if the roster audits it (the suite holds that it always does).
     let tryRefusal (id: string) : RefusalAudit option =
         refusalAudit |> List.tryFind (fun a -> a.Family = id)
+
+    /// Phase 257 — one PACKAGE'S share of the roster: the families it ships, their refusal audit
+    /// and their adequacy census, under the package id a consumer references to run them.
+    ///
+    /// The kit's families are no longer all in one assembly. Those that read the dataframe layer
+    /// ship from `Fuaran.Core.DataFrame.Conformance` (DECISIONS.md D68), and this package cannot
+    /// name them without referencing that one — the upward reference the boundary test refuses. So
+    /// each package declares its own share, and a reader that sees both composes them: the
+    /// renderings below take a list of rosters, and the generated `docs/conformance-families.*`
+    /// are rendered from both.
+    type Roster =
+        {
+            /// The package id the families ship from — the one reference a consumer adds to run them.
+            Package: string
+            /// The families this package ships, keyed exactly as the combined roster keys them.
+            Families: LawFamily list
+            /// One audit row per family above.
+            RefusalAudit: RefusalAudit list
+            /// One adequacy-census row per family above.
+            Census: (string * AdequacyClass) list
+        }
+
+    /// This package's share: `families`, `refusalAudit` and `SampleAdequacy.census`.
+    let roster: Roster =
+        { Package = "Fuaran.Core.Conformance"
+          Families = families
+          RefusalAudit = refusalAudit
+          Census = SampleAdequacy.census }
 
     // ---- the exports ------------------------------------------------------------------------
 
@@ -502,11 +495,10 @@ module Families =
         | SeamNotEveryDomainHas -> "seam-not-every-domain-has"
         | StrongerPromise -> "stronger-promise"
 
-    /// The wire spelling of a refusal-audit verdict — Phase 220. `unaudited` is never rendered for
-    /// a shipped family (the suite holds the audit equal to the roster); it exists so the renderer
-    /// is total rather than throwing on a roster a consumer extended.
-    let refusalToken (id: string) : string =
-        match tryRefusal id with
+    /// The wire spelling of a refusal-audit verdict over a composed roster — the audit row is read
+    /// from whichever package's share carries the family (Phase 257).
+    let refusalTokenOf (rosters: Roster list) (id: string) : string =
+        match rosters |> List.collect _.RefusalAudit |> List.tryFind (fun a -> a.Family = id) with
         | Some a ->
             match a.Population with
             | NoRefusal -> "none"
@@ -515,15 +507,16 @@ module Families =
             | Drawn -> "drawn"
         | None -> "unaudited"
 
-    /// The adequacy cell — Phase 220. What `certify`'s verdict for a family is made of, as a fact
-    /// the generated data carries rather than one a reader reconstructs: `unconditional` (every
-    /// iteration builds every branch, so a green run is a pass), `guarded-reached` (the family
-    /// carries a guard and this run reached every guarded side), `guarded-starved` (the guard went
-    /// red — the run tested nothing on a side a law is about), or `guarded-unmeasured` (a guarded
-    /// family no run was handed for). Read from `SampleAdequacy.census` and the measured run, so it
-    /// cannot disagree with either.
-    let adequacyToken (cases: (string * CaseCount) list) (id: string) : string =
-        match SampleAdequacy.census |> List.tryFind (fun (k, _) -> k = id) with
+    /// The wire spelling of a refusal-audit verdict — Phase 220. `unaudited` is never rendered for
+    /// a shipped family (the suite holds the audit equal to the roster); it exists so the renderer
+    /// is total rather than throwing on a roster a consumer extended. Reads this package's share;
+    /// a family another package ships reads its verdict through the composed renderings.
+    let refusalToken (id: string) : string = refusalTokenOf [ roster ] id
+
+    /// The adequacy cell over a composed roster — the census row is read from whichever package's
+    /// share carries the family (Phase 257).
+    let adequacyTokenOf (rosters: Roster list) (cases: (string * CaseCount) list) (id: string) : string =
+        match rosters |> List.collect _.Census |> List.tryFind (fun (k, _) -> k = id) with
         | None -> "unclassified"
         | Some(_, Unconditional _) -> "unconditional"
         | Some(_, Guarded _) ->
@@ -532,30 +525,47 @@ module Families =
             | Some(_, c) when List.isEmpty c.Starved -> "guarded-reached"
             | Some _ -> "guarded-starved"
 
+    /// The adequacy cell — Phase 220. What `certify`'s verdict for a family is made of, as a fact
+    /// the generated data carries rather than one a reader reconstructs: `unconditional` (every
+    /// iteration builds every branch, so a green run is a pass), `guarded-reached` (the family
+    /// carries a guard and this run reached every guarded side), `guarded-starved` (the guard went
+    /// red — the run tested nothing on a side a law is about), or `guarded-unmeasured` (a guarded
+    /// family no run was handed for). Read from `SampleAdequacy.census` and the measured run, so it
+    /// cannot disagree with either.
+    let adequacyToken (cases: (string * CaseCount) list) (id: string) : string = adequacyTokenOf [ roster ] cases id
+
+    /// Every family of the composed roster, paired with the package share that ships it, sorted by id.
+    let private composed (rosters: Roster list) : (Roster * LawFamily) list =
+        [ for r in rosters do
+              for f in r.Families -> r, f ]
+        |> List.sortBy (fun (_, f) -> f.Id)
+
     /// The roster as JSON — the machine export, and the one an offline projection reads without
-    /// building or running anything (it is committed, generated, at `docs/conformance-families.json`).
+    /// building or running anything (it is committed, generated, at `docs/conformance-families.json`,
+    /// rendered from every package's share).
     ///
     /// The shape is a CONTRACT and is documented in `STABILITY.md`: a top-level object carrying
-    /// `kind`, `schema`, `package` and a `families` array sorted by `id`, each member an object
-    /// with `id`, `module`, `entry`, `witness` (array), `optIn` (boolean), `reason` (a string from
+    /// `kind`, `schema`, `packages` (the package ids composed, in the order given) and a `families`
+    /// array sorted by `id`, each member an object with `id`, `module`, `entry`, `package` (the
+    /// package the family ships from), `witness` (array), `optIn` (boolean), `reason` (a string from
     /// the [[OptInReason]] vocabulary, **present only for an opt-in family** — this wire model has
     /// no null), `discharges` (array), `cases` (a string: a decimal count, `vacuous`, or
     /// `unmeasured`), `adequacy` (see [[adequacyToken]]) and `refusal` (see [[refusalToken]]).
     ///
-    /// `schema` reads 4 since Phase 220 added `adequacy` and `refusal`; it read 3 from Phase 196's
-    /// `cases` and 2 from Phase 194's `reason`. The
-    /// bump is free and therefore taken: a search of the workspace found no reader of this file
-    /// outside this repository's own suite, so nothing keys on the old number, and a shape that
-    /// changes under an unmoved stamp is the drift class this estate keeps paying for elsewhere.
-    /// Members are written in that order and the array is sorted, so the rendering is byte-stable
-    /// across runs and a diff shows only what moved. Two spaces of indent, `\n` line endings, and
-    /// a trailing newline.
+    /// `schema` reads 5 since Phase 257 split the kit across two packages: the top-level `package`
+    /// became `packages`, and each family names its own. It read 4 from Phase 220's `adequacy` and
+    /// `refusal`, 3 from Phase 196's `cases` and 2 from Phase 194's `reason`. Each bump is free and
+    /// therefore taken: a search of the workspace found no reader of this file outside this
+    /// repository's own suite, so nothing keys on the old number, and a shape that changes under an
+    /// unmoved stamp is the drift class this estate keeps paying for elsewhere. Members are written
+    /// in that order and the array is sorted, so the rendering is byte-stable across runs and a diff
+    /// shows only what moved. Two spaces of indent, `\n` line endings, and a trailing newline.
     ///
     /// `cases` is the ONE member a roster cannot derive — a declaration cannot run a law — so it
     /// is supplied by the caller that did run them. `toJson ()` renders `unmeasured` for every
     /// family, which is the honest cell for a caller that measured nothing.
-    let toJsonWith (cases: (string * CaseCount) list) : string =
-        let family (f: LawFamily) =
+    let toJsonOf (rosters: Roster list) (cases: (string * CaseCount) list) : string =
+        let family (r: Roster, f: LawFamily) =
             // `reason` is OMITTED for a base-run family rather than rendered `null`: this wire
             // model has no null (`JVal` cannot represent one, and `no_null_ever` is a proved
             // grammar theorem over the renderer), so a null here would emit a document the kit's
@@ -563,27 +573,24 @@ module Families =
             [ "      " + quote "id" + ": " + quote f.Id
               "      " + quote "module" + ": " + quote f.Module
               "      " + quote "entry" + ": " + quote f.Entry
+              "      " + quote "package" + ": " + quote r.Package
               "      " + quote "witness" + ": " + jsonArray f.Witness
               "      " + quote "optIn" + ": " + (if f.OptIn then "true" else "false")
               "      " + quote "discharges" + ": " + jsonArray f.Discharges
               "      " + quote "cases" + ": " + quote (casesCell cases f.Id)
-              "      " + quote "adequacy" + ": " + quote (adequacyToken cases f.Id)
-              "      " + quote "refusal" + ": " + quote (refusalToken f.Id) ]
+              "      " + quote "adequacy" + ": " + quote (adequacyTokenOf rosters cases f.Id)
+              "      " + quote "refusal" + ": " + quote (refusalTokenOf rosters f.Id) ]
             |> fun members ->
                 match f.Reason with
                 | None -> members
-                | Some r ->
+                | Some reason ->
                     // after `optIn`, before `discharges` — the documented member order
-                    let head, tail = List.splitAt 5 members
-                    head @ [ "      " + quote "reason" + ": " + quote (reasonToken r) ] @ tail
+                    let head, tail = List.splitAt 6 members
+                    head @ [ "      " + quote "reason" + ": " + quote (reasonToken reason) ] @ tail
             |> String.concat ",\n"
             |> fun body -> "    {\n" + body + "\n    }"
 
-        let body =
-            families
-            |> List.sortBy (fun f -> f.Id)
-            |> List.map family
-            |> String.concat ",\n"
+        let body = composed rosters |> List.map family |> String.concat ",\n"
 
         "{\n"
         + "  "
@@ -593,11 +600,11 @@ module Families =
         + ",\n"
         + "  "
         + quote "schema"
-        + ": 4,\n"
+        + ": 5,\n"
         + "  "
-        + quote "package"
+        + quote "packages"
         + ": "
-        + quote "Fuaran.Core.Conformance"
+        + jsonArray (rosters |> List.map _.Package)
         + ",\n"
         + "  "
         + quote "families"
@@ -605,32 +612,38 @@ module Families =
         + body
         + "\n  ]\n}\n"
 
+    /// This package's share as JSON — `toJsonOf [ roster ]`.
+    let toJsonWith (cases: (string * CaseCount) list) : string = toJsonOf [ roster ] cases
+
     /// The roster as the generated `docs/conformance-families.md` — the human-readable half of the
-    /// same export. Sorted by `id`, so the table is byte-stable and a diff shows only what moved.
+    /// same export, rendered from every package's share. Sorted by `id`, so the table is
+    /// byte-stable and a diff shows only what moved.
     ///
-    /// `cases` carries what a run measured, per Phase 196; `adequacy` and `refusal` are Phase 220's.
-    let toMarkdownWith (cases: (string * CaseCount) list) : string =
+    /// `cases` carries what a run measured, per Phase 196; `adequacy` and `refusal` are Phase
+    /// 220's; `package` is Phase 257's.
+    let toMarkdownOf (rosters: Roster list) (cases: (string * CaseCount) list) : string =
         let cell (xs: string list) =
             if List.isEmpty xs then
                 "—"
             else
                 xs |> List.map (fun x -> "`" + x + "`") |> String.concat ", "
 
-        let row (f: LawFamily) =
+        let rows = composed rosters
+
+        let row (r: Roster, f: LawFamily) =
             sprintf
-                "| `%s` | %s | %s | %s | %s | %s | %s | %s |"
+                "| `%s` | `%s` | %s | %s | %s | %s | %s | %s | %s |"
                 f.Id
+                r.Package
                 (if f.OptIn then "opt-in" else "base run")
                 (match f.Reason with
-                 | Some r -> "`" + reasonToken r + "`"
+                 | Some reason -> "`" + reasonToken reason + "`"
                  | None -> "—")
                 (cell f.Witness)
                 (cell f.Discharges)
                 (casesCell cases f.Id)
-                ("`" + adequacyToken cases f.Id + "`")
-                ("`" + refusalToken f.Id + "`")
-
-        let rows = families |> List.sortBy (fun f -> f.Id) |> List.map row
+                ("`" + adequacyTokenOf rosters cases f.Id + "`")
+                ("`" + refusalTokenOf rosters f.Id + "`")
 
         [ "# The law families this kit ships"
           ""
@@ -648,7 +661,7 @@ module Families =
           "Running one at your own witness is how a domain certifies it conforms; this table is the"
           "enumeration of what there is to run, so a family cannot be quietly absent from a"
           "conformance census that quantifies over it. The enumeration is held to reflection over"
-          "the shipped assembly BY RETURN TYPE, so it cannot miss a family by how the family is"
+          "the shipped assemblies BY RETURN TYPE, so it cannot miss a family by how the family is"
           "named."
           ""
           "**Base run / opt-in.** The five `base run` families are the ones `Conformance.certify` and"
@@ -686,16 +699,29 @@ module Families =
           "run that misses it fails. `drawn` — drawn, and a run that misses it stays green unless"
           "the family is guarded, which is what the `Adequacy` cell beside it answers."
           ""
-          sprintf
-              "%d families, across %s."
-              (List.length families)
-              (modules |> List.map (fun m -> "`" + m + "`") |> String.concat ", ")
+          "**Package.** The package a family ships from — the one reference a consumer adds to run it."
+          "The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conformance`"
+          "(Phase 257, DECISIONS.md D68); every other family ships from `Fuaran.Core.Conformance`."
           ""
-          "| Family | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |"
-          "|---|---|---|---|---|---|---|---|" ]
-        @ rows
+          sprintf
+              "%d families, across %s, from %s."
+              (List.length rows)
+              (rows
+               |> List.map (fun (_, f) -> f.Module)
+               |> List.distinct
+               |> List.sort
+               |> List.map (fun m -> "`" + m + "`")
+               |> String.concat ", ")
+              (rosters |> List.map (fun r -> "`" + r.Package + "`") |> String.concat ", ")
+          ""
+          "| Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |"
+          "|---|---|---|---|---|---|---|---|---|" ]
+        @ (rows |> List.map row)
         @ [ "" ]
         |> String.concat "\n"
+
+    /// This package's share as markdown — `toMarkdownOf [ roster ]`.
+    let toMarkdownWith (cases: (string * CaseCount) list) : string = toMarkdownOf [ roster ] cases
 
     /// The roster rendered with no run behind it — every `cases` cell reads `unmeasured`. Kept
     /// beside the counted renderings rather than replaced by them, because a reader that wants the

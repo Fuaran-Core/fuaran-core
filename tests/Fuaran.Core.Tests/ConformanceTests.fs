@@ -771,11 +771,13 @@ let tests =
                   (bad |> List.exists (fun r -> r.Counterexample.IsSome))
                   "the lossy failure carries a (tree, tree) counterexample"
 
-          // Phase 36 — the aggregate-parity laws (Column.aggregate as the single source GroupBy calls).
-          testCase "aggregateParityLaws certify single-source parity + null-skip (Phase 36)"
+          // Phase 36 — the aggregate-parity law (Column.aggregate as the single source GroupBy calls).
+          // Phase 257 split the family: the parity half ships from Fuaran.Core.DataFrame.Conformance
+          // under this name, and the null-skip half is `aggregateNullSkipLaws`, in the kit.
+          testCase "aggregateParityLaws certify single-source parity (Phase 36)"
           <| fun _ ->
               let results = Conformance.aggregateParityLaws 4242 200
-              Expect.equal (List.length results) 2 "parity + null-skip laws reported"
+              Expect.equal (List.length results) 1 "the parity law reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -787,6 +789,26 @@ let tests =
 
               // seed-replay determinism
               Expect.equal (Conformance.aggregateParityLaws 4242 200) results "same seed ⇒ identical report"
+
+          // Phase 257 — the null-skip half of Phase 36, a family of its own in the kit.
+          testCase "aggregateNullSkipLaws certify Column.aggregate's null-skip semantics (Phase 36, split by 257)"
+          <| fun _ ->
+              let results = Conformance.aggregateNullSkipLaws 4242 200
+              Expect.equal (List.length results) 1 "the null-skip law reported"
+
+              for r in results do
+                  Expect.isTrue r.Passed (sprintf "%s — %A" r.Law r.Counterexample)
+
+              Expect.equal (Conformance.aggregateNullSkipLaws 4242 200) results "same seed ⇒ identical report"
+
+              // The semantics the law pins, read directly once so the sample's verdict has a
+              // fixed point beside it: a Null is not counted.
+              let col = Column.create "c" IntType [ Int 1; Null; Int 2 ]
+
+              Expect.equal
+                  (Column.aggregate Count col)
+                  (Ok(Int 2))
+                  "Count over [1; null; 2] counts the two present cells"
 
           // Phase 60 — the attestation / replay-as-provenance laws.
           testCase
@@ -1395,7 +1417,7 @@ let keyedChildrenLawTests =
               // The half `SampleAdequacyTests` does not run for a witness-taking family — it leaves
               // those to their own suite, and this is that suite.
               match
-                  SampleAdequacy.census
+                  KitRoster.census
                   |> List.tryFind (fun (n, _) -> n = "Conformance.keyedChildrenLaws")
               with
               | Some(_, Guarded _) -> ()
@@ -1705,7 +1727,7 @@ let propagationEvaluatorLawTests =
           testCase "the census calls it Guarded, and the run reports the arms it reached"
           <| fun _ ->
               match
-                  SampleAdequacy.census
+                  KitRoster.census
                   |> List.tryFind (fun (n, _) -> n = "Conformance.propagationEvaluatorLaws")
               with
               | Some(_, Guarded _) -> ()

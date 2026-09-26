@@ -384,6 +384,6 @@ let tests =
                     "Conformance.columnarOpLawsWith", [ "StreamGen" ]
                     "Conformance.incrementalLawsWith", [ "StreamGen" ] ] do
                   Expect.equal
-                      (Families.tryFind id |> Option.map (fun f -> f.Witness))
+                      (KitRoster.tryFind id |> Option.map (fun f -> f.Witness))
                       (Some witness)
                       (sprintf "%s names the witness it takes" id) ]

@@ -362,7 +362,7 @@ let motivatingInstanceTests =
 /// Reading the roster keeps this file's completeness claim exactly as strong as it was and moves
 /// the derivation to one place: a family answers with `LawResult list` or it is not a family, and
 /// no module list is restated here for a new module to fall outside of.
-let private shippedFamilies () : string list = Families.ids
+let private shippedFamilies () : string list = KitRoster.ids
 
 [<Tests>]
 let censusTests =
@@ -378,14 +378,14 @@ let censusTests =
               // The kit's declared roster closes it — itself held to reflection over the shipped
               // assembly BY RETURN TYPE — so a family added without answering the adequacy
               // question fails to ship rather than passing silently.
-              let declared = SampleAdequacy.census |> List.map fst |> Set.ofList
+              let declared = KitRoster.census |> List.map fst |> Set.ofList
               let shipped = shippedFamilies ()
               let unclassified = shipped |> List.filter (fun f -> not (Set.contains f declared))
 
               Expect.isEmpty
                   unclassified
                   (sprintf
-                      "these law families are not in SampleAdequacy.census — declare each as Guarded or Unconditional (with the reason): %A"
+                      "these law families are not in any census share (SampleAdequacy.census, DataFrameFamilies.census) — declare each as Guarded or Unconditional (with the reason): %A"
                       unclassified)
 
           testCase "the census names no family the kit no longer ships"
@@ -395,7 +395,7 @@ let censusTests =
               let shipped = shippedFamilies () |> Set.ofList
 
               let stale =
-                  SampleAdequacy.census
+                  KitRoster.census
                   |> List.map fst
                   |> List.filter (fun f -> not (Set.contains f shipped))
 
@@ -403,14 +403,14 @@ let censusTests =
 
           testCase "the census carries no duplicate row and no empty reason"
           <| fun _ ->
-              let names = SampleAdequacy.census |> List.map fst
+              let names = KitRoster.census |> List.map fst
 
               Expect.equal
                   (List.length (List.distinct names))
                   (List.length names)
                   "a family classified twice could be classified two ways"
 
-              for name, cls in SampleAdequacy.census do
+              for name, cls in KitRoster.census do
                   match cls with
                   | Guarded dims ->
                       Expect.isNonEmpty dims (sprintf "%s is Guarded but names no dimension" name)
@@ -451,6 +451,7 @@ let censusTests =
                     "queryLaws", Conformance.queryLaws
                     "registryLaws", Conformance.registryLaws
                     "packLoadingLaws", Conformance.packLoadingLaws
+                    "aggregateNullSkipLaws", Conformance.aggregateNullSkipLaws
                     "aggregateParityLaws", Conformance.aggregateParityLaws
                     "columnarOpLaws", Conformance.columnarOpLaws
                     "columnarValidatorLaws", Conformance.columnarValidatorLaws
@@ -459,7 +460,7 @@ let censusTests =
                     "deferredLaws", Conformance.deferredLaws
                     "capabilityPipelineLaws", Conformance.capabilityPipelineLaws
                     "canonicalFloatLaws", Conformance.canonicalFloatLaws ] do
-                  match SampleAdequacy.census |> List.tryFind (fun (n, _) -> n = "Conformance." + name) with
+                  match KitRoster.census |> List.tryFind (fun (n, _) -> n = "Conformance." + name) with
                   | Some(_, Unconditional _) ->
                       Expect.isFalse
                           (emits (run 4242 20))

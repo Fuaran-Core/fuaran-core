@@ -1,5 +1,5 @@
 // ============================================================================
-//  Fuaran.Core.CSharp — the scalar expression (Phase 128), a facade over
+//  Fuaran.Core.DataFrame.CSharp — the scalar expression (Phase 128), a facade over
 //  `Fuaran.Core.ColExpr`.
 //
 //  Twelve cases, twelve factories, one total `Match`. The list-shaped payloads

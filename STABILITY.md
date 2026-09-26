@@ -2349,7 +2349,9 @@ consumer's contract and nothing rides it. Phase 250 adds a case to the closed `S
 which the surface gate classes `union-widening`, and a breaking change opens a minor slot rather
 than a patch one. Every other member this phase adds is classed `additive` by the gate and rides
 the slot beside it. Phase 246 adds two more breaking moves, a `retype` of `columnarOpLawsWith` and
-a verdict change on `aiSurfaceLaws`, and both ride the slot for the same reason. `<Version>` and the laws corpus here (`conformance/laws/*.json`) were re-stamped
+a verdict change on `aiSurfaceLaws`, and both ride the slot for the same reason. Phase 257 moves the dataframe families and the dataframe half of the C# facade into two new
+packages, which the gate classes `removal` for `Fuaran.Core.Conformance` and `Fuaran.Core.CSharp`;
+both ride the slot too. `<Version>` and the laws corpus here (`conformance/laws/*.json`) were re-stamped
 in the same commit as the version move, per `docs/conformance-corpus.md`; the byte copy in the
 shared wire-format corpus is re-synced separately.
 
@@ -2579,6 +2581,77 @@ certifies rather than answering for an open assumption. The generated
 `docs/conformance-families.md` shows each family's cases at this repository's reference witness,
 through the Phase 196 `cases` column. The pass-path counts Phase 245 proposes are not part of this
 entry.
+
+### The compute boundary, prepared inside Core — two new packages, `Fuaran.Core.DataFrame.Conformance` and `Fuaran.Core.DataFrame.CSharp` (Phase 257)
+
+**What changed.** No spine package references `Fuaran.Core.DataFrame` or `Fuaran.Core.Column.Ops`
+any more (DECISIONS.md D66, D68). Two packages crossed that line, and each is now split in two:
+
+- **`Fuaran.Core.DataFrame.Conformance`** (new, Fable-clean) carries every law family that reads
+  the dataframe layer. They are `transformLaws`, `aggregateParityLaws` (its `GroupBy` parity
+  half), `columnarOpLaws`, `columnarOpLawsWith`, `columnarOpStreamGen`, `incrementalLaws`,
+  `incrementalLawsWith`, `paramLaws`, `schemaWalkLaws`, `nowLaws`, `slotParamLaws`, and the whole
+  `IncrementalDelta` module. Their home is the module `DataFrameConformance`. A same-named
+  forwarding module, `Fuaran.Core.Conformance`, in the same package keeps every `Conformance.<family>`
+  spelling compiling (D68 §2). **The forwards are marked for removal in Phase 258.**
+- **`Fuaran.Core.DataFrame.CSharp`** (new, .NET-only like its parent) carries the dataframe half of
+  the C# facade: `Expr`, `CaseArm`, `Step`, `Pipeline`, the step specs, the slot types, and
+  `BinaryOperator`, `ScalarFunction`, `JoinMode`, `SortOrder` and `ClockGrain`. They stay in the
+  `Fuaran.Core.CSharp` namespace.
+- **`Fuaran.Core.Conformance`** keeps every other family, `columnarValidatorLaws` and the
+  `Column.aggregate` half of aggregate parity. That half is now its own family,
+  **`aggregateNullSkipLaws`** (additive).
+- **`Fuaran.Core.CSharp`** keeps the column layer, the hole family and the JSON model. It gains a
+  public **`Vocabulary`** bridge (`ToCore` / `FromCore` for `ColumnKind` and `AggregateFunction`),
+  which is additive.
+
+**Two of these ids are the ones that leave.** `Fuaran.Core.DataFrame.Conformance` and
+`Fuaran.Core.DataFrame.CSharp` go with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` when
+the compute repository takes them over (D66). They are cut here so the move is a copy of whole
+assemblies.
+
+**The class the gate prints.** `Fuaran.Core.Conformance` and `Fuaran.Core.CSharp` are both
+`removal`, because a binary compiled against 0.31.0 that calls a moved member will not find it.
+The two new packages have no earlier baseline to move from. Both removals ride this draft, which is
+already breaking (`UpdateNode`, and Phase 246's `retype` and verdict change). **For a consumer that
+recompiles, it is additive.** Add one PackageReference and no source changes: every family name and
+every facade type resolves as it did. This has been measured on .NET and under Fable 5 for `open`,
+a module abbreviation and fully-qualified access (D68).
+
+**What a consumer does.**
+
+- An F# consumer that runs any of the moved families adds `Fuaran.Core.DataFrame.Conformance`.
+- A C# consumer that authors pipelines adds `Fuaran.Core.DataFrame.CSharp`.
+- A census that reflects over the kit's assembly alone widens to both assemblies. The roster keys
+  are unchanged, so no row is renamed. Composed from both packages, the roster has 71 families
+  where 0.31.0's had 70. None is removed or renamed, and the one addition is
+  `Conformance.aggregateNullSkipLaws`.
+- A consumer calling `aggregateParityLaws` now runs one law where it ran two. It adopts
+  `aggregateNullSkipLaws` to keep the null-skip law.
+
+**The renames Phase 258 will ask for.** When the forwards go, a consumer spells the moved families
+`DataFrameConformance.<family>`. At 0.31.0, fuaran-dotnet's census adopts ten of the families this
+touches. They are `aggregateParityLaws`, `columnarOpLaws`, `columnarOpLawsWith`, `incrementalLaws`,
+`paramLaws`, `schemaWalkLaws`, `nowLaws`, `slotParamLaws`, `IncrementalDelta.laws` and
+`IncrementalDelta.lawsWith`. Of those, `IncrementalDelta` keeps its name.
+
+**The roster export's shape moves, and `schema` reads 5.** `docs/conformance-families.json` is
+rendered from both packages' shares (`Families.toJsonOf [ Families.roster; DataFrameFamilies.roster ]`).
+The top-level `package` became `packages`, the package ids composed, in order. Each family object
+gains `package`, after `entry`, naming the package it ships from. The markdown gains a `Package`
+column. `Families.toJsonWith` / `toMarkdownWith` still render one package's share: the kit's own,
+at the same schema.
+
+**Held by the suite.** `ComputeBoundaryTests` refuses any of the seventeen spine assemblies that
+reaches the compute side. It reads the `ProjectReference` closure of every project and each built
+dll's assembly-reference table, so an `open` against a transitively available assembly is caught
+where no project file names it. It was shown red by a perturbation: `Query` given a `DataFrame`
+reference and one use of it, which reddened both readings and named `Conformance` as reaching
+`DataFrame` through `Query`. The same perturbation, reverted, left the tests green. The roster,
+census, refusal-audit and reference-run checks now quantify over both assemblies. A forwards test
+holds `Conformance` in the new package to `DataFrameConformance` member for member. Each facade
+proof scans its own assembly (`tests/Fuaran.Core.CSharp.Proof`,
+`tests/Fuaran.Core.DataFrame.CSharp.Proof`).
 
 ## 0.31.0 — released 2026-09-26 as `v0.31.0`
 

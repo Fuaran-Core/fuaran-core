@@ -612,7 +612,7 @@ let private realCases () =
 /// reflection over the shipped assembly by `ConformanceFamiliesTests`, so a renamed law still stops
 /// answering for a row with no edit in this file.
 let private realLaws () =
-    Fuaran.Core.Families.families
+    KitRoster.families
     |> List.filter (fun f -> f.Module = "Conformance")
     |> List.map (fun f -> f.Entry)
     |> Set.ofList

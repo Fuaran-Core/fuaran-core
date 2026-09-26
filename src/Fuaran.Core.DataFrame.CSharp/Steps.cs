@@ -1,5 +1,5 @@
 // ============================================================================
-//  Fuaran.Core.CSharp — the transform step and the pipeline (Phase 128), a facade
+//  Fuaran.Core.DataFrame.CSharp — the transform step and the pipeline (Phase 128), a facade
 //  over `Fuaran.Core.Transform` and `Transform list`.
 //
 //  Every place the F# algebra uses a tuple in a list — a project rename, a join key

@@ -21,11 +21,9 @@
          Independent of the null-tolerance family beside it; the order between those two is
          free, so each simply keeps the position it arrived in. -->
     <Compile Include="FoldConfluence.fs" />
-    <!-- Phase 99 — the incremental-evaluation equivalence family. Independent of both families
-         above (it drives Fuaran.Core.DataFrame's evaluator only), so it is appended at the end;
-         it reads `ConfRng` and `LawResult` from Conformance.fs, which is the only ordering
-         constraint it has. -->
-    <Compile Include="IncrementalDelta.fs" />
+    <!-- Phase 99's incremental-evaluation family (IncrementalDelta.fs) ships from
+         Fuaran.Core.DataFrame.Conformance since Phase 257 (DECISIONS.md D68), with every other
+         family that reads the dataframe layer. -->
     <!-- Phase 217 — the cross-pipeline VALUE table, public. It lived in the repository's own Fable
          smoke until the Fable compiler left this repository; a consumer that owns a Fable toolchain
          now compiles it from this package's `fable/` sources and diffs `ParityVectors.lines ()`
@@ -47,8 +45,9 @@
     <ProjectReference Include="..\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.OpStream.Dag\Fuaran.Core.OpStream.Dag.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
-    <ProjectReference Include="..\Fuaran.Core.DataFrame\Fuaran.Core.DataFrame.fsproj" />
-    <ProjectReference Include="..\Fuaran.Core.Column.Ops\Fuaran.Core.Column.Ops.fsproj" />
+    <!-- Phase 257 — no reference to Fuaran.Core.DataFrame or Fuaran.Core.Column.Ops. The families
+         over them ship from Fuaran.Core.DataFrame.Conformance, and the boundary test in
+         tests/Fuaran.Core.Tests refuses either reference here (DECISIONS.md D66, D68). -->
     <ProjectReference Include="..\Fuaran.Core.Query\Fuaran.Core.Query.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Validator\Fuaran.Core.Validator.fsproj" />
