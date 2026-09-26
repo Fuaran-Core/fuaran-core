@@ -300,7 +300,14 @@
          resolver's untyped `Failed` is projected into the enumerated `ExecutionFailed`, so
          `Ok(Failed _)` is unreachable and `queryLaws` certifies it. See STABILITY.md
          "0.27.0 (draft)". -->
-    <Version>0.32.0</Version>
+    <!-- 0.33.0 (2026-09-26): Phase 258 — the compute strand leaves this repository (DECISIONS.md
+         D66). `Fuaran.Core.DataFrame`, `Fuaran.Core.Column.Ops`, `Fuaran.Core.DataFrame.Conformance`
+         and `Fuaran.Core.DataFrame.CSharp` are no longer produced here: they continue, under the
+         same ids and namespaces, from https://github.com/Fuaran-Core/fuaran-core-compute at
+         `0.33.0`, and this repository's `0.32.0` emissions of them stay on nuget.org. BREAKING —
+         four packages leave the roster, a `removal` for a consumer taking them from here — so `0.32.0`,
+         which is tagged, is advanced rather than ridden. See STABILITY.md "0.33.0 — DRAFT". -->
+    <Version>0.33.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

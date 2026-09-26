@@ -35,7 +35,8 @@ open Fuaran.Core
 // says that nothing was compared.
 //
 // Phase 172 inverted which side is asked for. The families Core itself EMITS —
-// `laws/transform-laws.json` and `apply/` — are committed in this repository
+// `laws/capability-laws.json` and `apply/` (and `laws/transform-laws.json` until
+// Phase 258 moved it to the compute repository) — are committed in this repository
 // (`conformance/`, see OwnedConformance) and the default suite reads them from
 // there, so the suite is self-contained and a machine holding only this
 // repository is green. What still wants the LIVE corpus is a different question
@@ -354,7 +355,8 @@ let locate (family: string) : Result<string, string> =
 // ---------------------------------------------------------------------------
 //  Phase 216 — what a COPY-FRESHNESS leg needs, which `Resolution` cannot say.
 // ---------------------------------------------------------------------------
-//  `transform-laws.json` carries a `kitVersion` stamp DERIVED from `<Version>`, and the corpus
+//  `transform-laws.json` (this repository's until Phase 258; `capability-laws.json` has the same
+//  shape) carries a `kitVersion` stamp DERIVED from `<Version>`, and the corpus
 //  repository holds a declared byte copy of it. So EVERY move of `<Version>` restales that copy,
 //  in a different repository — and the leg that notices consulted the ask first, found it unset,
 //  and consulted nothing else. On 2026-09-21 that ran three times in one day: a version moved, the

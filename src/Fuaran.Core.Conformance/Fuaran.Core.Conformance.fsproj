@@ -23,7 +23,8 @@
     <Compile Include="FoldConfluence.fs" />
     <!-- Phase 99's incremental-evaluation family (IncrementalDelta.fs) ships from
          Fuaran.Core.DataFrame.Conformance since Phase 257 (DECISIONS.md D68), with every other
-         family that reads the dataframe layer. -->
+         family that reads the dataframe layer; that package is produced by the compute
+         repository since Phase 258 (D66). -->
     <!-- Phase 217 — the cross-pipeline VALUE table, public. It lived in the repository's own Fable
          smoke until the Fable compiler left this repository; a consumer that owns a Fable toolchain
          now compiles it from this package's `fable/` sources and diffs `ParityVectors.lines ()`
@@ -46,8 +47,9 @@
     <ProjectReference Include="..\Fuaran.Core.OpStream.Dag\Fuaran.Core.OpStream.Dag.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
     <!-- Phase 257 — no reference to Fuaran.Core.DataFrame or Fuaran.Core.Column.Ops. The families
-         over them ship from Fuaran.Core.DataFrame.Conformance, and the boundary test in
-         tests/Fuaran.Core.Tests refuses either reference here (DECISIONS.md D66, D68). -->
+         over them ship from Fuaran.Core.DataFrame.Conformance, produced by the compute repository
+         since Phase 258, and the boundary test in tests/Fuaran.Core.Tests refuses either reference
+         here (DECISIONS.md D66, D68). -->
     <ProjectReference Include="..\Fuaran.Core.Query\Fuaran.Core.Query.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Validator\Fuaran.Core.Validator.fsproj" />

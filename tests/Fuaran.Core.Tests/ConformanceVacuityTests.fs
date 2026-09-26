@@ -322,14 +322,6 @@ let private runs =
 
                 Conformance.captureReplayLaws encInt decInt ConfRng.next OpStream.defaultHash 31337 200)
            run
-               "Conformance.transformLaws"
-               LawVectorExport.iterations
-               (Conformance.transformLaws
-                   DataFrame.evalPipeline
-                   (LawVectorExport.lawGen ())
-                   LawVectorExport.seed
-                   LawVectorExport.iterations)
-           run
                "Conformance.constructThenEncodeLaws"
                (List.length ConstructThenEncodeTests.corpus)
                (Conformance.constructThenEncodeLaws
@@ -346,24 +338,7 @@ let private runs =
            run "Conformance.registryLaws" 200 (Conformance.registryLaws 4242 200)
            run "Conformance.packLoadingLaws" 200 (Conformance.packLoadingLaws 4242 200)
            run "Conformance.aggregateNullSkipLaws" 200 (Conformance.aggregateNullSkipLaws 4242 200)
-           run "Conformance.aggregateParityLaws" 200 (Conformance.aggregateParityLaws 4242 200)
-           run "Conformance.columnarOpLaws" 200 (Conformance.columnarOpLaws 4242 200)
-           run
-               "Conformance.columnarOpLawsWith"
-               200
-               (Conformance.columnarOpLawsWith ColumnOps.invert Conformance.columnarOpStreamGen 4242 200)
            run "Conformance.columnarValidatorLaws" 200 (Conformance.columnarValidatorLaws 4242 200)
-           run "Conformance.incrementalLaws" 200 (Conformance.incrementalLaws 4242 200)
-           run
-               "Conformance.incrementalLawsWith"
-               200
-               (Conformance.incrementalLawsWith
-                   WitnessTakingFamiliesTests.incrementalPipelines
-                   Conformance.columnarOpStreamGen
-                   4242
-                   200)
-           run "Conformance.paramLaws" 200 (Conformance.paramLaws 7714 200)
-           run "Conformance.schemaWalkLaws" 300 (Conformance.schemaWalkLaws 1121 300)
            run "Conformance.deferredLaws" 200 (Conformance.deferredLaws 4242 200)
            run "Conformance.capabilityPipelineLaws" 200 (Conformance.capabilityPipelineLaws 4242 200)
            run
@@ -387,8 +362,6 @@ let private runs =
            run "Conformance.canonicalFloatLaws" 500 (Conformance.canonicalFloatLaws 4242 500)
            run "Conformance.chainBreakReasonLaws" 120 (Conformance.chainBreakReasonLaws 5125 120)
            run "Conformance.dagBreakReasonLaws" 120 (Conformance.dagBreakReasonLaws 5147 120)
-           run "Conformance.nowLaws" 150 (Conformance.nowLaws 1250 150)
-           run "Conformance.slotParamLaws" 120 (Conformance.slotParamLaws 12500 120)
 
            // ---- the families outside `Conformance` ----
            run
@@ -413,11 +386,7 @@ let private runs =
                    FoldConfluenceTests.treeLaneGen
                    3
                    1000
-                   120)
-           run "IncrementalDelta.laws" 60 (IncrementalDelta.laws 7 60)
-           // The SHIPPED row bound (9) and the sample size its own suite sweeps at. A narrower
-           // bound is the family's documented go-red, not a census run.
-           run "IncrementalDelta.lawsWith" 100 (IncrementalDelta.lawsWith 9 7 100) ]
+                   120) ]
         : Run list)
 
 /// The family's own adequacy class, which is what decides how its run is read. Looked up rather
@@ -426,10 +395,7 @@ let private runs =
 let private classOf (id: string) : AdequacyClass =
     match KitRoster.census |> List.tryFind (fun (k, _) -> k = id) with
     | Some(_, k) -> k
-    | None ->
-        failwithf
-            "%s has no census row (SampleAdequacy.census or DataFrameFamilies.census) — the roster and the census disagree"
-            id
+    | None -> failwithf "%s has no census row (SampleAdequacy.census) — the roster and the census disagree" id
 
 /// The measured census: one `CaseCount` per family, in roster order. This is what the generated
 /// `docs/conformance-families.{md,json}` render their `cases` column from.
@@ -439,12 +405,13 @@ let cases () : (string * CaseCount) list =
     |> List.sortBy fst
 
 /// Phase 223 — the six families Phase 220's audit found drawing a refusal population a run could
-/// silently miss, with the dimensions each is now `Guarded` over.
+/// silently miss, with the dimensions each is now `Guarded` over. Five are this repository's since
+/// Phase 258: `transformLaws` left with the dataframe layer it reads (D66), and the compute
+/// repository's suite holds its row.
 let private drawnRefusalSix: (string * string list) list =
     [ "Conformance.casLaws", [ "accepted"; "refused" ]
       "Conformance.idempotencyLaws", [ "accepted"; "refused" ]
       "Conformance.aiSurfaceLaws", [ "accepted"; "refused"; "allowed"; "parked"; "denied" ]
-      "Conformance.transformLaws", [ "accepted"; "refused" ]
       "Conformance.columnarValidatorLaws", [ "null cell"; "out-of-range cell" ]
       "Conformance.diffContainedLaws", [ "accepted"; "refused" ] ]
 
@@ -474,10 +441,6 @@ let private drawnRefusalSixRuns: (string * (int * (int -> LawResult list))) list
                AiSurfaceTests.state0
                seed
                200)
-      "Conformance.transformLaws",
-      (LawVectorExport.iterations,
-       fun seed ->
-           Conformance.transformLaws DataFrame.evalPipeline (LawVectorExport.lawGen ()) seed LawVectorExport.iterations)
       "Conformance.columnarValidatorLaws", (200, fun seed -> Conformance.columnarValidatorLaws seed 200)
       "Conformance.diffContainedLaws",
       (200, fun seed -> Conformance.diffContainedLaws nodew idw ConformanceTests.containedGen seed 200) ]
@@ -650,7 +613,7 @@ let vacuityTests =
 
               Expect.isEmpty
                   (Set.difference rostered (Set.ofList audited) |> Set.toList)
-                  "these law families have no refusal-audit row (Families.refusalAudit or DataFrameFamilies.refusalAudit) — audit each in the commit that ships it"
+                  "these law families have no refusal-audit row (Families.refusalAudit) — audit each in the commit that ships it"
 
               Expect.isEmpty
                   (Set.difference (Set.ofList audited) rostered |> Set.toList)
@@ -703,9 +666,9 @@ let vacuityTests =
                       "guarded-reached"
                       (sprintf "%s reached both sides at the reference witness" id)
 
-          // ---- Phase 223: the six drawn-refusal families ----
+          // ---- Phase 223: the drawn-refusal families (six, five here since Phase 258) ----
 
-          testCase "the six drawn-refusal families are Guarded, and reached at the reference witness"
+          testCase "the drawn-refusal families are Guarded, and reached at the reference witness"
           <| fun _ ->
               let measured = cases ()
 

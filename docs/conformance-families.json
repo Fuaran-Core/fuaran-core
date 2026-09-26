@@ -1,26 +1,13 @@
 {
   "kind": "fuaran.core.conformance.families",
   "schema": 5,
-  "packages": ["Fuaran.Core.Conformance", "Fuaran.Core.DataFrame.Conformance"],
+  "packages": ["Fuaran.Core.Conformance"],
   "families": [
     {
       "id": "Conformance.aggregateNullSkipLaws",
       "module": "Conformance",
       "entry": "aggregateNullSkipLaws",
       "package": "Fuaran.Core.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "200",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
-      "id": "Conformance.aggregateParityLaws",
-      "module": "Conformance",
-      "entry": "aggregateParityLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
@@ -223,32 +210,6 @@
       "cases": "600",
       "adequacy": "unconditional",
       "refusal": "none"
-    },
-    {
-      "id": "Conformance.columnarOpLaws",
-      "module": "Conformance",
-      "entry": "columnarOpLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "1200",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
-      "id": "Conformance.columnarOpLawsWith",
-      "module": "Conformance",
-      "entry": "columnarOpLawsWith",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": ["StreamGen"],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "1200",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
     },
     {
       "id": "Conformance.columnarValidatorLaws",
@@ -497,32 +458,6 @@
       "refusal": "drawn"
     },
     {
-      "id": "Conformance.incrementalLaws",
-      "module": "Conformance",
-      "entry": "incrementalLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "400",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
-      "id": "Conformance.incrementalLawsWith",
-      "module": "Conformance",
-      "entry": "incrementalLawsWith",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": ["StreamGen"],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "200",
-      "adequacy": "guarded-reached",
-      "refusal": "none"
-    },
-    {
       "id": "Conformance.keyedChildrenLaws",
       "module": "Conformance",
       "entry": "keyedChildrenLaws",
@@ -601,19 +536,6 @@
       "refusal": "none"
     },
     {
-      "id": "Conformance.nowLaws",
-      "module": "Conformance",
-      "entry": "nowLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "750",
-      "adequacy": "unconditional",
-      "refusal": "built"
-    },
-    {
       "id": "Conformance.opAlgebra",
       "module": "Conformance",
       "entry": "opAlgebra",
@@ -630,19 +552,6 @@
       "module": "Conformance",
       "entry": "packLoadingLaws",
       "package": "Fuaran.Core.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "unconditional",
-      "refusal": "built"
-    },
-    {
-      "id": "Conformance.paramLaws",
-      "module": "Conformance",
-      "entry": "paramLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
       "witness": [],
       "optIn": true,
       "reason": "seam-not-every-domain-has",
@@ -768,32 +677,6 @@
       "refusal": "built"
     },
     {
-      "id": "Conformance.schemaWalkLaws",
-      "module": "Conformance",
-      "entry": "schemaWalkLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "1200",
-      "adequacy": "guarded-reached",
-      "refusal": "none"
-    },
-    {
-      "id": "Conformance.slotParamLaws",
-      "module": "Conformance",
-      "entry": "slotParamLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "720",
-      "adequacy": "unconditional",
-      "refusal": "built"
-    },
-    {
       "id": "Conformance.snapshotLaws",
       "module": "Conformance",
       "entry": "snapshotLaws",
@@ -830,19 +713,6 @@
       "cases": "600",
       "adequacy": "unconditional",
       "refusal": "built"
-    },
-    {
-      "id": "Conformance.transformLaws",
-      "module": "Conformance",
-      "entry": "transformLaws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "32",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
     },
     {
       "id": "Conformance.verifyHonestyLaws",
@@ -892,32 +762,6 @@
       "reason": "needs-witness-capability",
       "discharges": [],
       "cases": "360",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
-      "id": "IncrementalDelta.laws",
-      "module": "IncrementalDelta",
-      "entry": "laws",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "420",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
-      "id": "IncrementalDelta.lawsWith",
-      "module": "IncrementalDelta",
-      "entry": "lawsWith",
-      "package": "Fuaran.Core.DataFrame.Conformance",
-      "witness": [],
-      "optIn": true,
-      "reason": "seam-not-every-domain-has",
-      "discharges": [],
-      "cases": "700",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
     }

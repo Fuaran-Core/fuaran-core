@@ -1,21 +1,22 @@
-/// Phase 257 — the law-family roster as the SUITE reads it: both packages' shares, composed.
+/// The law-family roster as the SUITE reads it: the share THIS repository ships.
 ///
-/// The kit's families ship from two assemblies since Phase 257 (DECISIONS.md D68): the families
-/// that read the dataframe layer from `Fuaran.Core.DataFrame.Conformance`, every other one from
-/// `Fuaran.Core.Conformance`. Each package declares its own share (`Families.roster`,
-/// `DataFrameFamilies.roster`), because the kit cannot name the other package's families without
-/// the upward reference the boundary test refuses. This suite references both, so it is the one
-/// place the whole roster is visible, and every check that used to read `Families.families` or
-/// `SampleAdequacy.census` reads the composition here instead.
+/// Phase 257 split the kit's families across two assemblies (DECISIONS.md D68): the families that
+/// read the dataframe layer went to `Fuaran.Core.DataFrame.Conformance`, every other one stayed in
+/// `Fuaran.Core.Conformance`, and each package declares its own share (`Families.roster`,
+/// `DataFrameFamilies.roster`). Phase 258 moved the dataframe share out of this repository with the
+/// rest of the compute strand (D66), so the composition is one share again. It stays a list, and
+/// every roster, census and audit check still reads it here, so the checks quantify over exactly the
+/// families this repository is answerable for; the dataframe share is certified by the compute
+/// repository's own suite.
 module Fuaran.Core.Tests.KitRoster
 
 open System.Reflection
 open Fuaran.Core
 
-/// Both shares, the kit's first. The order is the order the generated docs name the packages in.
-let rosters: Families.Roster list = [ Families.roster; DataFrameFamilies.roster ]
+/// This repository's share.
+let rosters: Families.Roster list = [ Families.roster ]
 
-/// Every law family, across both packages.
+/// Every law family in this share.
 let families: Families.LawFamily list = rosters |> List.collect _.Families
 
 /// The composed roster's keys, sorted.
@@ -35,7 +36,7 @@ let packageOf (id: string) : string option =
     |> List.tryFind (fun r -> r.Families |> List.exists (fun f -> f.Id = id))
     |> Option.map _.Package
 
-/// Every refusal-audit row, across both packages.
+/// Every refusal-audit row in this share.
 let refusalAudit: Families.RefusalAudit list =
     rosters |> List.collect _.RefusalAudit
 
@@ -43,7 +44,7 @@ let refusalAudit: Families.RefusalAudit list =
 let tryRefusal (id: string) : Families.RefusalAudit option =
     refusalAudit |> List.tryFind (fun a -> a.Family = id)
 
-/// Every adequacy-census row, across both packages.
+/// Every adequacy-census row in this share.
 let census: (string * AdequacyClass) list = rosters |> List.collect _.Census
 
 /// Every ladder obligation the composed roster discharges, sorted by obligation.
@@ -52,11 +53,8 @@ let obligations: (string * string) list =
           for o in f.Discharges -> o, f.Id ]
     |> List.sortBy fst
 
-/// The two assemblies the kit ships from, the kit's first. The second is loaded by name: an F#
-/// module has no `typeof`, and every type it declares a family over belongs to the kit.
-let assemblies: Assembly list =
-    [ typeof<LawResult>.Assembly
-      Assembly.Load(AssemblyName "Fuaran.Core.DataFrame.Conformance") ]
+/// The assembly this share ships from.
+let assemblies: Assembly list = [ typeof<LawResult>.Assembly ]
 
 /// The adequacy and refusal cells, over the composed roster.
 let adequacyToken (cases: (string * CaseCount) list) (id: string) : string =

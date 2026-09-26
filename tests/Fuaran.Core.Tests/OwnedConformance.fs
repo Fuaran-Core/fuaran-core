@@ -7,8 +7,10 @@ open System.IO
 // Where the conformance vectors THIS repository emits live, and the equality
 // their published copies are held to.
 //
-// Phase 172. Two families in the shared wire-format corpus are Core's own
-// generic contracts — `laws/transform-laws.json` and the `apply/` family — and
+// Phase 172. Two families in the shared wire-format corpus were Core's own
+// generic contracts — `laws/transform-laws.json` and the `apply/` family (the
+// first left with the compute strand in Phase 258, DECISIONS.md D66; the
+// capability vectors joined `laws/` in Phase 235) — and
 // until this phase they were emitted by Core, committed only in the corpus,
 // and then read BACK by Core's own suites from `wire-format-fixtures/`. Since
 // Phase 130 an absent corpus fails, so the generic spine's gate was red on a

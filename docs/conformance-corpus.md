@@ -15,7 +15,6 @@ gate.
 
 ```
 conformance/
-  laws/transform-laws.json     the transform-law reference vectors (`--emit-laws`)
   laws/capability-laws.json    the capability-law vectors (`--emit-laws`, since Phase 235)
   apply/skeleton-apply.json    the skeleton-op apply contract (`--emit-apply`)
   apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
@@ -24,20 +23,25 @@ conformance/
 ### Which law sets Core emits — all of them, and the UI tier emits none
 
 Core is the reference for every law family it ships, so it emits every law set a host certifies a
-reimplementation against. Since Phase 235 that is **two** families under `laws/`, both written by
-the one `--emit-laws` command from `tests/Fuaran.Core.Tests/LawVectorExport.fs`:
+reimplementation against. Since Phase 258 that is **one** family under `laws/`, written by the
+`--emit-laws` command from `tests/Fuaran.Core.Tests/LawVectorExport.fs`:
 
 | Family | File | Shape |
 |---|---|---|
-| `transformLaws` | `laws/transform-laws.json` | a PARITY family — the reference evaluator's ANSWERS over a declared sample |
 | `capabilityLaws` | `laws/capability-laws.json` | a SELF-CONTAINED family — the `(input, expected verdict)` pairs the law draws from its seed |
+
+**`transformLaws` (`laws/transform-laws.json`) was the second until Phase 258.** It is a PARITY
+family — the `Fuaran.Core.DataFrame` reference evaluator's ANSWERS over a declared sample — and it
+left with that evaluator (DECISIONS.md D66, D70): [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) emits it, stamps it
+with its own `<Version>` and declares the corpus copy as its derived file. The corpus path is
+unchanged, so no host reads a different place; only its producer moved.
 
 **No UI-tier repository emits a law set.** Until Phase 235 `capability-laws.json` was exported by
 the UI tier's test project, against whatever Core version that repository pinned — so the reference
 for Core behaviour was produced one repository and one pin away from Core, and a Core change that
 moved a capability vector (Phase 225 did) could not re-emit it in the same change-set. That exporter
 is retired; the UI tier now READS the corpus copy and certifies its pinned kit against it, as every
-other host does. A future law set Core is the reference for is added here, beside these two — the
+other host does. A future law set Core is the reference for is added here, beside this one — the
 propagation law set fuaran#1764 plans is one — never as a second exporter in a host repository.
 
 `laws/manifest.json` in the corpus, the index over every family in `laws/`, stays hand-curated: no
@@ -55,7 +59,7 @@ any other difference is reported as a divergence.
 Every file is EMITTED, never hand-edited: each expectation is computed by calling the reference
 evaluator or `Ops.apply`, and the suite holds the committed bytes to a fresh render on every run.
 The corpus — <https://github.com/fuaran-ui/fuaran-ui-specification>, resolved on disk under the
-directory name `wire-format-fixtures` — carries the same four files at `laws/` and `apply/`, and
+directory name `wire-format-fixtures` — carries the same three files at `laws/` and `apply/`, and
 those are **declared copies**: `copies.json` names each source, its copy's workspace path, the
 `fingerprint` equality it is held to, and the command that refreshes it. The hosts keep reading the
 corpus at the same paths with the same bytes; a copy is what they were always reading, and this
@@ -76,7 +80,7 @@ dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <corpus dir>
 A flag rather than a test side-effect: the corpus is a separate repository, and a suite that wrote
 into it on every run would dirty a shared clone. Note the name — the UI language repository's
 `--emit-corpus` renders THAT domain's node vectors and knows nothing about this engine; the apply
-semantics and the transform laws are Core's, so Core emits them.
+semantics and the capability laws are Core's, so Core emits them.
 
 A change to what this kit renders is not finished until BOTH have been written and committed: the
 in-repo file in the same commit as the change (the default suite is red otherwise), and the corpus
@@ -85,7 +89,7 @@ as stale, with that exact command, for as long as the second half is outstanding
 
 ### The `kitVersion` stamp
 
-Both `laws/` files carry the producing kit's version, and hosts read it, so the stamp
+The `laws/` file carries the producing kit's version, and hosts read it, so the stamp
 stays in the file and the file's bytes are what the copy must match. What Phase 172 changes is
 WHERE a `<Version>` move goes red: the stamp lives in this repository's committed file, so a version
 cut re-emits it in the same commit and Core's own gate never crosses a repository boundary to fail.

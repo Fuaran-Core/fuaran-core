@@ -88,13 +88,6 @@ $ErrorActionPreference = 'Stop'
 #   ScoreVocabulary / ScoreVocabularyProofs — Phase 173: the same pair over the vendored
 #                third-domain sample (`ScoreDomainSpike.fs`): records and omit-at-default at scale,
 #                on the same non-default shape. Each opens its predecessor.
-#   ColumnOps  — Phase 176, the COMPUTE strand's op algebra: `ColumnOps.apply` / `canApply` /
-#                `invert` / `Diff.toOps` over a table with a validity mask, clause for clause,
-#                with the five Preservation clauses proved for columns — totality with its
-#                rejection characterisation, all-or-nothing rejection, the dry run's agreement,
-#                well-formedness preserved, `invert`'s round trip with its partial cases
-#                characterised — and `Diff.toOps`'s script proved to reconstruct its target.
-#                Self-contained: it opens nothing, so its position is free.
 #   Capability — Phase 177, the FUNCTION SEAM every AI edit crosses: `Fuaran.Core.Function`'s
 #                effect lattice, value spaces, `signature` / `apply` / `curry` / `compose` /
 #                `auditEffect` over an abstract witness, and `Capability.validateArgs` / `invoke`
@@ -123,24 +116,17 @@ $ErrorActionPreference = 'Stop'
 #                rejection proved justified (maximal, NOT maximum), and the whole result proved
 #                invariant under arrival order for id-distinct input, with the witness that the
 #                hypothesis is needed. Opens DagFold and TreeOps, so it follows both.
-#   Pipeline   — Phase 154, the COUNTED PIPELINE DRIVER, and Phase 234, its EXPRESSION EVALUATOR:
-#                `Fuaran.Core.DataFrame`'s closed `ColExpr` and `Transform` algebra, the private
-#                `evalExpr` with its four loops, `evalFilter`, `evalDerive`, `evalStep`'s dispatch
-#                and `evalPipelineWithInEnvCounted`'s fold with its cost model clause for clause,
-#                over the cell primitives and the twelve non-expression verbs as parameters —
-#                totality (Ok exactly when every step succeeds, else the first failing step's own
-#                error), the count proved monotone in the pipeline prefix, the evaluator's visits
-#                proved at most the expression's nodes, the expression work bounded by the count
-#                under the §21.8 node limit taken as a HYPOTHESIS, the unenforced limit recorded as
-#                a theorem, and the uncounted entry point as the counted one projected.
-#                Opens Limits (the one constant it takes as a premise), so it follows it.
+#
+#   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
+#                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
+#                (DECISIONS.md D66); they are checked by the compute repository's own proof leg.
 #
 # Adding a model is adding its name to this list AND a budget entry to modules.json: nothing else
 # is per-module, here or in the kit. The line below is also READ AS TEXT by the `Proofs.Ladder`
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'ColumnOps', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'Pipeline')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.

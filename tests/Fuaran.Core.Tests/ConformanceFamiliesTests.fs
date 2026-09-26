@@ -44,14 +44,6 @@ open Fuaran.Core
 [<Literal>]
 let private guardModule = "Fuaran.Core.SampleAdequacy"
 
-/// Phase 257 — the dataframe families' own home. The roster keys them by the spellings a consumer
-/// calls today, `Conformance.<family>`, which the forwarding module in the same assembly carries;
-/// the home module is held to that forwarding module member for member by its own test below,
-/// so it is excluded here rather than rostered twice. Phase 258 removes the forwards and re-keys
-/// the roster to this module.
-[<Literal>]
-let private forwardedHome = "Fuaran.Core.DataFrameConformance"
-
 /// The law entry points one module declares, by REFLECTION OVER RETURN TYPE.
 let lawMethods (t: Type) : MethodInfo list =
     [ for m in t.GetMethods(BindingFlags.Public ||| BindingFlags.Static ||| BindingFlags.DeclaredOnly) do
@@ -64,17 +56,17 @@ let lawMethods (t: Type) : MethodInfo list =
           then
               yield m ]
 
-/// Every public law entry point the kit ships, found by REFLECTION OVER RETURN TYPE across both
-/// of its assemblies (Phase 257). A law family is an entry point that answers with `LawResult
-/// list`; that is what the type says, and unlike a naming convention it cannot be spelled around.
-/// Two assemblies can each declare a module of the same name — the forwards do exactly that — so
-/// a key found twice is REFUSED rather than silently overwritten: two families under one roster
-/// key is precisely the ambiguity a consumer's call would resolve by reference order.
+/// Every public law entry point the kit ships, found by REFLECTION OVER RETURN TYPE across its
+/// assemblies (`KitRoster.assemblies`: two from Phase 257, one again since Phase 258 moved the
+/// dataframe share out). A law family is an entry point that answers with `LawResult list`; that is
+/// what the type says, and unlike a naming convention it cannot be spelled around. A key found
+/// twice is REFUSED rather than silently overwritten: two families under one roster key is
+/// precisely the ambiguity a consumer's call would resolve by reference order.
 let private shipped () : Map<string, MethodInfo> =
     let found =
         [ for asm in KitRoster.assemblies do
               for t in asm.GetTypes() do
-                  if t.IsPublic && t.FullName <> guardModule && t.FullName <> forwardedHome then
+                  if t.IsPublic && t.FullName <> guardModule then
                       let moduleName =
                           let n = t.FullName
 
@@ -242,58 +234,6 @@ let familiesTests =
 
               Expect.isEmpty phantom (sprintf "these Families records name no shipped law entry point: %A" phantom)
 
-          testCase
-              "every dataframe family is forwarded under its pre-split spelling, and every forward reaches its home"
-          <| fun _ ->
-              // Phase 257 — the forwards are what keep `Conformance.<family>` compiling for a
-              // consumer that references both packages. Held member for member, both directions,
-              // by name and parameter types, so a family added to its home without a forward (or a
-              // forward left behind by a removed family) fails here; then each seed-and-iterations
-              // forward is RUN beside its home, so a forward that called the wrong family does too.
-              let dfAsm = KitRoster.assemblies |> List.last
-
-              let membersOf (fullName: string) =
-                  match dfAsm.GetType fullName with
-                  | null -> failtestf "%s is not in %s" fullName (dfAsm.GetName().Name)
-                  | t ->
-                      t.GetMethods(BindingFlags.Public ||| BindingFlags.Static ||| BindingFlags.DeclaredOnly)
-                      |> Array.map (fun m ->
-                          m.Name
-                          + "("
-                          + (m.GetParameters()
-                             |> Array.map (fun p -> p.ParameterType.Name)
-                             |> String.concat ",")
-                          + ")")
-                      |> Set.ofArray
-
-              let home = membersOf forwardedHome
-              let forwards = membersOf "Fuaran.Core.Conformance"
-              let unforwarded, orphaned = compareRoster forwards home
-
-              Expect.isEmpty
-                  unforwarded
-                  "these DataFrameConformance members have no forward in the Conformance module beside them"
-
-              Expect.isEmpty orphaned "these forwards name no DataFrameConformance member"
-
-              let homeType = dfAsm.GetType forwardedHome
-              let fwdType = dfAsm.GetType "Fuaran.Core.Conformance"
-
-              for m in lawMethods homeType do
-                  let ps = m.GetParameters() |> Array.map _.ParameterType
-
-                  if ps = [| typeof<int>; typeof<int> |] then
-                      let run (t: Type) =
-                          t.GetMethod(m.Name, ps).Invoke(null, [| box 20260926; box 3 |]) :?> LawResult list
-
-                      Expect.equal
-                          (run fwdType)
-                          (run homeType)
-                          (sprintf
-                              "Conformance.%s must answer exactly what DataFrameConformance.%s answers"
-                              m.Name
-                              m.Name)
-
           testCase "the roster comparison goes red in both directions"
           <| fun _ ->
               // The guard proved the only way a guard can be. A completeness check that cannot
@@ -455,9 +395,7 @@ let familiesTests =
 
               Expect.isEmpty
                   missing
-                  (sprintf
-                      "these roster families have no census row (SampleAdequacy.census or DataFrameFamilies.census): %A"
-                      missing)
+                  (sprintf "these roster families have no census row (SampleAdequacy.census): %A" missing)
 
               Expect.isEmpty phantom (sprintf "these census rows name no roster family: %A" phantom)
 
@@ -503,8 +441,8 @@ let familiesTests =
 
               Expect.stringContains
                   json
-                  "\"packages\": [\"Fuaran.Core.Conformance\", \"Fuaran.Core.DataFrame.Conformance\"]"
-                  "the export names the packages it composes (Phase 257)"
+                  "\"packages\": [\"Fuaran.Core.Conformance\"]"
+                  "the export names the packages it composes (Phase 257; one since Phase 258)"
 
               for f in KitRoster.families do
                   Expect.stringContains json ("\"id\": \"" + f.Id + "\"") (sprintf "%s appears in the export" f.Id)

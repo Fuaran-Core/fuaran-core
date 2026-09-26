@@ -282,10 +282,7 @@ let private derived<'T> (package: string) (label: string) (encode: 'T -> string)
 /// roots here; the roster test below refuses a packable package that is neither here nor in
 /// `notWire`, so the choice cannot be skipped.
 let internal roots: WireRoot list =
-    [ derived<Transform list> "Fuaran.Core.DataFrame" "pipeline" DataFrameCodec.encodePipeline
-      derived<TableDelta> "Fuaran.Core.DataFrame" "tableDelta" DeltaCodec.encode
-      derived<DataSource> "Fuaran.Core.Column" "dataSource" ColumnCodec.encode
-      derived<ColumnOp> "Fuaran.Core.Column.Ops" "columnOp" ColumnOps.encode
+    [ derived<DataSource> "Fuaran.Core.Column" "dataSource" ColumnCodec.encode
       derived<Query> "Fuaran.Core.Query" "query" QueryCodec.encode
       derived<QueryResult> "Fuaran.Core.Query" "queryResult" QueryCodec.encodeResult
       derived<Deferred<QueryResult>> "Fuaran.Core.Query" "deferredQueryResult" QueryCodec.encodeDeferredResult
@@ -342,9 +339,6 @@ let internal notWire: (string * string) list =
       "Fuaran.Core.Conformance",
       "a law kit; the law corpus it exports is pinned by its own emission test (`--emit-laws`)"
       "Fuaran.Core.CSharp", "a C# facade over packages baselined here; it emits through them"
-      "Fuaran.Core.DataFrame.Conformance",
-      "the law families over the dataframe layer; the transform law corpus is pinned by the kit's emission test (`--emit-laws`)"
-      "Fuaran.Core.DataFrame.CSharp", "the dataframe half of the C# facade; it emits through the packages it wraps"
       "Fuaran.Core.Idl.Cli", "a command-line host over Fuaran.Core.Idl; it emits through it" ]
 
 /// Build every document of one root: `(name, emitted bytes)`, plus the construction logs for the
@@ -901,34 +895,4 @@ let tests =
                   ))
                   (Some Breaking)
                   "identical structure emitted as different bytes is breaking — the hash sees what canonical form hides"
-          }
-
-          test "a decode ALIAS moves nothing: the aliased spelling re-encodes to the baseline's bytes" {
-              // `cols` is the alias Phase 213 kept. A document written with it decodes, and
-              // re-encodes to exactly the bytes the baseline pins for a `project` step — so the
-              // alias is outside the pinned surface, and adding one cannot move it.
-              let committed = parseDocs (File.ReadAllText(wirePath "Fuaran.Core.DataFrame"))
-
-              let project =
-                  committed |> List.find (fun d -> d.Name = "pipeline / Transform.Project")
-
-              let aliased = project.Canonical.Replace("\"columns\":", "\"cols\":")
-              Expect.notEqual aliased project.Canonical "the probe really spelled the alias"
-
-              match DataFrameCodec.decodePipeline aliased with
-              | Error e -> failtestf "the aliased spelling did not decode: %A" e
-              | Ok steps ->
-                  let reEncoded = toDoc ("x", DataFrameCodec.encodePipeline steps)
-                  Expect.equal reEncoded.Canonical project.Canonical "re-encoded canonically"
-                  Expect.equal reEncoded.Hash project.Hash "to the very bytes the baseline pins"
-          }
-
-          test "the probe measures real content: the DataFrame baseline names the members 213 moved" {
-              let tokens =
-                  parseDocs (File.ReadAllText(wirePath "Fuaran.Core.DataFrame"))
-                  |> List.map (fun d -> tokensOf d.Canonical)
-                  |> Set.unionMany
-
-              Expect.contains tokens "member $[]{project}.columns" "a project step's column list"
-              Expect.isFalse (tokens.Contains "member $[]{project}.cols") "and not its decode alias"
           } ]

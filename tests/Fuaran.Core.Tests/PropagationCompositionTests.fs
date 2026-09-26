@@ -4,16 +4,21 @@ module Fuaran.Core.Tests.PropagationCompositionTests
 // measurement (Phase 250) built a sheet over `Column.Ops`, `DataFrame.Incremental` and
 // `Propagation` and found five places where the three strands met only through glue it kept by
 // hand. Each section below is one of those places, closed inside the contract, and the sheet at the
-// bottom composes all of them and is certified by `Conformance.propagationEvaluatorLawsWith`:
+// bottom composes them and is certified by `Conformance.propagationEvaluatorLawsWith`:
 //
 //   1. `UpdateNode` — a redefinition is one in-place op, so it dirties one node.
 //   2. `Propagation.changedForOp` — the post-edit change set, with a removed node's dependents in it
 //      and the removed id out of it.
-//   3. Column-granular reads — `partDependencyMap` + `dirtyFromChangedParts`, with the columnar
-//      adapter `ColumnOps.changedColumns` supplied as the changed-parts function.
-//   4. `ColumnOps.deltaOf` — a one-cell edit reaches `Incremental` as one row.
-//   5. `Propagation.evalFromWith` — a node's prior value is an argument, so a table node's
+//   3. Column-granular reads — `partDependencyMap` + `dirtyFromChangedParts`, with a columnar
+//      adapter (the moved columns of a source edit) supplied as the changed-parts function.
+//   4. `Propagation.evalFromWith` — a node's prior value is an argument, so a table node's
 //      incremental state is carried by the driver rather than beside it.
+//
+// The fifth place — `ColumnOps.deltaOf`, a one-cell edit reaching `Incremental` as one row — is a
+// fact about `Column.Ops` and `DataFrame`, and left this repository with them in Phase 258
+// (DECISIONS.md D66). The sheet's source edits and its table node's refresh are stated in this
+// file since, over `Fuaran.Core.Column`'s table alone, so the sheet still certifies what is this
+// repository's: the driver carrying a prior, and the family holding an evaluator that caches.
 
 open Expecto
 open Fuaran.Core
@@ -260,6 +265,26 @@ let private changedForOpTests =
 //  3. column-granular reads
 // =============================================================================================
 
+/// A source table edit, stated in this file. Until Phase 258 the sheet below edited its source
+/// through `Column.Ops`, and `ColumnOps.changedColumns` was the columnar adapter this section
+/// supplied as the changed-parts function; that package left this repository with the compute
+/// strand (D66), and the contract under test is `Propagation`'s, which takes the adapter as an
+/// ARGUMENT — so the adapter is local now, over the three edit shapes the sheet makes.
+type SourceEdit =
+    /// One cell rewritten in place.
+    | EditCell of column: string * row: int * value: Cell
+    /// One row appended.
+    | AppendRow of (string * Cell) list
+    /// A whole column replaced.
+    | ReplaceColumn of Column
+
+/// The columns an edit moved, or `None` where it cannot say: an append moves every column.
+let movedColumns (edit: SourceEdit) : Set<string> option =
+    match edit with
+    | EditCell(col, _, _) -> Some(Set.singleton col)
+    | ReplaceColumn c -> Some(Set.singleton c.Name)
+    | AppendRow _ -> None
+
 let private partTests =
     let parts (xs: string list) = Some(Set.ofList xs)
 
@@ -278,13 +303,10 @@ let private partTests =
         [ testCase
               "a price edit dirties the readers of price and everything downstream of them, and not the reader of id"
           <| fun () ->
-              let op = SetCell("price", 0, Float 2.0)
+              let edit = EditCell("price", 0, Float 2.0)
 
               let dirty =
-                  Propagation.dirtyFromChangedParts
-                      partDeps
-                      (fun _ -> ColumnOps.changedColumns op)
-                      (Set.singleton "orders")
+                  Propagation.dirtyFromChangedParts partDeps (fun _ -> movedColumns edit) (Set.singleton "orders")
 
               Expect.equal dirty (Set.ofList [ "orders"; "lines"; "total"; "raw" ]) "ids reads only the id column"
 
@@ -300,16 +322,13 @@ let private partTests =
                   (Set.contains "total" dirty)
                   "which parts of `lines` moved is not known until it is recomputed"
 
-          testCase "an op whose moved columns are unknown dirties exactly what dirtyFromChangedIds does"
+          testCase "an edit whose moved columns are unknown dirties exactly what dirtyFromChangedIds does"
           <| fun () ->
-              let op = AppendRows [ [ "id", Int 9 ] ]
-              Expect.isNone (ColumnOps.changedColumns op) "an append moves every column"
+              let edit = AppendRow [ "id", Int 9 ]
+              Expect.isNone (movedColumns edit) "an append moves every column"
 
               let byParts =
-                  Propagation.dirtyFromChangedParts
-                      partDeps
-                      (fun _ -> ColumnOps.changedColumns op)
-                      (Set.singleton "orders")
+                  Propagation.dirtyFromChangedParts partDeps (fun _ -> movedColumns edit) (Set.singleton "orders")
 
               let byNodes =
                   Propagation.dirtyFromChangedIds (Propagation.nodeDependencies partDeps) (Set.singleton "orders")
@@ -337,8 +356,18 @@ let private partTests =
               Expect.equal (Map.find "root" (Propagation.nodeDependencies m)) Set.empty "every node appears" ]
 
 // =============================================================================================
-//  4. ColumnOps.deltaOf
+//  4. the sheet: evalFromWith over a tree edited by UpdateNode, a source edited in place
 // =============================================================================================
+//
+//  Phase 250 built this sheet over `Column.Ops` (the source edits and their row delta,
+//  `ColumnOps.deltaOf`) and `DataFrame.Incremental` (the table node's refresh). Both left this
+//  repository with the compute strand in Phase 258 (D66); the section on `deltaOf` went with them.
+//  What stays is what this sheet certifies about THIS repository: `evalFromWith` carrying a node's
+//  prior through the driver, and `Conformance.propagationEvaluatorLawsWith` holding a prior-aware
+//  evaluator whose value carries a reuse cache — the adequacy witness the claims ladder's
+//  `propagation-prior-blind` row names. So the table node's incremental state is stated here, in
+//  the smallest form that is still a cache the prior carries: the derived column's cells, the
+//  formula they were built with, and how many rows the last build recomputed.
 
 let private orders (n: int) : Table =
     let rows = [ 0 .. n - 1 ]
@@ -349,124 +378,69 @@ let private orders (n: int) : Table =
           Column.create "qty" IntType (rows |> List.map (fun i -> Int(1 + i % 7)))
           Column.create "price" FloatType (rows |> List.map (fun i -> Float(0.25 * float (1 + i % 40)))) ] }
 
-let private rid = RowIdentity.byColumn "id"
+/// The rows an edit moved, in place: `Rows` when the row set is unchanged and only these rows'
+/// cells moved, `AllRows` when the edit cannot say more (an append, a whole column).
+type RowDelta =
+    | Rows of Set<int>
+    | AllRows
 
-let private linesPipeline =
-    [ Derive("amount", Binary(Mul, Cast(FloatType, Col "qty"), Col "price")) ]
+let private cellsOf (col: string) (t: Table) : Cell list =
+    match Table.tryColumn col t with
+    | Some c -> c.Cells
+    | None -> []
 
-let private deltaTests =
-    let rowsOf (d: TableDelta) =
-        match d with
-        | FullRefresh -> None
-        | RowSet r -> Some r.Rows
+let private withColumn (c: Column) (t: Table) : Table =
+    { t with
+        Columns = t.Columns |> List.map (fun x -> if x.Name = c.Name then c else x) }
 
-    testList
-        "ColumnOps.deltaOf"
-        [ testCase "a cell edit off the key is its one row, RowChanged"
-          <| fun () ->
-              let d = ColumnOps.deltaOf rid (orders 5) (SetCell("price", 2, Float 9.0))
-              Expect.equal (rowsOf d) (Some [ ByKey "i:3", RowChanged ]) "row 2 carries key 3"
+/// Apply a source edit, with the rows it moved. An edit naming a column the table does not have,
+/// or a row outside it, is refused.
+let private applyEdit (edit: SourceEdit) (t: Table) : Result<Table * RowDelta, string> =
+    match edit with
+    | EditCell(col, row, v) ->
+        match Table.tryColumn col t with
+        | Some c when row >= 0 && row < Column.length c ->
+            let cells = c.Cells |> List.mapi (fun i x -> if i = row then v else x)
 
-          testCase "a cell edit that writes the value already there is the empty delta"
-          <| fun () ->
-              let t = orders 5
-              let d = ColumnOps.deltaOf rid t (SetCell("qty", 0, Int 1))
-              Expect.equal d (Delta.empty rid.Scheme) "nothing moved"
+            Ok(
+                withColumn { c with Cells = cells } t,
+                (if Column.cell row c = v then
+                     Rows Set.empty
+                 else
+                     Rows(Set.singleton row))
+            )
+        | _ -> Error(sprintf "no cell %s[%d]" col row)
+    | AppendRow cells ->
+        let cellFor name =
+            cells
+            |> List.tryPick (fun (k, v) -> if k = name then Some v else None)
+            |> Option.defaultValue Null
 
-          testCase "a key edit is the old key removed and the new key added"
-          <| fun () ->
-              let d = ColumnOps.deltaOf rid (orders 5) (SetCell("id", 0, Int 99))
-              Expect.equal (rowsOf d) (Some [ ByKey "i:1", RowRemoved; ByKey "i:99", RowAdded ]) "identity moved"
+        Ok(
+            { t with
+                Columns =
+                    t.Columns
+                    |> List.map (fun c ->
+                        { c with
+                            Cells = c.Cells @ [ cellFor c.Name ] }) },
+            AllRows
+        )
+    | ReplaceColumn c when Table.tryColumn c.Name t |> Option.isSome && Column.length c = Table.rowCount t ->
+        Ok(withColumn c t, AllRows)
+    | ReplaceColumn c -> Error(sprintf "column %s does not fit the table" c.Name)
 
-          testCase "a column edit names every row whose cell moved; an append names every new row"
-          <| fun () ->
-              let t = orders 4
-              let col = Column.create "qty" IntType [ Int 1; Int 5; Int 3; Int 4 ]
-              let d = ColumnOps.deltaOf rid t (SetColumn col)
-              Expect.equal (rowsOf d) (Some [ ByKey "i:2", RowChanged ]) "only row 1's qty moved"
+/// A line formula: `amount = qty * price * factor`, over the two columns it names.
+type LineFormula =
+    { Qty: string
+      Price: string
+      Factor: float }
 
-              let d2 = ColumnOps.deltaOf rid t (AppendRows [ [ "id", Int 10 ]; [ "id", Int 11 ] ])
-              Expect.equal (rowsOf d2) (Some [ ByKey "i:10", RowAdded; ByKey "i:11", RowAdded ]) "two new keys"
-
-          testCase "FullRefresh wherever identity or the op cannot say more"
-          <| fun () ->
-              let t = orders 4
-              Expect.equal (ColumnOps.deltaOf rid t (RemoveColumn "qty")) FullRefresh "a schema change"
-
-              Expect.equal
-                  (ColumnOps.deltaOf rid t (ApplyTransform linesPipeline))
-                  FullRefresh
-                  "a whole-table transform"
-
-              Expect.equal
-                  (ColumnOps.deltaOf rid t (SetCell("price", 99, Float 1.0)))
-                  FullRefresh
-                  "an op that does not apply"
-
-              Expect.equal
-                  (ColumnOps.deltaOf rid t (AppendRows [ [ "id", Int 1 ] ]))
-                  FullRefresh
-                  "an append reusing a key"
-
-              Expect.equal
-                  (ColumnOps.deltaOf rid t (AppendRows [ [ "qty", Int 1 ] ]))
-                  FullRefresh
-                  "an append with no key"
-
-          testCase "the delta is true: refreshing with it equals evaluating the edited table"
-          <| fun () ->
-              let t = orders 50
-
-              let ops =
-                  [ SetCell("price", 7, Float 3.5)
-                    SetCell("id", 3, Int 1000)
-                    SetColumn(Column.create "qty" IntType [ for i in 0..49 -> Int(i % 3) ])
-                    AppendRows [ [ "id", Int 500; "qty", Int 2; "price", Float 1.0 ] ] ]
-
-              for op in ops do
-                  let t' = ColumnOps.apply op t |> Result.defaultWith (fun e -> failwithf "%A" e)
-
-                  let s0 =
-                      Incremental.prime DataFrame.noResolve Map.empty rid linesPipeline t
-                      |> Result.defaultWith (fun e -> failwithf "%A" e)
-
-                  let d = ColumnOps.deltaOf rid t op
-
-                  let s1 =
-                      Incremental.refresh DataFrame.noResolve Map.empty rid linesPipeline s0 d t'
-                      |> Result.defaultWith (fun e -> failwithf "%A" e)
-
-                  Expect.equal
-                      (Incremental.result s1)
-                      (DataFrame.evalPipeline linesPipeline t'
-                       |> Result.defaultWith (fun e -> failwithf "%A" e))
-                      (sprintf "%A" op)
-
-          testCase "a one-cell edit reaches Incremental as ONE row, where the column invalidation reaches every row"
-          <| fun () ->
-              let n = 1000
-              let t = orders n
-              let op = SetCell("price", 500, Float 7.25)
-              let t' = ColumnOps.apply op t |> Result.defaultWith (fun e -> failwithf "%A" e)
-
-              let s0 =
-                  Incremental.prime DataFrame.noResolve Map.empty rid linesPipeline t
-                  |> Result.defaultWith (fun e -> failwithf "%A" e)
-
-              let refreshWith d =
-                  Incremental.refresh DataFrame.noResolve Map.empty rid linesPipeline s0 d t'
-                  |> Result.defaultWith (fun e -> failwithf "%A" e)
-                  |> Incremental.footprint
-                  |> Incremental.rowsEvaluated
-
-              Expect.equal (refreshWith (ColumnOps.deltaOf rid t op)) 1 "one row evaluated"
-
-              let coarse = Delta.ofChange rid.Scheme (ColumnOps.changeOf op)
-              Expect.isGreaterThanOrEqual (refreshWith coarse) n "the column invalidation re-evaluates every row" ]
-
-// =============================================================================================
-//  5. the sheet: evalFromWith over a tree edited by UpdateNode, sources edited by ColumnOps
-// =============================================================================================
+/// The table node's incremental state: the cells it built, the formula it built them with, and how
+/// many rows its last build recomputed.
+type LineState =
+    { Formula: LineFormula
+      Amounts: Cell list
+      Recomputed: int }
 
 /// A table node's value: the result a node MEANS, plus the incremental state that let it be
 /// computed cheaply and the source version that state is in step with. Equality is over the result
@@ -474,7 +448,7 @@ let private deltaTests =
 [<CustomEquality; NoComparison>]
 type TableSnap =
     { Result: Table
-      State: IncrementalEval option
+      State: LineState option
       BuiltAt: int }
 
     override this.Equals(o) =
@@ -484,11 +458,11 @@ type TableSnap =
 
     override this.GetHashCode() = hash this.Result
 
-/// A source node's value: its table, the version it is at, and the delta from the version before.
+/// A source node's value: its table, the version it is at, and the rows the last edit moved.
 type SourceSnap =
     { Table: Table
       Version: int
-      Delta: TableDelta }
+      Delta: RowDelta }
 
 type SheetValue =
     | CellV of Cell
@@ -498,7 +472,7 @@ type SheetValue =
 type SheetDef =
     | Root
     | Source
-    | TableFormula of source: string * pipeline: Transform list * columns: string list
+    | TableFormula of source: string * formula: LineFormula * columns: string list
     | CellSum of table: string * column: string
 
 type SheetNode =
@@ -510,7 +484,7 @@ type Sheet =
     { Tree: SheetNode
       Sources: Map<string, Table>
       Versions: Map<string, int>
-      Deltas: Map<string, TableDelta> }
+      Deltas: Map<string, RowDelta> }
 
 let private sheetw: NodeWitness<SheetNode, string> =
     { Id = fun n -> n.Id
@@ -563,6 +537,47 @@ let private tableOf (v: SheetValue option) =
     | Some(TableV t) -> Some t.Result
     | _ -> None
 
+/// One row's amount: `qty * price * factor`, `Null` where either input is not a number.
+let private amountOf (f: LineFormula) (qty: Cell) (price: Cell) : Cell =
+    let num =
+        function
+        | Int i -> Some(float i)
+        | Float x -> Some x
+        | _ -> None
+
+    match num qty, num price with
+    | Some q, Some p -> Float(q * p * f.Factor)
+    | _ -> Null
+
+let private linesTable (amounts: Cell list) : Table =
+    { Schema = [ "amount", FloatType ]
+      Columns = [ Column.create "amount" FloatType amounts ] }
+
+/// Every row, from scratch: the state a prime builds.
+let private primeLines (f: LineFormula) (source: Table) : Result<LineState, string> =
+    match Table.tryColumn f.Qty source, Table.tryColumn f.Price source with
+    | Some q, Some p ->
+        Ok
+            { Formula = f
+              Amounts = List.map2 (amountOf f) q.Cells p.Cells
+              Recomputed = Table.rowCount source }
+    | _ -> Error(sprintf "lines reads %s and %s, and the source has %A" f.Qty f.Price (Table.columnNames source))
+
+/// The rows a delta names, recomputed against the prior state; every other row is the prior's.
+let private refreshLines (st: LineState) (rows: Set<int>) (source: Table) : LineState =
+    let qty = cellsOf st.Formula.Qty source
+    let price = cellsOf st.Formula.Price source
+
+    { st with
+        Amounts =
+            st.Amounts
+            |> List.mapi (fun i x ->
+                if Set.contains i rows then
+                    amountOf st.Formula qty[i] price[i]
+                else
+                    x)
+        Recomputed = Set.count rows }
+
 /// The REFERENCE evaluator: what each node means, computed from scratch.
 let private reference (s: Sheet) (resolve: string -> SheetValue option) (id: string) : Result<SheetValue, string> =
     match defOf s id with
@@ -575,16 +590,15 @@ let private reference (s: Sheet) (resolve: string -> SheetValue option) (id: str
                   Version = s.Versions[id]
                   Delta = s.Deltas[id] }
         )
-    | Some(TableFormula(src, pipeline, _)) ->
+    | Some(TableFormula(src, f, _)) ->
         match resolve src with
         | Some(SourceV snap) ->
-            DataFrame.evalPipeline pipeline snap.Table
-            |> Result.map (fun t ->
+            primeLines f snap.Table
+            |> Result.map (fun st ->
                 TableV
-                    { Result = t
+                    { Result = linesTable st.Amounts
                       State = None
                       BuiltAt = snap.Version })
-            |> Result.mapError DataFrame.errorString
         | _ -> Ok(CellV Null)
     | Some(CellSum(t, col)) ->
         match tableOf (resolve t) with
@@ -592,8 +606,9 @@ let private reference (s: Sheet) (resolve: string -> SheetValue option) (id: str
         | None -> Ok(CellV Null)
 
 /// The PRIOR-AWARE evaluator: a table node refreshes its prior state against its source's delta
-/// when that state is one version behind (or at) the source, and primes otherwise. Everything it
-/// needs is an argument — the prior from the driver, the delta from the source's value.
+/// when that state was built with the same formula one version behind the source (or at it), and
+/// primes otherwise. Everything it needs is an argument — the prior from the driver, the delta
+/// from the source's value.
 let withPrior
     (s: Sheet)
     (resolve: string -> SheetValue option)
@@ -601,33 +616,34 @@ let withPrior
     (id: string)
     : Result<SheetValue, string> =
     match defOf s id with
-    | Some(TableFormula(src, pipeline, _)) ->
+    | Some(TableFormula(src, f, _)) ->
         match resolve src with
         | Some(SourceV snap) ->
             let result =
-                match prior with
-                | Some(TableV { State = Some st; BuiltAt = at }) when at = snap.Version - 1 ->
-                    Incremental.refresh DataFrame.noResolve Map.empty rid pipeline st snap.Delta snap.Table
-                | Some(TableV { State = Some st; BuiltAt = at }) when at = snap.Version ->
-                    Incremental.refresh
-                        DataFrame.noResolve
-                        Map.empty
-                        rid
-                        pipeline
-                        st
-                        (Delta.empty rid.Scheme)
-                        snap.Table
-                | _ -> Incremental.prime DataFrame.noResolve Map.empty rid pipeline snap.Table
+                match prior, snap.Delta with
+                | Some(TableV { State = Some st; BuiltAt = at }), Rows rows when
+                    st.Formula = f
+                    && at = snap.Version - 1
+                    && List.length st.Amounts = Table.rowCount snap.Table
+                    ->
+                    Ok(refreshLines st rows snap.Table)
+                | Some(TableV { State = Some st; BuiltAt = at }), _ when st.Formula = f && at = snap.Version ->
+                    Ok(refreshLines st Set.empty snap.Table)
+                | _ -> primeLines f snap.Table
 
             result
             |> Result.map (fun st ->
                 TableV
-                    { Result = Incremental.result st
+                    { Result = linesTable st.Amounts
                       State = Some st
                       BuiltAt = snap.Version })
-            |> Result.mapError DataFrame.errorString
         | _ -> Ok(CellV Null)
     | _ -> reference s resolve id
+
+let private linesFormula =
+    { Qty = "qty"
+      Price = "price"
+      Factor = 1.0 }
 
 let private initialSheet (rows: int) : Sheet =
     let node id def = { Id = id; Def = def; Children = [] }
@@ -637,24 +653,22 @@ let private initialSheet (rows: int) : Sheet =
           Def = Root
           Children =
             [ node "orders" Source
-              node "lines" (TableFormula("orders", linesPipeline, [ "qty"; "price" ]))
+              node "lines" (TableFormula("orders", linesFormula, [ "qty"; "price" ]))
               node "total" (CellSum("lines", "amount"))
               node "idSum" (CellSum("orders", "id")) ] }
       Sources = Map.ofList [ "orders", orders rows ]
       Versions = Map.ofList [ "orders", 0 ]
-      Deltas = Map.ofList [ "orders", Delta.empty rid.Scheme ] }
+      Deltas = Map.ofList [ "orders", Rows Set.empty ] }
 
-/// A data edit through `ColumnOps`: the source moves one version, and its delta is `deltaOf`.
-let private dataEdit (op: ColumnOp) (s: Sheet) : Sheet * Set<string> =
-    let t = s.Sources["orders"]
-
-    match ColumnOps.apply op t with
+/// A data edit: the source moves one version, and its delta is the rows the edit moved.
+let private dataEdit (edit: SourceEdit) (s: Sheet) : Sheet * Set<string> =
+    match applyEdit edit s.Sources["orders"] with
     | Error _ -> s, Set.empty
-    | Ok t' ->
+    | Ok(t', delta) ->
         { s with
             Sources = Map.add "orders" t' s.Sources
             Versions = Map.add "orders" (s.Versions["orders"] + 1) s.Versions
-            Deltas = Map.add "orders" (ColumnOps.deltaOf rid t op) s.Deltas },
+            Deltas = Map.add "orders" delta s.Deltas },
         Set.singleton "orders"
 
 /// A structural edit through `Ops`, its change set from `changedForOp`.
@@ -666,12 +680,7 @@ let private sheetEdit (op: SkeletonOp<SheetNode, string>) (s: Sheet) : Sheet * S
 let private redefineLines (factor: float) =
     UpdateNode
         { Id = "lines"
-          Def =
-            TableFormula(
-                "orders",
-                [ Derive("amount", Binary(Mul, Binary(Mul, Cast(FloatType, Col "qty"), Col "price"), Lit(Float factor))) ],
-                [ "qty"; "price" ]
-            )
+          Def = TableFormula("orders", { linesFormula with Factor = factor }, [ "qty"; "price" ])
           Children = [] }
 
 let evaluatorWitness: EvaluatorWitness<Sheet, SheetValue> =
@@ -691,20 +700,23 @@ let evaluatorWitness: EvaluatorWitness<Sheet, SheetValue> =
 
             let edited =
                 match kind with
-                | 0 -> dataEdit (SetCell("price", row, Float(0.25 * float (v + 1)))) s
-                | 1 -> dataEdit (SetCell("qty", row, Int(v + 1))) s
-                | 2 -> dataEdit (SetCell("id", row, Int(1000 + v))) s
-                | 3 -> dataEdit (AppendRows [ [ "id", Int(2000 + v); "qty", Int 1; "price", Float 1.0 ] ]) s
+                | 0 -> dataEdit (EditCell("price", row, Float(0.25 * float (v + 1)))) s
+                | 1 -> dataEdit (EditCell("qty", row, Int(v + 1))) s
+                | 2 -> dataEdit (EditCell("id", row, Int(1000 + v))) s
+                | 3 -> dataEdit (AppendRow [ "id", Int(2000 + v); "qty", Int 1; "price", Float 1.0 ]) s
                 | 4 ->
-                    dataEdit (SetColumn(Column.create "qty" IntType [ for i in 0 .. rows - 1 -> Int((i + v) % 5) ])) s
+                    dataEdit
+                        (ReplaceColumn(Column.create "qty" IntType [ for i in 0 .. rows - 1 -> Int((i + v) % 5) ]))
+                        s
                 | 5 -> sheetEdit (redefineLines (float (v % 3 + 1))) s
-                // A redefinition the pipeline evaluator refuses (a column the source does not have),
-                // so the failing-evaluator arm of the agreement law is reached.
+                // A redefinition the evaluator refuses (a column the source does not have), so the
+                // failing-evaluator arm of the agreement law is reached.
                 | 6 ->
                     sheetEdit
                         (UpdateNode
                             { Id = "lines"
-                              Def = TableFormula("orders", [ Derive("amount", Col "missing") ], [ "missing" ])
+                              Def =
+                                TableFormula("orders", { linesFormula with Qty = "missing" }, [ "missing"; "price" ])
                               Children = [] })
                         s
                 | _ -> sheetEdit (Batch [ RemoveNode "idSum" ]) s
@@ -722,13 +734,12 @@ let private sheetTests =
                   Propagation.evalWith (withPrior s0) (depsOf s0)
                   |> Result.defaultWith (fun e -> failwithf "%A" e)
 
-              let s1, changed = dataEdit (SetCell("price", 500, Float 7.25)) s0
+              let s1, changed = dataEdit (EditCell("price", 500, Float 7.25)) s0
 
               match Propagation.evalFromWith (withPrior s1) full0.Values changed (depsOf s1) with
               | Ok o ->
                   match o.Values["lines"] with
-                  | TableV { State = Some st } ->
-                      Expect.equal (Incremental.footprint st).Recompute (RowsRecomputed 1) "one row"
+                  | TableV { State = Some st } -> Expect.equal st.Recomputed 1 "one row"
                   | other -> failtestf "lines is not a refreshed table: %A" other
 
                   Expect.equal
@@ -740,14 +751,11 @@ let private sheetTests =
           testCase "a price edit reaches, at column granularity, every node but the one reading ids"
           <| fun () ->
               let s0 = initialSheet 10
-              let op = SetCell("price", 3, Float 1.5)
+              let edit = EditCell("price", 3, Float 1.5)
               let pdeps = Propagation.partDependencyMap sheetw idw sheetReads s0.Tree
 
               let dirty =
-                  Propagation.dirtyFromChangedParts
-                      pdeps
-                      (fun _ -> ColumnOps.changedColumns op)
-                      (Set.singleton "orders")
+                  Propagation.dirtyFromChangedParts pdeps (fun _ -> movedColumns edit) (Set.singleton "orders")
 
               Expect.equal dirty (Set.ofList [ "orders"; "lines"; "total" ]) "idSum reads only id"
 
@@ -813,4 +821,4 @@ let private sheetTests =
 
 [<Tests>]
 let tests =
-    testList "PropagationComposition" [ updateNodeTests; changedForOpTests; partTests; deltaTests; sheetTests ]
+    testList "PropagationComposition" [ updateNodeTests; changedForOpTests; partTests; sheetTests ]

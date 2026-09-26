@@ -216,7 +216,8 @@ module Families =
           c "registryLaws" none (Some SeamNotEveryDomainHas) []
           c "packLoadingLaws" none (Some SeamNotEveryDomainHas) []
           // Phase 257 — the `Column.aggregate` half of what was `aggregateParityLaws`; the parity
-          // half ships from `Fuaran.Core.DataFrame.Conformance` with the other dataframe families.
+          // half ships from `Fuaran.Core.DataFrame.Conformance` with the other dataframe families,
+          // produced by the compute repository since Phase 258 (DECISIONS.md D66).
           c "aggregateNullSkipLaws" none (Some SeamNotEveryDomainHas) []
           c "columnarValidatorLaws" none (Some SeamNotEveryDomainHas) []
           c "deferredLaws" none (Some SeamNotEveryDomainHas) []
@@ -429,11 +430,12 @@ module Families =
     /// and their adequacy census, under the package id a consumer references to run them.
     ///
     /// The kit's families are no longer all in one assembly. Those that read the dataframe layer
-    /// ship from `Fuaran.Core.DataFrame.Conformance` (DECISIONS.md D68), and this package cannot
-    /// name them without referencing that one — the upward reference the boundary test refuses. So
-    /// each package declares its own share, and a reader that sees both composes them: the
-    /// renderings below take a list of rosters, and the generated `docs/conformance-families.*`
-    /// are rendered from both.
+    /// ship from `Fuaran.Core.DataFrame.Conformance` (DECISIONS.md D68) — since Phase 258 from
+    /// the compute repository, which produces that package (D66) — and this package cannot name
+    /// them without referencing that one, the upward reference the boundary test refuses. So each
+    /// package declares its own share, and a reader that sees several composes them: the
+    /// renderings below take a list of rosters. This repository's generated
+    /// `docs/conformance-families.*` render this package's share alone.
     type Roster =
         {
             /// The package id the families ship from — the one reference a consumer adds to run them.
@@ -701,7 +703,9 @@ module Families =
           ""
           "**Package.** The package a family ships from — the one reference a consumer adds to run it."
           "The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conformance`"
-          "(Phase 257, DECISIONS.md D68); every other family ships from `Fuaran.Core.Conformance`."
+          "(Phase 257, DECISIONS.md D68), which the compute repository produces since Phase 258"
+          "(D66) and whose own generated census lists them; every family here ships from"
+          "`Fuaran.Core.Conformance`."
           ""
           sprintf
               "%d families, across %s, from %s."

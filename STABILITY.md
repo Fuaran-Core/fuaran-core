@@ -234,6 +234,13 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
 
 ### The Compute strand — `Column` / `DataFrame` / `Query` (first-class)
 
+> **Since `0.33.0` (Phase 258, DECISIONS.md D66) `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops`
+> are produced by [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute),
+> and every change to them from `0.33.0` on is recorded in that repository's `STABILITY.md`.** The
+> paragraphs below about those two packages are the record of what this repository promised while
+> it produced them (up to `0.32.0`), which that document points at rather than restates; the
+> promises about `Column` and `Query` are still this repository's.
+
 The relational/columnar strand (`Fuaran.Core.Column`, `Fuaran.Core.DataFrame`, `Fuaran.Core.Query`) is
 a **first-class, stability-critical member of the substrate**, not an example or a reference sketch —
 its public surface carries the same 1.0 commitment as the witness spine, and its cross-host semantics
@@ -2341,6 +2348,70 @@ all, which `Artifact.readHarden` resolves through `HardenPolicy.Default` by a pr
 own doc comment. Emptying the default would have changed what already-published bytes MEAN, for
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
+
+## 0.33.0 — DRAFT
+
+**It is a MINOR slot because the change that opens it is BREAKING.** `0.32.0` is tagged, so it is a
+consumer's contract and nothing rides it. Phase 258 removes four packages from this repository's
+roster — `removal`, breaking for a consumer that takes them from here — and a breaking change opens a
+minor slot rather than a patch one. `<Version>` and the laws corpus here (`conformance/laws/capability-laws.json`) were
+re-stamped in the same commit as the version move, per `docs/conformance-corpus.md`; the byte copy in
+the shared wire-format corpus is re-synced separately.
+
+### The compute strand leaves: moved, not removed (Phase 258) — BREAKING, `removal`
+
+**What changed.** DECISIONS.md D66 ruled that the compute layer is produced by a repository of its own,
+because its programme (performance, and breaking changes to reach it) is not this spine's (stability,
+laws, proofs). Phase 257 prepared the line inside this tree; this phase cuts it. Four package ids are
+no longer produced here:
+
+| Package id | Last emitted here | Continues from |
+|---|---|---|
+| `Fuaran.Core.DataFrame` | `0.32.0` | [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) at `0.33.0` |
+| `Fuaran.Core.Column.Ops` | `0.32.0` | the same repository, at `0.33.0` |
+| `Fuaran.Core.DataFrame.Conformance` | `0.32.0` | the same repository, at `0.33.0` |
+| `Fuaran.Core.DataFrame.CSharp` | `0.32.0` | the same repository, at `0.33.0` |
+
+They are **moved, not removed** (D7's rule for a package that changes producer): the ids, the CLR
+namespaces and the public surfaces continue unchanged from the new producer, which opened at `0.33.0`
+so that no version number names two contracts. With them went their tests, the two proof models
+(`proofs/ColumnOps.fst`, `proofs/Pipeline.fst`) and their claims-ladder rows, their public-surface and
+wire-surface baselines, the transform law vectors (`conformance/laws/transform-laws.json`, now the
+compute repository's derived file, stamped with its version), the Phase 257 forwarding module (it
+lived in `Fuaran.Core.DataFrame.Conformance`, so it goes with that package; the compute repository
+retires it in its own change-set) and `docs/incremental-evaluation.md`. The entries below for versions up
+to `0.32.0` stay here as the record of those packages' history — the compute repository's
+`STABILITY.md` points at them rather than restating them, so they are not edited or removed — and
+every change to the four packages from `0.33.0` on is recorded there.
+
+**What stays, and why.** `Fuaran.Core.Column` stays: `Table`, `Schema` and `DataSource` are the types
+the `Query` seam produces and declares, the `Validator` column rules check and the kit's columnar
+families read, so the seams need it, and the compute packages are built over it. `Propagation`,
+`Query`, `Conformance` (with its `aggregateNullSkipLaws` and `columnarValidatorLaws` families) and the
+C# facade's column half stay for the same reason. No surviving package's public surface moved.
+
+**What adopting it costs.**
+
+- **A consumer that pins this repository for any of the four ids** keeps restoring what it pinned —
+  every version this repository published (up to `0.32.0`) stays on nuget.org, which is immutable. To
+  move past `0.32.0` it raises those ids to the compute repository's release with a **second**
+  `PackageVersion` property, one per producing repository (for example `FuaranCoreVersion` for the
+  spine and `FuaranCoreComputeVersion` for the four), because the two repositories version
+  independently and one property spanning both can never be correct.
+- **A consumer of the spine only** raises `FuaranCoreVersion` to `0.33.0` and changes nothing else.
+- **A consumer that references both** sees no compile change: the compute repository's `0.33.0` is
+  built over this repository's `0.32.0` substrate, whose surface this slot does not move.
+
+**What the surface gate printed, and what it did not.** Measured on this change: `18 baseline(s)
+read, 0 moved` and `no baseline has moved since v0.32.0` — every surviving package's public surface
+renders exactly as tagged. The gate reads the baselines of the packages the tree still ships, so a
+package that leaves takes its baseline with it (`api/` loses four files, `api/wire/` the two for
+`Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops`) and no class is printed for it. The class of
+this slot is therefore this entry's statement rather than a gate output: four whole surfaces are
+removed from the roster, which is `removal` — breaking — for any consumer that takes them from this
+repository, and nothing for one that does not. The boundary test (`ComputeBoundaryTests`) is now an
+assertion of ABSENCE: no project, directory, package reference or built spine assembly in this tree
+names one of the four ids.
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 

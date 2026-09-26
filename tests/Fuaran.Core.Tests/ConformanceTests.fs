@@ -771,25 +771,10 @@ let tests =
                   (bad |> List.exists (fun r -> r.Counterexample.IsSome))
                   "the lossy failure carries a (tree, tree) counterexample"
 
-          // Phase 36 — the aggregate-parity law (Column.aggregate as the single source GroupBy calls).
-          // Phase 257 split the family: the parity half ships from Fuaran.Core.DataFrame.Conformance
-          // under this name, and the null-skip half is `aggregateNullSkipLaws`, in the kit.
-          testCase "aggregateParityLaws certify single-source parity (Phase 36)"
-          <| fun _ ->
-              let results = Conformance.aggregateParityLaws 4242 200
-              Expect.equal (List.length results) 1 "the parity law reported"
-
-              if results |> List.exists (fun r -> not r.Passed) then
-                  let fails =
-                      results
-                      |> List.filter (fun r -> not r.Passed)
-                      |> List.map (fun r -> sprintf "%s — %A" r.Law r.Counterexample)
-
-                  failtestf "aggregateParityLaws failed:\n%s" (String.concat "\n" fails)
-
-              // seed-replay determinism
-              Expect.equal (Conformance.aggregateParityLaws 4242 200) results "same seed ⇒ identical report"
-
+          // Phase 36's aggregate-parity law (Column.aggregate as the single source GroupBy calls) was
+          // split by Phase 257: its parity half is `aggregateParityLaws`, which reads the dataframe
+          // layer and left this repository with it in Phase 258 (D66), and its null-skip half is
+          // below.
           // Phase 257 — the null-skip half of Phase 36, a family of its own in the kit.
           testCase "aggregateNullSkipLaws certify Column.aggregate's null-skip semantics (Phase 36, split by 257)"
           <| fun _ ->

@@ -1,33 +1,38 @@
-/// Phase 257 — the compute boundary, held.
+/// Phase 257 — the compute boundary, held; Phase 258 — held as an ABSENCE.
 ///
-/// DECISIONS.md D66 rules that `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` leave this
-/// repository for one of their own, and D68 records how the line was prepared inside it first: the
-/// families and the facade half that read them moved into `Fuaran.Core.DataFrame.Conformance` and
-/// `Fuaran.Core.DataFrame.CSharp`, so the later move is a copy of whole assemblies. That only stays
-/// true while nothing on this side of the line reaches across it again, and a helper that does is
-/// the easiest change in the world to make. So this test refuses it, on two readings, because each
-/// misses what the other sees:
+/// DECISIONS.md D66 rules that `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` are produced by
+/// a repository of their own (https://github.com/Fuaran-Core/fuaran-core-compute), together with
+/// `Fuaran.Core.DataFrame.Conformance` and `Fuaran.Core.DataFrame.CSharp`, the two assemblies Phase
+/// 257 cut beside them (D68). Phase 258 removed all four from this tree. The line runs one way — the
+/// compute layer is built over this spine, never the reverse — and the easiest change in the world
+/// to make is a helper that brings one of the ids back: a project restored under `src/`, a
+/// `ProjectReference` to it, or a `PackageReference` to the compute repository's release, which
+/// would make the spine depend on the layer above it. So this test refuses each, on readings that
+/// each miss what the others see:
 ///
-///   * the PROJECT FILES — every spine project's `ProjectReference` closure, walked through the
-///     projects it names, so a reference that arrives through an intermediate project is caught;
+///   * the TREE — no project in the solution and no directory under `src/` or `tests/` is named for
+///     a compute id;
+///   * the PROJECT FILES — every project's `ProjectReference` closure, walked through the projects
+///     it names, so a reference that arrives through an intermediate project is caught, and no
+///     project or central package file names a compute id as a package;
 ///   * the BUILT ASSEMBLIES — each spine dll's own assembly-reference table, read from its
 ///     metadata (the list `Assembly.GetReferencedAssemblies` returns, read without loading the
-///     assembly into this process). The compiler writes a reference there for every assembly a
-///     compiled construct actually uses, so an `open` that resolved against a transitively
-///     available assembly shows up here even where no project file names it.
-///
-/// The compute side is the two ids that leave plus the two assemblies this phase cut beside them;
-/// a spine assembly referencing either new one reaches `DataFrame` through it.
+///     assembly into this process), and this suite's own dependency manifest. The compiler writes a
+///     reference for every assembly a compiled construct actually uses, so an `open` that resolved
+///     against a transitively available assembly shows up there even where no project file names it.
 module Fuaran.Core.Tests.ComputeBoundaryTests
 
 open System
 open System.IO
 open System.Reflection.Metadata
 open System.Reflection.PortableExecutable
+open System.Text.Json
 open System.Xml.Linq
 open Expecto
 
-/// The spine: every assembly that stays in this repository when the compute layer leaves (D66).
+/// The spine: every assembly this repository ships since the compute layer left (D66). Every
+/// project under `src/` is on it, which the tree test below holds, so a new project is classified
+/// by the commit that adds it.
 let spine: string list =
     [ "Fuaran.Core.Tree"
       "Fuaran.Core.Ops"
@@ -36,6 +41,7 @@ let spine: string list =
       "Fuaran.Core.Wire"
       "Fuaran.Core.Column"
       "Fuaran.Core.Validator"
+      "Fuaran.Core.Observer"
       "Fuaran.Core.Function"
       "Fuaran.Core.Query"
       "Fuaran.Core.Projection"
@@ -43,11 +49,12 @@ let spine: string list =
       "Fuaran.Core.AiSurface"
       "Fuaran.Core.Idl"
       "Fuaran.Core.Idl.Codegen"
+      "Fuaran.Core.Idl.Spike"
       "Fuaran.Core.Idl.Cli"
       "Fuaran.Core.Conformance"
       "Fuaran.Core.CSharp" ]
 
-/// The compute side of the line.
+/// The compute side of the line: the four ids the compute repository produces.
 let compute: Set<string> =
     set
         [ "Fuaran.Core.DataFrame"
@@ -56,13 +63,13 @@ let compute: Set<string> =
           "Fuaran.Core.DataFrame.CSharp" ]
 
 // ---------------------------------------------------------------------------
-//  the pure rule, so it has a go-red
+//  the pure rules, so each has a go-red
 // ---------------------------------------------------------------------------
 
-/// Every (spine assembly, compute assembly) pair such that the compute assembly is reachable from
-/// the spine one through `edges` — a map from an assembly to the assemblies it references
-/// directly. Reachability rather than adjacency, so an intermediate hop cannot launder a crossing.
-let crossings (edges: Map<string, string list>) (spineNames: string list) : (string * string) list =
+/// Every (assembly, compute assembly) pair such that the compute assembly is reachable from the
+/// named one through `edges` — a map from an assembly to the assemblies it references directly.
+/// Reachability rather than adjacency, so an intermediate hop cannot launder a crossing.
+let crossings (edges: Map<string, string list>) (names: string list) : (string * string) list =
     let rec reach (seen: Set<string>) (frontier: string list) =
         match frontier with
         | [] -> seen
@@ -75,41 +82,67 @@ let crossings (edges: Map<string, string list>) (spineNames: string list) : (str
 
             reach (Set.union seen (Set.ofList next)) (next @ rest)
 
-    [ for s in spineNames do
+    [ for s in names do
           for c in reach Set.empty [ s ] |> Set.intersect compute |> Set.toList -> s, c ]
+
+/// The names in a list that ARE compute ids, compared without regard to case (a package id is
+/// case-insensitive, and a directory on this repository's development machines is too).
+let computeNamed (names: string seq) : string list =
+    let lowered = compute |> Set.map (fun c -> c.ToLowerInvariant())
+
+    names
+    |> Seq.filter (fun n -> Set.contains (n.ToLowerInvariant()) lowered)
+    |> Seq.distinct
+    |> Seq.sort
+    |> Seq.toList
 
 // ---------------------------------------------------------------------------
 //  reading the tree
 // ---------------------------------------------------------------------------
 
+let private root () = Snapshots.repoFile ""
+
 let private srcDir () = Snapshots.repoFile "src"
 
-/// The project file for an assembly name under `src/` — `.fsproj`, or `.csproj` for the facade.
-let private projectFileOf (name: string) : string option =
-    [ ".fsproj"; ".csproj" ]
-    |> List.map (fun ext -> Path.Combine(srcDir (), name, name + ext))
-    |> List.tryFind File.Exists
+let private subdirNames (dir: string) : string list =
+    if Directory.Exists dir then
+        Directory.GetDirectories dir |> Array.map Path.GetFileName |> Array.toList
+    else
+        []
 
-/// The `ProjectReference` targets a project file names, as assembly names — read as XML, so a
-/// project name that appears in a COMMENT (the kit's own project file explains in one why it no
-/// longer references the dataframe layer) is not read as a reference.
-let private projectReferencesOf (projectFile: string) : string list =
-    XDocument.Load(projectFile).Descendants()
-    |> Seq.filter (fun e -> e.Name.LocalName = "ProjectReference")
+/// Every project file in the solution, repository-relative, read from `Fuaran.Core.slnx`.
+let private solutionProjects () : string list =
+    XDocument.Load(Snapshots.repoFile "Fuaran.Core.slnx").Descendants()
+    |> Seq.filter (fun e -> e.Name.LocalName = "Project")
+    |> Seq.choose (fun e ->
+        match e.Attribute(XName.Get "Path") with
+        | null -> None
+        | a -> Some(a.Value.Replace('\\', '/')))
+    |> Seq.toList
+
+let private nameOf (projectPath: string) =
+    Path.GetFileNameWithoutExtension projectPath
+
+/// The elements of one local name in an MSBuild file, read as XML, so a name that appears in a
+/// COMMENT (this repository's project files explain in several why they no longer reference the
+/// dataframe layer) is not read as a reference.
+let private includesOf (localName: string) (file: string) : string list =
+    XDocument.Load(file).Descendants()
+    |> Seq.filter (fun e -> e.Name.LocalName = localName)
     |> Seq.choose (fun e ->
         match e.Attribute(XName.Get "Include") with
         | null -> None
-        | a -> Some(Path.GetFileNameWithoutExtension(a.Value.Replace('\\', '/'))))
+        | a -> Some a.Value)
     |> Seq.toList
 
-/// The project-reference graph over every project under `src/`.
+/// The project-reference graph over every project in the solution, keyed by assembly name.
 let private projectEdges () : Map<string, string list> =
-    Directory.GetDirectories(srcDir ())
-    |> Array.choose (fun d ->
-        let name = Path.GetFileName d
-
-        projectFileOf name |> Option.map (fun p -> name, projectReferencesOf p))
-    |> Map.ofArray
+    solutionProjects ()
+    |> List.map (fun p ->
+        nameOf p,
+        includesOf "ProjectReference" (Path.Combine(root (), p))
+        |> List.map (fun r -> Path.GetFileNameWithoutExtension(r.Replace('\\', '/'))))
+    |> Map.ofList
 
 /// The assembly-reference table of a built dll: the names `Assembly.GetReferencedAssemblies`
 /// would return, read from the metadata so nothing is loaded.
@@ -119,6 +152,12 @@ let internal referencedAssemblies (dllPath: string) : string list =
     let md = pe.GetMetadataReader()
 
     [ for h in md.AssemblyReferences -> md.GetString((md.GetAssemblyReference h).Name) ]
+
+/// The project file for an assembly name under `src/` — `.fsproj`, or `.csproj` for the facade.
+let private projectFileOf (name: string) : string option =
+    [ ".fsproj"; ".csproj" ]
+    |> List.map (fun ext -> Path.Combine(srcDir (), name, name + ext))
+    |> List.tryFind File.Exists
 
 /// The built dll for a spine assembly: the copy in this test's own output when the suite
 /// references it, otherwise the project's own build output, preferring this binary's
@@ -131,8 +170,21 @@ let private builtAssembly (name: string) : Result<string, string> =
     else
         match projectFileOf name with
         | None -> Error(sprintf "%s: no project under src/" name)
-        | Some p ->
-            PublicSurfaceTests.assemblyFor (Snapshots.repoFile "") (Path.GetRelativePath(Snapshots.repoFile "", p)) name
+        | Some p -> PublicSurfaceTests.assemblyFor (root ()) (Path.GetRelativePath(root (), p)) name
+
+/// The library names this suite's dependency manifest resolves (`<assembly>.deps.json`, the file
+/// the host reads to build the load context). A stale dll left in the output directory by an older
+/// build is not in it, so this is the reading that cannot be fooled by `bin/` debris.
+let private manifestLibraries () : string list =
+    let deps =
+        Path.Combine(AppContext.BaseDirectory, Reflection.Assembly.GetExecutingAssembly().GetName().Name + ".deps.json")
+
+    use doc = JsonDocument.Parse(File.ReadAllText deps)
+
+    [ for lib in doc.RootElement.GetProperty("libraries").EnumerateObject() ->
+          match lib.Name.IndexOf '/' with
+          | -1 -> lib.Name
+          | i -> lib.Name.Substring(0, i) ]
 
 let private render (pairs: (string * string) list) : string =
     pairs |> List.map (fun (s, c) -> s + " -> " + c) |> String.concat "; "
@@ -143,15 +195,14 @@ let tests =
         "Compute boundary"
         [
 
-          testCase "the rule goes red on a direct crossing, an indirect one, and neither"
+          testCase "the rules go red on a direct crossing, an indirect one, a named id, and neither"
           <| fun _ ->
               // The go-red, over a synthetic graph: a spine project gaining a DataFrame reference,
               // one gaining it through an intermediate hop, and the clean graph beside them.
               let clean =
                   Map.ofList
                       [ "Fuaran.Core.Query", [ "Fuaran.Core.Column"; "Fuaran.Core.Function" ]
-                        "Fuaran.Core.Column", [ "Fuaran.Core.Wire" ]
-                        "Fuaran.Core.DataFrame", [ "Fuaran.Core.Column" ] ]
+                        "Fuaran.Core.Column", [ "Fuaran.Core.Wire" ] ]
 
               Expect.isEmpty (crossings clean [ "Fuaran.Core.Query" ]) "a clean graph crosses nothing"
 
@@ -172,24 +223,86 @@ let tests =
                   [ "Fuaran.Core.Query", "Fuaran.Core.Column.Ops" ]
                   "a reference through an intermediate project is a crossing too"
 
-          testCase "no spine project references the compute side, directly or through another project"
+              Expect.isEmpty
+                  (computeNamed [ "Fuaran.Core.Column"; "Fuaran.Core.Columns.Ops"; "Fuaran.Core.DataFrames" ])
+                  "a near-miss is not a compute id"
+
+              Expect.equal
+                  (computeNamed
+                      [ "Fuaran.Core.Column"
+                        "fuaran.core.dataframe"
+                        "Fuaran.Core.DataFrame.CSharp" ])
+                  [ "Fuaran.Core.DataFrame.CSharp"; "fuaran.core.dataframe" ]
+                  "a compute id is named whatever its case"
+
+          testCase "no project in the solution, and no directory under src/ or tests/, is a compute id"
+          <| fun _ ->
+              let projects = solutionProjects ()
+
+              Expect.isGreaterThan
+                  (List.length projects)
+                  (List.length spine)
+                  "the solution reading found the spine and more — a reader that found nothing would pass vacuously"
+
+              let named =
+                  computeNamed (
+                      (projects |> List.map nameOf)
+                      @ subdirNames (srcDir ())
+                      @ subdirNames (Snapshots.repoFile "tests")
+                  )
+
+              Expect.isEmpty
+                  named
+                  (sprintf
+                      "the compute strand is back in this tree: %A. D66: those ids are produced by https://github.com/Fuaran-Core/fuaran-core-compute from 0.33.0; the spine does not carry them."
+                      named)
+
+          testCase "every project under src/ is on the spine, and every spine name is a project there"
+          <| fun _ ->
+              let under =
+                  subdirNames (srcDir ())
+                  |> List.filter (fun n -> Option.isSome (projectFileOf n))
+
+              Expect.equal
+                  (List.sort under)
+                  (List.sort spine)
+                  "the spine list is the src/ tree: a new project is classified by the commit that adds it"
+
+          testCase "no project in the solution references the compute side, directly or through another project"
           <| fun _ ->
               let edges = projectEdges ()
-
-              for name in spine do
-                  Expect.isTrue
-                      (Map.containsKey name edges)
-                      (sprintf "%s has no project under src/ — the spine list names a project that is not there" name)
-
-              let found = crossings edges spine
+              let found = crossings edges (edges |> Map.keys |> Seq.toList)
 
               Expect.isEmpty
                   found
                   (sprintf
-                      "spine project(s) reach the compute side through their ProjectReferences: %s. D66/D68: the compute layer leaves this repository; a spine project that needs it is a design question for the compute repository's seam, not a reference to add here."
+                      "project(s) reach the compute side through their ProjectReferences: %s. D66: the compute layer is built over this spine, never the reverse; a spine project that needs it is a design question for the compute repository's seam, not a reference to add here."
                       (render found))
 
-          testCase "no built spine assembly references the compute side"
+              // The reading is not vacuous: the suite's own project names the kit it runs.
+              Expect.contains
+                  (Map.find "Fuaran.Core.Tests" edges)
+                  "Fuaran.Core.Conformance"
+                  "the test project's references were read"
+
+          testCase "no project and no central package file names a compute id as a package"
+          <| fun _ ->
+              let files =
+                  Snapshots.repoFile "Directory.Packages.props"
+                  :: (solutionProjects () |> List.map (fun p -> Path.Combine(root (), p)))
+
+              let packages =
+                  [ for f in files do
+                        yield! includesOf "PackageReference" f
+                        yield! includesOf "PackageVersion" f ]
+
+              Expect.contains packages "FSharp.Core" "the package reading found the packages that are there"
+
+              Expect.isEmpty
+                  (computeNamed packages)
+                  "a package reference to the compute repository's release would make the spine depend on the layer built over it (D66)"
+
+          testCase "no built spine assembly, and nothing this suite loads, references the compute side"
           <| fun _ ->
               let refs =
                   [ for name in spine ->
@@ -214,14 +327,7 @@ let tests =
               let kit = refs |> List.find (fun (n, _) -> n = "Fuaran.Core.Conformance") |> snd
               Expect.contains kit "Fuaran.Core.Column" "the kit's reference table names Column, which it reads"
 
-          testCase "the compute side does reference the spine it is built over"
-          <| fun _ ->
-              // The other direction is allowed, and is what makes the line a line: the two new
-              // assemblies read the kit and the facade below them. Checked so the reader above is
-              // seen to find a reference where one exists.
-              for name, below in
-                  [ "Fuaran.Core.DataFrame.Conformance", "Fuaran.Core.Conformance"
-                    "Fuaran.Core.DataFrame.CSharp", "Fuaran.Core.CSharp" ] do
-                  match builtAssembly name with
-                  | Error e -> failtestf "%s" e
-                  | Ok dll -> Expect.contains (referencedAssemblies dll) below (sprintf "%s references %s" name below) ]
+              let libraries = manifestLibraries ()
+              Expect.contains libraries "Fuaran.Core.Column" "the manifest reading found the spine"
+
+              Expect.isEmpty (computeNamed libraries) "this suite's dependency manifest resolves a compute assembly" ]

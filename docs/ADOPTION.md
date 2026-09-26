@@ -62,22 +62,16 @@ not adopted, never as passed. See [`construct-then-encode.md`](construct-then-en
 ## 2c. If your authoring tier is C# or VB, author through the facade
 
 `Fuaran.Core.CSharp` (Phase 128) is a C#-shaped surface over the closed unions a non-F# authoring
-tier has to build and read: the dataframe algebra (`ColExpr`, `Transform`, and `Cell` / `ColumnType` /
-`BinOp` / `ScalarFn` / `AggFn` / `JoinKind` / `SortDir` / `WindowFn` / `DataSource` and the three step
-specs under them), the artifact-function declaration family (`ValueSpace`, `HoleKind`, `HoleDecl`,
-`EffectClass`, `SigEntry`, `Signature`), and the wire JSON model (`JVal`).
+tier has to build and read: the column layer (`Cell` / `ColumnType` / `AggFn` / `DataSource` and the
+table values over them), the artifact-function declaration family (`ValueSpace`, `HoleKind`,
+`HoleDecl`, `EffectClass`, `SigEntry`, `Signature`), and the wire JSON model (`JVal`).
 
-```csharp
-var pipeline = Pipeline.Of(
-    Step.Filter(Expr.Binary(BinaryOperator.Gt, Expr.Col("amount"), Expr.Param("threshold"))),
-    Step.GroupBy(new[] { "region" }, new[] { AggregateSpec.Of("total", AggregateFunction.Sum, "amount") }));
+The dataframe algebra's half of the facade (`ColExpr`, `Transform`, `Pipeline` and the step specs
+under them) is `Fuaran.Core.DataFrame.CSharp`, split out by Phase 257 and — like the dataframe layer it
+wraps — produced since Phase 258 by the compute repository; see
+[The dataframe path](#the-dataframe-path) below.
 
-var core = pipeline.ToCore();           // the declared bridge OUT — an F# `Transform list`
-var back = Pipeline.FromCore(core);     // and back IN
-```
-
-Construction is factory methods, reading is a total `Match` / `Switch` per union, and a pipeline is a
-`Pipeline` value rather than an F# list. **No public member mentions an F# option, list, function or
+Construction is factory methods and reading is a total `Match` / `Switch` per union. **No public member mentions an F# option, list, function or
 positional tuple at any generic depth, except on a member named exactly `ToCore` or `FromCore`** —
 that pair is the whole bridge, and the package's own gate prints the census of every member using it.
 So a tier that keeps a rule like *every authored value passes through the declared surface* can keep
@@ -128,6 +122,24 @@ OpStream.fromJsonl streamW jsonl  : Result<_, string>              // portable �
 - **F6 — the win.** Core's `fromJsonl` is portable (FSharp.Core only), so your Fable host can
   rehydrate and `verifyChain` a stream in-browser — which a `System.Text.Json` decoder can't.
 
+## The dataframe path
+
+`Fuaran.Core.DataFrame` (the `Transform` pipeline and its reference evaluator, the typed delta, the
+incremental seam), `Fuaran.Core.Column.Ops` (the columnar op algebra), `Fuaran.Core.DataFrame.Conformance`
+(the law families over them, `transformLaws` among them) and `Fuaran.Core.DataFrame.CSharp` (the
+dataframe half of the C# facade) are produced by their own repository,
+[`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute), from `0.33.0`,
+under the same package ids and the same namespaces (DECISIONS.md D66; Phase 258 removed them here).
+Adopting the dataframe path is adopting that repository's packages: its `docs/` carry the
+incremental-evaluation guide that used to be `docs/incremental-evaluation.md` here, and its
+`conformance/laws/transform-laws.json` is the transform law corpus. Everything above this section —
+the tree, the op-stream, the witnesses, `Fuaran.Core.Column` and the kit — is still this
+repository's, and the compute packages are built over it.
+
+A consumer that pinned this repository's `<Version>` for those four ids pins the compute repository's
+for them instead: a second `PackageVersion` property, one per producing repository. The versions this
+repository published of them (up to `0.32.0`) stay on nuget.org and keep restoring.
+
 ## Verify
 
 `./verify.ps1` builds the sample and runs its conformance report as part of the green gate. A clean
@@ -138,8 +150,8 @@ adoption prints `conformance: GREEN`.
 - [`samples/adoption/Program.fs`](../samples/adoption/Program.fs) — the runnable template.
 - [`CORE-ADOPTION-PILOT.md`](../../Fuaran-Documents/docs/CORE-ADOPTION-PILOT.md) — the Documents pilot (the worked example + the findings).
 - [`STABILITY.md`](../STABILITY.md) — which witness surfaces are stability-critical.
-- [`incremental-evaluation.md`](incremental-evaluation.md) — adopting incremental `Transform`
-  evaluation (a refresh that costs the rows that changed).
+- [The dataframe path](#the-dataframe-path) — where `DataFrame`, `Column.Ops`, their law families,
+  the dataframe facade and the incremental-evaluation guide live since Phase 258.
 - [`construct-then-encode.md`](construct-then-encode.md) — certifying the authoring surface (step 2b
   above): why a codec round trip cannot see a widened builder, and how to answer for the family.
 - [`../tests/Fuaran.Core.CSharp.Proof/Authoring.cs`](../tests/Fuaran.Core.CSharp.Proof/Authoring.cs) —

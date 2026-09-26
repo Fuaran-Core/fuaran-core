@@ -8,8 +8,8 @@
   <ItemGroup>
     <Compile Include="Reference.fs" />
     <Compile Include="Reference2.fs" />
-    <!-- Phase 257 — the law-family roster as the suite reads it: both packages' shares composed.
-         Early, because every roster and census check below reads it. -->
+    <!-- Phase 257 — the law-family roster as the suite reads it (one share since Phase 258 moved
+         the dataframe share out). Early, because every roster and census check below reads it. -->
     <Compile Include="KitRoster.fs" />
     <!-- The `Hash` pin suite — the FIPS 180-4 known-answer vectors and platform byte-equality for
          SHA-256, plus the pinned FNV-1a values. First: everything below folds through one or the
@@ -41,14 +41,6 @@
     <Compile Include="DagTests.fs" />
     <Compile Include="ProvenanceTests.fs" />
     <Compile Include="ColumnTests.fs" />
-    <Compile Include="DataFrameTests.fs" />
-    <Compile Include="ColumnOpsTests.fs" />
-    <!-- Phase 98 — the column layer's typed delta: the algebra laws, the wire, and the
-         reference identity witness. After the columnar suites it builds on. -->
-    <Compile Include="DeltaTests.fs" />
-    <!-- Phase 99 — the incremental evaluation seam: the generated equivalence family, the
-         measured footprints, and one case per way out of the incremental path. -->
-    <Compile Include="IncrementalTests.fs" />
     <Compile Include="QueryTests.fs" />
     <Compile Include="Snapshots.fs" />
     <!-- Pins the UTF-8 decoding of a redirected child's stdout, so the cross-host
@@ -137,10 +129,6 @@
          here by Phase 123: its scale cases read the reference vocabulary now that
          the UI fixture has left, so it compiles after ReferenceIdl.fs. -->
     <Compile Include="IdlDiffTests.fs" />
-    <!-- Phase 115 - the incremental seam run against the vendored `incremental-recompute`
-         corpus vectors at fixtures/incremental-recompute/ (the control that must not move,
-         and the sort vector whose class does). Reads nothing here, so it simply follows. -->
-    <Compile Include="IncrementalCorpusTests.fs" />
     <Compile Include="SampleAdequacyTests.fs" />
     <!-- Phase 118 - the .NET pin of the cross-pipeline vector table. The table itself is public in
          Fuaran.Core.Conformance since Phase 217 (`ParityVectors`), so this pins the very module a
@@ -249,21 +237,10 @@
          derivation of "what ships" and Snapshots.fs for the repository root, so it follows
          both; appended at the end of the list (append-only registration). -->
     <Compile Include="PublicSurfaceTests.fs" />
-    <!-- Phase 257 — the compute boundary: no spine project or built spine assembly references
-         DataFrame or Column.Ops. After PublicSurfaceTests, whose assembly locator it reuses. -->
+    <!-- Phase 257, made an assertion of ABSENCE by Phase 258 — the compute boundary: no project,
+         package reference or built spine assembly names DataFrame, Column.Ops or the two
+         assemblies cut beside them. After PublicSurfaceTests, whose assembly locator it reuses. -->
     <Compile Include="ComputeBoundaryTests.fs" />
-    <!-- Phase 206 — the wall-clock scaling gate: a RATIO between two row counts for the reference
-         evaluator, `Delta.diff` and the incremental refresh, plus the inequality the incremental
-         seam exists to make (a restricted refresh beats the full evaluation on the clock). Reads
-         no other test module — it builds its own tables — so it is appended at the end of the
-         list (append-only registration). -->
-    <Compile Include="ScalingTests.fs" />
-    <Compile Include="IncrementalTopNTests.fs" />
-    <Compile Include="IncrementalGroupByTests.fs" />
-    <!-- Phase 208 — the refresh's cost, COUNTED rather than timed: refresh work grows with the
-         delta and not with the table. Reads no other test module (it builds its own tables), so
-         it is appended at the end of the list (append-only registration). -->
-    <Compile Include="IncrementalRefreshCostTests.fs" />
     <!-- Phase 201 — defaults-fill on decode stated as a LAW (fill on absence, re-encode
          ABSENT, carry a present non-default), held in every decoder leg the generator
          emits; the full `WIRE_FORMAT.md` §3.1 node envelope declared, host-only members
@@ -295,11 +272,8 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Observer\Fuaran.Core.Observer.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Conformance\Fuaran.Core.Conformance.fsproj" />
-    <ProjectReference Include="..\..\src\Fuaran.Core.DataFrame.Conformance\Fuaran.Core.DataFrame.Conformance.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.OpStream.Dag\Fuaran.Core.OpStream.Dag.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Column\Fuaran.Core.Column.fsproj" />
-    <ProjectReference Include="..\..\src\Fuaran.Core.DataFrame\Fuaran.Core.DataFrame.fsproj" />
-    <ProjectReference Include="..\..\src\Fuaran.Core.Column.Ops\Fuaran.Core.Column.Ops.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Query\Fuaran.Core.Query.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
     <!-- The suite certifies BOTH halves: the model / codec / sampler / sanitisation floor

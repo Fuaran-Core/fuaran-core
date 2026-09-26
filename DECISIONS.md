@@ -1,5 +1,79 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-26 — D71: D66 is EXECUTED — the compute strand has left this repository, on the `0.33.0` draft, moved rather than removed
+
+**Recorded (Phase 258).** D66 ruled that `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` are
+produced by a repository of their own under the same ids, and listed four steps. The first was
+Phase 257 (D68: the line drawn inside this tree). The second and third are done outside it:
+[`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) exists,
+carries the four packages with their history, and released them at `0.33.0` — the next minor above
+this repository's last emission of them, `0.32.0` — on 2026-09-26. This phase is the fourth: the
+strand is removed from here.
+
+**What left.** The four projects (`DataFrame`, `Column.Ops`, and the two Phase 257 cut beside them,
+`DataFrame.Conformance` and `DataFrame.CSharp`), the dataframe facade proof, the test suites over
+them, the two proof models (`ColumnOps.fst`, `Pipeline.fst`) with their claims-ladder rows, cost
+entries, oracle extractions and coverage exclusions, their public- and wire-surface baselines, the
+transform law vectors with their exporter and their entries in `version-derives.json` and
+`copies.json` (the compute repository declares both), and `docs/incremental-evaluation.md`. The Phase
+257 forwarding module went with `DataFrame.Conformance`, the package it lived in; the compute
+repository retires its own copy in its own change-set.
+
+**What changed in what stayed.** The kit's roster is one share again (`KitRoster`), and its generated
+census renders this package's families only. The boundary test is now an assertion of ABSENCE: no
+project, directory, package reference or built spine assembly names one of the four ids, so a helper
+cannot bring them back — including by a package reference to the compute repository's release, which
+would invert the direction D66 set. The Phase 250 composition sheet, which certified
+`propagationEvaluatorLawsWith` over `Column.Ops` edits and a `DataFrame.Incremental` refresh, now
+states its source edits and its table node's cache over `Column` alone, so the family keeps an
+adequacy witness here; its `ColumnOps.deltaOf` section left with that function.
+
+**The version.** `0.32.0` is tagged, and removing four packages is the surface gate's `removal`, so
+the slot advances to `0.33.0` rather than riding. The number coincides with the compute repository's
+first release by construction, not by coupling: from here the two repositories version
+independently, and a consumer pins each with its own property. STABILITY.md "0.33.0 — DRAFT" is the
+consumer-facing record ("moved, not removed").
+
+## 2026-09-26 — D70: D62 is AMENDED — the compute repository is the specification owner for the compute subsystems the other hosts twin
+
+**Amends D62 (Phase 258, as D66 step 4 directs).** D62 names this repository "the reference
+implementation and specification owner for every other host language", and lists among the
+subsystems the other hosts twin the `Transform` / DataFrame evaluator. From `0.33.0` that evaluator
+is not in this repository. So the ownership D62 states is split along D66's line:
+
+- **The compute subsystems** — the `Transform` / `ColExpr` evaluator, the columnar op algebra, the
+  incremental seam and the transform law vectors (`laws/transform-laws.json`) the other hosts certify
+  against — are specified by
+  [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute), which
+  emits and stamps those vectors.
+- **Everything else D62 names** — `FunctionRegistry.findBySignature`, `Capability.invocationKey`,
+  list-parameter substitution, the lenient-ingest rules, and the law sets this repository emits
+  (`laws/capability-laws.json`, the `apply/` family) — stays this repository's to specify.
+
+D62's trigger (a per-language Core package is cut when a SECOND domain needs Core semantics in that
+language by a route other than Fable) and its preparation rule (each host keeps its twins behind a
+boundary; the specification owner emits every law set it is the reference for) apply to each owner
+for its own subsystems: a future per-language compute package certifies against the compute
+repository's vectors. D62's text stands; this entry is how it reads from `0.33.0`.
+
+## 2026-09-26 — D69: D49 is AMENDED — the dataframe algebra belongs "not in a consumer tier"; its reasons stand and its conclusion changes
+
+**Amends D49 (Phase 258, recording what D66 ruled).** D49 decided that "`Fuaran.Core.DataFrame`
+stays in this repository", on three reasons: the algebra has several consuming domains and none is
+above the others; it sits on this spine and on nothing else; in the consuming tiers it is a binding,
+never a node. All three still hold, and this entry does not re-argue them.
+
+What changes is the conclusion they support. Each reason rules out homing the algebra IN A CONSUMER
+TIER — a user-interface, presentation or application-composition tier — and none of them rules on a
+sibling repository beside this one, which satisfies all three equally: its consumers stay peers, it
+depends on this spine and nothing else, and it stays a binding in every consumer. D66 answered that
+second question, for a reason D49 never weighed (one `<Version>` over a spine that should break
+almost never and a compute layer that will break repeatedly). So D49's conclusion reads, from
+Phase 258: **the dataframe algebra belongs not in a consumer tier** — today in
+[`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute), under the
+same ids. D49's honest reading of the reference evaluator against the no-evaluator principle is
+unchanged and travels with the code. D49's text is left as written; this entry is the amendment.
+
 ## 2026-09-26 — D68: the compute boundary is prepared inside Core — two assemblies cut beside the leaving ones, the families keep their spelling through a same-named forwarding module, and the facade half keeps its namespace
 
 **Decided (Phase 257).** D66 moves `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` to a

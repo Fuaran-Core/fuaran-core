@@ -198,17 +198,9 @@ let pipelineWitness: CapabilityPipelineWitness =
     { PipelineRegistry = capabilityRegistry
       GenPipeline = genPipeline }
 
-// ---------------------------------------------------------------------------
-//  the columnar pair at a caller's generator
-// ---------------------------------------------------------------------------
-
-/// The pipelines a domain might run over the kit's reference table: a filter, a derive, a
-/// projection that drops `b`, and a group-by.
-let incrementalPipelines: Transform list list =
-    [ [ Filter(Binary(Gt, Col "a", Lit(Int 2))) ]
-      [ Derive("d", Binary(Add, Col "a", Lit(Int 1))) ]
-      [ Project [ "a", "a" ] ]
-      [ GroupBy([ "a" ], [ { Name = "s"; Fn = Sum; Of = "b" } ]) ] ]
+// The columnar pair (`columnarOpLawsWith`, `incrementalLawsWith`) and the reference pipelines they
+// were certified over read the dataframe layer, and left this repository with it in Phase 258
+// (DECISIONS.md D66); the compute repository's suite certifies them.
 
 let private failing (rs: LawResult list) =
     rs |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law)
@@ -352,37 +344,12 @@ let tests =
                   [ guardLaw "Conformance.capabilityPipelineLawsWith" "built default-deny arm" ]
                   "exactly the invoke-node guard is red"
 
-          testCase "columnarOpLawsWith certifies the kit's reference StreamGen green"
-          <| fun _ ->
-              allGreen
-                  "columnarOpLawsWith"
-                  (Conformance.columnarOpLawsWith ColumnOps.invert Conformance.columnarOpStreamGen 2463 200)
-
-          testCase "incrementalLawsWith certifies the reference pipelines green at the kit's StreamGen"
-          <| fun _ ->
-              allGreen
-                  "incrementalLawsWith"
-                  (Conformance.incrementalLawsWith incrementalPipelines Conformance.columnarOpStreamGen 2464 200)
-
-          testCase "a generator that never edits a value starves incrementalLawsWith"
-          <| fun _ ->
-              let appendsOnly: StreamGen<ColumnOp, Table> =
-                  { State0 = Conformance.columnarOpStreamGen.State0
-                    Op = fun r -> AppendRows [ [ "a", Int 1; "b", Int 2 ] ], r }
-
-              Expect.equal
-                  (failing (Conformance.incrementalLawsWith incrementalPipelines appendsOnly 2464 50))
-                  [ guardLaw "Conformance.incrementalLawsWith" "value edit" ]
-                  "exactly the value-edit guard is red"
-
           testCase "the witness-taking families take the domain's witness — the roster says so"
           <| fun _ ->
               for id, witness in
                   [ "Conformance.capabilityLawsWith", [ "CapabilitySeamWitness" ]
                     "Conformance.queryLawsWith", [ "QuerySeamWitness" ]
-                    "Conformance.capabilityPipelineLawsWith", [ "CapabilityPipelineWitness" ]
-                    "Conformance.columnarOpLawsWith", [ "StreamGen" ]
-                    "Conformance.incrementalLawsWith", [ "StreamGen" ] ] do
+                    "Conformance.capabilityPipelineLawsWith", [ "CapabilityPipelineWitness" ] ] do
                   Expect.equal
                       (KitRoster.tryFind id |> Option.map (fun f -> f.Witness))
                       (Some witness)
