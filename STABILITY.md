@@ -2342,9 +2342,9 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.31.0 — draft (opened by Phase 220)
+## 0.31.0 — released 2026-09-26 as `v0.31.0`
 
-**This slot is a DRAFT, and it is a MINOR slot because the change opening it is BREAKING.**
+**It is a MINOR release because the change that opened it is BREAKING.**
 Phase 220 changes `Conformance.certify`'s and `Conformance.certifyStream`'s VERDICT for some
 domains. That is a behaviour change on the kit's most central aggregates, whatever the surface gate
 says about the members that carry it (the gate classes those members as additive, and that is
@@ -2794,12 +2794,11 @@ union those properties are on the case class, and for a single-case or struct un
 union type. A test fails any carrying case whose fields the renderer could not name, so a fallback
 to types alone cannot quietly bring the blindness back.
 
-## 0.30.1 — draft
+## 0.30.1 — never released; its entries ship in `0.31.0`
 
-**This slot is a DRAFT.** `<Version>` reads `0.30.1` and no `v0.30.1` tag exists, so the entries
-below describe a contract still being assembled and further changes may ride it. Nothing here is a
-promise to a consumer until the release gesture is made; when it is, this paragraph is retired and
-the header restated as a released one.
+**This slot was a draft that was never tagged.** Phase 220's breaking change advanced it to
+`0.31.0` before any release, so no `v0.30.1` exists. Every entry below ships in `0.31.0`, and they
+are kept here, under the slot they were written for, as the record of their class.
 
 **It is a PATCH slot because the work opening it is additive**, which is the rule the `0.30.0` entry
 states rather than a choice made here: a patch number says adopting costs nothing — no source
