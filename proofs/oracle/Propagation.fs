@@ -534,5 +534,56 @@ let walk_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( 
      end))
 
 
+type evaluator_with<'v> = (Prims.string  ->  FStar_Pervasives_Native.option<'v>)  ->  FStar_Pervasives_Native.option<'v>  ->  Prims.string  ->  outcome<'v, Prims.string>
+
+
+let blind = (fun ( evw  :  evaluator_with<'v> ) ( f  :  Prims.string  ->  FStar_Pervasives_Native.option<'v> ) ( id  :  Prims.string ) -> (evw f FStar_Pervasives_Native.None id))
+
+
+let lift = (fun ( ev  :  evaluator<'v> ) ( f  :  Prims.string  ->  FStar_Pervasives_Native.option<'v> ) ( uu___  :  FStar_Pervasives_Native.option<'v> ) ( id  :  Prims.string ) -> (ev f id))
+
+
+let rec go_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( recompute  :  Prims.string  ->  Prims.bool ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( cycles  :  Prims.list<Prims.list<Prims.string>> ) ( results  :  Prims.list<(Prims.string * 'v)> ) ( order  :  Prims.list<Prims.string> ) -> (match (order) with
+| [] -> begin
+     Ok ({values = results; cyclic = cycles})
+     end
+| (id)::rest -> begin
+     (match ((reuse recompute prior id)) with
+| FStar_Pervasives_Native.None -> begin
+     (match ((first_undeclared deps id (touches id))) with
+| FStar_Pervasives_Native.Some (r) -> begin
+     Error (EvalUndeclaredRead (id, r))
+     end
+| FStar_Pervasives_Native.None -> begin
+     (match ((evw (resolve_in (lookups (reads_of deps id) results)) (assoc id prior) id)) with
+| Ok (x) -> begin
+     (go_with evw touches deps recompute prior cycles ((((id), (x)))::results) rest)
+     end
+| Error (m) -> begin
+     Error (EvalNodeFailed (id, m))
+     end)
+     end)
+     end
+| FStar_Pervasives_Native.Some (p) -> begin
+     (go_with evw touches deps recompute prior cycles ((((id), (p)))::results) rest)
+     end)
+     end))
+
+
+let walk_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( recompute  :  Prims.string  ->  Prims.bool ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( topo  :  topo_result ) -> (go_with evw touches deps recompute prior topo.cycles [] topo.order))
+
+
+let eval_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk_with evw touches deps always [] topo))
+
+
+let eval_from_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( prior  :  Prims.list<(Prims.string * 'v)> ) ( changed  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (match ((unknown_of deps changed)) with
+| (uu___)::uu___1 -> begin
+     Error (EvalUnknownChange ((unknown_of deps changed)))
+     end
+| [] -> begin
+     (walk_with evw touches deps (in_set (dirty_from_changed_ids deps changed)) prior topo)
+     end))
+
+
 
 

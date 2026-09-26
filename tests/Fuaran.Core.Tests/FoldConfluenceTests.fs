@@ -71,6 +71,7 @@ let rec private encTreeOp (op: SkeletonOp<RNode, string>) : string =
     | MoveNode(t, np) -> "M|" + t + "|" + np
     | ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
     | Batch inner -> "B|" + (inner |> List.map encTreeOp |> String.concat ";")
+    | UpdateNode node -> "U|" + encNode node
 
 let treeW: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string>> =
     { Apply = fun op st -> Ops.apply nodew idw op st

@@ -190,6 +190,11 @@ module Propagation =
         | Batch ops ->
             (Set.empty, ops)
             ||> List.fold (fun acc o -> Set.union acc (touchedBy w idw root o))
+        // Phase 250 — the node ALONE. An in-place rewrite keeps the node's id and its children, so
+        // no container's structure moved: what changed is the one definition, and its readers are
+        // reached by the closure. Before `UpdateNode`, a redefinition was a remove plus an insert,
+        // which touched the parent as well and moved the node to the end of its siblings.
+        | UpdateNode node -> Set.singleton (s (w.Id node))
 
     /// The dirty set induced by a structural `SkeletonOp`: `touchedBy` ∪ their transitive dependents. The
     /// dependency map is computed over the **pre-edit** `root` so a removed node's now-dangling dependents are
@@ -204,6 +209,121 @@ module Propagation =
         : Set<string> =
         let deps = dependencyMap w idw readsOf root
         dirtyFromChangedIds deps (touchedBy w idw root op)
+
+    /// The change set to hand `evalFrom` over the POST-edit graph after a structural `SkeletonOp`
+    /// (Phase 250): `dirtyFromOp` over the PRE-edit tree, restricted to the ids the post-edit tree
+    /// still holds.
+    ///
+    /// Both halves are load-bearing, and each is the obvious thing to get wrong. The dirty set must
+    /// be computed over `pre`, because a removed node's dependents are reachable from it only in the
+    /// graph that still holds it — over `post` they no longer read anything that exists, and a change
+    /// set built there leaves them stale. And the removed ids must then be dropped, because `evalFrom`
+    /// over the post-edit dependency map refuses an id that map does not hold (`EvalUnknownChange`,
+    /// the proved `evalfrom_unknown_refused`) — which is the refusal that catches a domain's
+    /// mistyped change set, and so is kept rather than relaxed. Restricting `touchedBy` to the
+    /// surviving ids instead is accepted by `evalFrom` and is WRONG: it loses exactly the dependents
+    /// of a removed node.
+    ///
+    /// The result names every surviving node whose value the edit can move, so it is an honest
+    /// `changed` for `evalFrom`: over-approximating (a closure handed in as a change set closes to
+    /// itself), never missing a reader. `post` must be the tree `op` produced from `pre`.
+    let changedForOp
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (readsOf: 'Node -> 'Id seq)
+        (pre: 'Node)
+        (post: 'Node)
+        (op: SkeletonOp<'Node, 'Id>)
+        : Set<string> =
+        let survivors = Tree.ids w post |> List.map idw.ToString |> Set.ofList
+        Set.intersect (dirtyFromOp w idw pre readsOf op) survivors
+
+    // ---- column-granular reads (Phase 250) ----
+    // A read of a node may name the PARTS of that node's value it depends on — the columns of a table,
+    // the fields of a record — so an edit that moves only some parts of a node dirties only the readers
+    // of those parts. Core names no part vocabulary: a part is a string the domain chooses, and which
+    // parts an edit moved is a function the CALLER supplies (a columnar domain derives it from its op,
+    // e.g. `ColumnOps.changedColumns`). The node-granular map the driver walks is a projection of this
+    // one, so the two can never disagree about which nodes read which.
+
+    /// One declared read — `Read` is the id read — narrowed to the parts of that node's value the
+    /// reader depends on. `Parts = None` reads the whole value — the node-granular read every existing `readsOf` makes.
+    type PartRead<'Id> =
+        { Read: 'Id; Parts: Set<string> option }
+
+    /// Build the part-granular dependency map of a tree (Phase 250): each node's string id → each id it
+    /// reads → the parts it reads there (`None` = the whole value). Two reads of one node merge: their
+    /// parts unite, and a whole-value read absorbs any narrowed one. Like `dependencyMap`, every node
+    /// appears and a dangling read is retained. Pure, total.
+    let partDependencyMap
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (readsOf: 'Node -> PartRead<'Id> seq)
+        (root: 'Node)
+        : Map<string, Map<string, Set<string> option>> =
+        let merge (a: Set<string> option) (b: Set<string> option) =
+            match a, b with
+            | Some x, Some y -> Some(Set.union x y)
+            | _ -> None
+
+        Tree.preorder w root
+        |> List.map (fun n ->
+            let reads =
+                (Map.empty, readsOf n)
+                ||> Seq.fold (fun acc r ->
+                    let k = idw.ToString r.Read
+
+                    match Map.tryFind k acc with
+                    | Some prev -> Map.add k (merge prev r.Parts) acc
+                    | None -> Map.add k r.Parts acc)
+
+            idw.ToString(w.Id n), reads)
+        |> Map.ofList
+
+    /// The node-granular projection of a part-granular map — exactly `dependencyMap` of the same
+    /// `readsOf` with its parts dropped. This is what `sort`, `eval`, `evalFrom` and their `With`
+    /// forms walk.
+    let nodeDependencies (partDeps: Map<string, Map<string, Set<string> option>>) : Map<string, Set<string>> =
+        partDeps
+        |> Map.map (fun _ reads -> reads |> Map.toList |> List.map fst |> Set.ofList)
+
+    /// The dirty set for a change that moved only SOME parts of the changed nodes (Phase 250):
+    /// `changed` ∪ every reader of a changed node whose declared parts meet the parts that moved
+    /// (`changedParts id`; `None` = unknown or all, which every reader meets) ∪ everything downstream
+    /// of those readers.
+    ///
+    /// **Only the FIRST hop is narrowed, and that is a statement about what is known, not a
+    /// shortcut.** Which parts of a changed node moved is the caller's knowledge (a columnar op says
+    /// which column it wrote). Which parts of a RECOMPUTED node's value move is not known until it is
+    /// recomputed, so from the second hop on every reader is dirty, exactly as in
+    /// `dirtyFromChangedIds` — to which this is equal when `changedParts` answers `None` everywhere or
+    /// every read is whole-value.
+    ///
+    /// **Sound under part-faithful reads, which is the domain's obligation.** A reader left clean is
+    /// one whose answer the edit cannot move PROVIDED it depends on no part of the read value it did
+    /// not declare. Core cannot check that — it does not see inside a value — so a domain that
+    /// declares `Parts` makes that promise for each one. The proved driver (`evalFrom`, theorem
+    /// `evalfrom_agrees`) still recomputes node-granularly; this set is what an edit CAN reach at
+    /// part granularity, for scheduling, reporting and measurement. Pure, total.
+    let dirtyFromChangedParts
+        (partDeps: Map<string, Map<string, Set<string> option>>)
+        (changedParts: string -> Set<string> option)
+        (changed: Set<string>)
+        : Set<string> =
+        let meets (declared: Set<string> option) (moved: Set<string> option) =
+            match declared, moved with
+            | Some d, Some m -> not (Set.isEmpty (Set.intersect d m))
+            | _ -> true
+
+        let firstHop =
+            [ for KeyValue(reader, reads) in partDeps do
+                  for KeyValue(read, parts) in reads do
+                      if Set.contains read changed && meets parts (changedParts read) then
+                          yield reader ]
+            |> Set.ofList
+
+        let deps = nodeDependencies partDeps
+        Set.union changed (dirtyFromChangedIds deps firstHop)
 
     // ---- incremental recompute driver (Phase 69) ----
     // The tree-level member of the incremental-eval trio (DataFrame.evalFrom columnar ∥
@@ -247,8 +367,13 @@ module Propagation =
     /// naming the violation is what a domain can act on.
     ///
     /// Cyclic SCCs are surfaced, never evaluated — so a node in a cycle is never a violator here.
-    let private walk
-        (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
+    ///
+    /// **The node's prior value rides beside its reads (Phase 250).** A recomputed node is handed
+    /// `Map.tryFind id prior` — its own value from the evaluation that produced `prior`, or `None`
+    /// when there is none. `eval` / `evalFrom` hand an evaluator that ignores it; `evalWith` /
+    /// `evalFromWith` hand the domain's own.
+    let private walkWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
         (recompute: string -> bool)
         (prior: Map<string, 'v>)
         (deps: Map<string, Set<string>>)
@@ -282,7 +407,7 @@ module Propagation =
 
                             None
 
-                    let computed = evalNode resolve id
+                    let computed = evalNode resolve (Map.tryFind id prior) id
 
                     match undeclared.Value with
                     | Some r -> Error(EvalUndeclaredRead(id, r))
@@ -294,6 +419,15 @@ module Propagation =
                     go (Map.add id (Map.find id prior) results) rest
 
         go Map.empty topo.Order
+
+    /// The prior-blind walk every existing entry point runs: the evaluator is never handed a prior.
+    let private walk
+        (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
+        (recompute: string -> bool)
+        (prior: Map<string, 'v>)
+        (deps: Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        walkWith (fun resolve _ id -> evalNode resolve id) recompute prior deps
 
     /// The reference full evaluator (Phase 69): evaluate every acyclic node once, in dependency order,
     /// threading the results; cyclic SCCs are returned in `EvalOutcome.Cyclic`. The evaluator the
@@ -344,3 +478,52 @@ module Propagation =
         else
             let dirty = dirtyFromChangedIds deps changed
             walk evalNode (fun id -> Set.contains id dirty) prior deps
+
+    // ---- the prior value, inside the contract (Phase 250) ----
+    // `evalFrom` hands an evaluator its declared reads and nothing else, and a node's OWN prior value
+    // is not one of them — so a domain that reuses work WITHIN a node (a table node refreshing only the
+    // rows a source edit reached, `DataFrame.Incremental`) had to keep its caches beside the driver and
+    // keep them in step with it by hand, with nothing certifying the bookkeeping. These two hand the
+    // evaluator its prior value as an argument, so the driver keeps it in step: a node is handed
+    // exactly the value it had in the evaluation that produced `prior`.
+
+    /// The full evaluator over a prior-aware evaluator (Phase 250): `eval` with every node handed
+    /// `None` as its prior. It is the reference `evalFromWith` is certified against.
+    let evalWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (deps: Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        walkWith evalNode (fun _ -> true) Map.empty deps
+
+    /// Incrementally re-evaluate with each RECOMPUTED node handed its own prior value (Phase 250):
+    /// `evalFrom`, except that `evalNode resolve prior id` receives `Map.tryFind id prior` beside the
+    /// resolver. A clean node is reused exactly as `evalFrom` reuses it, and the refusals are
+    /// `evalFrom`'s: an unknown changed id is `EvalUnknownChange`, an undeclared read
+    /// `EvalUndeclaredRead` — one contract, not two.
+    ///
+    /// **The agreement theorem, restated for it** (`evalfromwith_agrees`, `proofs/Propagation.fst`):
+    /// `evalFromWith ev prior changed deps = evalWith ev deps` under `evalFrom`'s premises for the
+    /// evaluator's prior-blind reading (`fun resolve id -> ev resolve None id`) and ONE more — **the
+    /// evaluator's answer does not depend on the prior it is handed**: at every node the walk
+    /// recomputes, under the resolver it is handed there, `ev resolve (Some p) id = ev resolve None
+    /// id`. The prior is a hint for reusing work, never an input to the answer. A table node that
+    /// refreshes from its prior state must return the table a fresh evaluation would; one whose prior
+    /// is out of step with its source must recompute rather than trust it.
+    ///
+    /// That premise is the domain's, and `Conformance.propagationEvaluatorLawsWith` samples it at the
+    /// domain's own evaluator and edits. A value that carries a reuse cache (an incremental state
+    /// beside a table) defines its equality over what it MEANS, not over the cache: the theorem's
+    /// equality is the value type's.
+    let evalFromWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (prior: Map<string, 'v>)
+        (changed: Set<string>)
+        (deps: Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        let unknown = changed |> Set.filter (fun c -> not (Map.containsKey c deps))
+
+        if not (Set.isEmpty unknown) then
+            Error(EvalUnknownChange(Set.toList unknown))
+        else
+            let dirty = dirtyFromChangedIds deps changed
+            walkWith evalNode (fun id -> Set.contains id dirty) prior deps

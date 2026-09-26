@@ -1524,6 +1524,7 @@ let rec private toModelOpWith (bridge: RNode -> TreeOps.tree) (op: SkeletonOp<RN
     | MoveNode(t, np) -> TreeOps.MoveNode(t, np)
     | ReorderChildren(p, order) -> TreeOps.ReorderChildren(p, order)
     | Batch inner -> TreeOps.Batch(inner |> List.map (toModelOpWith bridge))
+    | UpdateNode node -> TreeOps.UpdateNode(bridge node)
 
 let private encWitnessNode (nodeId: string) (kindTag: string) = nodeId + "|" + kindTag
 
@@ -1653,7 +1654,11 @@ let private treeRefusals: SkeletonOp<RNode, string> list =
       MoveNode("a", "no-such-parent") // UnknownNode (new parent)
       ReorderChildren("a", [ "a1" ]) // ReorderMismatch
       ReorderChildren("no-such-parent", []) // UnknownNode (reorder)
-      Batch [ InsertChild("b", RNode.leaf "b133" "para" "v"); RemoveNode "root" ] ] // all-or-nothing
+      Batch [ InsertChild("b", RNode.leaf "b133" "para" "v"); RemoveNode "root" ] // all-or-nothing
+      // Phase 250 — the in-place update, asked at every state like the rest: an accepted rewrite
+      // of a container (its children kept), and an absent target (UnknownNode).
+      UpdateNode(RNode.node "a" "aside" [])
+      UpdateNode(RNode.leaf "no-such-node" "para" "v") ]
 
 /// Every op the generator yields, plus the refusals, asked at every state a prefix of the
 /// generated pool reaches — the same construction the Phase 132 diamond family uses, and for the
@@ -1939,6 +1944,7 @@ let rec private ofModelOp (o: TreeOps.op) : SkeletonOp<RNode, string> =
     | TreeOps.MoveNode(x, np) -> MoveNode(x, np)
     | TreeOps.ReorderChildren(p, order) -> ReorderChildren(p, order)
     | TreeOps.Batch inner -> Batch(inner |> List.map ofModelOp)
+    | TreeOps.UpdateNode n -> UpdateNode(ofModelTree n)
 
 let private ofModelProposal (p: Arbitrate.proposal) : ArbProposal =
     { Id = int p.pid
@@ -3874,6 +3880,7 @@ let rec private renderProdOp (op: SkeletonOp<RNode, string>) : string =
     | MoveNode(t, np) -> "M|" + t + "|" + np
     | ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
     | Batch inner -> "B|" + (inner |> List.map renderProdOp |> String.concat ";")
+    | UpdateNode node -> "U|" + encWitnessNode node.Id node.Kind
 
 let rec private renderModelOp (op: TreeOps.op) : string =
     match op with
@@ -3888,6 +3895,7 @@ let rec private renderModelOp (op: TreeOps.op) : string =
     | TreeOps.MoveNode(t, np) -> "M|" + t + "|" + np
     | TreeOps.ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
     | TreeOps.Batch inner -> "B|" + (inner |> List.map renderModelOp |> String.concat ";")
+    | TreeOps.UpdateNode node -> "U|" + encWitnessNode (mTid node) (mKind node)
 
 type private PresTally =
     {

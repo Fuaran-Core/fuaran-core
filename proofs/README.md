@@ -574,7 +574,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 27 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 28 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -583,7 +583,7 @@ place together with the contract it implies.
   the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
   law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
   witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
-  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 6 rows.
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 7 rows.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
@@ -626,6 +626,7 @@ over-read.
 | `capability-key-renderers-abstract` | `model-bridge` | `permanent` |
 | `propagation-order-distinct` | `model-bridge` | `unscheduled` |
 | `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLaws` |
+| `propagation-prior-blind` | `domain-obligation` | `Conformance.propagationEvaluatorLawsWith` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
 | `pipeline-step-evaluator-abstract` | `model-bridge` | `unscheduled` |
@@ -2188,7 +2189,8 @@ because the diamond is *false* without it and not merely unproved, the second be
 of the fifteen pairs and they are counted rather than estimated.
 
 `TreeOps.fst` models the tree as the witness shows it: a node is an id, a kind tag and an ordered
-child list, and nothing else is visible to `Ops`. On top of that sit the five skeleton ops,
+child list, and nothing else is visible to `Ops`. On top of that sit the skeleton ops — five, and
+six since Phase 250 added `UpdateNode`, whose content is the kind tag the witness shows —
 `Ops.apply`'s validation clause for clause with the `Rejection` envelope it raises, and
 `Ops.footprint` clause for clause. It shares `DagFold.fst`'s list-as-set algebra, its `footprint`,
 its `independent` and its `diamond` rather than restating them, which is what makes the composition
@@ -2223,6 +2225,11 @@ procedure.
   `Batch` writes structure. So a remove or a move is independent only of an op that does nothing at
   all, and `relocating_forces_inert` says exactly that. This is the phase's most useful finding: the
   conservative clause the shard called a limitation is what makes most of the theorem free.
+  **Phase 250's `UpdateNode` is relocating too**, and REQUIRED to be: an update of a node and a
+  concurrent remove of its ancestor share no address the script can name and do not commute, so the
+  update's footprint carries an unknown-parent write. All six pairs it adds close by this same
+  elimination (`update_is_relocating`), which is why the twenty-one pairs of the widened alphabet
+  needed no new commutation lemma. The price is on the record as data: `Skeleton.update_pair_halts`.
 - **The diamond's conclusion is symmetric in the pair**, so the remaining ordered cases halve
   (`wstep_sym`), and `Ops.independent` is symmetric too (`independent_sym`).
 - **Three commutation equalities on the tree** carry the rest: insert/insert, insert/reorder and
@@ -3597,8 +3604,9 @@ already proves — must make the run lose, and it does.
 
 ### The claims ladder, for this theorem
 
-1. **Proved (machine-checked, no admits).** The five lemmas above, over the five skeleton operations
-   and any tree, plus the two bridges the lift needed (`first_dup_none_iff`, `wf_iff_no_dups`) and
+1. **Proved (machine-checked, no admits).** The five lemmas above, over the skeleton operations —
+   five, and six since Phase 250's `UpdateNode`, which each lemma now carries a clause for — and
+   any tree, plus the two bridges the lift needed (`first_dup_none_iff`, `wf_iff_no_dups`) and
    the restated counterexample with its closure. **Phase 140 adds six**, over the same operations,
    any tree and ANY predicate: `apply_contained_is_apply` (the container-aware engine at
    `fun _ -> true` IS `apply`, which is what makes the clause-for-clause model checkable rather
@@ -5007,6 +5015,19 @@ Over any dependency map, any change set, any value type and any evaluator:
    `Ok` checked every node on the walked order, so none of them read outside its declaration. This
    is the sentence that makes premise 3's `prior` clause CARRY the enforcement rather than merely
    assume it: there is no successful `eval` of a non-conforming evaluator to take a `prior` from.
+8. **`evalfromwith_agrees`** (Phase 250) — the agreement theorem for the prior-aware driver.
+   `evalFromWith` hands a recomputed node its own value from the evaluation that produced `prior`
+   beside its resolver, so a domain that reuses work WITHIN a node carries that state through the
+   driver instead of beside it. `evalFromWith ev1 prior changed deps` equals `evalWith ev1 deps`,
+   under theorem 3's premises taken at the evaluators' prior-blind readings (`blind`: handed `None`)
+   and exactly ONE more, `prior_blind_along`: the evaluator's answer does not depend on the prior it
+   is handed, at every node the incremental walk recomputes, under the resolver the walk hands it
+   there. It is stated along the walk, not for every resolver, because an evaluator whose prior
+   carries reuse state keyed to its old inputs may trust that state beside the resolver the walk
+   builds and nowhere else — a "for every resolver" premise would be false of exactly the
+   evaluators the driver exists for. It is the `propagation-prior-blind` row, a domain obligation.
+   `eval_is_walk_with` is the refactor's own lemma: `eval` and `evalFrom` are the shared walk at an
+   evaluator that ignores its prior, so theorems 1–7 are about the same functions they were.
 
 **`grow` is a total function here, which production's is only by argument.** The F# loop stops
 because the accumulator grows inside a finite universe, and nothing checks that. The model's `grow`

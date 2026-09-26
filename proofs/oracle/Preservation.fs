@@ -28,6 +28,9 @@ let rec raisable : TreeOps.op  ->  TreeOps.rejection  ->  Prims.bool = (fun ( o 
 | (TreeOps.MoveNode (uu___, uu___1), TreeOps.WouldNestUnderSelf (uu___2)) -> begin
      true
      end
+| (TreeOps.UpdateNode (uu___), TreeOps.UnknownNode (uu___1, uu___2)) -> begin
+     true
+     end
 | (TreeOps.Batch (os), uu___) -> begin
      (raisable_all os e)
      end
@@ -109,6 +112,15 @@ if (not ((TreeOps.same_multiset current order))) then begin
      end else begin
      DagFold.Ok (())
      end)
+     end)
+     end
+| TreeOps.UpdateNode (n) -> begin
+     (match ((TreeOps.find_in (TreeOps.tid_of n) t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode ((TreeOps.tid_of n), (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     DagFold.Ok (())
      end)
      end
 | TreeOps.MoveNode (uu___, uu___1) -> begin
@@ -203,6 +215,15 @@ let invert_leaf : TreeOps.leaf_op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps
      end
 | FStar_Pervasives_Native.None -> begin
      DagFold.Error (TreeOps.UnknownNode (p, (TreeOps.ids pre)))
+     end)
+     end
+| TreeOps.UpdateNode (n) -> begin
+     (match ((TreeOps.find_in (TreeOps.tid_of n) pre)) with
+| FStar_Pervasives_Native.Some (old) -> begin
+     DagFold.Ok (TreeOps.UpdateNode (old))
+     end
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode ((TreeOps.tid_of n), (TreeOps.ids pre)))
      end)
      end)
      end))
@@ -400,6 +421,26 @@ if (not ((TreeOps.has_id np removed))) then begin
      end
 | TreeOps.Batch (os) -> begin
      (apply_contained_all ch os t)
+     end
+| TreeOps.UpdateNode (n) -> begin
+     (match ((TreeOps.find_in (TreeOps.tid_of n) t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode ((TreeOps.tid_of n), (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (ex) -> begin
+      
+if ((match ((TreeOps.kids_of ex)) with
+| (hd)::tl -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) && (not ((ch (TreeOps.TNode ((TreeOps.tid_of n), (TreeOps.kind_of n), (TreeOps.kids_of ex))))))) then begin
+     DagFold.Error (TreeOps.NotAContainer ((TreeOps.tid_of n), (TreeOps.kind_of n)))
+     end else begin
+     DagFold.Ok ((TreeOps.upd (TreeOps.tid_of n) (TreeOps.kind_of n) t))
+     end
+     end)
      end))
 and apply_contained_all : (TreeOps.tree  ->  Prims.bool)  ->  Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.tree, TreeOps.rejection> = (fun ( ch  :  TreeOps.tree  ->  Prims.bool ) ( os  :  Prims.list<TreeOps.op> ) ( t  :  TreeOps.tree ) -> (match (os) with
 | [] -> begin
@@ -476,6 +517,26 @@ if (not ((TreeOps.same_multiset current order))) then begin
      end else begin
      DagFold.Ok (())
      end)
+     end)
+     end
+| TreeOps.UpdateNode (n) -> begin
+     (match ((TreeOps.find_in (TreeOps.tid_of n) t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (TreeOps.UnknownNode ((TreeOps.tid_of n), (TreeOps.ids t)))
+     end
+| FStar_Pervasives_Native.Some (ex) -> begin
+      
+if ((match ((TreeOps.kids_of ex)) with
+| (hd)::tl -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) && (not ((ch (TreeOps.TNode ((TreeOps.tid_of n), (TreeOps.kind_of n), (TreeOps.kids_of ex))))))) then begin
+     DagFold.Error (TreeOps.NotAContainer ((TreeOps.tid_of n), (TreeOps.kind_of n)))
+     end else begin
+     DagFold.Ok (())
+     end
      end)
      end
 | TreeOps.MoveNode (uu___, uu___1) -> begin

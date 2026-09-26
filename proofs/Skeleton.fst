@@ -34,6 +34,15 @@
    The HALT half needs no boundary at all, and is stated separately so that "the halt half is
    unconditional" is machine-checked here too rather than inherited by assertion.
 
+   THE ALPHABET GREW AGAIN, AND NO BOUNDARY CAME WITH IT (Phase 250). `SkeletonOp` gained
+   `UpdateNode`, an in-place rewrite of a node's content, and `TreeOps.op` gained it in the same
+   change — so the theorem below is about the shipped alphabet and not a sub-alphabet of it, which
+   is the boundary Phase 162 removed and would otherwise have re-opened silently. Nothing in THIS
+   module changed to take it: the diamond is `TreeOps`', and an update closes there by the same
+   elimination as a remove or a move, because its footprint carries an unknown-parent write. The
+   two lemmas at the end are the evaluated half — an update lane folds, and two update lanes HALT,
+   which is the cost of that write stated as data rather than prose.
+
    Apache-2.0, like everything beside it.
 *)
 module Skeleton
@@ -81,3 +90,21 @@ let skeleton_fold_confluence s0 ls1 ls2 p =
 let batch_lanes_fold ()
   : Lemma (ensures LaneFolded? (skeleton_fold lift_tree [[lift_batch]; [lift_leaf]]))
   = assert_norm (LaneFolded? (skeleton_fold lift_tree [[lift_batch]; [lift_leaf]]))
+
+(* THE UPDATE ROW, EVALUATED (Phase 250). A lane carrying an `UpdateNode` is a lane this module is
+   now stated about, and it folds — so this goes red if the op is ever dropped from `TreeOps.op`. *)
+let update_tree : tree = TNode "root" "doc" [ TNode "x" "sec" []; TNode "y" "sec" [] ]
+
+let update_lane_folds ()
+  : Lemma (ensures LaneFolded? (skeleton_fold update_tree [[UpdateNode (TNode "x" "aside" [])]]))
+  = assert_norm (LaneFolded? (skeleton_fold update_tree [[UpdateNode (TNode "x" "aside" [])]]))
+
+(* … and two updates of DIFFERENT nodes halt rather than fold. They would commute, but the footprint
+   cannot tell them from an update against a remove of the updated node's ancestor, which does not —
+   so both carry an unknown-parent write and the fold reports them rather than guessing. The
+   over-approximation `Ops.footprint` pins for `UpdateNode`, as an evaluated fact. *)
+let update_pair_halts ()
+  : Lemma (ensures LaneHalted? (skeleton_fold update_tree [[UpdateNode (TNode "x" "aside" [])];
+                                                          [UpdateNode (TNode "y" "aside" [])]]))
+  = assert_norm (LaneHalted? (skeleton_fold update_tree [[UpdateNode (TNode "x" "aside" [])];
+                                                         [UpdateNode (TNode "y" "aside" [])]]))

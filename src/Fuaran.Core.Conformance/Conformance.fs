@@ -5104,9 +5104,15 @@ module Conformance =
             (changed: Set<string>)
             (answerSets: (string * Map<string, 'V>) list)
             : string option =
+            // A node the edit REMOVED from the map is not held to naming (Phase 250): nothing
+            // evaluates it after the edit, so it cannot go stale, and `evalFrom` over the edited map
+            // refuses its id as `EvalUnknownChange` — which is why `Propagation.changedForOp` leaves
+            // it out. Its READERS are still held here: they remain in the map, and a change set that
+            // omits one is caught by the probes below. An INSERTED node (absent before, present
+            // after) is still held to naming, and `changedForOp` names it.
             let unnamed =
                 Set.union (Set.ofList (keysOf deps0)) (Set.ofList (keysOf deps1))
-                |> Set.filter (fun id -> not (Set.contains id changed))
+                |> Set.filter (fun id -> not (Set.contains id changed) && Map.containsKey id deps1)
                 |> Set.toList
 
             match unnamed |> List.tryFind (fun id -> Map.tryFind id deps0 <> Map.tryFind id deps1) with
@@ -5286,6 +5292,238 @@ module Conformance =
               [ "change reaching a reader", readerReached
                 "clean node reused from prior", cleanReused
                 "failing evaluator", failed ] ]
+
+    // ---- the prior value, at a DOMAIN'S evaluator (Phase 250) ----
+    // `Propagation.evalFromWith` hands a recomputed node its own prior value beside its reads, and the
+    // restated agreement theorem (`evalfromwith_agrees`, row `propagation-prior-blind` of `proofs.json`)
+    // adds ONE premise to `evalfrom_agrees`' — the evaluator's answer does not depend on the prior it is
+    // handed. Like the others it is about the evaluator, a parameter of the model, so it is checked here
+    // at the evaluator a domain actually runs.
+
+    /// The evaluator-contract laws for a PRIOR-AWARE evaluator (Phase 250): `propagationEvaluatorLaws`
+    /// over the domain's reference evaluator (`evw.EvalNode`), and then three laws about the
+    /// prior-aware one (`evalNodeWith`) the domain hands `Propagation.evalWith` / `evalFromWith`.
+    ///
+    /// - **The prior-blind reading is the reference.** Handed no prior, the prior-aware evaluator
+    ///   returns what the reference returns and asks for the same reads, at every node of the prior
+    ///   and the edited model; and `evalWith` of it equals `eval` of the reference. This is what lets
+    ///   the reference laws above speak for the prior-aware evaluator at all.
+    /// - **The answer does not depend on the prior (prior discipline).** At every node of the edited
+    ///   model that has a prior value, under the answers the full evaluation of the edited model gives
+    ///   — which are the answers the incremental walk hands it, by the agreement theorem — the node
+    ///   handed its prior returns what it returns handed none, asking for the same reads. The prior is
+    ///   the node's own value from `evalWith` of the PRIOR model: the prior the driver really hands,
+    ///   carrying whatever reuse state the domain keeps in it. This is the restated theorem's added
+    ///   premise, sampled; an evaluator that trusts a prior out of step with its inputs fails here.
+    /// - **Agreement, with the prior.** Where the edit keeps the dependency map, `evalFromWith` of the
+    ///   edited evaluator over `evalWith`'s own prior — whole and with holes — equals `evalWith` of the
+    ///   edited evaluator.
+    ///
+    /// The theorem's equality is the VALUE TYPE's: a value that carries a reuse cache defines its
+    /// equality over what it means, not over the cache, or these laws compare caches.
+    ///
+    /// **Vacuity.** The guard counts, over the edits that reached the agreement law, a RECOMPUTED node
+    /// that was handed a prior (so the prior path was taken, not only the priming one) and a clean
+    /// node reused from the prior. A domain whose every edit moves the map reaches neither.
+    let propagationEvaluatorLawsWith
+        (evw: EvaluatorWitness<'Model, 'V>)
+        (evalNodeWith: 'Model -> (string -> 'V option) -> 'V option -> string -> Result<'V, string>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let reference = propagationEvaluatorLaws evw seed iterations
+        let mutable rng = ConfRng.ofSeed seed
+        let mutable blind = None
+        let mutable discipline = None
+        let mutable agreement = None
+        let mutable priorHanded = 0
+        let mutable cleanReused = 0
+
+        let probe (ev: (string -> 'V option) -> string -> Result<'V, string>) (answers: Map<string, 'V>) (id: string) =
+            let asked = ResizeArray<string>()
+
+            let resolve k =
+                asked.Add k
+                Map.tryFind k answers
+
+            let result = ev resolve id
+            result, List.ofSeq asked
+
+        let withPrior (m: 'Model) (prior: 'V option) : (string -> 'V option) -> string -> Result<'V, string> =
+            fun resolve id -> evalNodeWith m resolve prior id
+
+        let valuesOf (r: Result<Propagation.EvalOutcome<'V>, Propagation.PropagationError>) =
+            match r with
+            | Ok o -> o.Values
+            | Error _ -> Map.empty
+
+        let keysOf (deps: Map<string, Set<string>>) = deps |> Map.toList |> List.map fst
+
+        let blindDefect (i: int) (which: string) (m: 'Model) (deps: Map<string, Set<string>>) : string option =
+            let viaReference = Propagation.eval (evw.EvalNode m) deps
+            let viaWith = Propagation.evalWith (evalNodeWith m) deps
+
+            if viaReference <> viaWith then
+                Some(
+                    sprintf
+                        "seed=%d iter=%d: %s — over the %s model, evalWith of the prior-aware evaluator returned %A and eval of the reference %A"
+                        seed
+                        i
+                        evw.Surface
+                        which
+                        viaWith
+                        viaReference
+                )
+            else
+                let answers = valuesOf viaReference
+
+                keysOf deps
+                |> List.tryPick (fun id ->
+                    let a = probe (evw.EvalNode m) answers id
+                    let b = probe (withPrior m None) answers id
+
+                    if a <> b then
+                        Some(
+                            sprintf
+                                "seed=%d iter=%d: %s — node %s of the %s model, handed no prior, gave %A (asking %A) where the reference gave %A (asking %A)"
+                                seed
+                                i
+                                evw.Surface
+                                id
+                                which
+                                (fst b)
+                                (snd b)
+                                (fst a)
+                                (snd a)
+                        )
+                    else
+                        None)
+
+        for i in 0 .. iterations - 1 do
+            let m0, r1 = evw.Model rng
+            let (m1, changed), r2 = evw.Change m0 r1
+            rng <- r2
+            let deps0 = evw.Deps m0
+            let deps1 = evw.Deps m1
+
+            // ---- law 1: the prior-blind reading is the reference ----
+            if blind.IsNone then
+                blind <-
+                    match blindDefect i "prior" m0 deps0 with
+                    | Some why -> Some why
+                    | None -> blindDefect i "edited" m1 deps1
+
+            let old = Propagation.evalWith (evalNodeWith m0) deps0
+            let full = Propagation.evalWith (evalNodeWith m1) deps1
+            let priorValues = valuesOf old
+            let newValues = valuesOf full
+
+            // ---- law 2: the answer does not depend on the prior ----
+            if discipline.IsNone then
+                discipline <-
+                    keysOf deps1
+                    |> List.tryPick (fun id ->
+                        match Map.tryFind id priorValues with
+                        | None -> None
+                        | Some p ->
+                            let handed = probe (withPrior m1 (Some p)) newValues id
+                            let none = probe (withPrior m1 None) newValues id
+
+                            if handed <> none then
+                                Some(
+                                    sprintf
+                                        "seed=%d iter=%d: %s — node %s (changed=%A), handed its prior %A, gave %A (asking %A); handed none it gave %A (asking %A). The prior is a hint for reusing work and may not change the answer"
+                                        seed
+                                        i
+                                        evw.Surface
+                                        id
+                                        (Set.toList changed)
+                                        p
+                                        (fst handed)
+                                        (snd handed)
+                                        (fst none)
+                                        (snd none)
+                                )
+                            else
+                                None)
+
+            // ---- law 3: agreement, over the priors the theorem admits ----
+            let known = changed |> Set.forall (fun c -> Map.containsKey c deps1)
+
+            match old with
+            | Ok out0 when deps0 = deps1 && known ->
+                let mutable holed = out0.Values
+                let mutable r = rng
+
+                for id in keysOf deps0 do
+                    let coin, r' = ConfRng.intBelow 3 r
+                    r <- r'
+
+                    if coin = 0 then
+                        holed <- Map.remove id holed
+
+                rng <- r
+                let exact = Propagation.evalFromWith (evalNodeWith m1) out0.Values changed deps1
+                let viaHoled = Propagation.evalFromWith (evalNodeWith m1) holed changed deps1
+
+                if agreement.IsNone then
+                    if exact <> full then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s — evalFromWith over evalWith's own prior (changed=%A) returned %A, and evalWith of the edited evaluator %A"
+                                    seed
+                                    i
+                                    evw.Surface
+                                    (Set.toList changed)
+                                    exact
+                                    full
+                            )
+                    elif viaHoled <> full then
+                        agreement <-
+                            Some(
+                                sprintf
+                                    "seed=%d iter=%d: %s — evalFromWith over evalWith's prior with holes at %A (changed=%A) returned %A, and evalWith of the edited evaluator %A"
+                                    seed
+                                    i
+                                    evw.Surface
+                                    (keysOf deps0 |> List.filter (fun id -> not (Map.containsKey id holed)))
+                                    (Set.toList changed)
+                                    viaHoled
+                                    full
+                            )
+
+                let dirty = Propagation.dirtyFromChangedIds deps1 changed
+
+                if dirty |> Set.exists (fun d -> Map.containsKey d out0.Values) then
+                    priorHanded <- priorHanded + 1
+
+                if
+                    (Propagation.sort deps1).Order
+                    |> List.exists (fun id -> not (Set.contains id dirty) && Map.containsKey id out0.Values)
+                then
+                    cleanReused <- cleanReused + 1
+            | _ -> ()
+
+        reference
+        @ [ { Law =
+                "handed no prior, the prior-aware evaluator is the reference evaluator, and evalWith of it is eval of the reference (prior-blind reading)"
+              Passed = blind.IsNone
+              Counterexample = blind }
+            { Law =
+                "at the answers the incremental walk hands it, a node handed its prior returns what it returns handed none (prior discipline)"
+              Passed = discipline.IsNone
+              Counterexample = discipline }
+            { Law =
+                "evalFromWith of the edited evaluator over evalWith's own prior, whole and with holes, equals evalWith over the same map (agreement, with the prior)"
+              Passed = agreement.IsNone
+              Counterexample = agreement }
+            SampleAdequacy.reached
+                "Conformance.propagationEvaluatorLawsWith"
+                "prior-aware edit"
+                seed
+                [ "recomputed node handed a prior", priorHanded
+                  "clean node reused from prior", cleanReused ] ]
 
     // ---- cross-witness composition pilot (Phase 51) ----
     // Validate the Wave-13 frontier operators (`composeAcross`, Phase 47; `applyMemo`, Phase 49)
@@ -7100,6 +7338,7 @@ module Conformance =
                 + "|"
                 + (order |> List.map idw.ToString |> String.concat ",")
             | Batch inner -> "B|" + (inner |> List.map encOp |> String.concat ";")
+            | UpdateNode node -> "U|" + encode node
 
         let sw: StreamWitness<SkeletonOp<'Node, 'Id>, 'Node, Rejection<'Id>> =
             { Apply = fun op st -> Ops.applyContained canHold nodew idw op st

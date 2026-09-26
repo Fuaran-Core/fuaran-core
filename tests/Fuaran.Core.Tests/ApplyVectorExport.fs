@@ -21,8 +21,10 @@ namespace Fuaran.Core.Tests
 //
 //  1. THE ENVELOPE IS THE WITNESS SURFACE, and nothing else. A vector's tree is
 //     `{"children":[…],"id":…,"kind":…}` — exactly what `NodeWitness` exposes
-//     (`Id`, `KindTag`, `Children`), because the skeleton five are STRUCTURAL
-//     ops and structure is all they read. No domain payload appears, so a host
+//     (`Id`, `KindTag`, `Children`), because the skeleton ops are STRUCTURAL
+//     ops and structure is all they read — `UpdateNode` (Phase 250) included,
+//     whose vectors rewrite a node's `kind`, the one piece of content the
+//     witness surface shows. No domain payload appears, so a host
 //     with an entirely different node vocabulary can run the family by mapping
 //     three members. That is what makes an apply family expressible at all in a
 //     core that owns no node type.
@@ -82,7 +84,7 @@ module ApplyVectorExport =
 
     let encodeTree (n: RNode) : string = Canon.render (encodeTreeJ n)
 
-    /// The skeleton five, `$type`-discriminated on the corpus's own convention (`$type` sorts before
+    /// The skeleton ops, `$type`-discriminated on the corpus's own convention (`$type` sorts before
     /// every lower-case member, so it is always first).
     let rec encodeOpJ (op: SkeletonOp<RNode, string>) : JVal =
         match op with
@@ -92,6 +94,7 @@ module ApplyVectorExport =
         | ReorderChildren(parent, order) ->
             Canon.typed "reorderChildren" [ "parent", JStr parent; "order", JArr(order |> List.map JStr) ]
         | Batch ops -> Canon.typed "batch" [ "ops", JArr(ops |> List.map encodeOpJ) ]
+        | UpdateNode node -> Canon.typed "updateNode" [ "node", encodeTreeJ node ]
 
     let encodeOp (op: SkeletonOp<RNode, string>) : string = Canon.render (encodeOpJ op)
 
@@ -183,6 +186,10 @@ module ApplyVectorExport =
                                   | Error _ -> () ]
                     )
             | _ -> Error "batch needs an `ops` array"
+        | Some "updateNode" ->
+            match field "node" v with
+            | Some n -> decodeTreeJ n |> Result.map UpdateNode
+            | None -> Error "updateNode needs `node`"
         | Some other -> Error("unknown op `" + other + "`")
         | None -> Error "an op needs a string `$type` member"
 
@@ -363,7 +370,30 @@ module ApplyVectorExport =
               (Batch [ InsertChild("b", nodeOf "n6" "para" []); RemoveNode "nope" ])
               (NoneWith
                   "NO DIRECT MAPPING: fuaran-ts, fuaran-py, fuaran-go and fuaran-rs WRAP an inner failure as `BatchAborted` carrying the inner op's index, discarding the inner class; Core returns the inner rejection itself. A host asserts the wrapper and the index — `BatchAborted` at index 1 here — and the tree unchanged; the inner class is not comparable across the two shapes.")
-              "All-or-nothing: the first op would succeed alone (see the vector above), the second refuses, and the tree is the one the batch started from." ]
+              "All-or-nothing: the first op would succeed alone (see the vector above), the second refuses, and the tree is the one the batch started from."
+
+          // ---- UpdateNode (Phase 250) ----
+          case
+              "update-accept-leaf"
+              (UpdateNode(nodeOf "a1" "heading" []))
+              (NoneWith "accept")
+              "The node whose id the payload carries takes the payload's content in place: same id, same position among its siblings."
+          case
+              "update-accept-keeps-children"
+              (UpdateNode(nodeOf "a" "aside" []))
+              (NoneWith "accept")
+              "Content, not structure: the node keeps the children it has, and the payload's own (empty) child list is not read."
+          case
+              "update-accept-root"
+              (UpdateNode(nodeOf "root" "article" []))
+              (NoneWith "accept")
+              "The root can be rewritten in place — it keeps its id and its children, so nothing is left unaddressable."
+          case
+              "update-reject-unknown"
+              (UpdateNode(nodeOf "nope" "para" []))
+              (NoneWith
+                  "NO HOST MAPPING yet: none of fuaran-ts, fuaran-py, fuaran-go or fuaran-rs carries an in-place update op, so there is no code to translate. A host adopting `updateNode` raises its node-not-found code here.")
+              "The payload's id names no node in the tree." ]
 
     // -----------------------------------------------------------------------
     //  the rendered artefact
@@ -435,6 +465,7 @@ module ApplyVectorExport =
         | MoveNode _ -> "MoveNode"
         | ReorderChildren _ -> "ReorderChildren"
         | Batch _ -> "Batch"
+        | UpdateNode _ -> "UpdateNode"
 
     let private renderVector (c: Case) : string =
         jobj
@@ -445,12 +476,14 @@ module ApplyVectorExport =
               "expected", expectedOf c ]
 
     let private description =
-        "Apply-engine conformance for the five structural tree ops (InsertChild, RemoveNode, "
-        + "MoveNode, ReorderChildren, Batch): one vector per validator clause per op, Batch's "
+        "Apply-engine conformance for the six skeleton tree ops (InsertChild, RemoveNode, "
+        + "MoveNode, ReorderChildren, Batch, and since Phase 250 UpdateNode): one vector per "
+        + "validator clause per op, Batch's "
         + "all-or-nothing atomicity, and the three id-collision shapes. Each vector carries an "
         + "`input.tree` and an `input.op` as canonical JSON STRINGS. The tree envelope is the "
         + "WITNESS SURFACE and nothing else — `{\"children\":[…],\"id\":…,\"kind\":…}` — because the "
-        + "five ops are structural and structure is all they read; a host runs the family by "
+        + "ops read structure and, for UpdateNode, the `kind` it rewrites in place and nothing "
+        + "else; a host runs the family by "
         + "mapping those three members onto its own node type, not by decoding its own wire format. "
         + "An `accept` vector requires the host's applied tree to encode byte-for-byte to "
         + "`expected.tree`, whose `expected.hash` is `sha256:` plus lowercase hex over exactly those "

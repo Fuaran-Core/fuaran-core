@@ -1,5 +1,105 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-26 — D65: `UpdateNode of node: 'Node` — one field, content not structure, and an unknown-parent write in its footprint; classed `union-widening`, so it opens the `0.32.0` slot
+
+**Decided (operator, 2026-09-26; executed by Phase 250).** `SkeletonOp` gains an in-place update,
+declared last so every existing tag keeps its number. The source was a downstream
+spreadsheet-shaped consumer's measurement (Phase 250). A redefined formula was
+`Batch [RemoveNode id; InsertChild(parent, node')]`. That moved the node to the end of its
+siblings and dirtied the parent as well, and the consumer measured 2.82 nodes dirtied per
+redefinition where 1.00 moved.
+
+**One field, not two.** The phase text proposed `UpdateNode(id, node)`. The shipped case is
+`UpdateNode of node: 'Node`, and the target is `w.Id node`. With two fields the op can carry an id
+that disagrees with its payload's, and Core has no honest refusal for that. Every existing
+`Rejection` case names something else. A new trailing case would be a second break, on a second
+closed union, and it would widen the proof model's rejection type and `Preservation`'s op/rejection
+characterisation with it. One field makes the mismatch unrepresentable. It is the argument `Ops.fs`
+already records for removing the ordinal: an id stated twice can disagree, and an id stated once
+cannot.
+
+**Content, not structure.** The node takes the payload's content and keeps the children it already
+has, and the payload's children are not read. Membership and order stay the other four ops' job,
+exactly as `Ops.fs` separates membership from order. So `Propagation.touchedBy` is the node alone,
+the id set never moves (no duplicate-id clause), and the root may be rewritten. Under
+`applyContained`, a rewrite that would leave children under a node the predicate refuses is
+`NotAContainer(target, newKindTag)`. It names the NEW kind, because that is the kind refused.
+
+**The footprint carries an unknown-parent write, and that is required.** `Ops.footprint (UpdateNode
+n)` is `Reads {id}`, `ContentWrites {id}`, `UnknownParentWrites {id}`. Without the unknown-parent
+write, an update of `x` and a concurrent `RemoveNode` of an ancestor of `x` share no address the
+script can name, so `Ops.independent` would call them independent. They do not commute: the update
+lands in one order and is refused in the other. Only the unknown-parent clause can see that pair,
+exactly as it sees a remove against a write inside the removed subtree. **So UpdateNode is
+independent only of structure-free scripts**, the same pinned over-approximation `RemoveNode` and
+`MoveNode` pay, and two updates of different nodes are reported dependent. Tightening that is a
+change to the `Footprint` record, not to a clause — `TreeOps` section 18's argument applies
+unchanged.
+
+**The proof model carries it.** `TreeOps.op` gained the case, with its apply and footprint clauses.
+Without it, `Skeleton.skeleton_fold_confluence` would quietly be about a sub-alphabet of the
+shipped union again, which is the boundary Phase 162 removed. Because the footprint relocates, the
+diamond's six new pairs close by `relocating_forces_inert` (`update_is_relocating`), with no new
+commutation lemma. `Preservation` carries the rejection characterisation, `apply_preserves_wf`,
+`invert_applicable` and `contained_preserves` for it (`upd_found_self`, `upd_contained`).
+`Skeleton.update_lane_folds` and `update_pair_halts` are the evaluated rows: an update lane folds,
+and two update lanes halt.
+
+**Class.** The surface gate prints `union-widening` for `Fuaran.Core.Ops`. `0.31.0` is tagged, so
+the change advances the slot to `0.32.0` (STABILITY.md "0.32.0 — DRAFT"). What adopting it costs a
+consumer with an exhaustive `match` on `SkeletonOp` is one arm, and that entry names it.
+
+## 2026-09-26 — D64: the prior value is an argument of the propagation driver, and the agreement theorem gains exactly one premise; `evalFrom` keeps refusing an unknown change
+
+**Decided (operator, 2026-09-26; executed by Phase 250).** `Propagation.evalWith` and
+`evalFromWith` take an evaluator `resolve -> prior -> id -> Result`, and hand a recomputed node its
+own value from the evaluation that produced `prior`. The source was a downstream
+spreadsheet-shaped consumer's measurement (Phase 250). Its table nodes refreshed only the rows an
+edit reached (`DataFrame.Incremental`), and that needs the node's previous incremental state, which
+`evalFrom` never passed. The consumer kept one state per node beside the driver and kept each in
+step with its source by hand. Nothing certified that bookkeeping, and an out-of-step state is a
+silently wrong refresh.
+
+**How theorem 11's hypotheses read for `evalFromWith`.** `evalfromwith_agrees`
+(`proofs/Propagation.fst` section 7) states `evalFromWith ev1 prior changed deps = evalWith ev1
+deps`. Its premises are `evalfrom_agrees`' own premises, taken at the evaluators' PRIOR-BLIND
+readings (`blind ev = fun resolve id -> ev resolve None id`), with nothing weakened: `agree_off`
+and `touches_off` (the change set is complete), `prior_of` (`prior` is `evalWith`'s own output over
+the same map, or fewer of its values), and a duplicate-free order. It adds exactly ONE premise,
+`prior_blind_along`: **the evaluator's answer does not depend on the prior it is handed**, at every
+node the incremental walk recomputes, under the resolver the walk hands it there. The premise is
+stated along the walk and not for every resolver, deliberately. An evaluator whose prior carries
+reuse state keyed to the inputs it was built from is entitled to trust that state beside the
+resolver the walk builds, and nowhere else. A "for every resolver" premise would be false of
+exactly the evaluators the feature exists for.
+
+The premise is about the evaluator, which is the model's parameter, so it is a DOMAIN obligation.
+It is the `propagation-prior-blind` row of `proofs.json`, discharged by a domain's green run of
+`Conformance.propagationEvaluatorLawsWith`. That family samples the prior discipline at the answers
+the full evaluation gives, which are the answers the incremental walk hands a node by the theorem
+itself. Equality in the theorem is the VALUE TYPE's. A value that carries a reuse cache defines its
+equality over what it means, not over the cache, and the family's own reference sheet does exactly
+that.
+
+The shared walk is a lemma too: `eval_is_walk_with` shows that `eval` and `evalFrom` are the
+prior-aware walk at an evaluator that ignores its prior. So every theorem already proved about them
+stands unchanged.
+
+**The refusal stays.** The phase text also asked that "`evalFrom` reports rather than refuses an id
+absent from the graph". That half is DECLINED. `Propagation.changedForOp`, shipped by the same
+phase, returns `dirtyFromOp` over the pre-edit tree restricted to the post-edit ids, so it never
+names an absent id. The consumer's finding offered the two remedies as alternatives, and the defect
+was that Core offered nothing that computed the post-edit set, not that it refused an absent id.
+The refusal is a proved clause (`evalfrom_unknown_refused`) and a certified law arm (the
+unknown-change arm of `propagationEvalLaws`, guarded in `SampleAdequacy`). It is what catches a
+domain's mistyped change set, and a mistyped id is indistinguishable from a removed one. A report
+field would have been a second closed-record break (`EvalOutcome`) for a case `changedForOp`
+removes. `evalFromWith` refuses identically, so there is one contract, not two.
+
+One law moves with it, in the permissive direction only. `propagationEvaluatorLaws`' change-set
+honesty law no longer holds a node the edit REMOVED from the map to being named. Nothing evaluates
+that node after the edit, and `changedForOp` leaves it out. Its readers are still held.
+
 ## 2026-09-25 — D63: a tree-typed slot gets a value space — ruling (A), carried as a new `ValueSpace.SlotTree` case; (B), refusing at `register`, is declined
 
 **Decided (operator, 2026-09-20; executed by Phase 229, shape confirmed 2026-09-25).** Ruling

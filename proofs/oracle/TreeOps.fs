@@ -280,6 +280,7 @@ type op =
 | MoveNode of Prims.string * Prims.string
 | ReorderChildren of Prims.string * Prims.list<Prims.string>
 | Batch of Prims.list<op>
+| UpdateNode of tree
 
 
 let uu___is_InsertChild : op  ->  Prims.bool = (fun ( projectee  :  op ) -> (match (projectee) with
@@ -372,6 +373,21 @@ let uu___is_Batch : op  ->  Prims.bool = (fun ( projectee  :  op ) -> (match (pr
 let __proj__Batch__item___0 : op  ->  Prims.list<op> = (fun ( projectee  :  op ) -> (match (projectee) with
 | Batch (_0) -> begin
      _0
+     end))
+
+
+let uu___is_UpdateNode : op  ->  Prims.bool = (fun ( projectee  :  op ) -> (match (projectee) with
+| UpdateNode (node) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__UpdateNode__item__node : op  ->  tree = (fun ( projectee  :  op ) -> (match (projectee) with
+| UpdateNode (node) -> begin
+     node
      end))
 
 
@@ -484,6 +500,27 @@ and reorder_all : Prims.string  ->  Prims.list<Prims.string>  ->  Prims.list<tre
      end
 | (t)::r -> begin
      ((reorder_at p order t))::(reorder_all p order r)
+     end))
+
+
+let rec upd : Prims.string  ->  Prims.string  ->  tree  ->  tree = (fun ( x  :  Prims.string ) ( k  :  Prims.string ) ( t  :  tree ) -> (match (t) with
+| TNode (i, k0, cs) -> begin
+     (
+
+let cs' = (upd_all x k cs)
+in  
+if (Prims.op_Equals i x) then begin
+     TNode (i, k, cs')
+     end else begin
+     TNode (i, k0, cs')
+     end)
+     end))
+and upd_all : Prims.string  ->  Prims.string  ->  Prims.list<tree>  ->  Prims.list<tree> = (fun ( x  :  Prims.string ) ( k  :  Prims.string ) ( ts  :  Prims.list<tree> ) -> (match (ts) with
+| [] -> begin
+     []
+     end
+| (t)::r -> begin
+     ((upd x k t))::(upd_all x k r)
      end))
 
 
@@ -635,6 +672,15 @@ if (not ((has_id np removed))) then begin
      end
 | Batch (os) -> begin
      (apply_all os t)
+     end
+| UpdateNode (n) -> begin
+     (match ((find_in (tid_of n) t)) with
+| FStar_Pervasives_Native.None -> begin
+     DagFold.Error (UnknownNode ((tid_of n), (ids t)))
+     end
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     DagFold.Ok ((upd (tid_of n) (kind_of n) t))
+     end)
      end))
 and apply_all : Prims.list<op>  ->  tree  ->  DagFold.outcome<tree, rejection> = (fun ( os  :  Prims.list<op> ) ( t  :  tree ) -> (match (os) with
 | [] -> begin
@@ -675,6 +721,12 @@ in {DagFold.reads = (p)::inserted; DagFold.structure_writes = (p)::[]; DagFold.c
      end
 | Batch (inner) -> begin
      (fp_all inner)
+     end
+| UpdateNode (n) -> begin
+     (
+
+let x = (tid_of n)
+in {DagFold.reads = (x)::[]; DagFold.structure_writes = []; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = (x)::[]})
      end))
 and fp_all : Prims.list<op>  ->  DagFold.footprint = (fun ( os  :  Prims.list<op> ) -> (match (os) with
 | [] -> begin
@@ -858,6 +910,9 @@ let rec no_reloc : op  ->  Prims.bool = (fun ( o  :  op ) -> (match (o) with
      false
      end
 | MoveNode (uu___, uu___1) -> begin
+     false
+     end
+| UpdateNode (uu___) -> begin
      false
      end
 | Batch (os) -> begin

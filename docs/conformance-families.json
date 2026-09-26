@@ -578,6 +578,18 @@
       "refusal": "drawn"
     },
     {
+      "id": "Conformance.propagationEvaluatorLawsWith",
+      "module": "Conformance",
+      "entry": "propagationEvaluatorLawsWith",
+      "witness": ["EvaluatorWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": ["propagation-prior-blind"],
+      "cases": "720",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.queryLaws",
       "module": "Conformance",
       "entry": "queryLaws",

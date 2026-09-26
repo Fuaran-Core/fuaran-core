@@ -194,6 +194,12 @@ module Families =
               (Some NeedsWitnessCapability)
               [ "propagation-change-set-and-prior" ]
 
+          c
+              "propagationEvaluatorLawsWith"
+              [ "EvaluatorWitness" ]
+              (Some NeedsWitnessCapability)
+              [ "propagation-prior-blind" ]
+
           c "captureReplayLaws" none (Some SeamNotEveryDomainHas) []
           c "transformLaws" none (Some SeamNotEveryDomainHas) []
           c "constructThenEncodeLaws" none (Some SeamNotEveryDomainHas) []
@@ -354,6 +360,10 @@ module Families =
               "Conformance.propagationEvaluatorLaws"
               Drawn
               "the failing-evaluator arm comes from the domain's own edits; guarded on evaluator edit"
+          r
+              "Conformance.propagationEvaluatorLawsWith"
+              Drawn
+              "runs propagationEvaluatorLaws first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit"
 
           // ---- the fixture-only families ----
           r "Conformance.captureReplayLaws" Built "the tampered capture and the misordered replay are built"

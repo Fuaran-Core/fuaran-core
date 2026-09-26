@@ -3,9 +3,12 @@
    DOMAIN HYPOTHESIS proved for it rather than sampled (fuaran-core Phase 133).
 
    WHAT IS MODELLED. `Ops.apply` over the `NodeWitness`/`IdWitness` view of a tree: a node is an
-   id, a kind tag and an ordered child list, and nothing else is visible to the algebra. The five
-   skeleton ops (`InsertChild`, `RemoveNode`, `MoveNode`, `ReorderChildren`, `Batch`), each
-   validation clause and each `Rejection` it raises, and `Ops.footprint` clause for clause.
+   id, a kind tag and an ordered child list, and nothing else is visible to the algebra. The six
+   skeleton ops (`InsertChild`, `RemoveNode`, `MoveNode`, `ReorderChildren`, `Batch`, and since
+   Phase 250 `UpdateNode`), each validation clause and each `Rejection` it raises, and
+   `Ops.footprint` clause for clause. `UpdateNode`'s content is the one piece of a node the witness
+   shows — its kind tag — so an in-place rewrite is modelled as a rewrite of the kind, children
+   kept, which is everything the shipped op can do that the algebra can see.
 
    WHAT IS PROVED. `tree_independence_diamond`: for every pair of ops whose footprints
    `Ops.independent` declares disjoint, and every WELL-FORMED tree at which both apply, each
@@ -20,7 +23,10 @@
         independence between an unknown-parent write and ANY structural write. Every skeleton op
         except a structure-free `Batch` writes structure, so a remove or a move is independent
         only of an op that does nothing at all. NINE of the fifteen unordered pairs are closed
-        by this lemma alone, and the tree is never looked at.
+        by this lemma alone, and the tree is never looked at. Phase 250's `UpdateNode` carries an
+        unknown-parent write too — REQUIRED, not cautious: an update of `x` and a remove of an
+        ancestor of `x` share no address the script can name and do not commute — so all six of
+        the pairs it adds close the same way (`update_is_relocating`).
      2. `diamond_sym` — the diamond's conclusion is symmetric in the pair, so the remaining
         ordered cases halve.
      3. Three concrete commutation equalities on the tree — insert/insert, insert/reorder,
@@ -160,7 +166,8 @@ type rejection =
   | Rejected           : code:string -> message:string -> rejection
 
 (* ======================================================================================
-   3. The skeleton five (F#: `SkeletonOp<'Node,'Id>`).
+   3. The skeleton ops (F#: `SkeletonOp<'Node,'Id>`). `UpdateNode` is declared LAST, as it is
+      there (Phase 250): a case's declaration order is its tag number.
    ====================================================================================== *)
 
 type op =
@@ -169,6 +176,7 @@ type op =
   | MoveNode        : target:string -> new_parent:string -> op
   | ReorderChildren : parent:string -> order:list string -> op
   | Batch           : list op -> op
+  | UpdateNode      : node:tree -> op
 
 (* ======================================================================================
    4. The three structural edits `Tree.updateNode` performs, first-order.
@@ -241,6 +249,21 @@ and reorder_all (p:string) (order:list string) (ts:list tree) : Tot (list tree) 
   match ts with
   | [] -> []
   | t :: r -> reorder_at p order t :: reorder_all p order r
+
+(* F#: the `UpdateNode` arm (Phase 250) — `updateNode (w.Id node) (fun existing -> ReplaceChildren
+   node (Children existing))`: the node takes the payload's content and keeps its own children. The
+   content the witness shows is the kind tag, so that is what moves; the payload's children are
+   not read, which is why the argument is a kind and not a tree. Applied at EVERY node carrying the
+   id, as `Tree.updateNode` does. *)
+let rec upd (x:string) (k:string) (t:tree) : Tot tree (decreases t) =
+  match t with
+  | TNode i k0 cs ->
+    let cs' = upd_all x k cs in
+    if i = x then TNode i k cs' else TNode i k0 cs'
+and upd_all (x:string) (k:string) (ts:list tree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> upd x k t :: upd_all x k r
 
 (* ======================================================================================
    5. `validateReorder`'s permutation test.
@@ -342,6 +365,14 @@ let rec apply (o:op) (t:tree) : Tot (outcome tree rejection) (decreases o) =
   (* F#: `Batch` — all-or-nothing, threading the tree and abandoning the whole on first failure. *)
   | Batch os -> apply_all os t
 
+  (* F#: `validateUpdate` under `apply` (Phase 250) — the target is the payload's own id and must
+     be in the tree; the container clause is `applyContained`'s and `canHold` is `fun _ -> true`
+     here. *)
+  | UpdateNode n ->
+    (match find_in (tid_of n) t with
+     | None -> Error (UnknownNode (tid_of n) (ids t))
+     | Some _ -> Ok (upd (tid_of n) (kind_of n) t))
+
 and apply_all (os:list op) (t:tree) : Tot (outcome tree rejection) (decreases os) =
   match os with
   | [] -> Ok t
@@ -384,6 +415,10 @@ let rec op_fp (o:op) : Tot footprint (decreases o) =
     { reads = p :: order; structure_writes = [p];
       content_writes = []; unknown_parent_writes = [] }
   | Batch inner -> fp_all inner
+  | UpdateNode n ->
+    let x = tid_of n in
+    { reads = [x]; structure_writes = [];
+      content_writes = [x]; unknown_parent_writes = [x] }
 and fp_all (os:list op) : Tot footprint (decreases os) =
   match os with
   | [] -> empty_fp
@@ -454,6 +489,9 @@ let relocating_forces_inert (a b:op)
    names. Stated separately because it is the half a reader checks against `Ops.footprint`. *)
 let remove_is_relocating (x:string) : Lemma (ensures relocating (RemoveNode x)) = ()
 let move_is_relocating (x np:string) : Lemma (ensures relocating (MoveNode x np)) = ()
+
+(* … and so is an in-place rewrite (Phase 250), which is what closes all six pairs it adds. *)
+let update_is_relocating (n:tree) : Lemma (ensures relocating (UpdateNode n)) = ()
 
 (* ======================================================================================
    9. The commuting half — the algebra of the two edits that survive the elimination.
@@ -1279,9 +1317,9 @@ let leaf_wstep (a b:op) (s:tree)
           (ensures wstep a b s)
   = match a, b with
     (* a relocating op is independent only of an inert one, and no leaf is inert *)
-    | RemoveNode _, _ | MoveNode _ _, _ ->
+    | RemoveNode _, _ | MoveNode _ _, _ | UpdateNode _, _ ->
       relocating_forces_inert a b; inert_wstep_right a b s
-    | _, RemoveNode _ | _, MoveNode _ _ ->
+    | _, RemoveNode _ | _, MoveNode _ _ | _, UpdateNode _ ->
       relocating_forces_inert b a; inert_wstep_left a b s
     | InsertChild p1 n1, InsertChild p2 n2 -> ins_ins_step p1 n1 p2 n2 s
     | InsertChild p1 n1, ReorderChildren p2 o2 -> ins_reorder_step p1 n1 p2 o2 s
@@ -1735,9 +1773,9 @@ let leaf_diamond (a b:leaf_op) (s:tree)
         if wf sa && wf sb then begin
           (* the two orders reach one tree; all that is left is that it is still id-unique *)
           match a, b with
-          | RemoveNode _, _ | MoveNode _ _, _ ->
+          | RemoveNode _, _ | MoveNode _ _, _ | UpdateNode _, _ ->
             relocating_forces_inert a b; inert_is_identity b sa; inert_is_identity b s
-          | _, RemoveNode _ | _, MoveNode _ _ ->
+          | _, RemoveNode _ | _, MoveNode _ _ | _, UpdateNode _ ->
             independent_sym (op_fp a) (op_fp b);
             relocating_forces_inert b a; inert_is_identity a sb; inert_is_identity a s
           | InsertChild p1 n1, InsertChild p2 n2 ->
@@ -2202,6 +2240,7 @@ let rec no_reloc (o:op) : Tot bool (decreases o) =
   match o with
   | RemoveNode _ -> false
   | MoveNode _ _ -> false
+  | UpdateNode _ -> false
   | Batch os -> no_reloc_all os
   | _ -> true
 and no_reloc_all (os:list op) : Tot bool (decreases os) =
@@ -2242,6 +2281,7 @@ let rec no_reloc_preserves_wf (o:op) (t:tree)
     | Batch os -> no_reloc_all_preserves_wf os t
     | RemoveNode _ -> ()
     | MoveNode _ _ -> ()
+    | UpdateNode _ -> ()
 and no_reloc_all_preserves_wf (os:list op) (t:tree)
   : Lemma (requires wf t /\ no_reloc_all os)
           (ensures (match apply_all os t with Ok t' -> wf t' | Error _ -> True)) (decreases os)

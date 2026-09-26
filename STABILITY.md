@@ -2342,6 +2342,145 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.32.0 — DRAFT
+
+**It is a MINOR slot because the change that opens it is BREAKING.** `0.31.0` is tagged, so it is a
+consumer's contract and nothing rides it. Phase 250 adds a case to the closed `SkeletonOp` union,
+which the surface gate classes `union-widening`, and a breaking change opens a minor slot rather
+than a patch one. Every other member this phase adds is classed `additive` by the gate and rides
+the slot beside it. `<Version>` and the laws corpus here (`conformance/laws/*.json`) were re-stamped
+in the same commit as the version move, per `docs/conformance-corpus.md`; the byte copy in the
+shared wire-format corpus is re-synced separately.
+
+The phase's source is a downstream spreadsheet-shaped consumer's measurement (Phase 250). It built
+a sheet over `Column.Ops`, `DataFrame.Incremental` and `Propagation`, and found five places where
+the three strands met only through glue it kept by hand. Each entry below closes one of them.
+
+### `UpdateNode` — the in-place skeleton op (Phase 250) — BREAKING, `union-widening`
+
+**What changed.** `SkeletonOp<'Node, 'Id>` gains a sixth case, declared last so every existing tag
+keeps its number:
+
+```fsharp
+| UpdateNode of node: 'Node
+```
+
+It rewrites one node in place. The node whose id is `w.Id node` takes the payload's content and
+KEEPS the children it already has; the payload's own children are not read. The target is the
+payload's id rather than a second field. A two-field `UpdateNode(id, node)` could carry an id that
+disagrees with its payload, and Core has no honest refusal for that. The single field makes the
+mismatch unrepresentable. This is the argument `Ops.fs` already records for removing the ordinal:
+an id stated twice can disagree, and an id stated once cannot.
+
+- `Ops.apply` / `canApply`: an absent target is `UnknownNode`, enumerating the tree. The root may
+  be rewritten. No id set moves, so there is no duplicate-id clause.
+- `Ops.applyContained` / `canApplyContained`: when the node holds children and the REWRITTEN node
+  cannot hold them, the refusal is `NotAContainer(target, newKindTag)`. It names the new kind,
+  because that is the kind the predicate refused.
+- `Ops.invert`: `UpdateNode` of the pre-state node. The undo restores the content and keeps the
+  children the tree holds when it runs.
+- `Ops.footprint`: `Reads {id}`, `ContentWrites {id}`, `UnknownParentWrites {id}`. The unknown-parent
+  write is REQUIRED, not cautious. An update of `x` and a concurrent `RemoveNode` of an ancestor of
+  `x` share no address the script can name, and they do not commute: the update lands in one order
+  and is refused in the other. It costs the same pinned over-approximation remove and move pay: an
+  update is independent only of a structure-free script, so two updates of different nodes are
+  reported dependent. See "Op-script footprint + independence".
+- `Propagation.touchedBy`: the node alone. A redefinition used to be
+  `Batch [RemoveNode id; InsertChild(parent, node')]`. That moved the node to the end of its parent
+  and dirtied the parent too; the consumer measured 2.82 nodes dirtied per redefinition where 1.00
+  moved. Now a redefinition dirties the node and its readers.
+- The apply-vector family (`conformance/apply/skeleton-apply.json`) gains four `updateNode` vectors:
+  three accepts and an unknown-target refusal. The family is `proposed` for every other host, and
+  none of them carries an in-place update op yet, so the refusal vector names no host code.
+- The proof model carries the case. `TreeOps.op` gained `UpdateNode` with its apply and footprint
+  clauses, so `Skeleton.skeleton_fold_confluence` is about the shipped alphabet and not a
+  sub-alphabet of it. The diamond closes by `relocating_forces_inert`, the same elimination as a
+  remove or a move (`update_is_relocating`). `Preservation` proves the rest: the rejection
+  characterisation, `apply_preserves_wf`, `invert_applicable` and `contained_preserves` all gained
+  an update clause.
+
+**What adopting it costs a consumer with an exhaustive `match` on `SkeletonOp`.** Every such match
+gains one arm, or it becomes incomplete: FS0025, a warning, or an error under warnings-as-errors.
+Against a stale same-version pack there is no compile signal at all, only an
+`InvalidCastException` at run time, which is why this advances the slot. The arm is usually one line:
+
+- an op encoder or fingerprint: encode the payload node;
+- a domain `touchedBy`-shaped walk: the node alone;
+- a footprint of the domain's own: follow `Ops.footprint` — the unknown-parent write is what makes
+  it sound.
+
+A consumer that only CONSTRUCTS ops and hands them to `Ops.*` needs nothing.
+
+### `Propagation.evalWith` / `evalFromWith` — the prior value, inside the contract (Phase 250) — additive
+
+**What changed.** Two drivers whose evaluator is `resolve -> prior -> id -> Result`. A recomputed
+node is handed `Map.tryFind id prior`, its own value from the evaluation that produced `prior`.
+`evalWith` hands every node `None`. The refusals are `evalFrom`'s, unchanged: an unknown changed
+id is `EvalUnknownChange`, and an undeclared read is `EvalUndeclaredRead`. `eval` and `evalFrom`
+are now the shared walk over an evaluator that ignores its prior. That is a proved identity
+(`eval_is_walk_with`), and neither moved.
+
+**The agreement theorem, restated** (`evalfromwith_agrees`, `proofs/Propagation.fst`). It holds
+under `evalFrom`'s premises for the evaluator's prior-blind reading, plus one more: **the
+evaluator's answer does not depend on the prior it is handed**, at every node the walk recomputes,
+under the resolver the walk hands it there. The prior is a hint for reusing work, never an input to
+the answer. It is the `propagation-prior-blind` row of `proofs.json`, a domain obligation.
+
+**`Conformance.propagationEvaluatorLawsWith`** — additive — samples that obligation at a domain's
+own evaluator. It runs `propagationEvaluatorLaws` over the domain's reference evaluator, then three
+laws about the prior-aware one: its prior-blind reading is the reference, the prior discipline, and
+agreement with the prior. Its adequacy guard counts a recomputed node handed a prior, and a clean
+node reused from one.
+
+**What a consumer does.** Nothing, unless it keeps per-node reuse state beside the driver. That is
+the consumer's case: one `IncrementalEval` per table node, kept in step by hand. Such state moves
+into the node's value. Give the value an equality over what it means, not over the cache, and
+certify the evaluator with the new family.
+
+### `Propagation.changedForOp` — the post-edit change set for a structural op (Phase 250) — additive
+
+`dirtyFromOp` over the PRE-edit tree, restricted to the ids the post-edit tree holds. The pre-edit
+graph is what still reaches a removed node's dependents; dropping the removed ids is what
+`evalFrom` over the post-edit map accepts. The one-line glue the consumer wrote for it took a
+failing test to find. Restricting `touchedBy` to the survivors instead is accepted and leaves the
+dependents stale.
+
+**Declined, with the reason:** "`evalFrom` reports rather than refuses an id absent from the graph."
+`evalFrom` still refuses. That refusal is a proved clause (`evalfrom_unknown_refused`) and a
+certified law arm (`propagationEvalLaws`' unknown-change arm, which `SampleAdequacy` guards). It is
+what catches a domain's mistyped change set. `changedForOp` never names an absent id, so the report
+half has no remaining case, and a report field would be a second closed-record break. DECISIONS.md
+has the ruling.
+
+**A law verdict moves with it, in the permissive direction.** `propagationEvaluatorLaws`'
+change-set-honesty law no longer holds a node the edit REMOVED from the dependency map to being
+named. Nothing evaluates it after the edit, and `changedForOp` leaves it out. Its readers are still
+held. A domain that was RED only because its change set omitted a removed id is now GREEN; no green
+verdict turns red.
+
+### Column-granular reads — `Propagation.PartRead`, `partDependencyMap`, `nodeDependencies`, `dirtyFromChangedParts`; `ColumnOps.changedColumns` (Phase 250) — additive
+
+A read may name the parts of the read node's value it depends on (`Parts = None` is the whole
+value). `dirtyFromChangedParts` narrows the FIRST hop: a reader of a changed node is dirty only
+when its declared parts meet the parts that moved. From the second hop on every reader is dirty,
+because which parts of a recomputed value move is not known until it is recomputed. The
+changed-parts function is a PARAMETER, and Propagation names no column vocabulary.
+`ColumnOps.changedColumns`, read off `changeOf`, is the columnar adapter. It is sound under
+part-faithful reads, which is the domain's promise. The proved driver still recomputes
+node-granularly; this set is what an edit can reach at part granularity, for scheduling, reporting
+and measurement.
+
+### `ColumnOps.deltaOf` — a cell edit reaches `Incremental` as one row (Phase 250) — additive
+
+`deltaOf : RowIdentity<'Id> -> Table -> ColumnOp -> TableDelta` builds the row delta from the op
+and the BEFORE table. It does not diff before against after. A cell edit is its one row
+(`RowChanged`), or the old key removed and the new one added when it wrote the key. An append is
+its new rows, a column edit is the rows whose cell moved, and a schema or whole-table op is
+`FullRefresh`. `FullRefresh` is also the answer wherever identity is missing or the op does not
+apply. On the consumer's sheet, a one-cell edit of a 1,000-row source re-evaluated one row of the
+row-local node. `changeOf`'s column invalidation re-evaluated every row of it. The docs'
+"What it costs on the clock" section carries the measured numbers and where full evaluation wins.
+
 ## 0.31.0 — released 2026-09-26 as `v0.31.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.**

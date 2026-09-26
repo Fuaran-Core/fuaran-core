@@ -115,6 +115,7 @@ let private sw: StreamWitness<SkeletonOp<RNode, string>, RNode, Rejection<string
         | MoveNode(t, np) -> "M|" + t + "|" + np
         | ReorderChildren(p, order) -> "O|" + p + "|" + String.concat "," order
         | Batch inner -> "B|" + (inner |> List.map encOp |> String.concat ";")
+        | UpdateNode node -> "U|" + encNode node
 
     { Apply = fun op st -> Ops.apply nodew idw op st
       Encode = encOp

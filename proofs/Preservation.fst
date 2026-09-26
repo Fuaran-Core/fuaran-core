@@ -7,7 +7,8 @@
    Phase 137 shipped) is imported rather than remodelled, and this module adds `Ops.canApply` and
    `Ops.invert` — the two surfaces of the engine that model did not reach — clause for clause.
 
-   WHAT IS PROVED, over the five skeleton operations and any tree:
+   WHAT IS PROVED, over the six skeleton operations (Phase 250 added `UpdateNode`, an in-place
+   rewrite of a node's content that keeps its children) and any tree:
 
      - `apply_total` — `Ops.apply` reaches exactly one outcome on every input, and WHICH rejection
        it can raise is characterised per clause. That characterisation is the content: it proves
@@ -85,6 +86,7 @@ let rec raisable (o:op) (e:rejection) : Tot bool (decreases o) =
   | MoveNode _ _, CannotRemoveRoot        -> true
   | MoveNode _ _, UnknownNode _ _         -> true
   | MoveNode _ _, WouldNestUnderSelf _    -> true
+  | UpdateNode _, UnknownNode _ _         -> true
   | Batch os, _                           -> raisable_all os e
   | _, _                                  -> false
 and raisable_all (os:list op) (e:rejection) : Tot bool (decreases os) =
@@ -484,6 +486,79 @@ and rem_all_kills (pid x:string) (ts:list tree) (sub:tree)
       available for the first time, and the two other structural clauses fall out of section 3.
    ====================================================================================== *)
 
+(* ---- what an in-place rewrite does to a tree (Phase 250) ----
+
+   `TreeOps.upd` rewrites the kind at every node carrying the id and keeps every child list, so the
+   id set is untouched and so is well-formedness. On a well-formed tree the id is carried once, so
+   the rewrite is exactly one node's, which is what the inverse and the container clause need. *)
+
+let rec ids_upd (x k:string) (t:tree)
+  : Lemma (ensures ids (upd x k t) == ids t) (decreases t)
+  = match t with
+    | TNode _ _ cs -> ids_upd_all x k cs
+and ids_upd_all (x k:string) (ts:list tree)
+  : Lemma (ensures ids_all (upd_all x k ts) == ids_all ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ids_upd x k t; ids_upd_all x k r
+
+let rec upd_wf (x k:string) (t:tree)
+  : Lemma (ensures wf (upd x k t) == wf t) (decreases t)
+  = match t with
+    | TNode _ _ cs -> ids_upd_all x k cs; upd_wf_all x k cs
+and upd_wf_all (x k:string) (ts:list tree)
+  : Lemma (ensures wf_all (upd_all x k ts) == wf_all ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> upd_wf x k t; upd_wf_all x k r; ids_upd x k t; ids_upd_all x k r
+
+(* A rewrite of an id the tree does not carry is the identity. *)
+let rec upd_absent (x k:string) (t:tree)
+  : Lemma (requires not (mem x (ids t))) (ensures upd x k t == t) (decreases t)
+  = match t with
+    | TNode _ _ cs -> upd_absent_all x k cs
+and upd_absent_all (x k:string) (ts:list tree)
+  : Lemma (requires not (mem x (ids_all ts))) (ensures upd_all x k ts == ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      mem_app x (ids t) (ids_all r);
+      upd_absent x k t;
+      upd_absent_all x k r
+
+(* Two rewrites of one id: the second wins. *)
+let rec upd_upd (x k1 k2:string) (t:tree)
+  : Lemma (ensures upd x k2 (upd x k1 t) == upd x k2 t) (decreases t)
+  = match t with
+    | TNode _ _ cs -> upd_upd_all x k1 k2 cs
+and upd_upd_all (x k1 k2:string) (ts:list tree)
+  : Lemma (ensures upd_all x k2 (upd_all x k1 ts) == upd_all x k2 ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> upd_upd x k1 k2 t; upd_upd_all x k1 k2 r
+
+(* On a well-formed tree, rewriting the node `find_in` answers with to the kind it already has is
+   the identity — the half of the round trip the inverse relies on. *)
+let rec upd_found_self (x:string) (t:tree) (ex:tree)
+  : Lemma (requires wf t /\ find_in x t == Some ex) (ensures upd x (kind_of ex) t == t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = x then upd_absent_all x (kind_of ex) cs
+      else upd_found_self_all x cs ex
+and upd_found_self_all (x:string) (ts:list tree) (ex:tree)
+  : Lemma (requires wf_all ts /\ find_all x ts == Some ex)
+          (ensures upd_all x (kind_of ex) ts == ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      find_in_some_iff x t;
+      (match find_in x t with
+       | Some _ ->
+         upd_found_self x t ex;
+         inter_nil_iff (ids t) (ids_all r);
+         upd_absent_all x (kind_of ex) r
+       | None -> upd_absent x (kind_of ex) t; upd_found_self_all x r ex)
+
 let rec apply_preserves_wf (o:op) (t:tree)
   : Lemma (requires wf t)
           (ensures (match apply o t with Ok t' -> wf t' | Error _ -> True)) (decreases o)
@@ -526,6 +601,8 @@ let rec apply_preserves_wf (o:op) (t:tree)
       else ()
 
     | Batch os -> apply_all_preserves_wf os t
+
+    | UpdateNode n -> upd_wf (tid_of n) (kind_of n) t
 
 and apply_all_preserves_wf (os:list op) (t:tree)
   : Lemma (requires wf t)
@@ -577,6 +654,12 @@ let can_apply (o:op) (t:tree) : Tot (outcome unit rejection) =
        let current = kid_ids (kids_of n) in
        if not (same_multiset current order) then Error (ReorderMismatch p current order)
        else Ok ())
+
+  (* F#: `validateUpdate` (Phase 250) — the target must be in the tree. *)
+  | UpdateNode n ->
+    (match find_in (tid_of n) t with
+     | None -> Error (UnknownNode (tid_of n) (ids t))
+     | Some _ -> Ok ())
 
   (* F#: `MoveNode` and `Batch` simulate through `applyWith` and `Result.map ignore` the result. *)
   | MoveNode _ _
@@ -650,7 +733,13 @@ let invert_leaf (o:leaf_op) (pre:tree) : Tot (outcome op rejection) =
      | ReorderChildren p _ ->
        (match find_in p pre with
         | Some pn -> Ok (ReorderChildren p (order_in pn))
-        | None -> Error (UnknownNode p (ids pre))))
+        | None -> Error (UnknownNode p (ids pre)))
+     (* F#: `UpdateNode(Tree.tryFind (w.Id node) pre |> Option.get)` (Phase 250) — the pre-state
+        node itself, whose content the undo restores and whose children it does not read. *)
+     | UpdateNode n ->
+       (match find_in (tid_of n) pre with
+        | Some old -> Ok (UpdateNode old)
+        | None -> Error (UnknownNode (tid_of n) (ids pre))))
 
 (* ---- small facts about the child-list edits ---- *)
 
@@ -1233,6 +1322,20 @@ let invert_applicable (o:leaf_op) (t:tree)
           | _ -> ())
        | _, _ -> ())
 
+    | UpdateNode n ->
+      (* undone by the content it replaced: the old node's kind, rewritten over the new one, is the
+         old tree, because on a well-formed tree the id is carried once *)
+      let x = tid_of n in
+      (match find_in x t with
+       | None -> ()
+       | Some old ->
+         find_in_id x t old;
+         ids_upd x (kind_of n) t;
+         find_in_some_iff x t;
+         find_in_some_iff x (upd x (kind_of n) t);
+         upd_upd x (kind_of n) (kind_of old) t;
+         upd_found_self x t old)
+
 #pop-options
 
 (* ======================================================================================
@@ -1449,6 +1552,17 @@ let rec apply_contained (ch:tree -> bool) (o:op) (t:tree)
 
   | Batch os -> apply_contained_all ch os t
 
+  (* F#: `validateUpdate` (Phase 250) — the target must be in the tree, and when the node it
+     rewrites holds children, the REWRITTEN node (the payload's content over those children) must
+     be able to hold them. *)
+  | UpdateNode n ->
+    (match find_in (tid_of n) t with
+     | None -> Error (UnknownNode (tid_of n) (ids t))
+     | Some ex ->
+       if Cons? (kids_of ex) && not (ch (TNode (tid_of n) (kind_of n) (kids_of ex)))
+       then Error (NotAContainer (tid_of n) (kind_of n))
+       else Ok (upd (tid_of n) (kind_of n) t))
+
 and apply_contained_all (ch:tree -> bool) (os:list op) (t:tree)
   : Tot (outcome tree rejection) (decreases os) =
   match os with
@@ -1484,6 +1598,13 @@ let can_apply_contained (ch:tree -> bool) (o:op) (t:tree) : Tot (outcome unit re
      | Some n ->
        let current = kid_ids (kids_of n) in
        if not (same_multiset current order) then Error (ReorderMismatch p current order)
+       else Ok ())
+  | UpdateNode n ->
+    (match find_in (tid_of n) t with
+     | None -> Error (UnknownNode (tid_of n) (ids t))
+     | Some ex ->
+       if Cons? (kids_of ex) && not (ch (TNode (tid_of n) (kind_of n) (kids_of ex)))
+       then Error (NotAContainer (tid_of n) (kind_of n))
        else Ok ())
   | MoveNode _ _
   | Batch _ -> (match apply_contained ch o t with Ok _ -> Ok () | Error e -> Error e)
@@ -1633,6 +1754,18 @@ let not_a_container_locates (ch:tree -> bool) (o:op) (t:tree)
                                         not (ch off) /\ Cons? (kids_of off)
                           | None -> False)
                        | _ -> False)
+                      \/
+                      (* the rewrite site (Phase 250): the node of the tree an update names, as
+                         the update would leave it — the payload's kind over the children it
+                         already holds. The kind reported is the NEW one, because that is the
+                         kind the predicate refused; the tree's own node still carries the old. *)
+                      (match o with
+                       | UpdateNode n ->
+                         tid_of n == p /\ kind_of n == k /\
+                         (match find_in p t with
+                          | Some ex -> Cons? (kids_of ex) /\ not (ch (TNode p k (kids_of ex)))
+                          | None -> False)
+                       | _ -> False)
                     | _ -> True))
   = match o with
     | InsertChild _ n ->
@@ -1663,6 +1796,14 @@ let not_a_container_exact (ch:tree -> bool) (o:op) (t:tree)
                          | InsertChild _ n ->
                            (match first_uncontained ch n with
                             | Some off -> tid_of off == p /\ kind_of off == k /\ not (ch off)
+                            | None -> False)
+                         | _ -> False)
+                        \/
+                        (match o with
+                         | UpdateNode n ->
+                           tid_of n == p /\ kind_of n == k /\
+                           (match find_in p t with
+                            | Some ex -> not (ch (TNode p k (kids_of ex)))
                             | None -> False)
                          | _ -> False)
                       | _ -> True)))
@@ -1840,6 +1981,39 @@ and reorder_contained_all (ch:tree -> bool) (p:string) (ord:list string) (ts:lis
     | [] -> ()
     | t :: r -> reorder_contained ch p ord t; reorder_contained_all ch p ord r
 
+(* An in-place rewrite of the node `find_in` answers with keeps the invariant when that node, as
+   rewritten, satisfies it — every other node is unchanged, and its children are unchanged too, which
+   is where well-formedness enters: the id is carried once, so no child is also rewritten. The
+   ancestors' capability survives through `child_blind`, since their child lists now hold the
+   rewritten node. (Phase 250.) *)
+let rec upd_contained (ch:tree -> bool) (x k:string) (t:tree) (ex:tree)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t /\ find_in x t == Some ex /\
+                    (Nil? (kids_of ex) \/ ch (TNode x k (kids_of ex))))
+          (ensures contained ch (upd x k t)) (decreases t)
+  = match t with
+    | TNode i ki cs ->
+      if i = x then upd_absent_all x k cs
+      else begin
+        upd_contained_all ch x k cs ex;
+        match cs with
+        | [] -> ()
+        | _ :: _ -> assert (ch (TNode i ki (upd_all x k cs)) == ch (TNode i ki cs))
+      end
+and upd_contained_all (ch:tree -> bool) (x k:string) (ts:list tree) (ex:tree)
+  : Lemma (requires child_blind ch /\ wf_all ts /\ contained_all ch ts /\ find_all x ts == Some ex /\
+                    (Nil? (kids_of ex) \/ ch (TNode x k (kids_of ex))))
+          (ensures contained_all ch (upd_all x k ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      find_in_some_iff x t;
+      (match find_in x t with
+       | Some _ ->
+         upd_contained ch x k t ex;
+         inter_nil_iff (ids t) (ids_all r);
+         upd_absent_all x k r
+       | None -> upd_absent x k t; upd_contained_all ch x k r ex)
+
 (* ---- 8.5 THE SEVENTH LEMMA — the container capability is preserved ---- *)
 
 #push-options "--z3rlimit 120"
@@ -1926,6 +2100,14 @@ let rec contained_preserves (ch:tree -> bool) (o:op) (t:tree)
       end
 
     | Batch os -> contained_preserves_all ch os t
+
+    | UpdateNode n ->
+      (match find_in (tid_of n) t with
+       | None -> ()
+       | Some ex ->
+         find_in_id (tid_of n) t ex;
+         if Cons? (kids_of ex) && not (ch (TNode (tid_of n) (kind_of n) (kids_of ex))) then ()
+         else upd_contained ch (tid_of n) (kind_of n) t ex)
 
 and contained_preserves_all (ch:tree -> bool) (os:list op) (t:tree)
   : Lemma (requires child_blind ch /\ wf t /\ contained ch t)

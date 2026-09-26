@@ -349,6 +349,10 @@ module SampleAdequacy =
           // clean node reused from `prior`, and an edited evaluator that failed. A domain whose edits
           // all move the dependency map reaches none of them, and the guard says so.
           "Conformance.propagationEvaluatorLaws", Guarded [ "evaluator edit" ]
+          // Phase 250 — the prior-aware evaluator: a recomputed node handed its prior (the prior
+          // path, not only priming) and a clean node reused from it. It runs the family above first,
+          // so the reference arms carry that family's guard too.
+          "Conformance.propagationEvaluatorLawsWith", Guarded [ "evaluator edit"; "prior-aware edit" ]
           // Phase 181. Every other arm is BUILT each iteration — an op applied, inverted, chained
           // and replayed — but the inverse-only-for-applicable law is about the ops the table
           // REFUSES, and whether the generator refused an INVERTIBLE one is a property of the run.

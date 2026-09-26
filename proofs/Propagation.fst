@@ -1034,3 +1034,184 @@ let evalfrom_unknown_refused (#v:Type) (ev ev':evaluator v) (t t':read_witness)
                    walk_invoked ev t prior changed deps topo == [] /\
                    mem c (unknown_of deps changed)) =
   unknown_exact deps changed c
+
+(* ======================================================================================
+   7. The prior value, inside the contract (Phase 250).
+
+      F#: `evalWith` / `evalFromWith` and the private `walkWith` they share with `eval` /
+      `evalFrom`. A recomputed node is handed its OWN value from the evaluation that produced
+      `prior` (`Map.tryFind id prior`) beside its resolver, so a domain that reuses work WITHIN a
+      node — a table node refreshing only the rows an edit reached — carries that state through
+      the driver instead of beside it.
+
+      THE AGREEMENT THEOREM, RESTATED (`evalfromwith_agrees`). It is `evalfrom_agrees` at the
+      evaluator's PRIOR-BLIND reading (`blind`: handed `None`), with every premise of that theorem
+      unchanged, and ONE more: `prior_blind_along` — the evaluator's answer does not depend on the
+      prior it is handed, at every node the incremental walk recomputes, under the resolver the walk
+      hands it there. The prior is a hint for reusing work, never an input to the answer. It is a
+      premise and not a lemma for the reason `agree_off` is one: it is about the evaluator, which is
+      this model's PARAMETER. `Conformance.propagationEvaluatorLawsWith` samples it at a domain's own
+      evaluator (`propagation-prior-blind`).
+
+      And the refactor that introduced the shared walk is itself a lemma (`eval_is_walk_with`): the
+      prior-blind entry points are the prior-aware walk of an evaluator that ignores its prior, so
+      `eval` and `evalFrom` — and every theorem above about them — are unchanged by it.
+   ====================================================================================== *)
+
+(* F#: `evalNode : (string -> 'v option) -> 'v option -> string -> Result<'v, string>`. *)
+type evaluator_with (v:Type) = (string -> option v) -> option v -> string -> outcome v string
+
+(* F#: `fun resolve id -> evalNode resolve None id` — the reading `evalWith` walks. *)
+let blind (#v:Type) (evw:evaluator_with v) : evaluator v = fun f id -> evw f None id
+
+(* F#: `fun resolve _ id -> evalNode resolve id` — the evaluator `walk` hands `walkWith`. *)
+let lift (#v:Type) (ev:evaluator v) : evaluator_with v = fun f _ id -> ev f id
+
+(* F#: the private `walkWith`'s loop — `go`, with the recomputed node handed `Map.tryFind id prior`. *)
+let rec go_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
+                (recompute:string -> bool) (prior:list (string & v))
+                (cycles:list (list string)) (results:list (string & v)) (order:list string)
+  : Tot (outcome (eval_outcome v) propagation_error) (decreases order) =
+  match order with
+  | [] -> Ok ({ values = results; cyclic = cycles })
+  | id :: rest ->
+    (match reuse recompute prior id with
+     | None ->
+       (match first_undeclared deps id (touches id) with
+        | Some r -> Error (EvalUndeclaredRead id r)
+        | None ->
+          (match evw (resolve_in (lookups (reads_of deps id) results)) (assoc id prior) id with
+           | Ok x -> go_with evw touches deps recompute prior cycles ((id, x) :: results) rest
+           | Error m -> Error (EvalNodeFailed id m)))
+     | Some p -> go_with evw touches deps recompute prior cycles ((id, p) :: results) rest)
+
+(* F#: `walkWith`. *)
+let walk_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
+              (recompute:string -> bool) (prior:list (string & v)) (topo:topo_result)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  go_with evw touches deps recompute prior topo.cycles [] topo.order
+
+(* F#: `evalWith` — `walkWith evalNode (fun _ -> true) Map.empty deps`. *)
+let eval_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap) (topo:topo_result)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  walk_with evw touches deps always [] topo
+
+(* F#: `evalFromWith` — `evalFrom`'s guard, then the prior-aware walk over the dirty set. *)
+let eval_from_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (prior:list (string & v))
+                   (changed:list string) (deps:dmap) (topo:topo_result)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  match unknown_of deps changed with
+  | _ :: _ -> Error (EvalUnknownChange (unknown_of deps changed))
+  | [] -> walk_with evw touches deps (in_set (dirty_from_changed_ids deps changed)) prior topo
+
+(* The shared walk, handed an evaluator that ignores its prior, IS the prior-blind walk. *)
+let rec go_with_lift (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap)
+                     (recompute:string -> bool) (prior:list (string & v))
+                     (cycles:list (list string)) (results:list (string & v)) (order:list string)
+  : Lemma (ensures go_with (lift ev) touches deps recompute prior cycles results order ==
+                   go ev touches deps recompute prior cycles results order) (decreases order) =
+  match order with
+  | [] -> ()
+  | id :: rest ->
+    (match reuse recompute prior id with
+     | None ->
+       (match first_undeclared deps id (touches id) with
+        | Some _ -> ()
+        | None ->
+          (match ev (resolve_in (lookups (reads_of deps id) results)) id with
+           | Ok x -> go_with_lift ev touches deps recompute prior cycles ((id, x) :: results) rest
+           | Error _ -> ()))
+     | Some p -> go_with_lift ev touches deps recompute prior cycles ((id, p) :: results) rest)
+
+(* THE ADDED PREMISE. Along the walk the prior-blind reading takes — which, by the agreement
+   theorem, is the walk the incremental driver takes — every node recomputed there answers the
+   same handed its prior as handed none. Stated over the walk rather than over every resolver,
+   because the prior is only ever handed beside the resolver that walk builds: an evaluator whose
+   prior carries reuse state keyed to the inputs it was built from is entitled to trust that state
+   there, and nowhere else. *)
+let rec prior_blind_along (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
+                          (recompute:string -> bool) (prior:list (string & v))
+                          (results:list (string & v)) (order:list string)
+  : Tot prop (decreases order) =
+  match order with
+  | [] -> True
+  | id :: rest ->
+    (match reuse recompute prior id with
+     | Some p -> prior_blind_along evw touches deps recompute prior ((id, p) :: results) rest
+     | None ->
+       (match first_undeclared deps id (touches id) with
+        | Some _ -> True
+        | None ->
+          evw (resolve_in (lookups (reads_of deps id) results)) (assoc id prior) id ==
+            evw (resolve_in (lookups (reads_of deps id) results)) None id /\
+          (match evw (resolve_in (lookups (reads_of deps id) results)) None id with
+           | Ok x -> prior_blind_along evw touches deps recompute prior ((id, x) :: results) rest
+           | Error _ -> True)))
+
+(* Under the premise, the prior-aware walk is the prior-blind reading's walk, step for step. *)
+let rec go_with_blind (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
+                      (recompute:string -> bool) (prior:list (string & v))
+                      (cycles:list (list string)) (results:list (string & v)) (order:list string)
+  : Lemma (requires prior_blind_along evw touches deps recompute prior results order)
+          (ensures go_with evw touches deps recompute prior cycles results order ==
+                   go (blind evw) touches deps recompute prior cycles results order)
+          (decreases order) =
+  match order with
+  | [] -> ()
+  | id :: rest ->
+    (match reuse recompute prior id with
+     | Some p -> go_with_blind evw touches deps recompute prior cycles ((id, p) :: results) rest
+     | None ->
+       (match first_undeclared deps id (touches id) with
+        | Some _ -> ()
+        | None ->
+          (match evw (resolve_in (lookups (reads_of deps id) results)) None id with
+           | Ok x -> go_with_blind evw touches deps recompute prior cycles ((id, x) :: results) rest
+           | Error _ -> ())))
+
+(* A walk handed NO prior hands every node `None`, so the premise holds of it trivially. *)
+let rec prior_blind_empty (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
+                          (recompute:string -> bool) (results:list (string & v)) (order:list string)
+  : Lemma (ensures prior_blind_along evw touches deps recompute [] results order) (decreases order) =
+  match order with
+  | [] -> ()
+  | id :: rest ->
+    (match reuse recompute ([] <: list (string & v)) id with
+     | Some p -> prior_blind_empty evw touches deps recompute ((id, p) :: results) rest
+     | None ->
+       (match first_undeclared deps id (touches id) with
+        | Some _ -> ()
+        | None ->
+          (match evw (resolve_in (lookups (reads_of deps id) results)) None id with
+           | Ok x -> prior_blind_empty evw touches deps recompute ((id, x) :: results) rest
+           | Error _ -> ())))
+
+(* `evalWith` is `eval` of the prior-blind reading. *)
+let eval_with_is_blind (#v:Type) (evw:evaluator_with v) (touches:read_witness) (deps:dmap)
+                       (topo:topo_result)
+  : Lemma (ensures eval_with evw touches deps topo == eval (blind evw) touches deps topo) =
+  prior_blind_empty evw touches deps always [] topo.order;
+  go_with_blind evw touches deps always [] topo.cycles [] topo.order
+
+(* The two prior-blind entry points are the shared walk at `lift`: the refactor changed nothing. *)
+let eval_is_walk_with (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap) (topo:topo_result)
+  : Lemma (ensures eval_with (lift ev) touches deps topo == eval ev touches deps topo) =
+  go_with_lift ev touches deps always [] topo.cycles [] topo.order
+
+(* THEOREM — evalfromwith_agrees. `evalFromWith` over the dirty set equals `evalWith`, under
+   `evalfrom_agrees`' premises for the prior-blind readings of the old and the new evaluator
+   (`evw0`, which produced `out0`, and `evw1`, the evaluator after the change) and the one premise
+   the prior adds, `prior_blind_along` along the incremental walk. *)
+let evalfromwith_agrees (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witness) (deps:dmap)
+                        (changed:list string) (topo:topo_result) (out0:eval_outcome v)
+                        (prior:list (string & v))
+  : Lemma (requires agree_off (blind evw0) (blind evw1) changed /\ touches_off t0 t1 changed /\
+                    distinct topo.order /\ Nil? (unknown_of deps changed) /\
+                    eval_with evw0 t0 deps topo == Ok out0 /\ prior_of prior out0.values /\
+                    prior_blind_along evw1 t1 deps (in_set (dirty_from_changed_ids deps changed))
+                                      prior [] topo.order)
+          (ensures eval_from_with evw1 t1 prior changed deps topo == eval_with evw1 t1 deps topo) =
+  eval_with_is_blind evw0 t0 deps topo;
+  eval_with_is_blind evw1 t1 deps topo;
+  go_with_blind evw1 t1 deps (in_set (dirty_from_changed_ids deps changed)) prior topo.cycles [] topo.order;
+  evalfrom_agrees (blind evw0) (blind evw1) t0 t1 deps changed topo out0 prior

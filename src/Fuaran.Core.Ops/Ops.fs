@@ -32,9 +32,9 @@ type Rejection<'Id> =
     /// Domain-side extension point: a per-kind property-edit rejection.
     | Rejected of code: string * message: string
 
-/// The skeleton-five structural-edit ops shared by every domain. Per-kind property
-/// edits (`SetInput`, `SetParameter`, `SetVariable`, `UpdateProp`, …) stay domain-side
-/// and compose with these. `Batch` is all-or-nothing.
+/// The skeleton edit ops shared by every domain — five structural, and since Phase 250 one
+/// generic in-place content edit (`UpdateNode`). Finer per-kind property edits (`SetInput`,
+/// `SetParameter`, `SetVariable`, `UpdateProp`, …) stay domain-side and compose with these. `Batch` is all-or-nothing.
 ///
 /// **Membership and order are separate concerns.** `InsertChild` and `MoveNode` change
 /// which children a parent has, and both APPEND; `ReorderChildren` states the order, by
@@ -49,12 +49,22 @@ type Rejection<'Id> =
 /// stored anywhere. An index is a projection over that list, derivable from it and only
 /// meaningful against one snapshot of it, which makes it silently wrong after any
 /// concurrent or preceding edit. An id is checkable; an ordinal is not.
+///
+/// **Content and structure are separate concerns too (Phase 250).** `UpdateNode node` rewrites
+/// one node IN PLACE: the node whose id is `w.Id node` takes `node`'s own content and KEEPS the
+/// children it already has — the payload's children are not read, because changing membership or
+/// order is what the other four ops are for. The target is the payload's own id rather than a
+/// second field, for the reason the ordinal above was removed: an id stated twice can disagree,
+/// and an id stated once cannot. It is declared LAST so every existing case keeps its tag. Before
+/// it, redefining a node was `Batch [RemoveNode id; InsertChild(parent, node')]`, which moved the
+/// node to the end of its parent and dirtied the parent as well as the node.
 type SkeletonOp<'Node, 'Id> =
     | InsertChild of parent: 'Id * node: 'Node
     | RemoveNode of target: 'Id
     | MoveNode of target: 'Id * newParent: 'Id
     | ReorderChildren of parent: 'Id * order: 'Id list
     | Batch of SkeletonOp<'Node, 'Id> list
+    | UpdateNode of node: 'Node
 
 /// The structural read/write **footprint** of an op-script (Phase 78) — the multi-agent coordination
 /// invariant computed *from the script*, never separately declared (the `paramsOf` precedent). The
@@ -69,11 +79,12 @@ type SkeletonOp<'Node, 'Id> =
 ///     positions): `InsertChild.parent`, `ReorderChildren.parent`, `MoveNode.newParent`. A **known**
 ///     structural position.
 ///   - `ContentWrites` — node ids whose own node is authored / destroyed / relocated (the identity-level
-///     write): an `InsertChild`'s whole inserted subtree, a `RemoveNode`/`MoveNode` target. Distinct from
-///     a structure-write: it is *which node*, not *whose child-list*. (A domain that layers an in-place
-///     property-edit op on top populates this the same way — two content-writes to one node collide.)
-///   - `UnknownParentWrites` — the targets of `RemoveNode` / `MoveNode`. Removing or moving a node also
-///     rewrites its *source* parent's child-list, but that parent (and every ancestor relationship) is a
+///     write): an `InsertChild`'s whole inserted subtree, a `RemoveNode`/`MoveNode` target, an
+///     `UpdateNode`'s target (Phase 250). Distinct from a structure-write: it is *which node*, not *whose
+///     child-list*. Two content-writes to one node collide.
+///   - `UnknownParentWrites` — the targets of `RemoveNode` / `MoveNode` / `UpdateNode`. Removing or moving
+///     a node also rewrites its *source* parent's child-list, and rewriting a node in place rewrites the
+///     child-list entry it occupies, but that parent (and every ancestor relationship) is a
 ///     **tree fact the pure script cannot name** — so such an op is the conservative case: it collides
 ///     with *every* structural write in a concurrent script. THE pinned over-approximation (STABILITY.md
 ///     "Op-script footprint + independence").
@@ -229,6 +240,37 @@ module Ops =
             else
                 Ok()
 
+    /// The node an `UpdateNode` leaves behind (Phase 250): the payload's own content over the
+    /// children `existing` already holds. The payload's children are never read.
+    let private updated (w: NodeWitness<'Node, 'Id>) (existing: 'Node) (node: 'Node) : 'Node =
+        w.ReplaceChildren node (w.Children existing)
+
+    /// `UpdateNode`'s checks (Phase 250), in order: the target — the payload's own id — must be in
+    /// the tree (`UnknownNode`, enumerating the ids that are); and, when the node it rewrites holds
+    /// children, the rewritten node must be able to hold them (`NotAContainer`, naming the target
+    /// and the NEW kind tag, since that is the kind that refuses). The second check is the
+    /// container-aware engine's only: plain `apply` passes a `canHold` that admits everything.
+    /// There is no duplicate-id check to make: the rewritten node keeps its id and its children,
+    /// so the tree's id set is unchanged by construction.
+    let private validateUpdate
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (node: 'Node)
+        (root: 'Node)
+        : Result<unit, Rejection<'Id>> =
+        let target = w.Id node
+
+        match Tree.tryFind w idw target root with
+        | None -> Error(UnknownNode(target, Tree.ids w root))
+        | Some existing ->
+            let result = updated w existing node
+
+            if not (List.isEmpty (w.Children result)) && not (canHold result) then
+                Error(NotAContainer(target, w.KindTag result))
+            else
+                Ok()
+
     /// The shared apply engine, parameterised by a container capability `canHold`
     /// (Phase 251). `apply` passes `(fun _ -> true)` — every node can hold children, so the
     /// behaviour is exactly as before; `applyContained` passes the domain predicate so an
@@ -332,6 +374,15 @@ module Ops =
 
             go root ops
 
+        | UpdateNode node ->
+            let target = w.Id node
+
+            validateUpdate canHold w idw node root
+            |> Result.bind (fun () ->
+                Tree.updateNode w idw target (fun existing -> updated w existing node) root
+                |> Option.map Ok
+                |> Option.defaultValue (Error(UnknownNode(target, allIds ()))))
+
     /// Apply one skeleton op. Every node is treated as able to hold children.
     let apply
         (w: NodeWitness<'Node, 'Id>)
@@ -375,6 +426,7 @@ module Ops =
         | InsertChild(parent, node) -> validateInsert canHold w idw parent node root
         | RemoveNode target -> validateRemove w idw target root
         | ReorderChildren(parent, order) -> validateReorder w idw parent order root
+        | UpdateNode node -> validateUpdate canHold w idw node root
         | MoveNode _
         | Batch _ -> applyWith canHold w idw op root |> Result.map ignore
 
@@ -481,11 +533,11 @@ module Ops =
         canApplyAllWith (fun _ -> true) w idw ops root
 
     /// Derive the inverse of an op from the **pre-state** tree (the tree the op applied to)
-    /// — Phase 242. The skeleton-five are structural, so each inverse is recoverable from
-    /// the pre-state: insert↔remove, remove↔insert (capturing the removed subtree + its
-    /// parent + index), move↔move-back (prior parent + index), reorder↔reorder (prior
-    /// order). `Batch` inverts to its inverses in reverse order (each derived against the
-    /// state that op saw). Total: a non-applyable op has no inverse — its `Rejection` is
+    /// — Phase 242. Every skeleton op's inverse is recoverable from the pre-state:
+    /// insert↔remove, remove↔insert (capturing the removed subtree + its parent + index),
+    /// move↔move-back (prior parent + index), reorder↔reorder (prior order), update↔update (the
+    /// pre-state node, whose content the undo restores — Phase 250). `Batch` inverts to its
+    /// inverses in reverse order (each derived against the state that op saw). Total: a non-applyable op has no inverse — its `Rejection` is
     /// returned. The defining law: `apply (invert op pre) (apply op pre) = pre`. Undo/redo
     /// becomes a generic capability over the witness, not a per-domain re-implementation.
     let rec invert
@@ -553,6 +605,9 @@ module Ops =
                 | ReorderChildren(parent, _) ->
                     let p = Tree.tryFind w idw parent pre |> Option.get
                     Ok(ReorderChildren(parent, p |> w.Children |> List.map w.Id))
+                // The pre-state node restores the content; its children are not read by the
+                // inverse either, so the children the tree holds when the undo runs are kept.
+                | UpdateNode node -> Ok(UpdateNode(Tree.tryFind w idw (w.Id node) pre |> Option.get))
                 | Batch _ -> Ok op // unreachable (handled above) — keeps the match total
 
     /// Normalise an op script (Phase 23): a conservative, structural peephole that collapses the
@@ -619,7 +674,7 @@ module Ops =
     // ---- footprint + independence (Phase 78) ----
     // The multi-agent coordination invariant, computed structurally from the op-script (never
     // separately declared — the `paramsOf` precedent, Phase 77). `footprint` is a pure, total union-fold
-    // over the skeleton five through the witnesses; `independent` is pairwise footprint disjointness.
+    // over the skeleton ops through the witnesses; `independent` is pairwise footprint disjointness.
     // The structural basis for dispatch-time conflict refusal (a downstream dispatcher's computed
     // leases), lease derivation (Phase 84), and proposal arbitration (Phase 85).
     //
@@ -632,9 +687,11 @@ module Ops =
     //       concurrent script — disjoint-subtree independence is NOT proven when either side removes or
     //       moves (that needs the tree);
     //   (2) a RemoveNode's `ContentWrites` records only the target id, not its (tree-unknown) subtree.
-    //       Sound for the skeleton five because every skeleton op is a structural write, so (1) already
-    //       serialises a remove/move against any concurrent structural op; a domain that layers a *pure
-    //       in-place* content op on top must fold the removed subtree in itself (it has the tree).
+    //       Sound for the skeleton ops because every one of them — `UpdateNode` included, which is why
+    //       its footprint carries an unknown-parent write (Phase 250) — is a structural write, so (1)
+    //       already serialises a remove/move against any concurrent op; a domain that layers its OWN
+    //       in-place content op on top, with no unknown-parent write, must fold the removed subtree in
+    //       itself (it has the tree).
     //
     // Phase 143 asked whether (1) could now be TIGHTENED, with Phase 138's preservation theorem in
     // hand: a relocation ought to commute with a structural write under an unrelated parent. It
@@ -718,6 +775,23 @@ module Ops =
                     Reads = Set.add (key parent) named
                     StructureWrites = Set.singleton (key parent) }
             | Batch inner -> List.fold (fun acc o -> unionFootprint acc (ofOp o)) emptyFootprint inner
+            | UpdateNode node ->
+                // Phase 250 — an in-place rewrite. The node is read (it must exist) and its content
+                // is written. It is ALSO an unknown-parent write, and that is required rather than
+                // cautious: the node is rewritten under a parent — and a chain of ancestors — the
+                // script cannot name, so an update of `x` and a concurrent `RemoveNode` of an
+                // ancestor of `x` carry disjoint reads and content-writes yet do not commute (the
+                // update lands in one order and is refused in the other). Only the unknown-parent
+                // clause of `independent` can see that pair, exactly as it sees a remove against a
+                // write inside the removed subtree. The cost is the same pinned over-approximation
+                // the remove/move pay: an update is independent only of a structure-free script,
+                // so two updates of different nodes are reported dependent.
+                let target = key (w.Id node)
+
+                { Reads = Set.singleton target
+                  StructureWrites = Set.empty
+                  ContentWrites = Set.singleton target
+                  UnknownParentWrites = Set.singleton target }
 
         List.fold (fun acc op -> unionFootprint acc (ofOp op)) emptyFootprint ops
 

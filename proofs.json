@@ -432,7 +432,7 @@
     {
       "id": "tree-independence-diamond",
       "level": "proved",
-      "claim": "For the skeleton-op tree algebra, two operations whose footprints are declared disjoint and which both apply at an id-unique tree each apply after the other and reach the same tree — the fold theorem's domain hypothesis, proved rather than sampled, for ALL FIFTEEN unordered operation pairs since Phase 162 lifted the diamond along a batch's script; it covered twelve of the fifteen when Phase 133 shipped it, and the three it left are `tree-algebra-batch-nesting`, which is now a proved row rather than an assumed one. Nine of the fifteen are closed by the conservative footprint alone and never look at a tree: a remove or a move writes an unknown parent, independence refuses that against any structural write, and every skeleton operation except a do-nothing batch writes structure — so such a pair is independent only where the other operation does nothing at all.",
+      "claim": "For the skeleton-op tree algebra, two operations whose footprints are declared disjoint and which both apply at an id-unique tree each apply after the other and reach the same tree — the fold theorem's domain hypothesis, proved rather than sampled, for ALL FIFTEEN unordered operation pairs since Phase 162 lifted the diamond along a batch's script, and all TWENTY-ONE since Phase 250 added `UpdateNode`, whose six new pairs close by the same footprint elimination as a remove or a move; it covered twelve of the fifteen when Phase 133 shipped it, and the three it left are `tree-algebra-batch-nesting`, which is now a proved row rather than an assumed one. Nine of the fifteen are closed by the conservative footprint alone and never look at a tree: a remove or a move writes an unknown parent, independence refuses that against any structural write, and every skeleton operation except a do-nothing batch writes structure — so such a pair is independent only where the other operation does nothing at all.",
       "phase": "fuaran-core#133",
       "evidence": {
         "theorem": "tree_independence_diamond",
@@ -483,6 +483,28 @@
       "phase": "fuaran-core#133",
       "evidence": {
         "theorem": "skeleton_fold_confluence",
+        "model": "proofs/Skeleton.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "skeleton-update-in-alphabet",
+      "level": "proved",
+      "claim": "The fold theorem's alphabet is the SHIPPED alphabet again after Phase 250 added `UpdateNode`, an in-place rewrite of a node's content that keeps its children. `TreeOps.op` gained the case with its apply and footprint clauses in the same change, so `skeleton_fold_confluence` is not about a sub-alphabet — the boundary Phase 162 removed — and a lane carrying an update folds. The diamond's six new pairs close by the same elimination as a remove or a move (`update_is_relocating`): the update's footprint carries an unknown-parent write, which is REQUIRED because an update of a node and a concurrent remove of its ancestor share no address the script can name and do not commute.",
+      "phase": "fuaran-core#250",
+      "evidence": {
+        "theorem": "update_lane_folds",
+        "model": "proofs/Skeleton.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "skeleton-update-pair-halts",
+      "level": "proved",
+      "claim": "The cost of the update's unknown-parent write, as an evaluated fact rather than prose: two lanes each updating a DIFFERENT node halt rather than fold. They would commute, but the footprint cannot tell them from an update against a remove of the updated node's ancestor, which does not — so both are relocating, and the fold reports the pair instead of guessing. The same pinned over-approximation `RemoveNode` and `MoveNode` pay; tightening it is a change to the `Footprint` record.",
+      "phase": "fuaran-core#250",
+      "evidence": {
+        "theorem": "update_pair_halts",
         "model": "proofs/Skeleton.fst",
         "prover": "proofs/fstar-pin.json"
       }
@@ -1993,6 +2015,17 @@
       }
     },
     {
+      "id": "propagation-evalfromwith-agrees",
+      "level": "proved",
+      "claim": "The agreement theorem, restated for the prior-aware driver (Phase 250). `evalFromWith ev1 prior changed deps` equals `evalWith ev1 deps` as a whole `Result`, under `evalfrom_agrees`' premises taken at the evaluators' PRIOR-BLIND readings (the evaluator handed `None`), with none of them weakened, and exactly one more: `prior_blind_along` — the evaluator's answer does not depend on the prior it is handed, at every node the incremental walk recomputes, under the resolver the walk hands it there. Stated along the walk rather than for every resolver, because an evaluator whose prior carries reuse state keyed to the inputs it was built from is entitled to trust it beside the resolver the walk builds and nowhere else. The shared walk is a lemma too: `eval_is_walk_with` shows `eval` and `evalFrom` are the prior-aware walk at an evaluator that ignores its prior, so every theorem about them stands unchanged.",
+      "phase": "fuaran-core#250",
+      "evidence": {
+        "theorem": "evalfromwith_agrees",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "propagation-evalfrom-minimal",
       "level": "proved",
       "claim": "A node outside the dirty set AND present in `prior` is not re-evaluated: `evalFrom` returns the same `Result` under any two evaluators that agree on the dirty ids and on the ids `prior` does not hold — which is what \"is not evaluated\" means for a pure function without instrumenting one — and the instrumented reading says the same (`invoked_only_stale`: every id `walk_invoked` lists is on the walked order and is dirty or absent from `prior`). The statement the phase was filed with — \"a node outside the dirty set is not re-evaluated\" — is FALSE without the qualifier, by production's own contract: an id absent from `prior` is always recomputed, dirty or not, and the differential exhibits it.",
@@ -2060,6 +2093,17 @@
       "dischargedBy": "Conformance.propagationEvaluatorLaws",
       "evidence": {
         "assumption": "the domain's evaluator is a function of what it reads, changes and reads differently only where the change set says, and prior is eval's own output over the same dependency map — Conformance.propagationEvaluatorLaws"
+      }
+    },
+    {
+      "id": "propagation-prior-blind",
+      "level": "assumed",
+      "claim": "THE ONE PREMISE THE PRIOR ADDS (Phase 250). `evalfromwith_agrees` holds of a prior-aware evaluator whose answer does not depend on the prior it is handed, at every node the incremental walk recomputes, under the resolver the walk hands it there (`prior_blind_along`). It is about the evaluator, which is the model's PARAMETER, so it is a domain obligation in the shape of `propagation-change-set-and-prior`: `Conformance.propagationEvaluatorLawsWith` takes the domain's `EvaluatorWitness` (whose `EvalNode` is the domain's REFERENCE evaluator) and its prior-aware evaluator, and certifies that the prior-blind reading is the reference, that a node handed its prior — its own value from `evalWith` of the model before the edit, carrying whatever reuse state the domain keeps in it — answers what it answers handed none at the answers the full evaluation of the edited model gives (the answers the incremental walk hands it, by the theorem itself), and that `evalFromWith` over `evalWith`'s own prior, whole and with holes, equals `evalWith`. The theorem's equality is the value type's, so a value carrying a reuse cache defines its equality over what it means rather than over the cache. Its adequacy witness is an in-repo sheet whose table nodes refresh with `DataFrame.Incremental` from the prior the driver hands them.",
+      "phase": "fuaran-core#250",
+      "class": "domain-obligation",
+      "dischargedBy": "Conformance.propagationEvaluatorLawsWith",
+      "evidence": {
+        "assumption": "the domain's prior-aware evaluator answers the same handed its prior as handed none, at the resolver the incremental walk hands it — Conformance.propagationEvaluatorLawsWith"
       }
     },
     {

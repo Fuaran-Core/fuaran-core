@@ -52,7 +52,7 @@ run can miss it. `drawn-miss-is-red` — drawn, but a law demands the refused ca
 run that misses it fails. `drawn` — drawn, and a run that misses it stays green unless
 the family is guarded, which is what the `Adequacy` cell beside it answers.
 
-64 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
+65 families, across `Conformance`, `FoldConfluence`, `IncrementalDelta`.
 
 | Family | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|
@@ -104,6 +104,7 @@ the family is guarded, which is what the `Adequacy` cell beside it answers.
 | `Conformance.projectionLaws` | opt-in | `needs-witness-capability` | `ProjectionWitness` | — | 800 | `unconditional` | `none` |
 | `Conformance.propagationEvalLaws` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `built` |
 | `Conformance.propagationEvaluatorLaws` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-change-set-and-prior` | 600 | `guarded-reached` | `drawn` |
+| `Conformance.propagationEvaluatorLawsWith` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-prior-blind` | 720 | `guarded-reached` | `drawn` |
 | `Conformance.queryLaws` | opt-in | `seam-not-every-domain-has` | — | — | 1400 | `unconditional` | `built` |
 | `Conformance.reconcileLaws` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 | `guarded-reached` | `drawn` |
 | `Conformance.reducer` | base run | — | `StreamGen` | — | 400 | `guarded-reached` | `drawn` |

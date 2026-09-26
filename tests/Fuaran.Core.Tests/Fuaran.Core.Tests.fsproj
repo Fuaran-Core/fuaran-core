@@ -86,6 +86,7 @@
     <Compile Include="ProjectionTests.fs" />
     <Compile Include="PropagationTests.fs" />
     <Compile Include="PropagationContractTests.fs" />
+    <Compile Include="PropagationCompositionTests.fs" />
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
     <!-- Phase 102 - the null-tolerant read: the conformance family plus the
