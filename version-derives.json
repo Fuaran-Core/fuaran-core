@@ -1,0 +1,21 @@
+{
+  "kind": "version",
+  "producer": "fuaran-core",
+  "derives": [
+    {
+      "emit": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws",
+      "writes": "conformance/laws/transform-laws.json",
+      "copiedTo": "Fuaran/Fuaran-UI/wire-format-fixtures:laws/transform-laws.json"
+    },
+    {
+      "emit": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws",
+      "writes": "conformance/laws/capability-laws.json",
+      "copiedTo": "Fuaran/Fuaran-UI/wire-format-fixtures:laws/capability-laws.json"
+    },
+    {
+      "emit": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply",
+      "writes": "conformance/apply/skeleton-apply.json",
+      "copiedTo": "Fuaran/Fuaran-UI/wire-format-fixtures:apply/skeleton-apply.json"
+    }
+  ]
+}
