@@ -27,6 +27,9 @@ public enum ColumnKind
     String,
     Date,
     Timestamp,
+
+    /// <summary>An exact decimal, carried as canonical decimal text.</summary>
+    Decimal,
 }
 
 /// <summary>The group / window aggregate function set.</summary>
@@ -94,6 +97,7 @@ internal static class Vocab
             ColumnKind.String => ColumnType.StringType,
             ColumnKind.Date => ColumnType.DateType,
             ColumnKind.Timestamp => ColumnType.TimestampType,
+            ColumnKind.Decimal => ColumnType.DecimalType,
             _ => throw new ArgumentOutOfRangeException(nameof(k), k, "not a ColumnKind"),
         };
 
@@ -106,6 +110,7 @@ internal static class Vocab
             ColumnType.Tags.StringType => ColumnKind.String,
             ColumnType.Tags.DateType => ColumnKind.Date,
             ColumnType.Tags.TimestampType => ColumnKind.Timestamp,
+            ColumnType.Tags.DecimalType => ColumnKind.Decimal,
             _ => throw Interop.UnknownCase(nameof(ColumnType), t.Tag),
         };
 

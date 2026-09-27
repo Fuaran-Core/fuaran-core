@@ -132,6 +132,7 @@ module ColumnValidator =
         | Str s -> "s:" + s
         | Date s -> "d:" + s
         | Timestamp s -> "t:" + s
+        | Decimal s -> "m:" + s
         | Null -> "n:"
 
     /// Build a rule from an id + body.
@@ -189,6 +190,10 @@ module ColumnValidator =
                         match cell with
                         | Int n -> Some(float n)
                         | Float f -> Some f
+                        // The bounds are floats, so a decimal is read at the nearest float: a range
+                        // check is a statement about magnitude, and leaving the case out would pass
+                        // every decimal column unchecked.
+                        | Decimal s -> DecimalText.tryToFloat s
                         | _ -> None
 
                     match v with

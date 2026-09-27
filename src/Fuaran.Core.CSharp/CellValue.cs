@@ -4,7 +4,10 @@
 //  Null/NA is a first-class case on the F# side, never a sentinel buried in the
 //  data — so it is a first-class factory here (`CellValue.Null`) rather than a
 //  nullable payload. `Date` / `Timestamp` carry their canonical ISO-8601 string,
-//  exactly as the wrapped model does; the facade adds no host `DateTime`.
+//  exactly as the wrapped model does; the facade adds no host `DateTime`. A decimal
+//  carries canonical decimal text on the same ground, and the facade adds no host
+//  `decimal`: `System.Decimal` has a range and a scale limit the wrapped value does
+//  not, so a conversion in either direction belongs to the caller who knows its data.
 // ============================================================================
 
 namespace Fuaran.Core.CSharp;
@@ -35,6 +38,26 @@ public sealed class CellValue : IEquatable<CellValue>
     public static CellValue Timestamp(string iso8601) =>
         new(Cell.NewTimestamp(Interop.NotNull(iso8601, nameof(iso8601))));
 
+    /// <summary>
+    /// An exact decimal cell, holding the canonical form of <paramref name="text"/>: an optional
+    /// <c>-</c>, digits, and an optional <c>.</c> followed by digits. No exponent, no separators.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="text"/> is not decimal text.</exception>
+    public static CellValue Decimal(string text) =>
+        TryDecimal(text, out var cell)
+            ? cell
+            : throw new ArgumentException("not decimal text: an optional '-', digits, and an optional '.' followed by digits", nameof(text));
+
+    /// <summary>
+    /// An exact decimal cell for <paramref name="text"/>, or <c>false</c> where it is not decimal text.
+    /// </summary>
+    public static bool TryDecimal(string text, out CellValue cell)
+    {
+        var canonical = DecimalText.tryCanonical(Interop.NotNull(text, nameof(text)));
+        cell = canonical is null ? Null : new CellValue(Cell.NewDecimal(canonical.Value));
+        return canonical is not null;
+    }
+
     /// <summary>The null / NA cell — the in-memory form of the wire's validity mask.</summary>
     public static CellValue Null { get; } = new(Cell.Null);
 
@@ -46,6 +69,7 @@ public sealed class CellValue : IEquatable<CellValue>
         Func<string, T> onStr,
         Func<string, T> onDate,
         Func<string, T> onTimestamp,
+        Func<string, T> onDecimal,
         Func<T> onNull
     ) =>
         _core.Tag switch
@@ -56,6 +80,7 @@ public sealed class CellValue : IEquatable<CellValue>
             Cell.Tags.Str => onStr(((Cell.Str)_core).Item),
             Cell.Tags.Date => onDate(((Cell.Date)_core).Item),
             Cell.Tags.Timestamp => onTimestamp(((Cell.Timestamp)_core).Item),
+            Cell.Tags.Decimal => onDecimal(((Cell.Decimal)_core).Item),
             Cell.Tags.Null => onNull(),
             _ => throw Interop.UnknownCase(nameof(Cell), _core.Tag),
         };
@@ -68,6 +93,7 @@ public sealed class CellValue : IEquatable<CellValue>
         Action<string> onStr,
         Action<string> onDate,
         Action<string> onTimestamp,
+        Action<string> onDecimal,
         Action onNull
     ) =>
         Match(
@@ -99,6 +125,11 @@ public sealed class CellValue : IEquatable<CellValue>
             v =>
             {
                 onTimestamp(v);
+                return true;
+            },
+            v =>
+            {
+                onDecimal(v);
                 return true;
             },
             () =>

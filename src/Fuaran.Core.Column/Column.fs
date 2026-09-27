@@ -22,6 +22,11 @@ type ColumnType =
     | StringType
     | DateType
     | TimestampType
+    /// An EXACT decimal (`0.33.0`): a value a `float` cannot hold without rounding, such as a sum of
+    /// money. Unparameterised — it carries no precision and no scale, because the text a cell
+    /// carries has exactly the digits it has. A host that maps it to a fixed-scale store type reads
+    /// the scale off the data or declares it in its own model.
+    | DecimalType
 
 /// A single realized scalar cell. Null/NA is a first-class case (`Null`), never a sentinel
 /// value buried in the data — the in-memory form of the wire's validity mask. `Date` /
@@ -35,6 +40,13 @@ type Cell =
     | Date of string
     | Timestamp of string
     | Null
+    /// An exact decimal, carried as its CANONICAL text (`DecimalText`): an optional `-`, the integer
+    /// digits with no leading zero, and a `.` with fraction digits only where the fraction is
+    /// non-zero, with no trailing zero — `0`, `12`, `-3.5`, `0.05`. No exponent, no separators.
+    /// Text for the reason `Date` is text: no host decimal type is the same type on every host, and
+    /// the digits are. Build one with `Cell.decimal`, which canonicalises; the codec does the same
+    /// on decode. Declared after `Null` so every case that was already published keeps its tag.
+    | Decimal of string
 
 /// A typed, null-aware column. `Cells` co-indexes with the table's rows; a `Null` cell is the
 /// validity-mask "absent" marker. `Type` is the declared column type; a present cell whose
@@ -83,6 +95,158 @@ type ColumnError =
     /// or a column whose `Type` disagrees with its schema entry) — `Table.validate` names the fault.
     | Malformed of detail: string
 
+/// Exact-decimal text (`0.33.0`) — the carrier of a `Decimal` cell, and the only arithmetic the
+/// column layer needs over it: a canonical form, an order, and a sum.
+///
+/// THE GRAMMAR READ is `-?[0-9]+(\.[0-9]+)?`: an optional minus, at least one integer digit, and a
+/// fraction of at least one digit where a point is written. That is what a database renders a
+/// fixed-scale value as (`12.50`), so leading zeros and trailing fraction zeros are READ and
+/// normalised away. A leading `+`, a bare point (`.5`, `5.`), an exponent, a separator and white
+/// space are refused: each has more than one reading somewhere, and the type exists to have one.
+///
+/// THE CANONICAL FORM WRITTEN has no leading zero on the integer part (a lone `0` stands for none),
+/// no trailing zero on the fraction, no point where the fraction is zero, and no sign on zero. Two
+/// texts denote one number exactly when their canonical forms are one string, so equality, grouping
+/// and distinctness over canonical cells are string equality and need no arithmetic.
+///
+/// Arbitrary precision: the digits are strings, so nothing here overflows or rounds. Pure, total,
+/// FSharp.Core only, Fable-clean — no host `decimal`, whose range and layout differ by host.
+[<RequireQualifiedAccess>]
+module DecimalText =
+
+    let private isDigits (s: string) : bool =
+        s.Length > 0 && s |> Seq.forall (fun c -> c >= '0' && c <= '9')
+
+    /// `(negative, integer digits, fraction digits)` with the zeros stripped — an empty digit
+    /// string is zero — or `None` for text outside the grammar.
+    let private parts (s: string) : (bool * string * string) option =
+        if isNull (box s) || s.Length = 0 then
+            None
+        else
+            let negative = s.[0] = '-'
+            let body = if negative then s.Substring 1 else s
+            let dot = body.IndexOf '.'
+
+            let wellFormed, ip, fp =
+                if dot < 0 then
+                    isDigits body, body, ""
+                else
+                    let ip = body.Substring(0, dot)
+                    let fp = body.Substring(dot + 1)
+                    isDigits ip && isDigits fp, ip, fp
+
+            if not wellFormed then
+                None
+            else
+                let ip = ip.TrimStart '0'
+                let fp = fp.TrimEnd '0'
+                let isZero = ip.Length = 0 && fp.Length = 0
+                Some(negative && not isZero, ip, fp)
+
+    let private render (negative: bool, ip: string, fp: string) : string =
+        (if negative then "-" else "")
+        + (if ip.Length = 0 then "0" else ip)
+        + (if fp.Length = 0 then "" else "." + fp)
+
+    /// Zero, in canonical form.
+    let zero: string = "0"
+
+    /// The canonical form of `s`, or `None` where `s` is not decimal text.
+    let tryCanonical (s: string) : string option = parts s |> Option.map render
+
+    /// True where `s` is decimal text already in canonical form.
+    let isCanonical (s: string) : bool = tryCanonical s = Some s
+
+    // Magnitudes are compared and combined as digit strings aligned at the point: the fractions
+    // padded to one scale on the right, the whole padded to one width on the left.
+    let private aligned (ia: string, fa: string) (ib: string, fb: string) : string * string * int =
+        let scale = max fa.Length fb.Length
+        let a = ia + fa.PadRight(scale, '0')
+        let b = ib + fb.PadRight(scale, '0')
+        let width = max a.Length b.Length
+        a.PadLeft(width, '0'), b.PadLeft(width, '0'), scale
+
+    let private sign (n: int) : int =
+        if n < 0 then -1
+        elif n > 0 then 1
+        else 0
+
+    let private digit (c: char) : int = int c - int '0'
+
+    // Digits are held as ints and rendered through `string`, the one conversion every host agrees on.
+    let private digitsText (digits: int[]) : string =
+        digits |> Array.map string |> String.concat ""
+
+    let private addMagnitudes (a: string) (b: string) : string =
+        let out = Array.zeroCreate<int> (a.Length + 1)
+        let mutable carry = 0
+
+        for i in a.Length - 1 .. -1 .. 0 do
+            let d = digit a.[i] + digit b.[i] + carry
+            out.[i + 1] <- d % 10
+            carry <- d / 10
+
+        out.[0] <- carry
+        digitsText out
+
+    /// `a - b` over aligned magnitudes with `a >= b`.
+    let private subMagnitudes (a: string) (b: string) : string =
+        let out = Array.zeroCreate<int> a.Length
+        let mutable borrow = 0
+
+        for i in a.Length - 1 .. -1 .. 0 do
+            let d = digit a.[i] - digit b.[i] - borrow
+
+            if d < 0 then
+                out.[i] <- d + 10
+                borrow <- 1
+            else
+                out.[i] <- d
+                borrow <- 0
+
+        digitsText out
+
+    /// The numeric order of two decimal texts as `-1` / `0` / `1`, or `None` where either is not
+    /// decimal text. Canonical or not: `1.50` and `1.5` compare equal.
+    let compare (a: string) (b: string) : int option =
+        match parts a, parts b with
+        | Some(na, ia, fa), Some(nb, ib, fb) ->
+            if na <> nb then
+                Some(if na then -1 else 1)
+            else
+                let ma, mb, _ = aligned (ia, fa) (ib, fb)
+                let magnitude = sign (System.String.CompareOrdinal(ma, mb))
+                Some(if na then -magnitude else magnitude)
+        | _ -> None
+
+    /// The exact sum of two decimal texts, in canonical form, or `None` where either is not decimal
+    /// text. Nothing is rounded and nothing overflows.
+    let add (a: string) (b: string) : string option =
+        match parts a, parts b with
+        | Some(na, ia, fa), Some(nb, ib, fb) ->
+            let ma, mb, scale = aligned (ia, fa) (ib, fb)
+
+            let negative, magnitude =
+                if na = nb then
+                    na, addMagnitudes ma mb
+                else
+                    match sign (System.String.CompareOrdinal(ma, mb)) with
+                    | 0 -> false, ""
+                    | c when c > 0 -> na, subMagnitudes ma mb
+                    | _ -> nb, subMagnitudes mb ma
+
+            let magnitude = magnitude.PadLeft(scale + 1, '0')
+            let ip = magnitude.Substring(0, magnitude.Length - scale)
+            let fp = magnitude.Substring(magnitude.Length - scale)
+            let isZero = (ip.TrimStart '0').Length = 0 && (fp.TrimEnd '0').Length = 0
+            Some(render (negative && not isZero, ip.TrimStart '0', fp.TrimEnd '0'))
+        | _ -> None
+
+    /// The nearest `float` to a decimal text, or `None` where it is not decimal text. This is the
+    /// one place the type rounds, and it is for the aggregates whose result is a `float` by
+    /// declaration (`Mean` / `Median` / `StdDev`); a value that must stay exact never comes through it.
+    let tryToFloat (s: string) : float option = tryCanonical s |> Option.map float
+
 module ColumnType =
 
     /// The canonical wire tag for a column type (the fixed scalar-set vocabulary).
@@ -94,9 +258,17 @@ module ColumnType =
         | StringType -> "string"
         | DateType -> "date"
         | TimestampType -> "timestamp"
+        | DecimalType -> "decimal"
 
     /// The full closed set of valid type tags — the `UnknownType` enumeration (and the encode order).
-    let all = [ IntType; FloatType; BoolType; StringType; DateType; TimestampType ]
+    let all =
+        [ IntType
+          FloatType
+          BoolType
+          StringType
+          DateType
+          TimestampType
+          DecimalType ]
 
     let allTags = all |> List.map tag
 
@@ -110,13 +282,27 @@ module ColumnType =
     /// promotes int operands to float). This is the single source of truth for "is a retype safe" — the
     /// schema-compatibility check and the codec/evaluator coercion agree by construction, not by a second
     /// rule-set.
+    ///
+    /// `Int → Decimal` is the second lossless promotion (`0.33.0`), and the codec agrees with it the
+    /// same way: `ColumnCodec.decodeCell` decodes a JSON int into a `DecimalType` column. `Float →
+    /// Decimal` is NOT a widening, in either direction: a float is an approximation and a decimal is
+    /// a statement of digits, so a retype between them changes what the column claims.
     let widens (from: ColumnType) (target: ColumnType) : bool =
-        from = target || (from = IntType && target = FloatType)
+        from = target
+        || (from = IntType && target = FloatType)
+        || (from = IntType && target = DecimalType)
 
 module Cell =
 
     /// Is the cell the null/NA marker?
     let isNull (c: Cell) : bool = c = Null
+
+    /// A `Decimal` cell holding the canonical form of `text`, or `None` where `text` is not decimal
+    /// text (`DecimalText`). The way to build one: every reader of a `Decimal` cell — the capture
+    /// key, the distinct token, the wire — takes the text as it finds it, so two cells are the same
+    /// value exactly when they were both built canonical.
+    let decimal (text: string) : Cell option =
+        DecimalText.tryCanonical text |> Option.map Decimal
 
     /// The column type a present cell carries (`None` for `Null`, which is type-agnostic).
     let typeOf (c: Cell) : ColumnType option =
@@ -127,6 +313,7 @@ module Cell =
         | Str _ -> Some StringType
         | Date _ -> Some DateType
         | Timestamp _ -> Some TimestampType
+        | Decimal _ -> Some DecimalType
         | Null -> None
 
     /// The type default a `Null` cell encodes as on the wire (the validity mask, not this
@@ -140,6 +327,7 @@ module Cell =
         | StringType -> Str ""
         | DateType -> Date ""
         | TimestampType -> Timestamp ""
+        | DecimalType -> Decimal DecimalText.zero
 
 /// A group/window aggregate function (Phase 36, lifted from the DataFrame evaluator's `GroupBy` so it
 /// is a public, single-source surface). `Count` is non-null count; `Sum` keeps the source numeric type;
@@ -202,6 +390,15 @@ module Column =
         match c with
         | Int i -> Some(float i)
         | Float f -> Some f
+        | Decimal s -> DecimalText.tryToFloat s
+        | _ -> None
+
+    /// A cell as exact-decimal text: a `Decimal`'s own, or an `Int`'s digits (the lossless
+    /// promotion `ColumnType.widens` pins). A `Float` is not one — see `widens`.
+    let private aggAsDecimal (c: Cell) : string option =
+        match c with
+        | Decimal s -> DecimalText.tryCanonical s
+        | Int i -> Some(string i)
         | _ -> None
 
     /// A total comparison between two present, same-family cells (`None` ⇒ incomparable). Identical to
@@ -211,6 +408,11 @@ module Column =
     let private aggCompare (a: Cell) (b: Cell) : int option =
         match a, b with
         | (Int _ | Float _), (Int _ | Float _) -> Some(compare (aggAsNum a) (aggAsNum b))
+        // An exact comparison, never through `float`: two decimals a float cannot tell apart are
+        // still ordered. A `Decimal` beside a `Float` is incomparable, as `widens` has it.
+        | (Decimal _ | Int _), (Decimal _ | Int _) ->
+            Option.map2 (fun x y -> DecimalText.compare x y) (aggAsDecimal a) (aggAsDecimal b)
+            |> Option.flatten
         | Bool x, Bool y -> Some(compare x y)
         | Str x, Str y -> Some(System.String.CompareOrdinal(x, y))
         | Date x, Date y -> Some(System.String.CompareOrdinal(x, y))
@@ -248,6 +450,10 @@ module Column =
         | Str s -> "s:" + s
         | Date s -> "d:" + s
         | Timestamp s -> "t:" + s
+        // `m`, the tag `Query.invocationKey` gives the same case. The text is taken as found, as a
+        // date's is: a cell built by `Cell.decimal` or decoded off the wire is canonical, and for
+        // those one number is one token.
+        | Decimal s -> "m:" + s
         | Null -> "n:"
 
     let private checkedSumInt (r: int64) : Result<Cell, AggregateError> =
@@ -280,6 +486,10 @@ module Column =
     /// check, so the result is host-deterministic. `Float` sums via the pinned `List.sum`.
     /// `CountDistinct` (Phase 101) counts distinct PRESENT values by the canonical `Distinct` token, so
     /// it never depends on a host's float equality.
+    ///
+    /// A `DecimalType` column is numeric (`0.33.0`). Its `Sum` is EXACT and is a `Decimal`; its
+    /// `Min`/`Max` compare exactly; its `Mean`/`Median`/`StdDev` are `float`, as `aggType` declares
+    /// for every source type, and are the nearest float to each value.
     let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
         let cells = col.Cells
         // Each branch reads the input once, on demand: only Count/CountDistinct/Min/Max need the
@@ -288,13 +498,14 @@ module Column =
             cells |> List.filter (fun c -> not (Cell.isNull c))
 
         let nums () = cells |> List.choose aggAsNum
-        let isNumeric = col.Type = IntType || col.Type = FloatType
+
+        let isNumeric = col.Type = IntType || col.Type = FloatType || col.Type = DecimalType
 
         let requireNumeric (k: unit -> Result<Cell, AggregateError>) =
             if isNumeric then
                 k ()
             else
-                Error(IncompatibleAggType(aggFnTag fn, ColumnType.tag col.Type, [ "int"; "float" ]))
+                Error(IncompatibleAggType(aggFnTag fn, ColumnType.tag col.Type, [ "int"; "float"; "decimal" ]))
 
         match fn with
         | Count -> Ok(Int(List.length (present ())))
@@ -313,14 +524,25 @@ module Column =
             )
         | Sum ->
             requireNumeric (fun () ->
-                let ns = nums ()
-
-                if List.isEmpty ns then
-                    Ok Null
-                elif col.Type = IntType then
-                    checkedSumInt (ns |> List.sumBy int64)
+                if col.Type = DecimalType then
+                    // Exact: the sum of a decimal column is the decimal it is, to the last digit, and
+                    // cannot overflow. It never passes through `float`.
+                    match cells |> List.choose aggAsDecimal with
+                    | [] -> Ok Null
+                    | first :: rest ->
+                        rest
+                        |> List.fold (fun acc d -> DecimalText.add acc d |> Option.defaultValue acc) first
+                        |> Decimal
+                        |> Ok
                 else
-                    Ok(Float(List.sum ns)))
+                    let ns = nums ()
+
+                    if List.isEmpty ns then
+                        Ok Null
+                    elif col.Type = IntType then
+                        checkedSumInt (ns |> List.sumBy int64)
+                    else
+                        Ok(Float(List.sum ns)))
         | Mean ->
             requireNumeric (fun () ->
                 let ns = nums ()
@@ -567,12 +789,16 @@ module ColumnCodec =
 
         match present, ty with
         | Int i, FloatType -> JFloat(float i)
+        | Int i, DecimalType -> JStr(string i)
         | Int i, _ -> JInt i
         | Float f, _ -> JFloat f
         | Bool b, _ -> JBool b
         | Str s, _ -> JStr s
         | Date s, _ -> JStr s
         | Timestamp s, _ -> JStr s
+        // A STRING on the wire, never a JSON number: a number token is read through a float by
+        // most parsers, and the digits are the value.
+        | Decimal s, _ -> JStr s
         | Null, _ -> JStr "" // unreachable (Null replaced above); defensive
 
     let private columnJson (c: Column) : JVal =
@@ -627,11 +853,33 @@ module ColumnCodec =
                     | Float f when System.Double.IsNegativeInfinity f -> Some(c.Name, "-Infinity")
                     | _ -> None))
 
+    let private notCanonicalDecimal (column: string) : ColumnError =
+        MalformedShape(
+            column
+            + ": a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
+        )
+
+    /// The first column holding a `Decimal` cell whose text is not canonical, or `None`. Such a cell
+    /// would encode to a string the decoder rewrites (`1.50` comes back as `1.5`) or refuses
+    /// (`abc`), so the value that went in is not the value that comes out.
+    let private firstNonCanonicalDecimal (src: DataSource) : string option =
+        match src with
+        | Ref _ -> None
+        | Embedded t ->
+            t.Columns
+            |> List.tryPick (fun c ->
+                c.Cells
+                |> List.tryPick (fun cell ->
+                    match cell with
+                    | Decimal s when not (DecimalText.isCanonical s) -> Some c.Name
+                    | _ -> None))
+
     /// Total, guarded encode (Phases 38 + 43). Rejects a structurally-malformed `Table`
     /// (`Table.validate`) and any non-finite `Float` cell with a typed `ColumnError` instead of silently
     /// emitting a `Table` that round-trips to a *different* value (extra/missing columns dropped) or
     /// un-decodable wire (`"NaN"` where a `JFloat` is expected). Over a well-formed, all-finite source it
-    /// is exactly `Ok (encode src)`.
+    /// is exactly `Ok (encode src)`. A `Decimal` cell whose text is not canonical is rejected on the
+    /// same ground (`0.33.0`).
     let tryEncode (src: DataSource) : Result<string, ColumnError> =
         let structural =
             match src with
@@ -642,7 +890,10 @@ module ColumnCodec =
         |> Result.bind (fun () ->
             match firstNonFinite src with
             | Some(col, tok) -> Error(NonFiniteFloat(col, tok))
-            | None -> Ok(encode src))
+            | None ->
+                match firstNonCanonicalDecimal src with
+                | Some col -> Error(notCanonicalDecimal col)
+                | None -> Ok(encode src))
 
     // ---- decode (`Json.parse` → six-code `ColumnError`) ----
 
@@ -704,6 +955,12 @@ module ColumnCodec =
     /// correct `"timestamp"` schema; unit by magnitude: ≥ 1e11 ⇒ milliseconds, else seconds —
     /// epoch-seconds stay below 1e11 until year 5138). Every other type requires its exact
     /// JSON kind.
+    ///
+    /// A decimal column (`0.33.0`) reads a STRING of decimal text and canonicalises it, so `12.50`
+    /// decodes to `Decimal "12.5"`; it reads an integer token, which is exact; and it REFUSES a
+    /// fractional number token as a `TypeMismatch`. That token has already been through a float by
+    /// the time it arrives here, and a type whose purpose is exactness cannot accept a value it
+    /// cannot vouch for. An emitter writes a decimal as a string.
     let private decodeCell (colName: string) (ty: ColumnType) (v: JVal) : Result<Cell, ColumnError> =
         let mismatch () =
             Error(TypeMismatch(colName, ColumnType.tag ty, kindName v))
@@ -724,6 +981,17 @@ module ColumnCodec =
         // parser's Int32 path and arrive as a whole-valued JFloat.
         | TimestampType, JInt i -> Ok(epochToIso (int64 i))
         | TimestampType, JFloat f when f = floor f && abs f < 9e15 -> Ok(epochToIso (int64 f))
+        | DecimalType, JInt i -> Ok(Decimal(string i))
+        | DecimalType, JStr s ->
+            match DecimalText.tryCanonical s with
+            | Some canonical -> Ok(Decimal canonical)
+            | None ->
+                Error(
+                    MalformedShape(
+                        colName
+                        + ": a decimal value must be decimal text — an optional '-', digits, and an optional '.' followed by digits, with no exponent, sign '+', separator or white space"
+                    )
+                )
         | _ -> mismatch ()
 
     let private decodeSchemaEntry (el: JVal) : Result<string * ColumnType, ColumnError> =
@@ -808,7 +1076,8 @@ module ColumnCodec =
     /// present cells. PINNED deterministic rules: all-int numerics ⇒ int, any
     /// fractional ⇒ float, all-bool ⇒ bool, all-string ⇒ string — **never**
     /// date/timestamp (temporal types require a declared schema; a date-looking
-    /// string stays a string). An empty column, or mixed kinds, is a
+    /// string stays a string), and never decimal, on the same ground: a column of
+    /// digit strings is a string column until a schema says otherwise. An empty column, or mixed kinds, is a
     /// DIDACTIC reject naming the explicit-schema remedy. (The Fuaran wire
     /// has no JSON null, so inference sees every value slot; masked-absent
     /// cells only ride the wrapped form.)

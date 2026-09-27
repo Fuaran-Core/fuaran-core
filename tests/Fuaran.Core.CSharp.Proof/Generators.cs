@@ -56,7 +56,7 @@ internal sealed partial class Gen
 
     internal CellValue Cell()
     {
-        switch (_cellCase++ % 7)
+        switch (_cellCase++ % 8)
         {
             case 0:
                 return CellValue.Int(Below(100) - 50);
@@ -70,6 +70,8 @@ internal sealed partial class Gen
                 return CellValue.Date($"2026-09-{(Below(27) + 1):00}");
             case 5:
                 return CellValue.Timestamp($"2026-09-{(Below(27) + 1):00}T00:00:00Z");
+            case 6:
+                return CellValue.Decimal($"{Below(2000) - 1000}.{Below(100):00}");
             default:
                 return CellValue.Null;
         }

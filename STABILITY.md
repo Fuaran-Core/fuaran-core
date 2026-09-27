@@ -247,7 +247,7 @@ its public surface carries the same 1.0 commitment as the witness spine, and its
 are **conformance-certified**, not asserted. Stable surfaces:
 
 - **The columnar model + wire codec** — the fixed Arrow scalar set (`int` / `float` / `bool` / `string`
-  / `date` / `timestamp`), the validity-mask null model, and `ColumnCodec`'s six-code decode envelope
+  / `date` / `timestamp`, and from `0.33.0` the exact `decimal`), the validity-mask null model, and `ColumnCodec`'s six-code decode envelope
   are the cross-host contract: two hosts encode a column to byte-identical wire (same null / coercion /
   ordering / **canonical-float** semantics — floats route through `Wire.Canon.canonicalFloat`, certified
   by `Conformance.canonicalFloatLaws`). Changing the scalar set, the null model, the codec envelope, or
@@ -2398,7 +2398,8 @@ C# facade's column half stay for the same reason. No surviving package's public 
   `PackageVersion` property, one per producing repository (for example `FuaranCoreVersion` for the
   spine and `FuaranCoreComputeVersion` for the four), because the two repositories version
   independently and one property spanning both can never be correct.
-- **A consumer of the spine only** raises `FuaranCoreVersion` to `0.33.0` and changes nothing else.
+- **A consumer of the spine only** raises `FuaranCoreVersion` to `0.33.0` and, for THIS move, changes
+  nothing else. The decimal entry below is a second move in the same slot and has a cost of its own.
 - **A consumer that references both** sees no compile change: the compute repository's `0.33.0` is
   built over this repository's `0.32.0` substrate, whose surface this slot does not move.
 
@@ -2420,6 +2421,62 @@ names one of the four ids.
   `Null` for an empty numeric input, int64 accumulation with the int32 range check, `Median` by sort,
   `CountDistinct` by the distinct token, `Min`/`Max` keeping the first of an incomparable pair, and
   `First`/`Last` including a `Null`. It costs a consumer nothing.
+
+### An exact decimal in the column model (DECISIONS.md D72) — BREAKING, `union-widening`
+
+**What changed.** The scalar set gains `decimal`: `ColumnType.DecimalType` and `Cell.Decimal of
+string`, the cell carrying canonical decimal text (`0`, `12`, `-3.5`, `0.05`). Both are declared last
+in their unions, `Decimal` after `Null`, so every case already published keeps its tag. Beside them:
+
+- **`DecimalText`** — `tryCanonical`, `isCanonical`, `compare`, `add`, `tryToFloat`, `zero`. Exact,
+  arbitrary precision, FSharp.Core only.
+- **`Cell.decimal`** — the constructor, which canonicalises and answers `None` for text that is not
+  decimal.
+- **`ColumnType.widens`** — `int → decimal` is a safe widening. `float` and `decimal` are not
+  interchangeable in either direction.
+- **`Column.aggregate`** — a decimal column is numeric. `Sum` is exact and is a `Decimal`; `Min` and
+  `Max` compare exactly; `Mean`, `Median` and `StdDev` are `float`, as `aggType` declares. The
+  `expected` list an `IncompatibleAggType` carries is now `int`, `float`, `decimal`.
+- **`ColumnCodec`** — a decimal is a JSON **string** on the wire. Decode canonicalises the text
+  (`12.50` reads as `12.5`), reads an integer token, and refuses a fractional number token as a
+  `TypeMismatch` and text that is not decimal as a `MalformedShape`. `tryEncode` refuses a `Decimal`
+  cell whose text is not canonical. Schema inference never infers `decimal`.
+- **`Query`** — a parameter or a result column may be declared `decimal`, and the capture key tags a
+  decimal binding `m`.
+- **`ColumnValidator.inRange`** — reads a decimal at its nearest float, against its float bounds.
+- **The C# facade** — `ColumnKind.Decimal`, `CellValue.Decimal`, `CellValue.TryDecimal`, and an
+  `onDecimal` argument on `CellValue.Match` and `CellValue.Switch`, before `onNull`.
+
+**What adopting it costs.**
+
+- **Every exhaustive `match` over `Cell` or `ColumnType` stops compiling** until it names the new
+  case. That is the intent of a closed union, and it is the whole of the cost for an F# consumer that
+  does not use the type.
+- **Every C# call of `CellValue.Match` or `CellValue.Switch`** gains one argument. Named arguments
+  stop compiling with a message naming `onDecimal`; positional ones stop compiling on the arity.
+- **A host in another language** mirrors the type when it raises: the tag `decimal`, the canonical
+  form, the string on the wire, the refusal of a fractional number token, and the capture-key tag
+  `m`. Until it does, a document carrying a decimal column is an `UnknownType` to it, which is the
+  refusal that host already makes for any tag it does not know.
+- **A test that used `"decimal"` as its example of an unknown type tag** needs another example.
+  This repository's own suite did.
+- **Nothing on the wire changes for a document that carries no decimal.** Every existing document
+  encodes to the bytes it encoded to before.
+
+**What the surface gate printed.** Measured on this change, before the baselines were regenerated:
+`Fuaran.Core.Column — union-widening (13 move(s))` and `Fuaran.Core.CSharp — retype (5 move(s))` on the
+managed surface; `Fuaran.Core.Column additive, 2 move(s)` and `Fuaran.Core.Query additive, 6 move(s)` on
+the wire surface. Four baselines moved with the change: `api/Fuaran.Core.Column.txt`,
+`api/Fuaran.Core.CSharp.txt`, `api/wire/Fuaran.Core.Column.txt` and `api/wire/Fuaran.Core.Query.txt`.
+The wire class is `additive` and the managed class is breaking, so the move rides this slot, which is
+untagged and already breaking, and advances nothing.
+
+**What is NOT yet checked, stated rather than assumed.** `proofs/Query.fst` carries the new case, and
+the committed extraction `proofs/oracle/Query.fs` was brought into line by hand. The differential
+families in the ordinary suite run green against it. **The proof leg itself has not been run over
+this change**, so until `proofs/check.ps1` is green on it the `Query` model's theorems are unchecked
+over the new case and the extraction is unconfirmed against a fresh one. A release of this slot
+waits on that run, and on the Fable gate every cut cites.
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 

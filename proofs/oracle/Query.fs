@@ -85,6 +85,7 @@ type column_type =
 | StringType
 | DateType
 | TimestampType
+| DecimalType
 
 
 let uu___is_IntType : column_type  ->  Prims.bool = (fun ( projectee  :  column_type ) -> (match (projectee) with
@@ -140,6 +141,15 @@ let uu___is_TimestampType : column_type  ->  Prims.bool = (fun ( projectee  :  c
      false
      end))
 
+
+let uu___is_DecimalType : column_type  ->  Prims.bool = (fun ( projectee  :  column_type ) -> (match (projectee) with
+| DecimalType -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
 type cell =
 | Int of Prims.int
 | Float of Prims.string
@@ -148,6 +158,7 @@ type cell =
 | Date of Prims.string
 | Timestamp of Prims.string
 | Null
+| Decimal of Prims.string
 
 
 let uu___is_Int : cell  ->  Prims.bool = (fun ( projectee  :  cell ) -> (match (projectee) with
@@ -246,6 +257,21 @@ let uu___is_Null : cell  ->  Prims.bool = (fun ( projectee  :  cell ) -> (match 
      end
 | uu___ -> begin
      false
+     end))
+
+
+let uu___is_Decimal : cell  ->  Prims.bool = (fun ( projectee  :  cell ) -> (match (projectee) with
+| Decimal (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Decimal__item___0 : cell  ->  Prims.string = (fun ( projectee  :  cell ) -> (match (projectee) with
+| Decimal (_0) -> begin
+     _0
      end))
 
 type host_effect =
@@ -593,6 +619,9 @@ let cell_type : cell  ->  FStar_Pervasives_Native.option<column_type> = (fun ( c
 | Timestamp (uu___) -> begin
      FStar_Pervasives_Native.Some (TimestampType)
      end
+| Decimal (uu___) -> begin
+     FStar_Pervasives_Native.Some (DecimalType)
+     end
 | Null -> begin
      FStar_Pervasives_Native.None
      end))
@@ -667,6 +696,9 @@ let cell_tag : cell  ->  Prims.string = (fun ( c  :  cell ) -> (match (c) with
 | Timestamp (uu___) -> begin
      "t"
      end
+| Decimal (uu___) -> begin
+     "m"
+     end
 | Null -> begin
      "n"
      end))
@@ -694,6 +726,9 @@ if v then begin
      v
      end
 | Timestamp (v) -> begin
+     v
+     end
+| Decimal (v) -> begin
      v
      end
 | Null -> begin

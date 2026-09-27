@@ -14,14 +14,16 @@ let private sampleTable: Table =
           "b", BoolType
           "s", StringType
           "d", DateType
-          "t", TimestampType ]
+          "t", TimestampType
+          "m", DecimalType ]
       Columns =
         [ Column.create "i" IntType [ Int 1; Null; Int -42 ]
           Column.create "f" FloatType [ Float 0.1; Float(1.0 / 3.0); Null ]
           Column.create "b" BoolType [ Bool true; Null; Bool false ]
           Column.create "s" StringType [ Str "a\"b"; Str ""; Null ]
           Column.create "d" DateType [ Date "2026-06-22"; Null; Date "1970-01-01" ]
-          Column.create "t" TimestampType [ Timestamp "2026-06-22T17:00:00Z"; Null; Timestamp "2000-01-01T00:00:00Z" ] ] }
+          Column.create "t" TimestampType [ Timestamp "2026-06-22T17:00:00Z"; Null; Timestamp "2000-01-01T00:00:00Z" ]
+          Column.create "m" DecimalType [ Decimal "12.5"; Null; Decimal "-0.05" ] ] }
 
 let private sample = Embedded sampleTable
 
@@ -48,9 +50,18 @@ let private genSource (seed: int) : DataSource =
             | StringType -> Str("v" + string i + "\\\n")
             | DateType -> Date("20" + string (10 + pick 80) + "-01-15")
             | TimestampType -> Timestamp("20" + string (10 + pick 80) + "-01-15T12:00:00Z")
+            // Canonical by construction: an integer part as `string` lays it out, and a fraction
+            // that does not end in zero.
+            | DecimalType -> Decimal(string (pick 2000 - 1000) + "." + string (pick 90) + string (1 + pick 9))
 
     let types =
-        [ IntType; FloatType; BoolType; StringType; DateType; TimestampType ]
+        [ IntType
+          FloatType
+          BoolType
+          StringType
+          DateType
+          TimestampType
+          DecimalType ]
         |> List.filter (fun _ -> pick 2 = 0)
         |> function
             | [] -> [ IntType ]
@@ -239,8 +250,8 @@ let tests =
 
           testCase "UnknownType — a type tag outside the fixed set, with the enumeration"
           <| fun _ ->
-              match ColumnCodec.decode """{"schema":[{"name":"x","type":"decimal"}],"columns":{}}""" with
-              | Error(UnknownType("decimal", expected)) ->
+              match ColumnCodec.decode """{"schema":[{"name":"x","type":"money"}],"columns":{}}""" with
+              | Error(UnknownType("money", expected)) ->
                   Expect.equal expected ColumnType.allTags "enumerates the valid tags"
               | other -> failtestf "expected UnknownType, got %A" other
 
@@ -292,7 +303,7 @@ let tests =
                       Tag = "ref" }
                     { Name = "bad-type"
                       Kind = Corpus.Reject
-                      Json = """{"schema":[{"name":"x","type":"decimal"}],"columns":{}}"""
+                      Json = """{"schema":[{"name":"x","type":"money"}],"columns":{}}"""
                       Tag = "reject" } ]
 
               let outcomes = Corpus.runCorpus ColumnCodec.codec cases
@@ -492,7 +503,7 @@ let tests =
 
               match Column.aggregate Sum strs with
               | Error(IncompatibleAggType("sum", "string", expected)) ->
-                  Expect.equal expected [ "int"; "float" ] "enumerates numeric types"
+                  Expect.equal expected [ "int"; "float"; "decimal" ] "enumerates numeric types"
               | other -> failtestf "expected IncompatibleAggType, got %A" other
 
           testCase "Column.aggregate Sum overflow is a named AggregateOverflow"
@@ -501,4 +512,216 @@ let tests =
 
               match Column.aggregate Sum big with
               | Error(AggregateOverflow _) -> ()
-              | other -> failtestf "expected AggregateOverflow, got %A" other ]
+              | other -> failtestf "expected AggregateOverflow, got %A" other
+
+          // ---- the exact decimal (0.33.0) ----
+
+          testCase "DecimalText.tryCanonical normalises what a database renders and refuses the rest"
+          <| fun _ ->
+              let canon = DecimalText.tryCanonical
+              Expect.equal (canon "12.50") (Some "12.5") "a fixed-scale rendering loses its trailing zero"
+              Expect.equal (canon "007") (Some "7") "leading zeros go"
+              Expect.equal (canon "0.00") (Some "0") "zero has one spelling"
+              Expect.equal (canon "-0.0") (Some "0") "and no sign"
+              Expect.equal (canon "-0.050") (Some "-0.05") "a negative fraction keeps its sign"
+
+              Expect.equal
+                  (canon "12345678901234567890.123456789")
+                  (Some "12345678901234567890.123456789")
+                  "there is no precision limit"
+
+              for bad in
+                  [ ""
+                    "-"
+                    "."
+                    ".5"
+                    "5."
+                    "+1"
+                    "1e3"
+                    "1,000"
+                    " 1"
+                    "1 "
+                    "1.2.3"
+                    "--1"
+                    "0x10"
+                    "NaN" ] do
+                  Expect.equal (canon bad) None (sprintf "'%s' is not decimal text" bad)
+
+              Expect.isTrue (DecimalText.isCanonical "12.5") "a canonical text says so"
+              Expect.isFalse (DecimalText.isCanonical "12.50") "and a non-canonical one does not"
+
+          testCase "DecimalText.compare orders by value, exactly"
+          <| fun _ ->
+              Expect.equal (DecimalText.compare "1.50" "1.5") (Some 0) "two spellings of one number are equal"
+              Expect.equal (DecimalText.compare "-2" "1") (Some -1) "a negative is below a positive"
+              Expect.equal (DecimalText.compare "10" "9.999") (Some 1) "magnitude is by place, not by text"
+              Expect.equal (DecimalText.compare "-10" "-9.999") (Some -1) "and reverses under the sign"
+              Expect.equal (DecimalText.compare "0" "-0.0") (Some 0) "zero has no sign"
+
+              Expect.equal
+                  (DecimalText.compare "0.10000000000000000001" "0.1")
+                  (Some 1)
+                  "two values one float holds are still ordered"
+
+              Expect.equal (DecimalText.compare "abc" "1") None "text that is not decimal has no order"
+
+          testCase "DecimalText.add is exact"
+          <| fun _ ->
+              Expect.equal (DecimalText.add "0.1" "0.2") (Some "0.3") "the sum a float gets wrong"
+              Expect.equal (DecimalText.add "99.99" "0.01") (Some "100") "a carry through the point"
+              Expect.equal (DecimalText.add "999" "1") (Some "1000") "a carry that widens"
+              Expect.equal (DecimalText.add "1000" "-1") (Some "999") "a borrow that narrows"
+              Expect.equal (DecimalText.add "1" "-1") (Some "0") "cancellation is an unsigned zero"
+              Expect.equal (DecimalText.add "-0.5" "0.25") (Some "-0.25") "the larger magnitude's sign wins"
+              Expect.equal (DecimalText.add "0.25" "-0.5") (Some "-0.25") "in either order"
+              Expect.equal (DecimalText.add "-1.5" "-2.5") (Some "-4") "two negatives add magnitudes"
+
+              Expect.equal
+                  (DecimalText.add "12345678901234567890" "0.000000000000000000001")
+                  (Some "12345678901234567890.000000000000000000001")
+                  "nothing is rounded, at any scale"
+
+              Expect.equal (DecimalText.add "x" "1") None "text that is not decimal has no sum"
+
+          testCase "DecimalText.add and compare agree with integer arithmetic over a sample"
+          <| fun _ ->
+              // Scaled by 1000, so the expected value is integer arithmetic and the check is exact.
+              let render (n: int64) =
+                  let sign = if n < 0L then "-" else ""
+                  let m = abs n
+                  sign + string (m / 1000L) + "." + (string (m % 1000L)).PadLeft(3, '0')
+
+              let mutable st = 12345u
+
+              let next () =
+                  st <- (st * 1664525u) + 1013904223u
+                  int64 (st >>> 8) % 2000001L - 1000000L
+
+              for _ in 1..500 do
+                  let a = next ()
+                  let b = next ()
+
+                  Expect.equal
+                      (DecimalText.add (render a) (render b))
+                      (DecimalText.tryCanonical (render (a + b)))
+                      (sprintf "%s + %s" (render a) (render b))
+
+                  Expect.equal
+                      (DecimalText.compare (render a) (render b))
+                      (Some(compare a b))
+                      (sprintf "%s vs %s" (render a) (render b))
+
+          testCase "Cell.decimal canonicalises, and refuses text that is not decimal"
+          <| fun _ ->
+              Expect.equal (Cell.decimal "12.50") (Some(Decimal "12.5")) "canonical on the way in"
+              Expect.equal (Cell.decimal "1e3") None "an exponent is not decimal text"
+              Expect.equal (Cell.typeOf (Decimal "1")) (Some DecimalType) "the cell carries its type"
+
+          testCase "a decimal column is strings on the wire, and decodes canonical"
+          <| fun _ ->
+              let json =
+                  """{"schema":[{"name":"m","type":"decimal"}],"columns":{"m":{"values":["12.50","0","-3"],"validity":[true,false,true]}}}"""
+
+              match ColumnCodec.decode json with
+              | Ok(Embedded t) ->
+                  let m = Table.tryColumn "m" t |> Option.get
+                  Expect.equal m.Type DecimalType "the declared type"
+                  Expect.equal m.Cells [ Decimal "12.5"; Null; Decimal "-3" ] "canonical cells, the masked one Null"
+
+                  let again = ColumnCodec.encode (Embedded t)
+                  Expect.stringContains again "\"12.5\"" "a decimal is emitted as a string"
+
+                  Expect.equal
+                      (ColumnCodec.tryEncode (Embedded t))
+                      (Ok again)
+                      "the guarded encode agrees over canonical cells"
+              | other -> failtestf "unexpected: %A" other
+
+          testCase "a decimal column accepts an integer token and refuses a fractional number token"
+          <| fun _ ->
+              let withValues (values: string) =
+                  """{"schema":[{"name":"m","type":"decimal"}],"columns":{"m":{"values":["""
+                  + values
+                  + """],"validity":[true]}}}"""
+
+              match ColumnCodec.decode (withValues "3") with
+              | Ok(Embedded t) ->
+                  Expect.equal (Table.tryColumn "m" t |> Option.get).Cells [ Decimal "3" ] "an integer is exact"
+              | other -> failtestf "unexpected: %A" other
+
+              match ColumnCodec.decode (withValues "3.5") with
+              | Error(TypeMismatch("m", "decimal", "float")) -> ()
+              | other -> failtestf "expected TypeMismatch, got %A" other
+
+              match ColumnCodec.decode (withValues "\"1e3\"") with
+              | Error(MalformedShape _) -> ()
+              | other -> failtestf "expected MalformedShape, got %A" other
+
+          testCase "schema inference never infers decimal"
+          <| fun _ ->
+              match ColumnCodec.decode """{"columns":{"m":["12.50","3"]}}""" with
+              | Ok(Embedded t) -> Expect.equal t.Schema [ "m", StringType ] "digit strings are strings"
+              | other -> failtestf "unexpected: %A" other
+
+          testCase "tryEncode rejects a decimal cell that is not canonical"
+          <| fun _ ->
+              let build (text: string) =
+                  Embedded
+                      { Schema = [ "m", DecimalType ]
+                        Columns = [ Column.create "m" DecimalType [ Decimal text ] ] }
+
+              for text in [ "1.50"; "abc"; "01" ] do
+                  match ColumnCodec.tryEncode (build text) with
+                  | Error(MalformedShape _) -> ()
+                  | other -> failtestf "expected MalformedShape for '%s', got %A" text other
+
+          testCase "Column.aggregate over a decimal column: an exact Sum, exact Min and Max, a float Mean"
+          <| fun _ ->
+              let col =
+                  Column.create "m" DecimalType [ Decimal "0.1"; Decimal "0.2"; Null; Decimal "-5" ]
+
+              Expect.equal (Column.aggregate Sum col) (Ok(Decimal "-4.7")) "Sum is exact and is a decimal"
+              Expect.equal (Column.aggregate Min col) (Ok(Decimal "-5")) "Min compares by value"
+              Expect.equal (Column.aggregate Max col) (Ok(Decimal "0.2")) "Max compares by value"
+              Expect.equal (Column.aggregate Count col) (Ok(Int 3)) "Count skips the null"
+              Expect.equal (Column.aggregate CountDistinct col) (Ok(Int 3)) "three distinct values"
+
+              Expect.equal
+                  (Column.aggregate Mean col)
+                  (Ok(Float(List.sum [ 0.1; 0.2; -5.0 ] / 3.0)))
+                  "Mean is the float mean of the nearest floats"
+
+              Expect.equal (Column.aggType Sum DecimalType) DecimalType "Sum keeps the source type"
+              Expect.equal (Column.aggType Mean DecimalType) FloatType "Mean is a float"
+
+              Expect.equal
+                  (Column.aggregate Sum (Column.create "m" DecimalType [ Null; Null ]))
+                  (Ok Null)
+                  "Sum of all-null is Null"
+
+              // Ten tenths: the float sum is 0.9999999999999999.
+              let tenths = Column.create "m" DecimalType (List.replicate 10 (Decimal "0.1"))
+              Expect.equal (Column.aggregate Sum tenths) (Ok(Decimal "1")) "ten tenths are one"
+
+          testCase "int→decimal is a safe widening; float and decimal are not interchangeable"
+          <| fun _ ->
+              Expect.isTrue (ColumnType.widens IntType DecimalType) "an int is exactly a decimal"
+              Expect.isFalse (ColumnType.widens FloatType DecimalType) "a float is an approximation"
+              Expect.isFalse (ColumnType.widens DecimalType FloatType) "and a decimal is not one"
+              Expect.isFalse (ColumnType.widens DecimalType IntType) "narrowing is not a widening"
+
+              let widened = Schema.diff [ "a", IntType ] [ "a", DecimalType ]
+              Expect.equal (Schema.classify [ "a" ] widened) Compatible "int→decimal is compatible"
+
+              match Schema.classify [ "a" ] (Schema.diff [ "a", FloatType ] [ "a", DecimalType ]) with
+              | Breaking reasons -> Expect.isNonEmpty reasons "float→decimal names a reason"
+              | other -> failtestf "expected Breaking, got %A" other
+
+          testCase "the type tag set names decimal, last"
+          <| fun _ ->
+              Expect.equal
+                  ColumnType.allTags
+                  [ "int"; "float"; "bool"; "string"; "date"; "timestamp"; "decimal" ]
+                  "the closed set, in encode order"
+
+              Expect.equal (ColumnType.ofTag "decimal") (Some DecimalType) "the tag resolves" ]

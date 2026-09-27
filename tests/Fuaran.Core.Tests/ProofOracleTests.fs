@@ -7894,6 +7894,7 @@ let private qColToModel (t: ColumnType) : ModelQuery.column_type =
     | StringType -> ModelQuery.StringType
     | DateType -> ModelQuery.DateType
     | TimestampType -> ModelQuery.TimestampType
+    | DecimalType -> ModelQuery.DecimalType
 
 let private qColTag (t: ColumnType) : string =
     match t with
@@ -7903,6 +7904,7 @@ let private qColTag (t: ColumnType) : string =
     | StringType -> "string"
     | DateType -> "date"
     | TimestampType -> "timestamp"
+    | DecimalType -> "decimal"
 
 let private qModelColTag (t: ModelQuery.column_type) : string =
     match t with
@@ -7912,6 +7914,7 @@ let private qModelColTag (t: ModelQuery.column_type) : string =
     | ModelQuery.StringType -> "string"
     | ModelQuery.DateType -> "date"
     | ModelQuery.TimestampType -> "timestamp"
+    | ModelQuery.DecimalType -> "decimal"
 
 let private qCellToModel (c: Cell) : ModelQuery.cell =
     match c with
@@ -7921,6 +7924,7 @@ let private qCellToModel (c: Cell) : ModelQuery.cell =
     | Cell.Str v -> ModelQuery.Str v
     | Cell.Date v -> ModelQuery.Date v
     | Cell.Timestamp v -> ModelQuery.Timestamp v
+    | Cell.Decimal v -> ModelQuery.Decimal v
     | Cell.Null -> ModelQuery.Null
 
 let private qArgsToModel (args: (string * Cell) list) : ModelQuery.arguments =
@@ -8117,7 +8121,13 @@ let private queryIdPool = [ "q-a"; "q-b"; "q-c" ]
 let private queryParamNamePool = [ "p0"; "p1"; "p2"; "when" ]
 
 let private queryTypePool =
-    [ IntType; FloatType; BoolType; StringType; DateType; TimestampType ]
+    [ IntType
+      FloatType
+      BoolType
+      StringType
+      DateType
+      TimestampType
+      DecimalType ]
 
 /// A present cell of the given type, from a small pool that reaches the key's edges: a negative
 /// and an extreme int, a negative zero and an exponent-form float, a string that SPELLS a binding
@@ -8142,6 +8152,12 @@ let private genCellOf (t: ColumnType) (r: ConfRng.T) : Cell * ConfRng.T =
     | TimestampType ->
         let v, r1 = ConfRng.choose [ "2026-09-20T00:00:00Z"; "1970-01-01T00:00:00Z" ] r
         Cell.Timestamp v, r1
+    | DecimalType ->
+        // A zero, a negative, a fraction a float cannot hold, and one longer than any host decimal.
+        let v, r1 =
+            ConfRng.choose [ "0"; "-3.5"; "0.1"; "12345678901234567890123456789012345.000000000001" ] r
+
+        Cell.Decimal v, r1
 
 /// A declaration: up to three params, names drawn WITH replacement, any type, either
 /// requiredness; every determinism source reached.

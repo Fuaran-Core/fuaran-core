@@ -136,9 +136,13 @@ type column_type =
   | StringType
   | DateType
   | TimestampType
+  | DecimalType
 
 (* F#: `Cell`. A float crosses as an opaque carrier — the seam reads its TYPE and hands the
-   carrier to the float renderer, and nothing else. *)
+   carrier to the float renderer, and nothing else. A decimal's carrier is its text, which is
+   what the F# cell holds too: the seam reads it as it stands, exactly as it reads a date's. The
+   F# declares `Decimal` after `Null`, so that the published cases keep their tags; the order of
+   the cases is nothing any clause here reads. *)
 type cell =
   | Int       : int -> cell
   | Float     : string -> cell
@@ -147,6 +151,7 @@ type cell =
   | Date      : string -> cell
   | Timestamp : string -> cell
   | Null      : cell
+  | Decimal   : string -> cell
 
 (* F#: `HostEffect`. *)
 type host_effect =
@@ -207,6 +212,7 @@ let cell_type (c:cell) : Tot (option column_type) =
   | Str _ -> Some StringType
   | Date _ -> Some DateType
   | Timestamp _ -> Some TimestampType
+  | Decimal _ -> Some DecimalType
   | Null -> None
 
 (* F#: `Effect.determinismTag`. *)
@@ -245,6 +251,7 @@ let cell_tag (c:cell) : Tot string =
   | Str _ -> "s"
   | Date _ -> "d"
   | Timestamp _ -> "t"
+  | Decimal _ -> "m"
   | Null -> "n"
 
 (* F#: `Query.cellFields`, second component — the cell's scalar rendering. *)
@@ -256,6 +263,7 @@ let cell_payload (rn:renderers) (c:cell) : Tot string =
   | Str v -> v
   | Date v -> v
   | Timestamp v -> v
+  | Decimal v -> v
   | Null -> ""
 
 (* F#: `List.sortBy fst`'s insertion step — a STABLE sort, so a binding lands before the first

@@ -21,6 +21,7 @@ field Fuaran.Core.AggregateError+Tags.AggregateOverflow : System.Int32 (literal)
 field Fuaran.Core.AggregateError+Tags.IncompatibleAggType : System.Int32 (literal)
 field Fuaran.Core.Cell+Tags.Bool : System.Int32 (literal)
 field Fuaran.Core.Cell+Tags.Date : System.Int32 (literal)
+field Fuaran.Core.Cell+Tags.Decimal : System.Int32 (literal)
 field Fuaran.Core.Cell+Tags.Float : System.Int32 (literal)
 field Fuaran.Core.Cell+Tags.Int : System.Int32 (literal)
 field Fuaran.Core.Cell+Tags.Null : System.Int32 (literal)
@@ -36,6 +37,7 @@ field Fuaran.Core.ColumnError+Tags.TypeMismatch : System.Int32 (literal)
 field Fuaran.Core.ColumnError+Tags.UnknownType : System.Int32 (literal)
 field Fuaran.Core.ColumnType+Tags.BoolType : System.Int32 (literal)
 field Fuaran.Core.ColumnType+Tags.DateType : System.Int32 (literal)
+field Fuaran.Core.ColumnType+Tags.DecimalType : System.Int32 (literal)
 field Fuaran.Core.ColumnType+Tags.FloatType : System.Int32 (literal)
 field Fuaran.Core.ColumnType+Tags.IntType : System.Int32 (literal)
 field Fuaran.Core.ColumnType+Tags.StringType : System.Int32 (literal)
@@ -45,6 +47,7 @@ field Fuaran.Core.DataSource+Tags.Ref : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Breaking : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Compatible : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Unknown : System.Int32 (literal)
+method Fuaran.Core.CellModule.decimal(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Cell>
 method Fuaran.Core.CellModule.defaultFor(Fuaran.Core.ColumnType) : Fuaran.Core.Cell
 method Fuaran.Core.CellModule.isNull(Fuaran.Core.Cell) : System.Boolean
 method Fuaran.Core.CellModule.typeOf(Fuaran.Core.Cell) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ColumnType>
@@ -62,6 +65,11 @@ method Fuaran.Core.ColumnModule.length(Fuaran.Core.Column) : System.Int32
 method Fuaran.Core.ColumnTypeModule.ofTag(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ColumnType>
 method Fuaran.Core.ColumnTypeModule.tag(Fuaran.Core.ColumnType) : System.String
 method Fuaran.Core.ColumnTypeModule.widens(Fuaran.Core.ColumnType, Fuaran.Core.ColumnType) : System.Boolean
+method Fuaran.Core.DecimalText.add(System.String, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+method Fuaran.Core.DecimalText.compare(System.String, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
+method Fuaran.Core.DecimalText.isCanonical(System.String) : System.Boolean
+method Fuaran.Core.DecimalText.tryCanonical(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+method Fuaran.Core.DecimalText.tryToFloat(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Double>
 method Fuaran.Core.SchemaModule.classify(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.SchemaDelta) : Fuaran.Core.SchemaCompat
 method Fuaran.Core.SchemaModule.diff(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>) : Fuaran.Core.SchemaDelta
 method Fuaran.Core.SchemaModule.fingerprint(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>) : System.String
@@ -72,6 +80,7 @@ method Fuaran.Core.TableModule.validate(Fuaran.Core.Table) : Microsoft.FSharp.Co
 property Fuaran.Core.ColumnCodec.codec : Fuaran.Core.Corpus+Codec`1<Fuaran.Core.DataSource> { get }
 property Fuaran.Core.ColumnTypeModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ColumnType> { get }
 property Fuaran.Core.ColumnTypeModule.allTags : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
+property Fuaran.Core.DecimalText.zero : System.String { get }
 property Fuaran.Core.TableModule.empty : Fuaran.Core.Table { get }
 record-field Fuaran.Core.Column.Cells #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>
 record-field Fuaran.Core.Column.Name #0 : System.String
@@ -91,6 +100,7 @@ type Fuaran.Core.AggregateError+Tags (type)
 type Fuaran.Core.Cell (union)
 type Fuaran.Core.Cell+Bool (type)
 type Fuaran.Core.Cell+Date (type)
+type Fuaran.Core.Cell+Decimal (type)
 type Fuaran.Core.Cell+Float (type)
 type Fuaran.Core.Cell+Int (type)
 type Fuaran.Core.Cell+Str (type)
@@ -117,6 +127,7 @@ type Fuaran.Core.DataSource (union)
 type Fuaran.Core.DataSource+Embedded (type)
 type Fuaran.Core.DataSource+Ref (type)
 type Fuaran.Core.DataSource+Tags (type)
+type Fuaran.Core.DecimalText (module)
 type Fuaran.Core.SchemaCompat (union)
 type Fuaran.Core.SchemaCompat+Breaking (type)
 type Fuaran.Core.SchemaCompat+Tags (type)
@@ -139,6 +150,7 @@ union-case Fuaran.Core.AggregateError.NewAggregateOverflow #1(detail: System.Str
 union-case Fuaran.Core.AggregateError.NewIncompatibleAggType #0(fn: System.String, colType: System.String, expected: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Cell.NewBool #2(Item: System.Boolean)
 union-case Fuaran.Core.Cell.NewDate #4(Item: System.String)
+union-case Fuaran.Core.Cell.NewDecimal #7(Item: System.String)
 union-case Fuaran.Core.Cell.NewFloat #1(Item: System.Double)
 union-case Fuaran.Core.Cell.NewInt #0(Item: System.Int32)
 union-case Fuaran.Core.Cell.NewStr #3(Item: System.String)
@@ -154,6 +166,7 @@ union-case Fuaran.Core.ColumnError.NewTypeMismatch #4(column: System.String, exp
 union-case Fuaran.Core.ColumnError.NewUnknownType #3(got: System.String, expected: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.ColumnType.BoolType #2()
 union-case Fuaran.Core.ColumnType.DateType #4()
+union-case Fuaran.Core.ColumnType.DecimalType #6()
 union-case Fuaran.Core.ColumnType.FloatType #1()
 union-case Fuaran.Core.ColumnType.IntType #0()
 union-case Fuaran.Core.ColumnType.StringType #3()

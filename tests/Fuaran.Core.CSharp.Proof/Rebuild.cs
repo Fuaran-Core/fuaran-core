@@ -24,6 +24,7 @@ internal static partial class Rebuild
             onStr: x => CellValue.Str(x),
             onDate: x => CellValue.Date(x),
             onTimestamp: x => CellValue.Timestamp(x),
+            onDecimal: x => CellValue.Decimal(x),
             onNull: () => CellValue.Null
         );
 

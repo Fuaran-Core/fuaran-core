@@ -19,6 +19,7 @@ field Fuaran.Core.CSharp.AggregateFunction.Sum : Fuaran.Core.CSharp.AggregateFun
 field Fuaran.Core.CSharp.AggregateFunction.value__ : System.Int32
 field Fuaran.Core.CSharp.ColumnKind.Bool : Fuaran.Core.CSharp.ColumnKind (literal)
 field Fuaran.Core.CSharp.ColumnKind.Date : Fuaran.Core.CSharp.ColumnKind (literal)
+field Fuaran.Core.CSharp.ColumnKind.Decimal : Fuaran.Core.CSharp.ColumnKind (literal)
 field Fuaran.Core.CSharp.ColumnKind.Float : Fuaran.Core.CSharp.ColumnKind (literal)
 field Fuaran.Core.CSharp.ColumnKind.Int : Fuaran.Core.CSharp.ColumnKind (literal)
 field Fuaran.Core.CSharp.ColumnKind.String : Fuaran.Core.CSharp.ColumnKind (literal)
@@ -35,18 +36,20 @@ field Fuaran.Core.CSharp.HostEffectKind.WritesHost : Fuaran.Core.CSharp.HostEffe
 field Fuaran.Core.CSharp.HostEffectKind.value__ : System.Int32
 method Fuaran.Core.CSharp.CellValue.Bool(System.Boolean) : Fuaran.Core.CSharp.CellValue
 method Fuaran.Core.CSharp.CellValue.Date(System.String) : Fuaran.Core.CSharp.CellValue
+method Fuaran.Core.CSharp.CellValue.Decimal(System.String) : Fuaran.Core.CSharp.CellValue
 method Fuaran.Core.CSharp.CellValue.Equals(Fuaran.Core.CSharp.CellValue) : System.Boolean
 method Fuaran.Core.CSharp.CellValue.Equals(System.Object) : System.Boolean
 method Fuaran.Core.CSharp.CellValue.Float(System.Double) : Fuaran.Core.CSharp.CellValue
 method Fuaran.Core.CSharp.CellValue.FromCore(Fuaran.Core.Cell) : Fuaran.Core.CSharp.CellValue
 method Fuaran.Core.CSharp.CellValue.GetHashCode() : System.Int32
 method Fuaran.Core.CSharp.CellValue.Int(System.Int32) : Fuaran.Core.CSharp.CellValue
-method Fuaran.Core.CSharp.CellValue.Match`1(System.Func`2<System.Int32, !!0>, System.Func`2<System.Double, !!0>, System.Func`2<System.Boolean, !!0>, System.Func`2<System.String, !!0>, System.Func`2<System.String, !!0>, System.Func`2<System.String, !!0>, System.Func`1<!!0>) : !!0
+method Fuaran.Core.CSharp.CellValue.Match`1(System.Func`2<System.Int32, !!0>, System.Func`2<System.Double, !!0>, System.Func`2<System.Boolean, !!0>, System.Func`2<System.String, !!0>, System.Func`2<System.String, !!0>, System.Func`2<System.String, !!0>, System.Func`2<System.String, !!0>, System.Func`1<!!0>) : !!0
 method Fuaran.Core.CSharp.CellValue.Str(System.String) : Fuaran.Core.CSharp.CellValue
-method Fuaran.Core.CSharp.CellValue.Switch(System.Action`1<System.Int32>, System.Action`1<System.Double>, System.Action`1<System.Boolean>, System.Action`1<System.String>, System.Action`1<System.String>, System.Action`1<System.String>, System.Action) : System.Void
+method Fuaran.Core.CSharp.CellValue.Switch(System.Action`1<System.Int32>, System.Action`1<System.Double>, System.Action`1<System.Boolean>, System.Action`1<System.String>, System.Action`1<System.String>, System.Action`1<System.String>, System.Action`1<System.String>, System.Action) : System.Void
 method Fuaran.Core.CSharp.CellValue.Timestamp(System.String) : Fuaran.Core.CSharp.CellValue
 method Fuaran.Core.CSharp.CellValue.ToCore() : Fuaran.Core.Cell
 method Fuaran.Core.CSharp.CellValue.ToString() : System.String
+method Fuaran.Core.CSharp.CellValue.TryDecimal(System.String, Fuaran.Core.CSharp.CellValue&) : System.Boolean
 method Fuaran.Core.CSharp.ColumnValue.Equals(Fuaran.Core.CSharp.ColumnValue) : System.Boolean
 method Fuaran.Core.CSharp.ColumnValue.Equals(System.Object) : System.Boolean
 method Fuaran.Core.CSharp.ColumnValue.FromCore(Fuaran.Core.Column) : Fuaran.Core.CSharp.ColumnValue

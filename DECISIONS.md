@@ -1,5 +1,61 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-27 — D72: the column model gains an EXACT decimal, carried as canonical text; the type is decided, its representation is PROPOSED
+
+**Recorded on the `0.33.0` draft.** The scalar set was `int` / `float` / `bool` / `string` / `date` /
+`timestamp`. A sum of money has no honest home in it: a `float` rounds, and an `int` of minor units
+moves the scale into every consumer's head. The maintainer asked for a decimal in the column model on
+2026-09-27. That the type exists is therefore decided. How it is represented was chosen in the change
+that added it, on the grounds below, and **stands as PROPOSED until the maintainer ratifies it**,
+because a scalar's representation is a wire commitment every host language then mirrors.
+
+**What was added.** `ColumnType.DecimalType`, wire tag `decimal`. `Cell.Decimal of string`. The
+`DecimalText` module: `tryCanonical`, `isCanonical`, `compare`, `add`, `tryToFloat`, `zero`.
+`Cell.decimal`, the constructor that canonicalises.
+
+**The representation, and each choice with the evidence that would overturn it.**
+
+| # | Choice | Why | What would overturn it |
+|---|---|---|---|
+| K1 | **The carrier is text**, not a host decimal. | The reason `Date` is text: the model takes no host type, and stays Fable-clean and byte-identical. `System.Decimal` is 96 bits with a scale of at most 28, other hosts' decimals are other widths, and a database's `NUMERIC(38, 10)` fits none of them everywhere. The digits fit all of them. | A measured cost, in a consumer, of parsing text on a hot path that a typed vector behind the `Table` boundary cannot absorb. |
+| K2 | **The type is unparameterised**: no precision, no scale. | The text has exactly the digits it has, so a declared scale would be a second statement of the same fact, and the two could disagree. `ColumnType` stays a closed set of nullary cases, which is what `ColumnType.all`, `ofTag` and every host's enum rely on. | A host that must allocate a fixed-scale vector before it sees the data and cannot scan for the scale. |
+| K3 | **The canonical form strips zeros**: no leading zero, no trailing fraction zero, no point on a whole number, no sign on zero. | Two texts then denote one number exactly when they are one string, so equality, grouping and the distinct token need no arithmetic. A scale kept for display (`12.50`) is presentation, which the render tier owns. | A consumer for which the written scale is data, not presentation. It would carry the scale in a column of its own. |
+| K4 | **The grammar read is `-?[0-9]+(\.[0-9]+)?`**, and leading and trailing zeros are read and normalised. A leading `+`, a bare point, an exponent, a separator and white space are refused. | It is what a database renders a fixed-scale value as. Each refused form has more than one reading in some locale or tool. | A source in wide use that emits one of the refused forms and cannot be configured not to. |
+| K5 | **On the wire a decimal is a JSON string.** An integer token is read, because it is exact. **A fractional number token is refused** as a `TypeMismatch`. | A number token has been through a float in most parsers before any codec sees it. A type whose purpose is exactness cannot accept a value it cannot vouch for. This is stricter than the lenient-ingest rules the other types follow, deliberately. | Evidence from an emitter census that the refusal costs more emissions than the silent inexactness would cost correctness. The remedy would be a named, opt-in lenient reader, not a change to this one. |
+| K6 | **`Decimal` is declared after `Null`**, and `DecimalType` last. | Every case already published keeps its tag, so the move is `union-widening` and nothing else: no existing case is retyped. | Nothing; the order is read by no clause. |
+| K7 | **The column layer's arithmetic is an order and a sum, both exact.** `Sum` over a decimal column is a `Decimal`. `Min` and `Max` compare exactly. `Mean`, `Median` and `StdDev` are `float`, as `aggType` already declares for every source type, and read each value at its nearest float. | They are what `Column.aggregate` needs. Division is not closed over finite decimals, so an exact `Mean` would need a rounding rule this layer has no ground to choose. Multiplication, division and rounding belong to the evaluator, in the compute repository. | A consumer that needs an exact mean to a stated scale. That is an evaluator function with the scale as its argument. |
+| K8 | **`Int → Decimal` is a safe widening; `Float → Decimal` is not, in either direction.** | An int is exactly a decimal, and the codec agrees by reading an integer token into a decimal column. A float is an approximation and a decimal is a statement of digits, so a retype between them changes what the column claims. | Nothing foreseen. |
+| K9 | **Schema inference never infers `decimal`.** | The rule for temporal types: a column of digit strings is a string column until a schema says otherwise. | Nothing foreseen. |
+| K10 | **The capture key's tag for the case is `m`**, and the payload is the text as it stands. | `d` is a date's. Taking the text as found is what keeps the pre-image injective on cells, which is `cell_fields_injective` in `proofs/Query.fst`; canonicalising there would key two distinct cells alike. | Nothing; the tag is pinned once released. |
+
+**A `Decimal` cell is canonical by construction, and the boundaries hold that.** `Cell.decimal`
+canonicalises, the codec canonicalises on decode, and `ColumnCodec.tryEncode` refuses a cell whose
+text is not canonical. Inside those boundaries every reader takes the text as it finds it. A cell
+built directly with non-canonical text is the caller's defect, as a `Date` holding text that is not a
+date is; `encode` emits it as it stands and the round-trip law catches it.
+
+**The class and the version.** A case added to a published union is `union-widening`, breaking: every
+exhaustive `match` over `Cell` or `ColumnType` stops compiling, and the C# facade's `CellValue.Match`
+and `Switch` gain a parameter. `0.33.0` is an untagged draft that already carries a breaking move
+(D71), so this rides it and moves no number. STABILITY.md "0.33.0 — DRAFT" is the consumer-facing
+record, and its earlier sentence that a consumer of the spine "changes nothing else" is amended
+there.
+
+**What this change does not do, and who does.**
+
+- **The evaluator.** Decimal arithmetic in expressions, the typer's rules for a decimal operand, a
+  typed vector for the dense frame and the transform law vectors are the compute repository's. It
+  pins this repository at `0.32.0` and is unaffected until it raises; the raise is where its
+  exhaustive matches meet the new case.
+- **The other hosts.** Each host language's twin of the column codec gains the type when it raises.
+  The shared wire corpus gains decimal documents with the first host that emits them.
+- **The proof leg.** `proofs/Query.fst` carries the new case in its `column_type` and `cell`, and
+  `cell_type`, `cell_tag` and `cell_payload` each gain an arm. The committed extraction
+  `proofs/oracle/Query.fs` was brought into line BY HAND in this change, mirroring the extractor's
+  layout, because the machine it was made on had no prover installed. **It is held to a fresh
+  extraction by the proof leg, and until a run of `proofs/check.ps1` is green on it, the model's
+  theorems are unchecked over the new case and this entry says so.**
+
 ## 2026-09-26 — D71: D66 is EXECUTED — the compute strand has left this repository, on the `0.33.0` draft, moved rather than removed
 
 **Recorded (Phase 258).** D66 ruled that `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` are

@@ -114,6 +114,7 @@ module Query =
         | Str _ -> Some StringType
         | Date _ -> Some DateType
         | Timestamp _ -> Some TimestampType
+        | Decimal _ -> Some DecimalType
         | Null -> None
 
     /// The Phase 27 determinism label this query keys its captures on (`"deterministic"` /
@@ -131,6 +132,9 @@ module Query =
         | Str v -> "s", v
         | Date v -> "d", v
         | Timestamp v -> "t", v
+        // `m`: `d` is a date's. The text is the payload as it stands, which is what keeps the
+        // pre-image injective on cells (`cell_fields_injective` in `proofs/Query.fst`).
+        | Decimal v -> "m", v
         | Null -> "n", ""
 
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic query under:
@@ -283,6 +287,7 @@ module QueryCodec =
         | StringType -> "string"
         | DateType -> "date"
         | TimestampType -> "timestamp"
+        | DecimalType -> "decimal"
 
     let private colTypeOf =
         function
@@ -292,6 +297,7 @@ module QueryCodec =
         | "string" -> Ok StringType
         | "date" -> Ok DateType
         | "timestamp" -> Ok TimestampType
+        | "decimal" -> Ok DecimalType
         | other -> Error("unknown column type: " + other)
 
     // ---- effect class ----
