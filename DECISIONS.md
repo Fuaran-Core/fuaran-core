@@ -1,13 +1,15 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-09-27 — D72: the column model gains an EXACT decimal, carried as canonical text; the type is decided, its representation is PROPOSED
+## 2026-09-27 — D72: the column model gains an EXACT decimal, carried as canonical text
 
-**Recorded on the `0.33.0` draft.** The scalar set was `int` / `float` / `bool` / `string` / `date` /
-`timestamp`. A sum of money has no honest home in it: a `float` rounds, and an `int` of minor units
-moves the scale into every consumer's head. The maintainer asked for a decimal in the column model on
-2026-09-27. That the type exists is therefore decided. How it is represented was chosen in the change
-that added it, on the grounds below, and **stands as PROPOSED until the maintainer ratifies it**,
-because a scalar's representation is a wire commitment every host language then mirrors.
+**Recorded on the `0.33.0` draft. RATIFIED by the maintainer on 2026-09-27, as written.** The scalar
+set was `int` / `float` / `bool` / `string` / `date` / `timestamp`. A sum of money has no honest home
+in it: a `float` rounds, and an `int` of minor units moves the scale into every consumer's head. The
+maintainer asked for a decimal in the column model, and ruled on its representation after the change
+was written: it was put as a proposal, with a scaled integer under a declared scale as the
+alternative, because a scalar's representation is a wire commitment every host language then
+mirrors. The table below is what was ratified, and keeps beside each choice the evidence that would
+reopen it.
 
 **What was added.** `ColumnType.DecimalType`, wire tag `decimal`. `Cell.Decimal of string`. The
 `DecimalText` module: `tryCanonical`, `isCanonical`, `compare`, `add`, `tryToFloat`, `zero`.
@@ -50,11 +52,13 @@ there.
 - **The other hosts.** Each host language's twin of the column codec gains the type when it raises.
   The shared wire corpus gains decimal documents with the first host that emits them.
 - **The proof leg.** `proofs/Query.fst` carries the new case in its `column_type` and `cell`, and
-  `cell_type`, `cell_tag` and `cell_payload` each gain an arm. The committed extraction
-  `proofs/oracle/Query.fs` was brought into line BY HAND in this change, mirroring the extractor's
-  layout, because the machine it was made on had no prover installed. **It is held to a fresh
-  extraction by the proof leg, and until a run of `proofs/check.ps1` is green on it, the model's
-  theorems are unchecked over the new case and this entry says so.**
+  `cell_type`, `cell_tag` and `cell_payload` each gain an arm. **The model was checked with the
+  pinned prover over the new case: `Query.fst` verified on three cold runs, every query 3/3 under
+  `--quake`, and a fresh extraction of `proofs/oracle/Query.fs` is byte-identical to the committed
+  one.** No theorem's statement changed; `cell_fields_injective` holds with the seventh tag because
+  the tags are pairwise distinct and the payload is the carrier. What was run is the one model this
+  change touches. The other twenty are untouched, and the full leg is the continuous-integration
+  job's on the push.
 
 ## 2026-09-26 — D71: D66 is EXECUTED — the compute strand has left this repository, on the `0.33.0` draft, moved rather than removed
 

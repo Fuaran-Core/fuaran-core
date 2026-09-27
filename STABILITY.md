@@ -2471,12 +2471,14 @@ the wire surface. Four baselines moved with the change: `api/Fuaran.Core.Column.
 The wire class is `additive` and the managed class is breaking, so the move rides this slot, which is
 untagged and already breaking, and advances nothing.
 
-**What is NOT yet checked, stated rather than assumed.** `proofs/Query.fst` carries the new case, and
-the committed extraction `proofs/oracle/Query.fs` was brought into line by hand. The differential
-families in the ordinary suite run green against it. **The proof leg itself has not been run over
-this change**, so until `proofs/check.ps1` is green on it the `Query` model's theorems are unchecked
-over the new case and the extraction is unconfirmed against a fresh one. A release of this slot
-waits on that run, and on the Fable gate every cut cites.
+**What was checked, and what was not.** `proofs/Query.fst` carries the new case. It was verified with
+the pinned prover on three cold runs, every query 3/3 under `--quake`, and a fresh extraction of
+`proofs/oracle/Query.fs` is byte-identical to the committed one; the differential families in the
+ordinary suite run green against it. That is the one model this change touches: the full leg over
+all twenty-one was not run on the machine the change was made on, and is the continuous-integration
+job's. **The Fable gate has not been run over this change.** The new code is written to the
+Fable-clean subset the rest of the package keeps, and that is a claim until the gate every cut
+cites says so; a release of this slot waits on it.
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
