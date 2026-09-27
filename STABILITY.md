@@ -2413,6 +2413,14 @@ repository, and nothing for one that does not. The boundary test (`ComputeBounda
 assertion of ABSENCE: no project, directory, package reference or built spine assembly in this tree
 names one of the four ids.
 
+- **`Column.aggregate` reads its input once per function branch; results unchanged — BEHAVIOUR-IDENTICAL,
+  no public surface moves.** The present-cell list is built only on the branches that read it
+  (`Count`, `CountDistinct`, `Min`, `Max`) instead of for every function; the numeric aggregates build
+  their numbers alone and `First`/`Last` read neither. Every pinned semantic is kept: nulls skipped,
+  `Null` for an empty numeric input, int64 accumulation with the int32 range check, `Median` by sort,
+  `CountDistinct` by the distinct token, `Min`/`Max` keeping the first of an incomparable pair, and
+  `First`/`Last` including a `Null`. It costs a consumer nothing.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

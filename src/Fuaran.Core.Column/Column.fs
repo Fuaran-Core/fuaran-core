@@ -282,7 +282,11 @@ module Column =
     /// it never depends on a host's float equality.
     let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
         let cells = col.Cells
-        let present = cells |> List.filter (fun c -> not (Cell.isNull c))
+        // Each branch reads the input once, on demand: only Count/CountDistinct/Min/Max need the
+        // present cells and only the numeric aggregates need the numbers, so neither is built eagerly.
+        let present () =
+            cells |> List.filter (fun c -> not (Cell.isNull c))
+
         let nums () = cells |> List.choose aggAsNum
         let isNumeric = col.Type = IntType || col.Type = FloatType
 
@@ -293,8 +297,8 @@ module Column =
                 Error(IncompatibleAggType(aggFnTag fn, ColumnType.tag col.Type, [ "int"; "float" ]))
 
         match fn with
-        | Count -> Ok(Int(List.length present))
-        | CountDistinct -> Ok(Int(present |> List.map distinctToken |> List.distinct |> List.length))
+        | Count -> Ok(Int(List.length (present ())))
+        | CountDistinct -> Ok(Int(present () |> List.map distinctToken |> List.distinct |> List.length))
         | First ->
             Ok(
                 match cells with
@@ -352,7 +356,7 @@ module Column =
                         Ok(Float((List.item (mid - 1) ns + List.item mid ns) / 2.0)))
         | Min
         | Max ->
-            match present with
+            match present () with
             | [] -> Ok Null
             | first :: rest ->
                 let pick a b =

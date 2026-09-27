@@ -10,8 +10,10 @@
 /// would make the spine depend on the layer above it. So this test refuses each, on readings that
 /// each miss what the others see:
 ///
-///   * the TREE — no project in the solution and no directory under `src/` or `tests/` is named for
-///     a compute id;
+///   * the TREE — no project in the solution and no project directory under `src/` or `tests/` is
+///     named for a compute id. A directory counts only when it holds a project file (`*.fsproj` or
+///     `*.csproj`), because an untracked `bin/`/`obj/` leftover from a pre-Phase-258 build is build
+///     residue, not a project, and reading bare directory names reddened this on every such machine;
 ///   * the PROJECT FILES — every project's `ProjectReference` closure, walked through the projects
 ///     it names, so a reference that arrives through an intermediate project is caught, and no
 ///     project or central package file names a compute id as a package;
@@ -107,6 +109,19 @@ let private srcDir () = Snapshots.repoFile "src"
 let private subdirNames (dir: string) : string list =
     if Directory.Exists dir then
         Directory.GetDirectories dir |> Array.map Path.GetFileName |> Array.toList
+    else
+        []
+
+/// The directories under `dir` that hold a project file (`*.fsproj` or `*.csproj`) — a directory
+/// holding only `bin/` and `obj/` is build residue, not a project.
+let private projectDirNames (dir: string) : string list =
+    if Directory.Exists dir then
+        Directory.GetDirectories dir
+        |> Array.filter (fun d ->
+            Directory.EnumerateFiles(d, "*.fsproj") |> Seq.isEmpty |> not
+            || Directory.EnumerateFiles(d, "*.csproj") |> Seq.isEmpty |> not)
+        |> Array.map Path.GetFileName
+        |> Array.toList
     else
         []
 
@@ -247,8 +262,8 @@ let tests =
               let named =
                   computeNamed (
                       (projects |> List.map nameOf)
-                      @ subdirNames (srcDir ())
-                      @ subdirNames (Snapshots.repoFile "tests")
+                      @ projectDirNames (srcDir ())
+                      @ projectDirNames (Snapshots.repoFile "tests")
                   )
 
               Expect.isEmpty
