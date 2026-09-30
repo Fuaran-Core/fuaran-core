@@ -277,12 +277,18 @@ let tests =
                   [ []
                     [ "a", IntType ]
                     [ "n", IntType; "s", StringType ]
-                    [ "café", FloatType; "日本語", BoolType ] ] do
-                  // `Schema.fingerprint` is documented as the `name:type` list joined by U+0001.
+                    [ "café", FloatType; "日本語", BoolType ]
+                    // Phase 299: names spelling the separator and the escape — the case the bare
+                    // join collided on, and the case the escape exists for.
+                    [ "a:int" + Hash.foldSep + "b", StringType ]
+                    [ "a", IntType; "b", StringType ]
+                    [ Hash.fieldEsc + "x" + Hash.fieldEsc + Hash.foldSep, DecimalType ] ] do
+                  // `Schema.fingerprint` is documented as FNV-1a over the canonical field encoding of
+                  // the `name:type` list — `Hash.canonicalFields`, which Column carries a copy of.
                   let canonical =
                       cols
                       |> List.map (fun (n, t) -> n + ":" + ColumnType.tag t)
-                      |> String.concat Hash.foldSep
+                      |> Hash.canonicalFields
 
                   Expect.equal
                       (Schema.fingerprint cols)

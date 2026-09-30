@@ -1,7 +1,6 @@
 module Fuaran.Core.Tests.SiblingCorpus
 
 open System
-open System.Diagnostics
 open System.IO
 open Fuaran.Core
 
@@ -160,23 +159,10 @@ let fault (family: string) (root: string) : string option =
                 )
         | Ok _ -> Some(sprintf "manifest.json at '%s' is not a JSON object; %s" manifest expected)
 
-/// Run git in `workingDir`, with stdout decoded as UTF-8 rather than as whatever code page
-/// the console handed us (`ChildProcess`'s reason for existing).
+/// Run git in `workingDir` through the suite's one git helper (`ChildProcess.git`), its output
+/// trimmed — every question asked here has a one-line answer.
 let private git (workingDir: string) (arguments: string) : Result<string, string> =
-    try
-        let psi = ChildProcess.redirected "git" arguments
-        psi.WorkingDirectory <- workingDir
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEnd()
-        let err = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-
-        if p.ExitCode = 0 then
-            Ok(out.Trim())
-        else
-            Error(sprintf "`git %s` exited %d: %s" arguments p.ExitCode ((err + out).Trim()))
-    with e ->
-        Error(sprintf "`git %s` could not be run: %s" arguments e.Message)
+    ChildProcess.git workingDir arguments |> Result.map _.Trim()
 
 /// This repository's MAIN working tree as git reports it, asked from `from`.
 ///

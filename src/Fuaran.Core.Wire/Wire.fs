@@ -84,6 +84,33 @@ module JVal =
         | JFloat f -> Some f
         | _ -> None
 
+    /// The JSON kind of a value, as every decode error on the spine names it (`string`, `int`,
+    /// `bool`, `float`, `array`, `object`). Public once (Phase 299): `Decode`, `RowCodec` and the
+    /// columnar codec each kept a private copy of this match.
+    let kindName (v: JVal) : string =
+        match v with
+        | JStr _ -> "string"
+        | JInt _ -> "int"
+        | JBool _ -> "bool"
+        | JFloat _ -> "float"
+        | JArr _ -> "array"
+        | JObj _ -> "object"
+
+    /// THE spelling of a non-finite float on the spine (Phase 299): `NaN`, `Infinity` or
+    /// `-Infinity`, and `None` for a finite value. Every place that names one — the guarded
+    /// renderers' refusals, the canonical float layout's quoted token, the columnar codec's
+    /// `NonFiniteFloat` and the column layer's distinct token — reads it here, so a non-finite
+    /// value has one name on every surface.
+    let nonFiniteToken (f: float) : string option =
+        if System.Double.IsNaN f then
+            Some "NaN"
+        elif System.Double.IsPositiveInfinity f then
+            Some "Infinity"
+        elif System.Double.IsNegativeInfinity f then
+            Some "-Infinity"
+        else
+            None
+
 /// The single float -> string LAYOUT, shared by `Json.render` and `Canon.canonicalFloat`, and
 /// value-identical on both pipelines. .NET's round-trip specifier (`"R"`) is what the layout IS,
 /// and it is also the one thing Fable will not do: `String.format` REFUSES `R` at RUNTIME, so a
@@ -236,6 +263,25 @@ module Json =
                |> String.concat ",")
             + "}"
 
+    /// The FIRST non-finite `JFloat` in `v`, in document order — arrays by index, object members in
+    /// AUTHORED order — as `(path, token)`: the path is `$` for the root, `[i]` for an array item and
+    /// `["key"]` for a member (the key under `escape`, so the path is unambiguous for any key), and
+    /// the token is `JVal.nonFiniteToken`'s. `None` where every float is finite. Public once
+    /// (Phase 299): it is the scan both guarded renderers (`Json.tryRender`, `Canon.tryRender`)
+    /// refuse on, which each used to carry as a private copy.
+    let firstNonFinite (v: JVal) : (string * string) option =
+        let rec scan (path: string) (v: JVal) : (string * string) option =
+            match v with
+            | JFloat f -> JVal.nonFiniteToken f |> Option.map (fun tok -> path, tok)
+            | JArr xs ->
+                xs
+                |> List.indexed
+                |> List.tryPick (fun (i, x) -> scan (path + "[" + string i + "]") x)
+            | JObj fields -> fields |> List.tryPick (fun (k, x) -> scan (path + "[\"" + escape k + "\"]") x)
+            | _ -> None
+
+        scan "$" v
+
     /// A `"kind"`-tagged object — the wire envelope every domain node/op serialises as.
     /// `tag` leads; `fields` follow in author order (camelCase keys by discipline).
     let kindObj (tag: string) (fields: (string * JVal) list) : JVal = JObj(("kind", JStr tag) :: fields)
@@ -249,25 +295,82 @@ module Json =
     /// "no null"). `tryRender` names the first non-finite `JFloat` as a typed `Error` instead;
     /// over an all-finite value it is exactly `Ok (render v)`.
     let tryRender (v: JVal) : Result<string, string> =
-        let rec firstNonFinite (v: JVal) : float option =
-            match v with
-            | JFloat f when System.Double.IsNaN f || System.Double.IsInfinity f -> Some f
-            | JArr xs -> xs |> List.tryPick firstNonFinite
-            | JObj fields -> fields |> List.tryPick (fun (_, x) -> firstNonFinite x)
-            | _ -> None
-
         match firstNonFinite v with
-        | Some f ->
-            let tok =
-                if System.Double.IsNaN f then "NaN"
-                elif f > 0.0 then "Infinity"
-                else "-Infinity"
-
-            Error("non-finite float is not representable on the Fuaran wire: " + tok)
+        | Some(_, tok) -> Error("non-finite float is not representable on the Fuaran wire: " + tok)
         | None -> Ok(render v)
 
     /// `tryRender` under the `encode` name — the total, guarded encode entry point.
     let tryEncode (v: JVal) : Result<string, string> = tryRender v
+
+    /// THE integer reader of the wire (Phase 299): `Int32.TryParse` under the INVARIANT culture with
+    /// `NumberStyles.AllowLeadingSign` and nothing else — no white space, no separators, no culture's
+    /// own minus sign. The bare `Int32.TryParse tok` it replaces read under the CURRENT culture, so
+    /// under a culture whose negative sign is not U+002D (fa-IR, he-IL) `-5` failed the Int32 read,
+    /// fell to the float path and parsed as `JFloat -5.0`: one document decoded differently by
+    /// server locale while its bytes and digests agreed. `NumberStyles.None` would refuse the sign
+    /// itself, sending every negative integer to the float path on every host. `parseNumber` and
+    /// `Versioning.Profile.tryParse` both read through this one function.
+    let readInt32 (tok: string) : int option =
+        match
+            System.Int32.TryParse(
+                tok,
+                System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture
+            )
+        with
+        | true, v -> Some v
+        | _ -> None
+
+    /// True where `tok` is a number token of the JSON grammar, exactly (Phase 299; RFC 8259 §6):
+    ///
+    ///     -? (0 | [1-9][0-9]*) (\.[0-9]+)? ([eE][+-]?[0-9]+)?
+    ///
+    /// The parser holds every number token to it before reading one, so a leading zero (`01`), a
+    /// point with no digit before or after it (`-.5`, `1.`, `1.e5`) and an exponent with no digit
+    /// (`1e`, `1e+`) are each a `MalformedNumber` — where the scanner used to hand such a token to a
+    /// host number reader that accepted some of them, and not the same ones on every host.
+    let isJsonNumber (tok: string) : bool =
+        let n = tok.Length
+
+        let isDigit (k: int) =
+            k < n && tok.[k] >= '0' && tok.[k] <= '9'
+
+        let rec digitsFrom (k: int) =
+            if isDigit k then digitsFrom (k + 1) else k
+
+        // The integer part from `k`: a lone `0`, or a non-zero digit and any digits after it.
+        let afterInt (k: int) =
+            if k < n && tok.[k] = '0' then Some(k + 1)
+            elif isDigit k then Some(digitsFrom k)
+            else None
+
+        // An optional `.` and at least one digit.
+        let afterFrac (k: int) =
+            if k < n && tok.[k] = '.' then
+                let e = digitsFrom (k + 1)
+                if e > k + 1 then Some e else None
+            else
+                Some k
+
+        // An optional `e`/`E`, an optional sign, and at least one digit.
+        let afterExp (k: int) =
+            if k < n && (tok.[k] = 'e' || tok.[k] = 'E') then
+                let s =
+                    if k + 1 < n && (tok.[k + 1] = '+' || tok.[k + 1] = '-') then
+                        k + 2
+                    else
+                        k + 1
+
+                let e = digitsFrom s
+                if e > s then Some e else None
+            else
+                Some k
+
+        let start = if n > 0 && tok.[0] = '-' then 1 else 0
+
+        match afterInt start |> Option.bind afterFrac |> Option.bind afterExp with
+        | Some k -> k = n
+        | None -> false
 
     /// Internal signal for the recursive-descent parser; never escapes the parse entry points.
     /// Carries the classified kind, the message, and the position captured at the raise site.
@@ -323,10 +426,32 @@ module Json =
             elif c >= 'A' && c <= 'F' then int c - int 'A' + 10
             else fail BadHexDigit "bad hex digit in \\u escape"
 
+        let isHighSurrogate (u: int) = u >= 0xD800 && u <= 0xDBFF
+        let isLowSurrogate (u: int) = u >= 0xDC00 && u <= 0xDFFF
+
+        // A string is well-formed UTF-16 or it is REFUSED (Phase 299): every high surrogate is
+        // followed at once by a low one, and every low one follows a high one — whichever spelling
+        // each unit arrived in, a raw character or a `\u` escape. A lone or ill-ordered surrogate
+        // has no code point, so a string carrying one is not a string of characters, and a digest
+        // over it cannot mean one thing on every host (UTF-8 has no encoding for it; the platform
+        // encoders each substitute their own replacement). Both spellings are refused as
+        // `BadEscape`, the kind that already names "this string's content is not well-formed",
+        // rather than a new kind every exhaustive match would have to learn.
         let parseString () : string =
             expect '"'
             let sb = System.Text.StringBuilder()
             let mutable fin = false
+            // The last unit appended was a high surrogate still waiting for its low half.
+            let mutable pendingHigh = false
+
+            let append (u: int) =
+                if pendingHigh && not (isLowSurrogate u) then
+                    fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
+                elif not pendingHigh && isLowSurrogate u then
+                    fail BadEscape "ill-formed string: a low surrogate with no high surrogate before it"
+
+                pendingHigh <- isHighSurrogate u
+                sb.Append(char u) |> ignore
 
             while not fin do
                 if i >= n then
@@ -336,7 +461,11 @@ module Json =
                 i <- i + 1
 
                 match c with
-                | '"' -> fin <- true
+                | '"' ->
+                    if pendingHigh then
+                        fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
+
+                    fin <- true
                 | '\\' ->
                     if i >= n then
                         fail UnterminatedEscape "unterminated escape"
@@ -345,14 +474,14 @@ module Json =
                     i <- i + 1
 
                     match e with
-                    | '"' -> sb.Append('"') |> ignore
-                    | '\\' -> sb.Append('\\') |> ignore
-                    | '/' -> sb.Append('/') |> ignore
-                    | 'n' -> sb.Append('\n') |> ignore
-                    | 'r' -> sb.Append('\r') |> ignore
-                    | 't' -> sb.Append('\t') |> ignore
-                    | 'b' -> sb.Append('\b') |> ignore
-                    | 'f' -> sb.Append('\f') |> ignore
+                    | '"' -> append (int '"')
+                    | '\\' -> append (int '\\')
+                    | '/' -> append (int '/')
+                    | 'n' -> append (int '\n')
+                    | 'r' -> append (int '\r')
+                    | 't' -> append (int '\t')
+                    | 'b' -> append (int '\b')
+                    | 'f' -> append (int '\f')
                     | 'u' ->
                         if i + 4 > n then
                             fail TruncatedUnicodeEscape "truncated \\u escape"
@@ -364,12 +493,18 @@ module Json =
                             + hexDigit input.[i + 3]
 
                         i <- i + 4
-                        sb.Append(char code) |> ignore
+                        append code
                     | _ -> fail BadEscape ("bad escape '\\" + string e + "'")
-                | _ -> sb.Append(c) |> ignore
+                | _ -> append (int c)
 
             sb.ToString()
 
+        let isDigitAt (k: int) =
+            k < n && input.[k] >= '0' && input.[k] <= '9'
+
+        // The token is SCANNED as it always was — an optional sign, then digits, point, digits,
+        // exponent, each optional — so a refusal reports the token and position it always did; it
+        // is then held to the JSON number grammar (`isJsonNumber`) before anything reads it.
         let parseNumber () : JVal =
             let start = i
             let mutable isFloat = false
@@ -377,14 +512,14 @@ module Json =
             if peek () = '-' then
                 i <- i + 1
 
-            while i < n && input.[i] >= '0' && input.[i] <= '9' do
+            while isDigitAt i do
                 i <- i + 1
 
             if peek () = '.' then
                 isFloat <- true
                 i <- i + 1
 
-                while i < n && input.[i] >= '0' && input.[i] <= '9' do
+                while isDigitAt i do
                     i <- i + 1
 
             if peek () = 'e' || peek () = 'E' then
@@ -394,10 +529,13 @@ module Json =
                 if peek () = '+' || peek () = '-' then
                     i <- i + 1
 
-                while i < n && input.[i] >= '0' && input.[i] <= '9' do
+                while isDigitAt i do
                     i <- i + 1
 
             let tok = input.Substring(start, i - start)
+
+            if not (isJsonNumber tok) then
+                fail MalformedNumber ("malformed number: " + tok)
 
             let asFloat () =
                 match
@@ -433,15 +571,15 @@ module Json =
                 // coercion drops digits AND diverges cross-host (a 19-digit id becomes a
                 // different id), so reject it as a named MalformedNumber rather than
                 // corrupt it. (Fable-clean: Int32.TryParse + Double.TryParse only.)
-                match System.Int32.TryParse tok with
-                | true, v -> JInt v
-                | _ ->
+                match readInt32 tok with
+                | Some v -> JInt v
+                | None ->
                     // Safety is judged on the TOKEN, not on a parsed double: 2^53 + 1
                     // rounds to 2^53 as a double, so a range check on the value would
                     // wrongly accept it. An integer is int53-safe iff |value| ≤ 2^53 =
                     // 9007199254740992 (16 digits). Compare the digit string lexically —
-                    // JSON forbids leading zeros, so for equal length that IS the numeric
-                    // order. Fable-clean (string + Double.TryParse only, no Int64).
+                    // the grammar above refuses a leading zero, so for equal length that IS
+                    // the numeric order. Fable-clean (string + Double.TryParse only, no Int64).
                     let digits = if tok.StartsWith "-" then tok.Substring 1 else tok
 
                     let int53Safe =
@@ -668,13 +806,9 @@ module Canon =
     /// float→wire / float→key path in the substrate routes through this one function so the bytes match
     /// across the .NET / Fable / TS / Python hosts. Pinned in `STABILITY.md`.
     let canonicalFloat (f: float) : string =
-        if System.Double.IsNaN f then
-            "\"NaN\""
-        elif System.Double.IsPositiveInfinity f then
-            "\"Infinity\""
-        elif System.Double.IsNegativeInfinity f then
-            "\"-Infinity\""
-        else
+        match JVal.nonFiniteToken f with
+        | Some tok -> "\"" + tok + "\""
+        | None ->
             // -0 collapses to 0 (WIRE_FORMAT §2 rule 5) — the wire rule, applied before the layout.
             let v = if f = 0.0 then 0.0 else f
             FloatLayout.finite v
@@ -722,26 +856,8 @@ module Canon =
     /// in this package to wrap (it references nothing that hashes), so the guarded digest is
     /// `tryRender v |> Result.map digest` at the caller, with the caller's own hash.
     let tryRender (v: JVal) : Result<string, string> =
-        let rec firstNonFinite (path: string) (v: JVal) : (string * float) option =
-            match v with
-            | JFloat f when System.Double.IsNaN f || System.Double.IsInfinity f -> Some(path, f)
-            | JArr xs ->
-                xs
-                |> List.indexed
-                |> List.tryPick (fun (i, x) -> firstNonFinite (path + "[" + string i + "]") x)
-            | JObj fields ->
-                fields
-                |> List.tryPick (fun (k, x) -> firstNonFinite (path + "[\"" + escape k + "\"]") x)
-            | _ -> None
-
-        match firstNonFinite "$" v with
-        | Some(path, f) ->
-            let tok =
-                if System.Double.IsNaN f then "NaN"
-                elif f > 0.0 then "Infinity"
-                else "-Infinity"
-
-            Error("non-finite float has no canonical rendering of its own: " + tok + " at " + path)
+        match Json.firstNonFinite v with
+        | Some(path, tok) -> Error("non-finite float has no canonical rendering of its own: " + tok + " at " + path)
         | None -> Ok(render v)
 
     /// Render a `JVal` with the SAME canonical escaping and pinned float layout as [[render]],
@@ -778,14 +894,54 @@ module Decode =
     /// A decoder reads a parsed `JVal`. Signature-identical across both pipelines.
     type Decoder<'T> = JVal -> Result<'T, string>
 
-    let private kindName =
-        function
-        | JStr _ -> "string"
-        | JInt _ -> "int"
-        | JBool _ -> "bool"
-        | JFloat _ -> "float"
-        | JArr _ -> "array"
-        | JObj _ -> "object"
+    /// The structural fault a decode combinator meets, BEFORE any codec spells it (Phase 299). The
+    /// combinators below come in two forms: the `string`-error ones every codec has always used,
+    /// and a `…With` form generic over the error type, which takes the codec's own spelling of a
+    /// `Fault`. A codec with a typed error envelope (the columnar codec's `ColumnError`) reuses the
+    /// same traversal and keeps its own codes, rather than carrying a private copy of each
+    /// combinator — which is what it did until this phase.
+    type Fault =
+        /// An object had no member of this name.
+        | MissingProperty of name: string
+        /// A value was of the wrong JSON kind: the kind expected, and the kind found (`JVal.kindName`).
+        | WrongKind of expected: string * got: string
+
+    /// A `Fault` in the words the `string`-error combinators have always used (`missing property:
+    /// <name>`, `expected <kind>, got <kind>`) — byte-identical to before this type existed.
+    let describe (fault: Fault) : string =
+        match fault with
+        | MissingProperty name -> "missing property: " + name
+        | WrongKind(expected, got) -> "expected " + expected + ", got " + got
+
+    /// The member `name` of an object — the FIRST, where a foreign document repeats a key, as every
+    /// combinator here reads it — or `None` where it has none or `el` is not an object.
+    let tryProp (name: string) (el: JVal) : JVal option =
+        match el with
+        | JObj fields -> fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+        | _ -> None
+
+    /// `getProp` over the caller's error type: `fault` spells a missing member or a non-object.
+    let propWith (fault: Fault -> 'E) (name: string) (el: JVal) : Result<JVal, 'E> =
+        match el with
+        | JObj _ ->
+            match tryProp name el with
+            | Some v -> Ok v
+            | None -> Error(fault (MissingProperty name))
+        | other -> Error(fault (WrongKind("object", JVal.kindName other)))
+
+    /// `asString` over the caller's error type.
+    let stringWith (fault: Fault -> 'E) (el: JVal) : Result<string, 'E> =
+        match el with
+        | JStr s -> Ok s
+        | other -> Error(fault (WrongKind("string", JVal.kindName other)))
+
+    /// The items of a JSON array, over the caller's error type.
+    let arrayWith (fault: Fault -> 'E) (el: JVal) : Result<JVal list, 'E> =
+        match el with
+        | JArr xs -> Ok xs
+        | other -> Error(fault (WrongKind("array", JVal.kindName other)))
+
+    let private kindName (v: JVal) = JVal.kindName v
 
     /// Parse a JSON string to a `JVal` root.
     let parse (json: string) : Result<JVal, string> = Json.parse json
@@ -796,18 +952,9 @@ module Decode =
     /// consumer makes to read a spec-conformant foreign document; everything downstream is unchanged.
     let parseTolerantOfNull (json: string) : Result<JVal, string> = Json.parseTolerantOfNull json
 
-    let getProp (name: string) (el: JVal) : Result<JVal, string> =
-        match el with
-        | JObj fields ->
-            match fields |> List.tryFind (fun (k, _) -> k = name) with
-            | Some(_, v) -> Ok v
-            | None -> Error("missing property: " + name)
-        | other -> Error("expected object, got " + kindName other)
+    let getProp (name: string) (el: JVal) : Result<JVal, string> = propWith describe name el
 
-    let asString (el: JVal) : Result<string, string> =
-        match el with
-        | JStr s -> Ok s
-        | other -> Error("expected string, got " + kindName other)
+    let asString (el: JVal) : Result<string, string> = stringWith describe el
 
     let asInt (el: JVal) : Result<int, string> =
         match el with
@@ -835,8 +982,8 @@ module Decode =
 
     /// Decode every element of a JSON array with `d`. Short-circuits on the first error.
     let mapList (d: Decoder<'T>) (el: JVal) : Result<'T list, string> =
-        match el with
-        | JArr xs ->
+        arrayWith describe el
+        |> Result.bind (fun xs ->
             let rec go acc =
                 function
                 | [] -> Ok(List.rev acc)
@@ -845,8 +992,7 @@ module Decode =
                     | Ok v -> go (v :: acc) rest
                     | Error m -> Error m
 
-            go [] xs
-        | other -> Error("expected array, got " + kindName other)
+            go [] xs)
 
 /// A single grid / chart / table row: an *open* name→value map (unlike a `TRecord`, whose
 /// field set is fixed). Cells are boxed scalars — the shape the UI tier's decoded path and
@@ -860,20 +1006,22 @@ type Row = Map<string, obj>
 /// `"<opaque>"` sentinel indefinitely (read-compat — a pre-typed emission decodes to the empty
 /// feed, exactly the old behaviour). Canonicality (Ordinal key sort, float layout, escaping) is
 /// inherited from `Canon.render`, never re-implemented here.
+///
+/// OBSOLETE since Phase 299, removed at the next breaking draft after `0.33.0` (DECISIONS.md "the
+/// parser holds to the JSON grammar, NaN sorts last, and `RowCodec` is obsoleted"). Two hazards are
+/// in its bytes and cannot be fixed without changing them: a `DateTime` of `Unspecified` kind goes
+/// through `ToUniversalTime()`, which reads the MACHINE's time zone, so one value encodes to
+/// different seconds on two servers; and an `int64` is widened to a double, so every value past
+/// 2^53 is silently a different number. And it is a boxed `Map<string, obj>` row — a UI-tier
+/// representation — in the spine.
+[<System.Obsolete("RowCodec is obsolete and is removed at the next breaking draft. Its bytes carry two hazards: a DateTime of Unspecified kind is encoded through ToUniversalTime(), so the Unix seconds depend on the machine's time zone; and an int64 is widened to a double, so any value past 2^53 is silently a different number. Carry rows as a Fuaran.Core.Column DataSource (ColumnCodec), or host a row codec in the UI tier.")>]
 module RowCodec =
 
     /// The residual-opaque sentinel the rows slot carried before the typed encoding.
     [<Literal>]
     let opaqueSentinel = "<opaque>"
 
-    let private kindName =
-        function
-        | JStr _ -> "string"
-        | JInt _ -> "int"
-        | JBool _ -> "bool"
-        | JFloat _ -> "float"
-        | JArr _ -> "array"
-        | JObj _ -> "object"
+    let private kindName (v: JVal) = JVal.kindName v
 
     /// Best-effort scalar cell encode over the boxed-cell seam — the rule-11 recognised set
     /// (string / bool / int / int64 / float / float32 / DateTimeOffset / DateTime → Unix
@@ -983,9 +1131,11 @@ module Versioning =
                 let ver = s.Substring(at + 1)
                 let parts = ver.Split('.')
 
+                // The wire's one integer reader (invariant culture, a sign and digits only). What
+                // it still accepts that `render` never emits (`01`) is Phase 306's grammar bijection.
                 let parseInt (t: string) =
-                    match System.Int32.TryParse t with
-                    | true, v when v >= 0 -> Some v
+                    match Json.readInt32 t with
+                    | Some v when v >= 0 -> Some v
                     | _ -> None
 
                 match parts with
@@ -1234,9 +1384,57 @@ module Corpus =
     // `Fuaran.Core.Wire` takes no dependency on `Fuaran.Core.Conformance`), seed-replayable so a
     // counterexample reproduces. Fable-clean.
 
-    /// A small alphabet that exercises every escape class plus ordinary characters.
-    let private fuzzAlphabet =
-        [| 'a'; 'z'; '0'; ' '; '"'; '\\'; '/'; '\n'; '\r'; '\t'; '\b'; '\f' |]
+    /// The fuzz alphabet, as ATOMS a generated string is a sequence of (Phase 299): ordinary
+    /// characters, the two escaped structural characters, EVERY control character U+0000–U+001F
+    /// (built, never written raw — a raw NUL in the source would make git treat this file as
+    /// binary), a non-ASCII BMP character, and the surrogate classes — a well-formed pair, a lone
+    /// high and a lone low (a low atom drawn before a high atom is the ill-ordered class). A string
+    /// holding a lone or ill-ordered surrogate is not well-formed UTF-16, and the parser refuses it.
+    let private fuzzAtoms: string[] =
+        Array.append
+            [| "a"
+               "z"
+               "0"
+               " "
+               "\""
+               "\\"
+               "/"
+               "\u007F"
+               "é"
+               "😀"
+               "\uD800"
+               "\uDFFF" |]
+            [| for k in 0x00..0x1F -> string (char k) |]
+
+    /// Every unit of `s` pairs: a high surrogate is followed by a low one, and a low one follows a
+    /// high one — the strings the parser accepts.
+    let private isWellFormedUtf16 (s: string) : bool =
+        let rec go (k: int) =
+            if k >= s.Length then
+                true
+            else
+                let u = int s.[k]
+
+                if u >= 0xD800 && u <= 0xDBFF then
+                    k + 1 < s.Length
+                    && int s.[k + 1] >= 0xDC00
+                    && int s.[k + 1] <= 0xDFFF
+                    && go (k + 2)
+                elif u >= 0xDC00 && u <= 0xDFFF then
+                    false
+                else
+                    go (k + 1)
+
+        go 0
+
+    let rec private allStringsWellFormed (v: JVal) : bool =
+        match v with
+        | JStr s -> isWellFormedUtf16 s
+        | JArr xs -> xs |> List.forall allStringsWellFormed
+        | JObj fields ->
+            fields
+            |> List.forall (fun (k, x) -> isWellFormedUtf16 k && allStringsWellFormed x)
+        | _ -> true
 
     /// Generate one random valid `JVal` from `seed`, nesting no deeper than `maxDepth`.
     let private genJVal (seed: int) (maxDepth: int) : JVal =
@@ -1251,7 +1449,7 @@ module Corpus =
         let randStr () =
             let len = pick 6
 
-            System.String(Array.init len (fun _ -> fuzzAlphabet.[pick fuzzAlphabet.Length]))
+            Array.init len (fun _ -> fuzzAtoms.[pick fuzzAtoms.Length]) |> String.concat ""
 
         let rec gen (depth: int) : JVal =
             // at the depth limit only scalars are generated (no further nesting)
@@ -1268,23 +1466,48 @@ module Corpus =
 
         gen 0
 
-    /// Generative round-trip law: over `count` seed-replayable random `JVal`s, `render` must be
-    /// idempotent under a `parse` round-trip — `parse (render v) |> Result.map render = Ok (render v)`.
-    /// The string form is robust to the one documented canonical normalisation (an integer-valued
-    /// `JFloat` renders without a point and re-parses as `JInt`); the rendered text still round-trips.
-    /// Returns the first counterexample's seed + offending output as an `Error`.
+    /// Generative round-trip law: over `count` seed-replayable random `JVal`s, BOTH renderers —
+    /// `Json.render` and, since Phase 299, `Canon.render` — must be idempotent under a `parse`
+    /// round-trip: `parse (render v) |> Result.map render = Ok (render v)`. The string form is robust
+    /// to the documented canonical normalisations (an integer-valued `JFloat` renders without a
+    /// point and re-parses as `JInt`; `Canon.render` sorts keys); the rendered text still
+    /// round-trips. A value holding a string that is NOT well-formed UTF-16 (a lone or ill-ordered
+    /// surrogate — the alphabet draws them) has no string to round-trip to, and there the law is
+    /// the refusal: `parse` must reject the rendered text as `BadEscape`, under both renderers.
+    /// Returns the first counterexample's seed, renderer and offending output as an `Error`.
     let fuzzRoundTrip (seed: int) (count: int) (maxDepth: int) : Result<unit, string> =
+        let check (name: string) (render: JVal -> string) (at: int) (v: JVal) : Result<unit, string> =
+            let s = render v
+
+            match Json.parseDetailed s, allStringsWellFormed v with
+            | Ok v2, true when render v2 = s -> Ok()
+            | Ok v2, true -> Error(sprintf "fuzz seed=%d: %s not idempotent (%s vs %s)" at name s (render v2))
+            | Error e, true -> Error(sprintf "fuzz seed=%d: parse rejected %s output %s — %s" at name s e.Message)
+            | Error e, false when e.Kind = BadEscape -> Ok()
+            | Error e, false ->
+                Error(
+                    sprintf
+                        "fuzz seed=%d: %s output %s carries an ill-formed string and was refused as %A, not BadEscape"
+                        at
+                        name
+                        s
+                        e.Kind
+                )
+            | Ok _, false ->
+                Error(sprintf "fuzz seed=%d: %s output %s carries an ill-formed string and was accepted" at name s)
+
         let rec go i =
             if i >= count then
                 Ok()
             else
                 let v = genJVal (seed + i) maxDepth
-                let s = Json.render v
 
-                match Json.parse s with
-                | Ok v2 when Json.render v2 = s -> go (i + 1)
-                | Ok v2 -> Error(sprintf "fuzz seed=%d: render not idempotent (%s vs %s)" (seed + i) s (Json.render v2))
-                | Error m -> Error(sprintf "fuzz seed=%d: parse rejected rendered output %s — %s" (seed + i) s m)
+                match check "Json.render" Json.render (seed + i) v with
+                | Error m -> Error m
+                | Ok() ->
+                    match check "Canon.render" Canon.render (seed + i) v with
+                    | Error m -> Error m
+                    | Ok() -> go (i + 1)
 
         go 0
 

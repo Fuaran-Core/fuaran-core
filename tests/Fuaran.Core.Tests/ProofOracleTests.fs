@@ -3477,9 +3477,31 @@ module private JsonParseDiff =
         | JsonParse.ROk v -> "ok " + renderModel v
         | JsonParse.RErr(k, m, at) -> sprintf "err %A @%d %s" k (input.Length - List.length at) m
 
+    /// THE PHASE 299 CARVE-OUT — the refusals production makes that the extracted model does not
+    /// make yet. Phase 299 held `parseNumber` to the JSON number grammar (`Json.isJsonNumber`) and
+    /// made `parseString` refuse a lone or ill-ordered surrogate; `proofs/JsonParse.fst` still
+    /// models the pre-299 scanner, and its extraction lives in a directory another phase of the
+    /// same tier owned, so the model is restated by Phase 306 (which owns `JsonParse.fst`), and
+    /// this carve-out is DELETED there. It is recognised on production's OWN answer, and only
+    /// there: a `MalformedNumber` whose message is exactly `malformed number: <tok>` over a token
+    /// the grammar refuses, or a `BadEscape` whose message is the surrogate refusal's. A
+    /// disagreement of any other shape — the model refusing where production accepts, a
+    /// different kind, position or message on any other input — is still a failure.
+    let isPhase299Refusal (prod: string) : bool =
+        let number =
+            System.Text.RegularExpressions.Regex.Match(
+                prod,
+                "^err MalformedNumber @\\d+ malformed number: (.*)$",
+                System.Text.RegularExpressions.RegexOptions.Singleline
+            )
+
+        (number.Success && not (Json.isJsonNumber number.Groups.[1].Value))
+        || System.Text.RegularExpressions.Regex.IsMatch(prod, "^err BadEscape @\\d+ ill-formed string: ")
+
     /// Every way the two disagree over one pool, plus how many inputs reached each outcome class —
     /// a run that only ever refused has compared twelve error messages and measured no parse at
-    /// all, and a run that only ever accepted has measured none of the classification.
+    /// all, and a run that only ever accepted has measured none of the classification. A
+    /// disagreement inside the Phase 299 carve-out (`isPhase299Refusal`) is not counted as one.
     let sweep (policy: NullPolicy) (maxDepth: int) (inputs: (string * string) list) =
         let mutable accepted = 0
         let mutable refused = 0
@@ -3494,7 +3516,7 @@ module private JsonParseDiff =
             else
                 refused <- refused + 1
 
-            if p <> m then
+            if p <> m && not (isPhase299Refusal p) then
                 bad.Add(sprintf "%s: input %s\n    production %s\n    model      %s" name input p m)
 
         List.ofSeq bad, accepted, refused
@@ -10430,6 +10452,33 @@ let proofOracleTests =
           <| fun _ ->
               JsonParseDiff.sweep RejectNull 512 JsonParseDiff.nearMisses
               |> JsonParseDiff.expectAgreement "near misses, strict"
+
+          // The carve-out's extent, pinned: over the near-miss table it holds EXACTLY the three
+          // tokens the pre-299 model reads and the grammar refuses, and each is a disagreement — so
+          // the carve-out is neither vacuous nor wider than Phase 299's refusals. Phase 306
+          // restates the model and deletes this test with the carve-out.
+          testCase
+              "the Phase 299 carve-out of the parser differential is exactly the grammar refusals the model does not yet make"
+          <| fun _ ->
+              let carved =
+                  [ for (name, input) in JsonParseDiff.nearMisses do
+                        let p = JsonParseDiff.prodAnswer RejectNull 512 input
+
+                        let m =
+                            JsonParseDiff.modelAnswer
+                                JsonParseDiff.toChs
+                                RejectNull
+                                512
+                                (JsonParseDiff.budget 512)
+                                input
+
+                        if p <> m && JsonParseDiff.isPhase299Refusal p then
+                            yield name ]
+
+              Expect.equal
+                  carved
+                  [ "leading zeros small"; "leading zeros int53"; "trailing dot" ]
+                  "the carved near misses"
 
           testCase "… and under the tolerant read policy, where the member-null fork lives"
           <| fun _ ->

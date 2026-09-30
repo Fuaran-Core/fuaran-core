@@ -99,11 +99,13 @@ let tests =
 
           testCase "numeric columns use the Wire canonical-float layout"
           <| fun _ ->
-              // a float column's value tokens must match Json.render of the same JFloat exactly
+              // a float column's value tokens must match Canon.render of the same JFloat exactly —
+              // the codec renders through Canon (Phase 299: this compared against Json.render, the
+              // author-ordered renderer the codec does not use)
               let json = ColumnCodec.encode sample
-              let expected = Json.render (JFloat 0.1)
+              let expected = Canon.render (JFloat 0.1)
               Expect.stringContains json expected "0.1 renders via the Wire {0:R} layout"
-              Expect.stringContains json (Json.render (JFloat(1.0 / 3.0))) "1/3 renders canonically"
+              Expect.stringContains json (Canon.render (JFloat(1.0 / 3.0))) "1/3 renders canonically"
 
           testCase "embedded float column accepts an integer token (lossless widening)"
           <| fun _ ->
@@ -124,12 +126,19 @@ let tests =
               | Ok src2 -> Expect.equal src2 src "ref round-trips"
               | Error e -> failtestf "decode failed: %s" (ColumnCodec.errorString e)
 
-          // ---- the six-code error envelope ----
+          // ---- the codec envelope ----
 
-          testCase "NotJson — a syntax error surfaces as NotJson"
+          testCase "NotJson — a syntax error surfaces as NotJson, carrying the parser's structured error"
           <| fun _ ->
               match ColumnCodec.decode "{not json" with
-              | Error(NotJson _) -> ()
+              | Error(NotJson e as err) ->
+                  Expect.equal e.Kind ExpectedToken "the parser's classified kind"
+                  Expect.equal e.Position 1 "the parser's position"
+                  // One prefix, not two (Phase 299: the string form was prefixed twice).
+                  Expect.equal
+                      (ColumnCodec.errorString err)
+                      ("not valid JSON: " + e.Message + " at position 1")
+                      "errorString spells it once"
               | other -> failtestf "expected NotJson, got %A" other
 
           // Phase 88 — `schema` may be omitted on an EMBEDDED source (inferred
@@ -236,11 +245,21 @@ let tests =
               | Error(MalformedShape d) -> Expect.stringContains d "declare it in an explicit" "names the remedy"
               | other -> failtestf "expected MalformedShape, got %A" other
 
-          testCase "Phase 88 — a ref source without schema is a didactic reject"
+          // Phase 299 dropped the Phase 88 rule that a ref source carry a schema: the decoder
+          // discarded it, so the rule asked for a statement nothing kept.
+          testCase "a ref source decodes with or without a schema, and keeps none"
           <| fun _ ->
-              match ColumnCodec.decode """{"ref":"orders"}""" with
-              | Error(MalformedShape d) -> Expect.stringContains d "ref source requires" "names the constraint"
-              | other -> failtestf "expected MalformedShape, got %A" other
+              Expect.equal (ColumnCodec.decode """{"ref":"orders"}""") (Ok(Ref "orders")) "no schema"
+              Expect.equal (ColumnCodec.decode """{"ref":"orders","schema":[]}""") (Ok(Ref "orders")) "empty schema"
+
+              Expect.equal
+                  (ColumnCodec.decode """{"ref":"orders","schema":[{"name":"a","type":"int"}]}""")
+                  (Ok(Ref "orders"))
+                  "a schema is read for well-formedness and not kept"
+
+              match ColumnCodec.decode """{"ref":"orders","schema":[{"name":"a","type":"money"}]}""" with
+              | Error(UnknownType("money", _)) -> ()
+              | other -> failtestf "a malformed schema beside a ref is still refused, got %A" other
 
           testCase "MissingField — a schema column missing from columns"
           <| fun _ ->
@@ -374,9 +393,11 @@ let tests =
                       [ Column.create "a" IntType [ Int 1; Int 2 ]
                         Column.create "b" IntType [ Int 9 ] ] }
 
+              // RaggedColumns since Phase 299 — LengthMismatch names one column's values and
+              // validity arrays disagreeing on the wire, a different fault.
               match Table.validate t with
-              | Error(LengthMismatch("b", 2, 1)) -> ()
-              | other -> failtestf "expected ragged LengthMismatch, got %A" other
+              | Error(RaggedColumns("b", 2, 1)) -> ()
+              | other -> failtestf "expected RaggedColumns, got %A" other
 
           testCase "Table.validate flags a schema name with no column, and an extra column"
           <| fun _ ->
@@ -725,3 +746,411 @@ let tests =
                   "the closed set, in encode order"
 
               Expect.equal (ColumnType.ofTag "decimal") (Some DecimalType) "the tag resolves" ]
+
+/// A table whose one column `c` of type `ty` holds `cells`.
+let private oneColumn (ty: ColumnType) (cells: Cell list) : Table =
+    { Schema = [ "c", ty ]
+      Columns = [ Column.create "c" ty cells ] }
+
+/// A source from `genSource`, with — on about half the seeds — one fault the codec cannot carry
+/// injected: a cell outside its column's type, a repeated column, non-canonical decimal or temporal
+/// text, a non-finite float, or a ragged column. The law below needs both outcomes.
+let private genMaybeBroken (seed: int) : DataSource =
+    match genSource seed with
+    | Ref r -> Ref r
+    | Embedded t ->
+        let fault = (seed * 7 + 3) % 12
+
+        let mapFirst (f: Column -> Column) =
+            match t.Columns with
+            | c :: rest -> { t with Columns = f c :: rest }
+            | [] -> t
+
+        let broken =
+            match fault with
+            | 0 ->
+                mapFirst (fun c ->
+                    { c with
+                        Cells = Bool true :: c.Cells |> List.truncate (max 1 (List.length c.Cells)) })
+            | 1 ->
+                match t.Columns with
+                | c :: _ -> { t with Columns = t.Columns @ [ c ] }
+                | [] -> t
+            | 2 ->
+                mapFirst (fun c ->
+                    { c with
+                        Cells =
+                            (if List.isEmpty c.Cells then
+                                 []
+                             else
+                                 Decimal "1.50" :: List.tail c.Cells) })
+            | 3 ->
+                mapFirst (fun c ->
+                    { c with
+                        Cells =
+                            (if List.isEmpty c.Cells then
+                                 []
+                             else
+                                 Date "2026-02-30" :: List.tail c.Cells) })
+            | 4 ->
+                mapFirst (fun c ->
+                    { c with
+                        Cells =
+                            (if List.isEmpty c.Cells then
+                                 []
+                             else
+                                 Float nan :: List.tail c.Cells) })
+            | 5 ->
+                match t.Columns with
+                | a :: b :: rest when not (List.isEmpty b.Cells) ->
+                    { t with
+                        Columns = a :: { b with Cells = List.tail b.Cells } :: rest }
+                | _ -> t
+            | _ -> t
+
+        Embedded broken
+
+[<Tests>]
+let trustsNothingTests =
+    testList
+        "Column.trusts nothing it is handed (Phase 299)"
+        [ testCase "validate refuses a cell outside its column's type, through ColumnType.widens"
+          <| fun _ ->
+              Expect.equal
+                  (Table.validate (oneColumn IntType [ Bool true ]))
+                  (Error(TypeMismatch("c", "int", "bool")))
+                  "a Bool in an int column"
+
+              Expect.equal
+                  (Table.validate (oneColumn DecimalType [ Float 1.5 ]))
+                  (Error(TypeMismatch("c", "decimal", "float")))
+                  "a Float in a decimal column"
+
+              Expect.equal
+                  (Table.validate (oneColumn FloatType [ Decimal "1.5" ]))
+                  (Error(TypeMismatch("c", "float", "decimal")))
+                  "a Decimal in a float column"
+
+              Expect.equal
+                  (Table.validate (oneColumn IntType [ Float 1.0 ]))
+                  (Error(TypeMismatch("c", "int", "float")))
+                  "a Float in an int column"
+
+              Expect.equal (Table.validate (oneColumn FloatType [ Int 3; Null ])) (Ok()) "Int widens into float"
+              Expect.equal (Table.validate (oneColumn DecimalType [ Int 3 ])) (Ok()) "Int widens into decimal"
+
+          testCase "validate refuses a duplicate schema name and a duplicate column name"
+          <| fun _ ->
+              let col = Column.create "a" IntType [ Int 1 ]
+
+              Expect.equal
+                  (Table.validate
+                      { Schema = [ "a", IntType; "a", IntType ]
+                        Columns = [ col; col ] })
+                  (Error(Malformed "duplicate schema name: a"))
+                  "the schema names a twice"
+
+              Expect.equal
+                  (Table.validate
+                      { Schema = [ "a", IntType ]
+                        Columns = [ col; col ] })
+                  (Error(Malformed "duplicate column name: a"))
+                  "two columns named a"
+
+              // …so encodeJson can no longer be asked to emit a repeated member key.
+              match
+                  ColumnCodec.tryEncode (
+                      Embedded
+                          { Schema = [ "a", IntType; "a", IntType ]
+                            Columns = [ col; col ] }
+                  )
+              with
+              | Error(Malformed _) -> ()
+              | other -> failtestf "tryEncode refuses the duplicate, got %A" other
+
+          testCase "validate refuses non-canonical decimal, date and timestamp text"
+          <| fun _ ->
+              for cell in [ Decimal "1.50"; Decimal "abc"; Decimal "01" ] do
+                  match Table.validate (oneColumn DecimalType [ cell ]) with
+                  | Error(MalformedShape d) -> Expect.stringContains d "canonical decimal text" "names the rule"
+                  | other -> failtestf "expected MalformedShape for %A, got %A" cell other
+
+              for text in
+                  [ ""
+                    "2026-02-30"
+                    "2023-02-29"
+                    "1900-02-29"
+                    "2026-6-1"
+                    "2026-13-01"
+                    "26-06-01" ] do
+                  match Table.validate (oneColumn DateType [ Date text ]) with
+                  | Error(MalformedShape d) -> Expect.stringContains d "YYYY-MM-DD" "names the form"
+                  | other -> failtestf "expected MalformedShape for date '%s', got %A" text other
+
+              for text in
+                  [ ""
+                    "2026-06-22T24:00:00Z"
+                    "2026-06-22T17:60:00Z"
+                    "2026-06-22T17:00:60Z"
+                    "2026-06-22 17:00:00Z"
+                    "2026-06-22T17:00:00"
+                    "2026-06-22T17:00:00+00:00"
+                    "2026-06-22T17:00:00.000Z" ] do
+                  match Table.validate (oneColumn TimestampType [ Timestamp text ]) with
+                  | Error(MalformedShape d) -> Expect.stringContains d "YYYY-MM-DDThh:mm:ssZ" "names the form"
+                  | other -> failtestf "expected MalformedShape for timestamp '%s', got %A" text other
+
+              for text in [ "2024-02-29"; "2000-02-29"; "0000-01-01"; "9999-12-31" ] do
+                  Expect.isTrue (TemporalText.isCanonicalDate text) (sprintf "%s is a date" text)
+
+              Expect.isTrue (TemporalText.isCanonicalTimestamp "1970-01-01T00:00:00Z") "the epoch"
+              Expect.isTrue (TemporalText.isCanonicalTimestamp "2026-06-22T23:59:59Z") "the last second"
+              Expect.isFalse (TemporalText.isCanonicalDate null) "null is no date"
+
+          testCase "validate refuses a non-finite float, and names the ragged table apart from LengthMismatch"
+          <| fun _ ->
+              Expect.equal
+                  (Table.validate (oneColumn FloatType [ Float nan ]))
+                  (Error(NonFiniteFloat("c", "NaN")))
+                  "the wire has no NaN"
+
+              Expect.equal
+                  (Table.validate
+                      { Schema = [ "a", IntType; "b", IntType ]
+                        Columns = [ Column.create "a" IntType [ Int 1 ]; Column.create "b" IntType [] ] })
+                  (Error(RaggedColumns("b", 1, 0)))
+                  "ragged"
+
+          // THE LAW: over what validate accepts, tryEncode is exactly Ok (encode src); over what it
+          // refuses, tryEncode refuses with validate's own error. And what encodes, decodes.
+          testCase "tryEncode is exactly Ok (encode src) over what validate accepts, and validate's error otherwise"
+          <| fun _ ->
+              let mutable accepted = 0
+              let mutable refused = 0
+
+              for seed in 1..600 do
+                  match genMaybeBroken seed with
+                  | Ref _ -> ()
+                  | Embedded t as src ->
+                      match Table.validate t, ColumnCodec.tryEncode src with
+                      | Ok(), Ok s ->
+                          accepted <- accepted + 1
+                          Expect.equal s (ColumnCodec.encode src) (sprintf "seed %d: Ok (encode src)" seed)
+
+                          match ColumnCodec.decode s with
+                          | Ok _ -> ()
+                          | Error e -> failtestf "seed %d: a table that encodes must decode: %A" seed e
+                      | Error e, Error e2 ->
+                          refused <- refused + 1
+                          Expect.equal e2 e (sprintf "seed %d: tryEncode refuses with validate's error" seed)
+                      | v, r -> failtestf "seed %d: validate %A but tryEncode %A" seed v r
+
+              Expect.isGreaterThan accepted 100 "the law measured acceptances"
+              Expect.isGreaterThan refused 100 "the law measured refusals"
+
+          testCase "aggregate refuses a cell outside its column's type by name, rather than truncating or dropping"
+          <| fun _ ->
+              let intCol = Column.create "a" IntType [ Int 1; Float 2.7 ]
+
+              Expect.equal
+                  (Column.aggregate Sum intCol)
+                  (Error(CellOutsideType("a", "int", "float")))
+                  "a Float in an int column is not truncated into the Sum"
+
+              let decCol = Column.create "m" DecimalType [ Decimal "1"; Float 2.5 ]
+
+              Expect.equal
+                  (Column.aggregate Mean decCol)
+                  (Error(CellOutsideType("m", "decimal", "float")))
+                  "a Float in a decimal column is not dropped from Sum and counted in Mean"
+
+              Expect.equal
+                  (Column.aggregate Count (Column.create "b" IntType [ Bool true ]))
+                  (Error(CellOutsideType("b", "int", "bool")))
+                  "every aggregate admits its cells first"
+
+              match Column.aggregate Sum (Column.create "m" DecimalType [ Decimal "abc" ]) with
+              | Error(CellOutsideType("m", "decimal", cell)) -> Expect.stringContains cell "abc" "names the text"
+              | other -> failtestf "expected CellOutsideType, got %A" other
+
+              Expect.equal
+                  (Column.aggregate Sum (Column.create "f" FloatType [ Int 1; Float 0.5 ]))
+                  (Ok(Float 1.5))
+                  "an Int widens into a float column's Sum"
+
+          testCase "aggregate canonicalises decimal text at entry"
+          <| fun _ ->
+              let col =
+                  Column.create "m" DecimalType [ Decimal "1.50"; Decimal "1.5"; Decimal "02" ]
+
+              Expect.equal (Column.aggregate CountDistinct col) (Ok(Int 2)) "1.50 and 1.5 are one value"
+              Expect.equal (Column.aggregate Min col) (Ok(Decimal "1.5")) "Min answers canonical text"
+              Expect.equal (Column.aggregate Max col) (Ok(Decimal "2")) "Max answers canonical text"
+              Expect.equal (Column.aggregate First col) (Ok(Decimal "1.5")) "First answers canonical text"
+
+          testCase "Min / Max / Median order NaN last and -0 equal to 0, on every host"
+          <| fun _ ->
+              let col =
+                  Column.create "f" FloatType [ Float 3.0; Float nan; Float -1.0; Float -0.0 ]
+
+              Expect.equal (Column.aggregate Min col) (Ok(Float -1.0)) "Min is not NaN"
+
+              match Column.aggregate Max col with
+              | Ok(Float f) -> Expect.isTrue (System.Double.IsNaN f) "Max is NaN — NaN sorts last"
+              | other -> failtestf "expected Float NaN, got %A" other
+
+              // sorted: -1, -0, 3, NaN — the median of four is the mean of -0 and 3.
+              Expect.equal (Column.aggregate Median col) (Ok(Float 1.5)) "Median counts NaN at the top"
+
+              Expect.equal
+                  (Column.aggregate
+                      CountDistinct
+                      (Column.create "f" FloatType [ Float 0.0; Float -0.0; Float nan; Float nan ]))
+                  (Ok(Int 2))
+                  "-0 is 0 and NaN is one value"
+
+          // The order and the token are one normal form: two floats tie under the aggregate order
+          // exactly when they are one distinct value. Probed through the public aggregate: `Min` keeps
+          // the FIRST of a tied pair, so a pair ties exactly when `Min` answers the first element in
+          // BOTH orders — a strict order answers the smaller one in both.
+          testCase "the float order and the distinct token agree over every pair of specials"
+          <| fun _ ->
+              let specials =
+                  [ 0.0
+                    -0.0
+                    1.0
+                    -1.0
+                    0.1
+                    nan
+                    -nan
+                    infinity
+                    -infinity
+                    System.Double.Epsilon
+                    1e308 ]
+
+              let bits (c: Result<Cell, AggregateError>) =
+                  match c with
+                  | Ok(Float f) -> System.BitConverter.DoubleToInt64Bits f
+                  | other -> failtestf "expected a float, got %A" other
+
+              for a in specials do
+                  for b in specials do
+                      let minOf (x: float) (y: float) =
+                          bits (Column.aggregate Min (Column.create "f" FloatType [ Float x; Float y ]))
+
+                      let bitsOf (x: float) = System.BitConverter.DoubleToInt64Bits x
+                      let tie = minOf a b = bitsOf a && minOf b a = bitsOf b
+
+                      let oneValue =
+                          Column.aggregate CountDistinct (Column.create "f" FloatType [ Float a; Float b ]) = Ok(Int 1)
+
+                      Expect.equal tie oneValue (sprintf "%g vs %g: tie ⇔ one distinct value" a b)
+
+          testCase "a decimal column reads a whole-valued number token within the int53 guard"
+          <| fun _ ->
+              let decode (values: string) =
+                  ColumnCodec.decode (
+                      """{"schema":[{"name":"m","type":"decimal"}],"columns":{"m":{"values":["""
+                      + values
+                      + """],"validity":[true]}}}"""
+                  )
+
+              let cells (r: Result<DataSource, ColumnError>) =
+                  match r with
+                  | Ok(Embedded t) -> t.Columns |> List.collect _.Cells
+                  | other -> failtestf "unexpected: %A" other
+
+              Expect.equal (cells (decode "3000000000")) [ Decimal "3000000000" ] "past int32, as 12 always was"
+              Expect.equal (cells (decode "-3000000000")) [ Decimal "-3000000000" ] "and negative"
+              Expect.equal (cells (decode "3e9")) [ Decimal "3000000000" ] "whatever the token's spelling"
+
+              Expect.equal
+                  (cells (decode "9007199254740992"))
+                  [ Decimal "9007199254740992" ]
+                  "2^53 itself, the guard's edge"
+
+              match decode "1e300" with
+              | Error(TypeMismatch("m", "decimal", "float")) -> ()
+              | other -> failtestf "past the guard is refused, got %A" other
+
+          testCase "DecimalText.tryToFloat refuses past the float range rather than returning infinity"
+          <| fun _ ->
+              let huge = "1" + String.replicate 400 "0"
+              Expect.equal (DecimalText.tryToFloat huge) None "no float is nearest to it"
+              Expect.equal (DecimalText.tryToFloat ("-" + huge)) None "nor to its negation"
+              Expect.equal (DecimalText.tryToFloat "1.5") (Some 1.5) "a float-range decimal reads"
+
+              let col = Column.create "m" DecimalType [ Decimal huge; Decimal "1" ]
+
+              match Column.aggregate Mean col with
+              | Error(AggregateOverflow d) -> Expect.stringContains d "past the float range" "named"
+              | other -> failtestf "expected AggregateOverflow, got %A" other
+
+              Expect.equal
+                  (Column.aggregate Sum col)
+                  (Ok(Decimal("1" + String.replicate 399 "0" + "1")))
+                  "the exact Sum still answers"
+
+              // The columnar range rule must not read the refusal as "in range": a decimal past the
+              // float range is out of every finite range, in either sign.
+              let reg =
+                  ColumnValidator.empty
+                  |> ColumnValidator.register (ColumnValidator.inRange "m" 0.0 100.0)
+
+              let rangeDefects (cells: Cell list) =
+                  ColumnValidator.validate
+                      reg
+                      { Schema = [ "m", DecimalType ]
+                        Columns = [ Column.create "m" DecimalType cells ] }
+                  |> List.filter (fun d -> d.Code = "COL-INRANGE")
+                  |> List.length
+
+              Expect.equal (rangeDefects [ Decimal huge; Decimal("-" + huge); Decimal "5" ]) 2 "both huge values"
+
+          testCase "date and timestamp text is validated at decode, epochs included"
+          <| fun _ ->
+              let decode (ty: string) (values: string) =
+                  ColumnCodec.decode (
+                      "{\"schema\":[{\"name\":\"t\",\"type\":\""
+                      + ty
+                      + "\"}],\"columns\":{\"t\":{\"values\":["
+                      + values
+                      + """],"validity":[true]}}}"""
+                  )
+
+              match decode "date" "\"2026-02-30\"" with
+              | Error(MalformedShape _) -> ()
+              | other -> failtestf "an impossible date, got %A" other
+
+              match decode "timestamp" "\"2026-06-22T17:00:00+01:00\"" with
+              | Error(MalformedShape _) -> ()
+              | other -> failtestf "an offset timestamp, got %A" other
+
+              match decode "timestamp" "900000000000000" with
+              | Error(MalformedShape d) -> Expect.stringContains d "0000-9999" "names the range"
+              | other -> failtestf "an epoch past year 9999, got %A" other
+
+              // A null date slot carries the wire's absent-slot placeholder, which is never read.
+              match
+                  ColumnCodec.decode
+                      """{"schema":[{"name":"t","type":"date"}],"columns":{"t":{"values":[""],"validity":[false]}}}"""
+              with
+              | Ok(Embedded t) -> Expect.equal (t.Columns |> List.collect _.Cells) [ Null ] "the masked slot is Null"
+              | other -> failtestf "unexpected: %A" other
+
+          testCase "decode ends in validate: a ragged, duplicated or repeated-key table is refused at decode"
+          <| fun _ ->
+              Expect.equal
+                  (ColumnCodec.decode """{"columns":{"a":[1,2],"b":[3]}}""")
+                  (Error(RaggedColumns("b", 2, 1)))
+                  "ragged is refused at decode, not by the encode that follows"
+
+              Expect.equal
+                  (ColumnCodec.decode
+                      """{"schema":[{"name":"a","type":"int"},{"name":"a","type":"int"}],"columns":{"a":[1]}}""")
+                  (Error(Malformed "duplicate schema name: a"))
+                  "a schema naming a column twice"
+
+              match ColumnCodec.decode """{"schema":[{"name":"a","type":"int"}],"columns":{"a":[1],"a":[2]}}""" with
+              | Error(Malformed d) -> Expect.stringContains d "duplicate column key" "a repeated key"
+              | other -> failtestf "expected Malformed, got %A" other ]

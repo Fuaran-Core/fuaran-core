@@ -281,6 +281,11 @@
          (every call site is a listed key, every listed key is a call site, no bare U+0001 join
          anywhere). Reads Snapshots.fs for the repository root; appended (append-only). -->
     <Compile Include="HashRosterTests.fs" />
+
+    <!-- Phase 299 — the codec refusal corpus (`conformance/refusals/`): the authored vectors, their
+         emit-refusals renderer, and the test holding the committed files to a fresh render.
+         Reads OwnedConformance.fs for the committed root; appended (append-only). -->
+    <Compile Include="RefusalVectorTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

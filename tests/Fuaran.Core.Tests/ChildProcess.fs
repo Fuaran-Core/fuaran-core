@@ -35,3 +35,23 @@ let redirected (fileName: string) (arguments: string) =
     psi.StandardOutputEncoding <- utf8
     psi.StandardErrorEncoding <- utf8
     psi
+
+/// `git <arguments>` run in `workingDir` through `redirected`: its standard output, or why git
+/// could not say — a non-zero exit (with what git wrote), or git not runnable at all. The ONE git
+/// helper the surface and corpus tests share (Phase 299): the public-surface and wire-surface
+/// baselines and the sibling-corpus resolver each carried a copy of this body until then.
+let git (workingDir: string) (arguments: string) : Result<string, string> =
+    try
+        let psi = redirected "git" arguments
+        psi.WorkingDirectory <- workingDir
+        use p = Process.Start psi
+        let out = p.StandardOutput.ReadToEnd()
+        let err = p.StandardError.ReadToEnd()
+        p.WaitForExit()
+
+        if p.ExitCode <> 0 then
+            Error(sprintf "`git %s` exited %d: %s" arguments p.ExitCode ((err + out).Trim()))
+        else
+            Ok out
+    with e ->
+        Error(sprintf "`git %s` could not be run: %s" arguments e.Message)
