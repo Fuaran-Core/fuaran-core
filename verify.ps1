@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # fuaran-core — repo verify gate: format-check + build + test.
 # Non-zero exit on the first failing stage. The "is the repo green" command.
 [CmdletBinding()]
@@ -13,17 +14,24 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
+# A skipped stage must not read green: `$LASTEXITCODE` is $null until a native command runs and it
+# survives from the previous stage. Each stage seeds it to 0 first, in the GLOBAL scope (a plain
+# assignment makes a script-scope copy that hides the real code when this script is invoked with `&`).
+$global:LASTEXITCODE = 0
 dotnet tool restore
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not $SkipFormatCheck) {
-    dotnet fantomas --check src tests
+    $global:LASTEXITCODE = 0
+    # `samples` is covered too: the adoption sample is code a reader copies (Phase 294).
+    dotnet fantomas --check src tests samples
     if ($LASTEXITCODE -ne 0) {
         Write-Host '==== verify: fantomas format-check FAILED (run ./run.ps1 to format)' -ForegroundColor Red
         exit $LASTEXITCODE
     }
 }
 
+$global:LASTEXITCODE = 0
 dotnet build Fuaran.Core.slnx --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -35,11 +43,13 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # in the suite below: the .NET half of every parity vector, and the Fable surface's membership
 # (`fable-exclusions.json`), including the check that no script here invokes the compiler.
 
+$global:LASTEXITCODE = 0
 dotnet run --project tests/Fuaran.Core.Tests --no-build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # The reference adoption sample (docs/ADOPTION.md) must certify GREEN — it exercises the
 # whole adoption path (witness laws + op-algebra + reducer + op-stream) end to end.
+$global:LASTEXITCODE = 0
 dotnet run --project samples/adoption --no-build
 if ($LASTEXITCODE -ne 0) {
     Write-Host '==== verify: adoption sample FAILED its conformance report' -ForegroundColor Red
@@ -47,6 +57,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($Proofs) {
+    $global:LASTEXITCODE = 0
     pwsh ./proofs/check.ps1 -Runs 3 -SkipOracleHost
     if ($LASTEXITCODE -ne 0) {
         Write-Host '==== verify: the proof leg FAILED (see proofs/README.md)' -ForegroundColor Red
