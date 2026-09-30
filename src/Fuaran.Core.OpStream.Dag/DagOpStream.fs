@@ -601,7 +601,9 @@ module Dag =
 
     /// Decode the `actor` field's raw span into a typed `Actor` (Phase 320) — the canonical object
     /// form (`{"kind":"human"|"agent", ...}`) emitted by `Actor.encode`, parsed via the flat-object
-    /// scanner. An unrecognised / absent `kind` degrades to `Human` over whatever `id` is present.
+    /// scanner. An unrecognised or absent `kind` is a named decode `Error`, never `Human` — a store
+    /// written by a newer build may carry a kind this reader does not know, and reading it as a
+    /// person would misattribute the node. The refusal surfaces as the `line N: <reason>` `Error`.
     let private actorOfRaw (raw: string) : Actor =
         let fields = Jsonl.topFields raw |> Map.ofList
 
@@ -611,8 +613,10 @@ module Dag =
             | None -> ""
 
         match get "kind" with
+        | "human" -> Human(get "id")
         | "agent" -> Agent(get "model", get "version", get "id")
-        | _ -> Human(get "id")
+        | "" -> failwith "Dag.fromJsonl: the actor carries no kind"
+        | kind -> failwith (sprintf "Dag.fromJsonl: unknown actor kind \"%s\"" kind)
 
     /// Parse JSONL back into a DAG (the `op` raw span is handed to `w.Decode`). Fully portable —
     /// runs under .NET and Fable. A decode Error or a structural fault yields a `line N: <reason>`
