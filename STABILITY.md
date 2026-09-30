@@ -3297,10 +3297,11 @@ the message they always used (`unknown determinism: …` / `unknown determinism 
 class does not move. The vocabulary WIDENS: a composed or multi-factor class now emits a `+` label
 where the chain emitted its maximum, and a strict decoder that accepts only the four old tokens
 refuses them. `api/wire/Fuaran.Core.Function.txt` and `api/wire/Fuaran.Core.Query.txt` are
-regenerated and classed `breaking`. The wire-surface exemplar builder samples a set as a one-member
-set, so those baselines pin the three singleton labels and no longer carry a `deterministic` variant
-document; the empty set and the four multi-factor labels are pinned by `conformance/laws/capability-laws.json`
-(below) and by `FunctionTests`.
+regenerated and classed `breaking`. The wire-surface exemplar builder draws a set of union cases
+three ways — one member per case, empty, and two members — so those baselines pin the three
+singleton labels, the empty set's `deterministic` (`… / Set<DeterminismFactor>.empty`) and the
+two-factor `clock+random` (`… / Set<DeterminismFactor>.two`); every multi-factor label is pinned by
+`conformance/laws/capability-laws.json` (below) and by `FunctionTests`.
 
 **Journals.** No capture journal is invalidated. `replayEffect` consumes by effect identity and does
 not compare the label, and `verifyCaptures` hashes the label as recorded. A journal recorded under a

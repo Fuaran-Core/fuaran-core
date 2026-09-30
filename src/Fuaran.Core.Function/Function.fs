@@ -1490,7 +1490,7 @@ module CapabilityCodec =
     let encodeDeferred (encodeT: 'T -> JVal) (d: Deferred<'T>) : string = Canon.render (deferredJson encodeT d)
 
     /// Decode a `Deferred<'T>` from a `JVal`, using `decodeT` for a `ready` payload — `Result`-typed with
-    /// a named error (the six-code envelope discipline).
+    /// a named error (the codec envelope discipline).
     let deferredOf (decodeT: JVal -> Result<'T, string>) (el: JVal) : Result<Deferred<'T>, string> =
         Decode.strField "$type" el
         |> Result.bind (fun k ->

@@ -23,9 +23,10 @@ module Fuaran.Core.Tests.WireSurfaceTests
 // next case added to a union would sit outside it with the gate green. So the set is built by
 // reflection from each package's ROOT document types: for every union type reachable from a
 // root, and every case of it, one document is built that routes through the enclosing unions to
-// reach that case, with every record field populated and every option `Some`. A case added
-// tomorrow is in tomorrow's set without anyone listing it — and so it MOVES the baseline, which
-// is the point. Two roots whose values are not reflectively constructible (they carry functions,
+// reach that case, with every record field populated and every option `Some`; a set of a union's
+// cases, drawn there with one member, is drawn again empty and with two members, since those are
+// spellings of its own. A case added tomorrow is in tomorrow's set without anyone listing it —
+// and so it MOVES the baseline, which is the point. Two roots whose values are not reflectively constructible (they carry functions,
 // or `obj` cells) are specimens written by hand, and say so.
 //
 // ---- what the baseline pins, and what it deliberately does not --------------------------
@@ -124,6 +125,28 @@ let private reachableAvoiding (avoid: Type list) (t: Type) : Type list =
 
 let private reachableUnions (t: Type) : Type list = reachableAvoiding [] t
 
+/// Every `Set<U>` reachable from `t` whose element `U` is a document union of two cases or more.
+/// A per-case document draws such a set with ONE member, so a set-valued field's other spellings
+/// (the empty set, and a set of several members) would sit outside the document set; these are the
+/// sets the set-shape documents below draw again, empty and with two members.
+let private reachableUnionSets (t: Type) : Type list =
+    let seen = Collections.Generic.HashSet<Type>()
+    let found = ResizeArray<Type>()
+
+    let rec walk (x: Type) =
+        if seen.Add x then
+            if isSet x then
+                let elemT = x.GetGenericArguments().[0]
+
+                if isDocUnion elemT && FSharpType.GetUnionCases(elemT, true).Length >= 2 then
+                    found.Add x
+
+            for c in componentTypes x do
+                walk c
+
+    walk t
+    List.ofSeq found
+
 /// Does building a value of `t` reach `target` without re-entering a type in `avoid`? The route
 /// must not re-enter a union already on the path: the inner occurrence is built as a leaf, so a
 /// route through it never arrives.
@@ -138,12 +161,30 @@ let rec private mentions (stack: Type list) (t: Type) : bool =
     || (t.IsArray && mentions stack (t.GetElementType()))
     || (t.IsGenericType && (t.GetGenericArguments() |> Array.exists (mentions stack)))
 
+/// How a `Set` of the target union's cases is drawn. Every document draws a set with one member
+/// unless it exists to exhibit the set's other shapes: none, or the target case beside the union's
+/// next case.
+type private SetShape =
+    | OneMember
+    | NoMembers
+    | TwoMembers
+
+/// The `log` entry a set-shape document records when it draws its set, so the suite can prove the
+/// shape was reached exactly as it proves a case was.
+let private setShapeName (shape: SetShape) =
+    match shape with
+    | OneMember -> "one"
+    | NoMembers -> "empty"
+    | TwoMembers -> "two"
+
 /// Build one value of `t`. `target`, when given, is the (union, case) the document exists to
 /// exhibit: every union met on the way chooses the first case whose fields reach the target's
 /// union, the target union itself chooses the target case, and a union met INSIDE itself chooses
-/// the first case that ends the recursion. `log` records every (union, case) actually built — the
-/// suite reads it to prove the target was reached rather than trusting the routing.
+/// the first case that ends the recursion. `shape` says how a set of the target union's cases is
+/// drawn. `log` records every (union, case) actually built — the suite reads it to prove the target
+/// was reached rather than trusting the routing.
 let rec private build
+    (shape: SetShape)
     (target: (Type * UnionCaseInfo) option)
     (log: ResizeArray<Type * string>)
     (stack: Type list)
@@ -152,7 +193,7 @@ let rec private build
     if List.length stack > 48 then
         failwithf "exemplar recursion did not terminate at %s (stack: %A)" t.FullName (stack |> List.map _.Name)
 
-    let recur = build target log (t :: stack)
+    let recur = build shape target log (t :: stack)
 
     if t = typeof<string> then
         box "s"
@@ -201,8 +242,23 @@ let rec private build
         Activator.CreateInstance(t, [| box arr |])
     elif isSet t then
         let elemT = t.GetGenericArguments().[0]
-        let arr = Array.CreateInstance(elemT, 1)
-        arr.SetValue(recur elemT, 0)
+
+        let members =
+            match shape, target with
+            | NoMembers, Some(u, _) when u = elemT ->
+                log.Add(t, setShapeName shape)
+                [||]
+            | TwoMembers, Some(u, c) when u = elemT ->
+                // The target case, and the union's first OTHER case beside it.
+                let other =
+                    FSharpType.GetUnionCases(u, true) |> Array.find (fun x -> x.Tag <> c.Tag)
+
+                log.Add(t, setShapeName shape)
+                [| recur elemT; build shape (Some(u, other)) log (t :: stack) elemT |]
+            | _ -> [| recur elemT |]
+
+        let arr = Array.CreateInstance(elemT, members.Length)
+        members |> Array.iteri (fun i m -> arr.SetValue(m, i))
         Activator.CreateInstance(t, [| box arr |])
     elif FSharpType.IsTuple t then
         FSharpValue.MakeTuple(FSharpType.GetTupleElements t |> Array.map recur, t)
@@ -257,8 +313,8 @@ let rec private friendly (t: Type) : string =
 
 /// Where a package's document set comes from.
 type internal WireRoot =
-    /// Built by reflection from a root type: one base document, and one document per case of
-    /// every union the root reaches.
+    /// Built by reflection from a root type: one base document, one document per case of every
+    /// union the root reaches, and two per set of a union's cases it reaches (empty, two members).
     | Derived of package: string * label: string * rootType: Type * encode: (obj -> string)
     /// Written by hand, for a root whose values reflection cannot construct.
     | Specimens of package: string * label: string * docs: (unit -> (string * string) list)
@@ -352,17 +408,34 @@ let internal documentsOf (r: WireRoot) : (string * string) list * (string * Type
                 failwithf "wire root %s: encoding document `%s` threw — %s" label name e.Message
 
         let baseLog = ResizeArray()
-        let baseDoc = label, emit label (build None baseLog [] rootType)
+        let baseDoc = label, emit label (build OneMember None baseLog [] rootType)
 
         let perCase =
             [ for u in reachableUnions rootType |> List.sortBy friendly do
                   for c in FSharpType.GetUnionCases(u, true) do
                       let log = ResizeArray()
-                      let v = build (Some(u, c)) log [] rootType
+                      let v = build OneMember (Some(u, c)) log [] rootType
                       let name = sprintf "%s / %s.%s" label (friendly u) c.Name
                       yield (name, emit name v), (name, u, c.Name, List.ofSeq log) ]
 
-        baseDoc :: (perCase |> List.map fst), perCase |> List.map snd
+        // A per-case document draws a set of union cases with one member; a set's empty and
+        // several-member spellings are documents of their own (for `DeterminismSource`, the
+        // `deterministic` tag and a `+`-joined one), routed as the set's first case is.
+        let perSetShape =
+            [ for st in
+                  reachableUnionSets rootType
+                  |> List.sortBy (fun st -> friendly (st.GetGenericArguments().[0])) do
+                  let u = st.GetGenericArguments().[0]
+                  let first = FSharpType.GetUnionCases(u, true).[0]
+
+                  for shape in [ NoMembers; TwoMembers ] do
+                      let log = ResizeArray()
+                      let v = build shape (Some(u, first)) log [] rootType
+                      let name = sprintf "%s / Set<%s>.%s" label (friendly u) (setShapeName shape)
+                      yield (name, emit name v), (name, st, setShapeName shape, List.ofSeq log) ]
+
+        let perDoc = perCase @ perSetShape
+        baseDoc :: (perDoc |> List.map fst), perDoc |> List.map snd
 
 // ---- the baseline ---------------------------------------------------------
 
