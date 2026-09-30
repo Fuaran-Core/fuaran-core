@@ -69,6 +69,33 @@ let private modelApply (w: StreamWitness<'Op, 'State, 'Rej>) (op: 'Op) (st: 'Sta
     | Ok s -> DagFold.Ok s
     | Error e -> DagFold.Error e
 
+/// A model outcome rendered exactly as `FoldConfluence.foldOnce` renders production's. The model's
+/// `LanesRejected` (Phase 300) carries the rejecting lanes; production's rendering names each with
+/// the rejection it met replaying ON ITS OWN from the base, so the renderer replays each lane
+/// through the model's own `replay` to recover it.
+let private renderModelOutcome
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (hashState: 'State -> string)
+    (state0: 'State)
+    (o: DagFold.lane_outcome<'Op, 'State, 'Rej>)
+    : LaneFoldOutcome =
+    match o with
+    | DagFold.LaneFolded s -> LaneFolded(hashState s)
+    | DagFold.LaneHalted cs ->
+        LaneHalted(FoldConfluence.canonicalConflictReport w.Encode (cs |> List.map ofModelConflict))
+    | DagFold.LaneRejected r -> LaneRejected(sprintf "%A" r)
+    | DagFold.LanesRejected rs ->
+        let rejection (lane: 'Op list) : LaneRejection<'Op, 'Rej> =
+            { Head = ""
+              Delta = lane
+              NodeId = ""
+              Reject =
+                match DagFold.replay (modelApply w) lane state0 with
+                | DagFold.Error r -> r
+                | DagFold.Ok _ -> failwith "the model named a lane that applies" }
+
+        LaneRejected(FoldConfluence.canonicalRejectionReport w.Encode (rs |> List.map rejection))
+
 /// The oracle's fold, rendered exactly as `FoldConfluence.foldOnce` renders production's.
 let private oracleFold
     (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -77,11 +104,8 @@ let private oracleFold
     (state0: 'State)
     (lanes: 'Op list list)
     : LaneFoldOutcome =
-    match DagFold.fold_once (modelApply w) (fp >> toModelFootprint) state0 lanes with
-    | DagFold.LaneFolded s -> LaneFolded(hashState s)
-    | DagFold.LaneHalted cs ->
-        LaneHalted(FoldConfluence.canonicalConflictReport w.Encode (cs |> List.map ofModelConflict))
-    | DagFold.LaneRejected r -> LaneRejected(sprintf "%A" r)
+    DagFold.fold_once (modelApply w) (fp >> toModelFootprint) state0 lanes
+    |> renderModelOutcome w hashState state0
 
 let private productionFold
     (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -1134,11 +1158,8 @@ let private oracleFoldFromDag
     let baseId, heads, dag = productionDag w baseOp lanes
     let model = toModelDag dag
 
-    match DagFold.fold_once_dag (modelApply w) (fp >> toModelFootprint) model model.nodes baseId state0 heads with
-    | DagFold.LaneFolded s -> LaneFolded(hashState s)
-    | DagFold.LaneHalted cs ->
-        LaneHalted(FoldConfluence.canonicalConflictReport w.Encode (cs |> List.map ofModelConflict))
-    | DagFold.LaneRejected r -> LaneRejected(sprintf "%A" r)
+    DagFold.fold_once_dag (modelApply w) (fp >> toModelFootprint) model model.nodes baseId state0 heads
+    |> renderModelOutcome w hashState state0
 
 type private DeltaTally =
     {
@@ -8597,6 +8618,60 @@ let private queryDifferential
 
 
 
+// ---------------------------------------------------------------------------
+//  Phase 300 — the reconcile's partition, and the lanes-apply test, beside the model's.
+//
+//  `reconcile_sound` is proved over the partition section 15 models clause for clause; these cases
+//  run the EXTRACTED partition over the closures and the drain the model computes from a real DAG
+//  in each of the four shapes the old rule got wrong, beside production's `Dag.reconcile`. And
+//  `fold_confluence_total` is proved over the checked `fold_once`; the rejecting-lane pool runs the
+//  extracted fold beside production's `foldOnce` over lane sets that do not all apply.
+// ---------------------------------------------------------------------------
+
+/// The model's reconcile script over a production DAG: the extracted `reconcile_ids` over the
+/// deduplicated heads' closures (`ancestors_of`), the base's closure, and the model's own drain of the
+/// union — each id mapped back to its op through the same DAG.
+let private modelReconcileOps (dag: Dag.T<'Op>) (baseId: string) (heads: string list) : 'Op list =
+    let model = toModelDag dag
+    let fuel = model.nodes
+    let cs = heads |> List.distinct |> List.map (DagFold.ancestors_of model fuel)
+    let baseC = DagFold.ancestors_of model fuel baseId
+    let union = DagFold.closure_nodes model.nodes (DagFold.concat cs)
+    let order = DagFold.drain_order ordLt (drainFuel union) union
+
+    DagFold.reconcile_ids order baseC cs |> List.map (fun id -> dag.Nodes.[id].Op)
+
+let private blindPlanFootprint (_: PlanOp) : Footprint =
+    { Reads = Set.empty
+      StructureWrites = Set.empty
+      ContentWrites = Set.empty
+      UnknownParentWrites = Set.empty }
+
+/// The four shapes over four drawn lanes, each lane under its own actor: disjoint, a fast-forward (the
+/// second lane chained onto the first), the first head named twice, and a criss-cross (two merges of
+/// the first two lanes under two actors, a lane off each, reconciled over `Dag.mergeBase`).
+let private reconcileShapes (a: PlanOp list) (b: PlanOp list) (c: PlanOp list) (d: PlanOp list) =
+    let h = OpStream.defaultHash
+
+    let chain (actor: string) (ops: PlanOp list) (parent: string) (dag: Dag.T<PlanOp>) =
+        ops
+        |> List.fold (fun (p, dd) op -> Dag.append h planW (Human actor) op p dd) (parent, dag)
+
+    let g, d0 = Dag.append h planW (Human "base") planLaneGen.BaseOp "" Dag.empty
+    let ha, d1 = chain "lane-a" a g d0
+    let hb, d2 = chain "lane-b" b g d1
+    let hff, d3 = chain "lane-b" b ha d1
+    let m1, d4 = Dag.merge h planW (Human "merge-1") planLaneGen.BaseOp ha hb d2
+    let m2, d5 = Dag.merge h planW (Human "merge-2") planLaneGen.BaseOp ha hb d4
+    let h1, d6 = chain "lane-a" c m1 d5
+    let h2, d7 = chain "lane-b" d m2 d6
+    let mb = Dag.mergeBase d7 h1 h2 |> Option.defaultValue g
+
+    [ "disjoint", d2, g, [ ha; hb ]
+      "fast-forward", d3, g, [ ha; hff ]
+      "duplicate head", d1, g, [ ha; ha ]
+      "criss-cross", d7, mb, [ h1; h2 ] ]
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -13957,4 +14032,75 @@ let proofOracleTests =
                   (Error(Propagation.EvalUnknownChange [ "nope" ]))
                   "an unknown change is the typed refusal naming it"
 
-              Expect.isEmpty ranUnknown "and no evaluator ran" ]
+              Expect.isEmpty ranUnknown "and no evaluator ran"
+
+          // ---- Phase 300: the reconcile's partition and the rejecting-lane pool, beside production ----
+
+          testCase "the extracted reconcile partition is production's over the four shapes"
+          <| fun _ ->
+              let mutable rng = ConfRng.ofSeed 3001
+              let mutable shared = 0
+
+              for _ in 1..40 do
+                  let lanes, r = planLaneGen.Lanes 4 rng
+                  rng <- r
+
+                  let a, b, c, d =
+                      List.item 0 lanes, List.item 1 lanes, List.item 2 lanes, List.item 3 lanes
+
+                  for name, dag, baseId, heads in reconcileShapes a b c d do
+                      let production =
+                          match heads with
+                          | [ h1; h2 ] -> Dag.reconcile blindPlanFootprint dag baseId h1 h2
+                          | _ -> failtest "two heads per shape"
+
+                      let model = modelReconcileOps dag baseId heads
+
+                      Expect.equal
+                          production
+                          (Ok model)
+                          (sprintf "%s: production's script is the model's partition" name)
+
+                      // the old rule — each lane's whole delta, concatenated — is what the model is
+                      // measured AGAINST: over a shape whose heads share history it must differ
+                      let old = heads |> List.collect (Dag.betweenOps dag baseId)
+
+                      if old <> model then
+                          shared <- shared + 1
+
+              Expect.isGreaterThan shared 0 "the pool reached a shape where the old rule applied shared history twice"
+
+          testCase
+              "the extracted fold and production refuse a rejecting-lane pool identically, under every arrival order"
+          <| fun _ ->
+              let mutable rng = ConfRng.ofSeed 3002
+              let mutable refused = 0
+              let rejecting = [ Retitle("missing", "x") ]
+
+              for i in 1..40 do
+                  let lanes0, r = planLaneGen.Lanes 3 rng
+                  rng <- r
+                  // a lane that does not apply from the base, at a position that moves
+                  let at = i % (List.length lanes0 + 1)
+                  let lanes = List.take at lanes0 @ [ rejecting ] @ List.skip at lanes0
+
+                  let outcomes =
+                      FoldConfluence.arrivalOrders (List.length lanes)
+                      |> List.map (fun p ->
+                          let ls = p |> List.map (fun k -> List.item k lanes)
+
+                          let production =
+                              productionFold planW planFootprint planHash basePlan planLaneGen.BaseOp ls
+
+                          let oracle = oracleFold planW planFootprint planHash basePlan ls
+                          Expect.equal oracle production "the extracted fold renders what production renders"
+                          production)
+                      |> List.distinct
+
+                  Expect.equal (List.length outcomes) 1 "one outcome under every arrival order"
+
+                  match outcomes with
+                  | [ LaneRejected report ] when report.Contains "T|missing|x" -> refused <- refused + 1
+                  | _ -> ()
+
+              Expect.isGreaterThan refused 0 "the pool reached the refusal it exists to measure" ]

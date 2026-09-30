@@ -297,7 +297,7 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": ["lanes-apply"],
+      "discharges": [],
       "cases": "600",
       "adequacy": "guarded-reached",
       "refusal": "none"
