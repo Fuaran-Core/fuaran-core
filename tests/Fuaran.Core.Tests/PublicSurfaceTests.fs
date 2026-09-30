@@ -71,7 +71,6 @@ module Fuaran.Core.Tests.PublicSurfaceTests
 
 open System
 open System.Collections.Immutable
-open System.Diagnostics
 open System.IO
 open System.Reflection
 open System.Reflection.Metadata
@@ -1008,21 +1007,7 @@ let private repoRoot () : string = Snapshots.repoFile ""
 
 // ---- git, for the since-the-newest-tag report -----------------------------
 
-let private git (root: string) (arguments: string) : Result<string, string> =
-    try
-        let psi = ChildProcess.redirected "git" arguments
-        psi.WorkingDirectory <- root
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEnd()
-        let err = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-
-        if p.ExitCode <> 0 then
-            Error(sprintf "`git %s` exited %d: %s" arguments p.ExitCode (err.Trim()))
-        else
-            Ok out
-    with e ->
-        Error("`git` could not be run: " + e.Message)
+let private git (root: string) (arguments: string) : Result<string, string> = ChildProcess.git root arguments
 
 /// Semantic ordering over `vX.Y.Z` tags. A tag this does not parse is dropped rather than
 /// sorted lexically — `v0.9.0` above `v0.26.0` would name the wrong baseline to compare

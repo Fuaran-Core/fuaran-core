@@ -110,6 +110,24 @@ let private recordAt (i: int) (project: OpRecord<int> -> string) : string =
     | Some r -> project r
     | None -> "<no-record>"
 
+/// `Column.aggregate` over a float column holding NaN, -0 and two NaNs, as `Min/Max/Median/
+/// CountDistinct`, the floats through the canonical layout. F# generic comparison put NaN below
+/// every value on .NET and above every value under Fable, so `Min`, `Max` and `Median` over such a
+/// column answered by host until Phase 299 spelled the order out: NaN is one value and sorts LAST,
+/// and -0 equals 0.
+let private aggregateNanOrder: string =
+    let col =
+        Column.create "f" FloatType [ Float 3.0; Float nan; Float -1.0; Float -0.0; Float nan ]
+
+    [ Min; Max; Median; CountDistinct ]
+    |> List.map (fun fn ->
+        match Column.aggregate fn col with
+        | Ok(Float f) -> Canon.canonicalFloat f
+        | Ok(Int i) -> string i
+        | Ok _ -> "<not-a-number>"
+        | Error _ -> "<refused>")
+    |> String.concat "/"
+
 /// The table. Order is part of the comparison, so it is a list and never a map.
 let vectors: (string * string) list =
     [
@@ -215,7 +233,10 @@ let vectors: (string * string) list =
       "confRng/seed-0", drawsOf 0
       "confRng/seed-1", drawsOf 1
       "confRng/seed-neg-1", drawsOf -1
-      "confRng/seed-1488", drawsOf 1488 ]
+      "confRng/seed-1488", drawsOf 1488
+
+      // ---- Column.aggregate — the NaN-aware order (Phase 299) ----
+      "aggregate/nan-order", aggregateNanOrder ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

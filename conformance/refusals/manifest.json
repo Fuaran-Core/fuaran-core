@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "description": "Codec refusal corpus (Phase 299). SELF-ENUMERATED: not indexed by the corpus root manifest.json, which indexes the canonical wire-format codec families only (the apply/ precedent). `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. The shared corpus takes its copy at the hosts' next pin raise. This manifest is authoritative for the vector count.",
+  "families": [
+    { "id": "codecRefusals", "kind": "codec-refusals", "file": "codec-refusals.json", "vectors": 51, "adoption": {"fuaran":"proposed","fuaran-go":"proposed","fuaran-py":"proposed","fuaran-rs":"proposed","fuaran-ts":"proposed"}, "description": "The JSON number grammar, well-formed UTF-16 strings, and the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, beside the acceptances they are the boundary of." }
+  ]
+}

@@ -185,13 +185,12 @@ let private adversarialFixtures =
     [ "src/Fuaran.Core.Conformance/ParityVectors.fs"
       "src/Fuaran.Core.Conformance/FunctionLaws.fs" ]
 
-/// The ONE bare join the scan knowingly carries, by file and count, so a second one in the same
-/// file still fails: `Schema.fingerprint` (`Fuaran.Core.Column`) joins `name:type` cells on the
-/// raw `U+0001` byte. It cannot call `Hash.canonicalFields` without a package edge from `Column`
-/// to `Tree` that its own comment declines, it lives outside Phase 290's declared files, and its
-/// bytes are pinned by the `hashSweep/*` parity rows — so it is NAMED here as residue for the
-/// compute strand to resolve, not silently allowed. Remove this entry when it does.
-let private knownBareJoins = [ "src/Fuaran.Core.Column/Column.fs", 1 ]
+/// The bare joins the scan knowingly carries, by file and count, so a second one in the same file
+/// still fails. EMPTY since Phase 299: the one entry it held — `Schema.fingerprint`, which joined
+/// `name:type` cells on the raw `U+0001` byte — now builds its pre-image through a value-identical
+/// copy of the canonical field encoding (`Column` references only `Wire`, so it cannot call
+/// `Hash.canonicalFields` itself), and `HashTests` holds the copy to the canonical function.
+let private knownBareJoins: (string * int) list = []
 
 let private bareJoins () : string list =
     let hash = Path.GetFullPath(hashFile ())

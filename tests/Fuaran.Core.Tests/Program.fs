@@ -58,6 +58,16 @@ let main argv =
         printfn "Wrote %s" (ApplyVectorExport.vectorsPath dir)
         printfn "Wrote %s" (ApplyVectorExport.manifestPath dir)
         0
+    // Phase 299 — write the `refusals/` family (the codec refusal vectors: the JSON number grammar,
+    // well-formed UTF-16 strings, and the columnar codec's cell-type, canonical-text, duplicate-name
+    // and ragged-table refusals); same target rule as `--emit-laws`:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-refusals [<dir>]
+    | "--emit-refusals" :: rest ->
+        let dir = emitTarget rest
+        RefusalVectorTests.RefusalCorpus.write dir
+        printfn "Wrote %s" (RefusalVectorTests.RefusalCorpus.vectorsPath dir)
+        printfn "Wrote %s" (RefusalVectorTests.RefusalCorpus.manifestPath dir)
+        0
     // Phase 184 — write the law-family roster's two generated artefacts (the human-readable
     // `docs/conformance-families.md` and the machine-readable `docs/conformance-families.json`
     // an offline projection reads):

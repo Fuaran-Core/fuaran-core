@@ -4,8 +4,10 @@ namespace Fuaran.Core
 //  Fuaran.Core.Column (Phase 28) — the relational/columnar data strand, a new
 //  Core substrate parallel to the tree/op-stream spine. A typed, null-aware,
 //  Arrow-compatible columnar model + its canonical wire codec. It is the data
-//  substrate `Fuaran.Core.DataFrame` (Phase 29) operates on and the shape the UI
-//  `DataSource` binding serialises (Compute Layer spec §1).
+//  substrate the compute layer operates on (`Fuaran.Core.DataFrame`, produced by
+//  its own repository since 0.33.0 — DECISIONS.md D66), the shape the `Query` seam
+//  produces, and the shape the UI `DataSource` binding serialises (Compute Layer
+//  spec §1).
 //
 //  It introduces no tree-witness field and no base node type — it is a separate,
 //  self-contained data strand. FSharp.Core only; Fable-clean on encode and decode
@@ -30,8 +32,9 @@ type ColumnType =
 
 /// A single realized scalar cell. Null/NA is a first-class case (`Null`), never a sentinel
 /// value buried in the data — the in-memory form of the wire's validity mask. `Date` /
-/// `Timestamp` carry their canonical ISO-8601 string (`YYYY-MM-DD` / `YYYY-MM-DDThh:mm:ssZ`)
-/// so the model needs no host `DateTime` dependency and stays Fable-clean + byte-identical.
+/// `Timestamp` carry their canonical ISO-8601 string (`YYYY-MM-DD` / `YYYY-MM-DDThh:mm:ssZ`,
+/// `TemporalText`) so the model needs no host `DateTime` dependency and stays Fable-clean +
+/// byte-identical; `Table.validate` and the codec's decode refuse any other text (Phase 299).
 type Cell =
     | Int of int
     | Float of float
@@ -49,8 +52,10 @@ type Cell =
     | Decimal of string
 
 /// A typed, null-aware column. `Cells` co-indexes with the table's rows; a `Null` cell is the
-/// validity-mask "absent" marker. `Type` is the declared column type; a present cell whose
-/// value-shape disagrees with `Type` is a decode-time error (the codec enforces the schema).
+/// validity-mask "absent" marker. `Type` is the declared column type; a present cell must be of a
+/// type that WIDENS into it (`ColumnType.widens`) — the codec refuses any other at decode,
+/// `Table.validate` (and so `ColumnCodec.tryEncode`) before encode, and `Column.aggregate` by name
+/// (Phase 299). `Column.create` checks nothing; a column built by hand is checked where it is used.
 type Column =
     { Name: string
       Type: ColumnType
@@ -66,24 +71,35 @@ type Table =
 
 /// A data source: embedded columns, or a host-resolved named `Ref` (spec §1 — the
 /// `Binding.Query` by-reference precedent). The evaluator resolves a `Ref` through a caller
-/// supplied resolver; the wire carries the name, never the rows.
+/// supplied resolver; the wire carries the name, never the rows — and no schema: the encoder
+/// writes the empty `"schema":[]` a reader of the embedded form expects, and the decoder reads a
+/// `ref` source with or without one and keeps none (Phase 299 dropped the rule that a `ref` had to
+/// carry a schema the decoder then discarded).
 type DataSource =
     | Embedded of Table
     | Ref of string
 
-/// The canonical six-code decode envelope for the columnar codec — the substrate's recoverable
-/// error discipline (GP4/GP5): every failure *names what went wrong* and, where a closed set is
-/// expected, *enumerates the alternatives*. Six codes, additive only.
+/// THE CODEC ENVELOPE — the closed set of refusals of the columnar codec and of `Table.validate`,
+/// the substrate's recoverable error discipline (GP4/GP5): every failure *names what went wrong*
+/// and, where a closed set is expected, *enumerates the alternatives*. Its size is stated nowhere
+/// but in this type: a new case is a breaking-source change for every exhaustive match (FS0025),
+/// and is classed as one in STABILITY.md.
 type ColumnError =
-    /// The input was not valid JSON at all (the underlying `Json.parse` failure, verbatim).
-    | NotJson of detail: string
+    /// The input was not valid JSON at all — the parser's structured failure (`Json.parseDetailed`):
+    /// its classified kind, its message and its position (Phase 299; it carried the string form,
+    /// already prefixed, before).
+    | NotJson of error: JsonError
     /// A required field was absent from an object (`schema` / `values` / `validity` / `name` / `type`).
     | MissingField of field: string
-    /// A value had the wrong JSON shape for its position (expected object/array/string where another kind appeared).
+    /// A value had the wrong JSON shape for its position (expected object/array/string where another
+    /// kind appeared), or a cell's TEXT is not its type's canonical form — decimal text, or an
+    /// ISO-8601 date or timestamp (`DecimalText`, `TemporalText`).
     | MalformedShape of detail: string
     /// A `type` tag was not one of the fixed scalar set; `expected` lists the valid tags.
     | UnknownType of got: string * expected: string list
-    /// A present cell's JSON kind disagreed with its column's declared type.
+    /// A present cell's type does not widen into its column's declared type — its JSON kind on
+    /// decode, its `Cell` case in `Table.validate` (Phase 299) — or a column's `Type` disagrees with
+    /// its schema entry.
     | TypeMismatch of column: string * expected: string * got: string
     /// A column's `values` and `validity` arrays had different lengths (they must co-index).
     | LengthMismatch of column: string * values: int * validity: int
@@ -91,9 +107,13 @@ type ColumnError =
     /// non-finite float (the same posture as the tree wire's `Json.tryRender`, Phase 12) — `encode`
     /// would otherwise emit the JSON *string* `"NaN"`, which fails to decode back to a `FloatType` cell.
     | NonFiniteFloat of column: string * value: string
-    /// The `Table` was structurally malformed (schema/column name disagreement, ragged column lengths,
-    /// or a column whose `Type` disagrees with its schema entry) — `Table.validate` names the fault.
+    /// The `Table` was structurally malformed (a duplicate schema or column name, or a schema/column
+    /// name disagreement) — `Table.validate` names the fault.
     | Malformed of detail: string
+    /// The table's columns are not one length (Phase 299): `column` has `got` rows where the first
+    /// column has `expected`. Distinct from `LengthMismatch`, which is ONE column's `values` and
+    /// `validity` arrays disagreeing on the wire.
+    | RaggedColumns of column: string * expected: int * got: int
 
 /// Exact-decimal text (`0.33.0`) — the carrier of a `Decimal` cell, and the only arithmetic the
 /// column layer needs over it: a canonical form, an order, and a sum.
@@ -242,10 +262,81 @@ module DecimalText =
             Some(render (negative && not isZero, ip.TrimStart '0', fp.TrimEnd '0'))
         | _ -> None
 
-    /// The nearest `float` to a decimal text, or `None` where it is not decimal text. This is the
+    /// The nearest `float` to a decimal text, or `None` where it is not decimal text OR its
+    /// magnitude is past the float range (Phase 299: a text of some 309 digits read as `∞`
+    /// silently until then, and an infinity is not the nearest float to any decimal). This is the
     /// one place the type rounds, and it is for the aggregates whose result is a `float` by
     /// declaration (`Mean` / `Median` / `StdDev`); a value that must stay exact never comes through it.
-    let tryToFloat (s: string) : float option = tryCanonical s |> Option.map float
+    let tryToFloat (s: string) : float option =
+        tryCanonical s
+        |> Option.map float
+        |> Option.filter (fun f -> not (System.Double.IsInfinity f))
+
+/// The canonical text of a `Date` and a `Timestamp` cell (Phase 299) — the two ISO-8601 forms the
+/// type docs have always named, now checked where a cell enters: `Table.validate` and the codec's
+/// decode refuse any other text.
+///
+/// A DATE is exactly `YYYY-MM-DD`; a TIMESTAMP is exactly `YYYY-MM-DDThh:mm:ssZ` — UTC, whole
+/// seconds, no offset, no fraction. The year is four digits (`0000`–`9999`), the month `01`–`12`,
+/// the day within its month's length in the proleptic Gregorian calendar (29 February only in a
+/// leap year), the hour `00`–`23`, the minute and the second `00`–`59` (no leap second: the epoch
+/// arithmetic the codec reads instants through has none). One instant has one text, so equality,
+/// grouping and ordering over valid cells are string equality and ordinal order, as they already
+/// were. Pure, total, FSharp.Core only, Fable-clean — no host `DateTime`.
+[<RequireQualifiedAccess>]
+module TemporalText =
+
+    let private digitsAt (s: string) (from: int) (count: int) : int option =
+        let rec go (k: int) (acc: int) =
+            if k = from + count then
+                Some acc
+            else
+                let c = s.[k]
+
+                if c >= '0' && c <= '9' then
+                    go (k + 1) (acc * 10 + (int c - int '0'))
+                else
+                    None
+
+        go from 0
+
+    let private isLeap (y: int) =
+        y % 4 = 0 && (y % 100 <> 0 || y % 400 = 0)
+
+    let private daysIn (y: int) (m: int) =
+        match m with
+        | 2 -> if isLeap y then 29 else 28
+        | 4
+        | 6
+        | 9
+        | 11 -> 30
+        | _ -> 31
+
+    // The date part of both forms, over the first ten characters of a string at least that long.
+    let private datePart (s: string) : bool =
+        s.[4] = '-'
+        && s.[7] = '-'
+        && (match digitsAt s 0 4, digitsAt s 5 2, digitsAt s 8 2 with
+            | Some y, Some m, Some d -> m >= 1 && m <= 12 && d >= 1 && d <= daysIn y m
+            | _ -> false)
+
+    /// True where `s` is a canonical date, `YYYY-MM-DD`, naming a day that exists.
+    let isCanonicalDate (s: string) : bool =
+        not (isNull (box s)) && s.Length = 10 && datePart s
+
+    /// True where `s` is a canonical timestamp, `YYYY-MM-DDThh:mm:ssZ` (UTC, whole seconds),
+    /// naming an instant that exists.
+    let isCanonicalTimestamp (s: string) : bool =
+        not (isNull (box s))
+        && s.Length = 20
+        && datePart s
+        && s.[10] = 'T'
+        && s.[13] = ':'
+        && s.[16] = ':'
+        && s.[19] = 'Z'
+        && (match digitsAt s 11 2, digitsAt s 14 2, digitsAt s 17 2 with
+            | Some h, Some mi, Some se -> h <= 23 && mi <= 59 && se <= 59
+            | _ -> false)
 
 module ColumnType =
 
@@ -278,8 +369,8 @@ module ColumnType =
 
     /// The pinned type-widening lattice (Phase 33). A `from`→`target` change is a *safe widening* iff it
     /// is the identity or the one lossless promotion the rest of the strand already pins: `Int → Float`
-    /// (`ColumnCodec.decodeCell` decodes a JSON int into a `FloatType` column; the `DataFrame` arithmetic
-    /// promotes int operands to float). This is the single source of truth for "is a retype safe" — the
+    /// (`ColumnCodec.decodeCell` decodes a JSON int into a `FloatType` column; the compute layer's
+    /// `DataFrame` arithmetic promotes int operands to float). This is the single source of truth for "is a retype safe" — the
     /// schema-compatibility check and the codec/evaluator coercion agree by construction, not by a second
     /// rule-set.
     ///
@@ -298,9 +389,11 @@ module Cell =
     let isNull (c: Cell) : bool = c = Null
 
     /// A `Decimal` cell holding the canonical form of `text`, or `None` where `text` is not decimal
-    /// text (`DecimalText`). The way to build one: every reader of a `Decimal` cell — the capture
-    /// key, the distinct token, the wire — takes the text as it finds it, so two cells are the same
-    /// value exactly when they were both built canonical.
+    /// text (`DecimalText`). The way to build one. Since Phase 299 no entry point takes a hand-built
+    /// non-canonical cell at its word — `Table.validate` (and so `ColumnCodec.tryEncode`) refuses it,
+    /// and `Column.aggregate` canonicalises it or refuses text that is not decimal at all — but a
+    /// reader outside this package that keys on the text (a capture key) still takes it as found,
+    /// so two cells are the same value there exactly when they were both built canonical.
     let decimal (text: string) : Cell option =
         DecimalText.tryCanonical text |> Option.map Decimal
 
@@ -315,19 +408,6 @@ module Cell =
         | Timestamp _ -> Some TimestampType
         | Decimal _ -> Some DecimalType
         | Null -> None
-
-    /// The type default a `Null` cell encodes as on the wire (the validity mask, not this
-    /// placeholder, carries nullity — the placeholder keeps the values array null-free, which the
-    /// Fuaran wire model requires).
-    let defaultFor (t: ColumnType) : Cell =
-        match t with
-        | IntType -> Int 0
-        | FloatType -> Float 0.0
-        | BoolType -> Bool false
-        | StringType -> Str ""
-        | DateType -> Date ""
-        | TimestampType -> Timestamp ""
-        | DecimalType -> Decimal DecimalText.zero
 
 /// A group/window aggregate function (Phase 36, lifted from the DataFrame evaluator's `GroupBy` so it
 /// is a public, single-source surface). `Count` is non-null count; `Sum` keeps the source numeric type;
@@ -344,7 +424,7 @@ type AggFn =
     | Last
     /// Phase 101 — the count of DISTINCT present values (nulls skipped, so `CountDistinct` over an
     /// all-null column is `0`, exactly as `Count` is). Distinctness is the SAME canonical token the
-    /// DataFrame `Distinct` / `GroupBy` partition on (Phase 41), so `NaN` collapses to one value,
+    /// compute layer's `Distinct` / `GroupBy` partition on (Phase 41), so `NaN` collapses to one value,
     /// `-0.0`/`0.0` coincide, and two cells of different types never collide — the count is
     /// host-identical, not host-comparison-dependent.
     | CountDistinct
@@ -352,10 +432,16 @@ type AggFn =
 /// Why an aggregate was refused (Phase 36) — recoverable + enumerated (GP5), never a throw (GP4). A
 /// numeric aggregate (`Sum`/`Mean`/`Median`/`StdDev`) over a non-numeric column names the expected
 /// types; an integer `Sum` outside the int32 band is a named overflow (the pinned no-silent-wrap posture
-/// shared with the DataFrame evaluator, Phase 39).
+/// shared with the compute layer's evaluator, Phase 39).
 type AggregateError =
     | IncompatibleAggType of fn: string * colType: string * expected: string list
     | AggregateOverflow of detail: string
+    /// A present cell outside its column's type (Phase 299): the column, its declared type, and the
+    /// cell — its type's tag, or, for a `Decimal` cell, the text that is not decimal text. The
+    /// aggregate used to read cells by shape and trust the column's type: a `Float` in an int
+    /// column was truncated into an int `Sum`, and one in a decimal column was dropped from `Sum`
+    /// and counted in `Mean`. Now it is refused, by name, before any aggregate reads it.
+    | CellOutsideType of column: string * colType: string * cell: string
 
 module Column =
 
@@ -384,7 +470,7 @@ module Column =
           Type = ty
           Cells = cells }
 
-    // ---- pinned aggregate semantics (Phase 36) — the single source the DataFrame GroupBy/Pivot calls ----
+    // ---- pinned aggregate semantics (Phase 36) — the single source the compute layer's GroupBy/Pivot call ----
 
     let private aggAsNum (c: Cell) : float option =
         match c with
@@ -401,13 +487,42 @@ module Column =
         | Int i -> Some(string i)
         | _ -> None
 
-    /// A total comparison between two present, same-family cells (`None` ⇒ incomparable). Identical to
-    /// the DataFrame evaluator's `compareCells`; kept here so `aggregate` (Min/Max) is self-contained in
-    /// the Column layer (the aggregate family is the single source; comparison is shared shape, not a
-    /// second aggregate implementation).
+    // ---- THE float order and THE float token (Phase 299) ----
+    // One normal form of a float, which the aggregate ORDER and the distinct TOKEN both read, so
+    // they agree by construction: `compareFloat a b = 0` exactly when `floatToken a = floatToken b`.
+    //   * NaN is ONE value, and it sorts LAST — above +∞. F# generic comparison put NaN below
+    //     everything on .NET and above everything under Fable, so `Min`/`Max`/`Median` over a
+    //     column holding a NaN answered differently by host; this order is spelled out, never
+    //     delegated to a host comparison.
+    //   * `-0` and `0` are one value (`Canon.canonicalFloat` collapses the sign, and `<` / `>` do
+    //     not separate them), so neither can win a tie by host.
+    //   * the non-finite tokens are `JVal.nonFiniteToken`'s — the one spelling on the spine.
+
+    /// The column layer's total order over floats: IEEE order on the non-NaN values, `-0 = 0`, and
+    /// NaN one value above every other.
+    let private compareFloat (a: float) (b: float) : int =
+        match System.Double.IsNaN a, System.Double.IsNaN b with
+        | true, true -> 0
+        | true, false -> 1
+        | false, true -> -1
+        | false, false ->
+            if a < b then -1
+            elif a > b then 1
+            else 0
+
+    /// The column layer's token for a float — equal exactly where `compareFloat` says equal.
+    let private floatToken (f: float) : string =
+        match JVal.nonFiniteToken f with
+        | Some tok -> tok
+        | None -> Canon.canonicalFloat f
+
+    /// A total comparison between two present, same-family cells (`None` ⇒ incomparable). Kept in the
+    /// Column layer so `aggregate` (Min/Max) is self-contained here (the aggregate family is the single
+    /// source; comparison is shared shape, not a second aggregate implementation). Numbers order
+    /// through `compareFloat`, so the answer is one on every host.
     let private aggCompare (a: Cell) (b: Cell) : int option =
         match a, b with
-        | (Int _ | Float _), (Int _ | Float _) -> Some(compare (aggAsNum a) (aggAsNum b))
+        | (Int _ | Float _), (Int _ | Float _) -> Option.map2 compareFloat (aggAsNum a) (aggAsNum b)
         // An exact comparison, never through `float`: two decimals a float cannot tell apart are
         // still ordered. A `Decimal` beside a `Float` is incomparable, as `widens` has it.
         | (Decimal _ | Int _), (Decimal _ | Int _) ->
@@ -432,29 +547,55 @@ module Column =
         | Last -> "last"
         | CountDistinct -> "countDistinct"
 
-    /// The canonical, host-deterministic identity token of a cell (Phase 101) — the same layout the
-    /// DataFrame evaluator's `groupKey` uses per cell, so `CountDistinct` counts exactly the values
-    /// a `Distinct` step would keep. Floats route through the pinned `Canon` layout (`-0.0` collapses
-    /// to `0`) with `NaN`/±∞ named, and each token is type-tagged so an `Int 1` and a `Float 1.0`
-    /// are two values, never one.
+    /// The canonical, host-deterministic identity token of a cell (Phase 101) — the per-cell layout
+    /// the compute layer's `Distinct` / `GroupBy` key on, so `CountDistinct` counts exactly the
+    /// values a `Distinct` step would keep. Floats route through `floatToken` — the token the
+    /// aggregate ORDER agrees with (Phase 299): `-0.0` collapses to `0`, NaN is one value, and the
+    /// non-finite spelling is `JVal.nonFiniteToken`'s. Each token is type-tagged so an `Int 1` and a
+    /// `Float 1.0` are two values, never one.
     let private distinctToken (c: Cell) : string =
         match c with
         | Int i -> "i:" + string i
-        | Float f ->
-            "f:"
-            + (if System.Double.IsNaN f then "NaN"
-               elif System.Double.IsPositiveInfinity f then "Inf"
-               elif System.Double.IsNegativeInfinity f then "-Inf"
-               else Canon.canonicalFloat f)
+        | Float f -> "f:" + floatToken f
         | Bool b -> "b:" + (if b then "1" else "0")
         | Str s -> "s:" + s
         | Date s -> "d:" + s
         | Timestamp s -> "t:" + s
-        // `m`, the tag `Query.invocationKey` gives the same case. The text is taken as found, as a
-        // date's is: a cell built by `Cell.decimal` or decoded off the wire is canonical, and for
-        // those one number is one token.
-        | Decimal s -> "m:" + s
+        // `m`, the tag `Query.invocationKey` gives the same case. Canonical text, so `1.50` and
+        // `1.5` are one token: `aggregate` canonicalises every decimal cell at entry and refuses
+        // text that is not decimal, and the canonicalisation here keeps the token honest for a cell
+        // that reaches it any other way.
+        | Decimal s -> "m:" + (DecimalText.tryCanonical s |> Option.defaultValue s)
         | Null -> "n:"
+
+    /// A present cell as `aggregate` admits it (Phase 299): a cell of a type that widens into
+    /// `col.Type` passes, a `Decimal` cell passes CANONICALISED, and anything else — a cell outside
+    /// the column's type, or a `Decimal` whose text is not decimal text — is a named
+    /// `CellOutsideType`. `Null` is type-agnostic and passes.
+    let private admit (col: Column) (c: Cell) : Result<Cell, AggregateError> =
+        match c with
+        | Null -> Ok Null
+        | Decimal s when col.Type = DecimalType ->
+            match DecimalText.tryCanonical s with
+            | Some canonical -> Ok(Decimal canonical)
+            | None ->
+                Error(CellOutsideType(col.Name, ColumnType.tag col.Type, "decimal text '" + s + "' (not decimal)"))
+        | _ ->
+            match Cell.typeOf c with
+            | Some t when ColumnType.widens t col.Type -> Ok c
+            | Some t -> Error(CellOutsideType(col.Name, ColumnType.tag col.Type, ColumnType.tag t))
+            | None -> Ok c
+
+    let private admitAll (col: Column) : Result<Cell list, AggregateError> =
+        let rec go acc =
+            function
+            | [] -> Ok(List.rev acc)
+            | c :: rest ->
+                match admit col c with
+                | Ok c' -> go (c' :: acc) rest
+                | Error e -> Error e
+
+        go [] col.Cells
 
     let private checkedSumInt (r: int64) : Result<Cell, AggregateError> =
         if r >= int64 System.Int32.MinValue && r <= int64 System.Int32.MaxValue then
@@ -478,8 +619,8 @@ module Column =
         | Last -> srcType
 
     /// Compute one aggregate over a column with the pinned null/coercion/float semantics (Phase 36) —
-    /// the public surface the DataFrame `GroupBy`/`Pivot` now *calls* (the single source of truth, not a
-    /// second copy). Null/NA is skipped; a numeric aggregate (`Sum`/`Mean`/`Median`/`StdDev`) over a
+    /// the public surface the compute layer's `GroupBy`/`Pivot` *call* (the single source of truth, not
+    /// a second copy). Null/NA is skipped; a numeric aggregate (`Sum`/`Mean`/`Median`/`StdDev`) over a
     /// non-numeric column is a named `IncompatibleAggType`; an integer `Sum` overflow is a named
     /// `AggregateOverflow` (Phase 39 no-silent-wrap). `Min`/`Max` order any same-family present cells;
     /// `First`/`Last` keep the first/last cell (a `Null` included). Int sums fold in int64 then range-
@@ -489,104 +630,147 @@ module Column =
     ///
     /// A `DecimalType` column is numeric (`0.33.0`). Its `Sum` is EXACT and is a `Decimal`; its
     /// `Min`/`Max` compare exactly; its `Mean`/`Median`/`StdDev` are `float`, as `aggType` declares
-    /// for every source type, and are the nearest float to each value.
+    /// for every source type, and are the nearest float to each value — a value past the float
+    /// range is a named `AggregateOverflow`, never an infinity.
+    ///
+    /// EVERY CELL IS ADMITTED FIRST (Phase 299): a present cell whose type does not widen into
+    /// `col.Type` (`ColumnType.widens`), or a `Decimal` whose text is not decimal text, is a named
+    /// `CellOutsideType` — never truncated, dropped or counted by shape. A `Decimal` cell is read
+    /// canonicalised, so `1.50` and `1.5` are one value everywhere below. Numbers ORDER through the
+    /// column layer's float order: NaN is one value and sorts last, `-0` equals `0`, so `Min`, `Max`
+    /// and `Median` over a column holding a NaN answer the same on every host (`Max` is NaN, `Min`
+    /// is not, and `Median` counts NaN at the top).
     let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
-        let cells = col.Cells
-        // Each branch reads the input once, on demand: only Count/CountDistinct/Min/Max need the
-        // present cells and only the numeric aggregates need the numbers, so neither is built eagerly.
-        let present () =
-            cells |> List.filter (fun c -> not (Cell.isNull c))
+        admitAll col
+        |> Result.bind (fun cells ->
+            // Each branch reads the input once, on demand: only Count/CountDistinct/Min/Max need the
+            // present cells and only the numeric aggregates need the numbers, so neither is built eagerly.
+            let present () =
+                cells |> List.filter (fun c -> not (Cell.isNull c))
 
-        let nums () = cells |> List.choose aggAsNum
+            // Every admitted present cell of a numeric column is a number here; the one that is not
+            // is a decimal past the float range, which `tryToFloat` refuses rather than reading as ∞.
+            let nums () : Result<float list, AggregateError> =
+                let rec go acc =
+                    function
+                    | [] -> Ok(List.rev acc)
+                    | Null :: rest -> go acc rest
+                    | c :: rest ->
+                        match aggAsNum c with
+                        | Some f -> go (f :: acc) rest
+                        | None ->
+                            let text =
+                                match c with
+                                | Decimal s -> s
+                                | other -> sprintf "%A" other
 
-        let isNumeric = col.Type = IntType || col.Type = FloatType || col.Type = DecimalType
+                            Error(
+                                AggregateOverflow(
+                                    col.Name
+                                    + ": the decimal "
+                                    + text
+                                    + " is past the float range, and "
+                                    + aggFnTag fn
+                                    + " is a float"
+                                )
+                            )
 
-        let requireNumeric (k: unit -> Result<Cell, AggregateError>) =
-            if isNumeric then
-                k ()
-            else
-                Error(IncompatibleAggType(aggFnTag fn, ColumnType.tag col.Type, [ "int"; "float"; "decimal" ]))
+                go [] cells
 
-        match fn with
-        | Count -> Ok(Int(List.length (present ())))
-        | CountDistinct -> Ok(Int(present () |> List.map distinctToken |> List.distinct |> List.length))
-        | First ->
-            Ok(
-                match cells with
-                | [] -> Null
-                | c :: _ -> c
-            )
-        | Last ->
-            Ok(
-                match cells with
-                | [] -> Null
-                | _ -> List.last cells
-            )
-        | Sum ->
-            requireNumeric (fun () ->
-                if col.Type = DecimalType then
-                    // Exact: the sum of a decimal column is the decimal it is, to the last digit, and
-                    // cannot overflow. It never passes through `float`.
-                    match cells |> List.choose aggAsDecimal with
-                    | [] -> Ok Null
-                    | first :: rest ->
-                        rest
-                        |> List.fold (fun acc d -> DecimalText.add acc d |> Option.defaultValue acc) first
-                        |> Decimal
-                        |> Ok
+            let isNumeric = col.Type = IntType || col.Type = FloatType || col.Type = DecimalType
+
+            let requireNumeric (k: unit -> Result<Cell, AggregateError>) =
+                if isNumeric then
+                    k ()
                 else
-                    let ns = nums ()
+                    Error(IncompatibleAggType(aggFnTag fn, ColumnType.tag col.Type, [ "int"; "float"; "decimal" ]))
 
-                    if List.isEmpty ns then
-                        Ok Null
-                    elif col.Type = IntType then
-                        checkedSumInt (ns |> List.sumBy int64)
-                    else
-                        Ok(Float(List.sum ns)))
-        | Mean ->
-            requireNumeric (fun () ->
-                let ns = nums ()
+            match fn with
+            | Count -> Ok(Int(List.length (present ())))
+            | CountDistinct -> Ok(Int(present () |> List.map distinctToken |> List.distinct |> List.length))
+            | First ->
+                Ok(
+                    match cells with
+                    | [] -> Null
+                    | c :: _ -> c
+                )
+            | Last ->
+                Ok(
+                    match cells with
+                    | [] -> Null
+                    | _ -> List.last cells
+                )
+            | Sum ->
+                requireNumeric (fun () ->
+                    match col.Type with
+                    | DecimalType ->
+                        // Exact: the sum of a decimal column is the decimal it is, to the last digit, and
+                        // cannot overflow. It never passes through `float`.
+                        match cells |> List.choose aggAsDecimal with
+                        | [] -> Ok Null
+                        | first :: rest ->
+                            rest
+                            |> List.fold (fun acc d -> DecimalText.add acc d |> Option.defaultValue acc) first
+                            |> Decimal
+                            |> Ok
+                    | IntType ->
+                        // Admitted cells of an int column are `Int`s, so nothing here is truncated.
+                        match
+                            cells
+                            |> List.choose (fun c ->
+                                match c with
+                                | Int i -> Some(int64 i)
+                                | _ -> None)
+                        with
+                        | [] -> Ok Null
+                        | ints -> checkedSumInt (List.sum ints)
+                    | _ ->
+                        nums ()
+                        |> Result.map (fun ns -> if List.isEmpty ns then Null else Float(List.sum ns)))
+            | Mean ->
+                requireNumeric (fun () ->
+                    nums ()
+                    |> Result.map (fun ns ->
+                        if List.isEmpty ns then
+                            Null
+                        else
+                            Float(List.sum ns / float (List.length ns))))
+            | StdDev ->
+                requireNumeric (fun () ->
+                    nums ()
+                    |> Result.map (fun ns ->
+                        if List.isEmpty ns then
+                            Null
+                        else
+                            let n = float (List.length ns)
+                            let mean = List.sum ns / n
+                            let var = (ns |> List.sumBy (fun x -> (x - mean) * (x - mean))) / n
+                            Float(sqrt var)))
+            | Median ->
+                requireNumeric (fun () ->
+                    nums ()
+                    |> Result.map (fun ns ->
+                        match List.sortWith compareFloat ns with
+                        | [] -> Null
+                        | sorted ->
+                            let n = List.length sorted
+                            let mid = n / 2
 
-                if List.isEmpty ns then
-                    Ok Null
-                else
-                    Ok(Float(List.sum ns / float (List.length ns))))
-        | StdDev ->
-            requireNumeric (fun () ->
-                let ns = nums ()
-
-                if List.isEmpty ns then
-                    Ok Null
-                else
-                    let n = float (List.length ns)
-                    let mean = List.sum ns / n
-                    let var = (ns |> List.sumBy (fun x -> (x - mean) * (x - mean))) / n
-                    Ok(Float(sqrt var)))
-        | Median ->
-            requireNumeric (fun () ->
-                let ns = nums () |> List.sort
-
-                match ns with
+                            if n % 2 = 1 then
+                                Float(List.item mid sorted)
+                            else
+                                Float((List.item (mid - 1) sorted + List.item mid sorted) / 2.0)))
+            | Min
+            | Max ->
+                match present () with
                 | [] -> Ok Null
-                | _ ->
-                    let n = List.length ns
-                    let mid = n / 2
+                | first :: rest ->
+                    let pick a b =
+                        match aggCompare a b with
+                        | Some c -> if (fn = Min) = (c <= 0) then a else b
+                        | None -> a
 
-                    if n % 2 = 1 then
-                        Ok(Float(List.item mid ns))
-                    else
-                        Ok(Float((List.item (mid - 1) ns + List.item mid ns) / 2.0)))
-        | Min
-        | Max ->
-            match present () with
-            | [] -> Ok Null
-            | first :: rest ->
-                let pick a b =
-                    match aggCompare a b with
-                    | Some c -> if (fn = Min) = (c <= 0) then a else b
-                    | None -> a
-
-                Ok(List.fold pick first rest)
+                    Ok(List.fold pick first rest))
 
 module Table =
 
@@ -605,12 +789,72 @@ module Table =
     /// The empty table (no columns, no rows).
     let empty: Table = { Schema = []; Columns = [] }
 
-    /// Structural well-formedness (Phase 43). `Column.create` does no validation and `encodeJson`
-    /// silently papers over a malformed table (a schema name with no column emits an empty placeholder;
-    /// an extra column is dropped; ragged columns encode against the first column's length). `validate`
-    /// names the fault instead: (a) every schema name has exactly one matching column and vice-versa,
-    /// (b) all columns share one length, (c) each column's `Type` matches its schema entry. This is
-    /// *structural* well-formedness — content/data-quality rules are the columnar validator's concern.
+    /// The first name `names` carries twice, in order.
+    let internal firstDuplicate (names: string list) : string option =
+        let rec go (seen: Set<string>) =
+            function
+            | [] -> None
+            | n :: rest -> if seen.Contains n then Some n else go (seen.Add n) rest
+
+        go Set.empty names
+
+    /// The first present cell of `c` the codec cannot carry as a cell of `c.Type`, as the refusal
+    /// naming it (Phase 299), in row order: a cell whose type does not widen into the column's
+    /// (`TypeMismatch`), a non-finite `Float` (`NonFiniteFloat` — the wire has none), and a
+    /// `Decimal` / `Date` / `Timestamp` whose text is not its type's canonical form (`MalformedShape`).
+    let private firstUncarriableCell (c: Column) : ColumnError option =
+        c.Cells
+        |> List.tryPick (fun cell ->
+            match cell with
+            | Null -> None
+            | _ ->
+                match Cell.typeOf cell with
+                | Some t when not (ColumnType.widens t c.Type) ->
+                    Some(TypeMismatch(c.Name, ColumnType.tag c.Type, ColumnType.tag t))
+                | _ ->
+                    match cell with
+                    | Float f -> JVal.nonFiniteToken f |> Option.map (fun tok -> NonFiniteFloat(c.Name, tok))
+                    | Decimal s when not (DecimalText.isCanonical s) ->
+                        Some(
+                            MalformedShape(
+                                c.Name
+                                + ": a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
+                            )
+                        )
+                    | Date s when not (TemporalText.isCanonicalDate s) ->
+                        Some(
+                            MalformedShape(
+                                c.Name
+                                + ": a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
+                            )
+                        )
+                    | Timestamp s when not (TemporalText.isCanonicalTimestamp s) ->
+                        Some(
+                            MalformedShape(
+                                c.Name
+                                + ": a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ, naming an instant that exists"
+                            )
+                        )
+                    | _ -> None)
+
+    /// Well-formedness — THE TABLE THE CODEC CAN CARRY (Phase 43; widened to the cells by Phase 299).
+    /// `Column.create` does no validation, and `encodeJson` silently papers over a malformed table (a
+    /// schema name with no column emits an empty placeholder; an extra column is dropped; ragged
+    /// columns encode against the first column's length; a repeated name emits a repeated member key
+    /// its readers disagree about). `validate` names the fault instead, first found in this order:
+    ///   (a) no schema name and no column name appears twice (`Malformed`);
+    ///   (b) every schema name has exactly one matching column and vice-versa (`Malformed`);
+    ///   (c) each column's `Type` matches its schema entry (`TypeMismatch`);
+    ///   (d) all columns share one length (`RaggedColumns`);
+    ///   (e) every present cell, column by column in schema order and row by row, is one the codec
+    ///       carries as a cell of its column's type — its type WIDENS into the column's
+    ///       (`ColumnType.widens`: an `Int` in a float or decimal column is a widening, a `Bool` in an
+    ///       int column or a `Float` in a decimal column is a `TypeMismatch`), a `Float` is finite
+    ///       (`NonFiniteFloat`), and a `Decimal`, `Date` or `Timestamp` carries its type's canonical
+    ///       text (`MalformedShape`).
+    /// Over what it accepts, `ColumnCodec.tryEncode` is exactly `Ok (encode src)` — a law pins it —
+    /// and `ColumnCodec.decode` ends in it, so a table that encodes is a table that decodes. It is
+    /// not a data-quality check: those are the columnar validator's rules.
     let validate (t: Table) : Result<unit, ColumnError> =
         let schemaNames = t.Schema |> List.map fst
         let columnNamesList = t.Columns |> List.map (fun c -> c.Name)
@@ -621,31 +865,52 @@ module Table =
         let extra =
             columnNamesList |> List.filter (fun n -> not (List.contains n schemaNames))
 
-        if not (List.isEmpty missing) then
-            Error(Malformed("schema names with no column: " + String.concat ", " missing))
-        elif not (List.isEmpty extra) then
-            Error(Malformed("columns absent from the schema: " + String.concat ", " extra))
-        else
-            // Type agreement (schema order drives the check).
-            let typeFault =
-                t.Schema
-                |> List.tryPick (fun (name, ty) ->
-                    match t.Columns |> List.tryFind (fun c -> c.Name = name) with
-                    | Some c when c.Type <> ty -> Some(TypeMismatch(name, ColumnType.tag ty, ColumnType.tag c.Type))
-                    | _ -> None)
+        match firstDuplicate schemaNames, firstDuplicate columnNamesList with
+        | Some n, _ -> Error(Malformed("duplicate schema name: " + n))
+        | None, Some n -> Error(Malformed("duplicate column name: " + n))
+        | None, None ->
+            if not (List.isEmpty missing) then
+                Error(Malformed("schema names with no column: " + String.concat ", " missing))
+            elif not (List.isEmpty extra) then
+                Error(Malformed("columns absent from the schema: " + String.concat ", " extra))
+            else
+                // Type agreement (schema order drives the check).
+                let typeFault =
+                    t.Schema
+                    |> List.tryPick (fun (name, ty) ->
+                        match t.Columns |> List.tryFind (fun c -> c.Name = name) with
+                        | Some c when c.Type <> ty ->
+                            Some(TypeMismatch(name, ColumnType.tag ty, ColumnType.tag c.Type))
+                        | _ -> None)
 
-            match typeFault with
-            | Some e -> Error e
-            | None ->
-                // Equal lengths across all columns.
-                match t.Columns with
-                | [] -> Ok()
-                | first :: rest ->
-                    let len0 = Column.length first
+                match typeFault with
+                | Some e -> Error e
+                | None ->
+                    // Equal lengths across all columns.
+                    let ragged =
+                        match t.Columns with
+                        | [] -> None
+                        | first :: rest ->
+                            let len0 = Column.length first
 
-                    match rest |> List.tryFind (fun c -> Column.length c <> len0) with
-                    | Some c -> Error(LengthMismatch(c.Name, len0, Column.length c))
-                    | None -> Ok()
+                            rest
+                            |> List.tryFind (fun c -> Column.length c <> len0)
+                            |> Option.map (fun c -> RaggedColumns(c.Name, len0, Column.length c))
+
+                    match ragged with
+                    | Some e -> Error e
+                    | None ->
+                        // The cells, schema order then row order.
+                        let cellFault =
+                            t.Schema
+                            |> List.tryPick (fun (name, _) ->
+                                t.Columns
+                                |> List.tryFind (fun c -> c.Name = name)
+                                |> Option.bind firstUncarriableCell)
+
+                        match cellFault with
+                        | Some e -> Error e
+                        | None -> Ok()
 
 // ---- schema compatibility (Phase 33) ----
 
@@ -757,37 +1022,72 @@ module Schema =
 
         h.ToString("x8")
 
-    /// A stable, cross-host content `fingerprint` of a `Schema` (Phase 33): the canonical `name:type`
-    /// list joined by the `U+0001` separator (which no column name contains), then hashed. Order-
-    /// sensitive — column order is part of a schema's identity — so a reorder changes the fingerprint.
-    /// Byte-identical across hosts (no host hashing primitive); the schema-version stamp a consumer's
-    /// provenance records to detect "same shape" cheaply.
+    // A DELIBERATE COPY of `Hash.canonicalFields` (`Fuaran.Core.Tree`), for the reason `fnv1a` above
+    // is one: `Column` references only `Wire`. Each field has every `fieldEsc` (U+0010) and every
+    // `foldSep` (U+0001) it carries escaped by a preceding `fieldEsc`, and is then terminated by
+    // `foldSep` — so the pre-image is INJECTIVE, where the bare U+0001 join it replaces (Phase 299)
+    // was not: a column NAME can spell the separator, and then two different schemas shared a
+    // pre-image. Both symbols are written as `\u` escapes, never as the raw control byte. It must
+    // stay VALUE-IDENTICAL to the canonical encoding: the suite compares `fingerprint` against
+    // `Hash.fnv1a (Hash.canonicalFields …)` over names carrying the separator and the escape, and the
+    // `hashSweep/*` parity rows carry it through both pipelines.
+    let private foldSep = "\u0001"
+    let private fieldEsc = "\u0010"
+
+    let private canonicalPreimage (fields: string list) : string =
+        fields
+        |> List.map (fun s ->
+            s.Replace(fieldEsc, fieldEsc + fieldEsc).Replace(foldSep, fieldEsc + foldSep)
+            + foldSep)
+        |> String.concat ""
+
+    /// A stable, cross-host content `fingerprint` of a `Schema` (Phase 33): FNV-1a over the canonical
+    /// field encoding of the `name:type` list — the pre-image `Hash.canonicalFields` builds, so a
+    /// name carrying the separator cannot make two schemas collide (Phase 299; the list was joined
+    /// on a bare U+0001 until then, and every fingerprint moved with the pre-image). Order-sensitive
+    /// — column order is part of a schema's identity — so a reorder changes the fingerprint.
+    /// Byte-identical across hosts (no host hashing primitive); the schema-version stamp a
+    /// consumer's provenance records to detect "same shape" cheaply.
     let fingerprint (s: Schema) : string =
         s
         |> List.map (fun (n, t) -> n + ":" + ColumnType.tag t)
-        |> String.concat ""
+        |> canonicalPreimage
         |> fnv1a
 
 /// The canonical wire codec for the columnar strand. Column-oriented (a `values` array + a
 /// `validity` mask per column, the Arrow layout), reusing the `Fuaran.Core.Wire` canonical rules
-/// so numeric columns are byte-identical across hosts. Decode is `Result`-typed with the six-code
-/// `ColumnError` envelope. Fable-clean (only `Json` / `Decode`).
+/// so numeric columns are byte-identical across hosts. Decode is `Result`-typed with the codec
+/// envelope (`ColumnError`), over the `Wire.Decode` combinators. Fable-clean (only `Json` / `Canon` /
+/// `Decode`).
 module ColumnCodec =
 
-    // ---- encode (Fable-clean `JVal` construction → `Json.render`) ----
+    // ---- encode (Fable-clean `JVal` construction → `Canon.render`) ----
 
-    /// The present-cell JSON value for a column of type `ty`. A `Null` cell emits the type
-    /// default placeholder (the validity mask records the nullity); a present cell of the wrong
-    /// shape for `ty` is normalised toward `ty` only where it is a lossless widening (`Int`→`Float`
-    /// in a float column), otherwise it encodes as-is and the round-trip law catches a mis-built
-    /// column. Floats use the `Wire` `{0:R}` canonical layout.
+    /// THE ABSENT SLOT — the value a `Null` cell's slot carries in the `values` array (Phase 299).
+    /// The validity mask, not this value, says the cell is absent; the slot exists only because the
+    /// Fuaran wire has no JSON `null`, so the array needs a value there. It is a WIRE placeholder of
+    /// the column's JSON kind and never a cell: a reader skips a masked slot without decoding it, so
+    /// the `""` a date or timestamp column carries is never read as a date. (Until this phase it was
+    /// produced through a public `Cell.defaultFor`, which built `Date ""` — a cell no date column
+    /// accepts. The bytes are unchanged.)
+    let private absentSlot (ty: ColumnType) : JVal =
+        match ty with
+        | IntType -> JInt 0
+        | FloatType -> JFloat 0.0
+        | BoolType -> JBool false
+        | StringType
+        | DateType
+        | TimestampType -> JStr ""
+        | DecimalType -> JStr DecimalText.zero
+
+    /// The JSON value of a cell in a column of type `ty`. A `Null` cell emits the absent slot (the
+    /// validity mask records the nullity); an `Int` in a float or decimal column is written as that
+    /// type (the lossless widenings `ColumnType.widens` pins). A cell `Table.validate` would refuse
+    /// encodes as-is — `encode` assumes a validated source, and `tryEncode` checks it first.
+    /// Floats use the `Wire` `{0:R}` canonical layout.
     let private cellJson (ty: ColumnType) (c: Cell) : JVal =
-        let present =
-            match c with
-            | Null -> Cell.defaultFor ty
-            | other -> other
-
-        match present, ty with
+        match c, ty with
+        | Null, _ -> absentSlot ty
         | Int i, FloatType -> JFloat(float i)
         | Int i, DecimalType -> JStr(string i)
         | Int i, _ -> JInt i
@@ -799,7 +1099,6 @@ module ColumnCodec =
         // A STRING on the wire, never a JSON number: a number token is read through a float by
         // most parsers, and the digits are the value.
         | Decimal s, _ -> JStr s
-        | Null, _ -> JStr "" // unreachable (Null replaced above); defensive
 
     let private columnJson (c: Column) : JVal =
         let values = c.Cells |> List.map (cellJson c.Type)
@@ -812,8 +1111,9 @@ module ColumnCodec =
         |> JArr
 
     /// Encode a `DataSource` to a `JVal` — embedded columns keyed by name (type comes from the
-    /// schema, so it is not repeated), or a `ref` string. Author-ordered keys (`schema` first) →
-    /// deterministic, byte-identical output.
+    /// schema, so it is not repeated), or a `ref` string beside an empty `schema`. The members are
+    /// built in author order; `encode` renders them under `Canon`, which sorts keys, so the BYTES
+    /// are canonical whatever the order here.
     let encodeJson (src: DataSource) : JVal =
         match src with
         | Embedded t ->
@@ -832,102 +1132,38 @@ module ColumnCodec =
 
     /// The canonical wire string for a `DataSource` — rendered under the shared `$type` discipline
     /// (`Canon`): Ordinal-sorted keys + the cross-host float layout, so a columnar payload is
-    /// byte-identical across the .NET, Fable, TS and Python hosts. **Assumes a well-formed, all-finite
-    /// source** — use `tryEncode` for the guarded, total entry point on untrusted/derived data.
+    /// byte-identical across the .NET, Fable, TS and Python hosts. **Assumes a source
+    /// `Table.validate` accepts** — use `tryEncode` for the guarded, total entry point on
+    /// untrusted/derived data.
     let encode (src: DataSource) : string = Canon.render (encodeJson src)
 
-    /// The first non-finite `Float` cell in a `DataSource` as `(columnName, token)`, or `None` if all
-    /// floats are finite. A non-finite float has no Fuaran wire representation (Phase 38) — the same
-    /// posture as the tree wire's `Json.tryRender` (Phase 12).
-    let private firstNonFinite (src: DataSource) : (string * string) option =
-        match src with
-        | Ref _ -> None
-        | Embedded t ->
-            t.Columns
-            |> List.tryPick (fun c ->
-                c.Cells
-                |> List.tryPick (fun cell ->
-                    match cell with
-                    | Float f when System.Double.IsNaN f -> Some(c.Name, "NaN")
-                    | Float f when System.Double.IsPositiveInfinity f -> Some(c.Name, "Infinity")
-                    | Float f when System.Double.IsNegativeInfinity f -> Some(c.Name, "-Infinity")
-                    | _ -> None))
-
-    let private notCanonicalDecimal (column: string) : ColumnError =
-        MalformedShape(
-            column
-            + ": a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
-        )
-
-    /// The first column holding a `Decimal` cell whose text is not canonical, or `None`. Such a cell
-    /// would encode to a string the decoder rewrites (`1.50` comes back as `1.5`) or refuses
-    /// (`abc`), so the value that went in is not the value that comes out.
-    let private firstNonCanonicalDecimal (src: DataSource) : string option =
-        match src with
-        | Ref _ -> None
-        | Embedded t ->
-            t.Columns
-            |> List.tryPick (fun c ->
-                c.Cells
-                |> List.tryPick (fun cell ->
-                    match cell with
-                    | Decimal s when not (DecimalText.isCanonical s) -> Some c.Name
-                    | _ -> None))
-
-    /// Total, guarded encode (Phases 38 + 43). Rejects a structurally-malformed `Table`
-    /// (`Table.validate`) and any non-finite `Float` cell with a typed `ColumnError` instead of silently
-    /// emitting a `Table` that round-trips to a *different* value (extra/missing columns dropped) or
-    /// un-decodable wire (`"NaN"` where a `JFloat` is expected). Over a well-formed, all-finite source it
-    /// is exactly `Ok (encode src)`. A `Decimal` cell whose text is not canonical is rejected on the
-    /// same ground (`0.33.0`).
+    /// Total, guarded encode (Phases 38 + 43 + 299): `Table.validate`, then `encode`. So over what
+    /// `validate` accepts it is EXACTLY `Ok (encode src)` — a law in the suite pins it — and
+    /// everything it refuses is refused by `validate`, with `validate`'s error: a structurally
+    /// malformed table, a cell outside its column's type, a non-finite float, and decimal, date or
+    /// timestamp text that is not canonical. A `ref` source carries no table and always encodes.
     let tryEncode (src: DataSource) : Result<string, ColumnError> =
-        let structural =
-            match src with
-            | Ref _ -> Ok()
-            | Embedded t -> Table.validate t
+        match src with
+        | Ref _ -> Ok(encode src)
+        | Embedded t -> Table.validate t |> Result.map (fun () -> encode src)
 
-        structural
-        |> Result.bind (fun () ->
-            match firstNonFinite src with
-            | Some(col, tok) -> Error(NonFiniteFloat(col, tok))
-            | None ->
-                match firstNonCanonicalDecimal src with
-                | Some col -> Error(notCanonicalDecimal col)
-                | None -> Ok(encode src))
+    // ---- decode (`Json.parseDetailed` → the codec envelope `ColumnError`) ----
 
-    // ---- decode (`Json.parse` → six-code `ColumnError`) ----
+    // The `Wire.Decode` combinators, over this codec's envelope (Phase 299; the codec kept a private
+    // copy of each until then). A missing member is `MissingField`; a wrong JSON kind is
+    // `MalformedShape`, prefixed with where it was met when there is a where. The messages are the
+    // ones the private copies wrote.
+    let private fault (ctx: string) (f: Decode.Fault) : ColumnError =
+        match f with
+        | Decode.MissingProperty name -> MissingField name
+        | Decode.WrongKind(expected, got) ->
+            MalformedShape((if ctx = "" then "" else ctx + ": ") + "expected " + expected + ", got " + got)
 
-    let private kindName =
-        function
-        | JStr _ -> "string"
-        | JInt _ -> "int"
-        | JBool _ -> "bool"
-        | JFloat _ -> "float"
-        | JArr _ -> "array"
-        | JObj _ -> "object"
+    let private getField (name: string) (el: JVal) : Result<JVal, ColumnError> = Decode.propWith (fault "") name el
 
-    let private getField (name: string) (el: JVal) : Result<JVal, ColumnError> =
-        match el with
-        | JObj fields ->
-            match fields |> List.tryFind (fun (k, _) -> k = name) with
-            | Some(_, v) -> Ok v
-            | None -> Error(MissingField name)
-        | other -> Error(MalformedShape("expected object, got " + kindName other))
+    let private asArr (ctx: string) (el: JVal) : Result<JVal list, ColumnError> = Decode.arrayWith (fault ctx) el
 
-    let private tryField (name: string) (el: JVal) : JVal option =
-        match el with
-        | JObj fields -> fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
-        | _ -> None
-
-    let private asArr (ctx: string) (el: JVal) : Result<JVal list, ColumnError> =
-        match el with
-        | JArr xs -> Ok xs
-        | other -> Error(MalformedShape(ctx + ": expected array, got " + kindName other))
-
-    let private asStr (ctx: string) (el: JVal) : Result<string, ColumnError> =
-        match el with
-        | JStr s -> Ok s
-        | other -> Error(MalformedShape(ctx + ": expected string, got " + kindName other))
+    let private asStr (ctx: string) (el: JVal) : Result<string, ColumnError> = Decode.stringWith (fault ctx) el
 
     /// Phase 94 (lenient-ingest) — render an epoch-seconds instant as the canonical
     /// ISO-8601 UTC timestamp string. Pure integer arithmetic (civil-from-days), so it
@@ -949,6 +1185,10 @@ module ColumnCodec =
         let year = yoe + era * 400L + (if month <= 2L then 1L else 0L)
         sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" year month day (sod / 3600L) (sod % 3600L / 60L) (sod % 60L)
 
+    /// The largest magnitude a whole-valued float token carries exactly: 2^53, the parser's int53
+    /// guard. A decimal column reads a whole-valued `JFloat` up to it and no further.
+    let private int53Max = 9007199254740992.0
+
     /// Decode one present value into a `Cell` of the declared column type, or a `TypeMismatch`.
     /// A float column accepts an integer JSON token (lossless widening); a timestamp column
     /// accepts an epoch number (Phase 94 — models emit epoch instants against their own
@@ -957,17 +1197,48 @@ module ColumnCodec =
     /// JSON kind.
     ///
     /// A decimal column (`0.33.0`) reads a STRING of decimal text and canonicalises it, so `12.50`
-    /// decodes to `Decimal "12.5"`; it reads an integer token, which is exact; and it REFUSES a
-    /// fractional number token as a `TypeMismatch`. That token has already been through a float by
-    /// the time it arrives here, and a type whose purpose is exactness cannot accept a value it
-    /// cannot vouch for. An emitter writes a decimal as a string.
+    /// decodes to `Decimal "12.5"`; it reads an integer token, which is exact — whichever
+    /// constructor the parser chose for it (Phase 299): a token past int32 arrives as a
+    /// whole-valued `JFloat`, and within the int53 guard its value IS its digits, so `3000000000`
+    /// decodes as `12` always did. It REFUSES a fractional number token, and a whole-valued one past
+    /// 2^53, as a `TypeMismatch`: that value has been through a float by the time it arrives here,
+    /// and a type whose purpose is exactness cannot accept a value it cannot vouch for. An emitter
+    /// writes a decimal as a string.
+    ///
+    /// A date or timestamp column (Phase 299) reads only its canonical ISO-8601 text
+    /// (`TemporalText`), and an epoch number only where the instant it names falls in the years the
+    /// canonical form spells (`0000`–`9999`); anything else is a `MalformedShape`.
     let private decodeCell (colName: string) (ty: ColumnType) (v: JVal) : Result<Cell, ColumnError> =
         let mismatch () =
-            Error(TypeMismatch(colName, ColumnType.tag ty, kindName v))
+            Error(TypeMismatch(colName, ColumnType.tag ty, JVal.kindName v))
+
+        let notCanonical (what: string) =
+            Error(MalformedShape(colName + ": " + what))
+
+        let temporal (isCanonical: string -> bool) (make: string -> Cell) (form: string) (s: string) =
+            if isCanonical s then
+                Ok(make s)
+            else
+                notCanonical (
+                    "a "
+                    + ColumnType.tag ty
+                    + " value must be canonical ISO-8601 text, "
+                    + form
+                    + ", naming a moment that exists"
+                )
 
         let epochToIso (i: int64) =
             let secs = if abs i >= 100_000_000_000L then i / 1000L else i
-            Timestamp(isoOfEpochSeconds secs)
+            let iso = isoOfEpochSeconds secs
+
+            if TemporalText.isCanonicalTimestamp iso then
+                Ok(Timestamp iso)
+            else
+                notCanonical (
+                    "the epoch "
+                    + string i
+                    + " names an instant outside the years 0000-9999 the canonical timestamp spells"
+                )
 
         match ty, v with
         | IntType, JInt i -> Ok(Int i)
@@ -975,23 +1246,20 @@ module ColumnCodec =
         | FloatType, JInt i -> Ok(Float(float i))
         | BoolType, JBool b -> Ok(Bool b)
         | StringType, JStr s -> Ok(Str s)
-        | DateType, JStr s -> Ok(Date s)
-        | TimestampType, JStr s -> Ok(Timestamp s)
+        | DateType, JStr s -> temporal TemporalText.isCanonicalDate Date "YYYY-MM-DD" s
+        | TimestampType, JStr s -> temporal TemporalText.isCanonicalTimestamp Timestamp "YYYY-MM-DDThh:mm:ssZ" s
         // Epoch-seconds fit Int32 (so arrive as JInt); epoch-milliseconds overflow the
         // parser's Int32 path and arrive as a whole-valued JFloat.
-        | TimestampType, JInt i -> Ok(epochToIso (int64 i))
-        | TimestampType, JFloat f when f = floor f && abs f < 9e15 -> Ok(epochToIso (int64 f))
+        | TimestampType, JInt i -> epochToIso (int64 i)
+        | TimestampType, JFloat f when f = floor f && abs f < 9e15 -> epochToIso (int64 f)
         | DecimalType, JInt i -> Ok(Decimal(string i))
+        | DecimalType, JFloat f when f = floor f && abs f <= int53Max -> Ok(Decimal(string (int64 f)))
         | DecimalType, JStr s ->
             match DecimalText.tryCanonical s with
             | Some canonical -> Ok(Decimal canonical)
             | None ->
-                Error(
-                    MalformedShape(
-                        colName
-                        + ": a decimal value must be decimal text — an optional '-', digits, and an optional '.' followed by digits, with no exponent, sign '+', separator or white space"
-                    )
-                )
+                notCanonical
+                    "a decimal value must be decimal text — an optional '-', digits, and an optional '.' followed by digits, with no exponent, sign '+', separator or white space"
         | _ -> mismatch ()
 
     let private decodeSchemaEntry (el: JVal) : Result<string * ColumnType, ColumnError> =
@@ -1037,7 +1305,7 @@ module ColumnCodec =
                 // omission cannot mean absent cells): models reproduce the canonical
                 // object shape minus the mask. Synthesize all-present; absent cells
                 // still require the full wrapped form, which stays canonical.
-                match tryField "validity" colEl with
+                match Decode.tryProp "validity" colEl with
                 | None -> Ok(values, values |> List.map (fun _ -> JBool true))
                 | Some validityEl ->
                     asArr (name + ".validity") validityEl
@@ -1045,7 +1313,7 @@ module ColumnCodec =
 
     /// Decode a single named column against its declared type from the `columns` object.
     let private decodeColumn (columnsObj: JVal) (name: string) (ty: ColumnType) : Result<Column, ColumnError> =
-        match tryField name columnsObj with
+        match Decode.tryProp name columnsObj with
         | None -> Error(MissingField("columns." + name))
         | Some colEl ->
             columnParts name colEl
@@ -1063,7 +1331,8 @@ module ColumnCodec =
                                 match decodeCell name ty v with
                                 | Ok c -> go (c :: acc) (vs, ps)
                                 | Error e -> Error e
-                        | _ :: _, p :: _ -> Error(MalformedShape(name + ".validity: expected bool, got " + kindName p))
+                        | _ :: _, p :: _ ->
+                            Error(MalformedShape(name + ".validity: expected bool, got " + JVal.kindName p))
                         | _ -> Error(MalformedShape(name + ": values/validity exhausted unevenly"))
 
                     go [] (values, validity)
@@ -1120,29 +1389,40 @@ module ColumnCodec =
                     )
                 )
 
-    /// Decode a `DataSource` from a `JVal` root — the six-code envelope on every failure.
+    /// The `columns` object, refused where it names one column twice (Phase 299). A parsed object
+    /// keeps a repeated key, and the readers disagreed about which occurrence wins; the encoder
+    /// never writes one (`Table.validate` refuses the duplicate name first), so a document that
+    /// carries one was not written by it and has two readings.
+    let private uniqueColumnKeys (columnsObj: JVal) : Result<JVal, ColumnError> =
+        match columnsObj with
+        | JObj fields ->
+            match Table.firstDuplicate (fields |> List.map fst) with
+            | Some key -> Error(Malformed("duplicate column key in \"columns\": " + key))
+            | None -> Ok columnsObj
+        | _ -> Ok columnsObj
+
+    /// Decode a `DataSource` from a `JVal` root — the codec envelope on every failure.
     /// Phase 88: `schema` may be OMITTED on an EMBEDDED source (inferred per
-    /// `inferColumnType`, columns in Ordinal key order); a `ref` source still
-    /// requires it (no cells to infer from). The canonical encoder always
-    /// emits the explicit schema, so the shorthand normalises on re-encode.
+    /// `inferColumnType`, columns in Ordinal key order). A `ref` source carries no rows, so it
+    /// needs no schema and keeps none (Phase 299 dropped the rule that it carry one the decoder
+    /// then discarded); a schema it does carry must still be a well-formed schema array. The
+    /// canonical encoder always emits the explicit schema, so the shorthand normalises on
+    /// re-encode. An embedded source ENDS in `Table.validate` (Phase 299), so what decodes is a
+    /// table `tryEncode` accepts: a ragged table is a `RaggedColumns` here, not an `Ok` that encode
+    /// then refuses with another cause.
     let decodeJson (el: JVal) : Result<DataSource, ColumnError> =
         let schemaR =
-            match tryField "schema" el with
+            match Decode.tryProp "schema" el with
             | Some schemaEl -> decodeSchema schemaEl |> Result.map Some
             | None -> Ok None
 
         schemaR
         |> Result.bind (fun schemaOpt ->
-            match tryField "ref" el, schemaOpt with
-            | Some refEl, Some _ -> asStr "ref" refEl |> Result.map Ref
-            | Some _, None ->
-                Error(
-                    MalformedShape(
-                        "a ref source requires an explicit \"schema\" array — there are no cells to infer column types from"
-                    )
-                )
-            | None, _ ->
+            match Decode.tryProp "ref" el with
+            | Some refEl -> asStr "ref" refEl |> Result.map Ref
+            | None ->
                 getField "columns" el
+                |> Result.bind uniqueColumnKeys
                 |> Result.bind (fun columnsObj ->
                     let schemaResolved =
                         match schemaOpt with
@@ -1158,7 +1438,7 @@ module ColumnCodec =
                                     (fun acc name ->
                                         acc
                                         |> Result.bind (fun entries ->
-                                            match tryField name columnsObj with
+                                            match Decode.tryProp name columnsObj with
                                             | None -> Error(MissingField("columns." + name))
                                             | Some colEl ->
                                                 columnParts name colEl
@@ -1179,20 +1459,21 @@ module ColumnCodec =
                                 | Error e -> Error e
 
                         go [] schema
-                        |> Result.map (fun columns -> Embedded { Schema = schema; Columns = columns }))))
+                        |> Result.map (fun columns -> { Schema = schema; Columns = columns })
+                        |> Result.bind (fun table -> Table.validate table |> Result.map (fun () -> Embedded table)))))
 
-    /// Decode a wire string into a `DataSource`, surfacing the six-code `ColumnError` envelope
-    /// (a JSON-syntax failure becomes `NotJson`).
+    /// Decode a wire string into a `DataSource`, surfacing the codec envelope `ColumnError` (a
+    /// JSON-syntax failure becomes `NotJson`, carrying the parser's structured error).
     let decode (s: string) : Result<DataSource, ColumnError> =
-        match Json.parse s with
-        | Error m -> Error(NotJson m)
+        match Json.parseDetailed s with
+        | Error e -> Error(NotJson e)
         | Ok el -> decodeJson el
 
     /// Render a `ColumnError` as a stable human string — the adapter for `Corpus.Codec`'s
     /// `string`-error decode slot and for diagnostics.
     let errorString (e: ColumnError) : string =
         match e with
-        | NotJson d -> "not valid JSON: " + d
+        | NotJson e -> "not valid JSON: " + e.Message + " at position " + string e.Position
         | MissingField f -> "missing field: " + f
         | MalformedShape d -> "malformed: " + d
         | UnknownType(got, expected) ->
@@ -1215,6 +1496,13 @@ module ColumnCodec =
             + "': non-finite float is not representable on the Fuaran wire: "
             + tok
         | Malformed d -> "malformed table: " + d
+        | RaggedColumns(col, expected, got) ->
+            "ragged table: column '"
+            + col
+            + "' has "
+            + string got
+            + " rows where the first column has "
+            + string expected
 
     /// The `Fuaran.Core.Wire.Corpus.Codec` over `DataSource` — encode + a `string`-error decode,
     /// so the columnar strand plugs straight into the conformance corpus tooling (`runCorpus` /

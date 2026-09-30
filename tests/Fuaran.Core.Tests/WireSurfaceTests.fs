@@ -62,7 +62,6 @@ module Fuaran.Core.Tests.WireSurfaceTests
 // ---------------------------------------------------------------------------
 
 open System
-open System.Diagnostics
 open System.IO
 open System.Security.Cryptography
 open System.Text
@@ -606,20 +605,7 @@ let internal describe (m: WireMove) =
 let private repoRoot () : string = Snapshots.repoFile ""
 
 let private git (arguments: string) : Result<string, string> =
-    try
-        let psi = ChildProcess.redirected "git" arguments
-        psi.WorkingDirectory <- repoRoot ()
-        use p = Process.Start psi
-        let out = p.StandardOutput.ReadToEnd()
-        let err = p.StandardError.ReadToEnd()
-        p.WaitForExit()
-
-        if p.ExitCode <> 0 then
-            Error(sprintf "`git %s` exited %d: %s" arguments p.ExitCode (err.Trim()))
-        else
-            Ok out
-    with e ->
-        Error("`git` could not be run: " + e.Message)
+    ChildProcess.git (repoRoot ()) arguments
 
 let private newestTag () : Result<string, string> =
     git "tag --list"
@@ -895,3 +881,181 @@ let tests =
                   (Some Breaking)
                   "identical structure emitted as different bytes is breaking — the hash sees what canonical form hides"
           } ]
+
+// ---- Phase 299 — the parser held to the JSON grammar, and one integer reader ----------------------
+//
+// These are READ-side facts, so no wire baseline above sees them: the baselines pin what the
+// packages EMIT. The grammar, the surrogate refusal and the invariant integer reader are pinned here,
+// and — as vectors a host codec twin certifies against — in `conformance/refusals/`.
+
+/// Run `f` with the current culture set to `name`, restoring the previous one however `f` ends.
+let private underCulture (name: string) (f: unit -> 'a) : 'a =
+    let saved = Globalization.CultureInfo.CurrentCulture
+    Globalization.CultureInfo.CurrentCulture <- Globalization.CultureInfo name
+
+    try
+        f ()
+    finally
+        Globalization.CultureInfo.CurrentCulture <- saved
+
+let private parseKind (text: string) : Result<JVal, JsonErrorKind> =
+    Json.parseDetailed text |> Result.mapError _.Kind
+
+[<Tests>]
+let grammarTests =
+    testList
+        "Wire.parser grammar (Phase 299)"
+        [ testCase "isJsonNumber is exactly the JSON number grammar"
+          <| fun _ ->
+              for tok in
+                  [ "0"
+                    "-0"
+                    "7"
+                    "-7"
+                    "10"
+                    "0.5"
+                    "-0.5"
+                    "1e5"
+                    "1E+5"
+                    "1e-5"
+                    "1.25e10"
+                    "9007199254740993" ] do
+                  Expect.isTrue (Json.isJsonNumber tok) (sprintf "%s is a JSON number" tok)
+
+              for tok in
+                  [ ""
+                    "-"
+                    "01"
+                    "-01"
+                    "00"
+                    "1."
+                    ".5"
+                    "-.5"
+                    "1.e5"
+                    "1e"
+                    "1e+"
+                    "+1"
+                    "1e5.0"
+                    "0x1"
+                    "1_0" ] do
+                  Expect.isFalse (Json.isJsonNumber tok) (sprintf "%s is not a JSON number" tok)
+
+          testCase "the parser refuses a token outside the grammar as MalformedNumber, naming the token"
+          <| fun _ ->
+              for text in [ "01"; "-01"; "[00]"; "1."; "-.5"; "1.e5"; "{\"a\":01}" ] do
+                  Expect.equal (parseKind text) (Error MalformedNumber) (sprintf "%s is refused" text)
+
+              match Json.parseDetailed "01" with
+              | Error e ->
+                  Expect.equal e.Message "malformed number: 01" "the token, in the message it always had"
+                  Expect.equal e.Position 2 "at the token's end"
+              | Ok v -> failtestf "01 parsed as %A" v
+
+              Expect.equal (Json.parse "-0") (Ok(JInt 0)) "a lone zero, signed, is a number"
+              Expect.equal (Json.parse "0.5") (Ok(JFloat 0.5)) "a zero before the point is a number"
+
+          testCase "a lone or ill-ordered surrogate is refused as BadEscape, raw or escaped"
+          <| fun _ ->
+              let high = string (char 0xD83D)
+              let low = string (char 0xDE00)
+              let quoted (s: string) = "\"" + s + "\""
+
+              for text in
+                  [ quoted high
+                    quoted low
+                    quoted (low + high)
+                    quoted (high + "z")
+                    quoted (high + high)
+                    quoted "\\uD800"
+                    quoted "\\uDFFF"
+                    quoted "\\uDE00\\uD83D"
+                    quoted ("\\uD83D" + "\\n")
+                    "{" + quoted high + ":1}" ] do
+                  Expect.equal (parseKind text) (Error BadEscape) (sprintf "%A is refused" text)
+
+              let pair = high + low
+              Expect.equal (Json.parse (quoted pair)) (Ok(JStr pair)) "a raw pair is a character"
+              Expect.equal (Json.parse (quoted "\\uD83D\\uDE00")) (Ok(JStr pair)) "an escaped pair is the same one"
+              Expect.equal (Json.parse (quoted (high + "\\uDE00"))) (Ok(JStr pair)) "and a mixed one"
+
+          // The go-red a culture probe needs: if neither culture moved the host reader, the probes
+          // below would pass without measuring anything.
+          testCase "the integer reader is the invariant one: -5 is JInt -5 under fa-IR and he-IL"
+          <| fun _ ->
+              let cultures = [ "fa-IR"; "he-IL" ]
+
+              let hostReaderMoved =
+                  cultures
+                  |> List.exists (fun c -> underCulture c (fun () -> not (fst (Int32.TryParse "-5"))))
+
+              Expect.isTrue hostReaderMoved "at least one culture reads -5 differently through the ambient reader"
+
+              let documents =
+                  [ "-5"
+                    "[-1,-2147483648,2147483647,-2147483649,3000000000,-0]"
+                    "{\"a\":-12,\"b\":[1,-2.5,-3e2]}" ]
+
+              for c in cultures do
+                  for d in documents do
+                      Expect.equal
+                          (underCulture c (fun () -> Json.parse d))
+                          (Json.parse d)
+                          (sprintf "%s parses the same under %s" d c)
+
+                  Expect.equal (underCulture c (fun () -> Json.parse "-5")) (Ok(JInt -5)) (sprintf "-5 under %s" c)
+
+                  Expect.equal
+                      (underCulture c (fun () -> Versioning.Profile.tryParse "core@1.2"))
+                      (Ok { Name = "core"; Major = 1; Minor = 2 })
+                      (sprintf "a profile under %s" c)
+
+              Expect.isError (Versioning.Profile.tryParse "core@ 1.2") "no white space in a profile's integers"
+              Expect.equal (Json.readInt32 "-5") (Some -5) "the reader takes a sign"
+              Expect.equal (Json.readInt32 "+5") (Some 5) "AllowLeadingSign, as the phase states it"
+              Expect.equal (Json.readInt32 " 5") None "and nothing else"
+
+          testCase "fuzzRoundTrip draws every surrogate class and both renderers, and holds"
+          <| fun _ ->
+              match Corpus.fuzzRoundTrip 299 3000 4 with
+              | Ok() -> ()
+              | Error m -> failtest m
+
+          testCase "kindName, nonFiniteToken and firstNonFinite are one public definition each"
+          <| fun _ ->
+              Expect.equal
+                  ([ JStr ""; JInt 0; JBool true; JFloat 0.5; JArr []; JObj [] ]
+                   |> List.map JVal.kindName)
+                  [ "string"; "int"; "bool"; "float"; "array"; "object" ]
+                  "the kinds"
+
+              Expect.equal
+                  ([ nan; infinity; -infinity; 1.0 ] |> List.map JVal.nonFiniteToken)
+                  [ Some "NaN"; Some "Infinity"; Some "-Infinity"; None ]
+                  "the one spelling"
+
+              Expect.equal
+                  (Json.firstNonFinite (JObj [ "a", JArr [ JFloat 1.0; JFloat -infinity ]; "b", JFloat nan ]))
+                  (Some("$[\"a\"][1]", "-Infinity"))
+                  "the first, in document order, with its path"
+
+              Expect.equal (Canon.canonicalFloat nan) "\"NaN\"" "the canonical layout quotes the same token"
+
+          testCase "the Decode combinators run over a caller's error type"
+          <| fun _ ->
+              let fault (f: Decode.Fault) = f
+              Expect.equal (Decode.propWith fault "x" (JObj [])) (Error(Decode.MissingProperty "x")) "missing"
+
+              Expect.equal
+                  (Decode.propWith fault "x" (JInt 1))
+                  (Error(Decode.WrongKind("object", "int")))
+                  "not an object"
+
+              Expect.equal (Decode.arrayWith fault (JArr [ JInt 1 ])) (Ok [ JInt 1 ]) "an array"
+              Expect.equal (Decode.stringWith fault (JBool true)) (Error(Decode.WrongKind("string", "bool"))) "a bool"
+
+              Expect.equal
+                  (Decode.getProp "x" (JObj []))
+                  (Error "missing property: x")
+                  "the string form keeps its words"
+
+              Expect.equal (Decode.asString (JInt 1)) (Error "expected string, got int") "…all of them" ]

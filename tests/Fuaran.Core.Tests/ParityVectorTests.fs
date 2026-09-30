@@ -84,7 +84,10 @@ let private expected: (string * string) list =
       "confRng/seed-0", "12702810-1931064975-2093279515-1561498856-2122184415-1415771932-1521297884-222582007"
       "confRng/seed-1", "166402301-879050087-1794327795-1338740069-1921087622-1872842638-205863014-1114920338"
       "confRng/seed-neg-1", "2015858743-1309524423-815153517-1875012400-1982543394-218150117-1746742363-2136549504"
-      "confRng/seed-1488", "1779094209-974108648-1386259377-469941146-625613426-646666080-1082870579-340445045" ]
+      "confRng/seed-1488", "1779094209-974108648-1386259377-469941146-625613426-646666080-1082870579-340445045"
+      // Phase 299: Min is -1 (NaN is not below it), Max is NaN (NaN sorts last), Median of the five is
+      // the third of -1, -0, 3, NaN, NaN, and the four distinct values are 3, NaN, -1 and 0.
+      "aggregate/nan-order", "-1/\"NaN\"/3/4" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -98,7 +101,8 @@ let private families =
       "jsonRender/"
       "witness/"
       "chain/"
-      "confRng/" ]
+      "confRng/"
+      "aggregate/" ]
 
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the
@@ -107,8 +111,10 @@ let private families =
 /// so any row moving reddens it; the row-level tests below say which one did.
 let private sweepRows = 124
 
+// Moved by Phase 299: every row's fourth value is `Schema.fingerprint`, whose pre-image is the
+// canonical field encoding now rather than a bare U+0001 join.
 let private sweepDigest =
-    "86213e76c48e7e0eea259781167489b400961a086e1fbafcdef819890d95eb40"
+    "4f8ceff06baed41adbfbba2bc5644c5665abf3ea138b1978c5f5e4414388782f"
 
 [<Tests>]
 let tests =

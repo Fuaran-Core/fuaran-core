@@ -18,6 +18,8 @@ conformance/
   laws/capability-laws.json    the capability-law vectors (`--emit-laws`, since Phase 235)
   apply/skeleton-apply.json    the skeleton-op apply contract (`--emit-apply`)
   apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
+  refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, column cells (`--emit-refusals`, since Phase 299)
+  refusals/manifest.json       the refusals family's own index + per-host adoption (`--emit-refusals`)
 ```
 
 ### Which law sets Core emits — all of them, and the UI tier emits none

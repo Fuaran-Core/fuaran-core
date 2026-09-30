@@ -1,5 +1,106 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D79: the parser holds to the JSON grammar, NaN sorts last, the column codec carries only a table it can decode, and `RowCodec` is obsoleted
+
+**Recorded by Phase 299. BREAKING, riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`, "Column
+trusts nothing it is handed").** The column strand took what it was handed at its word — a cell by its
+shape, a table by its column list, a decimal by its text, a date by nothing at all — and the parser
+under it read tokens the JSON grammar does not have. Each ruling below is the refusal a host twin
+must make too; `conformance/refusals/` carries them as vectors.
+
+*The JSON number grammar, exactly — scanned as before, then held to the grammar.* `Json.isJsonNumber`
+is `-? (0 | [1-9][0-9]*) (\.[0-9]+)? ([eE][+-]?[0-9]+)?` and nothing else, and `parseNumber` checks
+every token against it before reading one: `01`, `1.`, `-.5`, `1.e5`, `1e` are `MalformedNumber`.
+The token is still SCANNED the way it always was (an optional sign, digits, point, digits,
+exponent), and the refusal is `malformed number: <tok>` at the token's end. That is deliberate:
+an input the old parser already refused as `malformed number: <tok>` keeps its kind, its position
+and its message, so the behaviour change is the set of tokens now refused, and the parser differential against the
+extracted model (`proofs/JsonParse.fst`) disagrees on exactly those. A scanner that stopped at the
+first grammar fault would have moved the position and message of inputs nobody meant to touch.
+
+*One integer reader, the invariant one.* `Json.readInt32` is `Int32.TryParse(tok,
+NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture)`, and `parseNumber` and
+`Versioning.Profile.tryParse` both read through it. The bare `Int32.TryParse tok` read under the
+current culture: under fa-IR and he-IL `-5` failed it, fell to the float path and parsed as
+`JFloat -5.0`, so one document decoded differently by server locale while its bytes and digests
+agreed. `NumberStyles.None`, as the phase first stated it, would have refused the sign itself and sent
+every negative integer to the float path on every host — the amendment's correction is what shipped.
+
+*A lone or ill-ordered surrogate is refused, as `BadEscape`, raw or escaped.* A string is well-formed
+UTF-16 or it is not a string of characters: a surrogate with no partner has no code point, UTF-8 has
+no encoding for it, and the platform encoders each substitute their own replacement, so a digest over
+it cannot mean one thing on every host (Phase 290's injectivity needs the refusal; Phase 306 states the
+UTF-8 theorem over it). The kind is the existing `BadEscape` — "this string's content is not
+well-formed" — rather than a new `JsonErrorKind` every exhaustive match would have to learn; the
+message says which half is missing. `Corpus.fuzzRoundTrip` now draws every control character and
+every surrogate class through BOTH renderers, and its law for an ill-formed draw is the refusal.
+
+*NaN sorts last, and `-0` equals `0` — spelled out, never delegated.* F# generic comparison put NaN
+below every value on .NET and above every value under Fable, so `Min`, `Max` and `Median` over a
+column holding a NaN answered by host. The column layer's order (`compareFloat`) is IEEE order on the
+non-NaN values, `-0 = 0`, and NaN one value above +∞; its token (`floatToken`, the distinct token's
+float half) is equal exactly where the order ties, and the non-finite spelling is
+`JVal.nonFiniteToken`'s, the one spelling every surface now reads. Last rather than first because a
+NaN in a measurement is an absence of a comparable value, and `Min` answering it would hide every real
+value. The `aggregate/nan-order` parity vector pins the answers on both pipelines.
+
+*`Table.validate` is the table the codec can carry.* It now refuses a duplicate schema or column name,
+a present cell whose type does not widen into its column's (`ColumnType.widens` — the rule the schema
+lattice already pinned, so the codec and the lattice agree by construction), a non-finite float, and
+decimal, date or timestamp text that is not canonical (`TemporalText`: `YYYY-MM-DD` and
+`YYYY-MM-DDThh:mm:ssZ`, calendar-checked), and names a ragged table `RaggedColumns`, apart from the
+wire's values/validity `LengthMismatch`. `tryEncode` is then exactly `validate` and `encode`, a law in
+the suite pins it over generated and deliberately broken tables, and `decode` ENDS in `validate`, so
+a table that decodes is one `tryEncode` accepts. A NaN is refused by `validate` rather than only by
+`tryEncode` because the law is stated over what `validate` accepts; a computation that produces a NaN
+still aggregates it — `aggregate` reads columns, not tables. `aggregate` admits every cell first and
+refuses one outside its column's type by name (`AggregateError.CellOutsideType`) rather than
+truncating it into an int `Sum` or dropping it from a decimal `Sum` while counting it in `Mean`.
+
+*The decimal's edges.* A decimal column reads a whole-valued number token within the int53 guard
+(`3000000000` arrives as a `JFloat`, and within 2^53 its value is its digits — the Timestamp arm's
+rule), and refuses one past it. `DecimalText.tryToFloat` refuses past the float range rather than
+answering ∞; the aggregates that are floats name it `AggregateOverflow`, and the columnar range rule
+reads it as out of every finite range.
+
+*The absent slot is a wire placeholder, not a cell.* `Cell.defaultFor` built `Date ""` — a cell no date
+column accepts — to fill a null's slot in the values array. It is removed; the codec writes the same
+bytes from a private placeholder a reader never decodes (the validity mask marks the slot). A `ref`
+source no longer has to carry a schema: the decoder read it and discarded it, so the rule asked for a
+statement nothing kept. The encoder still writes `"schema":[]` beside a `ref`, which the host twins'
+readers expect.
+
+*Column reads through `Wire.Decode`, generic over its error.* `Decode.Fault` names the two structural
+faults (`MissingProperty`, `WrongKind`) before any codec spells them, and `propWith` / `stringWith` /
+`arrayWith` / `tryProp` take the caller's spelling; the string combinators are those at `describe`,
+byte-identical to before. A `mapError` adapter over the string form was the alternative and is
+DECLINED: it would have had to parse the string back into `MissingField` versus `MalformedShape`.
+`JVal.kindName`, `JVal.nonFiniteToken` and `Json.firstNonFinite` are public once, where three private
+copies of each stood. `Schema.fingerprint` builds its pre-image through a value-identical copy of the
+canonical field encoding (`Column` references only `Wire`, so it cannot call `Hash.canonicalFields`);
+a name spelling the separator made two schemas collide under the bare `U+0001` join, and every
+fingerprint moved once.
+
+*`RowCodec` is obsoleted — and its removal waits on the UI tier, not on a count of callers.* Its bytes
+carry two hazards no fix can remove without changing them: an `Unspecified`-kind `DateTime` goes
+through `ToUniversalTime()`, which reads the machine's time zone, and an `int64` is widened to a
+double. The phase's premise that "only tests consume it" is TRUE OF THIS REPOSITORY AND FALSE OF ITS
+CONSUMERS: a downstream UI host calls it from its generated codec, its chart and binding code and its
+IDL vocabulary, and
+that host builds with warnings as errors, so the `[<Obsolete>]` reaches it as a build error at its
+next Core raise. That is the notice doing its job, and it is the UI host's call how to answer it
+(suppress FS0044 at the call sites for a release, or host its own row codec); what it settles here is
+that removal at "the next breaking draft" means the next breaking draft AFTER the UI tier owns a row
+codec — removing it sooner would break that host's generated code with no replacement to move to.
+
+*Not done here, and where it goes.* The parser differential's model still reads the pre-299 grammar:
+`proofs/JsonParse.fst` and its extraction are restated by Phase 306, which owns the model; until then
+the differential carves out EXACTLY the refusals above (a `MalformedNumber` over a token
+`isJsonNumber` refuses, a `BadEscape` carrying the surrogate message), recognised on production's own
+answer, and a test pins the carve-out's extent over the near-miss table so it can be neither vacuous
+nor wider. The shared wire corpus takes its copy of `conformance/refusals/` at the hosts' next pin
+raise, when their codec twins re-certify; its manifest records every host as `proposed`.
+
 ## 2026-09-30 — D75: an incomplete match is a build error, the publication sweep is a standing arm of the suite, and the pack's reproducibility is re-measured — path-length-independent content, still no byte-identity claim
 
 **Recorded by Phase 294. Gate and packaging only; no package surface moves (STABILITY.md `0.33.0 — DRAFT`).**

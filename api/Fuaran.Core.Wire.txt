@@ -13,6 +13,8 @@ ctor Fuaran.Core.Versioning+Profile..ctor(System.String, System.Int32, System.In
 ctor Fuaran.Core.Versioning+UnknownKind..ctor(System.String, Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Versioning+Profile>)
 field Fuaran.Core.Corpus+CaseKind+Tags.Reject : System.Int32 (literal)
 field Fuaran.Core.Corpus+CaseKind+Tags.RoundTrip : System.Int32 (literal)
+field Fuaran.Core.Decode+Fault+Tags.MissingProperty : System.Int32 (literal)
+field Fuaran.Core.Decode+Fault+Tags.WrongKind : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JArr : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JBool : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JFloat : System.Int32 (literal)
@@ -53,20 +55,29 @@ method Fuaran.Core.Corpus.coverageGate(Microsoft.FSharp.Collections.FSharpList`1
 method Fuaran.Core.Corpus.fuzzRoundTrip(System.Int32, System.Int32, System.Int32) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.Corpus.roundTrip`1(Fuaran.Core.Corpus+Codec`1<!!0>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.Corpus.runCorpus`1(Fuaran.Core.Corpus+Codec`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Case>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
+method Fuaran.Core.Decode.arrayWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Decode+Fault, !!0>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.JVal>, !!0>
 method Fuaran.Core.Decode.asBool(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.Boolean, System.String>
 method Fuaran.Core.Decode.asFloat(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.Double, System.String>
 method Fuaran.Core.Decode.asInt(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.Int32, System.String>
 method Fuaran.Core.Decode.asString(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Decode.describe(Fuaran.Core.Decode+Fault) : System.String
 method Fuaran.Core.Decode.getProp(System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Decode.intField(System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.Int32, System.String>
 method Fuaran.Core.Decode.kindOf(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Decode.mapList`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, System.String>
 method Fuaran.Core.Decode.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Decode.parseTolerantOfNull(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
+method Fuaran.Core.Decode.propWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Decode+Fault, !!0>, System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, !!0>
 method Fuaran.Core.Decode.strField(System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Decode.stringWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Decode+Fault, !!0>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, !!0>
+method Fuaran.Core.Decode.tryProp(System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.JVal>
 method Fuaran.Core.JValModule.asFloat(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Double>
+method Fuaran.Core.JValModule.kindName(Fuaran.Core.JVal) : System.String
+method Fuaran.Core.JValModule.nonFiniteToken(System.Double) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Json.encode(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Json.escape(System.String) : System.String
+method Fuaran.Core.Json.firstNonFinite(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
+method Fuaran.Core.Json.isJsonNumber(System.String) : System.Boolean
 method Fuaran.Core.Json.kindObj(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>) : Fuaran.Core.JVal
 method Fuaran.Core.Json.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Json.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.JsonError>
@@ -77,6 +88,7 @@ method Fuaran.Core.Json.parseTolerantOfNull(System.String) : Microsoft.FSharp.Co
 method Fuaran.Core.Json.parseTolerantOfNullWith(System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Json.parseWith(System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Json.parseWithPolicy(Fuaran.Core.NullPolicy, System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
+method Fuaran.Core.Json.readInt32(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.Json.render(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Json.tryEncode(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Json.tryRender(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
@@ -122,6 +134,10 @@ type Fuaran.Core.Corpus+CaseKind+Tags (type)
 type Fuaran.Core.Corpus+Codec`1 (record)
 type Fuaran.Core.Corpus+Outcome (record)
 type Fuaran.Core.Decode (module)
+type Fuaran.Core.Decode+Fault (union)
+type Fuaran.Core.Decode+Fault+MissingProperty (type)
+type Fuaran.Core.Decode+Fault+Tags (type)
+type Fuaran.Core.Decode+Fault+WrongKind (type)
 type Fuaran.Core.JVal (union)
 type Fuaran.Core.JVal+JArr (type)
 type Fuaran.Core.JVal+JBool (type)
@@ -157,6 +173,8 @@ type Fuaran.Core.Versioning+ProfileModule (module)
 type Fuaran.Core.Versioning+UnknownKind (record)
 union-case Fuaran.Core.Corpus+CaseKind.Reject #1()
 union-case Fuaran.Core.Corpus+CaseKind.RoundTrip #0()
+union-case Fuaran.Core.Decode+Fault.NewMissingProperty #0(name: System.String)
+union-case Fuaran.Core.Decode+Fault.NewWrongKind #1(expected: System.String, got: System.String)
 union-case Fuaran.Core.JVal.NewJArr #4(Item: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.JVal>)
 union-case Fuaran.Core.JVal.NewJBool #2(Item: System.Boolean)
 union-case Fuaran.Core.JVal.NewJFloat #3(Item: System.Double)

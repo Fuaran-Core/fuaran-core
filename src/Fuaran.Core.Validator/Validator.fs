@@ -193,8 +193,16 @@ module ColumnValidator =
                         | Float f -> Some f
                         // The bounds are floats, so a decimal is read at the nearest float: a range
                         // check is a statement about magnitude, and leaving the case out would pass
-                        // every decimal column unchecked.
-                        | Decimal s -> DecimalText.tryToFloat s
+                        // every decimal column unchecked. Past the float range `tryToFloat` refuses
+                        // (Phase 299) rather than answering ∞; such a decimal text is out of every
+                        // finite range, so it is read as the infinity of its sign here, where "out
+                        // of range" is the whole question. Text that is not decimal stays unread.
+                        | Decimal s ->
+                            match DecimalText.tryToFloat s, DecimalText.compare s DecimalText.zero with
+                            | Some f, _ -> Some f
+                            | None, Some c when c < 0 -> Some -infinity
+                            | None, Some _ -> Some infinity
+                            | None, None -> None
                         | _ -> None
 
                     match v with
