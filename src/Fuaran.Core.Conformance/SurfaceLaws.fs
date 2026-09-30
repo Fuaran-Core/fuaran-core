@@ -33,107 +33,90 @@ module internal SurfaceLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable roundTrip = None
-        let mutable subset = None
-        let mutable digestStable = None
-        let mutable compact = None
+        let roundTrip =
+            LawKit.LawCell "projection round-trip (project ∘ re-import ∘ parseBack ∘ project = project)"
+
+        let subset =
+            LawKit.LawCell "a scoped projection is a subset of the whole (ById / Subtree / ChangedSince)"
+
+        let digestStable =
+            LawKit.LawCell "digest stability (a projection line changes iff its content digest changes)"
+
+        let compact =
+            LawKit.LawCell "compactness (the projection is strictly smaller than the wire form)"
         // digest-stability witness across draws: id string -> (digest, content cell)
         let mutable seen = Map.empty<string, string * string>
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen rng
-            rng <- r1
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen
             let whole = Projection.project pw Whole tree
 
             // determinism: the same tree projects to the identical projection
-            if Projection.project pw Whole tree <> whole && digestStable.IsNone then
-                digestStable <- Some(sprintf "seed=%d iter=%d: projecting the same tree twice differs" seed i)
+            digestStable.Check(
+                (Projection.project pw Whole tree = whole),
+                fun () -> at "projecting the same tree twice differs"
+            )
 
             // round-trip: render -> parseBack -> re-import -> project = the original projection
             match Projection.parseBack pw (Projection.render whole) with
-            | Error e ->
-                if roundTrip.IsNone then
-                    roundTrip <- Some(sprintf "seed=%d iter=%d: parseBack rejected its own projection: %s" seed i e)
+            | Error e -> roundTrip.Check(false, fun () -> at (sprintf "parseBack rejected its own projection: %s" e))
             | Ok ops ->
                 match applyOps ops with
-                | Error e ->
-                    if roundTrip.IsNone then
-                        roundTrip <- Some(sprintf "seed=%d iter=%d: re-import rejected the parsed ops: %s" seed i e)
+                | Error e -> roundTrip.Check(false, fun () -> at (sprintf "re-import rejected the parsed ops: %s" e))
                 | Ok tree2 ->
-                    if Projection.project pw Whole tree2 <> whole && roundTrip.IsNone then
-                        roundTrip <- Some(sprintf "seed=%d iter=%d: re-imported tree projects differently" seed i)
+                    roundTrip.Check(
+                        (Projection.project pw Whole tree2 = whole),
+                        fun () -> at "re-imported tree projects differently"
+                    )
 
             // scoped ⊆ whole, on a randomly-drawn id
             let ids = Tree.ids pw.Tree tree
-            let target, r2 = ConfRng.choose ids rng
-            rng <- r2
+            let target = rng.Choose ids
 
             let wholeRendered = whole.Lines |> List.map Projection.renderLine |> Set.ofList
 
             for scope in [ ById target; Subtree target ] do
                 let scoped = Projection.project pw scope tree
 
-                if
-                    scoped.Lines
-                    |> List.exists (fun l -> not (wholeRendered.Contains(Projection.renderLine l)))
-                    && subset.IsNone
-                then
-                    subset <-
-                        Some(
-                            sprintf
-                                "seed=%d iter=%d: a scoped line (target %s) is not in the whole projection"
-                                seed
-                                i
-                                (pw.IdW.ToString target)
+                subset.Check(
+                    not (
+                        scoped.Lines
+                        |> List.exists (fun l -> not (wholeRendered.Contains(Projection.renderLine l)))
+                    ),
+                    fun () ->
+                        at (
+                            sprintf "a scoped line (target %s) is not in the whole projection" (pw.IdW.ToString target)
                         )
+                )
 
-            if
-                (Projection.project pw (ChangedSince(Projection.snapshot pw tree)) tree).Lines
-                <> []
-                && subset.IsNone
-            then
-                subset <- Some(sprintf "seed=%d iter=%d: ChangedSince over an unchanged tree is non-empty" seed i)
+            subset.Check(
+                ((Projection.project pw (ChangedSince(Projection.snapshot pw tree)) tree).Lines = []),
+                fun () -> at "ChangedSince over an unchanged tree is non-empty"
+            )
 
             // digest ⇔ content cell, across draws (same id, possibly different content)
             for l in whole.Lines do
                 match Map.tryFind l.IdKey seen with
                 | Some(digest, cell) ->
-                    if (digest = l.Digest) <> (cell = Projection.lineText l) && digestStable.IsNone then
-                        digestStable <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: node %s — line changed without a digest change (or vice versa)"
-                                    seed
-                                    i
-                                    l.IdKey
-                            )
+                    digestStable.Check(
+                        ((digest = l.Digest) = (cell = Projection.lineText l)),
+                        fun () -> at (sprintf "node %s — line changed without a digest change (or vice versa)" l.IdKey)
+                    )
                 | None -> seen <- Map.add l.IdKey (l.Digest, Projection.lineText l) seen
 
             // compactness: strictly smaller than the wire form
-            if Projection.sizeOf whole >= String.length (wireEncode tree) && compact.IsNone then
-                compact <-
-                    Some(
+            compact.Check(
+                (Projection.sizeOf whole < String.length (wireEncode tree)),
+                fun () ->
+                    at (
                         sprintf
-                            "seed=%d iter=%d: projection (%d chars) is not smaller than the wire form (%d chars)"
-                            seed
-                            i
+                            "projection (%d chars) is not smaller than the wire form (%d chars)"
                             (Projection.sizeOf whole)
                             (String.length (wireEncode tree))
                     )
+            ))
 
-        [ { Law = "projection round-trip (project ∘ re-import ∘ parseBack ∘ project = project)"
-            Passed = roundTrip.IsNone
-            Counterexample = roundTrip }
-          { Law = "a scoped projection is a subset of the whole (ById / Subtree / ChangedSince)"
-            Passed = subset.IsNone
-            Counterexample = subset }
-          { Law = "digest stability (a projection line changes iff its content digest changes)"
-            Passed = digestStable.IsNone
-            Counterexample = digestStable }
-          { Law = "compactness (the projection is strictly smaller than the wire form)"
-            Passed = compact.IsNone
-            Counterexample = compact } ]
+        LawKit.results [ roundTrip; subset; digestStable; compact ]
 
     // ---- AI-surface laws (Phase 59) ----
 
@@ -177,11 +160,24 @@ module internal SurfaceLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable completeness = None
-        let mutable readTools = None
-        let mutable patterns = None
-        let mutable proposals = None
+        let completeness =
+            LawKit.LawCell
+                "catalogue completeness (every emitted op kind is catalogued; every catalogued kind is emittable)"
+
+        let readTools =
+            LawKit.LawCell "read tools are total + deterministic; an unknown tool is refused naming the alternatives"
+
+        let patterns =
+            LawKit.LawCell
+                "pattern resolution is deterministic (an anchor-built intent resolves, identically every time)"
+
+        let proposals =
+            LawKit.LawCell(
+                if kitPolicy then
+                    "proposal soundness (approved applies via the domain reducer; denied/rejected never mutates)"
+                else
+                    "proposal soundness under the domain's own policy (approved applies via the domain reducer; denied/rejected never mutates)"
+            )
 
         let catalogued = w.OpKinds |> List.map (fun o -> o.Kind) |> Set.ofList
         let mutable seenKinds = Set.empty
@@ -201,24 +197,22 @@ module internal SurfaceLaws =
 
         (try
             for t in w.ReadTools do
-                if t.Run state0 <> t.Run state0 && readTools.IsNone then
-                    readTools <- Some(sprintf "seed=%d: read tool '%s' is not deterministic" seed t.Name)
+                readTools.Check(
+                    (t.Run state0 = t.Run state0),
+                    fun () -> sprintf "seed=%d: read tool '%s' is not deterministic" seed t.Name
+                )
          with ex ->
-             if readTools.IsNone then
-                 readTools <- Some(sprintf "seed=%d: a read tool threw: %s" seed ex.Message))
+             readTools.Check(false, fun () -> sprintf "seed=%d: a read tool threw: %s" seed ex.Message))
 
         if w.ReadTools |> List.forall (fun t -> t.Name <> "__no_such_tool__") then
             match AiSurface.runTool w "__no_such_tool__" state0 with
             | Ok _ ->
-                if readTools.IsNone then
-                    readTools <- Some(sprintf "seed=%d: an unknown read-tool name was not refused" seed)
+                readTools.Check(false, fun () -> sprintf "seed=%d: an unknown read-tool name was not refused" seed)
             | Error msg ->
-                if
-                    not (w.ReadTools |> List.forall (fun t -> msg.Contains t.Name))
-                    && readTools.IsNone
-                then
-                    readTools <-
-                        Some(sprintf "seed=%d: the unknown-tool refusal does not enumerate the available tools" seed)
+                readTools.Check(
+                    (w.ReadTools |> List.forall (fun t -> msg.Contains t.Name)),
+                    fun () -> sprintf "seed=%d: the unknown-tool refusal does not enumerate the available tools" seed
+                )
 
         // an intent text a pattern's own anchor matches: wildcard spans filled with a drawn token.
         let textOfAnchor (token: string) (anchor: string) : string =
@@ -236,33 +230,29 @@ module internal SurfaceLaws =
 
             sb.ToString()
 
-        for i in 0 .. iterations - 1 do
-            let op, r1 = genOp rng
-            rng <- r1
+        LawKit.run iterations seed (fun rng _ at ->
+            let op = rng.Draw genOp
 
             // ---- catalogue completeness: emitted direction ----
             let kind = w.KindOfOp op
             seenKinds <- Set.add kind seenKinds
 
-            if not (Set.contains kind catalogued) && completeness.IsNone then
-                completeness <- Some(sprintf "seed=%d iter=%d: op kind '%s' is not in the catalogue" seed i kind)
+            completeness.Check(
+                Set.contains kind catalogued,
+                fun () -> at (sprintf "op kind '%s' is not in the catalogue" kind)
+            )
 
             // ---- pattern determinism ----
             match w.Patterns with
             | [] -> ()
             | bank ->
-                let card, r2 = ConfRng.choose bank rng
-                rng <- r2
+                let card = rng.Choose bank
 
                 match card.PromptAnchors with
-                | [] ->
-                    if patterns.IsNone then
-                        patterns <- Some(sprintf "seed=%d iter=%d: pattern '%s' has no anchors" seed i card.Name)
+                | [] -> patterns.Check(false, fun () -> at (sprintf "pattern '%s' has no anchors" card.Name))
                 | anchors ->
-                    let anchor, r3 = ConfRng.choose anchors rng
-                    rng <- r3
-                    let tok, r4 = ConfRng.intBelow 1000 rng
-                    rng <- r4
+                    let anchor = rng.Choose anchors
+                    let tok = rng.IntBelow 1000
                     let token = "v" + string tok
 
                     let intent =
@@ -271,19 +261,16 @@ module internal SurfaceLaws =
 
                     let a = PatternBank.resolve w intent
 
-                    if a.IsNone && patterns.IsNone then
-                        patterns <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: intent built from pattern '%s' anchor '%s' did not resolve"
-                                    seed
-                                    i
-                                    card.Name
-                                    anchor
-                            )
+                    patterns.Check(
+                        a.IsSome,
+                        fun () ->
+                            at (sprintf "intent built from pattern '%s' anchor '%s' did not resolve" card.Name anchor)
+                    )
 
-                    if a <> PatternBank.resolve w intent && patterns.IsNone then
-                        patterns <- Some(sprintf "seed=%d iter=%d: pattern resolution is not deterministic" seed i)
+                    patterns.Check(
+                        (a = PatternBank.resolve w intent),
+                        fun () -> at "pattern resolution is not deterministic"
+                    )
 
             // ---- proposal soundness ----
             // the kit drives the decision axis so all three outcomes are exercised for any policy;
@@ -305,9 +292,7 @@ module internal SurfaceLaws =
                     let domainDecision = w.Decide (if kitPolicy then "conformance" else author) op
                     Some(w.Apply op state0, domainDecision)
                 with ex ->
-                    if proposals.IsNone then
-                        proposals <- Some(sprintf "seed=%d iter=%d: Decide/Apply threw: %s" seed i ex.Message)
-
+                    proposals.Check(false, fun () -> at (sprintf "Decide/Apply threw: %s" ex.Message))
                     None
 
             match direct with
@@ -318,15 +303,16 @@ module internal SurfaceLaws =
                  | Error rej ->
                      refused <- refused + 1
 
-                     if Proposals.explainRejection w rej = "" && proposals.IsNone then
-                         proposals <- Some(sprintf "seed=%d iter=%d: explainRejection rendered empty guidance" seed i)
+                     proposals.Check(
+                         (Proposals.explainRejection w rej <> ""),
+                         fun () -> at "explainRejection rendered empty guidance"
+                     )
                  | Ok _ -> accepted <- accepted + 1)
 
                 // the decision under test: the kit's roll, or the domain's own policy (Phase 246).
                 let decision =
                     if kitPolicy then
-                        let dRoll, r5 = ConfRng.intBelow 3 rng
-                        rng <- r5
+                        let dRoll = rng.IntBelow 3
 
                         match dRoll with
                         | 0 -> Allow
@@ -348,19 +334,13 @@ module internal SurfaceLaws =
                     // Allow: submit applies exactly what the reducer applies.
                     match Proposals.submit wUnder author "t0" None [ op ] Proposals.Queue.empty state0, direct with
                     | Proposals.SubmitApplied s', Ok sd ->
-                        if s' <> sd && proposals.IsNone then
-                            proposals <- Some(sprintf "seed=%d iter=%d: an allowed submit ≠ direct apply" seed i)
-                    | Proposals.SubmitOpRejected _, Error _ -> ()
+                        proposals.Check((s' = sd), fun () -> at "an allowed submit ≠ direct apply")
+                    | Proposals.SubmitOpRejected _, Error _ -> proposals.Saw()
                     | other, _ ->
-                        if proposals.IsNone then
-                            proposals <-
-                                Some(
-                                    sprintf
-                                        "seed=%d iter=%d: allowed submit disagreed with the reducer (%A)"
-                                        seed
-                                        i
-                                        other
-                                )
+                        proposals.Check(
+                            false,
+                            fun () -> at (sprintf "allowed submit disagreed with the reducer (%A)" other)
+                        )
                 | NeedsApproval ->
                     parked <- parked + 1
                     // NeedsApproval: parks without applying; approval applies (or stays pending).
@@ -368,103 +348,70 @@ module internal SurfaceLaws =
 
                     match Proposals.submit wi author "t0" (Some "intent") [ op ] Proposals.Queue.empty state0 with
                     | Proposals.SubmitProposed(q, id) ->
-                        if applyCalls.Value <> 0 && proposals.IsNone then
-                            proposals <- Some(sprintf "seed=%d iter=%d: parking a proposal invoked the reducer" seed i)
+                        proposals.Check((applyCalls.Value = 0), fun () -> at "parking a proposal invoked the reducer")
 
                         (match Proposals.approve wi "approver" "t1" id q state0, direct with
                          | Ok(q2, s'), Ok sd ->
-                             if s' <> sd && proposals.IsNone then
-                                 proposals <-
-                                     Some(sprintf "seed=%d iter=%d: an approved proposal ≠ direct apply" seed i)
+                             proposals.Check((s' = sd), fun () -> at "an approved proposal ≠ direct apply")
 
                              // double-decide is a named failure.
                              match Proposals.approve wi "approver" "t2" id q2 state0 with
-                             | Error(Proposals.NotPending _) -> ()
-                             | _ ->
-                                 if proposals.IsNone then
-                                     proposals <-
-                                         Some(sprintf "seed=%d iter=%d: a decided proposal was re-decidable" seed i)
-                         | Error(Proposals.OpNoLongerApplies _), Error _ -> ()
+                             | Error(Proposals.NotPending _) -> proposals.Saw()
+                             | _ -> proposals.Check(false, fun () -> at "a decided proposal was re-decidable")
+                         | Error(Proposals.OpNoLongerApplies _), Error _ -> proposals.Saw()
                          | other, _ ->
-                             if proposals.IsNone then
-                                 proposals <-
-                                     Some(
-                                         sprintf
-                                             "seed=%d iter=%d: approval disagreed with the reducer (%A)"
-                                             seed
-                                             i
-                                             other
-                                     ))
+                             proposals.Check(
+                                 false,
+                                 fun () -> at (sprintf "approval disagreed with the reducer (%A)" other)
+                             ))
 
                         // rejection never invokes the reducer.
                         let before = applyCalls.Value
 
                         (match Proposals.reject "approver" "t1" "not now" id q with
                          | Ok _ ->
-                             if applyCalls.Value <> before && proposals.IsNone then
-                                 proposals <-
-                                     Some(sprintf "seed=%d iter=%d: rejecting a proposal invoked the reducer" seed i)
-                         | Error _ ->
-                             if proposals.IsNone then
-                                 proposals <-
-                                     Some(sprintf "seed=%d iter=%d: rejecting a pending proposal failed" seed i))
+                             proposals.Check(
+                                 (applyCalls.Value = before),
+                                 fun () -> at "rejecting a proposal invoked the reducer"
+                             )
+                         | Error _ -> proposals.Check(false, fun () -> at "rejecting a pending proposal failed"))
 
                         // an unknown id is a named failure.
                         (match Proposals.approve wi "approver" "t1" 9999 q state0 with
-                         | Error(Proposals.UnknownProposal _) -> ()
-                         | _ ->
-                             if proposals.IsNone then
-                                 proposals <-
-                                     Some(sprintf "seed=%d iter=%d: an unknown proposal id was not refused" seed i))
+                         | Error(Proposals.UnknownProposal _) -> proposals.Saw()
+                         | _ -> proposals.Check(false, fun () -> at "an unknown proposal id was not refused"))
                     | other ->
-                        if proposals.IsNone then
-                            proposals <-
-                                Some(sprintf "seed=%d iter=%d: NeedsApproval did not park the submit (%A)" seed i other)
+                        proposals.Check(
+                            false,
+                            fun () -> at (sprintf "NeedsApproval did not park the submit (%A)" other)
+                        )
                 | Deny _ ->
                     denied <- denied + 1
                     // Deny: refused, and the reducer is never invoked.
                     match Proposals.submit wUnder author "t0" None [ op ] Proposals.Queue.empty state0 with
                     | Proposals.SubmitDenied _ ->
-                        if applyCalls.Value <> 0 && proposals.IsNone then
-                            proposals <- Some(sprintf "seed=%d iter=%d: a denied submit invoked the reducer" seed i)
+                        proposals.Check((applyCalls.Value = 0), fun () -> at "a denied submit invoked the reducer")
                     | other ->
-                        if proposals.IsNone then
-                            proposals <-
-                                Some(sprintf "seed=%d iter=%d: Deny did not refuse the submit (%A)" seed i other)
+                        proposals.Check(false, fun () -> at (sprintf "Deny did not refuse the submit (%A)" other)))
 
         // ---- catalogue completeness: emittable direction ----
         let missing = Set.difference catalogued seenKinds
 
-        if not (Set.isEmpty missing) && completeness.IsNone then
-            completeness <-
-                Some(
-                    sprintf
-                        "seed=%d: catalogued kinds never emitted by the generator: %s"
-                        seed
-                        (missing |> Set.toList |> String.concat ", ")
-                )
+        completeness.Check(
+            Set.isEmpty missing,
+            fun () ->
+                sprintf
+                    "seed=%d: catalogued kinds never emitted by the generator: %s"
+                    seed
+                    (missing |> Set.toList |> String.concat ", ")
+        )
 
-        [ { Law = "catalogue completeness (every emitted op kind is catalogued; every catalogued kind is emittable)"
-            Passed = completeness.IsNone
-            Counterexample = completeness }
-          { Law = "read tools are total + deterministic; an unknown tool is refused naming the alternatives"
-            Passed = readTools.IsNone
-            Counterexample = readTools }
-          { Law = "pattern resolution is deterministic (an anchor-built intent resolves, identically every time)"
-            Passed = patterns.IsNone
-            Counterexample = patterns }
-          { Law =
-              if kitPolicy then
-                  "proposal soundness (approved applies via the domain reducer; denied/rejected never mutates)"
-              else
-                  "proposal soundness under the domain's own policy (approved applies via the domain reducer; denied/rejected never mutates)"
-            Passed = proposals.IsNone
-            Counterexample = proposals }
-          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A generator that
-          // draws no op the reducer rejects leaves the guidance law and the rejected-parity arms
-          // certified by nothing; one that draws nothing applicable leaves the applied-parity arms so.
-          SampleAdequacy.reached family "accepted op" seed [ "accepted", accepted ]
-          SampleAdequacy.reached family "rejected op" seed [ "refused", refused ] ]
+        LawKit.results [ completeness; readTools; patterns; proposals ]
+        // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A generator that
+        // draws no op the reducer rejects leaves the guidance law and the rejected-parity arms
+        // certified by nothing; one that draws nothing applicable leaves the applied-parity arms so.
+        @ [ SampleAdequacy.reached family "accepted op" seed [ "accepted", accepted ]
+            SampleAdequacy.reached family "rejected op" seed [ "refused", refused ] ]
         // Phase 246 — under the domain's policy, the decisions it reached. The kit's roll reaches all
         // three by construction, so the kit-policy form carries no such line.
         @ (if kitPolicy then

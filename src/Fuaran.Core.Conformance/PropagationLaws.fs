@@ -25,10 +25,17 @@ module internal PropagationLaws =
     /// A final fixed law certifies **cycle-as-data**: a 3-cycle enumerates as a `Cycles` SCC and
     /// `cycleThrough` returns a path — `sort` terminates, never diverges.
     let dirtyPropagationLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable soundMinimal = None
-        let mutable frontier = None
-        let mutable byteIdentity = None
+        let soundMinimal =
+            LawKit.LawCell "dirtyFromChangedIds equals the independent reads-reachability closure (sound + minimal)"
+
+        let frontier =
+            LawKit.LawCell "no node outside the dirty set changes value under the edit (frontier soundness)"
+
+        let byteIdentity =
+            LawKit.LawCell "incremental recompute over the dirty set is byte-identical to a full recompute"
+
+        let cycle =
+            LawKit.LawCell "a reference cycle enumerates as a Tarjan SCC + cycleThrough returns a path (cycle-as-data)"
         // Phase 121 — frontier soundness quantifies over CLEAN nodes and the reuse half of the
         // byte-identity law over DIRTY ones, so a sample in which every node is dirty (or none is)
         // certifies one of them green having never applied it.
@@ -54,10 +61,9 @@ module internal PropagationLaws =
 
             go (Set.singleton start) (Set.singleton start)
 
-        for i in 0 .. iterations - 1 do
-            let extra, r1 = ConfRng.intBelow 6 rng
+        LawKit.run iterations seed (fun rng _ at ->
+            let extra = rng.IntBelow 6
             let nNodes = extra + 2
-            let mutable r = r1
             let ids = [ for k in 0 .. nNodes - 1 -> string k ]
 
             // node k reads a random subset of {0 .. k-1} — acyclic by construction (edges point to lower ids).
@@ -65,8 +71,7 @@ module internal PropagationLaws =
                 [ for k in 0 .. nNodes - 1 ->
                       let reads =
                           [ for j in 0 .. k - 1 do
-                                let coin, r' = ConfRng.intBelow 3 r
-                                r <- r'
+                                let coin = rng.IntBelow 3
 
                                 if coin = 0 then
                                     yield string j ]
@@ -77,16 +82,13 @@ module internal PropagationLaws =
             // an intrinsic base value per node, and a change to one node's base.
             let base0 =
                 [ for k in 0 .. nNodes - 1 ->
-                      let v, r' = ConfRng.intBelow 100 r
-                      r <- r'
+                      let v = rng.IntBelow 100
                       string k, v ]
                 |> Map.ofList
 
-            let ck, r2 = ConfRng.intBelow nNodes r
-            r <- r2
+            let ck = rng.IntBelow nNodes
             let changedId = string ck
             let base1 = Map.add changedId (Map.find changedId base0 + 1000) base0
-            rng <- r
 
             // toy pull evaluator over the DAG, index order (reads point to lower ids ⇒ already computed).
             let evalWith (baseOf: Map<string, int>) : Map<string, int> =
@@ -110,8 +112,10 @@ module internal PropagationLaws =
                 |> List.filter (fun n -> Set.contains changedId (readsReachable deps n))
                 |> Set.ofList
 
-            if dirty <> oracle && soundMinimal.IsNone then
-                soundMinimal <- Some(sprintf "seed=%d iter=%d: dirty=%A ≠ oracle=%A (deps=%A)" seed i dirty oracle deps)
+            soundMinimal.Check(
+                (dirty = oracle),
+                fun () -> at (sprintf "dirty=%A ≠ oracle=%A (deps=%A)" dirty oracle deps)
+            )
 
             dirtyNodes <- dirtyNodes + (ids |> List.filter (fun n -> Set.contains n dirty) |> List.length)
 
@@ -125,9 +129,9 @@ module internal PropagationLaws =
                 |> List.tryFind (fun n -> not (Set.contains n dirty) && Map.find n oldVals <> Map.find n newVals)
 
             match leaked with
-            | Some n when frontier.IsNone ->
-                frontier <- Some(sprintf "seed=%d iter=%d: clean node %s changed value (unsound frontier)" seed i n)
-            | _ -> ()
+            | Some n ->
+                frontier.Check(false, fun () -> at (sprintf "clean node %s changed value (unsound frontier)" n))
+            | None -> frontier.Saw()
 
             // (3) byte-identity: incremental recompute (reuse clean, recompute dirty) == full recompute.
             let incr =
@@ -142,11 +146,10 @@ module internal PropagationLaws =
 
                     Map.add id v acc)
 
-            if incr <> newVals && byteIdentity.IsNone then
-                byteIdentity <-
-                    Some(
-                        sprintf "seed=%d iter=%d: incremental recompute ≠ full recompute (changed=%s)" seed i changedId
-                    )
+            byteIdentity.Check(
+                (incr = newVals),
+                fun () -> at (sprintf "incremental recompute ≠ full recompute (changed=%s)" changedId)
+            ))
 
         // (4) cycle-as-data: a fixed 3-cycle a→b→c→a enumerates as an SCC; `cycleThrough` returns a path.
         let cyclic =
@@ -167,27 +170,14 @@ module internal PropagationLaws =
                 | None -> false)
             && not (List.contains "a" cyclesResult.Order) // a cyclic node is not in the linear Order
 
-        [ { Law = "dirtyFromChangedIds equals the independent reads-reachability closure (sound + minimal)"
-            Passed = soundMinimal.IsNone
-            Counterexample = soundMinimal }
-          { Law = "no node outside the dirty set changes value under the edit (frontier soundness)"
-            Passed = frontier.IsNone
-            Counterexample = frontier }
-          { Law = "incremental recompute over the dirty set is byte-identical to a full recompute"
-            Passed = byteIdentity.IsNone
-            Counterexample = byteIdentity }
-          { Law = "a reference cycle enumerates as a Tarjan SCC + cycleThrough returns a path (cycle-as-data)"
-            Passed = cycleOk
-            Counterexample =
-              (if cycleOk then
-                   None
-               else
-                   Some(sprintf "cycles=%A through-b=%A" cyclesResult.Cycles throughB)) }
-          SampleAdequacy.reached
-              "dirtyPropagationLaws"
-              "dirty frontier"
-              seed
-              [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
+        cycle.Check(cycleOk, fun () -> sprintf "cycles=%A through-b=%A" cyclesResult.Cycles throughB)
+
+        LawKit.results [ soundMinimal; frontier; byteIdentity; cycle ]
+        @ [ SampleAdequacy.reached
+                "Conformance.dirtyPropagationLaws"
+                "dirty frontier"
+                seed
+                [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
 
     // ---- tree-level incremental recompute driver (Phase 69) ----
     // The teeth on `Propagation.evalFrom`: over random acyclic DAGs + a toy pull evaluator, the incremental
@@ -201,11 +191,24 @@ module internal PropagationLaws =
     /// **minimality** (`evalFrom` invokes `evalNode` on exactly the dirty set); **unknown-change envelope**
     /// (a `changed` id absent from the graph is `EvalUnknownChange`, never a throw).
     let propagationEvalLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable byteIdentical = None
-        let mutable minimal = None
-        let mutable unknownChange = None
-        let mutable undeclaredRefused = None
+        let byteIdentical =
+            LawKit.LawCell "evalFrom is byte-identical to a full eval over the changed inputs (every change)"
+        // The three laws below are asserted only once the prior model has evaluated — the arm the
+        // "node reuse" and "undeclared read" guards count in — so they read through those guards.
+        let minimal =
+            LawKit.LawCell("evalFrom re-evaluates exactly the dirty set (minimal reuse)", Some "node reuse")
+
+        let unknownChange =
+            LawKit.LawCell(
+                "a changed id absent from the dependency map is a named EvalUnknownChange (GP5)",
+                Some "node reuse"
+            )
+
+        let undeclaredRefused =
+            LawKit.LawCell(
+                "an evaluator that reads outside its declared set is refused by eval and evalFrom alike, naming the node and the read (GP5)",
+                Some "undeclared read"
+            )
         // Phase 121 — the minimality law is what says work was AVOIDED, and it says nothing at all
         // over a sample in which every node is dirty. Both classes have to arise.
         let mutable dirtyNodes = 0
@@ -251,18 +254,16 @@ module internal PropagationLaws =
 
                 Ok(Map.find id baseOf + declaredSum + leaked)
 
-        for i in 0 .. iterations - 1 do
-            let extra, r1 = ConfRng.intBelow 6 rng
+        LawKit.run iterations seed (fun rng _ at ->
+            let extra = rng.IntBelow 6
             let nNodes = extra + 2
-            let mutable r = r1
             let ids = [ for k in 0 .. nNodes - 1 -> string k ]
 
             let deps =
                 [ for k in 0 .. nNodes - 1 ->
                       let reads =
                           [ for j in 0 .. k - 1 do
-                                let coin, r' = ConfRng.intBelow 3 r
-                                r <- r'
+                                let coin = rng.IntBelow 3
 
                                 if coin = 0 then
                                     yield string j ]
@@ -272,21 +273,16 @@ module internal PropagationLaws =
 
             let base0 =
                 [ for k in 0 .. nNodes - 1 ->
-                      let v, r' = ConfRng.intBelow 100 r
-                      r <- r'
+                      let v = rng.IntBelow 100
                       string k, v ]
                 |> Map.ofList
 
-            let ck, r2 = ConfRng.intBelow nNodes r
-            r <- r2
+            let ck = rng.IntBelow nNodes
             let changedId = string ck
             let base1 = Map.add changedId (Map.find changedId base0 + 1000) base0
-            rng <- r
 
             match Propagation.eval (evalNodeWith base0 deps (ResizeArray())) deps with
-            | Error e ->
-                if byteIdentical.IsNone then
-                    byteIdentical <- Some(sprintf "seed=%d iter=%d: prior eval errored: %A" seed i e)
+            | Error e -> byteIdentical.Check(false, fun () -> at (sprintf "prior eval errored: %A" e))
             | Ok prior ->
                 let fullInvoked = ResizeArray()
                 let incrInvoked = ResizeArray()
@@ -300,15 +296,18 @@ module internal PropagationLaws =
                         deps
 
                 // (1) byte-identical to a full eval over the changed inputs
-                if viaIncr <> viaFull && byteIdentical.IsNone then
-                    byteIdentical <- Some(sprintf "seed=%d iter=%d: evalFrom ≠ eval (changed=%s)" seed i changedId)
+                byteIdentical.Check(
+                    (viaIncr = viaFull),
+                    fun () -> at (sprintf "evalFrom ≠ eval (changed=%s)" changedId)
+                )
 
                 // (2) minimal: evalFrom invokes evalNode on exactly the dirty set (all nodes acyclic here)
                 let dirty = Propagation.dirtyFromChangedIds deps (Set.singleton changedId)
 
-                if Set.ofSeq incrInvoked <> dirty && minimal.IsNone then
-                    minimal <-
-                        Some(sprintf "seed=%d iter=%d: invoked=%A ≠ dirty=%A" seed i (Set.ofSeq incrInvoked) dirty)
+                minimal.Check(
+                    (Set.ofSeq incrInvoked = dirty),
+                    fun () -> at (sprintf "invoked=%A ≠ dirty=%A" (Set.ofSeq incrInvoked) dirty)
+                )
 
                 dirtyNodes <- dirtyNodes + (ids |> List.filter (fun n -> Set.contains n dirty) |> List.length)
 
@@ -324,11 +323,9 @@ module internal PropagationLaws =
                         (Set.singleton "no-such-id")
                         deps
                 with
-                | Error(Propagation.EvalUnknownChange [ "no-such-id" ]) -> ()
+                | Error(Propagation.EvalUnknownChange [ "no-such-id" ]) -> unknownChange.Saw()
                 | other ->
-                    if unknownChange.IsNone then
-                        unknownChange <-
-                            Some(sprintf "seed=%d iter=%d: expected EvalUnknownChange, got %A" seed i other)
+                    unknownChange.Check(false, fun () -> at (sprintf "expected EvalUnknownChange, got %A" other))
 
                 // (4) THE DECLARED-READS REFUSAL (Phase 209): an evaluator that reads outside its
                 // declaration is refused by BOTH drivers, naming the same node and the same read.
@@ -347,53 +344,41 @@ module internal PropagationLaws =
                         None
                     else
                         Some(
-                            sprintf
-                                "seed=%d iter=%d: node %s reading undeclared %s — eval=%A evalFrom=%A, expected both %A"
-                                seed
-                                i
-                                leakAt
-                                leakRead
-                                viaFullLeak
-                                viaIncrLeak
-                                expected
+                            at (
+                                sprintf
+                                    "node %s reading undeclared %s — eval=%A evalFrom=%A, expected both %A"
+                                    leakAt
+                                    leakRead
+                                    viaFullLeak
+                                    viaIncrLeak
+                                    expected
+                            )
                         )
 
                 match leakVerdict "0" "1" with
-                | None -> refusedRealNode <- refusedRealNode + 1
-                | Some why ->
-                    if undeclaredRefused.IsNone then
-                        undeclaredRefused <- Some why
+                | None ->
+                    refusedRealNode <- refusedRealNode + 1
+                    undeclaredRefused.Saw()
+                | Some why -> undeclaredRefused.Check(false, fun () -> why)
 
                 match leakVerdict changedId "no-such-node" with
-                | None -> refusedAbsentId <- refusedAbsentId + 1
-                | Some why ->
-                    if undeclaredRefused.IsNone then
-                        undeclaredRefused <- Some why
+                | None ->
+                    refusedAbsentId <- refusedAbsentId + 1
+                    undeclaredRefused.Saw()
+                | Some why -> undeclaredRefused.Check(false, fun () -> why))
 
-        [ { Law = "evalFrom is byte-identical to a full eval over the changed inputs (every change)"
-            Passed = byteIdentical.IsNone
-            Counterexample = byteIdentical }
-          { Law = "evalFrom re-evaluates exactly the dirty set (minimal reuse)"
-            Passed = minimal.IsNone
-            Counterexample = minimal }
-          { Law = "a changed id absent from the dependency map is a named EvalUnknownChange (GP5)"
-            Passed = unknownChange.IsNone
-            Counterexample = unknownChange }
-          { Law =
-              "an evaluator that reads outside its declared set is refused by eval and evalFrom alike, naming the node and the read (GP5)"
-            Passed = undeclaredRefused.IsNone
-            Counterexample = undeclaredRefused }
-          SampleAdequacy.reached
-              "propagationEvalLaws"
-              "node reuse"
-              seed
-              [ "dirty node", dirtyNodes; "clean node", cleanNodes ]
-          SampleAdequacy.reached
-              "propagationEvalLaws"
-              "undeclared read"
-              seed
-              [ "read of a real node", refusedRealNode
-                "read of an id the map does not hold", refusedAbsentId ] ]
+        LawKit.results [ byteIdentical; minimal; unknownChange; undeclaredRefused ]
+        @ [ SampleAdequacy.reached
+                "Conformance.propagationEvalLaws"
+                "node reuse"
+                seed
+                [ "dirty node", dirtyNodes; "clean node", cleanNodes ]
+            SampleAdequacy.reached
+                "Conformance.propagationEvalLaws"
+                "undeclared read"
+                seed
+                [ "read of a real node", refusedRealNode
+                  "read of an id the map does not hold", refusedAbsentId ] ]
 
     // ---- the propagation contract at a DOMAIN'S evaluator (Phase 211) ----
     // `propagationEvalLaws` above certifies the DRIVER, over a toy evaluator the kit wrote. What the
@@ -453,10 +438,21 @@ module internal PropagationLaws =
     /// **Opt-in, not folded into `certify`** — the `keyedChildrenLaws` shape. `certify` takes a tree
     /// witness, and a domain that does not evaluate incrementally has nothing for this family to say.
     let propagationEvaluatorLaws (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable purity = None
-        let mutable honesty = None
-        let mutable agreement = None
+        let purity =
+            LawKit.LawCell
+                "the domain's evaluator is a function of what it reads: repeated and reordered evaluation agree (purity, determinism)"
+
+        let honesty =
+            LawKit.LawCell
+                "off the change set the domain names, the edit moves neither the declared reads nor the evaluator's results or asked reads (change-set honesty)"
+        // Agreement is asserted only where the edit keeps the map and the prior evaluates — the arm
+        // the "evaluator edit" guard counts in — so it reads through that guard.
+        let agreement =
+            LawKit.LawCell(
+                "evalFrom of the edited evaluator over eval's own prior, whole and with holes, equals eval over the same map (agreement)",
+                Some "evaluator edit"
+            )
+
         let mutable readerReached = 0
         let mutable cleanReused = 0
         let mutable failed = 0
@@ -600,21 +596,23 @@ module internal PropagationLaws =
                         else
                             None)
 
-        for i in 0 .. iterations - 1 do
-            let m0, r1 = evw.Model rng
-            let (m1, changed), r2 = evw.Change m0 r1
-            rng <- r2
+        LawKit.run iterations seed (fun rng i at ->
+            let m0 = rng.Draw evw.Model
+            let m1, changed = rng.Draw(evw.Change m0)
             let deps0 = evw.Deps m0
             let deps1 = evw.Deps m1
             let ev0 = evw.EvalNode m0
             let ev1 = evw.EvalNode m1
 
             // ---- law 1: purity and determinism, of both evaluators ----
-            if purity.IsNone then
-                purity <-
-                    match purityDefect i "prior" ev0 deps0 with
-                    | Some why -> Some why
-                    | None -> purityDefect i "edited" ev1 deps1
+            if not purity.Failed then
+                match
+                    (match purityDefect i "prior" ev0 deps0 with
+                     | Some why -> Some why
+                     | None -> purityDefect i "edited" ev1 deps1)
+                with
+                | Some why -> purity.Check(false, fun () -> why)
+                | None -> purity.Saw()
 
             // ---- law 2: change-set honesty ----
             let old = Propagation.eval ev0 deps0
@@ -628,8 +626,8 @@ module internal PropagationLaws =
                 |> List.mapi (fun k kv -> k, kv)
                 |> List.fold (fun acc (k, (id, v)) -> if k % 2 = 0 then Map.add id v acc else acc) oldValues
 
-            if honesty.IsNone then
-                honesty <-
+            if not honesty.Failed then
+                match
                     honestyDefect
                         i
                         ev0
@@ -641,6 +639,9 @@ module internal PropagationLaws =
                           "the edited model's values", newValues
                           "a mixture of the two", mixed
                           "no answers at all", Map.empty ]
+                with
+                | Some why -> honesty.Check(false, fun () -> why)
+                | None -> honesty.Saw()
 
             // ---- law 3: agreement, over the priors the theorem admits ----
             let known = changed |> Set.forall (fun c -> Map.containsKey c deps1)
@@ -648,45 +649,43 @@ module internal PropagationLaws =
             match old with
             | Ok out0 when deps0 = deps1 && known ->
                 let mutable holed = out0.Values
-                let mutable r = rng
 
                 for id in keysOf deps0 do
-                    let coin, r' = ConfRng.intBelow 3 r
-                    r <- r'
+                    let coin = rng.IntBelow 3
 
                     if coin = 0 then
                         holed <- Map.remove id holed
 
-                rng <- r
                 let exact = Propagation.evalFrom ev1 out0.Values changed deps1
                 let viaHoled = Propagation.evalFrom ev1 holed changed deps1
 
-                if agreement.IsNone then
-                    if exact <> full then
-                        agreement <-
-                            Some(
+                if exact <> full then
+                    agreement.Check(
+                        false,
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: %s — evalFrom over eval's own prior (changed=%A) returned %A, and eval of the edited evaluator %A"
-                                    seed
-                                    i
+                                    "%s — evalFrom over eval's own prior (changed=%A) returned %A, and eval of the edited evaluator %A"
                                     evw.Surface
                                     (Set.toList changed)
                                     exact
                                     full
                             )
-                    elif viaHoled <> full then
-                        agreement <-
-                            Some(
+                    )
+                else
+                    agreement.Check(
+                        (viaHoled = full),
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: %s — evalFrom over eval's prior with holes at %A (changed=%A) returned %A, and eval of the edited evaluator %A"
-                                    seed
-                                    i
+                                    "%s — evalFrom over eval's prior with holes at %A (changed=%A) returned %A, and eval of the edited evaluator %A"
                                     evw.Surface
                                     (keysOf deps0 |> List.filter (fun id -> not (Map.containsKey id holed)))
                                     (Set.toList changed)
                                     viaHoled
                                     full
                             )
+                    )
 
                 let dirty = Propagation.dirtyFromChangedIds deps1 changed
 
@@ -702,27 +701,16 @@ module internal PropagationLaws =
                 match full with
                 | Error _ -> failed <- failed + 1
                 | Ok _ -> ()
-            | _ -> ()
+            | _ -> ())
 
-        [ { Law =
-              "the domain's evaluator is a function of what it reads: repeated and reordered evaluation agree (purity, determinism)"
-            Passed = purity.IsNone
-            Counterexample = purity }
-          { Law =
-              "off the change set the domain names, the edit moves neither the declared reads nor the evaluator's results or asked reads (change-set honesty)"
-            Passed = honesty.IsNone
-            Counterexample = honesty }
-          { Law =
-              "evalFrom of the edited evaluator over eval's own prior, whole and with holes, equals eval over the same map (agreement)"
-            Passed = agreement.IsNone
-            Counterexample = agreement }
-          SampleAdequacy.reached
-              "Conformance.propagationEvaluatorLaws"
-              "evaluator edit"
-              seed
-              [ "change reaching a reader", readerReached
-                "clean node reused from prior", cleanReused
-                "failing evaluator", failed ] ]
+        LawKit.results [ purity; honesty; agreement ]
+        @ [ SampleAdequacy.reached
+                "Conformance.propagationEvaluatorLaws"
+                "evaluator edit"
+                seed
+                [ "change reaching a reader", readerReached
+                  "clean node reused from prior", cleanReused
+                  "failing evaluator", failed ] ]
 
     // ---- the prior value, at a DOMAIN'S evaluator (Phase 250) ----
     // `Propagation.evalFromWith` hands a recomputed node its own prior value beside its reads, and the
@@ -763,10 +751,22 @@ module internal PropagationLaws =
         (iterations: int)
         : LawResult list =
         let reference = propagationEvaluatorLaws evw seed iterations
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable blind = None
-        let mutable discipline = None
-        let mutable agreement = None
+
+        let blind =
+            LawKit.LawCell
+                "handed no prior, the prior-aware evaluator is the reference evaluator, and evalWith of it is eval of the reference (prior-blind reading)"
+
+        let discipline =
+            LawKit.LawCell
+                "at the answers the incremental walk hands it, a node handed its prior returns what it returns handed none (prior discipline)"
+        // Agreement is asserted only where the edit keeps the map and the prior evaluates — the arm
+        // the "prior-aware edit" guard counts in — so it reads through that guard.
+        let agreement =
+            LawKit.LawCell(
+                "evalFromWith of the edited evaluator over evalWith's own prior, whole and with holes, equals evalWith over the same map (agreement, with the prior)",
+                Some "prior-aware edit"
+            )
+
         let mutable priorHanded = 0
         let mutable cleanReused = 0
 
@@ -830,19 +830,21 @@ module internal PropagationLaws =
                     else
                         None)
 
-        for i in 0 .. iterations - 1 do
-            let m0, r1 = evw.Model rng
-            let (m1, changed), r2 = evw.Change m0 r1
-            rng <- r2
+        LawKit.run iterations seed (fun rng i at ->
+            let m0 = rng.Draw evw.Model
+            let m1, changed = rng.Draw(evw.Change m0)
             let deps0 = evw.Deps m0
             let deps1 = evw.Deps m1
 
             // ---- law 1: the prior-blind reading is the reference ----
-            if blind.IsNone then
-                blind <-
-                    match blindDefect i "prior" m0 deps0 with
-                    | Some why -> Some why
-                    | None -> blindDefect i "edited" m1 deps1
+            if not blind.Failed then
+                match
+                    (match blindDefect i "prior" m0 deps0 with
+                     | Some why -> Some why
+                     | None -> blindDefect i "edited" m1 deps1)
+                with
+                | Some why -> blind.Check(false, fun () -> why)
+                | None -> blind.Saw()
 
             let old = Propagation.evalWith (evalNodeWith m0) deps0
             let full = Propagation.evalWith (evalNodeWith m1) deps1
@@ -850,8 +852,8 @@ module internal PropagationLaws =
             let newValues = valuesOf full
 
             // ---- law 2: the answer does not depend on the prior ----
-            if discipline.IsNone then
-                discipline <-
+            if not discipline.Failed then
+                match
                     keysOf deps1
                     |> List.tryPick (fun id ->
                         match Map.tryFind id priorValues with
@@ -862,21 +864,24 @@ module internal PropagationLaws =
 
                             if handed <> none then
                                 Some(
-                                    sprintf
-                                        "seed=%d iter=%d: %s — node %s (changed=%A), handed its prior %A, gave %A (asking %A); handed none it gave %A (asking %A). The prior is a hint for reusing work and may not change the answer"
-                                        seed
-                                        i
-                                        evw.Surface
-                                        id
-                                        (Set.toList changed)
-                                        p
-                                        (fst handed)
-                                        (snd handed)
-                                        (fst none)
-                                        (snd none)
+                                    at (
+                                        sprintf
+                                            "%s — node %s (changed=%A), handed its prior %A, gave %A (asking %A); handed none it gave %A (asking %A). The prior is a hint for reusing work and may not change the answer"
+                                            evw.Surface
+                                            id
+                                            (Set.toList changed)
+                                            p
+                                            (fst handed)
+                                            (snd handed)
+                                            (fst none)
+                                            (snd none)
+                                    )
                                 )
                             else
                                 None)
+                with
+                | Some why -> discipline.Check(false, fun () -> why)
+                | None -> discipline.Saw()
 
             // ---- law 3: agreement, over the priors the theorem admits ----
             let known = changed |> Set.forall (fun c -> Map.containsKey c deps1)
@@ -884,45 +889,43 @@ module internal PropagationLaws =
             match old with
             | Ok out0 when deps0 = deps1 && known ->
                 let mutable holed = out0.Values
-                let mutable r = rng
 
                 for id in keysOf deps0 do
-                    let coin, r' = ConfRng.intBelow 3 r
-                    r <- r'
+                    let coin = rng.IntBelow 3
 
                     if coin = 0 then
                         holed <- Map.remove id holed
 
-                rng <- r
                 let exact = Propagation.evalFromWith (evalNodeWith m1) out0.Values changed deps1
                 let viaHoled = Propagation.evalFromWith (evalNodeWith m1) holed changed deps1
 
-                if agreement.IsNone then
-                    if exact <> full then
-                        agreement <-
-                            Some(
+                if exact <> full then
+                    agreement.Check(
+                        false,
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: %s — evalFromWith over evalWith's own prior (changed=%A) returned %A, and evalWith of the edited evaluator %A"
-                                    seed
-                                    i
+                                    "%s — evalFromWith over evalWith's own prior (changed=%A) returned %A, and evalWith of the edited evaluator %A"
                                     evw.Surface
                                     (Set.toList changed)
                                     exact
                                     full
                             )
-                    elif viaHoled <> full then
-                        agreement <-
-                            Some(
+                    )
+                else
+                    agreement.Check(
+                        (viaHoled = full),
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: %s — evalFromWith over evalWith's prior with holes at %A (changed=%A) returned %A, and evalWith of the edited evaluator %A"
-                                    seed
-                                    i
+                                    "%s — evalFromWith over evalWith's prior with holes at %A (changed=%A) returned %A, and evalWith of the edited evaluator %A"
                                     evw.Surface
                                     (keysOf deps0 |> List.filter (fun id -> not (Map.containsKey id holed)))
                                     (Set.toList changed)
                                     viaHoled
                                     full
                             )
+                    )
 
                 let dirty = Propagation.dirtyFromChangedIds deps1 changed
 
@@ -934,22 +937,11 @@ module internal PropagationLaws =
                     |> List.exists (fun id -> not (Set.contains id dirty) && Map.containsKey id out0.Values)
                 then
                     cleanReused <- cleanReused + 1
-            | _ -> ()
+            | _ -> ())
 
         reference
-        @ [ { Law =
-                "handed no prior, the prior-aware evaluator is the reference evaluator, and evalWith of it is eval of the reference (prior-blind reading)"
-              Passed = blind.IsNone
-              Counterexample = blind }
-            { Law =
-                "at the answers the incremental walk hands it, a node handed its prior returns what it returns handed none (prior discipline)"
-              Passed = discipline.IsNone
-              Counterexample = discipline }
-            { Law =
-                "evalFromWith of the edited evaluator over evalWith's own prior, whole and with holes, equals evalWith over the same map (agreement, with the prior)"
-              Passed = agreement.IsNone
-              Counterexample = agreement }
-            SampleAdequacy.reached
+        @ LawKit.results [ blind; discipline; agreement ]
+        @ [ SampleAdequacy.reached
                 "Conformance.propagationEvaluatorLawsWith"
                 "prior-aware edit"
                 seed
