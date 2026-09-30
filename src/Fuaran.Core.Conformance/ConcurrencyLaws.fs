@@ -202,24 +202,37 @@ module internal ConcurrencyLaws =
                 ([ "reported pair", reportedPairs; "unreported pair", unreportedPairs ]
                  @ kinds.Demands) ]
 
-    /// The branch-reconciliation laws (Phase 83) — the teeth on `Dag.reconcile` and its "fold what
-    /// commutes, hand conflicts back untouched" contract (GP6). Over a seed-replayable sample it builds
-    /// a fork DAG (a common base + two independent branch deltas of accepted ops) and certifies:
+    /// The branch-reconciliation laws (Phase 83; the shapes Phase 300) — the teeth on `Dag.reconcile`
+    /// and its "fold what commutes, hand conflicts back untouched" contract (GP6). Over a
+    /// seed-replayable sample it builds a DAG in one of FOUR shapes, each lane under its OWN actor so a
+    /// shared node is shared on purpose and never by an accidental content-id coincidence:
     ///
-    ///  - **clean-merge replay** — when `reconcile = Ok script`, the script applied to the base replays
-    ///    to the SAME tree (Phase-06 content hash) as delta A then delta B AND as delta B then delta A:
-    ///    a conflict-free merge folds order-independently (the pin is canonical form, not semantics);
-    ///  - **footprint cross-validation (#78)** — footprint-independent deltas are always conflict-free
-    ///    (`independent ⇒ reconcile = Ok`); the converse is not claimed (footprints over-approximate);
-    ///  - **conflicted path is inert** — when the deltas conflict, `reconcile = Error` carrying exactly
-    ///    `Dag.conflicts`' report, and nothing is applied (GP6 — no winner, no partial merge);
+    ///  - **disjoint** — a common base and two independent branch deltas of accepted ops forked off it;
+    ///  - **fast-forward** — branch B chained onto branch A's head, so `headB` descends from `headA`;
+    ///  - **duplicate head** — branch A's head named twice;
+    ///  - **criss-cross** — two merges of the same two (commuting) branches under two actors, then a
+    ///    lane off each, reconciled over `Dag.mergeBase` of the two heads: one of two maximal common
+    ///    ancestors, chosen on the tie-break, with the other branch's history shared by both heads.
+    ///
+    /// and certifies:
+    ///
+    ///  - **clean-merge replay** — on the disjoint shape, when `reconcile = Ok script`, the script
+    ///    applied to the base replays to the SAME tree (Phase-06 content hash) as delta A then delta B
+    ///    AND as delta B then delta A: a conflict-free merge folds order-independently;
+    ///  - **shared history once** — on the three shared-history shapes, the clean script applied to
+    ///    `Dag.replayTo` of the base replays to the same tree as `Dag.replayTo` of a merge node over the
+    ///    two heads: history both heads hold is applied exactly once;
+    ///  - **footprint cross-validation (#78)** — footprint-independent EXCLUSIVE deltas are always
+    ///    conflict-free (`independent ⇒ reconcile = Ok`); the converse is not claimed;
+    ///  - **conflicted path is inert** — when the exclusive deltas conflict, `reconcile = Error`
+    ///    carrying exactly `Dag.conflicts`' report over them, and nothing is applied (GP6);
     ///  - **determinism / order pinning** — `reconcile` is a pure function of `(base, headA, headB)`,
-    ///    and the clean script is `betweenOps base headA ++ betweenOps base headB`.
+    ///    and the clean script is the shared region once, then A's exclusive delta, then B's.
     ///
     /// `'Node` needs equality. `encode` is the per-node content encoder (as `footprintLaws`). Mirrors
     /// `footprintLaws` — a domain that reconciles branches runs it.
     ///
-    /// `hashFn` is the chain hash the two reconciled DAGs are built under — the domain's posture since
+    /// `hashFn` is the chain hash the reconciled DAGs are built under — the domain's posture since
     /// Phase 297 (`reconcileLawsWith`); `reconcileLaws` pins `OpStream.defaultHash`, which is what
     /// every run used before.
     let reconcileLawsWith
@@ -236,7 +249,7 @@ module internal ConcurrencyLaws =
         let fp (op: SkeletonOp<'Node, 'Id>) = Ops.footprint nodew idw [ op ]
 
         // A minimal StreamWitness so the branch deltas live in a REAL DAG (append needs Encode for the
-        // content id; reconcile/betweenOps never call Apply or Decode). Encode is a structural
+        // content id; the shared-history law replays through Apply). Encode is a structural
         // fingerprint of the op — enough for distinct nodes to get distinct content ids.
         let rec encOp (op: SkeletonOp<'Node, 'Id>) : string =
             match op with
@@ -270,6 +283,12 @@ module internal ConcurrencyLaws =
                 Some "reconcile outcome"
             )
 
+        let sharedOnce =
+            LawKit.LawCell(
+                "reconcile applies shared history once (a clean fast-forward, duplicate-head or criss-cross script replays to Dag.replayTo of the merge node)",
+                Some "reconcile shape"
+            )
+
         let cross =
             LawKit.LawCell(
                 "reconcile is conflict-free when the deltas are footprint-independent (#78 cross-validation)",
@@ -291,36 +310,106 @@ module internal ConcurrencyLaws =
         let mutable cleanFolds = 0
         let mutable conflictedFolds = 0
         let mutable independentDeltas = 0
+        // Phase 300 — the shape every trial was built in.
+        let mutable disjoint = 0
+        let mutable fastForward = 0
+        let mutable duplicateHead = 0
+        let mutable crissCross = 0
         // Phase 297 — the kind of every DRAWN op, folded into the second guard below.
         let kinds = LawKit.OpKindTally()
+        // The no-op the base node and the merge nodes carry, so `Dag.replayTo` of either is the
+        // history above it and nothing else.
+        let noOp: SkeletonOp<'Node, 'Id> = Batch []
 
-        // Chain a script onto `parent`, returning the new head (parent itself when the script is empty).
-        let chain (ops: SkeletonOp<'Node, 'Id> list) (parent: string) (d0: Dag.T<SkeletonOp<'Node, 'Id>>) =
+        // Chain a script onto `parent` under `actor`, returning the new head (parent itself when the
+        // script is empty).
+        let chain
+            (actor: string)
+            (ops: SkeletonOp<'Node, 'Id> list)
+            (parent: string)
+            (d0: Dag.T<SkeletonOp<'Node, 'Id>>)
+            =
             let mutable head = parent
             let mutable d = d0
 
             for op in ops do
-                let id, d' = Dag.append hashFn sw (Human "conf") op head d
+                let id, d' = Dag.append hashFn sw (Human actor) op head d
                 head <- id
                 d <- d'
 
             head, d
 
-        LawKit.run iterations seed (fun rng _ at ->
+        LawKit.run iterations seed (fun rng i at ->
             let tree = rng.Draw gen.Tree
             let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
             let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
 
-            // a fork DAG: a genesis base node (its op never participates — it is in the base closure,
-            // which betweenOps excludes), then branch A and branch B forked off the base.
-            let baseId, d1 =
-                Dag.append hashFn sw (Human "conf") (RemoveNode(nodew.Id tree)) "" Dag.empty
+            // a genesis base node carrying the no-op (it is in the base closure, which the
+            // partition excludes), then branch A forked off it under its own actor.
+            let genesis, d1 = Dag.append hashFn sw (Human "base") noOp "" Dag.empty
+            let headA0, d2 = chain "lane-a" a genesis d1
 
-            let headA, d2 = chain a baseId d1
-            let headB, dag = chain b baseId d2
+            // The shape, cycled by iteration. A criss-cross is built only over two NON-EMPTY
+            // branches that commute, and only when the merged tree admits a lane off each: a merge of
+            // two conflicting branches is a history whose own replay order is a tie-break, which no
+            // reconcile can make unambiguous (DECISIONS: the subtraction rule). Its second branch is
+            // therefore redrawn, a bounded number of times, until it commutes with the first; failing
+            // that the trial falls back to the disjoint shape, on the same draw.
+            let commutesWithA (s: SkeletonOp<'Node, 'Id> list) =
+                not (List.isEmpty s)
+                && Ops.independent (Ops.footprint nodew idw a) (Ops.footprint nodew idw s)
 
-            let deltaA = Dag.betweenOps dag baseId headA
-            let deltaB = Dag.betweenOps dag baseId headB
+            let crissB =
+                if i % 4 = 3 && not (List.isEmpty a) then
+                    let rec redraw k =
+                        if k = 0 then
+                            None
+                        else
+                            let s = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 2 tree)
+                            if commutesWithA s then Some s else redraw (k - 1)
+
+                    if commutesWithA b then Some b else redraw 16
+                else
+                    None
+
+            let crissTree =
+                match crissB with
+                | Some cb ->
+                    match applyAll (a @ cb) tree with
+                    | Ok t -> Some(cb, t)
+                    | Error _ -> None
+                | None -> None
+
+            // (shape, base, headA, headB, dag, expected exclusive deltas, expected shared region)
+            let shapeName, baseId, headA, headB, dag, exclA, exclB, shared =
+                match i % 4, crissTree with
+                | 1, _ ->
+                    let headB, dag = chain "lane-b" b headA0 d2
+                    "fast-forward", genesis, headA0, headB, dag, [], b, a
+                | 2, _ -> "duplicate-head", genesis, headA0, headA0, d2, a, [], []
+                | 3, Some(b, merged) ->
+                    let headB0, d3 = chain "lane-b" b genesis d2
+                    let m1, d4 = Dag.merge hashFn sw (Human "merge-1") noOp headA0 headB0 d3
+                    let m2, d5 = Dag.merge hashFn sw (Human "merge-2") noOp headA0 headB0 d4
+                    let c = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
+                    let d = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
+                    let h1, d6 = chain "lane-a" c m1 d5
+                    let h2, dag = chain "lane-b" d m2 d6
+                    // `mergeBase` picks one of the two maximal common ancestors; the other branch is
+                    // history both heads hold above it.
+                    let mb = Dag.mergeBase dag h1 h2 |> Option.defaultValue genesis
+                    let other = if mb = headA0 then b else a
+                    "criss-cross", mb, h1, h2, dag, noOp :: c, noOp :: d, other
+                | _ ->
+                    let headB, dag = chain "lane-b" b genesis d2
+                    "disjoint", genesis, headA0, headB, dag, a, b, []
+
+            match shapeName with
+            | "fast-forward" -> fastForward <- fastForward + 1
+            | "duplicate-head" -> duplicateHead <- duplicateHead + 1
+            | "criss-cross" -> crissCross <- crissCross + 1
+            | _ -> disjoint <- disjoint + 1
+
             let result = Dag.reconcile fp dag baseId headA headB
 
             // determinism + order pinning: a pure function of (base, headA, headB); clean script pinned.
@@ -334,39 +423,68 @@ module internal ConcurrencyLaws =
                 cleanFolds <- cleanFolds + 1
 
                 determinism.Check(
-                    (script = deltaA @ deltaB),
-                    fun () -> at "clean script ≠ betweenOps A ++ betweenOps B (order pin)"
-                )
-
-                // clean-merge replay: script ≡ A-then-B ≡ B-then-A on the base tree (content hash).
-                let viaScript = applyAll script tree |> Result.map hashOf
-                let ab = applyAll deltaA tree |> Result.bind (applyAll deltaB) |> Result.map hashOf
-                let ba = applyAll deltaB tree |> Result.bind (applyAll deltaA) |> Result.map hashOf
-
-                clean.Check(
-                    (match viaScript, ab, ba with
-                     | Ok hs, Ok hab, Ok hba when hs = hab && hab = hba -> true
-                     | _ -> false),
+                    (script = shared @ exclA @ exclB),
                     fun () ->
                         at (
-                            sprintf
-                                "a conflict-free merge did not fold order-independently (script=%A ab=%A ba=%A)"
-                                viaScript
-                                ab
-                                ba
+                            "clean script ≠ shared region ++ exclusive A ++ exclusive B (order pin, "
+                            + shapeName
+                            + ")"
                         )
                 )
+
+                if shapeName = "disjoint" then
+                    // clean-merge replay: script ≡ A-then-B ≡ B-then-A on the base tree (content hash).
+                    let viaScript = applyAll script tree |> Result.map hashOf
+                    let ab = applyAll a tree |> Result.bind (applyAll b) |> Result.map hashOf
+                    let ba = applyAll b tree |> Result.bind (applyAll a) |> Result.map hashOf
+
+                    clean.Check(
+                        (match viaScript, ab, ba with
+                         | Ok hs, Ok hab, Ok hba when hs = hab && hab = hba -> true
+                         | _ -> false),
+                        fun () ->
+                            at (
+                                sprintf
+                                    "a conflict-free merge did not fold order-independently (script=%A ab=%A ba=%A)"
+                                    viaScript
+                                    ab
+                                    ba
+                            )
+                    )
+                else
+                    // shared history once: the script from replayTo(base) ≡ replayTo(merge of the heads).
+                    let m, dm = Dag.merge hashFn sw (Human "merge") noOp headA headB dag
+
+                    let viaScript =
+                        Dag.replayTo sw tree dm baseId
+                        |> Result.mapError snd
+                        |> Result.bind (applyAll script)
+                        |> Result.map hashOf
+
+                    let viaMerge = Dag.replayTo sw tree dm m |> Result.mapError snd |> Result.map hashOf
+
+                    sharedOnce.Check(
+                        (viaScript = viaMerge),
+                        fun () ->
+                            at (
+                                sprintf
+                                    "a clean %s script did not replay to the merge node (script=%A merge=%A)"
+                                    shapeName
+                                    viaScript
+                                    viaMerge
+                            )
+                    )
             | Error cs ->
                 conflictedFolds <- conflictedFolds + 1
 
                 // the conflicted path returns exactly Dag.conflicts' report, nothing applied.
                 conflicted.Check(
-                    (cs = Dag.conflicts fp deltaA deltaB),
+                    (cs = Dag.conflicts fp exclA exclB),
                     fun () -> at "Error payload ≠ Dag.conflicts report"
                 )
 
-            // footprint cross-validation: footprint-independent deltas ⇒ conflict-free (Ok).
-            if Ops.independent (Ops.footprint nodew idw deltaA) (Ops.footprint nodew idw deltaB) then
+            // footprint cross-validation: footprint-independent exclusive deltas ⇒ conflict-free (Ok).
+            if Ops.independent (Ops.footprint nodew idw exclA) (Ops.footprint nodew idw exclB) then
                 independentDeltas <- independentDeltas + 1
 
                 cross.Check(
@@ -376,12 +494,20 @@ module internal ConcurrencyLaws =
                     fun () -> at "footprint-independent deltas were NOT reconciled clean"
                 ))
 
-        LawKit.results [ clean; cross; conflicted; determinism ]
+        LawKit.results [ clean; sharedOnce; cross; conflicted; determinism ]
         @ [ SampleAdequacy.reached
                 "Conformance.reconcileLawsWith"
                 "reconcile outcome"
                 seed
                 [ "clean fold", cleanFolds; "conflicted fold", conflictedFolds ]
+            SampleAdequacy.reached
+                "Conformance.reconcileLawsWith"
+                "reconcile shape"
+                seed
+                [ "disjoint", disjoint
+                  "fast-forward", fastForward
+                  "duplicate head", duplicateHead
+                  "criss-cross", crissCross ]
             SampleAdequacy.reached
                 "Conformance.reconcileLawsWith"
                 "delta-pair independence and op kind"

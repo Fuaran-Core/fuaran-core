@@ -107,6 +107,58 @@ type MergeConflict<'Op> =
       Address: string
       Shape: MergeConflictShape }
 
+/// Why `Dag.tryAppend` / `Dag.tryMerge` refused to build a node (Phase 300) — the typed refusals that
+/// make the parent-splice premise a property of everything this module BUILDS rather than a premise
+/// about its callers. `nodeHash` joins the sorted parent ids with `,`, so a parent id carrying a comma
+/// splices: an `append` whose parent id is the string `"x,y"` minted the id of `merge(x, y)` with no
+/// hash weakness at all, and replaced that node silently. And `""` is `append`'s genesis marker, never
+/// a node id, so `merge("", x)` built a node with a phantom parent. `parent_splice_unambiguous`
+/// (proofs/Chain.fst) proves the comma-join injective exactly for non-empty, comma-free ids; these two
+/// refusals are that premise, stated where the ids enter.
+[<RequireQualifiedAccess>]
+type DagAppendFault =
+    /// A merge was handed `""` for a parent — `append`'s genesis marker, not a node id.
+    | EmptyParentId
+    /// A parent id carries a `,` — the separator the content-hash pre-image joins parent ids with.
+    | CommaInParentId of parentId: string
+
+/// Render a `DagAppendFault` for a log line or an exception message (Phase 300).
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module DagAppendFault =
+
+    let toString (f: DagAppendFault) : string =
+        match f with
+        | DagAppendFault.EmptyParentId -> "a merge parent is \"\", the genesis marker, not a node id"
+        | DagAppendFault.CommaInParentId p ->
+            "the parent id \""
+            + p
+            + "\" carries a comma, the separator of the content-hash pre-image"
+
+/// One lane an N-lane reconcile refused because the lane's own delta does not apply (Phase 300): the
+/// lane's head, its delta (the exclusive region `Dag.reconcileMany` would have folded), and the first
+/// node of that delta the domain rejected, with the rejection. A property of the lane alone — it is
+/// replayed on its own, never after another lane — so the set of these is arrival-order-invariant.
+type LaneRejection<'Op, 'Rej> =
+    { Head: string
+      Delta: 'Op list
+      NodeId: string
+      Reject: 'Rej }
+
+/// Why `Dag.reconcileMany` refused to fold a lane set (Phase 300). Every case is a property of the
+/// lane SET, never of the order the heads were named in: the interference report is Phase 64's,
+/// symmetric up to a `Left`/`Right` swap; the rejections are sorted by head id.
+[<RequireQualifiedAccess>]
+type ReconcileFault<'Op, 'Rej> =
+    /// Two lanes' exclusive deltas interfere — `Dag.conflicts`' report over every unordered lane pair,
+    /// nothing applied (GP6).
+    | LanesInterfere of conflicts: MergeConflict<'Op> list
+    /// The SHARED region — history two or more heads both hold above the base — does not replay from
+    /// the base state: the node that rejected and the rejection. No lane is to blame, so none is named.
+    | SharedHistoryRejected of nodeId: string * reject: 'Rej
+    /// One or more lanes do not apply from the state the shared region reaches; every such lane, sorted
+    /// by head id. Tested BEFORE anything is folded, one lane at a time, so it cannot depend on arrival.
+    | LanesRejected of lanes: LaneRejection<'Op, 'Rej> list
+
 /// A content-addressed branching/merging op-DAG over the `StreamWitness`.
 module Dag =
 
@@ -149,18 +201,23 @@ module Dag =
         |> List.filter (fun id -> not (parents.Contains id))
         |> List.sort
 
-    /// Append `op` as a child of `parentId` (`""` for genesis). Appending onto a node that
-    /// already has a child *forks* a branch. Returns the new node's content id.
-    let append
+    /// The splice premise on one parent id (Phase 300): not a comma-bearing id. `""` is judged by the
+    /// caller, because it means genesis to `append` and nothing at all to `merge`.
+    let private parentFault (p: string) : DagAppendFault option =
+        if p.Contains "," then
+            Some(DagAppendFault.CommaInParentId p)
+        else
+            None
+
+    let private addNode
         (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (encode: 'Op -> string)
         (actor: Actor)
         (op: 'Op)
-        (parentId: string)
+        (parents: string list)
         (dag: T<'Op>)
         : string * T<'Op> =
-        let parents = if parentId = "" then [] else [ parentId ]
-        let id = nodeHash hashFn w.Encode parents actor op
+        let id = nodeHash hashFn encode parents actor op
 
         let node =
             { Id = id
@@ -170,8 +227,67 @@ module Dag =
 
         id, { Nodes = Map.add id node dag.Nodes }
 
+    /// `append` with its refusal typed (Phase 300): a comma-bearing `parentId` is
+    /// `Error(DagAppendFault.CommaInParentId _)`, because its content id would splice into a merge's.
+    /// `""` is genesis, as for `append`.
+    let tryAppend
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (parentId: string)
+        (dag: T<'Op>)
+        : Result<string * T<'Op>, DagAppendFault> =
+        match parentFault parentId with
+        | Some f -> Error f
+        | None -> Ok(addNode hashFn w.Encode actor op (if parentId = "" then [] else [ parentId ]) dag)
+
+    /// Append `op` as a child of `parentId` (`""` for genesis). Appending onto a node that
+    /// already has a child *forks* a branch. Returns the new node's content id.
+    ///
+    /// Since Phase 300 a comma-bearing `parentId` is refused — an `ArgumentException` carrying
+    /// `DagAppendFault.toString`; `tryAppend` is the same refusal as a typed `Result`.
+    let append
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (parentId: string)
+        (dag: T<'Op>)
+        : string * T<'Op> =
+        match tryAppend hashFn w actor op parentId dag with
+        | Ok r -> r
+        | Error f -> invalidArg "parentId" (DagAppendFault.toString f)
+
+    /// `merge` with its refusals typed (Phase 300): a parent that is `""` is
+    /// `Error DagAppendFault.EmptyParentId`, a comma-bearing one `Error(DagAppendFault.CommaInParentId _)`
+    /// — the left parent judged first.
+    let tryMerge
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (leftId: string)
+        (rightId: string)
+        (dag: T<'Op>)
+        : Result<string * T<'Op>, DagAppendFault> =
+        let judge (p: string) =
+            if p = "" then
+                Some DagAppendFault.EmptyParentId
+            else
+                parentFault p
+
+        match judge leftId |> Option.orElse (judge rightId) with
+        | Some f -> Error f
+        | None -> Ok(addNode hashFn w.Encode actor op [ leftId; rightId ] dag)
+
     /// Merge two heads into a convergent node (`Parents = [leftId; rightId]`). `op` is the
     /// merge commit's own reconciliation op (a domain no-op where the merge adds nothing).
+    ///
+    /// Since Phase 300 a parent that is `""` or carries a comma is refused — an `ArgumentException`
+    /// carrying `DagAppendFault.toString`; `tryMerge` is the same refusal as a typed `Result`. With both
+    /// refusals, no merge id can equal an append id: an append's pre-image names ONE comma-free parent,
+    /// a merge's two joined by a comma.
     let merge
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -181,16 +297,9 @@ module Dag =
         (rightId: string)
         (dag: T<'Op>)
         : string * T<'Op> =
-        let parents = [ leftId; rightId ]
-        let id = nodeHash hashFn w.Encode parents actor op
-
-        let node =
-            { Id = id
-              Parents = parents
-              Actor = actor
-              Op = op }
-
-        id, { Nodes = Map.add id node dag.Nodes }
+        match tryMerge hashFn w actor op leftId rightId dag with
+        | Ok r -> r
+        | Error f -> invalidArg "parentId" (DagAppendFault.toString f)
 
     /// The first integrity fault in the DAG, scanned in deterministic id order (Phase 21): a node
     /// whose stored id is not the content hash of its (parents, actor, op) — a tampered node — or a
@@ -227,7 +336,11 @@ module Dag =
     /// The Kahn topological-sort core: returns the emitted order **and** the head's ancestor-closure.
     /// On an acyclic closure `List.length order = Set.count anc`; a cycle leaves the cyclic nodes
     /// unreachable so `order` is strictly shorter — the signal `tryTopoOrder` / `isAcyclic` use.
-    let private topoCore (dag: T<'Op>) (headId: string) : string list * Set<string> =
+    ///
+    /// Since Phase 300 the drain runs over the UNION of several heads' closures (`topoCoreMany`); one
+    /// head is the one-root case, byte-for-byte the drain it always was. The drain is a function of the
+    /// node SET it covers, so the order the roots are named in cannot reach the output.
+    let private topoCoreMany (dag: T<'Op>) (roots: string list) : string list * Set<string> =
         // Ancestor-closure via an explicit work-list (Phase 10) — a deep/long DAG cannot
         // overflow the stack the way the prior fold-recursive `collect` could. Tail-recursive.
         let rec collect (acc: Set<string>) (stack: string list) =
@@ -241,7 +354,7 @@ module Dag =
                     | Some n -> collect (Set.add id acc) (n.Parents @ rest)
                     | None -> collect acc rest
 
-        let anc = collect Set.empty [ headId ]
+        let anc = collect Set.empty roots
 
         let parentsIn id =
             (Map.find id dag.Nodes).Parents |> List.filter (fun p -> Set.contains p anc)
@@ -280,6 +393,8 @@ module Dag =
             | None -> ()
 
         List.ofSeq result, anc
+
+    let private topoCore (dag: T<'Op>) (headId: string) : string list * Set<string> = topoCoreMany dag [ headId ]
 
     /// The ancestor-closure of `headId` in deterministic topological order (parents before
     /// children; the ready frontier is drained smallest-id-first, so the order is total).
@@ -707,10 +822,16 @@ module Dag =
 
         collect Set.empty [ id ]
 
-    /// The merge base of two heads: the deepest common ancestor, measured by ancestor-closure
-    /// size (a node strictly deeper than any of its own ancestors has a strictly larger
-    /// closure), tie-broken by id for determinism. `None` when the histories are disjoint.
-    /// Total — a missing id contributes an empty closure.
+    /// The merge base of two heads: A MAXIMAL common ancestor — the common ancestor with the largest
+    /// ancestor-closure (a node strictly deeper than any of its own ancestors has a strictly larger
+    /// closure, so no common ancestor descends from the one returned), tie-broken by id for
+    /// determinism. `None` when the histories are disjoint. Total — a missing id contributes an empty
+    /// closure.
+    ///
+    /// A POLICY, not "the" base (Phase 300): where two heads share several maximal common ancestors — a
+    /// criss-cross, two merges of the same two lanes — the tie-break picks one, and the history the
+    /// other one carries is still shared by both heads. `reconcile` / `reconcileMany` no longer lean on
+    /// the choice: whatever base they are handed, history both heads hold above it is applied once.
     let mergeBase (dag: T<'Op>) (left: string) (right: string) : string option =
         let common = Set.intersect (ancestorsOf dag left) (ancestorsOf dag right)
 
@@ -825,25 +946,82 @@ module Dag =
                             Address = addr
                             Shape = MoveVsRemove } ]
 
-    // ---- branch reconciliation (Phase 83) ----
-    // The mechanical FOLD half of a merge. Given the DAG, a common base, and two heads: when the two
-    // branch deltas do NOT conflict (Phase 64), emit the deterministic merge script — delta A followed
-    // by delta B, one applyable `'Op` sequence (the `betweenOps` shape) — that folds both; when they
-    // DO, return Phase 64's typed report untouched, nothing applied. GP6 holds: the clean path is pure
-    // structural composition, the conflicted path decides nothing. `reconcile` is to merging what
-    // `apply` is to a `canApply`-clean op.
+    // ---- branch reconciliation (Phase 83; the delta rule Phase 300) ----
+    // The mechanical FOLD half of a merge. Given the DAG, a base, and the heads: when the lanes'
+    // deltas do NOT conflict (Phase 64), emit the deterministic merge script that folds them all;
+    // when they DO, return Phase 64's typed report untouched, nothing applied. GP6 holds: the clean
+    // path is pure structural composition, the conflicted path decides nothing.
     //
-    // Order pinning is CANONICAL FORM, not semantics. A conflict-free pair commutes — `conflicts = []`
-    // ≡ the deltas are footprint-independent (#78), and independent scripts replay to content-hash-equal
-    // state in either order — so pinning delta-A-then-delta-B (the `headA`, `headB` argument order) just
-    // makes the output a pure function of `(baseId, headA, headB)`. `reconcileLaws` certifies both the
-    // replay equivalence and the pin.
+    // THE DELTA RULE (Phase 300). Until 0.33.0 each lane's delta was `between base head` and the
+    // script their concatenation — so whenever two lanes' deltas overlapped, the shared history was
+    // applied twice: a fast-forward (one head descends from the other), the same head named twice, and
+    // a criss-cross (two merges of the same two lanes, `mergeBase` picking one of the two maximal
+    // common ancestors on its tie-break) all produced a script that replayed shared ops twice, and
+    // under a real footprint halted with those ops "conflicting" with themselves. Now the region above
+    // the base is PARTITIONED by node id:
+    //
+    //   - the SHARED region: every node above the base held by two or more heads' closures. It is
+    //     history the lanes agree on, so it is applied ONCE, first, in the drain order of the union;
+    //   - each head's EXCLUSIVE delta: `closure(head) − closure(base) − every other head's closure`.
+    //     A head that is an ancestor of another has an empty one; a head named twice is deduplicated
+    //     (first occurrence kept) before anything is computed.
+    //
+    // Conflicts are checked between the EXCLUSIVE deltas, pairwise: shared history is not a
+    // concurrent edit, and two exclusive deltas are always incomparable node for node (an ancestor of
+    // a node in one head's delta is in that head's closure, so it cannot be exclusive to another).
+    // The script is `shared ++ exclusive_1 ++ … ++ exclusive_n`, every node at most once, every node
+    // after its parents. With a single chain per lane off one base — what `FoldConfluence.foldOnce`
+    // builds — the shared region is empty and each exclusive delta is `between base head`, so the
+    // script is exactly the one the old rule produced there.
 
-    /// Reconcile two branch heads over a common base (Phase 83): non-conflicting deltas ⇒ `Ok` the
-    /// merge script (`betweenOps base headA ++ betweenOps base headB`, pinned order, one applyable
-    /// sequence); any conflict ⇒ `Error` the `Dag.conflicts` report verbatim — no partial merge (GP6).
+    /// The partition of the region above a base (Phase 300): the SHARED ids (drain order of the
+    /// union) and each deduplicated head's EXCLUSIVE ids (the same drain order, restricted).
+    type private Region =
+        { Shared: string list
+          Exclusive: (string * string list) list }
+
+    let private region (dag: T<'Op>) (baseId: string) (heads: string list) : Region =
+        let hs = List.distinct heads
+        let baseClosure = ancestorsOf dag baseId
+        let closures = hs |> List.map (fun h -> h, ancestorsOf dag h)
+
+        let owners (id: string) =
+            closures |> List.sumBy (fun (_, c) -> if Set.contains id c then 1 else 0)
+
+        let above =
+            topoCoreMany dag hs
+            |> fst
+            |> List.filter (fun id -> not (Set.contains id baseClosure))
+
+        { Shared = above |> List.filter (fun id -> owners id >= 2)
+          Exclusive =
+            closures
+            |> List.map (fun (h, c) -> h, above |> List.filter (fun id -> Set.contains id c && owners id = 1)) }
+
+    let private opsOf (dag: T<'Op>) (ids: string list) : 'Op list =
+        ids |> List.map (fun id -> dag.Nodes.[id].Op)
+
+    /// Every UNORDERED pair of deltas, i < j, checked with `conflicts` — the report both reconcilers
+    /// return.
+    let private interference (footprintOf: 'Op -> Footprint) (deltas: 'Op list list) : MergeConflict<'Op> list =
+        let indexed = List.indexed deltas
+
+        [ for (i, a) in indexed do
+              for (j, b) in indexed do
+                  if i < j then
+                      yield! conflicts footprintOf a b ]
+
+    /// Reconcile two branch heads over a base (Phase 83): non-conflicting exclusive deltas ⇒ `Ok` the
+    /// merge script — the shared region above the base once, then head A's exclusive delta, then head
+    /// B's (the Phase 300 delta rule, see the section comment) — one applyable sequence; any conflict ⇒
+    /// `Error` the `Dag.conflicts` report of the two exclusive deltas verbatim — no partial merge (GP6).
     /// `footprintOf` is the caller's address projection, as for `conflicts`. Pure function of
     /// `(baseId, headA, headB)`; picks no winner and applies no policy — resolution stays domain-side.
+    ///
+    /// Where the heads share nothing above the base (two lanes forked off it) the script is
+    /// `betweenOps base headA ++ betweenOps base headB`, as it always was. Where they do — `headB`
+    /// descending from `headA`, `headA = headB`, a criss-cross whose `baseId` is one of two maximal
+    /// common ancestors — the shared history is applied once and nothing conflicts with itself.
     let reconcile
         (footprintOf: 'Op -> Footprint)
         (dag: T<'Op>)
@@ -851,50 +1029,87 @@ module Dag =
         (headA: string)
         (headB: string)
         : Result<'Op list, MergeConflict<'Op> list> =
-        let deltaA = betweenOps dag baseId headA
-        let deltaB = betweenOps dag baseId headB
+        let r = region dag baseId [ headA; headB ]
+        let deltas = r.Exclusive |> List.map (snd >> opsOf dag)
 
-        match conflicts footprintOf deltaA deltaB with
-        | [] -> Ok(deltaA @ deltaB)
+        match interference footprintOf deltas with
+        | [] -> Ok(opsOf dag r.Shared @ List.concat deltas)
         | cs -> Error cs
 
-    // ---- N-lane reconciliation (Phase 100) ----
+    // ---- N-lane reconciliation (Phase 100; the lanes-apply test Phase 300) ----
     // `reconcile` folds TWO heads. A local-first deployment routinely converges N concurrent lanes
     // (one per writer/session) off one shared base, and folding them by repeated pairwise reconcile
     // is not the same operation: it would have to mint intermediate merge nodes, and the *order* in
     // which those pairings happen would leak into the result. `reconcileMany` states the N-lane fold
     // directly — every unordered lane pair is checked, then the whole set is composed at once — so
     // the arrival order of the lanes is canonical form and never semantics.
+    //
+    // Since Phase 300 it also tests, BEFORE composing anything, that every lane applies on its own
+    // from the state the shared region reaches. Without that test a lane set with a rejecting lane was
+    // outside the fold theorem and production did not refuse it either: lanes `[[Dec 5]; [Inc 10]]`
+    // off 0 folded under one arrival order and rejected under the other, because whether `Dec 5`
+    // rejects depends on whether `Inc 10` ran first. A lane's own replay is a property of the lane, so
+    // the set of rejecting lanes is a property of the lane set — and the refusal is order-free.
 
-    /// The N-lane generalisation of `reconcile` (Phase 100): fold `heads` — N branch heads over one
-    /// common `baseId` — into a single merge script. Every UNORDERED pair of lane deltas is checked
-    /// with `conflicts`; any interference ⇒ `Error` the concatenated reports, **nothing applied**
-    /// (GP6, exactly as `reconcile`); otherwise `Ok` the concatenation of the lane deltas in the
-    /// order `heads` names them.
+    /// The N-lane generalisation of `reconcile` (Phase 100), made total over rejecting lanes (Phase 300):
+    /// fold `heads` — N branch heads over `baseId`, whose state is `baseState` — into a single merge
+    /// script, or refuse with a `ReconcileFault` that names the same thing under every arrival order:
     ///
-    /// `reconcileMany fp dag b [x; y]` is `reconcile fp dag b x y` — the two-head form is the N = 2
-    /// case, and the check is `conflicts` per pair, so #78's conservativity contract is inherited
-    /// unchanged: `Ok` still carries the promise that the deltas provably commute, never a false
-    /// "clean merge". The `heads` order therefore pins **canonical form only** — a conflict-free lane
-    /// set replays to the same state under any arrival order, which is the claim
-    /// `Conformance.FoldConfluence.laneFoldLaws` certifies for a domain's own witness.
+    ///  1. the region above the base is partitioned exactly as `reconcile` partitions it (heads
+    ///     deduplicated, shared history once, one exclusive delta per head);
+    ///  2. every UNORDERED pair of exclusive deltas is checked with `conflicts`; any interference ⇒
+    ///     `Error(LanesInterfere report)`, **nothing applied** (GP6);
+    ///  3. the shared region is replayed from `baseState` through `w.Apply`; a rejection ⇒
+    ///     `Error(SharedHistoryRejected …)`;
+    ///  4. every exclusive delta is replayed ON ITS OWN from the state step 3 reached; any that rejects
+    ///     ⇒ `Error(LanesRejected …)`, every rejecting lane, sorted by head id;
+    ///  5. otherwise `Ok(shared ++ exclusive_1 ++ … ++ exclusive_n)`, in the order `heads` names them.
     ///
-    /// Pairwise, not joint: set disjointness IS pairwise, so N mutually-independent lanes are jointly
-    /// independent — there is no N-way interference the pairwise sweep can miss.
+    /// At N = 2, when both lanes apply, the script is `reconcile`'s. `Ok` still carries #78's promise
+    /// that the exclusive deltas provably commute; with step 4 it also carries the premise the fold
+    /// theorem used to ASSUME (`lanes_apply`): every lane applies from the base. The `heads` order
+    /// therefore pins **canonical form only** — `DagFold.fold_confluence_total` proves the outcome
+    /// equivalent under every permutation, and `Conformance.FoldConfluence.laneFoldLaws` certifies it
+    /// for a domain's own witness. Pairwise, not joint: set disjointness IS pairwise, so N
+    /// mutually-independent lanes are jointly independent.
     let reconcileMany
+        (w: StreamWitness<'Op, 'State, 'Rej>)
         (footprintOf: 'Op -> Footprint)
         (dag: T<'Op>)
         (baseId: string)
+        (baseState: 'State)
         (heads: string list)
-        : Result<'Op list, MergeConflict<'Op> list> =
-        let deltas = heads |> List.map (betweenOps dag baseId) |> List.indexed
+        : Result<'Op list, ReconcileFault<'Op, 'Rej>> =
+        let r = region dag baseId heads
+        let deltas = r.Exclusive |> List.map (fun (h, ids) -> h, ids, opsOf dag ids)
 
-        let cs =
-            [ for (i, a) in deltas do
-                  for (j, b) in deltas do
-                      if i < j then
-                          yield! conflicts footprintOf a b ]
+        let rec replayIds (st: 'State) (ids: string list) : Result<'State, string * 'Rej> =
+            match ids with
+            | [] -> Ok st
+            | id :: rest ->
+                match w.Apply dag.Nodes.[id].Op st with
+                | Ok st' -> replayIds st' rest
+                | Error e -> Error(id, e)
 
-        match cs with
-        | [] -> Ok(deltas |> List.collect snd)
-        | _ -> Error cs
+        match interference footprintOf (deltas |> List.map (fun (_, _, ops) -> ops)) with
+        | _ :: _ as cs -> Error(ReconcileFault.LanesInterfere cs)
+        | [] ->
+            match replayIds baseState r.Shared with
+            | Error(nodeId, rej) -> Error(ReconcileFault.SharedHistoryRejected(nodeId, rej))
+            | Ok sharedState ->
+                let rejected =
+                    deltas
+                    |> List.choose (fun (h, ids, ops) ->
+                        match replayIds sharedState ids with
+                        | Ok _ -> None
+                        | Error(nodeId, rej) ->
+                            Some
+                                { Head = h
+                                  Delta = ops
+                                  NodeId = nodeId
+                                  Reject = rej })
+                    |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Head, b.Head))
+
+                match rejected with
+                | [] -> Ok(opsOf dag r.Shared @ (deltas |> List.collect (fun (_, _, ops) -> ops)))
+                | rs -> Error(ReconcileFault.LanesRejected rs)

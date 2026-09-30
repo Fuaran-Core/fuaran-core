@@ -7,15 +7,21 @@
 ctor Fuaran.Core.Dag+T`1..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.DagNode`1<!0>>)
 ctor Fuaran.Core.DagBreak..ctor(System.String, Fuaran.Core.DagBreakReason, System.String, System.String)
 ctor Fuaran.Core.DagNode`1..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.Actor, !0)
+ctor Fuaran.Core.LaneRejection`2..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<!0>, System.String, !1)
 ctor Fuaran.Core.MergeConflict`1..ctor(!0, !0, System.String, Fuaran.Core.MergeConflictShape)
 field Fuaran.Core.Dag+ReplayFault`1+Tags.CyclicHistory : System.Int32 (literal)
 field Fuaran.Core.Dag+ReplayFault`1+Tags.Rejected : System.Int32 (literal)
+field Fuaran.Core.DagAppendFault+Tags.CommaInParentId : System.Int32 (literal)
+field Fuaran.Core.DagAppendFault+Tags.EmptyParentId : System.Int32 (literal)
 field Fuaran.Core.DagBreakReason+Tags.ContentIdMismatch : System.Int32 (literal)
 field Fuaran.Core.DagBreakReason+Tags.MissingParent : System.Int32 (literal)
 field Fuaran.Core.DagBreakReason+Tags.Unrecognised : System.Int32 (literal)
 field Fuaran.Core.MergeConflictShape+Tags.ConcurrentUpdate : System.Int32 (literal)
 field Fuaran.Core.MergeConflictShape+Tags.InsertPositionClash : System.Int32 (literal)
 field Fuaran.Core.MergeConflictShape+Tags.MoveVsRemove : System.Int32 (literal)
+field Fuaran.Core.ReconcileFault`2+Tags.LanesInterfere : System.Int32 (literal)
+field Fuaran.Core.ReconcileFault`2+Tags.LanesRejected : System.Int32 (literal)
+field Fuaran.Core.ReconcileFault`2+Tags.SharedHistoryRejected : System.Int32 (literal)
 method Fuaran.Core.Dag.ancestorsOf`1(Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 method Fuaran.Core.Dag.append`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, System.String, Fuaran.Core.Dag+T`1<!!0>) : System.Tuple`2<System.String, Fuaran.Core.Dag+T`1<!!0>>
 method Fuaran.Core.Dag.betweenOps`1(Fuaran.Core.Dag+T`1<!!0>, System.String, System.String) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
@@ -29,13 +35,16 @@ method Fuaran.Core.Dag.heads`1(Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Coll
 method Fuaran.Core.Dag.isAcyclic`1(Fuaran.Core.Dag+T`1<!!0>, System.String) : System.Boolean
 method Fuaran.Core.Dag.mergeBase`1(Fuaran.Core.Dag+T`1<!!0>, System.String, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Dag.merge`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, System.String, System.String, Fuaran.Core.Dag+T`1<!!0>) : System.Tuple`2<System.String, Fuaran.Core.Dag+T`1<!!0>>
-method Fuaran.Core.Dag.reconcileMany`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+T`1<!!0>, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MergeConflict`1<!!0>>>
+method Fuaran.Core.Dag.reconcileMany`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+T`1<!!0>, System.String, !!1, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.ReconcileFault`2<!!0, !!2>>
 method Fuaran.Core.Dag.reconcile`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+T`1<!!0>, System.String, System.String, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MergeConflict`1<!!0>>>
 method Fuaran.Core.Dag.replayTo`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, !!1, Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, System.Tuple`2<System.String, !!2>>
 method Fuaran.Core.Dag.toJsonl`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.Dag+T`1<!!0>) : System.String
+method Fuaran.Core.Dag.tryAppend`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.DagAppendFault>
+method Fuaran.Core.Dag.tryMerge`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, System.String, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.DagAppendFault>
 method Fuaran.Core.Dag.tryReplayTo`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, !!1, Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.Dag+ReplayFault`1<!!2>>
 method Fuaran.Core.Dag.tryTopoOrder`1(Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String>
 method Fuaran.Core.Dag.verifyDag`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Dag+T`1<!!0>) : System.Boolean
+method Fuaran.Core.DagAppendFaultModule.toString(Fuaran.Core.DagAppendFault) : System.String
 method Fuaran.Core.DagBreakReasonModule.ofString(System.String) : Fuaran.Core.DagBreakReason
 method Fuaran.Core.DagBreakReasonModule.toString(Fuaran.Core.DagBreakReason) : System.String
 record-field Fuaran.Core.Dag+T`1.Nodes #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.DagNode`1<!0>>
@@ -47,6 +56,10 @@ record-field Fuaran.Core.DagNode`1.Actor #2 : Fuaran.Core.Actor
 record-field Fuaran.Core.DagNode`1.Id #0 : System.String
 record-field Fuaran.Core.DagNode`1.Op #3 : !0
 record-field Fuaran.Core.DagNode`1.Parents #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.LaneRejection`2.Delta #1 : Microsoft.FSharp.Collections.FSharpList`1<!0>
+record-field Fuaran.Core.LaneRejection`2.Head #0 : System.String
+record-field Fuaran.Core.LaneRejection`2.NodeId #2 : System.String
+record-field Fuaran.Core.LaneRejection`2.Reject #3 : !1
 record-field Fuaran.Core.MergeConflict`1.Address #2 : System.String
 record-field Fuaran.Core.MergeConflict`1.Left #0 : !0
 record-field Fuaran.Core.MergeConflict`1.Right #1 : !0
@@ -57,20 +70,35 @@ type Fuaran.Core.Dag+ReplayFault`1+CyclicHistory (type)
 type Fuaran.Core.Dag+ReplayFault`1+Rejected (type)
 type Fuaran.Core.Dag+ReplayFault`1+Tags (type)
 type Fuaran.Core.Dag+T`1 (record)
+type Fuaran.Core.DagAppendFault (union)
+type Fuaran.Core.DagAppendFault+CommaInParentId (type)
+type Fuaran.Core.DagAppendFault+Tags (type)
+type Fuaran.Core.DagAppendFaultModule (module)
 type Fuaran.Core.DagBreak (record)
 type Fuaran.Core.DagBreakReason (union)
 type Fuaran.Core.DagBreakReason+Tags (type)
 type Fuaran.Core.DagBreakReason+Unrecognised (type)
 type Fuaran.Core.DagBreakReasonModule (module)
 type Fuaran.Core.DagNode`1 (record)
+type Fuaran.Core.LaneRejection`2 (record)
 type Fuaran.Core.MergeConflictShape (union)
 type Fuaran.Core.MergeConflictShape+Tags (type)
 type Fuaran.Core.MergeConflict`1 (record)
+type Fuaran.Core.ReconcileFault`2 (union)
+type Fuaran.Core.ReconcileFault`2+LanesInterfere (type)
+type Fuaran.Core.ReconcileFault`2+LanesRejected (type)
+type Fuaran.Core.ReconcileFault`2+SharedHistoryRejected (type)
+type Fuaran.Core.ReconcileFault`2+Tags (type)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewCyclicHistory #0(headId: System.String)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewRejected #1(nodeId: System.String, reject: !0)
+union-case Fuaran.Core.DagAppendFault.EmptyParentId #0()
+union-case Fuaran.Core.DagAppendFault.NewCommaInParentId #1(parentId: System.String)
 union-case Fuaran.Core.DagBreakReason.ContentIdMismatch #0()
 union-case Fuaran.Core.DagBreakReason.MissingParent #1()
 union-case Fuaran.Core.DagBreakReason.NewUnrecognised #2(reason: System.String)
 union-case Fuaran.Core.MergeConflictShape.ConcurrentUpdate #0()
 union-case Fuaran.Core.MergeConflictShape.InsertPositionClash #1()
 union-case Fuaran.Core.MergeConflictShape.MoveVsRemove #2()
+union-case Fuaran.Core.ReconcileFault`2.NewLanesInterfere #0(conflicts: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MergeConflict`1<!0>>)
+union-case Fuaran.Core.ReconcileFault`2.NewLanesRejected #2(lanes: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LaneRejection`2<!0, !1>>)
+union-case Fuaran.Core.ReconcileFault`2.NewSharedHistoryRejected #1(nodeId: System.String, reject: !1)

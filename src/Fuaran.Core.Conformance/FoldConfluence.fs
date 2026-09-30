@@ -17,6 +17,16 @@ namespace Fuaran.Core
 //  footprint projection and a lane generator, and it certifies, or refutes with a shrunk
 //  counterexample.
 //
+//  Until Phase 300 the second half of that claim was FALSE for one kind of lane set, and this
+//  header said otherwise: a lane that rejects from the base state (`[[Dec 5]; [Inc 10]]` off 0)
+//  folded under the arrival order that happened to run the other lane first and rejected under
+//  the other, so the pack reported a divergence and blamed a domain that satisfies the diamond.
+//  `Dag.reconcileMany` now replays every lane ON ITS OWN before anything is composed and refuses
+//  a set with a rejecting lane with the set of rejecting lanes — a property of the set, so the
+//  refusal is the same however the lanes arrive (`DagFold.fold_confluence_total`, proved with no
+//  hypothesis about the lane set). What is still a divergence, and still this pack's to find, is
+//  a domain whose declared-independent ops do not commute.
+//
 //  Three outcomes, not two. The pack distinguishes **folding identically** from **halting
 //  identically**, and treats a lane set that folds under one arrival order and halts under
 //  another as its own, separately-named defect — that is the bug class the pack exists to
@@ -49,8 +59,11 @@ type LaneFoldOutcome =
     /// deltas are handed to it the other way round. Comparing raw reports would therefore fail
     /// every trial for a reason that is presentation, not divergence.
     | LaneHalted of report: string
-    /// The domain reducer rejected an op while replaying the composed script. A rejection that
-    /// is not identical under every arrival order is a divergence like any other.
+    /// The lane set does not apply. Since Phase 300 this is, first, the canonical rendering of
+    /// every lane that does not apply ON ITS OWN from the base (`canonicalRejectionReport`) — a
+    /// property of the set, tested before anything is composed; and otherwise a rejection while
+    /// replaying the composed script, which a domain satisfying the diamond never produces. A
+    /// rejection that is not identical under every arrival order is a divergence like any other.
     | LaneRejected of reason: string
 
 /// The domain-supplied lane generator: the base state every lane forks from, the shared genesis
@@ -141,11 +154,76 @@ module FoldConfluence =
         |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
         |> String.concat "\n"
 
+    /// The canonical, arrival-order-independent rendering of a lane-set refusal (Phase 300): one
+    /// line per distinct rejecting lane — its delta in the domain's own encoding and the rejection
+    /// it met replaying on its own — sorted ordinally. A lane's own replay is a property of the
+    /// lane, so this rendering is a property of the lane SET, which is what lets "refuses
+    /// identically" be a real claim. Public for the same reason `canonicalConflictReport` is.
+    let canonicalRejectionReport (encodeOp: 'Op -> string) (rs: LaneRejection<'Op, 'Rej> list) : string =
+        rs
+        |> List.map (fun r ->
+            "["
+            + (r.Delta |> List.map encodeOp |> String.concat "; ")
+            + "] rejected: "
+            + sprintf "%A" r.Reject)
+        |> List.distinct
+        |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
+        |> String.concat "\n"
+
+    /// Fold the lane set whose heads are `heads`, in the order named, over a DAG already built —
+    /// `Dag.reconcileMany` from `state0`, the composed script replayed through the domain reducer,
+    /// and the outcome rendered canonically. `foldOnce` is this over the chains it builds; the
+    /// shaped draws of `laneFoldLawsWith` (a duplicated head, a fast-forward) are this over theirs.
+    let internal foldHeads
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (hashState: 'State -> string)
+        (state0: 'State)
+        (dag: Dag.T<'Op>)
+        (baseId: string)
+        (heads: string list)
+        : LaneFoldOutcome =
+        match Dag.reconcileMany w footprintOf dag baseId state0 heads with
+        | Error(ReconcileFault.LanesInterfere cs) -> LaneHalted(canonicalConflictReport w.Encode cs)
+        | Error(ReconcileFault.LanesRejected rs) -> LaneRejected(canonicalRejectionReport w.Encode rs)
+        | Error(ReconcileFault.SharedHistoryRejected(nodeId, rej)) ->
+            LaneRejected(
+                "shared history rejected at "
+                + w.Encode dag.Nodes.[nodeId].Op
+                + ": "
+                + sprintf "%A" rej
+            )
+        | Ok script ->
+            match script |> List.fold (fun acc op -> acc |> Result.bind (w.Apply op)) (Ok state0) with
+            | Ok st -> LaneFolded(hashState st)
+            | Error rej -> LaneRejected(sprintf "%A" rej)
+
+    /// Chain each lane onto `parentOf i` under its own actor, returning the heads in lane order.
+    let private chainLanes
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (hashFn: HashFn)
+        (parentOf: int -> string list -> string)
+        (d0: Dag.T<'Op>)
+        (lanes: 'Op list list)
+        : string list * Dag.T<'Op> =
+        lanes
+        |> List.indexed
+        |> List.fold
+            (fun (hs, d) (i, ops) ->
+                let actor = Human("lane-" + string i)
+
+                let head, d' =
+                    ops
+                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (parentOf i hs, d)
+
+                hs @ [ head ], d')
+            ([], d0)
+
     /// Fold ONE lane set in the order given, through the real DAG surface rather than a
     /// re-implementation of it: each lane is chained onto a shared base node **under its own
-    /// actor**, the lane deltas are recovered with `Dag.betweenOps`, `Dag.reconcileMany` checks
-    /// every unordered lane pair, and the composed script is replayed through the domain reducer
-    /// from `state0`.
+    /// actor**, the lane deltas are recovered by `Dag.reconcileMany`'s partition, which checks
+    /// every unordered lane pair and (Phase 300) that every lane applies on its own from `state0`,
+    /// and the composed script is replayed through the domain reducer from `state0`.
     ///
     /// The per-lane actor is load-bearing, not decoration: node ids are content hashes of
     /// (parents, actor, op), so two lanes carrying the SAME op sequence off the same base would
@@ -161,27 +239,8 @@ module FoldConfluence =
         (lanes: 'Op list list)
         : LaneFoldOutcome =
         let baseId, d0 = Dag.append hashFn w (Human "base") baseOp "" Dag.empty
-
-        let heads, dag =
-            lanes
-            |> List.indexed
-            |> List.fold
-                (fun (hs, d) (i, ops) ->
-                    let actor = Human("lane-" + string i)
-
-                    let head, d' =
-                        ops
-                        |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (baseId, d)
-
-                    hs @ [ head ], d')
-                ([], d0)
-
-        match Dag.reconcileMany footprintOf dag baseId heads with
-        | Error cs -> LaneHalted(canonicalConflictReport w.Encode cs)
-        | Ok script ->
-            match script |> List.fold (fun acc op -> acc |> Result.bind (w.Apply op)) (Ok state0) with
-            | Ok st -> LaneFolded(hashState st)
-            | Error rej -> LaneRejected(sprintf "%A" rej)
+        let heads, dag = chainLanes w hashFn (fun _ _ -> baseId) d0 lanes
+        foldHeads w footprintOf hashState state0 dag baseId heads
 
     /// Greedy delta-debugging over a failing lane set: repeatedly take the first single-element
     /// removal — a whole lane, or one op from one lane — that still `diverges`, to a fixpoint or
@@ -300,20 +359,51 @@ module FoldConfluence =
         let mutable folded = 0
         let mutable halted = 0
         let mutable rejected = 0
+        let mutable duplicateHeads = 0
+        let mutable fastForwards = 0
 
-        let outcomesOf (ls: 'Op list list) =
-            arrivalOrders (List.length ls)
-            |> List.map (fun p -> foldOnce w footprintOf hashFn hashState gen.State0 gen.BaseOp (permuteBy p ls))
-            |> List.distinct
+        // Phase 300 — the SHAPES a lane set arrives in. `Disjoint` is the pack's original draw: every
+        // lane chained off the base, the lanes themselves permuted. The two shared-history shapes
+        // are built ONCE and their HEADS permuted, because what arrives in a different order there is
+        // the head list, not the history: `DuplicateHead` names the first lane's head twice, and
+        // `FastForward` chains the second lane onto the first lane's head, so one head descends from
+        // the other. Both used to replay the shared history twice; both must fold, halt or refuse
+        // identically under every order. The criss-cross needs a merge op, which a lane generator does
+        // not supply, so it is drawn by `reconcileLaws`, over the tree algebra's no-op batch.
+        let outcomesOf (shape: int) (ls: 'Op list list) =
+            let baseId, d0 = Dag.append hashFn w (Human "base") gen.BaseOp "" Dag.empty
+
+            let overHeads (heads: string list) (dag: Dag.T<'Op>) =
+                arrivalOrders (List.length heads)
+                |> List.map (fun p -> foldHeads w footprintOf hashState gen.State0 dag baseId (permuteBy p heads))
+                |> List.distinct
+
+            match shape, ls with
+            | 1, _ :: _ ->
+                let heads, dag = chainLanes w hashFn (fun _ _ -> baseId) d0 ls
+                overHeads (heads @ [ List.head heads ]) dag
+            | 2, _ :: _ :: _ ->
+                let parentOf i (hs: string list) = if i = 1 then List.head hs else baseId
+                let heads, dag = chainLanes w hashFn parentOf d0 ls
+                overHeads heads dag
+            | _ ->
+                arrivalOrders (List.length ls)
+                |> List.map (fun p -> foldOnce w footprintOf hashFn hashState gen.State0 gen.BaseOp (permuteBy p ls))
+                |> List.distinct
+
+        let shapeName (shape: int) =
+            match shape with
+            | 1 -> "duplicate-head"
+            | 2 -> "fast-forward"
+            | _ -> "disjoint"
 
         // Every lane set is evidence for the classification law; a folding set for law 1 and a
         // halting set for law 2, which is why those two read through the guard that counts both
         // (Phase 297's covered cells) — a sample that never folds, or never halts, is reported once,
-        // by the guard, with the remedy.
-        LawKit.run iterations seed (fun rng _ at ->
-            let lanes = rng.Draw(gen.Lanes laneCount)
-
-            match outcomesOf lanes with
+        // by the guard, with the remedy. Each drawn lane set is judged in all three shapes (Phase
+        // 300); the draw itself is unchanged.
+        let judge (at: string -> string) (shape: int) (lanes: 'Op list list) =
+            match outcomesOf shape lanes with
             | [ single ] ->
                 classLaw.Saw()
 
@@ -326,17 +416,17 @@ module FoldConfluence =
                     haltLaw.Saw()
                 | LaneRejected _ -> rejected <- rejected + 1
             | _ ->
-                let small = shrinkLanes (fun ls -> List.length (outcomesOf ls) > 1) lanes
-                let smallOutcomes = outcomesOf small
+                let small = shrinkLanes (fun ls -> List.length (outcomesOf shape ls) > 1) lanes
+                let smallOutcomes = outcomesOf shape small
 
                 let msg () =
                     at (
                         string (List.length smallOutcomes)
-                        + " distinct outcomes over "
-                        + string (List.length (arrivalOrders (List.length small)))
-                        + " sampled arrival order(s) of "
+                        + " distinct outcomes over the sampled arrival orders of "
                         + string (List.length small)
-                        + " lane(s); shrunk to
+                        + " lane(s) in the "
+                        + shapeName shape
+                        + " shape; shrunk to
 "
                         + renderLanes w.Encode small
                         + "
@@ -356,7 +446,19 @@ outcomes:
 
                     match List.head smallOutcomes with
                     | LaneHalted _ -> haltLaw.Check(false, msg)
-                    | _ -> foldLaw.Check(false, msg))
+                    | _ -> foldLaw.Check(false, msg)
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let lanes = rng.Draw(gen.Lanes laneCount)
+
+            if not (List.isEmpty lanes) then
+                duplicateHeads <- duplicateHeads + 1
+
+            if List.length lanes >= 2 then
+                fastForwards <- fastForwards + 1
+
+            for shape in [ 0; 1; 2 ] do
+                judge at shape lanes)
 
         LawKit.results [ foldLaw; haltLaw; classLaw ]
         // The two coverage guards this pack shipped by hand in Phase 100 — the ones that caught
@@ -374,7 +476,11 @@ outcomes:
                 "lane-fold outcome"
                 seed
                 [ "folded", folded; "halted", halted ]
-                [ "rejected", rejected ] ]
+                // Phase 300 — the two shared-history shapes are counted beside the outcomes: they are
+                // drawn by construction from every lane set with enough lanes, so reported, not demanded.
+                [ "rejected", rejected
+                  "duplicate-head", duplicateHeads
+                  "fast-forward", fastForwards ] ]
 
     /// The fold-confluence laws (Phase 100) pinned to `OpStream.defaultHash` — the shape a domain
     /// runs. See `laneFoldLawsWith` for the law text, the sampling bound, and the coverage guards.

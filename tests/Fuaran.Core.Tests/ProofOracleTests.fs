@@ -121,6 +121,26 @@ let private productionDag
 
     baseId, heads, dag
 
+/// Production's N-lane partition and interference sweep, with the lanes-apply test (Phase 300)
+/// switched off by a reducer that accepts every op — the merge SCRIPT the differentials here compare,
+/// isolated from what the domain's reducer does with it.
+let private reconcileScript
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (fp: 'Op -> Footprint)
+    (dag: Dag.T<'Op>)
+    (baseId: string)
+    (heads: string list)
+    : Result<'Op list, MergeConflict<'Op> list> =
+    let accepting: StreamWitness<'Op, unit, 'Rej> =
+        { Apply = fun _ () -> Ok()
+          Encode = w.Encode
+          Decode = w.Decode }
+
+    match Dag.reconcileMany accepting fp dag baseId () heads with
+    | Ok script -> Ok script
+    | Error(ReconcileFault.LanesInterfere cs) -> Error cs
+    | Error other -> failwithf "an accepting reducer cannot refuse: %A" other
+
 /// Production's merge SCRIPT (or canonical halt report) through that DAG.
 let private productionScript
     (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -130,7 +150,7 @@ let private productionScript
     : Result<'Op list, string> =
     let baseId, heads, dag = productionDag w baseOp lanes
 
-    match Dag.reconcileMany fp dag baseId heads with
+    match reconcileScript w fp dag baseId heads with
     | Ok script -> Ok script
     | Error cs -> Error(FoldConfluence.canonicalConflictReport w.Encode cs)
 
@@ -9465,7 +9485,7 @@ let proofOracleTests =
                   let model = toModelDag dag
 
                   let production =
-                      match Dag.reconcileMany planFootprint dag merged heads2 with
+                      match reconcileScript planW planFootprint dag merged heads2 with
                       | Ok script -> Ok script
                       | Error cs -> Error(FoldConfluence.canonicalConflictReport planW.Encode cs)
 
@@ -10818,15 +10838,38 @@ let proofOracleTests =
                   for p in n.Parents do
                       Expect.isTrue (List.contains p keys) (sprintf "a stored parent is a key: %s" p)
 
-              // `Dag.append` does NOT validate the parent string it is handed — it takes it and
-              // stores it — so a comma-bearing parent id is constructible. What stops it sitting in
-              // a VERIFIED DAG is the walk's second clause: it names no node. That is the honest
-              // form of "refused or escaped", and it is the reason the model may ask for
-              // comma-freedom of a parent list whose parents are all present.
+              // Since Phase 300 `Dag.append` VALIDATES the parent string it is handed: a comma-bearing
+              // parent id — whose pre-image splices into the merge of the two ids it names — is
+              // refused with a typed fault, so the premise holds of everything production BUILDS.
               let ambiguous = List.head keys + "," + List.item 1 keys
 
-              let _, spoiled =
-                  Dag.append OpStream.defaultHash planW (Human "w") planLaneGen.BaseOp ambiguous dag
+              match Dag.tryAppend OpStream.defaultHash planW (Human "w") planLaneGen.BaseOp ambiguous dag with
+              | Error(DagAppendFault.CommaInParentId p) -> Expect.equal p ambiguous "the refusal names the offending id"
+              | other -> failtestf "a comma-bearing parent id must be refused, got %A" (Result.map fst other)
+
+              // What such an append WOULD have minted is exactly the merge of the two ids — the
+              // splice, measured: a node carrying the merge's content id and the one comma-bearing
+              // parent passes the content check. What stops it sitting in a VERIFIED DAG that was not
+              // built here (a hand-made or loaded one) is the walk's second clause: it names no node.
+              let mergeId, _ =
+                  Dag.merge
+                      OpStream.defaultHash
+                      planW
+                      (Human "w")
+                      planLaneGen.BaseOp
+                      (List.head keys)
+                      (List.item 1 keys)
+                      dag
+
+              let spoiled =
+                  { Dag.Nodes =
+                      dag.Nodes
+                      |> Map.add
+                          mergeId
+                          { Id = mergeId
+                            Parents = [ ambiguous ]
+                            Actor = Human "w"
+                            Op = planLaneGen.BaseOp } }
 
               match Dag.firstBreak OpStream.defaultHash planW spoiled with
               | Some b ->
