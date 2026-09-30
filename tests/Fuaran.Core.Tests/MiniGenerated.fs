@@ -1,5 +1,5 @@
 // AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.
-module Fuaran.Core.Idl.Spike.Generated
+module Fuaran.Core.Tests.MiniGenerated
 #nowarn "44" // this layer implements every declared member, including deprecated ones
 
 open Fuaran.Core

@@ -1,8 +1,14 @@
-namespace Fuaran.Core.Idl
+namespace Fuaran.Core.Idl.Cli
 
 open Fuaran.Core
+open Fuaran.Core.Idl
 
 // ---------------------------------------------------------------------------
+// Phase 230 — this harness used to be compiled into Fuaran.Core.Idl.Codegen and was
+// reached through a flag on the repository's own test runner. It is an operator tool,
+// not a library surface, so it lives with the command that runs it
+// (`fuaran-core-idl spike-proposal`) and is internal to it.
+//
 // The spike: what a proposed vocabulary change costs, measured rather than
 // argued.
 //
@@ -43,7 +49,7 @@ open Fuaran.Core
 /// One generated leg run outside this process — a TypeScript module under a JS
 /// runtime, say. Optional everywhere: the spike degrades to its in-process legs
 /// and SAYS SO, rather than reporting a pass it did not obtain.
-type ExternalLeg =
+type internal ExternalLeg =
     {
         Name: string
         /// `moduleSource` → `vectorsLiteral` → one wire string per vector, in order.
@@ -51,7 +57,7 @@ type ExternalLeg =
     }
 
 /// The verdict of one leg.
-type SpikeLeg =
+type internal SpikeLeg =
     {
         Name: string
         Passed: bool
@@ -61,7 +67,7 @@ type SpikeLeg =
         Detail: string
     }
 
-type SpikeInput =
+type internal SpikeInput =
     {
         /// The vocabulary as it stands.
         Base: Idl
@@ -75,7 +81,7 @@ type SpikeInput =
         External: ExternalLeg list
     }
 
-type SpikeReport =
+type internal SpikeReport =
     {
         ProposalId: string
         /// Document-level defects from `Proposal.validate`. A non-empty list does
@@ -91,7 +97,7 @@ type SpikeReport =
     }
 
 [<RequireQualifiedAccess>]
-module ProposalSpike =
+module internal ProposalSpike =
 
     let private leg name passed detail =
         { Name = name

@@ -554,6 +554,7 @@ let familiesTests =
                                        | Some(JStr "needs-witness-capability") -> Some Families.NeedsWitnessCapability
                                        | Some(JStr "seam-not-every-domain-has") -> Some Families.SeamNotEveryDomainHas
                                        | Some(JStr "stronger-promise") -> Some Families.StrongerPromise
+                                       | Some(JStr "no-witness-to-certify") -> Some Families.NoWitnessToCertify
                                        | other -> failtestf "`reason` is not a known opt-in token: %A" other)
                                       (strList (get "discharges"))
                               | other -> failtestf "a families entry is not an object: %A" other)

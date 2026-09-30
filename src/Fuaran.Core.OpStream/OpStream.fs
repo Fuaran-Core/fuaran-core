@@ -786,9 +786,11 @@ module OpStream =
 
     /// Decode the `actor` field's raw span into a typed `Actor` (Phase 320). The new canonical form
     /// is the object `{"kind":"human"|"agent", ...}` emitted by `Actor.encode`; this re-uses the
-    /// flat-object scanner (`Jsonl.topFields`) over that span. An unrecognised / absent `kind` falls
-    /// back to `Human` over whatever `id` is present, so a hand-edited record degrades rather than
-    /// throwing.
+    /// flat-object scanner (`Jsonl.topFields`) over that span. An unrecognised or absent `kind` is a
+    /// named decode `Error`, never `Human`: a store written by a newer build may carry a kind this
+    /// reader does not know, and reading it as a person would attribute a node to the wrong kind of
+    /// actor — the misattribution the actor field exists to prevent. The refusal surfaces through
+    /// the scanner's `line N: <reason>` channel, so a host reports it as version skew.
     let private actorOfRaw (raw: string) : Actor =
         let fields = Jsonl.topFields raw |> Map.ofList
 
@@ -798,8 +800,10 @@ module OpStream =
             | None -> ""
 
         match get "kind" with
+        | "human" -> Human(get "id")
         | "agent" -> Agent(get "model", get "version", get "id")
-        | _ -> Human(get "id")
+        | "" -> failwith "OpStream.fromJsonl: the actor carries no kind"
+        | kind -> failwith (sprintf "OpStream.fromJsonl: unknown actor kind \"%s\"" kind)
 
     /// The single JSONL scanner, parameterised on how the `actor` raw span decodes to a typed
     /// `Actor` (`actorOfRaw` for the canonical object form; the bare-string lift for the legacy

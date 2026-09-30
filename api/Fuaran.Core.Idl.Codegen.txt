@@ -13,15 +13,11 @@ ctor Fuaran.Core.Idl.Diff+Obligation..ctor(System.String, Fuaran.Core.Idl.Diff+S
 ctor Fuaran.Core.Idl.Diff+Snapshot..ctor(System.Int32, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+UnionSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+EnumSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>, System.String, System.String)
 ctor Fuaran.Core.Idl.Diff+UnionSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+CaseSnap>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Diff+Verdict..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, Fuaran.Core.Versioning+Evolution, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence>, System.String, System.String)
-ctor Fuaran.Core.Idl.ExternalLeg..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String>>>)
 ctor Fuaran.Core.Idl.FStarTarget+Provenance..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Idl.FStarTarget+Verdict..ctor(System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Gen+GenSupport..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Gen+KindProjection>)
 ctor Fuaran.Core.Idl.Gen+KindProjection..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.HostPreludeRef..ctor(System.String, System.String)
-ctor Fuaran.Core.Idl.SpikeInput..ctor(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.Proposal, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, System.Int32, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ExternalLeg>)
-ctor Fuaran.Core.Idl.SpikeLeg..ctor(System.String, System.Boolean, System.String)
-ctor Fuaran.Core.Idl.SpikeReport..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.SpikeLeg>, System.String, System.Boolean)
 ctor Fuaran.Core.Idl.SupportDocument..ctor(Fuaran.Core.Idl.Gen+GenSupport, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostPreludeRef>)
 ctor Fuaran.Core.Idl.Trust+AllowEntry..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Idl.Trust+Policy..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Trust+AllowEntry>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>)
@@ -145,8 +141,6 @@ method Fuaran.Core.Idl.Gen.jsonSchema(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Co
 method Fuaran.Core.Idl.Gen.provenanceHeader(System.String, System.String, System.String) : System.String
 method Fuaran.Core.Idl.Gen.typescriptModule(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.typescriptValue(Fuaran.Core.Idl.IdlValue) : System.String
-method Fuaran.Core.Idl.ProposalSpike.render(Fuaran.Core.Idl.SpikeReport) : System.String
-method Fuaran.Core.Idl.ProposalSpike.run(Fuaran.Core.Idl.SpikeInput) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SpikeReport, System.String>
 method Fuaran.Core.Idl.SupportArtifact.json(Fuaran.Core.Idl.SupportDocument) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.SupportArtifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
 method Fuaran.Core.Idl.SupportArtifact.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
@@ -212,8 +206,6 @@ record-field Fuaran.Core.Idl.Diff+Verdict.FSharpConsequences #4 : Microsoft.FSha
 record-field Fuaran.Core.Idl.Diff+Verdict.ProfileAdvice #6 : System.String
 record-field Fuaran.Core.Idl.Diff+Verdict.StabilityImpact #5 : System.String
 record-field Fuaran.Core.Idl.Diff+Verdict.Undecided #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>
-record-field Fuaran.Core.Idl.ExternalLeg.Name #0 : System.String
-record-field Fuaran.Core.Idl.ExternalLeg.Run #1 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String>>>
 record-field Fuaran.Core.Idl.FStarTarget+Provenance.Origin #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.FStarTarget+Provenance.Proves #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.FStarTarget+Verdict.Refusal #1 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
@@ -231,20 +223,6 @@ record-field Fuaran.Core.Idl.Gen+KindProjection.Mk #3 : Microsoft.FSharp.Core.FS
 record-field Fuaran.Core.Idl.Gen+KindProjection.SpecDecl #0 : System.String
 record-field Fuaran.Core.Idl.HostPreludeRef.Module #0 : System.String
 record-field Fuaran.Core.Idl.HostPreludeRef.Path #1 : System.String
-record-field Fuaran.Core.Idl.SpikeInput.Base #0 : Fuaran.Core.Idl.Idl
-record-field Fuaran.Core.Idl.SpikeInput.Corpus #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>
-record-field Fuaran.Core.Idl.SpikeInput.External #5 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ExternalLeg>
-record-field Fuaran.Core.Idl.SpikeInput.FuzzSeed #3 : System.Int32
-record-field Fuaran.Core.Idl.SpikeInput.FuzzVectors #4 : System.Int32
-record-field Fuaran.Core.Idl.SpikeInput.Proposal #1 : Fuaran.Core.Idl.Proposal
-record-field Fuaran.Core.Idl.SpikeLeg.Detail #2 : System.String
-record-field Fuaran.Core.Idl.SpikeLeg.Name #0 : System.String
-record-field Fuaran.Core.Idl.SpikeLeg.Passed #1 : System.Boolean
-record-field Fuaran.Core.Idl.SpikeReport.CostReport #3 : System.String
-record-field Fuaran.Core.Idl.SpikeReport.Defects #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
-record-field Fuaran.Core.Idl.SpikeReport.Green #4 : System.Boolean
-record-field Fuaran.Core.Idl.SpikeReport.Legs #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.SpikeLeg>
-record-field Fuaran.Core.Idl.SpikeReport.ProposalId #0 : System.String
 record-field Fuaran.Core.Idl.SupportDocument.HostPrelude #1 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostPreludeRef>
 record-field Fuaran.Core.Idl.SupportDocument.Support #0 : Fuaran.Core.Idl.Gen+GenSupport
 record-field Fuaran.Core.Idl.Trust+AllowEntry.ComponentId #1 : System.String
@@ -328,7 +306,6 @@ type Fuaran.Core.Idl.Diff+UnionSnap (record)
 type Fuaran.Core.Idl.Diff+Verdict (record)
 type Fuaran.Core.Idl.Diff+VerdictClass (union)
 type Fuaran.Core.Idl.Diff+VerdictClass+Tags (type)
-type Fuaran.Core.Idl.ExternalLeg (record)
 type Fuaran.Core.Idl.FStarTarget (module)
 type Fuaran.Core.Idl.FStarTarget+Provenance (record)
 type Fuaran.Core.Idl.FStarTarget+ProvenanceModule (module)
@@ -345,10 +322,6 @@ type Fuaran.Core.Idl.Gen (module)
 type Fuaran.Core.Idl.Gen+GenSupport (record)
 type Fuaran.Core.Idl.Gen+KindProjection (record)
 type Fuaran.Core.Idl.HostPreludeRef (record)
-type Fuaran.Core.Idl.ProposalSpike (module)
-type Fuaran.Core.Idl.SpikeInput (record)
-type Fuaran.Core.Idl.SpikeLeg (record)
-type Fuaran.Core.Idl.SpikeReport (record)
 type Fuaran.Core.Idl.SupportArtifact (module)
 type Fuaran.Core.Idl.SupportDocument (record)
 type Fuaran.Core.Idl.Trust (module)

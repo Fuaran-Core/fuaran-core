@@ -44,7 +44,7 @@ let private crProbe = "phase-129 probe line one\r\nphase-129 probe line two"
 /// The same prose as it must appear in the emitted artefact.
 let private lfProbe = "phase-129 probe line one\nphase-129 probe line two"
 
-let private miniIdl = Fuaran.Core.Idl.Spike.Fixtures.miniIdl
+let private miniIdl = Fuaran.Core.Tests.MiniIdl.miniIdl
 
 /// The slice the spike's generated modules cover — the same list `IdlSpikeTests`
 /// and the regeneration entry point use.

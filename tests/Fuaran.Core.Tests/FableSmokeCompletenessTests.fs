@@ -89,18 +89,17 @@ let private declaredIsPackable (xml: string) : bool option =
 let private removesFableSources (xml: string) : bool =
     Regex.IsMatch(xml, @"<Content\s+Remove=""\*\.fs""\s*/>")
 
-/// THE DERIVATION, in one place: every project directly under `src/`, with whether it is packable
-/// and whether it ships the `fable/` sources. A project's own `.?sproj` declaration wins; absent,
-/// the repository default from `Directory.Build.props` applies; absent there too, the SDK's own
-/// default, which is `true`. Deliberately NOT filtered by project type — see the header.
-let private packableProjects () : SrcProject list =
-    let repoDefault =
-        declaredIsPackable (File.ReadAllText buildPropsFile) |> Option.defaultValue true
-
-    Directory.GetDirectories srcDir
+/// THE DERIVATION, in one place, over any directory laid out like `src/`: every project directly
+/// under it, with whether it is packable and whether it ships the `fable/` sources. A project's
+/// own `.?sproj` declaration wins; absent, `repoDefault` applies (the repository default from
+/// `Directory.Build.props`); absent there too, the SDK's own default, which is `true`. Deliberately
+/// NOT filtered by project type — see the header. Taking the directory is what lets the guard
+/// below be proved on a fixture (Phase 230) instead of resting on whatever `src/` happens to hold.
+let private packableProjectsIn (repoDefault: bool) (dir: string) : SrcProject list =
+    Directory.GetDirectories dir
     |> Array.toList
-    |> List.collect (fun dir ->
-        Directory.GetFiles(dir, "*sproj")
+    |> List.collect (fun projectDir ->
+        Directory.GetFiles(projectDir, "*sproj")
         |> Array.toList
         |> List.map (fun file ->
             let xml = File.ReadAllText file
@@ -112,6 +111,62 @@ let private packableProjects () : SrcProject list =
               ShipsFableSources = packable && file.EndsWith ".fsproj" && not (removesFableSources xml) }))
     |> List.filter _.Packable
     |> List.sortBy _.Name
+
+/// The repository default, read once from `Directory.Build.props`.
+let private repoDefaultPackable () : bool =
+    declaredIsPackable (File.ReadAllText buildPropsFile) |> Option.defaultValue true
+
+/// Every packable project under this repository's `src/`.
+let private packableProjects () : SrcProject list =
+    packableProjectsIn (repoDefaultPackable ()) srcDir
+
+/// How many project directories sit directly under `dir`, packable or not.
+let private projectDirectoryCount (dir: string) : int =
+    Directory.GetDirectories dir |> Array.length
+
+/// The vacuity guard, as a function: does the derivation FILTER over this directory — are there
+/// fewer packable projects than project directories? A derivation that excluded nothing has never
+/// been shown to work, and over a tree with no unpackable project this reads `false`: the guard
+/// cannot fail there, which is why it is proved on a fixture that has one rather than on `src/`.
+let private derivationFilters (repoDefault: bool) (dir: string) : bool =
+    (packableProjectsIn repoDefault dir).Length < projectDirectoryCount dir
+
+/// Write one project file under `<root>/<name>/<name>.fsproj`.
+let private writeProject (root: string) (name: string) (body: string) : unit =
+    let dir = Path.Combine(root, name)
+    Directory.CreateDirectory dir |> ignore
+
+    File.WriteAllText(
+        Path.Combine(dir, name + ".fsproj"),
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n"
+        + body
+        + "  </PropertyGroup>\n</Project>\n"
+    )
+
+/// A src-shaped tree built for one test, in its own directory under the test's output and removed
+/// afterwards. Built rather than committed so no `.fsproj` stands anywhere a repository-wide reading
+/// of project files (this suite has several) could mistake it for a real project.
+///   * `Shipped`     — declares nothing, so it takes the repository default and ships `fable/`.
+///   * `OptedOut`    — packable, and removes the `.fs` content: the two IDL generation projects' shape.
+///   * `Unpublished` — `<IsPackable>false</IsPackable>`: the project the guard needs to see filtered.
+let private withFixtureTree (includeUnpackable: bool) (check: string -> unit) : unit =
+    let root =
+        Path.Combine(System.AppContext.BaseDirectory, "fable-smoke-fixture-" + System.Guid.NewGuid().ToString("N"))
+
+    try
+        writeProject root "Shipped" "    <TargetFramework>net10.0</TargetFramework>\n"
+        writeProject root "OptedOut" "    <TargetFramework>net10.0</TargetFramework>\n    <Content Remove=\"*.fs\" />\n"
+
+        if includeUnpackable then
+            writeProject
+                root
+                "Unpublished"
+                "    <TargetFramework>net10.0</TargetFramework>\n    <IsPackable>false</IsPackable>\n"
+
+        check root
+    finally
+        if Directory.Exists root then
+            Directory.Delete(root, true)
 
 let private exclusions () : Exclusion list =
     use doc = JsonDocument.Parse(File.ReadAllText exclusionsFile)
@@ -184,17 +239,20 @@ let tests =
                    + "or add an exclusions entry saying why not.")
           }
 
-          test "the derivation is not vacuous — it sees projects, it filters, and it tells the two kinds apart" {
-              // Each half matters. An empty packable set would make the check above pass over nothing
-              // (a wrong `src` path reads exactly like a clean repository); a filter that excludes
-              // nothing has never been shown to work; and a source-distribution reading that said
-              // "ships" of everything would make every exclusion look stale, or of nothing, every
-              // package look excluded.
-              let all = Directory.GetDirectories srcDir |> Array.length
+          test "the derivation sees this repository's projects and tells the two kinds of package apart" {
+              // Two halves matter here. An empty packable set would make the check above pass over
+              // nothing (a wrong `src` path reads exactly like a clean repository); and a
+              // source-distribution reading that said "ships" of everything would make every exclusion
+              // look stale, or of nothing, every package look excluded.
+              //
+              // What is NOT asserted of `src/` any more is that some project declares
+              // `IsPackable=false`. Until Phase 230 that held only because one unpackable project sat
+              // there, which made the filter's proof depend on that project staying unpackable and
+              // staying; every project under `src/` is packable now, and the filter is proved on a
+              // fixture in the two tests below.
               let packable = packableProjects ()
 
               Expect.isGreaterThan packable.Length 10 "the packable set should hold most of src/"
-              Expect.isLessThan packable.Length all "at least one project under src/ declares IsPackable=false"
 
               Expect.isTrue (packable |> List.exists _.ShipsFableSources) "most packages ship the fable/ sources"
 
@@ -202,6 +260,44 @@ let tests =
                   (packable
                    |> List.exists (fun p -> p.File.EndsWith ".fsproj" && not p.ShipsFableSources))
                   "the two IDL generation projects opt out of the source distribution, and the reading sees it"
+          }
+
+          test "the derivation filters — over a fixture tree holding one unpackable project" {
+              // The fixture stands in for the project this guard used to lean on. The derivation must
+              // drop `Unpublished`, keep the other two, and read the source distribution of each one
+              // correctly: `Shipped` ships `fable/`, `OptedOut` removes it.
+              withFixtureTree true (fun root ->
+                  let derived = packableProjectsIn true root
+
+                  Expect.equal
+                      (derived |> List.map _.Name)
+                      [ "OptedOut"; "Shipped" ]
+                      "the unpackable project is filtered out and the rest are kept, sorted"
+
+                  Expect.equal
+                      (derived |> List.map (fun p -> p.Name, p.ShipsFableSources))
+                      [ "OptedOut", false; "Shipped", true ]
+                      "the source-distribution reading tells an opted-out project from a shipping one"
+
+                  Expect.isTrue
+                      (derivationFilters true root)
+                      "fewer packable projects than project directories: the filter is seen working")
+          }
+
+          test "the vacuity guard can FAIL — over a tree with no unpackable project it reads false" {
+              // The go-red. `derivationFilters` is the comparison the guard makes; if it could only
+              // ever answer `true` the guard would be decoration. Over a tree where every project is
+              // packable — which is what `src/` is now — it answers `false`, which is the signal the
+              // guard exists to raise. That is why the real tree is not asked the question.
+              withFixtureTree false (fun root ->
+                  Expect.equal
+                      (packableProjectsIn true root |> List.map _.Name)
+                      [ "OptedOut"; "Shipped" ]
+                      "with no unpackable project, every project is kept"
+
+                  Expect.isFalse
+                      (derivationFilters true root)
+                      "no project is filtered, so the guard reads false — it is able to fail")
           }
 
           test "every exclusion is well formed" {

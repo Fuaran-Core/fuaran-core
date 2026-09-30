@@ -35,6 +35,7 @@ field Fuaran.Core.Conformance+VerifyDefect`1+Tags.DidNotApply : System.Int32 (li
 field Fuaran.Core.Conformance+VerifyDefect`1+Tags.EffectObserved : System.Int32 (literal)
 field Fuaran.Core.Conformance+VerifyDefect`1+Tags.ValidatorRejected : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.NeedsWitnessCapability : System.Int32 (literal)
+field Fuaran.Core.Families+OptInReason+Tags.NoWitnessToCertify : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.SeamNotEveryDomainHas : System.Int32 (literal)
 field Fuaran.Core.Families+OptInReason+Tags.StrongerPromise : System.Int32 (literal)
 field Fuaran.Core.Families+RefusalPopulation+Tags.Built : System.Int32 (literal)
@@ -119,7 +120,10 @@ method Fuaran.Core.Conformance.streamLaws`3(Fuaran.Core.StreamWitness`3<!!0, !!1
 method Fuaran.Core.Conformance.verifyFunctionSymbolic`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, !!0, Fuaran.Core.Validator+Registry`2<!!0, !!1>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, System.Int32, System.Int32) : Fuaran.Core.Conformance+FunctionVerifyReport`2<!!0, !!1>
 method Fuaran.Core.Conformance.verifyFunction`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, !!0, Fuaran.Core.Validator+Registry`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, Fuaran.Core.ConfRng+T>>>, System.Int32, System.Int32) : Fuaran.Core.Conformance+FunctionVerifyReport`2<!!0, !!1>
 method Fuaran.Core.Conformance.verifyHonestyLaws`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.DeterminismSource, !!0>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.DeterminismSource, !!0>, Fuaran.Core.Validator+Registry`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, Fuaran.Core.ConfRng+T>>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
+method Fuaran.Core.Conformance.witnessCoverageLaw(Microsoft.FSharp.Collections.FSharpList`1<System.Type>) : Fuaran.Core.LawResult
+method Fuaran.Core.Conformance.witnessFieldsLaw(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Type) : Fuaran.Core.LawResult
 method Fuaran.Core.Conformance.witnessLaws`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
+method Fuaran.Core.Conformance.witnessSurfaceLaws() : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Families.adequacyToken(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>, System.String) : System.String
 method Fuaran.Core.Families.adequacyTokenOf(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+Roster>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>, System.String) : System.String
 method Fuaran.Core.Families.reasonToken(Fuaran.Core.Families+OptInReason) : System.String
@@ -151,6 +155,8 @@ method Fuaran.Core.SampleAdequacy.spanned(System.String, System.String, System.I
 method Fuaran.Core.WireNullTolerance.check() : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.WireNullTolerance.run(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.WireNullTolerance+Vector>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
 method Fuaran.Core.WireNullTolerance.runVector(Fuaran.Core.WireNullTolerance+Vector) : Fuaran.Core.Corpus+Outcome
+property Fuaran.Core.Conformance.frozenWitnessFields : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>> { get }
+property Fuaran.Core.Conformance.unfrozenWitnesses : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>> { get }
 property Fuaran.Core.Families.families : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily> { get }
 property Fuaran.Core.Families.ids : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Families.modules : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
@@ -306,6 +312,7 @@ union-case Fuaran.Core.Conformance+VerifyDefect`1.NewDidNotApply #0(Item: Fuaran
 union-case Fuaran.Core.Conformance+VerifyDefect`1.NewEffectObserved #2(declared: Fuaran.Core.EffectClass, observed: Fuaran.Core.EffectClass)
 union-case Fuaran.Core.Conformance+VerifyDefect`1.NewValidatorRejected #1(Item: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!0>>)
 union-case Fuaran.Core.Families+OptInReason.NeedsWitnessCapability #0()
+union-case Fuaran.Core.Families+OptInReason.NoWitnessToCertify #3()
 union-case Fuaran.Core.Families+OptInReason.SeamNotEveryDomainHas #1()
 union-case Fuaran.Core.Families+OptInReason.StrongerPromise #2()
 union-case Fuaran.Core.Families+RefusalPopulation.Built #1()

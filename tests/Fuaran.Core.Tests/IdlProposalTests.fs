@@ -3,6 +3,7 @@ module Fuaran.Core.Tests.IdlProposalTests
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Cli
 
 // ---------------------------------------------------------------------------
 // The proposal document and the branchless spike.
@@ -18,7 +19,7 @@ open Fuaran.Core.Idl
 // hand, which is a second implementation of the encoder hiding inside a test.
 // ---------------------------------------------------------------------------
 
-module Mini = Fuaran.Core.Idl.Spike.Fixtures
+module Mini = Fuaran.Core.Tests.MiniIdl
 
 /// A complete, admissible proposal document with one field addition. Every test
 /// that wants a DEFECT starts from this and removes exactly one thing, so the
@@ -114,6 +115,43 @@ let private legOf (r: SpikeReport) (name: string) =
     match r.Legs |> List.tryFind (fun l -> l.Name = name) with
     | Some l -> l
     | None -> failtestf "no '%s' leg in the report (legs: %A)" name (r.Legs |> List.map (fun l -> l.Name))
+
+/// Phase 230 — the operator command the harness now lives behind. The CLI assembly is the one this
+/// suite compiled against, so its own copy in the test output is the one run; it is shelled rather
+/// than called, because an exit code returned by a function is not evidence about a process.
+let private cliDll = typeof<SpikeInput>.Assembly.Location
+
+/// Run `fuaran-core-idl <args>`: exit code, stdout, stderr. Both pipes are drained, stderr on a
+/// task, so a chatty child cannot fill one while the other is being read.
+let private runCli (args: string) : int * string * string =
+    let psi = ChildProcess.redirected "dotnet" ("\"" + cliDll + "\" " + args)
+    use p = System.Diagnostics.Process.Start psi
+    let err = p.StandardError.ReadToEndAsync()
+    let out = p.StandardOutput.ReadToEnd()
+    p.WaitForExit()
+    p.ExitCode, out, err.Result
+
+/// A scratch directory holding the three inputs the command reads: the vocabulary artifact, the
+/// proposal, and a corpus directory with one `nodes/` document.
+let private withCommandInputs (proposalJson: string) (check: (string -> string) -> unit) : unit =
+    let root =
+        System.IO.Path.Combine(System.AppContext.BaseDirectory, "spike-proposal-" + System.Guid.NewGuid().ToString("N"))
+
+    try
+        let nodes = System.IO.Path.Combine(root, "corpus", "nodes")
+        System.IO.Directory.CreateDirectory nodes |> ignore
+        System.IO.File.WriteAllText(System.IO.Path.Combine(nodes, "plain-badge.json"), plainBadgeWire)
+        System.IO.File.WriteAllText(System.IO.Path.Combine(root, "idl.json"), Artifact.render Mini.miniIdl)
+        System.IO.File.WriteAllText(System.IO.Path.Combine(root, "proposal.json"), proposalJson)
+        check (fun name -> System.IO.Path.Combine(root, name))
+    finally
+        if System.IO.Directory.Exists root then
+            System.IO.Directory.Delete(root, true)
+
+/// The command's own defaults for the two generative flags, so the in-process run below is the
+/// run the command makes when neither is passed.
+let private commandSeed = 20260826
+let private commandVectors = 200
 
 [<Tests>]
 let tests =
@@ -344,4 +382,72 @@ let tests =
                     Expect.isLessThan
                         (rendered.IndexOf "Document defects")
                         (rendered.IndexOf "## Legs")
-                        "an incomplete argument is stated before the legs that cannot redeem it") ] ]
+                        "an incomplete argument is stated before the legs that cannot redeem it") ]
+
+          testList
+              "the spike-proposal command (Phase 230: the harness moved to the CLI, output unchanged)"
+              [ testCase "it prints exactly the report the harness renders, and exits 0 on a green run" (fun _ ->
+                    withCommandInputs (completeJson tooltipDelta candidateWire) (fun path ->
+                        let expected =
+                            match
+                                ProposalSpike.run
+                                    { Base = Mini.miniIdl
+                                      Proposal = parseOrFail (completeJson tooltipDelta candidateWire)
+                                      Corpus = [ "plain-badge.json", plainBadgeWire ]
+                                      FuzzSeed = commandSeed
+                                      FuzzVectors = commandVectors
+                                      External = [] }
+                            with
+                            | Ok r -> r
+                            | Error e -> failtestf "spike did not run: %s" e
+
+                        Expect.isTrue
+                            expected.Green
+                            "the fixture proposal is a clean one, so the exit below means something"
+
+                        let code, out, _ =
+                            runCli (
+                                sprintf
+                                    "spike-proposal \"%s\" --idl \"%s\" --corpus \"%s\""
+                                    (path "proposal.json")
+                                    (path "idl.json")
+                                    (path "corpus")
+                            )
+
+                        Expect.equal code 0 "every leg passed, so exit 0"
+
+                        Expect.equal
+                            out
+                            (ProposalSpike.render expected)
+                            "the command prints the harness report, byte for byte"))
+
+                testCase "a failing leg exits 1" (fun _ ->
+                    // The candidate is already expressible before the delta, so the candidates leg fails.
+                    withCommandInputs (completeJson tooltipDelta plainBadgeWire) (fun path ->
+                        let code, out, _ =
+                            runCli (
+                                sprintf
+                                    "spike-proposal \"%s\" --idl \"%s\" --corpus \"%s\""
+                                    (path "proposal.json")
+                                    (path "idl.json")
+                                    (path "corpus")
+                            )
+
+                        Expect.equal code 1 "a failed leg is exit 1"
+                        Expect.stringContains out "already expressible" "and the report says which leg and why"))
+
+                testCase "no --idl is a refusal: exit 2, said on stderr" (fun _ ->
+                    withCommandInputs (completeJson tooltipDelta candidateWire) (fun path ->
+                        let code, out, err = runCli (sprintf "spike-proposal \"%s\"" (path "proposal.json"))
+
+                        Expect.equal code 2 "the document did not read is exit 2"
+                        Expect.stringContains err "no --idl" "the refusal names the missing argument"
+                        Expect.equal out "" "and nothing is printed to stdout"))
+
+                testCase "the verb is in the help text, and a bare verb is refused" (fun _ ->
+                    let helpCode, helpOut, _ = runCli "--help"
+                    Expect.equal helpCode 0 "help exits 0"
+                    Expect.stringContains helpOut "spike-proposal" "the command lists the verb"
+
+                    let bareCode, _, _ = runCli "spike-proposal"
+                    Expect.equal bareCode 2 "a verb with no document is refused") ] ]
