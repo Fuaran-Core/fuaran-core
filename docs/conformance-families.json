@@ -740,6 +740,19 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.witnessSurfaceLaws",
+      "module": "Conformance",
+      "entry": "witnessSurfaceLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "no-witness-to-certify",
+      "discharges": [],
+      "cases": "7",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
       "id": "FoldConfluence.laneFoldLaws",
       "module": "FoldConfluence",
       "entry": "laneFoldLaws",

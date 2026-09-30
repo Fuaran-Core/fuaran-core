@@ -393,8 +393,29 @@ justified against why composition could not express it.
 
 **Enforcement.** New `Fuaran.Core.*` code that adds a field to any of the six frozen records is a
 review-blocking regression (the same class as introducing a concrete node type, per *The load-bearing
-invariant* above). A conformance/API-surface test that pins each witness's field set is the mechanical
-backstop (`Conformance.witnessSurfaceLaws` — to be added alongside the first `1.0` release-candidate).
+invariant* above). The mechanical backstop is the law family **`Conformance.witnessSurfaceLaws`**
+(Phase 232), which this repository's suite runs on every gate: one law per frozen record, holding
+its field set — read by reflection from the compiled record — equal to the pinned list in
+`Conformance.frozenWitnessFields` **by name and in declaration order**, and a seventh law holding
+that every public record named `…Witness` in the Fuaran.Core assemblies the kit references is
+either frozen there or declared outside the freeze, with its reason, in
+`Conformance.unfrozenWitnesses` (today the six conformance-kit inputs — `CapabilitySeamWitness`,
+`QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`, `KeyedWitness`,
+`EvaluatorWitness` — each constructed only to run the opt-in family that takes it). A field added,
+removed, renamed or reordered on a frozen record turns the gate red **by the record's name**, and
+regenerating the `api/` baseline does not turn it green. A domain can run the same family at its
+own pin bump to certify that the Core it compiled against carries the frozen shape.
+
+**The opt-out for a deliberate widening before `1.0`.** Until the `1.0` cut, a frozen record may
+grow only as a deliberate, named act, never as a regenerated baseline: (1) edit the record's entry
+in `Conformance.frozenWitnessFields` to the new field list — the law stays red until you do, and
+that edit is the act a reviewer sees in the diff; (2) in the SAME commit, add an entry under the
+open draft heading of this file naming the record, the field, the class the surface gate reports
+(`record-widening`), and why composition — a new witness record that EMBEDS the frozen one — could
+not express it; (3) regenerate the `api/` baselines. Extending the freeze to a record now declared
+outside it is the same act in reverse: move it from `unfrozenWitnesses` to `frozenWitnessFields`
+with an entry here. From `1.0` there is no widening route: a frozen witness does not grow, and the
+`WitnessV2` path above is the only one.
 
 ## Digest changes
 
@@ -2510,6 +2531,60 @@ value and writes the report to standard output. The in-process `ExternalLeg` hoo
 TypeScript module run under a JavaScript runtime) was never reachable from the command and is not
 reachable now; a consumer that used it has the harness source in this repository's history. A
 consumer that never referenced those names changes nothing.
+
+### The witness-record field freeze is held by a law family now, not at the `1.0` release candidate (Phase 232) — BREAKING, `union-widening`
+
+**What changed.** The freeze section above promised its mechanical backstop "alongside the first `1.0`
+release-candidate", and until now nothing mechanical held the six frozen records: the surface gate
+classes a field add as `record-widening` and refuses only an UNCLASSIFIED move, so a field add that
+landed with its baseline regenerated passed. `Conformance.witnessSurfaceLaws ()` is that backstop,
+and this repository's suite runs it on every gate. It takes no witness and no seed. On .NET it
+answers seven laws: one per frozen record, holding the record's field set — read by reflection from
+the compiled record — equal to its pin in `Conformance.frozenWitnessFields` by name and in declaration
+order; and a coverage law holding that every public record named `…Witness` in the Fuaran.Core
+assemblies the kit references is frozen there or declared outside the freeze, with why, in
+`Conformance.unfrozenWitnesses`. Under Fable the coverage law is absent rather than reported green —
+a transpiled program has no assembly to enumerate — and the six field laws run as on .NET. The freeze
+section now names the family and states the opt-out for a deliberate widening before `1.0`.
+
+**The coverage law's classification is a finding, not a restatement.** Twelve public records end in
+`Witness`, not six: the conformance kit's own inputs (`CapabilitySeamWitness`, `QuerySeamWitness`,
+`CapabilityPipelineWitness`, `ConstructWitness`, `KeyedWitness`, `EvaluatorWitness`) were never named
+by the freeze. They are declared OUTSIDE it, each with its reason, rather than silently frozen:
+extending a `1.0` promise to six more records is a decision this entry does not take by default, and
+declaring them is what lets the law refuse a thirteenth witness that nobody classified. Moving one
+into the freeze is a move from `unfrozenWitnesses` to `frozenWitnessFields` with an entry here.
+
+**The roster gains the family and a reason for it.** `Families.OptInReason` gains
+`NoWitnessToCertify` (wire token `no-witness-to-certify`): the family certifies the Core a domain
+compiled against rather than the domain, so no aggregate runs it, and the three existing reasons all
+describe a family relevant to only some domains, which this one is not. The census class is
+`Unconditional` — nothing is drawn; the one run is the whole sample — and the refusal audit reads
+`none`. `docs/conformance-families.{md,json}` are regenerated (60 families).
+
+**Class: `union-widening`**, printed by the surface gate as
+`Fuaran.Core.Conformance — union-widening (7 move(s))`: one union case, three module functions
+(`witnessSurfaceLaws`, `witnessFieldsLaw`, `witnessCoverageLaw`) and two values
+(`frozenWitnessFields`, `unfrozenWitnesses`). The shard called the change additive; the new
+`OptInReason` case is what makes it breaking-source — an exhaustive `match` over the union stops
+compiling — and the gate decides (D45). This slot is untagged and already breaking, so the move rides
+it and advances nothing. One baseline moved: `api/Fuaran.Core.Conformance.txt`. No wire surface moved.
+
+**What adopting it costs.** A consumer that matches exhaustively on `Families.OptInReason` adds the
+`NoWitnessToCertify` arm. A consumer that reads the roster export and dispatches on the `reason`
+token meets one new token. Nothing else: no witness record moved, and a domain that never calls the
+new family is unaffected. A domain that wants the pin-bump check calls
+`Conformance.witnessSurfaceLaws ()` and reads the seven results.
+
+**Shown failing first.** With `IdWitness`'s first two fields swapped in the tree (a move that compiles
+at every recompiled construction site, since records are built by name), the suite failed
+`witness surface (IdWitness)` naming the reorder — and it still failed after the `api/` baselines were
+regenerated over the perturbed tree, which turned the surface gate green. The suite also carries decoy
+go-reds: a record with one extra field fails naming the record and the field, a reordered one and a
+non-record fail, and the coverage law refuses an unclassified `…Witness` record and a pin with no
+record behind it. **The Fable gate has not been run over this change**; the field laws use only
+`FSharpType.IsRecord` / `GetRecordFields` and the assembly walk sits behind `#if !FABLE_COMPILER`,
+which is a claim until that gate says so.
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 

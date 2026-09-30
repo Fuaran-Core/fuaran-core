@@ -58,6 +58,12 @@ module Families =
         /// contract promises — footprint independence, concurrent apply, arbitration. A domain
         /// elects it; the base contract does not imply it.
         | StrongerPromise
+        /// The family certifies no witness at all (Phase 232): it reads the kit's own knowledge of
+        /// the Core it was compiled against — `witnessSurfaceLaws` holds the frozen witness records'
+        /// field sets — so an aggregate that certifies a DOMAIN'S witness has nothing to hand it. It
+        /// is relevant to every domain, which is what separates it from `SeamNotEveryDomainHas`; a
+        /// domain runs it deliberately, typically at a pin bump.
+        | NoWitnessToCertify
 
     /// One law family: a public entry point of the kit that answers with `LawResult list`.
     type LawFamily =
@@ -228,6 +234,10 @@ module Families =
           c "canonicalFloatLaws" none (Some SeamNotEveryDomainHas) []
           c "chainBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
           c "dagBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
+
+          // Phase 232 — the witness-record field freeze. It takes no witness because it certifies
+          // the Core a domain compiled against rather than the domain, so no aggregate runs it.
+          c "witnessSurfaceLaws" none (Some NoWitnessToCertify) []
 
           f "FoldConfluence" "laneFoldLaws" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) []
           f "FoldConfluence" "laneFoldLawsWith" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) [] ]
@@ -414,6 +424,10 @@ module Families =
           r "Conformance.canonicalFloatLaws" NoRefusal "no refused outcome is read"
           r "Conformance.chainBreakReasonLaws" Built "all three break kinds are built each iteration"
           r "Conformance.dagBreakReasonLaws" Built "both break kinds are built each iteration"
+          r
+              "Conformance.witnessSurfaceLaws"
+              NoRefusal
+              "reads record field sets by reflection; no op is applied and no refused outcome exists"
 
           // ---- outside `Conformance` ----
           r "FoldConfluence.laneFoldLaws" Drawn "delegates to laneFoldLawsWith"
@@ -496,6 +510,7 @@ module Families =
         | NeedsWitnessCapability -> "needs-witness-capability"
         | SeamNotEveryDomainHas -> "seam-not-every-domain-has"
         | StrongerPromise -> "stronger-promise"
+        | NoWitnessToCertify -> "no-witness-to-certify"
 
     /// The wire spelling of a refusal-audit verdict over a composed roster — the audit row is read
     /// from whichever package's share carries the family (Phase 257).
@@ -668,13 +683,14 @@ module Families =
           ""
           "**Base run / opt-in.** The five `base run` families are the ones `Conformance.certify` and"
           "`Conformance.certifyStream` are built from — a domain gets them by calling an aggregate."
-          "Every other family certifies a seam not every domain has, so a domain calls it"
-          "deliberately, alongside its base run. Neither is a statement about importance: `reducer`"
+          "Every other family is opt-in — its `Why opt-in` cell says which reason — so a domain calls"
+          "it deliberately, alongside its base run. Neither is a statement about importance: `reducer`"
           "is a base-run family only for stream-shaped domains, and `footprintLaws` is opt-in while"
           "discharging a ladder obligation."
           ""
           "**Witness.** The witness and generator types the entry point takes, in parameter order. A"
-          "family with none runs against the kit's own fixtures and needs nothing but a seed."
+          "family with none runs against the kit's own fixtures and needs nothing but a seed — or,"
+          "for `no-witness-to-certify`, against the Core it was compiled against, and needs nothing."
           ""
           "**Discharges.** The claims-ladder obligations (`proofs.json` row ids) a green run of the"
           "family at your own witness discharges. Most families discharge none — they certify, they"
