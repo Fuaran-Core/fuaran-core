@@ -1,5 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D79: the reconcile partitions the region above its base, a rejecting lane set is refused as a set, and the "replays to the merge" premise is refuted rather than proved
+
+**Recorded by Phase 300. `Fuaran.Core.OpStream.Dag`, `Fuaran.Core.Conformance`; rides the `0.33.0`
+draft (STABILITY.md, "The lane DAG's reconcile applies shared history once…").**
+
+*The subtraction rule.* A lane's delta is no longer `between base head`. The region above the base
+is partitioned by node id: nodes held by two or more heads' closures are the SHARED region, applied
+once and first, in the drain order of the union of the closures; each head's EXCLUSIVE delta is its
+closure minus the base's minus every other head's, in the same drain order. Conflicts are checked
+between exclusive deltas only, because shared history is not a concurrent edit — and two exclusive
+deltas are incomparable node for node (an ancestor of a node in one head's delta is in that head's
+closure, so it cannot be exclusive to another). The rule is what a downstream consumer had been doing
+by hand at its own call site; it belongs in the primitive, so every consumer inherits the fix rather
+than each re-deriving it. Consequences, each chosen: a head that is an ancestor of another
+contributes nothing; a head named twice is DEDUPLICATED rather than refused (a duplicate head is a
+harmless restatement, and refusing it would make an idempotent re-delivery an error); and `mergeBase`
+stays a policy — "a maximal common ancestor", never "the right one" — because the partition no longer
+depends on which maximal common ancestor the tie-break returned.
+
+*The order-free rejection.* `reconcileMany` checks, in this order: interference between exclusive
+deltas; the shared region replaying from the base state; every exclusive delta replaying ON ITS OWN
+from the state the shared region reached. The third is the test the fold theorem used to assume
+(`lanes_apply`). Each check reads a property of the lane SET — the pairwise report is symmetric up
+to a swap, the shared region is a function of the set, and a lane replayed alone is a property of
+the lane — so the refusal is the same under every arrival order, and the rejecting lanes are
+reported sorted by head id. Interference is checked first so that every lane set that halted before
+still halts with the same report; the halt half of the theorem is untouched. `reconcileMany` takes
+the witness and the base state to do this, and `reconcile` does not: the two-head form stays the
+pure graph query it was, and a caller wanting the N-lane partition without the test hands
+`reconcileMany` an accepting witness.
+
+*The refuted premise.* The phase asked for a theorem that the script, replayed from `replayTo base`,
+equals `replayTo` of a merge of the heads "under the diamond". That is false, and the reason is not
+the reconcile's: a merged history whose branches do not commute has no order-free replay of its own —
+`replayTo` drains the merged closure by id, a tie-break — so no script can equal it. The witness is a
+fast-forward whose later head merged a side branch writing the cell the shared history writes; a
+pinned test finds one by varying actors until the id order puts the side branch first. What IS true
+is proved: each node once, exactly the region above the base, for any closures (`reconcile_sound`),
+and the whole checked fold arrival-order-invariant from the DAG (`reconcile_fold_order_free`). The
+replay equality is measured by `reconcileLaws` over histories whose merged branches commute, which
+is the only kind for which it is a question.
+
+*The splice refusals, staged.* `append` / `merge` refuse a comma-bearing parent id and `merge` an
+empty one, typed as `DagAppendFault` through `tryAppend` / `tryMerge`, with the plain forms raising.
+Turning the plain forms into `Result` is Phase 296's, later on the same draft, together with its
+unknown-parent and content-id-collision refusals; doing it here would churn every call site twice in
+one draft for no reader's benefit. The criss-cross is drawn by `reconcileLaws` and not by
+`laneFoldLaws`, because a criss-cross needs a merge op and a domain's lane generator supplies none.
+
 ## 2026-09-30 — D75: an incomplete match is a build error, the publication sweep is a standing arm of the suite, and the pack's reproducibility is re-measured — path-length-independent content, still no byte-identity claim
 
 **Recorded by Phase 294. Gate and packaging only; no package surface moves (STABILITY.md `0.33.0 — DRAFT`).**

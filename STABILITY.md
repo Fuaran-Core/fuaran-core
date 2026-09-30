@@ -3078,6 +3078,79 @@ along the new seams in this change: sibling phases in the same batch append case
 would turn each of their appends into a cross-file conflict. A hash that answers one digest for
 everything still leaves `hashFnLaws` green — measured, and its missing op-tamper arm is Phase 302's.
 
+### The lane DAG's reconcile applies shared history once and refuses a rejecting lane set the same way under every arrival order; `append` / `merge` refuse a splice-bearing parent id (Phase 300, DECISIONS.md "the reconcile partitions the region above its base") — BREAKING: `Dag.reconcileMany`'s signature and error type change, scripts change value where they were wrong, halts become folds, and `append` / `merge` raise where they accepted
+
+**What changed.**
+
+- **The delta rule.** `Dag.reconcile` and `Dag.reconcileMany` took each lane's delta as
+  `between base head` and concatenated them, so history two heads SHARE above the base was applied
+  twice: a fast-forward (`headB` descending from `headA`) returned `[Inc 7; Inc 7; Inc 1]`, the same
+  head named twice replayed its delta twice, and a criss-cross reconciled over `mergeBase`'s
+  tie-break (one of two maximal common ancestors) replayed the other branch twice. Under a real
+  footprint the same shapes HALTED, the shared ops "conflicting" with themselves. The region above
+  the base is now partitioned by node id: the SHARED region (nodes two or more heads' closures hold)
+  is applied once, first, in the drain order of the union; each head's EXCLUSIVE delta is its
+  closure minus the base's minus every other head's; heads are deduplicated (first occurrence kept).
+  Conflicts are checked between the exclusive deltas. Where the heads share nothing above the base —
+  two lanes forked off it, which is what `FoldConfluence.foldOnce` builds — the script is exactly
+  the one the old rule produced.
+- **`Dag.reconcileMany` tests that every lane applies before it folds.** It now takes the witness
+  and the base state — `reconcileMany w footprintOf dag baseId baseState heads` — and returns
+  `Result<'Op list, ReconcileFault<'Op, 'Rej>>`: `LanesInterfere` (the old `MergeConflict list`),
+  `SharedHistoryRejected` (the shared region does not replay from the base), or `LanesRejected`
+  (every lane that does not apply ON ITS OWN from the state the shared region reaches, sorted by
+  head id, each a `LaneRejection` carrying the head, its delta, the rejecting node and the
+  rejection). A lane set with a rejecting lane used to fold under the arrival order that happened
+  to run another lane first and reject under the other; it is refused identically under every order
+  now. `Dag.reconcile` keeps its signature.
+- **`FoldConfluence`.** `foldOnce` renders `LanesRejected` through the new public
+  `canonicalRejectionReport` (one line per distinct rejecting lane, in the domain's encoding, sorted);
+  the pack's header, which claimed a non-folding lane set refused identically when it did not, is
+  corrected. `laneFoldLaws` judges every drawn lane set in three shapes — disjoint (as before), the
+  first head named twice, and the second lane chained onto the first — and its adequacy line counts
+  the two shared-history shapes beside the outcomes (`duplicate-head=`, `fast-forward=`); the
+  `rejected=` count covers all three shapes, so it is three times what one draw per iteration gave.
+- **`Conformance.reconcileLaws`** builds four shapes (disjoint, fast-forward, duplicate head,
+  criss-cross over `mergeBase`) with each lane under its own actor, and gains a law — "reconcile
+  applies shared history once": a clean shared-history script replays to `Dag.replayTo` of a merge
+  node over the two heads — and a guard on the shape. Its result list grows from 6 to 8, and the
+  sample it draws moves (the criss-cross draws a lane off each merge).
+- **`Dag.append` / `Dag.merge` refuse a splice-bearing parent id.** A comma-bearing parent id
+  spliced into the content-hash pre-image — an `append` naming the parent `"x,y"` minted the id of
+  `merge(x, y)` and replaced it — and `merge("", x)` built a node with a phantom parent. The typed
+  refusal is `DagAppendFault` (`EmptyParentId`, `CommaInParentId`) through the new `tryAppend` /
+  `tryMerge`; the plain forms raise `ArgumentException` carrying `DagAppendFault.toString`. `""`
+  stays `append`'s genesis marker. No DAG production could build and still accepts changes a node id.
+- **`Dag.mergeBase`** is documented as "a maximal common ancestor" — a policy, not "the" base. No
+  behaviour change; the reconcile no longer leans on the choice.
+
+**Who is affected, and the migration.**
+
+- A caller of `reconcileMany`: pass the witness and the state at the base, and match
+  `ReconcileFault.LanesInterfere cs` where it matched `Error cs`. A caller that wants the partition
+  and the interference sweep without the lanes-apply test passes a witness whose `Apply` accepts
+  every op (the proof differential in `ProofOracleTests.fs` does exactly that).
+- A caller of either reconciler whose heads share history above the base: the script is shorter,
+  and correct; a lane set that halted on shared history now folds.
+- A caller that builds parent ids carrying commas, or merges with `""`: catch the
+  `ArgumentException`, or call `tryAppend` / `tryMerge`. Phase 296, later on this draft, turns
+  `append` / `merge` themselves into `Result`-returning functions and adds its own refusals.
+- A domain running `laneFoldLaws` or `reconcileLaws`: the adequacy lines and counts move as above.
+
+**Class.** `breaking-source` (the `reconcileMany` signature and error type; the refusals on
+`append` / `merge`) and behaviour (script values, halts into folds, rejections now order-free).
+Wire: none — the JSONL bytes and every node id production could build before are unchanged.
+Public surface: `ReconcileFault`, `LaneRejection`, `DagAppendFault`, `Dag.tryAppend`,
+`Dag.tryMerge`, `FoldConfluence.canonicalRejectionReport` added; `Dag.reconcileMany` retyped. The
+`api/` baselines are regenerated.
+
+**Proofs.** `DagFold.fold_confluence_total` — fold confluence with the diamond as the only
+hypothesis, because `fold_once` now tests every lane before folding — retires the `lanes-apply`
+assumed row; `fold_confluence` is its corollary. Section 15 models the partition clause for clause:
+`reconcile_sound` (each node at most once, exactly the region above the base, for any closures) and
+`reconcile_fold_order_free` (permuting the heads leaves the shared region identical and the checked
+fold outcome-equivalent). The oracle is re-extracted.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a
