@@ -212,46 +212,24 @@ let uu___is_WritesHost : host_effect  ->  Prims.bool = (fun ( projectee  :  host
      false
      end))
 
-type determinism_source =
-| Deterministic
-| Clock
-| Random
-| Network
+type determinism_source = {has_clock : Prims.bool; has_random : Prims.bool; has_network : Prims.bool}
 
 
-let uu___is_Deterministic : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Deterministic -> begin
-     true
-     end
-| uu___ -> begin
-     false
+let __proj__Mkdeterminism_source__item__has_clock : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
+| {has_clock = has_clock; has_random = has_random; has_network = has_network} -> begin
+     has_clock
      end))
 
 
-let uu___is_Clock : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Clock -> begin
-     true
-     end
-| uu___ -> begin
-     false
+let __proj__Mkdeterminism_source__item__has_random : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
+| {has_clock = has_clock; has_random = has_random; has_network = has_network} -> begin
+     has_random
      end))
 
 
-let uu___is_Random : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Random -> begin
-     true
-     end
-| uu___ -> begin
-     false
-     end))
-
-
-let uu___is_Network : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Network -> begin
-     true
-     end
-| uu___ -> begin
-     false
+let __proj__Mkdeterminism_source__item__has_network : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
+| {has_clock = has_clock; has_random = has_random; has_network = has_network} -> begin
+     has_network
      end))
 
 type effect_class = {host : host_effect; determinism : determinism_source}
@@ -269,7 +247,10 @@ let __proj__Mkeffect_class__item__determinism : effect_class  ->  determinism_so
      end))
 
 
-let pure_deterministic : effect_class = {host = Pure; determinism = Deterministic}
+let deterministic : determinism_source = {has_clock = false; has_random = false; has_network = false}
+
+
+let pure_deterministic : effect_class = {host = Pure; determinism = deterministic}
 
 
 let host_rank : host_effect  ->  Prims.int = (fun ( h  :  host_effect ) -> (match (h) with
@@ -281,21 +262,6 @@ let host_rank : host_effect  ->  Prims.int = (fun ( h  :  host_effect ) -> (matc
      end
 | WritesHost -> begin
      (Prims.parse_int "2")
-     end))
-
-
-let det_rank : determinism_source  ->  Prims.int = (fun ( d  :  determinism_source ) -> (match (d) with
-| Deterministic -> begin
-     (Prims.parse_int "0")
-     end
-| Clock -> begin
-     (Prims.parse_int "1")
-     end
-| Random -> begin
-     (Prims.parse_int "2")
-     end
-| Network -> begin
-     (Prims.parse_int "3")
      end))
 
 
@@ -312,24 +278,6 @@ if (Prims.op_Equals n (Prims.parse_int "1")) then begin
      end)
 
 
-let det_of : Prims.int  ->  determinism_source = (fun ( n  :  Prims.int ) ->  
-if (Prims.op_Equals n (Prims.parse_int "0")) then begin
-     Deterministic
-     end else begin
-      
-if (Prims.op_Equals n (Prims.parse_int "1")) then begin
-     Clock
-     end else begin
-      
-if (Prims.op_Equals n (Prims.parse_int "2")) then begin
-     Random
-     end else begin
-     Network
-     end
-     end
-     end)
-
-
 let max_int : Prims.int  ->  Prims.int  ->  Prims.int = (fun ( a  :  Prims.int ) ( b  :  Prims.int ) ->  
 if (a >= b) then begin
      a
@@ -338,25 +286,97 @@ if (a >= b) then begin
      end)
 
 
-let join : effect_class  ->  effect_class  ->  effect_class = (fun ( a  :  effect_class ) ( b  :  effect_class ) -> {host = (host_of (max_int (host_rank a.host) (host_rank b.host))); determinism = (det_of (max_int (det_rank a.determinism) (det_rank b.determinism)))})
+let det_union : determinism_source  ->  determinism_source  ->  determinism_source = (fun ( a  :  determinism_source ) ( b  :  determinism_source ) -> {has_clock = (a.has_clock || b.has_clock); has_random = (a.has_random || b.has_random); has_network = (a.has_network || b.has_network)})
 
 
-let covers : effect_class  ->  effect_class  ->  Prims.bool = (fun ( declared  :  effect_class ) ( actual  :  effect_class ) -> (((host_rank declared.host) >= (host_rank actual.host)) && ((det_rank declared.determinism) >= (det_rank actual.determinism))))
+let det_subset : determinism_source  ->  determinism_source  ->  Prims.bool = (fun ( a  :  determinism_source ) ( b  :  determinism_source ) -> ((((not (a.has_clock)) || b.has_clock) && ((not (a.has_random)) || b.has_random)) && ((not (a.has_network)) || b.has_network)))
 
 
-let determinism_tag : determinism_source  ->  Prims.string = (fun ( d  :  determinism_source ) -> (match (d) with
-| Deterministic -> begin
-     "deterministic"
+let join : effect_class  ->  effect_class  ->  effect_class = (fun ( a  :  effect_class ) ( b  :  effect_class ) -> {host = (host_of (max_int (host_rank a.host) (host_rank b.host))); determinism = (det_union a.determinism b.determinism)})
+
+
+let covers : effect_class  ->  effect_class  ->  Prims.bool = (fun ( declared  :  effect_class ) ( actual  :  effect_class ) -> (((host_rank declared.host) >= (host_rank actual.host)) && (det_subset actual.determinism declared.determinism)))
+
+
+let determinism_tag : determinism_source  ->  Prims.string = (fun ( d  :  determinism_source ) ->  
+if d.has_clock then begin
+      
+if d.has_random then begin
+      
+if d.has_network then begin
+     "clock+random+network"
+     end else begin
+     "clock+random"
      end
-| Clock -> begin
+     end else begin
+      
+if d.has_network then begin
+     "clock+network"
+     end else begin
      "clock"
      end
-| Random -> begin
+     end
+     end else begin
+      
+if d.has_random then begin
+      
+if d.has_network then begin
+     "random+network"
+     end else begin
      "random"
      end
-| Network -> begin
+     end else begin
+      
+if d.has_network then begin
      "network"
-     end))
+     end else begin
+     "deterministic"
+     end
+     end
+     end)
+
+
+let det_of_tag : Prims.string  ->  FStar_Pervasives_Native.option<determinism_source> = (fun ( s  :  Prims.string ) ->  
+if (Prims.op_Equals s "deterministic") then begin
+     FStar_Pervasives_Native.Some (deterministic)
+     end else begin
+      
+if (Prims.op_Equals s "clock") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = false; has_network = false})
+     end else begin
+      
+if (Prims.op_Equals s "random") then begin
+     FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = false})
+     end else begin
+      
+if (Prims.op_Equals s "network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = false; has_random = false; has_network = true})
+     end else begin
+      
+if (Prims.op_Equals s "clock+random") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = true; has_network = false})
+     end else begin
+      
+if (Prims.op_Equals s "clock+network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = false; has_network = true})
+     end else begin
+      
+if (Prims.op_Equals s "random+network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true})
+     end else begin
+      
+if (Prims.op_Equals s "clock+random+network") then begin
+     FStar_Pervasives_Native.Some ({has_clock = true; has_random = true; has_network = true})
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+     end
+     end
+     end
+     end
+     end
+     end)
 
 type value_space =
 | IntRange of Prims.int * Prims.int
