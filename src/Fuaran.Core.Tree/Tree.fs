@@ -205,16 +205,35 @@ module Tree =
         let result = rebuildPostorder w g root
         if hit then Some result else None
 
-    /// The content-hash fold separator — the shared `Hash.foldSep` (U+0001). `contentHash` always
-    /// used it; Phase 11 applied it to `encodeHash` too (which previously folded with `""`, aliasing
-    /// boundary-distinct trees). See `STABILITY.md`: `encodeHash` digests changed once; `contentHash`
-    /// digests are unchanged.
-    let private hashSep = Hash.foldSep
+    /// The digest pre-image of a tree under a per-node labelling: every preorder node as TWO
+    /// fields — its label, then its ARITY (`List.length (w.Children n)`, as a decimal) — through
+    /// `Hash.canonicalFields`. Shared by `contentHash` (label = kind tag) and `encodePreimage`
+    /// (label = the caller's encoder), so the two folds cannot drift apart.
+    ///
+    /// **Why the arity is there (Phase 290).** A preorder alone does not determine a tree:
+    /// `root(a(a1,a2), b(b1))` and `root(a(a1,a2,b(b1)))` have the same preorder — they are one
+    /// `MoveNode` apart — and hashed equal under every encoder, however injective, until this
+    /// fold carried the shape. A preorder WITH each node's child count is injective over ordered
+    /// trees (`preorder_arity_injective` in `proofs/TreeOps.fst`): the count says where each
+    /// node's subtree ends, so the flat list parses back into one tree. The arity is what the
+    /// witness exposes at the node itself, so the fold stays one local pass (a per-node depth
+    /// would be injective too, but needs the path carried down; a bare descent marker with no
+    /// ascent is not — `DECISIONS.md`, Phase 290). Through `canonicalFields` rather than a bare
+    /// separator so a label that spells the separator cannot run into the next field either (the
+    /// injectivity `Hash.canonicalFields` documents and `proofs/Query.fst` proves).
+    let private preimageWith (w: NodeWitness<'Node, 'Id>) (label: 'Node -> string) (node: 'Node) : string =
+        preorder w node
+        |> List.collect (fun n -> [ label n; string (List.length (w.Children n)) ])
+        |> Hash.canonicalFields
 
-    /// Content hash of a node's structural shape (kind tags in preorder). A cheap,
-    /// deterministic fingerprint for the bounded-escape `Custom`-region discipline.
+    /// Content hash of a node's structural SHAPE: the kind tag and the child count of every node
+    /// in preorder, through `Hash.canonicalFields` and the portable FNV-1a. A cheap, deterministic
+    /// fingerprint for the bounded-escape `Custom`-region discipline. Two trees with one
+    /// `contentHash` pre-image have the same shape and the same kind at every position — it sees
+    /// nesting, not just the sequence of kinds (Phase 290; before it two trees one `MoveNode`
+    /// apart could hash equal). It does NOT see per-node payload: for that, `encodeHash`.
     let contentHash (w: NodeWitness<'Node, 'Id>) (node: 'Node) : string =
-        preorder w node |> List.map w.KindTag |> String.concat hashSep |> Hash.fnv1a
+        preimageWith w w.KindTag node |> Hash.fnv1a
 
     // ---- convenience combinators (Phase 249) ----
     // The everyday traversals every domain otherwise re-derives atop `preorder` + the
@@ -326,21 +345,25 @@ module Tree =
 
     module Index =
 
-        /// The staleness digest: each node as `id>kind>child,child,…` (capturing identity, kind,
-        /// parent-child structure, and child order), folded through the portable FNV-1a. Covers
+        /// The staleness digest: each node as the fields `id`, `kind`, its child COUNT and then
+        /// each child id in order (capturing identity, kind, parent-child structure, and child
+        /// order), through `Hash.canonicalFields` and the portable FNV-1a. The count is what makes
+        /// the flat field list parse back into one tree, whatever `>` or `,` an id contains — until
+        /// Phase 290 the fields were joined on those two characters, which an id can spell. Covers
         /// everything the witness exposes — so it detects every skeleton edit plus a kind change or
         /// id-remap, but NOT an opaque per-node payload mutation the witness has no accessor for
         /// (the index would still hand back a payload-stale node; rebuild after a domain value-edit
         /// too). Recomputed by `isFreshFor` and compared against the stamp `build` stored.
         let private fingerprintOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : string =
             preorder w root
-            |> List.map (fun n ->
+            |> List.collect (fun n ->
+                let kids = w.Children n
+
                 idw.ToString(w.Id n)
-                + ">"
-                + w.KindTag n
-                + ">"
-                + (w.Children n |> List.map (fun c -> idw.ToString(w.Id c)) |> String.concat ","))
-            |> String.concat hashSep
+                :: w.KindTag n
+                :: string (List.length kids)
+                :: (kids |> List.map (fun c -> idw.ToString(w.Id c))))
+            |> Hash.canonicalFields
             |> Hash.fnv1a
 
         /// Build both maps + the staleness stamp in a single preorder pass.
@@ -406,17 +429,32 @@ module Tree =
 
     // ---- content-aware hash (Phase 06) ----
 
-    /// Content hash folding a caller-supplied per-node `encode` over the preorder, through the
+    /// The UNHASHED content pre-image `encodeHash` digests: every preorder node's `encode` paired
+    /// with its arity, through `Hash.canonicalFields`. Exposed (Phase 290) for the one caller that
+    /// must not settle for a 32-bit digest — `Function.applyMemo` keys its cache on this string
+    /// rather than on `encodeHash`, so a key hit is an equality of pre-images and a colliding FNV-1a
+    /// can never serve the wrong tree. INJECTIVE over trees whenever `encode` is injective over a
+    /// node's own content: the arity fold recovers the shape (`preorder_arity_injective`,
+    /// `proofs/TreeOps.fst`) and the field encoding recovers the fields (`proofs/Query.fst`).
+    let encodePreimage (w: NodeWitness<'Node, 'Id>) (encode: 'Node -> string) (node: 'Node) : string =
+        preimageWith w encode node
+
+    /// Content hash folding a caller-supplied per-node `encode` over the preorder — each node's
+    /// encoding and its child count, through `Hash.canonicalFields` (`encodePreimage`) and the
     /// portable FNV-1a. Where `contentHash` fingerprints SHAPE only (kind tags), this
     /// fingerprints CONTENT: two trees that differ only in per-node payload hash differently.
     /// The encoder is a per-call parameter — no `Core.Wire` dependency, no equality seam (GP2).
     /// When `encode` is canonical, `encodeHash w encode a = encodeHash w encode b` is a domain's
-    /// structural-equality test (the canonical-wire-equality pattern, generically). The `hashSep`
-    /// (U+0001) separator keeps two adjacent encodings from running together into a colliding fold
-    /// (`["ab";"c"]` and `["a";"bc"]` hash distinctly) — pre-Phase-11 this fold used `""`.
-    /// **Precondition (memo soundness, Phase 56):** `encode` must be *injective* over the node space —
-    /// a lossy `encode` makes distinct trees share a hash, so any caller that keys on `encodeHash`
-    /// (e.g. `Function.applyMemo`) could then serve the wrong tree. `Conformance.encoderInjectivityLaws`
-    /// certifies a given encoder is collision-free over a domain generator.
+    /// structural-equality test (the canonical-wire-equality pattern, generically). The field
+    /// encoding keeps two adjacent encodings from running together into a colliding fold
+    /// (`["ab";"c"]` and `["a";"bc"]` hash distinctly — pre-Phase-11 this fold used `""`, and until
+    /// Phase 290 a bare separator an encoding could spell), and the arity keeps two trees with one
+    /// preorder apart (until Phase 290 `root(a(a1,a2), b(b1))` and `root(a(a1,a2,b(b1)))` hashed
+    /// equal under every encoder).
+    /// **Precondition (memo soundness, Phase 56):** `encode` must be *injective* over a node's own
+    /// content — a lossy `encode` makes distinct trees share a pre-image, so any caller that keys
+    /// on this (or on `encodePreimage`) could then serve the wrong tree.
+    /// `Conformance.encoderInjectivityLaws` certifies a given encoder is collision-free over a
+    /// domain generator. That two distinct pre-images hash apart under FNV-1a is not claimed.
     let encodeHash (w: NodeWitness<'Node, 'Id>) (encode: 'Node -> string) (node: 'Node) : string =
-        preorder w node |> List.map encode |> String.concat hashSep |> Hash.fnv1a
+        encodePreimage w encode node |> Hash.fnv1a

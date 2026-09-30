@@ -29,6 +29,7 @@ method Fuaran.Core.Tree.count`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) : Syst
 method Fuaran.Core.Tree.depth`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, !!0) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.Tree.descendants`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
 method Fuaran.Core.Tree.encodeHash`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : System.String
+method Fuaran.Core.Tree.encodePreimage`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : System.String
 method Fuaran.Core.Tree.exists`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, !!0) : System.Boolean
 method Fuaran.Core.Tree.filter`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
 method Fuaran.Core.Tree.fold`3(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!2, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!2>>, !!2, !!0) : !!2

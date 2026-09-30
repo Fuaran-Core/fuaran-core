@@ -537,6 +537,42 @@
       }
     },
     {
+      "id": "tree-digest-preimage-injective",
+      "level": "proved",
+      "claim": "THE DIGEST SEES THE SHAPE (Phase 290). The pre-image `Tree.contentHash`, `Tree.encodePreimage` and `Tree.encodeHash` fold — every preorder node as its label and its ARITY — is injective over ordered trees: two trees with one (label, arity) preorder are one tree (`preorder_arity_injective`, no hypothesis; the label is the (id, kind) pair the witness shows and the arity is computed). The induction is `shape_prefix`: a shape followed by any suffix is read back uniquely, because the arity says how many of the following entries belong under the node. The PREMISE is evaluated beside it (`preorder_alone_aliases`): the label preorder alone identifies `root(a(a1,a2), b(b1))` with `root(a(a1,a2,b(b1)))`, which are two trees with two shapes and are one accepted `MoveNode(b, a)` apart — so until this phase the memo keyed on `encodeHash` served one function's tree for the other, and the arity is known to be load-bearing rather than decorative.",
+      "phase": "fuaran-core#290",
+      "evidence": {
+        "theorem": "preorder_arity_injective",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "tree-digest-fields-recover-shape",
+      "level": "proved",
+      "claim": "The FIELD LIST recovers the shape (Phase 290): the two fields per node the F# fold writes — the rendered label, then the arity as a numeral — are read back to the (label, arity) preorder, and so to one tree (`digest_fields_injective`, composing `fields_recover_shape` with `preorder_arity_injective`). CONDITIONAL, and named as such: the label renderer (production's caller-supplied `encode`) and the numeral renderer (`string` on an int) enter as parameters with their injectivity as hypotheses — the encoder-injectivity obligation `Conformance.encoderInjectivityLaws` samples at a domain's witness, and the numeral premise `seq-numeral-code-certified` already carries for the chain. The step from the field list to the ONE string the hash reads is `Hash.canonicalFields`, proved injective as `enc_injective` in `proofs/Query.fst` (row `query-invocation-key-injective`) and not restated. Whether two distinct pre-images HASH apart under FNV-1a is a claim about FNV-1a and is not made; `Function.applyMemo` keys on the pre-image itself for that reason.",
+      "phase": "fuaran-core#290",
+      "evidence": {
+        "theorem": "digest_fields_injective",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "tree-digest-differential",
+      "level": "tested",
+      "claim": "The pre-image production folds is the extracted model's shape, field for field: at every state the generated pool reaches, `Tree.encodePreimage` under the witness label equals `Hash.canonicalFields` over the extracted `TreeOps.fields` of `TreeOps.shape`, with the model's (id, kind) rendered exactly as the production label renders it — so `preorder_arity_injective` is known to be about the string the memo keys on. The go-red is a MIS-NESTING op bridge: every `InsertChild` crosses to the model as an insert under the parent's deepest last descendant, which keeps the preorder and moves the shape; under the arity-free fold this bridge agreed with production on the accepted-result hash (measured, Phase 290), and it now loses on that hash and on no verdict. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#290",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/TreeOps.fst",
+        "cases": [
+          "the digest pre-image production folds is the extracted model's shape, field for field",
+          "a tree oracle handed a MIS-NESTING op bridge DISAGREES with Ops.apply — the digest sees the shape"
+        ]
+      }
+    },
+    {
       "id": "tree-algebra-well-formed-states",
       "level": "assumed",
       "claim": "The tree the algebra runs over carries each id at most once. This is a hypothesis rather than an oversight: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved. Nothing downstream produces such a tree and the structural diff refuses one outright, but no shipped type carries the invariant. NARROWED BY PHASE 138 to what it now is — a hypothesis about the INPUT alone. Until Phase 137 the algebra could also break the invariant on a tree that had it (`insert-breaks-id-uniqueness`); since Phase 138 that half is a theorem, `apply-preserves-wf`, so a tree that starts id-unique stays id-unique under every accepted operation. What remains unenforced is the entry point, and only the entry point.",

@@ -809,38 +809,48 @@ module Function =
     // takes no `Function` dependency). Additive over the frozen witness (GP1/GP7); the cache is
     // caller-supplied (GP2 — no global state).
 
-    /// Canonicalise a bound argument for the cache key: a leaf value rides verbatim; a slot subtree
-    /// rides as its CONTENT hash (`Tree.encodeHash`), so two structurally-identical slot args key
-    /// identically and two different ones do not. The encoder is the caller's canonical node-encoder
-    /// (GP2 — the same one `Tree.encodeHash` takes), so the core needs no equality / codec seam.
-    let private argKey (w: ArtifactWitness<'Node, 'Id>) (encode: 'Node -> string) (arg: Arg<'Node>) : string =
+    /// Canonicalise a bound argument for the cache key as TWO fields: a tag saying which case it
+    /// is, then the payload — a leaf value verbatim; a slot subtree as its content PRE-IMAGE
+    /// (`Tree.encodePreimage`, the unhashed string `Tree.encodeHash` digests), so two
+    /// structurally-identical slot args key identically and two different ones do not, with no
+    /// 32-bit digest between them. The encoder is the caller's canonical node-encoder (GP2 — the
+    /// same one `Tree.encodeHash` takes), so the core needs no equality / codec seam.
+    let private argFields (w: ArtifactWitness<'Node, 'Id>) (encode: 'Node -> string) (arg: Arg<'Node>) : string list =
         match arg with
-        | ValueArg s -> "v" + s
-        | SlotArg n -> "s" + Tree.encodeHash w.Tree encode n
+        | ValueArg s -> [ "v"; s ]
+        | SlotArg n -> [ "s"; Tree.encodePreimage w.Tree encode n ]
 
-    /// The content-addressed application key (Phase 49): the function's CONTENT hash (`Tree.encodeHash`
-    /// — not the shape-only `Tree.contentHash`, so two functions that differ only in fixed literal
-    /// content key distinctly — soundness) joined with the canonicalised, address-sorted param-set.
-    /// Hygiene: args are keyed by absolute address. Deterministic — identical `(function, param-set)`
-    /// always yields the identical key (a hit), and any function- or param-change yields a different
-    /// one (a miss).
+    /// The content-addressed application key (Phase 49; injective since Phase 290): the function's
+    /// content PRE-IMAGE (`Tree.encodePreimage` — not the shape-only `Tree.contentHash`, so two
+    /// functions that differ only in fixed literal content key distinctly — soundness) and the
+    /// canonicalised, address-sorted param-set, each binding three fields (address, case tag,
+    /// payload), the whole through `Hash.canonicalFields`. Hygiene: args are keyed by absolute
+    /// address. Deterministic — identical `(function, param-set)` always yields the identical key
+    /// (a hit), and any function- or param-change yields a different one (a miss).
+    ///
+    /// **The key is the pre-image, not a hash of it.** Until Phase 290 it was two 32-bit FNV-1a
+    /// halves joined on a bare separator, and `applyMemo` served the cached tree on a key hit alone
+    /// — so a value spelling `U+0001` (`{a = "X\u0001b=vY"}` keyed as `{a = "X"; b = "Y"}`), two
+    /// argument sets colliding under FNV-1a, or two functions one `MoveNode` apart (the preorder
+    /// alias `Tree.encodePreimage` closes) each served the WRONG tree. A `Map` keyed on the full
+    /// pre-image compares it on every lookup, so a hit IS an equality of `(function, param-set)`
+    /// under the caller's `encode`: no collision bound to record, and nothing to compare after the
+    /// hit. The cost is the key's length — a function's whole encoding rather than eight hex
+    /// characters — paid once per entry beside the result tree the entry already holds.
     let internal memoKey
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)
         (args: Map<string, Arg<'Node>>)
         (node: 'Node)
         : string =
-        let fnHash = Tree.encodeHash w.Tree encode node
-
         let argCanon =
             args
             |> Map.toList
             |> List.sortBy fst
-            |> List.map (fun (a, arg) -> a + "=" + argKey w encode arg)
-            |> String.concat Hash.foldSep
-            |> Hash.fnv1a
+            |> List.collect (fun (a, arg) -> a :: argFields w encode arg)
+            |> Hash.canonicalFields
 
-        fnHash + Hash.foldSep + argCanon
+        Hash.canonicalFields [ Tree.encodePreimage w.Tree encode node; argCanon ]
 
     /// Apply the artifact-function with a caller-supplied content-addressed memo (Phase 49 / 53). The
     /// memoisability gate keys on the **observed** effect (`observedEffect` — the widest effect actually
@@ -857,10 +867,12 @@ module Function =
     /// GP2). The result tree is byte-for-byte what `apply` would produce, so `applyMemo` is
     /// observationally equal to `apply` modulo the (caller-owned) cache.
     ///
-    /// **Precondition (Phase 56):** `encode` must be *injective* over the node space — the key is
-    /// `Tree.encodeHash w.Tree encode node`, so a lossy `encode` (two distinct trees → one string) would
-    /// let the cache serve the WRONG tree. Certify a domain's encoder with
-    /// `Conformance.encoderInjectivityLaws` before trusting the memo.
+    /// **Precondition (Phase 56):** `encode` must be *injective* over a node's own content — the key
+    /// is built on `Tree.encodePreimage w.Tree encode node` (Phase 290: the full pre-image, so the
+    /// key is injective in the function AND the arguments given that), and a lossy `encode` (two
+    /// distinct nodes → one string) would let the cache serve the WRONG tree. Certify a domain's
+    /// encoder with `Conformance.encoderInjectivityLaws` before trusting the memo; `memoLaws`
+    /// carries the separator-in-value case that must miss.
     let applyMemo
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)

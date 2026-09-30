@@ -2471,3 +2471,151 @@ let batch_lift_is_not_vacuous ()
     assert_norm (Ok? (bind (wapply lift_batch lift_tree) (wapply lift_leaf)));
     assert_norm (bind (wapply lift_batch lift_tree) (wapply lift_leaf) ==
                  bind (wapply lift_leaf lift_tree) (wapply lift_batch))
+
+(* ======================================================================================
+   21. The digest pre-image sees the shape (Phase 290) — F#: `Tree.preimageWith`, the one
+       fold `Tree.contentHash`, `Tree.encodePreimage` and `Tree.encodeHash` share, and the key
+       `Function.applyMemo` serves a cached tree on.
+
+       Until Phase 290 the three digests folded the PREORDER alone — each node's label, and
+       nothing about where its subtree ends — and a preorder does not determine a tree:
+       `root(a(a1,a2), b(b1))` and `root(a(a1,a2,b(b1)))` visit the same nodes in the same
+       order and are one `MoveNode(b, a)` apart. Under any per-node label, however injective,
+       the two folded to one string, and the memo served one function's tree for the other.
+       The fold now carries each node's ARITY beside its label, and this section proves that
+       is enough: the (label, arity) preorder is INJECTIVE over ordered trees, because the
+       arity says how many of the following entries belong under this node, so the flat list
+       parses back into exactly one tree. It also proves the premise — the label preorder
+       alone ALIASES, on the shard's own pair — so the arity is known to be load-bearing
+       rather than decorative.
+
+       What the label IS here: the pair (id, kind) the witness shows, which is all a node has
+       in this model. Production's label is the caller's `encode`, a parameter, and what the
+       theorem needs of it is only injectivity on a node's own content; `fields_recover_shape`
+       states that step over a `render` parameter and `show` (the arity's decimal rendering)
+       with their injectivity as hypotheses — the two are the numeral-renderer and
+       encoder-injectivity premises the claims ladder already carries for the other keys, and
+       they are named there for this row too. The step from the field list to ONE string is
+       `Hash.canonicalFields`, proved injective as `enc_injective` in `Query.fst` and not
+       restated here. Whether two distinct pre-images HASH apart under FNV-1a is not claimed.
+   ====================================================================================== *)
+
+(* The length of a child list — the arity the F# fold writes as `string (List.length (w.Children n))`. *)
+let rec len (#a:Type) (l:list a) : Tot nat =
+  match l with
+  | [] -> 0
+  | _ :: r -> 1 + len r
+
+(* F#: `preorder w node |> List.collect (fun n -> [ label n; string (List.length (w.Children n)) ])`
+   at the witness level — each node as (id, kind, arity), node then children, left to right. *)
+let rec shape (t:tree) : Tot (list (string & string & nat)) (decreases t) =
+  match t with
+  | TNode i k cs -> (i, k, len cs) :: shape_all cs
+and shape_all (ts:list tree) : Tot (list (string & string & nat)) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> app (shape t) (shape_all r)
+
+(* The pre-290 fold, for the refutation: the label preorder with NO arity. *)
+let rec labels (t:tree) : Tot (list (string & string)) (decreases t) =
+  match t with
+  | TNode i k cs -> (i, k) :: labels_all cs
+and labels_all (ts:list tree) : Tot (list (string & string)) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> app (labels t) (labels_all r)
+
+(* ---- THE LEMMA, in prefix form: a shape followed by anything is read back uniquely ----
+
+   The induction has to carry a suffix, because a node's children are read out of the middle of
+   the list: `shape t` followed by `r1` equal to `shape u` followed by `r2` forces `t == u` AND
+   `r1 == r2`; and for a child LIST the same holds once the two lists have the same length —
+   which is exactly what the parent's arity supplies. *)
+let rec shape_prefix (t u:tree) (r1 r2:list (string & string & nat))
+  : Lemma (requires app (shape t) r1 == app (shape u) r2)
+          (ensures t == u /\ r1 == r2)
+          (decreases t) =
+  match t, u with
+  | TNode i k cs, TNode i' k' cs' ->
+    (* the heads agree, so the arities agree, so the two child lists have one length *)
+    assert (i == i' /\ k == k' /\ len cs == len cs');
+    shape_all_prefix cs cs' r1 r2
+and shape_all_prefix (ts us:list tree) (r1 r2:list (string & string & nat))
+  : Lemma (requires len ts == len us /\ app (shape_all ts) r1 == app (shape_all us) r2)
+          (ensures ts == us /\ r1 == r2)
+          (decreases ts) =
+  match ts, us with
+  | [], [] -> ()
+  | t :: tr, u :: ur ->
+    app_assoc (shape t) (shape_all tr) r1;
+    app_assoc (shape u) (shape_all ur) r2;
+    shape_prefix t u (app (shape_all tr) r1) (app (shape_all ur) r2);
+    shape_all_prefix tr ur r1 r2
+
+(* THE THEOREM. The (label, arity) preorder is injective over ordered trees: two trees with one
+   digest pre-image are one tree. No hypothesis — the label here is the whole of what the witness
+   shows, and the arity is computed, not rendered. *)
+let preorder_arity_injective (t1 t2:tree)
+  : Lemma (requires shape t1 == shape t2) (ensures t1 == t2) =
+  app_nil_r (shape t1);
+  app_nil_r (shape t2);
+  shape_prefix t1 t2 [] []
+
+(* ---- the premise: the label preorder ALONE aliases, on the shard's own pair ----
+
+   Evaluated, not argued: the two trees have one `labels` list, are not one tree, have two
+   `shape` lists — and the second IS the first under `MoveNode "b" "a"`, so the alias is reachable
+   by one accepted skeleton op, which is what made it a memo-soundness hole rather than a
+   curiosity. *)
+let flat_tree : tree =
+  TNode "root" "doc" [ TNode "a" "section" [ TNode "a1" "para" []; TNode "a2" "para" [] ];
+                       TNode "b" "section" [ TNode "b1" "para" [] ] ]
+
+let nested_tree : tree =
+  TNode "root" "doc" [ TNode "a" "section" [ TNode "a1" "para" []; TNode "a2" "para" [];
+                                             TNode "b" "section" [ TNode "b1" "para" [] ] ] ]
+
+let preorder_alone_aliases ()
+  : Lemma (ensures labels flat_tree == labels nested_tree /\
+                   ~(flat_tree == nested_tree) /\
+                   ~(shape flat_tree == shape nested_tree) /\
+                   apply (MoveNode "b" "a") flat_tree == Ok nested_tree) =
+  assert_norm (labels flat_tree == labels nested_tree);
+  assert_norm (~(flat_tree == nested_tree));
+  assert_norm (~(shape flat_tree == shape nested_tree));
+  assert_norm (apply (MoveNode "b" "a") flat_tree == Ok nested_tree)
+
+(* ---- the field list: (label, arity) pairs rendered as fields, two per node ----
+
+   F#: `[ label n; string (List.length (w.Children n)) ]` per node, before `Hash.canonicalFields`.
+   The label rendering and the numeral rendering are host functions — the caller's `encode` and
+   `string` on an int — and enter as parameters with their injectivity as hypotheses. This is the
+   one theorem in the section that is CONDITIONAL, and the ladder row says so. *)
+let injective (#a #b:eqtype) (f:a -> b) : prop = forall (x y:a). f x == f y ==> x == y
+
+let rec fields (render:(string & string) -> string) (show:nat -> string)
+               (l:list (string & string & nat)) : Tot (list string) =
+  match l with
+  | [] -> []
+  | (i, k, n) :: r -> render (i, k) :: show n :: fields render show r
+
+let rec fields_recover_shape (render:(string & string) -> string) (show:nat -> string)
+                             (l1 l2:list (string & string & nat))
+  : Lemma (requires injective render /\ injective show /\
+                    fields render show l1 == fields render show l2)
+          (ensures l1 == l2) =
+  match l1, l2 with
+  | [], [] -> ()
+  | (i, k, n) :: r1, (i', k', n') :: r2 ->
+    assert (render (i, k) == render (i', k'));
+    assert (show n == show n');
+    fields_recover_shape render show r1 r2
+
+(* The composite: equal field lists mean equal trees, under the two renderer premises. The step
+   from the field list to the one string the hash reads is `Query.enc_injective`. *)
+let digest_fields_injective (render:(string & string) -> string) (show:nat -> string) (t1 t2:tree)
+  : Lemma (requires injective render /\ injective show /\
+                    fields render show (shape t1) == fields render show (shape t2))
+          (ensures t1 == t2) =
+  fields_recover_shape render show (shape t1) (shape t2);
+  preorder_arity_injective t1 t2

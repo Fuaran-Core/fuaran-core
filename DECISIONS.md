@@ -172,6 +172,74 @@ consumer's pin raise, and the consumer-side phase that depends on this one carri
 census deliberately does not enrol `StringEscapeVectors`, on the `WireNullTolerance` precedent: a
 fixed vector table has no sample that could miss anything.
 
+## 2026-09-30 — D77: a tree digest folds each node's ARITY beside its label, the memo keys on the pre-image rather than its hash, and a depth marker is DECLINED — with the shard's reason for declining it corrected
+
+**Recorded by Phase 290. `Fuaran.Core.Tree`, `Function`, `Projection`, `Validator`, the kit and
+the proof leg; breaking on the `0.33.0` draft (every digest of five kinds changes value);
+`Tree.encodePreimage` is the one public-surface addition.**
+
+*The finding.* `Tree.contentHash` and `Tree.encodeHash` folded the preorder alone. A preorder does
+not determine an ordered tree: `root(a(a1,a2), b(b1))` and `root(a(a1,a2,b(b1)))` visit the same
+nodes in the same order and are one accepted `MoveNode(b, a)` apart, so they hashed equal under
+every per-node encoder — the "encode must be injective over the node space" precondition was never
+enough, because a per-node encoder sees one node and the alias is between two nestings of the same
+nodes. `Function.applyMemo` keyed on `encodeHash` and served the cached tree on a key hit alone, so
+one `MoveNode` reached a memo serving the wrong function's result. Three more keys joined their
+fields on the bare `U+0001` separator (`Function.memoKey`, `Projection.digestOf`,
+`Validator.canonicalCodes`; `Tree.Index.fingerprintOf` on `>` and `,`), which a value can spell.
+
+*What is taken.* Every preorder node contributes TWO fields to the digest pre-image — its label and
+its child count — through `Hash.canonicalFields`. A (label, arity) preorder is injective over
+ordered trees, and that is proved rather than argued (`preorder_arity_injective`,
+`proofs/TreeOps.fst` section 21): the arity says how many of the following entries belong under the
+node, so the flat list parses back into one tree. The premise is evaluated beside it
+(`preorder_alone_aliases`): the label preorder alone identifies the shard's pair. Every key the
+spine mints that is not a chain hash now builds through `canonicalFields`, and the doc comment
+above it is a ROSTER a source-reading family holds to `src/` both ways, so a new key cannot be
+minted through a bare join without the suite naming it.
+
+*The memo key is the pre-image, not a hash of it.* The shard offered two forms: compare the stored
+`(fnHash, args)` on a key hit, or record the collision bound of the two 32-bit halves. Neither was
+taken as written. Comparing `fnHash` after a hit compares eight hex characters the key already
+holds — it closes nothing on the function side, where the `MoveNode` alias lives; and a recorded
+bound is a documented hole, which is the debt posture this repository refuses. The key is instead
+`Hash.canonicalFields` over the function's `encodePreimage` (the unhashed string) and its
+address-sorted bindings, each binding three fields — address, case tag, payload, a slot payload
+being the slot subtree's own `encodePreimage`. A `Map` keyed on that string compares the whole
+pre-image on every lookup, so a hit IS an equality of `(function, param-set)` under the caller's
+`encode`: nothing to compare after the hit, no bound to record, and the memo's soundness rests on
+exactly two things — `encode` injective on a node's own content (the domain's obligation,
+`Conformance.encoderInjectivityLaws`) and the two theorems above. The cost is the key's length: a
+function's whole encoding beside the result tree the entry already holds. That is paid knowingly;
+a memo whose entries are cheap to key and wrong to serve is the worse trade.
+
+*A depth marker is DECLINED — and the shard's reason is corrected here rather than repeated.* The
+shard recorded the alternative as "a depth marker, which is not injective either without arity".
+That is false as stated: a preorder that carries EACH node's depth is injective over ordered trees
+(each node's parent is the nearest preceding node one level shallower), so a per-node depth would
+have closed the alias too. What is not injective is a bare DESCENT marker with no ascent — the
+shape a fold writes when it emits one symbol on entering a child list and nothing on leaving it —
+because `root(a(a1), a2)` and `root(a(a1, a2))` then emit the same marker sequence. The arity is
+taken over a per-node depth for three reasons, none of them injectivity: it is what the witness
+exposes AT the node (`w.Children n`), so the fold stays one local pass with no path carried down
+and no state between nodes; it is what the theorem is stated over, and the proof's induction
+(`shape_prefix`) reads the child list's length straight off the head; and it is the encoding a host
+twin re-implements from the field list alone, where a depth has to be reconstructed from the walk.
+A depth per node would also cost the same two fields per node, so nothing is saved by it. Recorded
+so the next reader does not reject the depth form for a reason that does not hold, and does not
+adopt it either.
+
+*What is deliberately NOT done here.* `Hash.utf8Bytes` gets the platform's replacement bytes for a
+lone or ill-ordered surrogate (byte-for-byte `Encoding.UTF8`, the parity claim the doc made and the
+corpus did not test), and NOT a refusal: replacement trades one collision class for another (the
+platform maps `"\uD800"`, `"\uDFFF"` and `"\uFFFD"` to one byte string), injectivity over ill-formed
+input needs a typed refusal at the parser and at the guarded digest, and that layer is Phase 306's,
+which depends on this phase and keeps the replacement form for the unguarded path. The wire
+encoder's string escaping is Phase 287's and is not touched. `Schema.fingerprint` in
+`Fuaran.Core.Column` still joins on the raw `U+0001` byte — `Column` takes no dependency on `Tree`,
+by its own recorded reason — and the roster family names it as the one known bare join, by file
+and count, so it is residue with a name rather than an exemption.
+
 ## 2026-09-30 — D74: the proof leg's module-cone selector is Phase 164's sanctioned form of a cheaper leg; a shared checked-module cache stays DECLINED
 
 **Recorded by Phase 328. Tooling under `proofs/` and the test project; no package surface moves.**

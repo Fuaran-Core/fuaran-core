@@ -939,5 +939,55 @@ let lift_batch : op = Batch ((InsertChild ("x", TNode ("n1", "para", [])))::(Reo
 let lift_leaf : op = InsertChild ("y", TNode ("n2", "para", []))
 
 
+let rec len = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     (Prims.parse_int "0")
+     end
+| (uu___)::r -> begin
+     ((Prims.parse_int "1") + (len r))
+     end))
+
+
+let rec shape : tree  ->  Prims.list<(Prims.string * Prims.string * Prims.nat)> = (fun ( t  :  tree ) -> (match (t) with
+| TNode (i, k, cs) -> begin
+     (((i), (k), ((len cs))))::(shape_all cs)
+     end))
+and shape_all : Prims.list<tree>  ->  Prims.list<(Prims.string * Prims.string * Prims.nat)> = (fun ( ts  :  Prims.list<tree> ) -> (match (ts) with
+| [] -> begin
+     []
+     end
+| (t)::r -> begin
+     (DagFold.app (shape t) (shape_all r))
+     end))
+
+
+let rec labels : tree  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( t  :  tree ) -> (match (t) with
+| TNode (i, k, cs) -> begin
+     (((i), (k)))::(labels_all cs)
+     end))
+and labels_all : Prims.list<tree>  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( ts  :  Prims.list<tree> ) -> (match (ts) with
+| [] -> begin
+     []
+     end
+| (t)::r -> begin
+     (DagFold.app (labels t) (labels_all r))
+     end))
+
+
+let flat_tree : tree = TNode ("root", "doc", (TNode ("a", "section", (TNode ("a1", "para", []))::(TNode ("a2", "para", []))::[]))::(TNode ("b", "section", (TNode ("b1", "para", []))::[]))::[])
+
+
+let nested_tree : tree = TNode ("root", "doc", (TNode ("a", "section", (TNode ("a1", "para", []))::(TNode ("a2", "para", []))::(TNode ("b", "section", (TNode ("b1", "para", []))::[]))::[]))::[])
+
+
+let rec fields : ((Prims.string * Prims.string)  ->  Prims.string)  ->  (Prims.nat  ->  Prims.string)  ->  Prims.list<(Prims.string * Prims.string * Prims.nat)>  ->  Prims.list<Prims.string> = (fun ( render  :  (Prims.string * Prims.string)  ->  Prims.string ) ( show  :  Prims.nat  ->  Prims.string ) ( l  :  Prims.list<(Prims.string * Prims.string * Prims.nat)> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| ((i, k, n))::r -> begin
+     ((render ((i), (k))))::((show n))::(fields render show r)
+     end))
+
+
 
 

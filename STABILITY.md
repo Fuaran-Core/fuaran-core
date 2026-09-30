@@ -2847,6 +2847,109 @@ bytes; the new `StringEscape` suite runs the vector family (over 350 checks, eve
 through every escaper, both chain configs and the DAG line) and shows it going red on a row spelling
 `U+000A` as `\n`.
 
+### Every hash pre-image is injective and every tree digest sees the tree's shape (Phase 290) — BREAKING, `digest-move`: memo keys, projection digests, `contentHash` / `encodeHash` digests, `Index` fingerprints and `canonicalCodes` all change value; `additive` on the public surface (`Tree.encodePreimage`)
+
+**What changed.** Three hashing pre-images on the spine were not what their documentation claimed,
+and each was a soundness hole in a function a consumer keys on.
+
+1. **The tree digests see the shape.** `Tree.contentHash` and `Tree.encodeHash` folded the
+   PREORDER alone. A preorder does not determine a tree: `root(a(a1,a2), b(b1))` and
+   `root(a(a1,a2,b(b1)))` visit the same nodes in the same order, are one accepted `MoveNode(b, a)`
+   apart, and hashed equal under every encoder — including one that carries ids. Both folds now
+   write every preorder node as TWO fields, its label and its ARITY (`List.length (w.Children n)`),
+   through `Hash.canonicalFields`; a preorder with arities is injective over ordered trees
+   (`preorder_arity_injective`, `proofs/TreeOps.fst`, section 21). `Tree.encodePreimage` is the new
+   public function exposing that unhashed string — the only public-surface move, classed `additive`
+   by the gate — and `encodeHash` is its FNV-1a. `Tree.Index.fingerprintOf` (private; the
+   `NodeIndex.Fingerprint` stamp) builds `id`, `kind`, child count, child ids through the same
+   encoding where it joined on `>` and `,`, which an id can spell.
+2. **The memo key is the pre-image, not a hash of it.** `Function.memoKey` was two 32-bit FNV-1a
+   halves joined on a bare `U+0001`, and `applyMemo` served the cached tree on a key hit alone — so
+   a value spelling the separator (`{a = "X\u0001b=vY"}` keyed as `{a = "X"; b = "Y"}`), two
+   argument sets colliding under FNV-1a, or the two functions above each served the WRONG tree. The
+   key is now `Hash.canonicalFields` over the function's `encodePreimage` and its address-sorted
+   bindings (three fields each: address, case tag, payload — a slot payload is the slot subtree's
+   `encodePreimage`), so a `Map` hit IS an equality of `(function, param-set)` under the caller's
+   `encode`, with nothing to compare after it and no collision bound to record. The cost is the
+   key's length: a function's whole encoding beside the result tree the entry already holds.
+3. **Every key builds through one encoding, and a roster holds it.** `Projection.digestOf` and
+   `Validator.canonicalCodes` joined on the bare separator too; both now go through
+   `Hash.canonicalFields`. The doc comment above `canonicalFields` lists every key the spine mints
+   that is not a chain hash, and the `Hash.Roster` family reads that list and holds it to `src/`
+   both ways — every call site of `canonicalFields` is a listed definition, every listed definition
+   calls it, and no definition joins on a bare `foldSep`, a `+ foldSep +` splice or the `U+0001`
+   literal — so a new key cannot be minted without joining the list. `Hash.foldSep` itself is
+   written `"\u0001"` rather than the raw byte, and the raw-byte hazard is noted beside `fieldEsc`.
+4. **`Hash.utf8Bytes` is byte-for-byte the platform's answer on ill-formed input.** A high surrogate
+   is a pair only when the next unit is in `DC00..DFFF`; a lone or ill-ordered surrogate encodes as
+   `EF BF BD`, which is what `System.Text.Encoding.UTF8` emits. Until now the low half was consumed
+   unchecked (`"\uD801\uD800"` produced U+10000's four bytes, a trivial second pre-image for
+   `sha256Hex`) and a lone surrogate was written CESU-style; the platform-parity claim was tested
+   over a well-formed corpus only. Seven ill-formed rows join `HashTests`' parity corpus (asserted
+   against `Encoding.UTF8`) and `ParityVectors` (`utf8Bytes/ill-formed-*`, `sha256/ill-formed-lone-high`,
+   pinned on both pipelines). What replacement does NOT buy is injectivity — the platform maps
+   `"\uD800"`, `"\uDFFF"` and `"\uFFFD"` to one byte string — and `utf8Bytes` says so: it is the
+   UNGUARDED, platform-parity path; the guarded form that REFUSES an ill-formed unit wherever a
+   digest must name one string is Phase 306's, and nothing here pre-empts it.
+5. **The witness's two identities are one relation.** `Conformance.witnessLaws` gains the law
+   `Equals a b ⇔ ToString a = ToString b`, over every drawn pair AND over BUILT pairs — a drawn id
+   against its own string, its case-flipped and its whitespace-padded forms read back through
+   `OfString` — because the reference generator never draws two ids differing only in case, so a
+   case-insensitive `Equals` over a case-preserving `ToString` was green in every family. It is
+   refused by the kit now, by name, inside `certify`'s short-circuit, rather than downstream by the
+   first duplicate id `InsertChild(p, node "A")` slips past beside an existing `"a"`. A witness whose
+   `OfString` refuses a perturbation reports nothing for it (the law stays true over what the
+   witness can construct). `witnessLaws` reports FIVE laws; `certify` twenty.
+6. **`memoLaws` gains the separator-in-value case**, BUILT from the drawn param-set: the two-binding
+   set is cached, and the one-binding set whose value spells the separator and the next binding
+   must answer exactly what `apply` answers (a refusal — the hole is unbound) and must not be a hit.
+   `memoLaws` reports FIVE laws. Both new laws' census rows are in `docs/conformance-families.*`.
+
+**The proof leg.** `proofs/TreeOps.fst` section 21 (`preorder_arity_injective`, unconditional;
+`preorder_alone_aliases`, the evaluated premise; `digest_fields_injective`, conditional on the label
+and numeral renderers being injective, and named so in the ladder), `proofs/oracle/TreeOps.fs`
+re-extracted, three ladder rows (`tree-digest-preimage-injective`, `tree-digest-fields-recover-shape`,
+`tree-digest-differential`), and two `Proofs.Oracle` cases — the pre-image production folds equals
+the extracted model's rendered shape at every generated state, and a MIS-NESTING op bridge (every
+insert re-parented under the parent's deepest last descendant, which keeps the preorder) now loses
+on the result hash and on no verdict; under the arity-free fold it agreed (measured). Dropping the
+arity from the model refutes `shape_prefix` (measured).
+
+**What adopting it costs.**
+
+- **Every stored digest of these five kinds is stale.** A `MemoCache` built before this version
+  never hits again (its keys are eight-hex halves; the new keys are pre-images) — rebuild it; a
+  `NodeIndex` built before it reads as stale to `Index.isFreshFor` — rebuild it; a
+  `ProjectionSnapshot` taken before it reports every line changed on the first diff — retake it;
+  a persisted `contentHash` / `encodeHash` value (a bounded-escape region stamp, a domain's
+  structural-equality record) no longer matches — re-derive it. A host twin that mirrors any of
+  these folds re-implements the (label, arity) field encoding and re-certifies against the new
+  vectors at its next pin raise.
+- **`Validator.canonicalCodes` is a different string** — each code escaped and `U+0001`-terminated
+  rather than `U+0001`-joined — so a host that persisted the projection re-derives it and a twin
+  re-certifies. Two hosts still produce the same bytes for the same defect set.
+- **A `MemoCache` holds longer keys.** Per entry, the function's whole encoding and its arguments'
+  rather than sixteen hex characters. A consumer that sized a memo by entry count sizes it by
+  key length too.
+- **`Hash.utf8Bytes` / `sha256Hex` over an ILL-FORMED string give different bytes** — the platform's.
+  Over a well-formed string nothing moves (the `hashSweep/*` digest is unchanged). A consumer that
+  digested a lone surrogate before now gets the platform's digest for it, which is the one its
+  server-side `SHA256` already computed.
+- **A witness with two identities is refused.** A domain whose `Equals` is case-insensitive over a
+  case-preserving `ToString`, or whose `ToString` is lossy, now fails `witnessLaws` and `certify`
+  at the identities law. That domain was already unsound under `tryFind` / `wellFormed`; the kit
+  now says so before the algebra does.
+- **A `witnessLaws` / `memoLaws` / `certify` caller that counts laws** reads 5 / 5 / 20 where it
+  read 4 / 4 / 19.
+
+**Not done here, and named.** `Schema.fingerprint` (`Fuaran.Core.Column`) still joins `name:type`
+cells on the raw `U+0001` byte: `Column` references only `Wire` and its own comment declines the
+package edge to `Tree` that `canonicalFields` would need, and its bytes are pinned by the
+`hashSweep/*` rows. The `Hash.Roster` family names it as the ONE known bare join, by file and count,
+so a second one there still fails; the residue is the compute strand's to resolve. The guarded,
+refusing `utf8Bytes` and the parser-side refusal are Phase 306's. The wire encoder's string escaping
+is untouched (Phase 287 owns it).
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

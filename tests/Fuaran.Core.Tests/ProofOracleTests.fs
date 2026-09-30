@@ -1571,14 +1571,16 @@ let private emptyTreeTally =
       Rejected = 0
       Classes = Set.empty }
 
-/// One (op, state) asked of both sides.
-let private treeProbe
+/// One (op, state) asked of both sides. `opBridge` carries the op across given the STATE it is
+/// asked at — the faithful bridge ignores the state; the Phase 290 mis-nesting mutant reads it.
+let private treeProbeWith
     (bridge: RNode -> TreeOps.tree)
+    (opBridge: RNode -> SkeletonOp<RNode, string> -> TreeOps.op)
     (op: SkeletonOp<RNode, string>)
     (st: RNode)
     (acc: TreeTally)
     : TreeTally =
-    let mop = toModelOpWith bridge op
+    let mop = opBridge st op
     let mst = bridge st
     let where = sprintf "op %s at tree %s" (treeW.Encode op) (prodTreeHash st)
 
@@ -1649,10 +1651,18 @@ let private treeRefusals: SkeletonOp<RNode, string> list =
       UpdateNode(RNode.node "a" "aside" [])
       UpdateNode(RNode.leaf "no-such-node" "para" "v") ]
 
+let private treeProbe (bridge: RNode -> TreeOps.tree) op st acc =
+    treeProbeWith bridge (fun _ -> toModelOpWith bridge) op st acc
+
 /// Every op the generator yields, plus the refusals, asked at every state a prefix of the
 /// generated pool reaches — the same construction the Phase 132 diamond family uses, and for the
 /// same reason: a check at the base tree alone measures one instance.
-let private treeDifferential (bridge: RNode -> TreeOps.tree) (seed: int) (trials: int) : TreeTally =
+let private treeDifferentialWith
+    (bridge: RNode -> TreeOps.tree)
+    (opBridge: RNode -> SkeletonOp<RNode, string> -> TreeOps.op)
+    (seed: int)
+    (trials: int)
+    : TreeTally =
     let mutable r = ConfRng.ofSeed seed
     let mutable tally = emptyTreeTally
 
@@ -1673,9 +1683,33 @@ let private treeDifferential (bridge: RNode -> TreeOps.tree) (seed: int) (trials
 
         for op in generated @ treeRefusals do
             for st in states do
-                tally <- treeProbe bridge op st tally
+                tally <- treeProbeWith bridge opBridge op st tally
 
     tally
+
+let private treeDifferential (bridge: RNode -> TreeOps.tree) (seed: int) (trials: int) : TreeTally =
+    treeDifferentialWith bridge (fun _ -> toModelOpWith bridge) seed trials
+
+/// The MIS-NESTING mutant (Phase 290) — the go-red instrument for the digest's shape claim. An
+/// `InsertChild(p, n)` is carried across as an insert under the DEEPEST LAST DESCENDANT of `p`
+/// instead of under `p` itself: the two results have the SAME preorder (the new node is still the
+/// last thing visited after `p`'s subtree) and differ only in where it hangs. Until Phase 290
+/// `Tree.encodeHash` folded the preorder alone, so this mutant AGREED with production on the
+/// accepted-result hash at every insert — the differential could not see nesting — and the arity
+/// fold is what makes it lose. Every other op crosses faithfully, so the verdicts still agree: what
+/// has to fail is the result hash, and nothing else.
+let private toModelOpMisNest (st: RNode) (op: SkeletonOp<RNode, string>) : TreeOps.op =
+    let rec deepestLast (n: RNode) =
+        match List.tryLast n.Children with
+        | Some c -> deepestLast c
+        | None -> n.Id
+
+    match op with
+    | InsertChild(p, node) ->
+        match Tree.tryFind nodew idw p st with
+        | Some parent -> TreeOps.InsertChild(deepestLast parent, toModelTree node)
+        | None -> TreeOps.InsertChild(p, toModelTree node)
+    | other -> toModelOpWith toModelTree other
 
 /// The theorem's own instance on the EXTRACTED code: for every pair the model's `independent`
 /// declares disjoint and every state where both halves of the guarded algebra accept, the two
@@ -9583,6 +9617,112 @@ let proofOracleTests =
               Expect.isTrue
                   (t.Diffs |> List.exists (fun d -> d.Contains "accepted result differs"))
                   (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head t.Diffs))
+
+          testCase "a tree oracle handed a MIS-NESTING op bridge DISAGREES with Ops.apply — the digest sees the shape"
+          <| fun _ ->
+              // Phase 290's teeth on the differential itself. The mutant re-nests every accepted
+              // insert under the parent's deepest last descendant, which keeps the preorder and
+              // moves the shape. Under the arity-free fold this comparison was GREEN — measured:
+              // the preorder-only `Tree.encodeHash` hashed the two results equal — so a green
+              // report above said nothing about nesting. The arity fold makes it lose, on the
+              // result hash and on nothing else: every verdict still agrees.
+              let t = treeDifferentialWith toModelTree toModelOpMisNest 1330 3
+
+              Expect.isNonEmpty t.Diffs "a bridge that re-nests an insert must lose the result comparison"
+
+              Expect.isTrue
+                  (t.Diffs |> List.exists (fun d -> d.Contains "accepted result differs"))
+                  (sprintf "the disagreement names the arm that moved — got:\n%s" (List.head t.Diffs))
+
+              // The mutant re-parents the insert, so its FOOTPRINT names a different parent too —
+              // expected, and not the claim. What must NOT move is any VERDICT: the mutant inserts
+              // under a node that exists exactly when the original parent does, so accept/reject
+              // agrees at every state, and the shape is visible ONLY through the result hash.
+              let verdictMoved =
+                  t.Diffs
+                  |> List.filter (fun d ->
+                      d.Contains "ACCEPTED but"
+                      || d.Contains "REJECTED but"
+                      || d.Contains "rejection class differs")
+
+              Expect.isEmpty
+                  verdictMoved
+                  (sprintf "no verdict moved under the mis-nesting mutant:\n%s" (String.concat "\n" verdictMoved))
+
+              // And the pair the shard names, by hand: `root(a(a1,a2), b(b1))` against
+              // `root(a(a1,a2,b(b1)))` — one preorder, one `MoveNode` apart — hash distinctly
+              // through production's own function on the reference node AND on the model's tree.
+              let flat = treeBase
+
+              let nested =
+                  match Ops.apply nodew idw (MoveNode("b", "a")) treeBase with
+                  | Ok t -> t
+                  | Error e -> failtestf "MoveNode(b, a) was refused: %A" e
+
+              Expect.equal
+                  (Tree.preorder nodew flat |> List.map (fun n -> n.Id))
+                  (Tree.preorder nodew nested |> List.map (fun n -> n.Id))
+                  "the premise: one preorder"
+
+              Expect.notEqual (prodTreeHash flat) (prodTreeHash nested) "production tells them apart"
+
+              Expect.notEqual
+                  (modelTreeHash (toModelTree flat))
+                  (modelTreeHash (toModelTree nested))
+                  "so does the model's witness"
+
+          testCase "the digest pre-image production folds is the extracted model's shape, field for field"
+          <| fun _ ->
+              // Phase 290's bridge, measured: `preorder_arity_injective` is proved over
+              // `TreeOps.shape` — each node as (id, kind, arity) in preorder — and production's
+              // `Tree.encodePreimage` is `Hash.canonicalFields` over [label; arity] per node. The
+              // two must agree at every state the generated pool reaches, with the model's
+              // (id, kind) rendered exactly as the production label here renders it, so the
+              // theorem is known to be about the string the memo keys on and not a lookalike.
+              let render (i: string, k: string) = encWitnessNode i k
+              let mutable r = ConfRng.ofSeed 1332
+              let mutable states = 0
+
+              for _ in 1..30 do
+                  let lanes, r' = treeLaneGen.Lanes 3 r
+                  r <- r'
+
+                  let reached =
+                      List.concat lanes
+                      |> List.fold
+                          (fun (acc, cur) op ->
+                              match Ops.apply nodew idw op cur with
+                              | Ok t -> (acc @ [ t ]), t
+                              | Error _ -> acc, cur)
+                          ([ treeBase ], treeBase)
+                      |> fst
+
+                  for st in reached do
+                      states <- states + 1
+
+                      Expect.equal
+                          (Tree.encodePreimage nodew (fun n -> encWitnessNode n.Id n.Kind) st)
+                          (Hash.canonicalFields (TreeOps.fields render string (TreeOps.shape (toModelTree st))))
+                          (sprintf "production's pre-image is the model's rendered shape at tree %s" (prodTreeHash st))
+
+              Expect.isGreaterThan states 30 (sprintf "states reached (%d)" states)
+
+              // And the refutation the model evaluates, on production: the label preorder of the
+              // shard's pair is one list, the pre-image is two.
+              let nested =
+                  match Ops.apply nodew idw (MoveNode("b", "a")) treeBase with
+                  | Ok t -> t
+                  | Error e -> failtestf "MoveNode(b, a) was refused: %A" e
+
+              Expect.equal
+                  (TreeOps.labels (toModelTree treeBase))
+                  (TreeOps.labels (toModelTree nested))
+                  "the model's label preorder aliases the pair"
+
+              Expect.notEqual
+                  (TreeOps.shape (toModelTree treeBase))
+                  (TreeOps.shape (toModelTree nested))
+                  "and its shape does not"
 
           testCase "the extracted tree model keeps the diamond its own theorem proves"
           <| fun _ ->

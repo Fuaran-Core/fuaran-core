@@ -80,13 +80,14 @@ module Validator =
           Infos = defects |> List.filter (fun d -> d.Severity = Severity.Info) |> List.length }
 
     /// Canonical, order-independent projection of the emitted defect codes — the cross-host
-    /// byte-parity surface (two conformant hosts must produce the same set). The codes are joined
-    /// with the `U+0001` control byte (Phase 25), which no defect code contains, so the projection
-    /// cannot be aliased by a code that happens to hold the separator (the prior `,` join could).
-    /// Parity-string-breaking vs the old `,`-joined form — defect codes are stable identifiers, so
-    /// in practice unchanged, but a host that persisted the old projection should re-derive it.
+    /// byte-parity surface (two conformant hosts must produce the same set). The sorted codes go
+    /// through `Hash.canonicalFields` (Phase 290): each code escaped and terminated by `U+0001`, so
+    /// the projection is INJECTIVE over sorted code lists whatever a code contains — the Phase 25
+    /// bare `U+0001` join promised that only for codes that never spell the byte, and the `,` join
+    /// before it not even that. Parity-string-breaking vs both earlier forms: a host that persisted
+    /// the old projection re-derives it, and a host twin re-certifies against the new bytes.
     let canonicalCodes (defects: Defect<'Id> list) : string =
-        defects |> List.map (fun d -> d.Code) |> List.sort |> String.concat Hash.foldSep
+        defects |> List.map (fun d -> d.Code) |> List.sort |> Hash.canonicalFields
 
 /// A columnar validation rule over a `Table` (Phase 37) — the columnar analogue of `RuleFamily`,
 /// reusing the SAME `Defect` / `Severity` model (one defect vocabulary, GP-consistent). The location

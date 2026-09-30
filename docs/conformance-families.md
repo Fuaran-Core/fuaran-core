@@ -103,7 +103,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.hashFnLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
 | `Conformance.idempotencyLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 800 | `guarded-reached` | `drawn` |
 | `Conformance.keyedChildrenLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen` | `witness-surface-scope` | 600 | `guarded-reached` | `built` |
-| `Conformance.memoLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 | `unconditional` | `none` |
+| `Conformance.memoLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 1000 | `unconditional` | `none` |
 | `Conformance.memoSoundnessLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 100 | `unconditional` | `none` |
 | `Conformance.mergeConflictLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 900 | `guarded-reached` | `none` |
 | `Conformance.noAttestationVacuityLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
@@ -123,7 +123,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.snapshotLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
 | `Conformance.streamLaws` | `Fuaran.Core.Conformance` | base run | — | `StreamWitness`, `StreamGen` | — | 600 | `guarded-reached` | `drawn` |
 | `Conformance.verifyHonestyLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 400 | `unconditional` | `drawn-miss-is-red` |
-| `Conformance.witnessLaws` | `Fuaran.Core.Conformance` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 400 | `unconditional` | `none` |
+| `Conformance.witnessLaws` | `Fuaran.Core.Conformance` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 500 | `unconditional` | `none` |
 | `Conformance.witnessSurfaceLaws` | `Fuaran.Core.Conformance` | opt-in | `no-witness-to-certify` | — | — | 7 | `unconditional` | `none` |
 | `FoldConfluence.laneFoldLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
 | `FoldConfluence.laneFoldLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |

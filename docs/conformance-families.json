@@ -479,7 +479,7 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "800",
+      "cases": "1000",
       "adequacy": "unconditional",
       "refusal": "none"
     },
@@ -735,7 +735,7 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": false,
       "discharges": ["lawful-abstract-witness"],
-      "cases": "400",
+      "cases": "500",
       "adequacy": "unconditional",
       "refusal": "none"
     },
