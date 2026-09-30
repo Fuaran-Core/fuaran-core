@@ -7,9 +7,17 @@
     <Description>Fuaran.Core.Conformance — a property-based law kit a domain runs against its own witness to certify it conforms to the Fuaran.Core op algebra + op-stream: apply totality, canApply≡apply, apply∘invert=identity, verifyChain, and replay determinism. FSharp.Core only (a deterministic uint32 xorshift32 generator, no FsCheck), Fable-clean.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Phase 121 — the sample-adequacy guard, and with it `LawResult`. FIRST, because every
-         family below declares its demands through it, and because the guard deliberately depends
-         on no family it guards — which is also why the shared verdict type moved here. -->
+    <!-- Phase 297 — the verdict and adequacy types (`LawResult`, `CaseCount`, `AdequacyClass`),
+         moved out of SampleAdequacy.fs unchanged, FIRST; then the law-family roster, which
+         declares each family's adequacy class and refusal verdict on the family's own record and
+         carries strings, not laws, so it depends on nothing but those types; then the guard,
+         whose census is a projection of the roster. The roster sat LAST until this phase, where
+         appending kept it clear of every family; it moved because the guard reads it, and it
+         still depends on no family. -->
+    <Compile Include="LawResult.fs" />
+    <Compile Include="Families.fs" />
+    <!-- Phase 121 — the sample-adequacy guard. Ahead of every family, because every family
+         declares its demands through it, and it deliberately depends on no family it guards. -->
     <Compile Include="SampleAdequacy.fs" />
     <!-- Phase 297 — the kit is split by topic behind a facade. `ConfRng` (the generator) and the
          witness records come first because every family reads them; `LawKit` (the runner —
@@ -50,12 +58,6 @@
          Conformance.fs and carries no law, so it sits before the roster and depends on nothing
          after it. -->
     <Compile Include="ParityVectors.fs" />
-    <!-- Phase 184 — the law-family roster, exported as data. LAST, and the position is a
-         property rather than a habit: it declares the enumeration of every family above it and
-         depends on none of them (it carries strings, not laws), so appending is the only
-         placement that cannot make the roster a compile-order question. A family added to any
-         module above gains its record here in the same commit. -->
-    <Compile Include="Families.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

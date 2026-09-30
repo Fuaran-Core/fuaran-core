@@ -388,7 +388,11 @@ let private runs =
                    FoldConfluenceTests.treeLaneGen
                    3
                    1000
-                   120) ]
+                   120)
+
+           // Phase 297 — the null-tolerant read vectors: a fixed corpus, one law per vector, so the
+           // one run is the whole sample.
+           run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ()) ]
         : Run list)
 
 /// The family's own adequacy class, which is what decides how its run is read. Looked up rather

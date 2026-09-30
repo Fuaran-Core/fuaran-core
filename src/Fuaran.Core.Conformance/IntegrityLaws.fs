@@ -280,8 +280,10 @@ module internal IntegrityLaws =
     ///    holds under a *cryptographic* `HashFn` too (run the kit with the keyed / wide stand-in), since
     ///    a re-hashed forgery cannot be re-signed without the host key.
     ///
-    /// The `noAttestation` default makes every branch **vacuous** (`Sign ⇒ None ⇒` nothing to verify or
-    /// falsify), so adopting the kit never forces a sink on a host — see `noAttestationVacuityLaws`.
+    /// Under the `noAttestation` default every branch is **vacuous** (`Sign ⇒ None ⇒` nothing to verify
+    /// or falsify), and since Phase 196 the family's signing-outcome guard reports that run RED rather
+    /// than green. Adopting the kit still never forces a sink on a host: a host with none runs
+    /// `noAttestationVacuityLaws` instead.
     /// Opt-in like `snapshotLaws` / `dagLaws`. `'State` needs equality (replay-equivalence).
     let attestationLaws
         (sw: StreamWitness<'Op, 'State, 'Rej>)
@@ -441,7 +443,8 @@ module internal IntegrityLaws =
     /// (`attestHead noAttestation ⇒ None`) and verifies nothing (`verifyAttestation noAttestation _ ⇒
     /// false`), and — because attestation is a read-only side-band — the chain is byte-identical whether
     /// or not a host ever attests. So adopting the seam is free: no sink ⇒ exactly the pre-attestation
-    /// path, and `attestationLaws OpStream.noAttestation` passes vacuously. Self-contained over a supplied
+    /// path — which is why a host with no sink runs THIS family, and not `attestationLaws
+    /// OpStream.noAttestation`, whose guard reds the vacuous run (Phase 196). Self-contained over a supplied
     /// witness + stream generator; `'State` is not compared.
     let noAttestationVacuityLaws
         (sw: StreamWitness<'Op, 'State, 'Rej>)

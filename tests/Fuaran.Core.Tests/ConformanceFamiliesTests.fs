@@ -302,7 +302,11 @@ let familiesTests =
                     Witness = []
                     OptIn = true
                     Reason = None
-                    Discharges = [] }
+                    Discharges = []
+                    Adequacy = Unconditional "a made-up family"
+                    Refusal =
+                      { Population = Families.NoRefusal
+                        Why = "a made-up family" } }
 
               Expect.notEqual
                   unexplained.OptIn
@@ -484,14 +488,25 @@ let familiesTests =
               // `LawFamily` records, it must equal `KitRoster.families` exactly. This is the leg
               // that would catch an escaping bug, a member dropped by a renderer edit, or a
               // `witness` list silently flattened to a string.
+              // Phase 297: the export carries a family's adequacy class and refusal verdict as
+              // their TOKENS (`adequacy`, `refusal` — see the shape test above); the prose behind
+              // them stays on the roster record. So those two fields are taken from the record the
+              // id names, and the leg still catches every member the export does carry.
               let mk id m entry witness optIn reason discharges : Families.LawFamily =
+                  let declared =
+                      match KitRoster.tryFind id with
+                      | Some f -> f
+                      | None -> failtestf "the export names %s, which the roster does not carry" id
+
                   { Id = id
                     Module = m
                     Entry = entry
                     Witness = witness
                     OptIn = optIn
                     Reason = reason
-                    Discharges = discharges }
+                    Discharges = discharges
+                    Adequacy = declared.Adequacy
+                    Refusal = declared.Refusal }
 
               let strList v =
                   match v with

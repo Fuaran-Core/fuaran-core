@@ -902,8 +902,8 @@ module internal TreeLaws =
     /// shape (Phase 147). `certify` runs over any `OpGen`, and `OpGen.CanHold` is an OPTION: folding
     /// this family in would add laws that cannot fail for every domain that leaves it `None`, which
     /// is the vacuity this kit exists to refuse, and would make `certify`'s law count depend on its
-    /// input. A domain with a container notion calls this alongside its base run;
-    /// `Conformance.certify` still returns 14 results.
+    /// input. A domain with a container notion calls this alongside its base run, and
+    /// `Conformance.certify`'s results do not depend on whether it does.
     ///
     /// **A domain that declares NO predicate is reported by name rather than skipped** — the
     /// `constructThenEncodeLaws` precedent. Calling this family is a claim to have a container
