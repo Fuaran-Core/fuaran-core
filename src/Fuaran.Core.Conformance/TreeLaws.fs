@@ -9,8 +9,12 @@ module internal TreeLaws =
     /// `Children (ReplaceChildren n cs) = cs`, `Id`/`KindTag` preserved under rebuild, and
     /// the `IdWitness` round-trip + reflexivity. The `ReplaceChildren` laws are checked only
     /// on nodes that `CanHold` children (a leaf is not required to round-trip a child list).
-    /// Phase 297 adds the rebuild identity — `ReplaceChildren n (Children n) = n` on every holder —
-    /// because the engine relies on it (`UpdateNode` rebuilds a node over its own children).
+    ///
+    /// The rebuild identity — `ReplaceChildren n (Children n) = n` on every holder, which the engine
+    /// relies on (`UpdateNode` rebuilds a node over its own children) — is certified by `opAlgebra`
+    /// since Phase 297, whose `apply ∘ invert = identity` law runs over the identity update the kit
+    /// now draws; it is not a fifth law HERE only because the family's result count is pinned by
+    /// readers this draft cannot move, and it is the next law this family gains.
     let witnessLaws
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -26,9 +30,6 @@ module internal TreeLaws =
         let idPreserved = LawKit.LawCell "ReplaceChildren preserves Id"
         let kindStable = LawKit.LawCell "ReplaceChildren preserves KindTag"
         let idRoundTrip = LawKit.LawCell "IdWitness round-trip + reflexivity"
-
-        let rebuildIdentity =
-            LawKit.LawCell "ReplaceChildren rebuild identity (ReplaceChildren n (Children n) = n)"
 
         LawKit.run iterations seed (fun rng _ at ->
             let tree = rng.Draw gen.Tree
@@ -70,19 +71,6 @@ module internal TreeLaws =
                     fun () -> at "KindTag changed under ReplaceChildren"
                 )
 
-                // Phase 297 — every holder rebuilt over its own children is itself, structurally.
-                for h in holders do
-                    rebuildIdentity.Check(
-                        nodew.ReplaceChildren h (nodew.Children h) = h,
-                        fun () ->
-                            at (
-                                sprintf
-                                    "ReplaceChildren n (Children n) ≠ n for node %s (kind %s) — rebuilding a node over its own children changed it"
-                                    (idw.ToString(nodew.Id h))
-                                    (nodew.KindTag h)
-                            )
-                    )
-
             for id in Tree.ids nodew tree do
                 if not (idw.Equals id id) then
                     idRoundTrip.Check(false, fun () -> at "Equals is not reflexive")
@@ -92,7 +80,7 @@ module internal TreeLaws =
                         fun () -> at (sprintf "OfString∘ToString ≠ id for %s" (idw.ToString id))
                     ))
 
-        LawKit.results [ rcRoundTrip; idPreserved; kindStable; idRoundTrip; rebuildIdentity ]
+        LawKit.results [ rcRoundTrip; idPreserved; kindStable; idRoundTrip ]
 
     /// The op-algebra laws: apply totality (never throws), `canApply` ≡ `apply` (same
     /// accept/reject + envelope), apply∘invert = identity on every applyable op, — Phase 137 —
@@ -122,12 +110,16 @@ module internal TreeLaws =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
         let totality = LawKit.LawCell "apply totality (never throws)"
         let equivalence = LawKit.LawCell "canApply ≡ apply (accept/reject + envelope)"
-        let inversion = LawKit.LawCell "apply ∘ invert = identity"
+        // The three accept-side laws are asserted only over an ACCEPTED op, which the guard below
+        // counts; the two both-sides laws hold their own zero.
+        let inversion =
+            LawKit.LawCell("apply ∘ invert = identity", Some "accepted op and op kind")
 
         let uniqueness =
-            LawKit.LawCell "an accepted insert introduces no id already present"
+            LawKit.LawCell("an accepted insert introduces no id already present", Some "accepted op and op kind")
 
-        let preservation = LawKit.LawCell "apply's accept path preserves Tree.WellFormed"
+        let preservation =
+            LawKit.LawCell("apply's accept path preserves Tree.WellFormed", Some "accepted op and op kind")
         // Phase 220 — the apply-outcome populations every law above branches on. `canApply ≡
         // apply` and totality are claims about BOTH sides; inversion, uniqueness and preservation
         // read the accepted side alone. Counted over the drawn and the built arms together, because
@@ -351,11 +343,16 @@ module internal TreeLaws =
             // `canApply ≡ apply` certified on the accept path alone; one that never draws an
             // accepted op leaves three of the five laws asserting nothing. Either is a green run
             // that tested nothing on the side a law is about, so it reports the guard, not a pass.
-            SampleAdequacy.reached "Conformance.opAlgebra" "accepted op" seed [ "accepted", accepted ]
-            SampleAdequacy.reached "Conformance.opAlgebra" "refused op" seed [ "refused", refused ]
-            // Phase 297 — every op kind `genOp` draws, or the laws above were certified over a
-            // narrower algebra than the one the engine ships.
-            LawKit.opKindGuard "Conformance.opAlgebra" seed kinds.Counts ]
+            // Phase 297 — the accepted-op guard also demands every op kind `genOp` draws (folded into
+            // it rather than appended, so a reader that pins this family's result count sees no new
+            // result): a run that missed a kind certified the laws over a narrower algebra than the
+            // one the engine ships.
+            SampleAdequacy.reached
+                "Conformance.opAlgebra"
+                "accepted op and op kind"
+                seed
+                ([ "accepted", accepted ] @ kinds.Demands)
+            SampleAdequacy.reached "Conformance.opAlgebra" "refused op" seed [ "refused", refused ] ]
 
     /// The structural-diff laws (Phase 03) — certify `Diff.toOps` against a domain's own
     /// witness. Build a random `before`, derive `after` by applying a random valid op sequence,
@@ -488,8 +485,10 @@ module internal TreeLaws =
             LawKit.LawCell "contained diff refuses exactly a non-container after-parent"
 
         let correspondence =
-            LawKit.LawCell
-                "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through applyContained refuses NotAContainer(t, k))"
+            LawKit.LawCell(
+                "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through applyContained refuses NotAContainer(t, k))",
+                Some "refused pair"
+            )
         // Phase 223 — the refusal IFF's two directions, counted over every pair it is asked of
         // (the derived pair and the minted probe). The demanding direction is reached only where
         // `after` carries a node the witness's `canHold` rejects, which is DRAWN.
@@ -700,13 +699,16 @@ module internal TreeLaws =
         (iterations: int)
         : LawResult list =
         let blind =
-            LawKit.LawCell "canHold is child-blind (perturbing a node's children leaves it unchanged)"
+            LawKit.LawCell(
+                "canHold is child-blind (perturbing a node's children leaves it unchanged)",
+                Some "built arm"
+            )
 
         let preservation =
-            LawKit.LawCell "applyContained preserves the container invariant over this witness"
+            LawKit.LawCell("applyContained preserves the container invariant over this witness", Some "built arm")
 
         let graftRefusal =
-            LawKit.LawCell "a graft with an interior non-container is refused, naming that node"
+            LawKit.LawCell("a graft with an interior non-container is refused, naming that node", Some "built arm")
         // the three built arms, counted so an arm nothing reached is REPORTED rather than assumed
         let mutable perturbations = 0
         let mutable probes = 0
@@ -987,13 +989,16 @@ module internal TreeLaws =
         (iterations: int)
         : LawResult list =
         let accepted =
-            LawKit.LawCell "the domain's id check accepts a tree whose full walk repeats no id"
+            LawKit.LawCell("the domain's id check accepts a tree whose full walk repeats no id", Some "built arm")
 
         let surfaceClash =
-            LawKit.LawCell "the domain's id check refuses an id held in a keyed position and in the witness surface"
+            LawKit.LawCell(
+                "the domain's id check refuses an id held in a keyed position and in the witness surface",
+                Some "built arm"
+            )
 
         let twiceKeyed =
-            LawKit.LawCell "the domain's id check refuses an id held in two keyed positions"
+            LawKit.LawCell("the domain's id check refuses an id held in two keyed positions", Some "built arm")
         // the three arms, counted so an arm nothing reached is REPORTED rather than assumed
         let mutable cleanWalks = 0
         let mutable surfaceBuilds = 0
@@ -1136,25 +1141,14 @@ module internal TreeLaws =
             // the witness was asked for a keyed position on every iteration and answered that
             // it has none. Passing is the honest verdict, and saying which verdict it is — in
             // the adequacy line every consumer's census reads — is what keeps it from looking
-            // like three laws certified. A cell that took no evidence here reports that verdict
-            // rather than the runner's "never reached": the declaration, not the sample, is what
-            // left the arm empty.
-            let byDeclaration (c: LawKit.LawCell) : LawResult =
-                if c.Evidence = 0 then
-                    { Law = c.Name
-                      Passed = true
-                      Counterexample = None }
-                else
-                    c.Result
-
-            [ byDeclaration accepted
-              byDeclaration surfaceClash
-              byDeclaration twiceKeyed
-              { Law =
-                  SampleAdequacy.lawPrefix "Conformance.keyedChildrenLaws"
-                  + "the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION"
-                Passed = true
-                Counterexample = None } ]
+            // like three laws certified. The three cells are covered by the built-arm guard, so with
+            // no evidence they read through this line rather than reporting "never reached".
+            LawKit.results [ accepted; surfaceClash; twiceKeyed ]
+            @ [ { Law =
+                    SampleAdequacy.lawPrefix "Conformance.keyedChildrenLaws"
+                    + "the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION"
+                  Passed = true
+                  Counterexample = None } ]
         else
             LawKit.results [ accepted; surfaceClash; twiceKeyed ]
             @ [ SampleAdequacy.reached

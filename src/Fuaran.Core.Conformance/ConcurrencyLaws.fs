@@ -29,33 +29,24 @@ module internal ConcurrencyLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
         let hashOf = Tree.encodeHash nodew encode
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable soundness = None
-        let mutable monotonicity = None
-        let mutable determinism = None
+
+        let soundness =
+            LawKit.LawCell(
+                "footprint soundness (an independent pair commutes under apply — content-hash equal)",
+                Some "script-pair independence and op kind"
+            )
+
+        let monotonicity =
+            LawKit.LawCell "footprint monotonicity (a sub-script's footprint ⊆ its script's)"
+
+        let determinism =
+            LawKit.LawCell "footprint determinism (a pure function of the script)"
         // Phase 121 — the soundness law only runs on an INDEPENDENT pair, so a generator that never
         // produced one would certify it green having never applied it once.
         let mutable independentPairs = 0
-
-        // Thread up to `n` random ops through `apply`, keeping the accepted ones — an applyable script.
-        let collectScript n (tree: 'Node) (r0: ConfRng.T) =
-            let mutable cur = tree
-            let mutable accepted = []
-            let mutable r = r0
-
-            for _ in 1..n do
-                let op, r' = LawKit.genOp nodew idw gen cur r
-                r <- r'
-
-                match Ops.applyContained canHold nodew idw op cur with
-                | Ok t' ->
-                    cur <- t'
-                    accepted <- accepted @ [ op ]
-                | Error _ -> ()
-
-            accepted, r
+        // Phase 297 — the kind of every DRAWN op, folded into the guard below.
+        let kinds = LawKit.OpKindTally()
 
         let subsetFp (s: Footprint) (f: Footprint) =
             Set.isSubset s.Reads f.Reads
@@ -63,26 +54,28 @@ module internal ConcurrencyLaws =
             && Set.isSubset s.ContentWrites f.ContentWrites
             && Set.isSubset s.UnknownParentWrites f.UnknownParentWrites
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            let a, r2 = collectScript 4 tree r1
-            let b, r3 = collectScript 4 tree r2
-            rng <- r3
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
+            let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+            let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
 
             let fa = Ops.footprint nodew idw a
             let fb = Ops.footprint nodew idw b
 
             // determinism: footprint is a pure function of the script.
-            if Ops.footprint nodew idw a <> fa && determinism.IsNone then
-                determinism <- Some(sprintf "seed=%d iter=%d: footprint is not a pure function of the script" seed i)
+            determinism.Check(
+                Ops.footprint nodew idw a = fa,
+                fun () -> at "footprint is not a pure function of the script"
+            )
 
             // monotonicity: a prefix's footprint ⊆ the full script's.
-            let k, r4 = ConfRng.intBelow (List.length a + 1) rng
-            rng <- r4
+            let k = rng.IntBelow(List.length a + 1)
             let prefix = List.truncate k a
 
-            if not (subsetFp (Ops.footprint nodew idw prefix) fa) && monotonicity.IsNone then
-                monotonicity <- Some(sprintf "seed=%d iter=%d: a %d-op prefix footprint ⊄ the full footprint" seed i k)
+            monotonicity.Check(
+                subsetFp (Ops.footprint nodew idw prefix) fa,
+                fun () -> at (sprintf "a %d-op prefix footprint ⊄ the full footprint" k)
+            )
 
             // soundness: an independent pair must commute under apply (content-hash equality).
             if Ops.independent fa fb then
@@ -95,36 +88,22 @@ module internal ConcurrencyLaws =
                 let ba =
                     applyAll b tree |> Result.bind (fun tb -> applyAll a tb |> Result.map hashOf)
 
-                match ab, ba with
-                | Ok ha, Ok hb when ha = hb -> ()
-                | _ ->
-                    if soundness.IsNone then
-                        soundness <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: an INDEPENDENT pair did not commute under apply (a=%A b=%A ab=%A ba=%A)"
-                                    seed
-                                    i
-                                    a
-                                    b
-                                    ab
-                                    ba
-                            )
+                soundness.Check(
+                    (match ab, ba with
+                     | Ok ha, Ok hb when ha = hb -> true
+                     | _ -> false),
+                    fun () ->
+                        at (
+                            sprintf "an INDEPENDENT pair did not commute under apply (a=%A b=%A ab=%A ba=%A)" a b ab ba
+                        )
+                ))
 
-        [ { Law = "footprint soundness (an independent pair commutes under apply — content-hash equal)"
-            Passed = soundness.IsNone
-            Counterexample = soundness }
-          { Law = "footprint monotonicity (a sub-script's footprint ⊆ its script's)"
-            Passed = monotonicity.IsNone
-            Counterexample = monotonicity }
-          { Law = "footprint determinism (a pure function of the script)"
-            Passed = determinism.IsNone
-            Counterexample = determinism }
-          SampleAdequacy.reached
-              "footprintLaws"
-              "script-pair independence"
-              seed
-              [ "independent pair", independentPairs ] ]
+        LawKit.results [ soundness; monotonicity; determinism ]
+        @ [ SampleAdequacy.reached
+                "Conformance.footprintLaws"
+                "script-pair independence and op kind"
+                seed
+                ([ "independent pair", independentPairs ] @ kinds.Demands) ]
 
     /// The merge-conflict enumeration laws (Phase 64) — the teeth on `Dag.conflicts` and the
     /// "detection is the negation of #78 independence, decomposed by shape" claim. Over a
@@ -150,46 +129,32 @@ module internal ConcurrencyLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
         let fp (op: SkeletonOp<'Node, 'Id>) = Ops.footprint nodew idw [ op ]
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable symmetryCx = None
-        let mutable determinismCx = None
-        let mutable agreementCx = None
+
+        let symmetry =
+            LawKit.LawCell "conflicts is symmetric (conflicts a b ≡ conflicts b a up to Left/Right swap)"
+
+        let determinism =
+            LawKit.LawCell "conflicts is deterministic (a pure function of its inputs)"
+
+        let agreement =
+            LawKit.LawCell "conflicts agrees with #78 (a pair is reported iff its footprints are not independent)"
         // Phase 121 — the agreement law is an `iff` over generated op pairs, so it is satisfied
         // trivially by a sample in which no pair is ever reported (or in which every pair is).
         let mutable reportedPairs = 0
         let mutable unreportedPairs = 0
+        // Phase 297 — the kind of every DRAWN op, folded into the guard below.
+        let kinds = LawKit.OpKindTally()
 
-        // Thread up to `n` random ops through `apply`, keeping the accepted ones — an applyable script.
-        let collectScript n (tree: 'Node) (r0: ConfRng.T) =
-            let mutable cur = tree
-            let mutable accepted = []
-            let mutable r = r0
-
-            for _ in 1..n do
-                let op, r' = LawKit.genOp nodew idw gen cur r
-                r <- r'
-
-                match Ops.applyContained canHold nodew idw op cur with
-                | Ok t' ->
-                    cur <- t'
-                    accepted <- accepted @ [ op ]
-                | Error _ -> ()
-
-            accepted, r
-
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            let a, r2 = collectScript 4 tree r1
-            let b, r3 = collectScript 4 tree r2
-            rng <- r3
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
+            let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+            let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
 
             let ab = Dag.conflicts fp a b
 
             // determinism: a pure function of the inputs.
-            if Dag.conflicts fp a b <> ab && determinismCx.IsNone then
-                determinismCx <- Some(sprintf "seed=%d iter=%d: conflicts is not a pure function of its inputs" seed i)
+            determinism.Check(Dag.conflicts fp a b = ab, fun () -> at "conflicts is not a pure function of its inputs")
 
             // symmetry: conflicts a b ≡ conflicts b a up to each pair's Left/Right swap.
             let ba = Dag.conflicts fp b a
@@ -210,8 +175,7 @@ module internal ConcurrencyLaws =
                    |> List.forall (fun x ->
                        (xs |> List.filter ((=) x) |> List.length) = (ys |> List.filter ((=) x) |> List.length))
 
-            if not (sameMultiset fwd bwd) && symmetryCx.IsNone then
-                symmetryCx <- Some(sprintf "seed=%d iter=%d: conflicts a b ≠ conflicts b a (up to pair swap)" seed i)
+            symmetry.Check(sameMultiset fwd bwd, fun () -> at "conflicts a b ≠ conflicts b a (up to pair swap)")
 
             // agreement with #78: a pair is reported iff its footprints are not independent.
             for oa in a do
@@ -224,33 +188,19 @@ module internal ConcurrencyLaws =
                     else
                         unreportedPairs <- unreportedPairs + 1
 
-                    if reported <> dependent && agreementCx.IsNone then
-                        agreementCx <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: reported=%b but not-independent=%b for (%A, %A)"
-                                    seed
-                                    i
-                                    reported
-                                    dependent
-                                    oa
-                                    ob
-                            )
+                    agreement.Check(
+                        (reported = dependent),
+                        fun () ->
+                            at (sprintf "reported=%b but not-independent=%b for (%A, %A)" reported dependent oa ob)
+                    ))
 
-        [ { Law = "conflicts is symmetric (conflicts a b ≡ conflicts b a up to Left/Right swap)"
-            Passed = symmetryCx.IsNone
-            Counterexample = symmetryCx }
-          { Law = "conflicts is deterministic (a pure function of its inputs)"
-            Passed = determinismCx.IsNone
-            Counterexample = determinismCx }
-          { Law = "conflicts agrees with #78 (a pair is reported iff its footprints are not independent)"
-            Passed = agreementCx.IsNone
-            Counterexample = agreementCx }
-          SampleAdequacy.reached
-              "mergeConflictLaws"
-              "op-pair interference"
-              seed
-              [ "reported pair", reportedPairs; "unreported pair", unreportedPairs ] ]
+        LawKit.results [ symmetry; determinism; agreement ]
+        @ [ SampleAdequacy.reached
+                "Conformance.mergeConflictLaws"
+                "op-pair interference and op kind"
+                seed
+                ([ "reported pair", reportedPairs; "unreported pair", unreportedPairs ]
+                 @ kinds.Demands) ]
 
     /// The branch-reconciliation laws (Phase 83) — the teeth on `Dag.reconcile` and its "fold what
     /// commutes, hand conflicts back untouched" contract (GP6). Over a seed-replayable sample it builds
@@ -310,11 +260,26 @@ module internal ConcurrencyLaws =
             ops
             |> List.fold (fun acc op -> acc |> Result.bind (fun s -> Ops.applyContained canHold nodew idw op s)) (Ok t)
 
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable cleanCx = None
-        let mutable crossCx = None
-        let mutable conflictedCx = None
-        let mutable determinismCx = None
+        let clean =
+            LawKit.LawCell(
+                "reconcile clean fold replays order-independently (content-hash equal)",
+                Some "reconcile outcome"
+            )
+
+        let cross =
+            LawKit.LawCell(
+                "reconcile is conflict-free when the deltas are footprint-independent (#78 cross-validation)",
+                Some "delta-pair independence and op kind"
+            )
+
+        let conflicted =
+            LawKit.LawCell(
+                "reconcile hands back Dag.conflicts' report on conflict (nothing applied)",
+                Some "reconcile outcome"
+            )
+
+        let determinism =
+            LawKit.LawCell "reconcile is deterministic + order-pinned (pure fn of (base, headA, headB))"
         // Phase 121 — three of the four laws below only run on a sample that reached their branch:
         // the clean-fold law needs an `Ok`, the conflicted-path law needs an `Error`, and the
         // cross-validation law needs a footprint-independent delta pair. A run that reached only
@@ -322,23 +287,8 @@ module internal ConcurrencyLaws =
         let mutable cleanFolds = 0
         let mutable conflictedFolds = 0
         let mutable independentDeltas = 0
-
-        let collectScript n (tree: 'Node) (r0: ConfRng.T) =
-            let mutable cur = tree
-            let mutable accepted = []
-            let mutable r = r0
-
-            for _ in 1..n do
-                let op, r' = LawKit.genOp nodew idw gen cur r
-                r <- r'
-
-                match Ops.applyContained canHold nodew idw op cur with
-                | Ok t' ->
-                    cur <- t'
-                    accepted <- accepted @ [ op ]
-                | Error _ -> ()
-
-            accepted, r
+        // Phase 297 — the kind of every DRAWN op, folded into the second guard below.
+        let kinds = LawKit.OpKindTally()
 
         // Chain a script onto `parent`, returning the new head (parent itself when the script is empty).
         let chain (ops: SkeletonOp<'Node, 'Id> list) (parent: string) (d0: Dag.T<SkeletonOp<'Node, 'Id>>) =
@@ -352,11 +302,10 @@ module internal ConcurrencyLaws =
 
             head, d
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            let a, r2 = collectScript 4 tree r1
-            let b, r3 = collectScript 4 tree r2
-            rng <- r3
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
+            let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+            let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
 
             // a fork DAG: a genesis base node (its op never participates — it is in the base closure,
             // which betweenOps excludes), then branch A and branch B forked off the base.
@@ -371,78 +320,69 @@ module internal ConcurrencyLaws =
             let result = Dag.reconcile fp dag baseId headA headB
 
             // determinism + order pinning: a pure function of (base, headA, headB); clean script pinned.
-            if Dag.reconcile fp dag baseId headA headB <> result && determinismCx.IsNone then
-                determinismCx <- Some(sprintf "seed=%d iter=%d: reconcile is not a pure function of its inputs" seed i)
+            determinism.Check(
+                Dag.reconcile fp dag baseId headA headB = result,
+                fun () -> at "reconcile is not a pure function of its inputs"
+            )
 
             match result with
             | Ok script ->
                 cleanFolds <- cleanFolds + 1
 
-                if script <> deltaA @ deltaB && determinismCx.IsNone then
-                    determinismCx <-
-                        Some(sprintf "seed=%d iter=%d: clean script ≠ betweenOps A ++ betweenOps B (order pin)" seed i)
+                determinism.Check(
+                    (script = deltaA @ deltaB),
+                    fun () -> at "clean script ≠ betweenOps A ++ betweenOps B (order pin)"
+                )
 
                 // clean-merge replay: script ≡ A-then-B ≡ B-then-A on the base tree (content hash).
                 let viaScript = applyAll script tree |> Result.map hashOf
                 let ab = applyAll deltaA tree |> Result.bind (applyAll deltaB) |> Result.map hashOf
                 let ba = applyAll deltaB tree |> Result.bind (applyAll deltaA) |> Result.map hashOf
 
-                match viaScript, ab, ba with
-                | Ok hs, Ok hab, Ok hba when hs = hab && hab = hba -> ()
-                | _ ->
-                    if cleanCx.IsNone then
-                        cleanCx <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: a conflict-free merge did not fold order-independently (script=%A ab=%A ba=%A)"
-                                    seed
-                                    i
-                                    viaScript
-                                    ab
-                                    ba
-                            )
+                clean.Check(
+                    (match viaScript, ab, ba with
+                     | Ok hs, Ok hab, Ok hba when hs = hab && hab = hba -> true
+                     | _ -> false),
+                    fun () ->
+                        at (
+                            sprintf
+                                "a conflict-free merge did not fold order-independently (script=%A ab=%A ba=%A)"
+                                viaScript
+                                ab
+                                ba
+                        )
+                )
             | Error cs ->
                 conflictedFolds <- conflictedFolds + 1
 
                 // the conflicted path returns exactly Dag.conflicts' report, nothing applied.
-                if cs <> Dag.conflicts fp deltaA deltaB && conflictedCx.IsNone then
-                    conflictedCx <- Some(sprintf "seed=%d iter=%d: Error payload ≠ Dag.conflicts report" seed i)
+                conflicted.Check(
+                    (cs = Dag.conflicts fp deltaA deltaB),
+                    fun () -> at "Error payload ≠ Dag.conflicts report"
+                )
 
             // footprint cross-validation: footprint-independent deltas ⇒ conflict-free (Ok).
             if Ops.independent (Ops.footprint nodew idw deltaA) (Ops.footprint nodew idw deltaB) then
                 independentDeltas <- independentDeltas + 1
 
-                match result with
-                | Ok _ -> ()
-                | Error _ ->
-                    if crossCx.IsNone then
-                        crossCx <-
-                            Some(
-                                sprintf "seed=%d iter=%d: footprint-independent deltas were NOT reconciled clean" seed i
-                            )
+                cross.Check(
+                    (match result with
+                     | Ok _ -> true
+                     | Error _ -> false),
+                    fun () -> at "footprint-independent deltas were NOT reconciled clean"
+                ))
 
-        [ { Law = "reconcile clean fold replays order-independently (content-hash equal)"
-            Passed = cleanCx.IsNone
-            Counterexample = cleanCx }
-          { Law = "reconcile is conflict-free when the deltas are footprint-independent (#78 cross-validation)"
-            Passed = crossCx.IsNone
-            Counterexample = crossCx }
-          { Law = "reconcile hands back Dag.conflicts' report on conflict (nothing applied)"
-            Passed = conflictedCx.IsNone
-            Counterexample = conflictedCx }
-          { Law = "reconcile is deterministic + order-pinned (pure fn of (base, headA, headB))"
-            Passed = determinismCx.IsNone
-            Counterexample = determinismCx }
-          SampleAdequacy.reached
-              "reconcileLaws"
-              "reconcile outcome"
-              seed
-              [ "clean fold", cleanFolds; "conflicted fold", conflictedFolds ]
-          SampleAdequacy.reached
-              "reconcileLaws"
-              "delta-pair independence"
-              seed
-              [ "independent delta pair", independentDeltas ] ]
+        LawKit.results [ clean; cross; conflicted; determinism ]
+        @ [ SampleAdequacy.reached
+                "Conformance.reconcileLaws"
+                "reconcile outcome"
+                seed
+                [ "clean fold", cleanFolds; "conflicted fold", conflictedFolds ]
+            SampleAdequacy.reached
+                "Conformance.reconcileLaws"
+                "delta-pair independence and op kind"
+                seed
+                ([ "independent delta pair", independentDeltas ] @ kinds.Demands) ]
 
     // ---- confluence / interleaving law (Phase 80) ----
     // The coordination claim the agent-fleet substrate rests on: op-scripts `Ops.independent`
@@ -490,9 +430,10 @@ module internal ConcurrencyLaws =
     ///    independence must survive any op-level schedule, not just whole-script sequencing;
     ///  - **confluence** — every sampled interleaving replays to the content-hash-equal tree
     ///    (the Phase-06 encoder hash) of the sequential `a @ b` reference order;
-    ///  - **coverage** — the sample exercised at least one non-empty independent pair (a vacuity
-    ///    guard: a run whose generator never yields an independent pair certifies nothing, and
-    ///    says so instead of reporting a hollow green).
+    ///  - **coverage** — the sample exercised at least one non-empty independent pair, and every
+    ///    op kind (a vacuity guard, in `SampleAdequacy`'s words since Phase 297: a run whose
+    ///    generator never yields an independent pair certifies nothing, and says so instead of
+    ///    reporting a hollow green).
     ///
     /// **Honesty boundary (the Phase 52 discipline): sufficiency, not necessity.** Independence is
     /// *sufficient* for confluence, never *necessary* — a pair NOT declared independent is
@@ -507,108 +448,95 @@ module internal ConcurrencyLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
         let hashOf = Tree.encodeHash nodew encode
         // The documented bound: 8 sampled riffles + the two sequential extremes per pair.
         let riffleSamples = 8
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable totality = None
-        let mutable confluence = None
-        let mutable checkedPairs = 0
 
-        // Thread up to `n` random ops through `apply`, keeping the accepted ones — an applyable script.
-        let collectScript n (tree: 'Node) (r0: ConfRng.T) =
-            let mutable cur = tree
-            let mutable accepted = []
-            let mutable r = r0
+        let totality =
+            LawKit.LawCell(
+                "interleaving totality (every sampled interleaving of an independent pair applies cleanly)",
+                Some "independent pair (coverage) and op kind"
+            )
 
-            for _ in 1..n do
-                let op, r' = LawKit.genOp nodew idw gen cur r
-                r <- r'
+        let confluence =
+            LawKit.LawCell(
+                "confluence (every sampled interleaving of an independent pair replays content-hash-equal)",
+                Some "independent pair (coverage) and op kind"
+            )
 
-                match Ops.applyContained canHold nodew idw op cur with
-                | Ok t' ->
-                    cur <- t'
-                    accepted <- accepted @ [ op ]
-                | Error _ -> ()
+        let mutable independentPairs = 0
+        // Phase 297 — the kind of every DRAWN op, folded into the coverage guard below.
+        let kinds = LawKit.OpKindTally()
 
-            accepted, r
-
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            let a, r2 = collectScript 4 tree r1
-            let b, r3 = collectScript 4 tree r2
-            rng <- r3
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
+            let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+            let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
 
             if
                 not (List.isEmpty a)
                 && not (List.isEmpty b)
                 && Ops.independent (footprintOf a) (footprintOf b)
             then
-                checkedPairs <- checkedPairs + 1
+                independentPairs <- independentPairs + 1
 
                 let mutable interleavings = [ a @ b; b @ a ]
 
                 for _ in 1..riffleSamples do
-                    let ops, r' = riffle a b rng
-                    rng <- r'
+                    let ops, r' = riffle a b rng.State
+                    rng.State <- r'
                     interleavings <- ops :: interleavings
 
                 match Ops.applyAll nodew idw (a @ b) tree |> Result.map hashOf with
                 | Error rej ->
-                    if totality.IsNone then
-                        totality <-
-                            Some(
+                    totality.Check(
+                        false,
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: the sequential a@b order of an INDEPENDENT pair failed to apply (%A; a=%A b=%A)"
-                                    seed
-                                    i
+                                    "the sequential a@b order of an INDEPENDENT pair failed to apply (%A; a=%A b=%A)"
                                     rej
                                     a
                                     b
                             )
+                    )
                 | Ok refHash ->
                     for ops in interleavings do
                         match Ops.applyAll nodew idw ops tree with
                         | Error rej ->
-                            if totality.IsNone then
-                                totality <-
-                                    Some(
+                            totality.Check(
+                                false,
+                                fun () ->
+                                    at (
                                         sprintf
-                                            "seed=%d iter=%d: an interleaving of an INDEPENDENT pair failed to apply (%A; a=%A b=%A ops=%A)"
-                                            seed
-                                            i
+                                            "an interleaving of an INDEPENDENT pair failed to apply (%A; a=%A b=%A ops=%A)"
                                             rej
                                             a
                                             b
                                             ops
                                     )
+                            )
                         | Ok t ->
-                            if hashOf t <> refHash && confluence.IsNone then
-                                confluence <-
-                                    Some(
+                            totality.Saw()
+
+                            confluence.Check(
+                                hashOf t = refHash,
+                                fun () ->
+                                    at (
                                         sprintf
-                                            "seed=%d iter=%d: an interleaving of an INDEPENDENT pair replayed to a different tree (a=%A b=%A ops=%A)"
-                                            seed
-                                            i
+                                            "an interleaving of an INDEPENDENT pair replayed to a different tree (a=%A b=%A ops=%A)"
                                             a
                                             b
                                             ops
                                     )
+                            ))
 
-        [ { Law = "interleaving totality (every sampled interleaving of an independent pair applies cleanly)"
-            Passed = totality.IsNone
-            Counterexample = totality }
-          { Law = "confluence (every sampled interleaving of an independent pair replays content-hash-equal)"
-            Passed = confluence.IsNone
-            Counterexample = confluence }
-          { Law = "coverage (the sample exercised at least one independent pair — vacuity guard)"
-            Passed = checkedPairs > 0
-            Counterexample =
-              if checkedPairs > 0 then
-                  None
-              else
-                  Some(sprintf "seed=%d: %d iterations produced no non-empty independent pair" seed iterations) } ]
+        LawKit.results [ totality; confluence ]
+        @ [ SampleAdequacy.reached
+                "Conformance.concurrencyLawsWith"
+                "independent pair (coverage) and op kind"
+                seed
+                ([ "independent pair", independentPairs ] @ kinds.Demands) ]
 
     /// The confluence / interleaving laws (Phase 80) pinned to the real `Ops.footprint` — the shape
     /// a domain runs. See `concurrencyLawsWith` for the law text, the sampling bound, and the
@@ -660,52 +588,46 @@ module internal ConcurrencyLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
         let hashOf = Tree.encodeHash nodew encode
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable permutation = None
-        let mutable partition = None
-        let mutable independence = None
-        let mutable actionability = None
-        let mutable confluence = None
+
+        let permutation =
+            LawKit.LawCell "arbitrate determinism + input-permutation invariance (the pinned order decides)"
+
+        let partition =
+            LawKit.LawCell "arbitrate is a total partition (every proposal lands in exactly one bucket)"
+
+        let independence =
+            LawKit.LawCell "the accepted set is pairwise independent (Ops.independent)"
+
+        let actionability =
+            LawKit.LawCell
+                "every rejection is actionable (Inapplicable = the canApplyAll envelope; Conflicts cites interfering accepted ids)"
+
+        let confluence =
+            LawKit.LawCell "the accepted scripts apply confluently in any order (the whole-script any-order claim)"
         // Phase 157 — the id-uniqueness hypothesis. `twinsSeen` is its own vacuity guard: the
         // observability half only runs on a set holding an applicable, self-interfering proposal.
-        let mutable uniqueness = None
+        let uniqueness =
+            LawKit.LawCell
+                "id uniqueness is the invariance hypothesis (duplicateIds is exact and empty on the certified sets; a repeated id makes arrival order observable)"
+
         let mutable twinsSeen = 0
         // Phase 121 — pairwise independence and any-order confluence are trivially true of an EMPTY
         // accepted set, and the actionability law quantifies over rejections. A sample that never
         // accepted, or never rejected, certifies those green having never applied them.
         let mutable acceptedSeen = 0
         let mutable rejectedSeen = 0
-
-        // An applyable script: up to `n` random ops threaded from `tree`, keeping the accepted.
-        let collectScript n (tree: 'Node) (r0: ConfRng.T) =
-            let mutable cur = tree
-            let mutable accepted = []
-            let mutable r = r0
-
-            for _ in 1..n do
-                let op, r' = LawKit.genOp nodew idw gen cur r
-                r <- r'
-
-                match Ops.applyContained canHold nodew idw op cur with
-                | Ok t' ->
-                    cur <- t'
-                    accepted <- accepted @ [ op ]
-                | Error _ -> ()
-
-            accepted, r
+        // Phase 297 — the kind of every DRAWN op, folded into the guard below.
+        let kinds = LawKit.OpKindTally()
 
         let mkProposal id ops : OpScriptProposal<'Node, 'Id> =
             { Id = id
               Holder = sprintf "agent-%d" id
               Ops = ops }
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            rng <- r1
-            let extra, r2 = ConfRng.intBelow 4 rng
-            rng <- r2
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
+            let extra = rng.IntBelow 4
             let count = extra + 2 // 2..5 proposals
 
             // Proposals off one base: applyable scripts (which frequently share parents, so
@@ -714,16 +636,13 @@ module internal ConcurrencyLaws =
             let mutable proposals = []
 
             for k in 1..count do
-                let script, r3 = collectScript 3 tree rng
-                rng <- r3
-                let corrupt, r4 = ConfRng.intBelow 4 rng
-                rng <- r4
+                let script = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 tree)
+                let corrupt = rng.IntBelow 4
 
                 let ops =
                     if corrupt = 0 then
                         let baseIds = Tree.ids nodew tree |> List.map idw.ToString |> Set.ofList
-                        let ghost, r5 = gen.FreshNode baseIds rng
-                        rng <- r5
+                        let ghost = rng.Draw(gen.FreshNode baseIds)
                         script @ [ RemoveNode(nodew.Id ghost) ]
                     else
                         script
@@ -733,16 +652,13 @@ module internal ConcurrencyLaws =
             let result = Arbitration.arbitrate nodew idw tree proposals
 
             // determinism + permutation invariance: shuffled input ⇒ identical Arbitration.
-            let shuffled, rS = ConfRng.shuffle proposals rng
-            rng <- rS
+            let shuffled = rng.Shuffle proposals
 
-            if
-                (Arbitration.arbitrate nodew idw tree shuffled <> result
-                 || Arbitration.arbitrate nodew idw tree proposals <> result)
-                && permutation.IsNone
-            then
-                permutation <-
-                    Some(sprintf "seed=%d iter=%d: arbitrate is not deterministic / permutation-invariant" seed i)
+            permutation.Check(
+                Arbitration.arbitrate nodew idw tree shuffled = result
+                && Arbitration.arbitrate nodew idw tree proposals = result,
+                fun () -> at "arbitrate is not deterministic / permutation-invariant"
+            )
 
             // Phase 157 — id uniqueness IS the permutation law's hypothesis. The check is held to
             // an independent recount; it is empty on the set the law above just ran over; and a
@@ -755,9 +671,10 @@ module internal ConcurrencyLaws =
                 |> List.distinct
                 |> List.sort
 
-            if Arbitration.duplicateIds proposals <> [] && uniqueness.IsNone then
-                uniqueness <-
-                    Some(sprintf "seed=%d iter=%d: duplicateIds is non-empty on an id-unique proposal set" seed i)
+            uniqueness.Check(
+                Arbitration.duplicateIds proposals = [],
+                fun () -> at "duplicateIds is non-empty on an id-unique proposal set"
+            )
 
             let selfInterfering (p: OpScriptProposal<'Node, 'Id>) =
                 match Ops.canApplyAll nodew idw p.Ops tree with
@@ -774,29 +691,23 @@ module internal ConcurrencyLaws =
                 let twinLast = proposals @ [ twin ]
                 let twinFirst = twin :: proposals
 
-                if
-                    (Arbitration.duplicateIds twinLast <> [ p.Id ]
-                     || Arbitration.duplicateIds twinLast <> recount twinLast
-                     || Arbitration.duplicateIds twinFirst <> recount twinFirst)
-                    && uniqueness.IsNone
-                then
-                    uniqueness <-
-                        Some(
-                            sprintf "seed=%d iter=%d: duplicateIds did not name exactly the repeated id %d" seed i p.Id
-                        )
+                uniqueness.Check(
+                    Arbitration.duplicateIds twinLast = [ p.Id ]
+                    && Arbitration.duplicateIds twinLast = recount twinLast
+                    && Arbitration.duplicateIds twinFirst = recount twinFirst,
+                    fun () -> at (sprintf "duplicateIds did not name exactly the repeated id %d" p.Id)
+                )
 
-                if
-                    Arbitration.arbitrate nodew idw tree twinLast = Arbitration.arbitrate nodew idw tree twinFirst
-                    && uniqueness.IsNone
-                then
-                    uniqueness <-
-                        Some(
+                uniqueness.Check(
+                    Arbitration.arbitrate nodew idw tree twinLast
+                    <> Arbitration.arbitrate nodew idw tree twinFirst,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: a repeated id (%d) left arrival order unobservable — the hypothesis would be decoration"
-                                seed
-                                i
+                                "a repeated id (%d) left arrival order unobservable — the hypothesis would be decoration"
                                 p.Id
                         )
+                )
 
             // total partition: accepted + rejected = input, each exactly once.
             let acceptedIds = result.Accepted |> List.map (fun p -> p.Id)
@@ -805,8 +716,10 @@ module internal ConcurrencyLaws =
             rejectedSeen <- rejectedSeen + List.length rejectedIds
             let inputIds = proposals |> List.map (fun p -> p.Id) |> List.sort
 
-            if List.sort (acceptedIds @ rejectedIds) <> inputIds && partition.IsNone then
-                partition <- Some(sprintf "seed=%d iter=%d: accepted+rejected ≠ input (dropped or duplicated)" seed i)
+            partition.Check(
+                List.sort (acceptedIds @ rejectedIds) = inputIds,
+                fun () -> at "accepted+rejected ≠ input (dropped or duplicated)"
+            )
 
             // pairwise independence of the accepted set.
             let acceptedFps =
@@ -817,22 +730,16 @@ module internal ConcurrencyLaws =
                 |> List.forall (fun (ida, fa) ->
                     acceptedFps |> List.forall (fun (idb, fb) -> ida = idb || Ops.independent fa fb))
 
-            if not pairwise && independence.IsNone then
-                independence <- Some(sprintf "seed=%d iter=%d: the accepted set is not pairwise independent" seed i)
+            independence.Check(pairwise, fun () -> at "the accepted set is not pairwise independent")
 
             // rejection actionability (GP5).
             for p, reason in result.Rejected do
                 match reason with
                 | Inapplicable(ix, rej) ->
-                    if Ops.canApplyAll nodew idw p.Ops tree <> Error(ix, rej) && actionability.IsNone then
-                        actionability <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: Inapplicable ≠ the canApplyAll envelope (proposal %d)"
-                                    seed
-                                    i
-                                    p.Id
-                            )
+                    actionability.Check(
+                        Ops.canApplyAll nodew idw p.Ops tree = Error(ix, rej),
+                        fun () -> at (sprintf "Inapplicable ≠ the canApplyAll envelope (proposal %d)" p.Id)
+                    )
                 | Conflicts ids ->
                     let fp = Ops.footprint nodew idw p.Ops
 
@@ -844,15 +751,11 @@ module internal ConcurrencyLaws =
                                | Some(_, afp) -> not (Ops.independent fp afp)
                                | None -> false)
 
-                    if not citesInterferingAccepted && actionability.IsNone then
-                        actionability <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: Conflicts cites a non-accepted or non-interfering id (proposal %d)"
-                                    seed
-                                    i
-                                    p.Id
-                            )
+                    actionability.Check(
+                        citesInterferingAccepted,
+                        fun () ->
+                            at (sprintf "Conflicts cites a non-accepted or non-interfering id (proposal %d)" p.Id)
+                    )
 
             // any-order confluence: pinned, reversed, and shuffled application orders all
             // succeed and agree (content hash) — and MergedScript reproduces the same tree.
@@ -863,49 +766,32 @@ module internal ConcurrencyLaws =
                 |> List.fold (fun acc s -> acc |> Result.bind (Ops.applyAll nodew idw s)) (Ok tree)
                 |> Result.map hashOf
 
-            let shuffledScripts, rO = ConfRng.shuffle scripts rng
-            rng <- rO
+            let shuffledScripts = rng.Shuffle scripts
 
             let viaMerged = Ops.applyAll nodew idw result.MergedScript tree |> Result.map hashOf
 
-            match applyIn scripts, applyIn (List.rev scripts), applyIn shuffledScripts, viaMerged with
-            | Ok a, Ok b, Ok c, Ok d when a = b && b = c && c = d -> ()
-            | _ ->
-                if confluence.IsNone then
-                    confluence <- Some(sprintf "seed=%d iter=%d: the accepted scripts did not apply confluently" seed i)
+            confluence.Check(
+                (match applyIn scripts, applyIn (List.rev scripts), applyIn shuffledScripts, viaMerged with
+                 | Ok a, Ok b, Ok c, Ok d when a = b && b = c && c = d -> true
+                 | _ -> false),
+                fun () -> at "the accepted scripts did not apply confluently"
+            ))
 
-        [ { Law = "arbitrate determinism + input-permutation invariance (the pinned order decides)"
-            Passed = permutation.IsNone
-            Counterexample = permutation }
-          { Law = "arbitrate is a total partition (every proposal lands in exactly one bucket)"
-            Passed = partition.IsNone
-            Counterexample = partition }
-          { Law = "the accepted set is pairwise independent (Ops.independent)"
-            Passed = independence.IsNone
-            Counterexample = independence }
-          { Law =
-              "every rejection is actionable (Inapplicable = the canApplyAll envelope; Conflicts cites interfering accepted ids)"
-            Passed = actionability.IsNone
-            Counterexample = actionability }
-          { Law = "the accepted scripts apply confluently in any order (the whole-script any-order claim)"
-            Passed = confluence.IsNone
-            Counterexample = confluence }
-          { Law =
-              "id uniqueness is the invariance hypothesis (duplicateIds is exact and empty on the certified sets; a repeated id makes arrival order observable)"
-            Passed = uniqueness.IsNone && twinsSeen > 0
-            Counterexample =
-              match uniqueness with
-              | Some _ -> uniqueness
-              | None when twinsSeen = 0 ->
-                  Some(
-                      sprintf
-                          "seed=%d: %d iterations produced no applicable self-interfering proposal to twin — the observability half never ran"
-                          seed
-                          iterations
-                  )
-              | None -> None }
-          SampleAdequacy.reached
-              "arbitrationLaws"
-              "arbitration bucket"
-              seed
-              [ "accepted proposal", acceptedSeen; "rejected proposal", rejectedSeen ] ]
+        // Phase 157 — the observability half is the law's own vacuity guard: a sample that never
+        // produced a twin certifies the hypothesis by decoration, and says so. An in-loop
+        // counterexample, being first, takes precedence.
+        if twinsSeen = 0 then
+            uniqueness.Fail(
+                sprintf
+                    "seed=%d: %d iterations produced no applicable self-interfering proposal to twin — the observability half never ran"
+                    seed
+                    iterations
+            )
+
+        LawKit.results [ permutation; partition; independence; actionability; confluence; uniqueness ]
+        @ [ SampleAdequacy.reached
+                "Conformance.arbitrationLaws"
+                "arbitration bucket and op kind"
+                seed
+                ([ "accepted proposal", acceptedSeen; "rejected proposal", rejectedSeen ]
+                 @ kinds.Demands) ]

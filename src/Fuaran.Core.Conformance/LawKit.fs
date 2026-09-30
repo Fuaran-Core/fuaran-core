@@ -30,18 +30,35 @@ module internal LawKit =
 
     /// One law under test. The first counterexample is kept and every later one discarded — a law
     /// is reported once, with the earliest seed-stamped case — and the EVIDENCE count is what the
-    /// non-degeneracy rule reads: a law that was never reached cannot report `Passed`, whatever
-    /// its failure slot says. That rule is the runner's shape rather than any family's discipline:
-    /// the audit that opened Phase 302 found `certify` green under a constant encoder and
-    /// `hashFnLaws` green under a constant `HashFn`, because a gated arm skipped and nothing counted
-    /// the skip. Here the count is taken at the assertion, so a family cannot pass a law it never
-    /// asserted.
-    type LawCell(name: string) =
+    /// non-degeneracy rule reads (Phase 302): a family cannot report a green verdict over a law it
+    /// never asserted. That rule is the runner's shape rather than any family's discipline: the
+    /// audit that opened Phase 302 found `certify` green under a constant encoder and `hashFnLaws`
+    /// green under a constant `HashFn`, because a gated arm skipped and nothing counted the skip.
+    /// Here the count is taken at the assertion.
+    ///
+    /// **Two cells, one rule — where the zero is REPORTED.** A law asserted only inside an arm the
+    /// family's own adequacy guard COUNTS is constructed `LawCell(name, coveredBy = <the guard's
+    /// dimension>)`: a starved arm is then reported ONCE, by the guard that names the dimension and
+    /// the remedy (`SampleAdequacy.reached`, whose red is what `SampleAdequacy.cases` renders as
+    /// `vacuous (<dimension>)`), and the covered cell reads through it — green with zero evidence,
+    /// exactly as the families have reported a skipped arm since Phase 121, because the guard
+    /// beside it is red and the family's verdict with it. A law whose arm NO guard counts is
+    /// constructed `LawCell(name)` and is STRICT: at zero evidence it reds itself, naming the
+    /// remedy, so an uncounted gate can never read green. The doctrine is the one Phase 121 set
+    /// and this phase closes the hole in: every gated arm is either counted by a named guard or
+    /// held by the cell — never neither.
+    type LawCell(name: string, coveredBy: string option) =
         let mutable failure: string option = None
         let mutable evidence = 0
 
+        /// A strict cell: no guard counts its arm, so it holds the zero itself.
+        new(name: string) = LawCell(name, None)
+
         /// The law's text, as `LawResult.Law` will carry it.
         member _.Name = name
+
+        /// The guard dimension that counts this law's arm, when one does.
+        member _.CoveredBy = coveredBy
 
         /// How many times the law was asserted in this run.
         member _.Evidence = evidence
@@ -68,15 +85,15 @@ module internal LawKit =
             if not holds then
                 c.Fail(counterexample ())
 
-        /// The verdict. Red on a recorded counterexample; red, naming the remedy, on zero evidence;
-        /// green otherwise.
+        /// The verdict. Red on a recorded counterexample; on zero evidence red, naming the remedy,
+        /// unless a guard covers the arm (see the type's note); green otherwise.
         member _.Result: LawResult =
             match failure with
             | Some cx ->
                 { Law = name
                   Passed = false
                   Counterexample = Some cx }
-            | None when evidence <= 0 ->
+            | None when evidence <= 0 && coveredBy.IsNone ->
                 { Law = name
                   Passed = false
                   Counterexample = Some("never reached" + unreachedRemedy) }
@@ -238,18 +255,12 @@ module internal LawKit =
         : SkeletonOp<'Node, 'Id> * ConfRng.T =
         genOpWith None nodew idw gen tree rng
 
-    /// The op-kind adequacy guard: the counts of each kind a family's sample drew, as the
-    /// `reached` law keyed to the family's roster id. Every kind in `opKinds` is demanded, because
-    /// `genOp` draws every kind — a family whose sample missed one drew too few ops to certify it.
-    let opKindGuard (family: string) (seed: int) (counts: Map<string, int>) : LawResult =
-        SampleAdequacy.reached
-            family
-            "op kind"
-            seed
-            (opKinds
-             |> List.map (fun k -> k, (counts |> Map.tryFind k |> Option.defaultValue 0)))
-
-    /// A mutable op-kind tally — `Note op` per drawn op, `Counts` for the guard.
+    /// The op-kind adequacy tally — `Note op` per drawn op, `Demands` for the guard. Every kind in
+    /// `opKinds` is demanded, because `genOp` draws every kind: a family whose sample missed one
+    /// drew too few ops to certify the laws over the algebra the engine ships. The demand list is
+    /// FOLDED into each op-drawing family's existing guard (its dimension reads "… and op kind")
+    /// rather than emitted as a guard of its own, so a reader that pins the family's result count
+    /// sees no new result and the kinds are demanded all the same.
     type OpKindTally() =
         let mutable counts: Map<string, int> = Map.empty
 
@@ -258,6 +269,11 @@ module internal LawKit =
             counts <- counts |> Map.add k ((counts |> Map.tryFind k |> Option.defaultValue 0) + 1)
 
         member _.Counts = counts
+
+        /// Every kind with its count, in `opKinds` order.
+        member _.Demands: (string * int) list =
+            opKinds
+            |> List.map (fun k -> k, (counts |> Map.tryFind k |> Option.defaultValue 0))
 
     // ---- shared builders -----------------------------------------------------------------------
 

@@ -22,7 +22,10 @@ module internal StreamLaws =
         : LawResult list =
         let verify = LawKit.LawCell "verifyChain accepts an intact chain"
         let replay = LawKit.LawCell "replay re-derives the live state"
-        let tamper = LawKit.LawCell "verifyChain detects a tampered op"
+
+        let tamper =
+            LawKit.LawCell("verifyChain detects a tampered op", Some "tampered chain")
+
         let mutable accepted = 0
         let mutable tampered = 0
 
@@ -76,7 +79,9 @@ module internal StreamLaws =
         : LawResult list =
         let totality = LawKit.LawCell "reducer totality (never throws)"
         let determinism = LawKit.LawCell "reducer replay determinism"
-        let envelope = LawKit.LawCell "rejection enumerates its alternatives"
+
+        let envelope =
+            LawKit.LawCell("rejection enumerates its alternatives", Some "refused op")
         // Phase 220 — the outcome populations the laws branch on, both DRAWN from the domain's
         // own generator: replay determinism reads the accepted ops, the envelope law reads the
         // refused ones, and totality is the claim that a refusal is TYPED rather than thrown —
@@ -302,7 +307,8 @@ module internal StreamLaws =
         let deterministic =
             LawKit.LawCell "a deterministic effect emits no capture (replay re-evaluates live)"
 
-        let tamper = LawKit.LawCell "verifyCaptures detects a tampered capture"
+        let tamper =
+            LawKit.LawCell("verifyCaptures detects a tampered capture", Some "tampered")
 
         let multiIdentity =
             LawKit.LawCell "replayEffect enforces effect-identity order (a misordered replay is a named error)"
@@ -440,7 +446,10 @@ module internal StreamLaws =
             LawKit.LawCell "appendIf with a stale head rejects, naming the actual head (stream unchanged)"
 
         let raceLaw =
-            LawKit.LawCell "two racing appendIf calls off one base admit exactly one winner under any serialisation"
+            LawKit.LawCell(
+                "two racing appendIf calls off one base admit exactly one winner under any serialisation",
+                Some "race arm"
+            )
 
         let actor = Human "conf"
         // Phase 223 — the match arm's two outcome populations, both DRAWN from the caller's

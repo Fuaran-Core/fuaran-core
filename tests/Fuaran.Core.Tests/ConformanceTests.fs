@@ -520,8 +520,8 @@ let tests =
 
               Expect.equal
                   (List.length results)
-                  4
-                  "exact-replay + deterministic + tamper + identity-order laws reported"
+                  5
+                  "exact-replay + deterministic + tamper + identity-order laws, and the Phase 297 tampered-capture guard, reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -1167,7 +1167,10 @@ let functionVerifyTests =
               let results =
                   Conformance.casLaws sw stratifiedStreamGen OpStream.defaultHash 4242 200
 
-              Expect.equal (List.length results) 5 "match + stale + race laws, and the two Phase 223 guards"
+              Expect.equal
+                  (List.length results)
+                  6
+                  "match + stale + race laws, the two Phase 223 guards, and the Phase 297 race-arm guard"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -1880,7 +1883,14 @@ let refusableFamilyTests =
               for family, results in
                   [ "Conformance.opAlgebra", Conformance.opAlgebra nodew idw opGen 999 200
                     "Conformance.reducer", Conformance.reducer sw.Apply streamGen None 314 200 ] do
-                  for side in [ "accepted op"; "refused op" ] do
+                  // Phase 297 — opAlgebra's accepted-op guard also demands every op kind.
+                  let accepted =
+                      if family = "Conformance.opAlgebra" then
+                          "accepted op and op kind"
+                      else
+                          "accepted op"
+
+                  for side in [ accepted; "refused op" ] do
                       let g = guardNamed family side results
                       Expect.isTrue g.Passed (sprintf "%s: %s — %A" family side g.Counterexample)
 
@@ -1918,20 +1928,42 @@ let refusableFamilyTests =
           <| fun _ ->
               let results = Conformance.opAlgebra nodew idw loneLeafGen 999 1
 
+              // Phase 297 — the accept-side laws are COVERED by the accepted-op guard, so a run that
+              // never accepted an op reads them through the guard (green here, red there) rather
+              // than as three "never reached" reds beside a red guard.
               Expect.isTrue
                   (subjectOf results |> List.forall (fun r -> r.Passed))
                   "every subject law is green over one drawn op"
 
               let starved =
-                  [ "accepted op"; "refused op" ]
+                  [ "accepted op and op kind"; "refused op" ]
                   |> List.filter (fun side -> not (guardNamed "Conformance.opAlgebra" side results).Passed)
 
-              Expect.equal (List.length starved) 1 "one op reaches one side, and the other is reported starved"
+              // One drawn op is one kind, so the accepted-op guard is starved on the five kinds it did
+              // not draw whichever side the op reached; the refused side is starved iff the op applied.
+              Expect.isNonEmpty starved "one op cannot reach both sides and every kind"
+
+              Expect.contains
+                  starved
+                  "accepted op and op kind"
+                  "one drawn op leaves five kinds unreached, and the guard says so"
 
           testCase "go-red: certify's verdict moves with opAlgebra's guard"
           <| fun _ ->
+              // Phase 297 — a witness under which NO node can hold children never asserts the three
+              // `ReplaceChildren` laws, and those cells are strict (no guard counts holders), so
+              // `certify` would now stop at the witness laws, honestly. The leaf is a holder here so
+              // the run gets as far as the algebra guard this test is about.
               let report =
-                  Conformance.certify nodew idw loneLeafGen sw streamGen OpStream.defaultHash 12345 1
+                  Conformance.certify
+                      nodew
+                      idw
+                      { loneLeafGen with CanHold = None }
+                      sw
+                      streamGen
+                      OpStream.defaultHash
+                      12345
+                      1
 
               let redGuards =
                   report.Results
