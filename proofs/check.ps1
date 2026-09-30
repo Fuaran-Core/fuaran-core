@@ -300,7 +300,7 @@ function Invoke-ConeTool([string[]] $ToolArgs, [switch] $Soft) {
     if (Test-Path $answerPath) { Remove-Item $answerPath -Force }
 
     $global:LASTEXITCODE = 0
-    & dotnet build $hostProjectPath --nologo -v q -clp:NoSummary | Out-Host
+    & dotnet build $hostProjectPath --nologo -v q | Out-Host
     if ($LASTEXITCODE -ne 0) {
         $why = "the cone selector could not build $hostProjectPath (exit $LASTEXITCODE); it reads the roster with the ladder's own parser, so it runs from the test project"
         if ($Soft) { Write-Host "==== proofs: $why" -ForegroundColor Yellow; return $null }
