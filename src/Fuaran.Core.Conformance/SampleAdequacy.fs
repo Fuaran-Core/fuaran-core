@@ -468,6 +468,11 @@ module SampleAdequacy =
           "Conformance.dagBreakReasonLaws",
           Unconditional
               "each iteration BUILDS both break kinds on the DAG walk — a node whose op is tampered with its map key left alone, and a named parent deleted — rather than drawing them, and the family's own last law fails if either kind was not actually observed"
+          // Phase 232 — nothing is drawn: every run reads every frozen record's field set and (on
+          // .NET) every public record the kit's assemblies export, so its one run is the sample.
+          "Conformance.witnessSurfaceLaws",
+          Unconditional
+              "every run reads the field set of every frozen witness record, and every public record the kit's assemblies export, by reflection — nothing is drawn, so the one run is the whole sample"
 
           // Phase 184. These three were absent from this census for the whole of its life, and
           // the omission was not a judgement — the completeness check that keeps this list honest

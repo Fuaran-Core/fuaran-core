@@ -19,13 +19,14 @@ named.
 
 **Base run / opt-in.** The five `base run` families are the ones `Conformance.certify` and
 `Conformance.certifyStream` are built from — a domain gets them by calling an aggregate.
-Every other family certifies a seam not every domain has, so a domain calls it
-deliberately, alongside its base run. Neither is a statement about importance: `reducer`
+Every other family is opt-in — its `Why opt-in` cell says which reason — so a domain calls
+it deliberately, alongside its base run. Neither is a statement about importance: `reducer`
 is a base-run family only for stream-shaped domains, and `footprintLaws` is opt-in while
 discharging a ladder obligation.
 
 **Witness.** The witness and generator types the entry point takes, in parameter order. A
-family with none runs against the kit's own fixtures and needs nothing but a seed.
+family with none runs against the kit's own fixtures and needs nothing but a seed — or,
+for `no-witness-to-certify`, against the Core it was compiled against, and needs nothing.
 
 **Discharges.** The claims-ladder obligations (`proofs.json` row ids) a green run of the
 family at your own witness discharges. Most families discharge none — they certify, they
@@ -58,7 +59,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 (D66) and whose own generated census lists them; every family here ships from
 `Fuaran.Core.Conformance`.
 
-59 families, across `Conformance`, `FoldConfluence`, from `Fuaran.Core.Conformance`.
+60 families, across `Conformance`, `FoldConfluence`, from `Fuaran.Core.Conformance`.
 
 | Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|---|
@@ -119,5 +120,6 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.streamLaws` | `Fuaran.Core.Conformance` | base run | — | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
 | `Conformance.verifyHonestyLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 400 | `unconditional` | `drawn-miss-is-red` |
 | `Conformance.witnessLaws` | `Fuaran.Core.Conformance` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 400 | `unconditional` | `none` |
+| `Conformance.witnessSurfaceLaws` | `Fuaran.Core.Conformance` | opt-in | `no-witness-to-certify` | — | — | 7 | `unconditional` | `none` |
 | `FoldConfluence.laneFoldLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
 | `FoldConfluence.laneFoldLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |

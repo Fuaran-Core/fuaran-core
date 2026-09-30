@@ -362,6 +362,8 @@ let private runs =
            run "Conformance.canonicalFloatLaws" 500 (Conformance.canonicalFloatLaws 4242 500)
            run "Conformance.chainBreakReasonLaws" 120 (Conformance.chainBreakReasonLaws 5125 120)
            run "Conformance.dagBreakReasonLaws" 120 (Conformance.dagBreakReasonLaws 5147 120)
+           // Phase 232 — no seed and no iteration count: the one run reads every record it pins.
+           run "Conformance.witnessSurfaceLaws" 1 (Conformance.witnessSurfaceLaws ())
 
            // ---- the families outside `Conformance` ----
            run
