@@ -3078,6 +3078,77 @@ along the new seams in this change: sibling phases in the same batch append case
 would turn each of their appends into a cross-file conflict. A hash that answers one digest for
 everything still leaves `hashFnLaws` green — measured, and its missing op-tamper arm is Phase 302's.
 
+### Column trusts nothing it is handed, and the parser holds to the JSON grammar (Phase 299, DECISIONS.md "the parser holds to the JSON grammar, NaN sorts last, the column codec carries only a table it can decode, and `RowCodec` is obsoleted") — BREAKING: `union-widening` (`ColumnError`, `AggregateError`), a changed case payload (`ColumnError.NotJson`), a `removal` (`Cell.defaultFor`), refusals of input that was accepted, and a value move (`Schema.fingerprint`); `additive` beside them
+
+**What changed.** The parser refuses a number token outside the JSON grammar (`01`, `1.`, `-.5`,
+`1.e5` — `Json.isJsonNumber` states it) and a string holding a lone or ill-ordered surrogate
+(`BadEscape`, raw or escaped), and reads integers through one invariant-culture reader
+(`Json.readInt32`). The column codec and `Table.validate` refuse a cell outside its column's type, a
+repeated name, non-canonical decimal, date and timestamp text and a non-finite float, and name a
+ragged table; `decode` ends in `validate`; `aggregate` admits every cell first and orders NaN last.
+`RowCodec` is `[<Obsolete>]`. No wire byte an encoder EMITS moves (`api/wire/` is unchanged); what
+moves is what the readers accept, the `Schema.fingerprint` values, and the managed surface below.
+
+**The break a Column consumer meets, one line each** (the compute repository's raise checklist; it
+adopts `ColumnType.widens` in its `Typing.join` so it never builds a column `validate` refuses):
+
+- `ColumnError.NotJson` carries the parser's `JsonError` (kind, message, position), not a string —
+  a site that builds `NotJson m` from `Json.parse`'s string reads `Json.parseDetailed` instead.
+- `ColumnError.RaggedColumns` is a new case (FS0025 at every exhaustive match); `Table.validate`
+  returns it for ragged columns where it returned `LengthMismatch`, which now means one column's
+  wire `values` and `validity` disagreeing, and nothing else.
+- `AggregateError.CellOutsideType` is a new case (FS0025 at every exhaustive match — an evaluator's
+  lift of `AggregateError` into its own envelope adds an arm).
+- `Cell.defaultFor` is removed: it built `Date ""`, a cell no date column accepts. Nothing replaces it
+  on the surface; the codec writes the same absent-slot bytes itself.
+- `Table.validate` refuses a present cell whose type does not widen into its column's (`Bool` in an
+  int column, `Float` in an int or decimal column, `Decimal` in a float column), a duplicate schema or
+  column name, non-canonical decimal, date or timestamp text, and a non-finite `Float`.
+- `ColumnCodec.tryEncode` is `validate` then `encode`: every refusal is `validate`'s, with its error.
+- `ColumnCodec.decode` / `decodeJson` end in `validate`, refuse a repeated key in `columns`, validate
+  date and timestamp text (`TemporalText`), and refuse an epoch outside the years `0000`–`9999`.
+- A `DecimalType` column reads a whole-valued number token within 2^53 (`3000000000`, `3e9`), and
+  still refuses a fractional one or one past 2^53.
+- `Column.aggregate` refuses a cell outside its column's type (`CellOutsideType`) instead of
+  truncating or dropping it, canonicalises decimal text (`Min`/`Max`/`First`/`Last` answer canonical
+  text), orders NaN last and `-0` equal to `0` in `Min` / `Max` / `Median`, and names a decimal past the
+  float range in `Mean` / `Median` / `StdDev` as `AggregateOverflow`.
+- `DecimalText.tryToFloat` returns `None` past the float range instead of `∞`.
+- `Schema.fingerprint` changes value for every schema: its pre-image is the canonical field encoding
+  (`Hash.canonicalFields`'s) rather than a bare `U+0001` join. A recorded fingerprint mismatches once.
+- A `ref` source decodes with or without a `schema`; a present one must still be well-formed.
+- `ColumnCodec.errorString (NotJson _)` spells `not valid JSON:` once (it was prefixed twice).
+
+**The break a `Wire` consumer meets:**
+
+- `Json.parse` and every entry point over it refuse the tokens and strings above; a producer that
+  emitted them is refused where it was read.
+- Under a culture whose negative sign is not U+002D (fa-IR, he-IL), `-5` parses as `JInt -5`; it was
+  `JFloat -5.0` there.
+- `Versioning.Profile.tryParse` refuses white space around the version integers (the invariant reader
+  takes a sign and digits only); what it still accepts that `render` never emits is Phase 306's.
+- `RowCodec` is obsolete: FS0044 at every use, a BUILD ERROR in a consumer that treats warnings as
+  errors. Suppress FS0044 at the call sites or move to a row codec of the consumer's own; it is removed
+  at the first breaking draft after the UI tier hosts one (DECISIONS.md, same entry).
+- `Corpus.fuzzRoundTrip` draws a wider alphabet (every control character, every surrogate class) and
+  checks `Canon.render` too: a caller's seed-pinned expectation of its result can move.
+
+**Additive:** `Decode.Fault`, `Decode.describe`, `Decode.tryProp`, `Decode.propWith`,
+`Decode.stringWith`, `Decode.arrayWith` (the combinators over a caller's error type); `JVal.kindName`,
+`JVal.nonFiniteToken`, `Json.firstNonFinite`, `Json.isJsonNumber`, `Json.readInt32`; the
+`TemporalText` module (`isCanonicalDate`, `isCanonicalTimestamp`). `api/Fuaran.Core.Column.txt` and
+`api/Fuaran.Core.Wire.txt` are regenerated; `api/wire/` does not move.
+
+**Vectors.** `conformance/refusals/` is a new self-enumerated family (`--emit-refusals`): the grammar,
+surrogate, cell-type, canonical-text, duplicate-name and ragged-table refusals beside the acceptances
+they bound, every host `proposed`; the shared corpus takes its copy at the hosts' next pin raise.
+`ParityVectors` gains `aggregate/nan-order`, and every `hashSweep/*` row's fourth value moves with the
+fingerprint — a Fable consumer re-runs its parity leg against this draft.
+
+**Not done here.** The extracted parser model still reads the pre-299 grammar; the parser
+differential carves out exactly these refusals until Phase 306 restates `proofs/JsonParse.fst`.
+`Function.fs` still says "six-code envelope" in one doc comment (another phase's file this tier).
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a
