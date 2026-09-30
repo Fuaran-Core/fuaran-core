@@ -23,9 +23,13 @@ namespace Fuaran.Core
 // `LawResult list` — rather than over a naming convention. The name shape is what let the three
 // escape; the return type is what a law family actually is.
 //
+// Since Phase 297 it is also the ONE place a family's adequacy class and refusal verdict are
+// declared: both sat in further lists (`SampleAdequacy.census`, `refusalAudit`) held equal to this
+// one only by tests, and both are projections of the family records now.
+//
 // It declares, it does not derive. What each family IS — its witness demands, whether an aggregate
-// runs it, which ladder obligation its green run discharges — is a fact about the code that only a
-// reader can state; the suite's job is to hold every one of those statements to the tree, and to
+// runs it, which ladder obligation its green run discharges, how its sample can starve, where its
+// refusals come from — is a fact about the code that only a reader can state; the suite's job is to hold every one of those statements to the tree, and to
 // refuse the roster that is merely incomplete. See `docs/conformance-families.md` (generated) and
 // the `docs/conformance-families.json` export beside it.
 
@@ -65,6 +69,43 @@ module Families =
         /// domain runs it deliberately, typically at a pin bump.
         | NoWitnessToCertify
 
+    /// Where a family's REFUSAL population comes from — Phase 220's audit vocabulary. A refusal
+    /// population is the set of refused / rejected / invalid outcomes at least one of the family's
+    /// laws branches on or asserts something about. What matters is whether a run can MISS it:
+    /// a population the family builds cannot be missed, and one a generator draws can.
+    type RefusalPopulation =
+        /// No law reads a refused outcome. Either the algebra has none, or refusals occur and every
+        /// law passes over them (a rejected op that simply does not extend a chain).
+        | NoRefusal
+        /// Every refused case a law reads is BUILT — each iteration, or from a fixed fixture — so
+        /// no run can miss it.
+        | Built
+        /// At least part of the refused population is DRAWN, and a run that misses it goes RED:
+        /// a law DEMANDS the refused case ("a broken function is caught"), so an unreached refusal
+        /// is a failing law rather than a green one. Loud, so it needs no guard.
+        | DrawnMissIsRed
+        /// At least part of the refused population is DRAWN — by a caller's generator or by the
+        /// kit's own roll — and a run that misses it stays GREEN, because the laws that read it are
+        /// agreements or implications that hold trivially over an empty population. This is the
+        /// vacuity class: a family carrying it must be `Guarded` (its `Adequacy`), or its
+        /// green run can mean nothing on the side the law is about.
+        | Drawn
+
+    /// A family's refusal verdict — where its refusal population comes from, and the evidence for
+    /// that verdict in words a reader can check against the code. Carried on the family's own
+    /// record (`LawFamily.Refusal`, Phase 297), so the audit and the roster cannot disagree.
+    type RefusalVerdict =
+        { Population: RefusalPopulation
+          Why: string }
+
+    /// One row of the refusable-family audit: a family, where its refusal population comes from,
+    /// and the evidence for that verdict in words a reader can check against the code. Since Phase
+    /// 297 a PROJECTION of the roster (`refusalAudit`, `refusalAuditOf`), never a declaration.
+    type RefusalAudit =
+        { Family: string
+          Population: RefusalPopulation
+          Why: string }
+
     /// One law family: a public entry point of the kit that answers with `LawResult list`.
     type LawFamily =
         {
@@ -99,53 +140,37 @@ module Families =
             /// The ladder is the other side of the same relation and the suite holds the two
             /// equal, so this is an index rather than a second declaration.
             Discharges: string list
+            /// How the family answers "could this run's sample have missed a verdict the laws
+            /// distinguish?" — Phase 121's adequacy class, declared on the family itself since
+            /// Phase 297. `SampleAdequacy.census` is its projection.
+            Adequacy: AdequacyClass
+            /// Where the family's refused outcomes come from — Phase 220's audit verdict, declared
+            /// on the family itself since Phase 297. `refusalAudit` is its projection.
+            Refusal: RefusalVerdict
         }
-
-    /// Where a family's REFUSAL population comes from — Phase 220's audit vocabulary. A refusal
-    /// population is the set of refused / rejected / invalid outcomes at least one of the family's
-    /// laws branches on or asserts something about. What matters is whether a run can MISS it:
-    /// a population the family builds cannot be missed, and one a generator draws can.
-    type RefusalPopulation =
-        /// No law reads a refused outcome. Either the algebra has none, or refusals occur and every
-        /// law passes over them (a rejected op that simply does not extend a chain).
-        | NoRefusal
-        /// Every refused case a law reads is BUILT — each iteration, or from a fixed fixture — so
-        /// no run can miss it.
-        | Built
-        /// At least part of the refused population is DRAWN, and a run that misses it goes RED:
-        /// a law DEMANDS the refused case ("a broken function is caught"), so an unreached refusal
-        /// is a failing law rather than a green one. Loud, so it needs no guard.
-        | DrawnMissIsRed
-        /// At least part of the refused population is DRAWN — by a caller's generator or by the
-        /// kit's own roll — and a run that misses it stays GREEN, because the laws that read it are
-        /// agreements or implications that hold trivially over an empty population. This is the
-        /// vacuity class: a family carrying it must be `Guarded` in `SampleAdequacy.census`, or its
-        /// green run can mean nothing on the side the law is about.
-        | Drawn
-
-    /// One row of the refusable-family audit: a family, where its refusal population comes from,
-    /// and the evidence for that verdict in words a reader can check against the code.
-    type RefusalAudit =
-        { Family: string
-          Population: RefusalPopulation
-          Why: string }
 
     /// Every law family the kit ships, in declaration order. Renderings sort by `Id`, so the order
     /// here is for a reader's benefit and never reaches an artefact.
     let families: LawFamily list =
         // `reason` is `OptInReason option`; `OptIn` is derived from it, so a family cannot be
         // declared opt-in without saying why, and a base-run family cannot carry a reason.
-        let f m entry witness reason discharges =
+        //
+        // Phase 297 — each row also declares the family's adequacy class and its refusal verdict,
+        // which were two further lists (`SampleAdequacy.census`, this module's `refusalAudit`)
+        // held equal to this one only by tests. Both are projections of these rows now.
+        let f m entry witness reason discharges adequacy (population, why) =
             { Id = m + "." + entry
               Module = m
               Entry = entry
               Witness = witness
               OptIn = Option.isSome reason
               Reason = reason
-              Discharges = discharges }
+              Discharges = discharges
+              Adequacy = adequacy
+              Refusal = { Population = population; Why = why } }
 
-        let c entry witness reason discharges =
-            f "Conformance" entry witness reason discharges
+        let c entry witness reason discharges adequacy refusal =
+            f "Conformance" entry witness reason discharges adequacy refusal
 
         let treeWitness = [ "NodeWitness"; "IdWitness"; "OpGen" ]
         let streamWitness = [ "StreamWitness"; "StreamGen" ]
@@ -153,94 +178,627 @@ module Families =
 
         [
           // ---- the base run: what `certify` and `certifyStream` are built from ----
-          c "witnessLaws" treeWitness None [ "lawful-abstract-witness" ]
-          c "opAlgebra" treeWitness None [ "tree-algebra-well-formed-states" ]
-          c "diffLaws" treeWitness None []
-          c "streamLaws" streamWitness None []
-          c "reducer" [ "StreamGen" ] None []
+          c
+              "witnessLaws"
+              treeWitness
+              None
+              [ "lawful-abstract-witness" ]
+              (Unconditional "each iteration rebuilds a drawn node and re-reads every accessor")
+              (NoRefusal, "accessor round-trips only; no apply, no refusal path")
+          // Phase 184. These three were absent from this census for the whole of its life, and
+          // the omission was not a judgement — the completeness check that keeps this list honest
+          // reflected over method NAMES ending in `Laws`, and none of the three is spelled that
+          // way. Two of them are the families `certify` and `certifyStream` are BUILT FROM. The
+          // check now reads `Families`, whose own completeness is quantified over RETURN TYPE, so
+          // a family cannot be missing from either list by how it is named.
+          //
+          // Phase 220 moved the two base-run families out of `Unconditional` (the refusable-family
+          // audit, `Families.refusalAudit`). Their BUILT arms are real, but every law that reads the
+          // apply OUTCOME — totality, `canApply ≡ apply`, the envelope law, and everything that reads
+          // the accepted side — is quantified over a population the domain's generator DRAWS, so
+          // whether the run reached an accepted op and a refused one is a property of the run.
+          c
+              "opAlgebra"
+              treeWitness
+              None
+              [ "tree-algebra-well-formed-states" ]
+              (Guarded [ "accepted"; "refused" ])
+              (Drawn,
+               "canApply ≡ apply and totality read both outcomes; genOp DRAWS refusals, and the collision arm BUILDS them only where the witness can carry a multi-node subtree")
+          c
+              "diffLaws"
+              treeWitness
+              None
+              []
+              (Unconditional "each iteration diffs a pair and re-applies the emitted script")
+              (NoRefusal, "a refused op is skipped while building `after`; no law reads it")
+          // Phase 245 — moved out of `Unconditional`, where "each iteration applies, replays and
+          // tampers the same chain" was true only of a generator whose ops the domain accepts. The
+          // chain is built from DRAWN ops and a refused op does not extend it, so a generator that
+          // is refused every time leaves every chain empty and all three laws green over nothing;
+          // and the tamper is only drawn, so one whose every substitute encodes like the op it
+          // replaces never runs the tamper law. Both are the run's to reach.
+          c
+              "streamLaws"
+              streamWitness
+              None
+              []
+              (Guarded [ "accepted"; "tampered chain" ])
+              (Drawn,
+               "the tampered chain it must reject is built only over a chain the caller's StreamGen fills, and a refused append is skipped; guarded on accepted op and tampered chain (Phase 245)")
+          c
+              "reducer"
+              [ "StreamGen" ]
+              None
+              []
+              (Guarded [ "accepted"; "refused" ])
+              (Drawn,
+               "totality (a refusal is typed, not thrown) and the envelope law read refusals that only the caller's StreamGen draws")
 
           // ---- opt-in: a seam not every domain has ----
-          c "diffContainedLaws" treeWitness (Some StrongerPromise) []
-          c "normalizeLaws" treeWitness (Some StrongerPromise) []
-          c "containerLaws" treeWitness (Some StrongerPromise) []
-          c "mergeConflictLaws" treeWitness (Some StrongerPromise) []
-          c "reconcileLaws" treeWitness (Some StrongerPromise) []
-          c "footprintLaws" treeWitness (Some StrongerPromise) [ "independence-diamond" ]
-          c "concurrencyLaws" treeWitness (Some StrongerPromise) [ "lanes-apply" ]
-          c "concurrencyLawsWith" treeWitness (Some StrongerPromise) []
-          c "arbitrationLaws" treeWitness (Some StrongerPromise) []
-          c "snapshotLaws" streamWitness (Some StrongerPromise) []
-          c "snapshotLawsWith" streamWitness (Some StrongerPromise) []
-          c "dagLaws" streamWitness (Some StrongerPromise) []
-          c "casLaws" streamWitness (Some StrongerPromise) []
-          c "idempotencyLaws" streamWitness (Some StrongerPromise) []
-          c "hashFnLaws" streamWitness (Some StrongerPromise) []
-          c "attributedLaws" streamWitness (Some StrongerPromise) []
-          c "codecInjectivityLaws" streamWitness (Some StrongerPromise) []
-          c "noAttestationVacuityLaws" streamWitness (Some StrongerPromise) []
-          c "attestationLaws" [ "StreamWitness"; "StreamGen"; "IAttestationSink" ] (Some NeedsWitnessCapability) []
-          c "compositionLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
-          c "compositionPilot" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
-          c "memoLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
-          c "memoSoundnessLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
-          c "functionVerifyLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
-          c "verifyHonestyLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
-          c "encoderInjectivityLaws" [ "ArtifactWitness" ] (Some NeedsWitnessCapability) []
-          c "projectionLaws" [ "ProjectionWitness" ] (Some NeedsWitnessCapability) []
-          c "aiSurfaceLaws" [ "AiSurfaceWitness" ] (Some NeedsWitnessCapability) []
-          c "aiSurfaceLawsUnderKitPolicy" [ "AiSurfaceWitness" ] (Some NeedsWitnessCapability) []
+          // The refusal iff reads the drawn pair (and the minted probe) under the witness's
+          // `canHold`; a canHold that refuses nothing, or none at all, exercises only its trivial
+          // direction — the "rather than missing a branch" this row used to excuse.
+          c
+              "diffContainedLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "accepted"; "refused" ])
+              (Drawn,
+               "the refusal IFF reads the drawn pair under the witness's canHold, and a canHold that refuses nothing holds it trivially; the graft probe beside it is built")
+          c
+              "normalizeLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Unconditional "each iteration normalises a drawn script and compares both ways")
+              (NoRefusal, "a refused op is skipped; no law reads it")
+          // Phase 161. Every arm is BUILT — a perturbed child list, an operation over a drawn tree,
+          // a graft carrying its own interior offender — but whether the WITNESS honours the rebuild
+          // is drawn, and a witness whose `ReplaceChildren` is partial on leaves reaches none of
+          // them. So the family counts what each arm actually reached and emits the guard, rather
+          // than claiming an unconditionality it cannot have over an arbitrary witness.
+          c
+              "containerLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "built arm (child perturbation / invariant probe / interior graft)" ])
+              (Built,
+               "the interior-offender graft is built and must be refused NotAContainer; its guard covers the built arms")
+          c
+              "mergeConflictLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "op-pair interference" ])
+              (NoRefusal, "conflicts is a report list, never a refused outcome")
+          c
+              "reconcileLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "reconcile outcome; delta-pair independence (delegates to reconcileLawsWith)" ])
+              (Drawn, "delegates to reconcileLawsWith")
+          // Phase 297 — the reconcile laws under the domain's own chain hash, the pinned parameter
+          // last before the seed (the naming rule); the bare form pins `OpStream.defaultHash`.
+          c
+              "reconcileLawsWith"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "reconcile outcome"; "delta-pair independence" ])
+              (Drawn, "a reconcile Error arises from OpGen-drawn scripts; guarded on reconcile outcome")
+          c
+              "footprintLaws"
+              treeWitness
+              (Some StrongerPromise)
+              [ "independence-diamond" ]
+              (Guarded [ "script-pair independence" ])
+              (NoRefusal, "a refused op is skipped; no law reads it")
+          c
+              "concurrencyLaws"
+              treeWitness
+              (Some StrongerPromise)
+              [ "lanes-apply" ]
+              (Guarded [ "independent pair (delegates to concurrencyLawsWith)" ])
+              (NoRefusal, "delegates to concurrencyLawsWith")
+          c
+              "concurrencyLawsWith"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "independent pair (its own Phase 80 vacuity guard)" ])
+              (NoRefusal, "a drawn refusal is skipped; an applyAll Error only fails a law")
+          c
+              "arbitrationLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "arbitration bucket" ])
+              (Drawn,
+               "Inapplicable comes from the kit's corruption roll and Conflicts from drawn scripts; guarded on arbitration bucket")
+          c
+              "snapshotLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Unconditional "delegates to snapshotLawsWith")
+              (NoRefusal, "delegates to snapshotLawsWith")
+          // Phase 297 — the snapshot arm runs only over a chain long enough to cut, which the domain's
+          // generator decides. Its two laws are STRICT runner cells: a run that never cuts a snapshot
+          // reds them itself ("never reached") and `cases` reads that as starvation, so the family
+          // needs no guard of its own to be seen starving.
+          c
+              "snapshotLawsWith"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Unconditional
+                  "each iteration takes a snapshot and replays across it; a run whose chains are too short to cut one reds both laws as never reached")
+              (NoRefusal, "a rejected append is skipped; a compact Error only fails a law")
+          // Phase 297 — the tamper arm runs only when a fresh draw differs from the op it replaces;
+          // the law is a STRICT runner cell, so a run that never draws a differing op reds it as
+          // never reached rather than passing it.
+          c
+              "dagLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Unconditional
+                  "each iteration builds, replays and round-trips one DAG, and tampers it whenever a fresh draw differs; a run that never tampers reds the tamper law as never reached")
+              (DrawnMissIsRed,
+               "the tampered node it must reject is built only when a fresh draw differs from the op it replaces; the tamper law is a strict runner cell, so a run that never tampers reds it as never reached (Phase 297)")
+          // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
+          // found and left for this phase. Each was `Unconditional` on the strength of what every
+          // iteration BUILDS, and each also carries a law that compares a REFUSED outcome — an
+          // agreement or an iff that holds trivially when nothing was refused — over a population
+          // the run DRAWS. So each counts its accepted and refused cases and emits the guard, and
+          // each kit reference generator is stratified so the guard never fires on it.
+          //
+          // `match ≡ append` compares a domain refusal with a CAS `Domain` rejection only when the
+          // caller's StreamGen draws a refused op.
+          //
+          // Phase 297 — and the race arm (two appendIf calls at one head that BOTH apply) is drawn
+          // too, so it is counted beside them.
+          c
+              "casLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "accepted"; "refused"; "race arm" ])
+              (Drawn,
+               "match ≡ append compares a domain refusal with a CAS Domain rejection only when StreamGen draws one; the stale-head rejection beside it is built")
+          // `fresh ≡ append` and the true-head CAS arm forward a domain refusal verbatim only when
+          // the drawn fresh op is refused; `Duplicate` and `StaleHead` beside them are built.
+          c
+              "idempotencyLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "accepted"; "refused" ])
+              (Drawn,
+               "fresh-key ≡ append and the CAS arm compare domain refusals only when StreamGen draws one; Duplicate and StaleHead are built")
+          // Phase 297 — moved out of `Unconditional`: the reorder, drop and bit-flip arms each need a
+          // chain long enough to perturb, which the domain's generator decides (a generator refused
+          // every time builds none). The family counts each arm and emits the guard.
+          c
+              "hashFnLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "tamper arm (reorder / drop / bit-flip)" ])
+              (Drawn,
+               "reorder, drop and bit-flip are built and must fail verifyChain, but only over a drawn chain long enough to perturb; guarded on tamper arm (Phase 297)")
+          // Phase 297 — moved out of `Unconditional`: the re-attribution tamper runs only over a
+          // non-empty lifted stream, which the domain's generator decides; the family counts it.
+          c
+              "attributedLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "tampered chain (re-attributed)" ])
+              (Drawn,
+               "a re-attributed op is built and must fail verifyChain, but only over a non-empty drawn stream; guarded on tampered chain (Phase 297)")
+          c
+              "codecInjectivityLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Unconditional
+                  "the left-inverse law is BUILT by every iteration — one drawn op round-tripped through the domain's own Decode, and a codec with a total left inverse is injective — so the family's weight does not rest on the collision search beside it, whose own third law fails when the draw was too narrow to compare anything")
+              (NoRefusal, "a Decode refusal only fails a law")
+          c
+              "noAttestationVacuityLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Unconditional "each iteration asks the no-op sink to sign and to verify")
+              (Built, "a plausible attestation is built and the no-op sink must reject it")
+          // Phase 196 — moved out of `Unconditional`, where it had sat since this census was
+          // written, and the reclassification is the finding rather than a tidy-up. "Each
+          // iteration signs a head and forges both an op and an attribution" is true of a SIGNING
+          // sink and false of `OpStream.noAttestation`, under which four of the five laws assert
+          // nothing and all five still report green. The sink is a PARAMETER, so whether the
+          // evidence is built is a property of the run — which is what `Guarded` means, and the
+          // family that certifies the unsigned path is `noAttestationVacuityLaws` beside it.
+          //
+          // Phase 297 — the op-forgery arm is demanded by the same guard.
+          c
+              "attestationLaws"
+              [ "StreamWitness"; "StreamGen"; "IAttestationSink" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "signing outcome and op tamper" ])
+              (Built, "op and actor forgeries are built each iteration; its guard is on the signing outcome")
+          c
+              "compositionLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration composes a drawn pair and compares against the nested application")
+              (NoRefusal, "a compose Error only fails a law or is compared opaquely")
+          c
+              "compositionPilot"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional
+                  "it runs `compositionLaws` (unconditional above) and BUILDS both applyMemo arms across the witness boundary each iteration — a closed inner sub-function memoised, and the composed outer compared against direct apply")
+              (NoRefusal, "as compositionLaws; a memo Error only fails a law")
+          c
+              "memoLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration forces a miss then a hit, and an effecting bypass, by construction")
+              (NoRefusal, "every Error arm only fails a law")
+          c
+              "memoSoundnessLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration applies the caller-supplied under-declared function twice")
+              (NoRefusal, "an Error only fails a law; the cache bypass is not a refusal")
+          c
+              "functionVerifyLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration verifies a SOUND and a BROKEN function, both caller-supplied")
+              (DrawnMissIsRed,
+               "the broken function is caught only when genParams reaches its bad sub-space, and a broken function that verifies clean is itself a red law")
+          c
+              "verifyHonestyLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration verifies a stochastic and an under-declared function, both caller-supplied")
+              (DrawnMissIsRed,
+               "the broken verdicts depend on genParams, and a broken function verifying under any axis is a red law")
+          // Phase 297 — moved out of `Unconditional`, where "each iteration hashes a drawn pair of
+          // trees" was false: each iteration hashes ONE tree against a seen-map, so a generator that
+          // draws one tree every time compared nothing and passed green. The family now counts the
+          // distinct trees it saw and the pairs it compared, as `codecInjectivityLaws` does.
+          c
+              "encoderInjectivityLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "distinct tree (seen / compared)" ])
+              (NoRefusal, "no refused outcome is read")
+          c
+              "projectionLaws"
+              [ "ProjectionWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration projects, re-imports and scopes the same tree")
+              (NoRefusal, "a re-import Error only fails a law")
+          // `explainRejection` and the rejected arms of the allow / approve parity read a reducer
+          // rejection only when the caller's op generator draws one; the decision axis, the unknown
+          // tool and the unknown proposal id are built.
+          //
+          // Phase 246 — `aiSurfaceLaws` runs the DOMAIN'S `Decide`, so which proposal arm a drawn op
+          // reaches is the domain's policy's answer: a policy that never parks or never denies
+          // leaves those arms untested, and one that allows everything is exactly that. The kit-
+          // policy form rolls the decision itself and keeps the two Phase 223 dimensions.
+          c
+              "aiSurfaceLawsAt"
+              [ "AiSurfaceWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ])
+              (Drawn,
+               "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one, and since Phase 246 the deny and park arms are reached only when the domain's own Decide chooses them; unknown tool and unknown id are built")
+          // Phase 297 — the obsolete bare name of `aiSurfaceLawsAt`, rostered through the 0.33.0 draft
+          // under its own id and guard label.
+          c
+              "aiSurfaceLaws"
+              [ "AiSurfaceWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ])
+              (Drawn, "an obsolete forward of aiSurfaceLawsAt, under its own id")
+          c
+              "aiSurfaceLawsUnderKitPolicy"
+              [ "AiSurfaceWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "accepted"; "refused" ])
+              (Drawn,
+               "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one; the kit rolls the decision, and unknown tool and unknown id are built")
 
           // Phase 246 — the seam families at a DOMAIN'S seam. Their fixture-bound forms below take
           // only a seed and certify Core's own fixtures, which is what they are for.
-          c "capabilityLawsWith" [ "CapabilitySeamWitness" ] (Some NeedsWitnessCapability) []
-          c "queryLawsWith" [ "QuerySeamWitness" ] (Some NeedsWitnessCapability) []
-          c "capabilityPipelineLawsWith" [ "CapabilityPipelineWitness" ] (Some NeedsWitnessCapability) []
+          // Phase 246 — the seam families at a domain's seam: every outcome is a call the domain's
+          // generator DRAWS, so each of the three is a dimension the run can miss.
+          c
+              "capabilityLawsAt"
+              [ "CapabilitySeamWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "settled"; "pending"; "refused" ])
+              (Drawn,
+               "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused")
+          c
+              "queryLawsAt"
+              [ "QuerySeamWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "settled"; "pending"; "refused" ])
+              (Drawn,
+               "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused")
+          c
+              "capabilityPipelineLawsAt"
+              [ "CapabilityPipelineWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "invoke node" ])
+              (Built,
+               "the unregistered-capability and undeclared-argument pipelines are built from every drawn Invoke node; guarded on invoke node")
+          // Phase 297 — the three `…With` spellings the naming rule renamed `…At`, rostered through
+          // the 0.33.0 draft as obsolete forwards under their own ids and guard labels.
+          c
+              "capabilityLawsWith"
+              [ "CapabilitySeamWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "settled"; "pending"; "refused" ])
+              (Drawn, "an obsolete forward of capabilityLawsAt, under its own id")
+          c
+              "queryLawsWith"
+              [ "QuerySeamWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "settled"; "pending"; "refused" ])
+              (Drawn, "an obsolete forward of queryLawsAt, under its own id")
+          // The default-deny arms are BUILT, but per drawn `Invoke` node — a generator of Source-only
+          // pipelines builds none of them.
+          c
+              "capabilityPipelineLawsWith"
+              [ "CapabilityPipelineWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "invoke node" ])
+              (Built, "an obsolete forward of capabilityPipelineLawsAt, under its own id")
 
+          // Phase 189 — the same shape, one axis further out: the collision arms are BUILT through
+          // the domain's own `PlaceKeyedChild`, and whether the witness honours a placement is the
+          // domain's to answer. A witness that declares NO keyed position is the one case that is
+          // not an unreached arm — it is a declaration that there is nothing to reach — and the
+          // family reports that as its adequacy line rather than as a missed verdict.
           c
               "keyedChildrenLaws"
               ([ "KeyedWitness" ] @ treeWitness)
               (Some NeedsWitnessCapability)
               [ "witness-surface-scope" ]
+              (Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ])
+              (Built,
+               "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms")
 
+          // Phase 211 — the same contract, at a DOMAIN'S evaluator. Every arm the agreement law
+          // distinguishes is DRAWN from the domain's own edits: a change that reached a reader, a
+          // clean node reused from `prior`, and an edited evaluator that failed. A domain whose edits
+          // all move the dependency map reaches none of them, and the guard says so.
           c
               "propagationEvaluatorLaws"
               [ "EvaluatorWitness" ]
               (Some NeedsWitnessCapability)
               [ "propagation-change-set-and-prior" ]
+              (Guarded [ "evaluator edit" ])
+              (Drawn, "the failing-evaluator arm comes from the domain's own edits; guarded on evaluator edit")
 
+          // Phase 250 — the prior-aware evaluator: a recomputed node handed its prior (the prior
+          // path, not only priming) and a clean node reused from it. It runs the family above first,
+          // so the reference arms carry that family's guard too.
           c
               "propagationEvaluatorLawsWith"
               [ "EvaluatorWitness" ]
               (Some NeedsWitnessCapability)
               [ "propagation-prior-blind" ]
+              (Guarded [ "evaluator edit"; "prior-aware edit" ])
+              (Drawn,
+               "runs propagationEvaluatorLaws first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit")
 
-          c "captureReplayLaws" none (Some SeamNotEveryDomainHas) []
-          c "constructThenEncodeLaws" none (Some SeamNotEveryDomainHas) []
-          c "hashFnAdversarialLaws" none (Some SeamNotEveryDomainHas) []
-          c "capabilityLaws" none (Some SeamNotEveryDomainHas) []
-          c "queryLaws" none (Some SeamNotEveryDomainHas) []
-          c "registryLaws" none (Some SeamNotEveryDomainHas) []
-          c "packLoadingLaws" none (Some SeamNotEveryDomainHas) []
+          // Phase 297 — moved out of `Unconditional`: the tamper arm runs only when a fresh draw
+          // encodes differently from the value it replaces, which the domain's generator decides.
+          c
+              "captureReplayLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "tampered" ])
+              (Drawn,
+               "the tampered capture is built only when a fresh draw encodes differently from the value it replaces (guarded on tampered, Phase 297); the misordered replay is built")
+          c
+              "constructThenEncodeLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "every corpus document is decoded, rebuilt through the authoring surface and re-encoded on every run — the sample is the caller's own corpus rather than a draw, and an empty one fails the family's own non-vacuity law instead of passing quietly")
+              (NoRefusal, "Reject corpus cases are filtered out; a Construct Error only fails a law")
+          c
+              "hashFnAdversarialLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "the budget IS the sample size, and it is the caller's own declared parameter")
+              (NoRefusal, "a collision search; no refused outcome")
+          c
+              "capabilityLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "each iteration exercises accept, reject and unknown-arg on a built declaration")
+              (Built, "out-of-space arg, unknown arg and unregistered id are built each iteration")
+          c
+              "queryLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "each iteration exercises accept, type-mismatch and unknown-param on a built declaration")
+              (Built, "type mismatch, unknown param, NoSuchQuery and ExecutionFailed are built")
+          c
+              "registryLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "each iteration queries matching and non-matching signatures on a built registry")
+              (Built, "an unregistered id and an out-of-space arg are built")
+          c
+              "packLoadingLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "each iteration loads a pack and refuses a stale pin and an unknown base")
+              (Built, "a stale-version pack and an unknown base are built")
           // Phase 257 — the `Column.aggregate` half of what was `aggregateParityLaws`; the parity
           // half ships from `Fuaran.Core.DataFrame.Conformance` with the other dataframe families,
           // produced by the compute repository since Phase 258 (DECISIONS.md D66).
-          c "aggregateNullSkipLaws" none (Some SeamNotEveryDomainHas) []
-          c "columnarValidatorLaws" none (Some SeamNotEveryDomainHas) []
-          c "deferredLaws" none (Some SeamNotEveryDomainHas) []
-          c "capabilityPipelineLaws" none (Some SeamNotEveryDomainHas) []
-          c "capabilityPipelineIncrementalLaws" none (Some SeamNotEveryDomainHas) []
-          c "dirtyPropagationLaws" none (Some SeamNotEveryDomainHas) []
-          c "propagationEvalLaws" none (Some SeamNotEveryDomainHas) []
-          c "canonicalFloatLaws" none (Some SeamNotEveryDomainHas) []
-          c "chainBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
-          c "dagBreakReasonLaws" none (Some SeamNotEveryDomainHas) []
+          c
+              "aggregateNullSkipLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "each iteration aggregates Count and Sum over a drawn column and its present-only projection")
+              (NoRefusal, "an aggregate Error only fails the law, and the kit draws no type that can raise one")
+          // The kit draws its own sample here, and a fault-free draw satisfies the soundness law as
+          // 0 = 0. The roll is stratified by iteration index, so three iterations reach both faults;
+          // a shorter run can still miss them, which is why the class is not `Unconditional`.
+          c
+              "columnarValidatorLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "null cell"; "out-of-range cell" ])
+              (Drawn,
+               "null and out-of-range faults are injected by the kit's own roll, and a fault-free draw satisfies the count laws trivially")
+          c
+              "deferredLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "each iteration round-trips Pending, Ready and Failed")
+              (Built, "the fixed Failed case must yield Error")
+          c
+              "capabilityPipelineLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "each iteration type-checks a well-typed and an ill-typed edge")
+              (Built, "the fixed ill-typed pipeline must refuse EdgeTypeMismatch")
+          c
+              "capabilityPipelineIncrementalLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "node reuse" ])
+              (NoRefusal, "an eval Error only records a failure")
+          c
+              "dirtyPropagationLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "dirty frontier" ])
+              (NoRefusal, "no refused outcome is read")
+          // Phase 209 — the second dimension is the undeclared-read refusal: a real node read
+          // without being declared, and an id the map does not hold at all.
+          c
+              "propagationEvalLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "node reuse"; "undeclared read" ])
+              (Built, "the unknown change and the leaky evaluator are built each iteration")
+          c
+              "canonicalFloatLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional "each iteration renders a drawn float and the three non-finite tokens")
+              (NoRefusal, "no refused outcome is read")
+          c
+              "chainBreakReasonLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "each iteration BUILDS all three break kinds on both walkers — a renumbered sequence, a repointed prev-link, and a payload tampered with its sequence and link left intact — rather than drawing them, and the family's own last two laws fail if any kind was not actually observed")
+              (Built, "all three break kinds are built each iteration")
+          c
+              "dagBreakReasonLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "each iteration BUILDS both break kinds on the DAG walk — a node whose op is tampered with its map key left alone, and a named parent deleted — rather than drawing them, and the family's own last law fails if either kind was not actually observed")
+              (Built, "both break kinds are built each iteration")
 
           // Phase 232 — the witness-record field freeze. It takes no witness because it certifies
           // the Core a domain compiled against rather than the domain, so no aggregate runs it.
-          c "witnessSurfaceLaws" none (Some NoWitnessToCertify) []
+          // Phase 232 — nothing is drawn: every run reads every frozen record's field set and (on
+          // .NET) every public record the kit's assemblies export, so its one run is the sample.
+          c
+              "witnessSurfaceLaws"
+              none
+              (Some NoWitnessToCertify)
+              []
+              (Unconditional
+                  "every run reads the field set of every frozen witness record, and every public record the kit's assemblies export, by reflection — nothing is drawn, so the one run is the whole sample")
+              (NoRefusal, "reads record field sets by reflection; no op is applied and no refused outcome exists")
 
-          f "FoldConfluence" "laneFoldLaws" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) []
-          f "FoldConfluence" "laneFoldLawsWith" [ "StreamWitness"; "LaneGen" ] (Some NeedsWitnessCapability) [] ]
+          // Phase 297 — the null-tolerant read vectors (Phase 102), rostered now that the family
+          // answers in `LawResult`s. The corpus is fixed, so the one run is the whole sample.
+          f
+              "WireNullTolerance"
+              "laws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "a fixed vector corpus: every run evaluates every vector under both read policies, so there is no sample that could miss one")
+              (Built, "every malformed and no-absence vector is a fixed member of the corpus")
+
+          f
+              "FoldConfluence"
+              "laneFoldLaws"
+              [ "StreamWitness"; "LaneGen" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "lane-fold outcome (delegates to laneFoldLawsWith)" ])
+              (Drawn, "delegates to laneFoldLawsWith")
+          f
+              "FoldConfluence"
+              "laneFoldLawsWith"
+              [ "StreamWitness"; "LaneGen" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "lane-fold outcome" ])
+              (Drawn,
+               "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome, with rejected lane sets counted beside it (Phase 245)") ]
 
     /// The roster's keys, sorted — the enumeration a census, a ladder or a projection quantifies
     /// over.
@@ -262,179 +820,33 @@ module Families =
               for o in f.Discharges -> o, f.Id ]
         |> List.sortBy fst
 
-    /// Phase 220 — the refusable-family audit, one row per family. It is DATA so the next audit
-    /// diffs it rather than re-reading sixty families: a row is a verdict and the evidence for it.
-    ///
-    /// The question each row answers: does the algebra the family certifies have a REFUSAL
-    /// population — a refused / rejected / invalid outcome a law branches on — and can a run miss
-    /// it without a law going red? `Drawn` is the class that matters: the suite holds every
-    /// `Drawn` row to a `Guarded` census class, so a family whose refusals a run can silently miss
-    /// cannot report an unguarded pass. The suite also holds this list equal to the roster in both
-    /// directions, so a family added later is audited in the commit that ships it.
-    let refusalAudit: RefusalAudit list =
-        let r family population why =
-            { Family = family
-              Population = population
-              Why = why }
+    /// Phase 220 — the refusable-family audit over any list of families, one row per family, in
+    /// the order given. A PROJECTION since Phase 297: each family declares its own verdict
+    /// (`LawFamily.Refusal`), so a row cannot name a family the roster does not carry, and a family
+    /// cannot ship unaudited.
+    let refusalAuditOf (fs: LawFamily list) : RefusalAudit list =
+        fs
+        |> List.map (fun f ->
+            { Family = f.Id
+              Population = f.Refusal.Population
+              Why = f.Refusal.Why })
 
-        [
-          // ---- the base run ----
-          r "Conformance.witnessLaws" NoRefusal "accessor round-trips only; no apply, no refusal path"
-          r
-              "Conformance.opAlgebra"
-              Drawn
-              "canApply ≡ apply and totality read both outcomes; genOp DRAWS refusals, and the collision arm BUILDS them only where the witness can carry a multi-node subtree"
-          r "Conformance.diffLaws" NoRefusal "a refused op is skipped while building `after`; no law reads it"
-          r
-              "Conformance.streamLaws"
-              Drawn
-              "the tampered chain it must reject is built only over a chain the caller's StreamGen fills, and a refused append is skipped; guarded on accepted op and tampered chain (Phase 245)"
-          r
-              "Conformance.reducer"
-              Drawn
-              "totality (a refusal is typed, not thrown) and the envelope law read refusals that only the caller's StreamGen draws"
+    /// Phase 220 — the refusable-family audit, one row per family: does the algebra the family
+    /// certifies have a REFUSAL population — a refused / rejected / invalid outcome a law branches
+    /// on — and can a run miss it without a law going red? `Drawn` is the class that matters: the
+    /// suite holds every `Drawn` row to a `Guarded` census class, so a family whose refusals a run
+    /// can silently miss cannot report an unguarded pass. This package's share, projected from
+    /// `families`.
+    let refusalAudit: RefusalAudit list = refusalAuditOf families
 
-          // ---- tree-shaped opt-ins ----
-          r
-              "Conformance.diffContainedLaws"
-              Drawn
-              "the refusal IFF reads the drawn pair under the witness's canHold, and a canHold that refuses nothing holds it trivially; the graft probe beside it is built"
-          r "Conformance.normalizeLaws" NoRefusal "a refused op is skipped; no law reads it"
-          r
-              "Conformance.containerLaws"
-              Built
-              "the interior-offender graft is built and must be refused NotAContainer; its guard covers the built arms"
-          r "Conformance.mergeConflictLaws" NoRefusal "conflicts is a report list, never a refused outcome"
-          r
-              "Conformance.reconcileLaws"
-              Drawn
-              "a reconcile Error arises from OpGen-drawn scripts; guarded on reconcile outcome"
-          r "Conformance.footprintLaws" NoRefusal "a refused op is skipped; no law reads it"
-          r "Conformance.concurrencyLaws" NoRefusal "delegates to concurrencyLawsWith"
-          r "Conformance.concurrencyLawsWith" NoRefusal "a drawn refusal is skipped; an applyAll Error only fails a law"
-          r
-              "Conformance.arbitrationLaws"
-              Drawn
-              "Inapplicable comes from the kit's corruption roll and Conflicts from drawn scripts; guarded on arbitration bucket"
-          r
-              "Conformance.keyedChildrenLaws"
-              Built
-              "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms"
+    /// The adequacy census over any list of families — `(id, class)` in the order given. A
+    /// PROJECTION since Phase 297: each family declares its own class (`LawFamily.Adequacy`).
+    let censusOf (fs: LawFamily list) : (string * AdequacyClass) list =
+        fs |> List.map (fun f -> f.Id, f.Adequacy)
 
-          // ---- stream-shaped opt-ins ----
-          r "Conformance.snapshotLaws" NoRefusal "delegates to snapshotLawsWith"
-          r "Conformance.snapshotLawsWith" NoRefusal "a rejected append is skipped; a compact Error only fails a law"
-          r "Conformance.dagLaws" Built "the tampered node it must reject is built each iteration"
-          r
-              "Conformance.casLaws"
-              Drawn
-              "match ≡ append compares a domain refusal with a CAS Domain rejection only when StreamGen draws one; the stale-head rejection beside it is built"
-          r
-              "Conformance.idempotencyLaws"
-              Drawn
-              "fresh-key ≡ append and the CAS arm compare domain refusals only when StreamGen draws one; Duplicate and StaleHead are built"
-          r "Conformance.hashFnLaws" Built "reorder, drop and bit-flip are built and must fail verifyChain"
-          r "Conformance.attributedLaws" Built "a re-attributed op is built and must fail verifyChain"
-          r "Conformance.codecInjectivityLaws" NoRefusal "a Decode refusal only fails a law"
-          r
-              "Conformance.noAttestationVacuityLaws"
-              Built
-              "a plausible attestation is built and the no-op sink must reject it"
-          r
-              "Conformance.attestationLaws"
-              Built
-              "op and actor forgeries are built each iteration; its guard is on the signing outcome"
-
-          // ---- artifact-witness opt-ins ----
-          r "Conformance.compositionLaws" NoRefusal "a compose Error only fails a law or is compared opaquely"
-          r "Conformance.compositionPilot" NoRefusal "as compositionLaws; a memo Error only fails a law"
-          r "Conformance.memoLaws" NoRefusal "every Error arm only fails a law"
-          r "Conformance.memoSoundnessLaws" NoRefusal "an Error only fails a law; the cache bypass is not a refusal"
-          r
-              "Conformance.functionVerifyLaws"
-              DrawnMissIsRed
-              "the broken function is caught only when genParams reaches its bad sub-space, and a broken function that verifies clean is itself a red law"
-          r
-              "Conformance.verifyHonestyLaws"
-              DrawnMissIsRed
-              "the broken verdicts depend on genParams, and a broken function verifying under any axis is a red law"
-          r "Conformance.encoderInjectivityLaws" NoRefusal "no refused outcome is read"
-
-          // ---- the remaining witnessed opt-ins ----
-          r "Conformance.projectionLaws" NoRefusal "a re-import Error only fails a law"
-          r
-              "Conformance.aiSurfaceLaws"
-              Drawn
-              "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one, and since Phase 246 the deny and park arms are reached only when the domain's own Decide chooses them; unknown tool and unknown id are built"
-          r
-              "Conformance.aiSurfaceLawsUnderKitPolicy"
-              Drawn
-              "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one; the kit rolls the decision, and unknown tool and unknown id are built"
-          r
-              "Conformance.capabilityLawsWith"
-              Drawn
-              "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused"
-          r
-              "Conformance.queryLawsWith"
-              Drawn
-              "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused"
-          r
-              "Conformance.capabilityPipelineLawsWith"
-              Built
-              "the unregistered-capability and undeclared-argument pipelines are built from every drawn Invoke node; guarded on invoke node"
-          r
-              "Conformance.propagationEvaluatorLaws"
-              Drawn
-              "the failing-evaluator arm comes from the domain's own edits; guarded on evaluator edit"
-          r
-              "Conformance.propagationEvaluatorLawsWith"
-              Drawn
-              "runs propagationEvaluatorLaws first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit"
-
-          // ---- the fixture-only families ----
-          r "Conformance.captureReplayLaws" Built "the tampered capture and the misordered replay are built"
-          r
-              "Conformance.constructThenEncodeLaws"
-              NoRefusal
-              "Reject corpus cases are filtered out; a Construct Error only fails a law"
-          r "Conformance.hashFnAdversarialLaws" NoRefusal "a collision search; no refused outcome"
-          r
-              "Conformance.capabilityLaws"
-              Built
-              "out-of-space arg, unknown arg and unregistered id are built each iteration"
-          r "Conformance.queryLaws" Built "type mismatch, unknown param, NoSuchQuery and ExecutionFailed are built"
-          r "Conformance.registryLaws" Built "an unregistered id and an out-of-space arg are built"
-          r "Conformance.packLoadingLaws" Built "a stale-version pack and an unknown base are built"
-          r
-              "Conformance.aggregateNullSkipLaws"
-              NoRefusal
-              "an aggregate Error only fails the law, and the kit draws no type that can raise one"
-          r
-              "Conformance.columnarValidatorLaws"
-              Drawn
-              "null and out-of-range faults are injected by the kit's own roll, and a fault-free draw satisfies the count laws trivially"
-          r "Conformance.deferredLaws" Built "the fixed Failed case must yield Error"
-          r "Conformance.capabilityPipelineLaws" Built "the fixed ill-typed pipeline must refuse EdgeTypeMismatch"
-          r "Conformance.capabilityPipelineIncrementalLaws" NoRefusal "an eval Error only records a failure"
-          r "Conformance.dirtyPropagationLaws" NoRefusal "no refused outcome is read"
-          r
-              "Conformance.propagationEvalLaws"
-              Built
-              "the unknown change and the leaky evaluator are built each iteration"
-          r "Conformance.canonicalFloatLaws" NoRefusal "no refused outcome is read"
-          r "Conformance.chainBreakReasonLaws" Built "all three break kinds are built each iteration"
-          r "Conformance.dagBreakReasonLaws" Built "both break kinds are built each iteration"
-          r
-              "Conformance.witnessSurfaceLaws"
-              NoRefusal
-              "reads record field sets by reflection; no op is applied and no refused outcome exists"
-
-          // ---- outside `Conformance` ----
-          r "FoldConfluence.laneFoldLaws" Drawn "delegates to laneFoldLawsWith"
-          r
-              "FoldConfluence.laneFoldLawsWith"
-              Drawn
-              "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome, with rejected lane sets counted beside it (Phase 245)" ]
+    /// This package's adequacy census, projected from `families` — what `SampleAdequacy.census`
+    /// forwards to.
+    let census: (string * AdequacyClass) list = censusOf families
 
     /// The audit row for one family, if the roster audits it (the suite holds that it always does).
     let tryRefusal (id: string) : RefusalAudit option =
@@ -456,33 +868,26 @@ module Families =
             Package: string
             /// The families this package ships, keyed exactly as the combined roster keys them.
             Families: LawFamily list
-            /// One audit row per family above.
+            /// One audit row per family above — `refusalAuditOf Families` (Phase 297: the families
+            /// carry their own verdicts, and the renderings read those).
             RefusalAudit: RefusalAudit list
-            /// One adequacy-census row per family above.
+            /// One adequacy-census row per family above — `censusOf Families` (Phase 297: the
+            /// families carry their own classes, and the renderings read those).
             Census: (string * AdequacyClass) list
         }
 
-    /// This package's share: `families`, `refusalAudit` and `SampleAdequacy.census`.
+    /// This package's share: `families`, with `refusalAudit` and `census` projected from it.
     let roster: Roster =
         { Package = "Fuaran.Core.Conformance"
           Families = families
           RefusalAudit = refusalAudit
-          Census = SampleAdequacy.census }
+          Census = census }
 
     // ---- the exports ------------------------------------------------------------------------
 
-    let private quote (s: string) : string =
-        let esc (c: char) =
-            match c with
-            | '"' -> "\\\""
-            | '\\' -> "\\\\"
-            | '\n' -> "\\n"
-            | '\r' -> "\\r"
-            | '\t' -> "\\t"
-            | c when c < ' ' -> "\\u" + (int c).ToString "x4"
-            | c -> string c
-
-        "\"" + (s |> Seq.map esc |> String.concat "") + "\""
+    /// A JSON string literal, through the wire's own escaper (Phase 297) — this module carried a
+    /// fourth hand-rolled copy until then, and a copy is where two escapers drift apart.
+    let private quote (s: string) : string = "\"" + Json.escape s + "\""
 
     let private jsonArray (xs: string list) : string =
         "[" + (xs |> List.map quote |> String.concat ", ") + "]"
@@ -500,7 +905,7 @@ module Families =
     /// The census cell for one family: the measured count, `vacuous`, or `unmeasured`.
     let private casesCell (cases: (string * CaseCount) list) (id: string) : string =
         match cases |> List.tryFind (fun (k, _) -> k = id) with
-        | Some(_, c) -> SampleAdequacy.renderCases c
+        | Some(_, c) -> CaseCell.render c
         | None -> unmeasuredToken
 
     /// The wire spelling of an opt-in reason — the JSON member and the markdown cell both use
@@ -515,9 +920,9 @@ module Families =
     /// The wire spelling of a refusal-audit verdict over a composed roster — the audit row is read
     /// from whichever package's share carries the family (Phase 257).
     let refusalTokenOf (rosters: Roster list) (id: string) : string =
-        match rosters |> List.collect _.RefusalAudit |> List.tryFind (fun a -> a.Family = id) with
-        | Some a ->
-            match a.Population with
+        match rosters |> List.collect _.Families |> List.tryFind (fun f -> f.Id = id) with
+        | Some f ->
+            match f.Refusal.Population with
             | NoRefusal -> "none"
             | Built -> "built"
             | DrawnMissIsRed -> "drawn-miss-is-red"
@@ -533,21 +938,23 @@ module Families =
     /// The adequacy cell over a composed roster — the census row is read from whichever package's
     /// share carries the family (Phase 257).
     let adequacyTokenOf (rosters: Roster list) (cases: (string * CaseCount) list) (id: string) : string =
-        match rosters |> List.collect _.Census |> List.tryFind (fun (k, _) -> k = id) with
+        match rosters |> List.collect _.Families |> List.tryFind (fun f -> f.Id = id) with
         | None -> "unclassified"
-        | Some(_, Unconditional _) -> "unconditional"
-        | Some(_, Guarded _) ->
-            match cases |> List.tryFind (fun (k, _) -> k = id) with
-            | None -> "guarded-unmeasured"
-            | Some(_, c) when List.isEmpty c.Starved -> "guarded-reached"
-            | Some _ -> "guarded-starved"
+        | Some f ->
+            match f.Adequacy with
+            | Unconditional _ -> "unconditional"
+            | Guarded _ ->
+                match cases |> List.tryFind (fun (k, _) -> k = id) with
+                | None -> "guarded-unmeasured"
+                | Some(_, c) when List.isEmpty c.Starved -> "guarded-reached"
+                | Some _ -> "guarded-starved"
 
     /// The adequacy cell — Phase 220. What `certify`'s verdict for a family is made of, as a fact
     /// the generated data carries rather than one a reader reconstructs: `unconditional` (every
     /// iteration builds every branch, so a green run is a pass), `guarded-reached` (the family
     /// carries a guard and this run reached every guarded side), `guarded-starved` (the guard went
     /// red — the run tested nothing on a side a law is about), or `guarded-unmeasured` (a guarded
-    /// family no run was handed for). Read from `SampleAdequacy.census` and the measured run, so it
+    /// family no run was handed for). Read from the family's own `Adequacy` and the measured run, so it
     /// cannot disagree with either.
     let adequacyToken (cases: (string * CaseCount) list) (id: string) : string = adequacyTokenOf [ roster ] cases id
 

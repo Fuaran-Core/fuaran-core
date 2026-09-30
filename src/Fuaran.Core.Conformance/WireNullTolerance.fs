@@ -198,6 +198,19 @@ module WireNullTolerance =
     /// Run a vector set.
     let run (vs: Vector list) : Corpus.Outcome list = vs |> List.map runVector
 
+    /// The family as law verdicts (Phase 297): one law per vector, named by the vector, its failure
+    /// detail the counterexample. `check` and `run` answer in the corpus's own shape; this answers in
+    /// the kit's, so the family is enumerated by the roster and measured by the census like every
+    /// other (`WireNullTolerance.laws`). The corpus is fixed, so every run evaluates every vector —
+    /// there is no sample that could miss one.
+    let laws () : LawResult list =
+        vectors
+        |> List.map (fun v ->
+            let outcome = runVector v
+            let law = LawKit.LawCell("wire null tolerance: " + v.Name)
+            law.Check(outcome.Passed, (fun () -> outcome.Detail))
+            law.Result)
+
     /// The whole family as a single verdict — `Ok` or the first failing vector, named.
     let check () : Result<unit, string> =
         match run vectors |> List.filter (fun o -> not o.Passed) with

@@ -177,13 +177,13 @@ let private bareJoin =
 
 /// Files whose separator splices are ADVERSARIAL INPUTS rather than keys, and mint no key: the
 /// parity-vector table builds strings that CONTAIN the separator on purpose, to pin what the
-/// encoders do with them, and the conformance kit's law bodies build the values a key must
-/// survive (`memoLaws`' separator-in-value case). Exempt from the bare-join scan only; the
-/// call-site scan above still reads the kit, so a key minted there would still have to join
-/// the roster.
+/// encoders do with them, and the conformance kit's function-law module builds the values a key
+/// must survive (`memoLaws`' separator-in-value case, in `FunctionLaws.fs` since the Phase 297
+/// split). Exempt from the bare-join scan only; the call-site scan above still reads the kit, so
+/// a key minted there would still have to join the roster.
 let private adversarialFixtures =
     [ "src/Fuaran.Core.Conformance/ParityVectors.fs"
-      "src/Fuaran.Core.Conformance/Conformance.fs" ]
+      "src/Fuaran.Core.Conformance/FunctionLaws.fs" ]
 
 /// The ONE bare join the scan knowingly carries, by file and count, so a second one in the same
 /// file still fails: `Schema.fingerprint` (`Fuaran.Core.Column`) joins `name:type` cells on the

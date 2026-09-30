@@ -24,7 +24,8 @@ namespace Fuaran.Core
 //  deployment that happened to receive the lanes the other way round proceeds, and the two
 //  replicas silently disagree about whether they diverged at all.
 //
-//  FSharp.Core only (the `ConfRng` LCG, no FsCheck), Fable-clean — as the rest of the kit.
+//  FSharp.Core only (the `ConfRng` xorshift32 generator, no FsCheck), Fable-clean — as the rest
+//  of the kit.
 //
 //  ---- Out of scope, deliberately -------------------------------------------
 //   - **Resolution.** The pack certifies that a halt is order-invariant; it never says a
@@ -280,10 +281,22 @@ module FoldConfluence =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable foldCx = None
-        let mutable haltCx = None
-        let mutable classCx = None
+        let foldLaw =
+            LawKit.LawCell(
+                "lane-fold determinism (every arrival order of a folding lane set folds to one state hash)",
+                Some "lane-fold outcome"
+            )
+
+        let haltLaw =
+            LawKit.LawCell(
+                "lane-halt determinism (a halting lane set halts with the same canonical report under every arrival order)",
+                Some "lane-fold outcome"
+            )
+
+        let classLaw =
+            LawKit.LawCell
+                "outcome classification is arrival-order-invariant (no lane set folds under one order and halts under another)"
+
         let mutable folded = 0
         let mutable halted = 0
         let mutable rejected = 0
@@ -293,73 +306,75 @@ module FoldConfluence =
             |> List.map (fun p -> foldOnce w footprintOf hashFn hashState gen.State0 gen.BaseOp (permuteBy p ls))
             |> List.distinct
 
-        for i in 0 .. iterations - 1 do
-            let lanes, r' = gen.Lanes laneCount rng
-            rng <- r'
+        // Every lane set is evidence for the classification law; a folding set for law 1 and a
+        // halting set for law 2, which is why those two read through the guard that counts both
+        // (Phase 297's covered cells) — a sample that never folds, or never halts, is reported once,
+        // by the guard, with the remedy.
+        LawKit.run iterations seed (fun rng _ at ->
+            let lanes = rng.Draw(gen.Lanes laneCount)
 
             match outcomesOf lanes with
             | [ single ] ->
+                classLaw.Saw()
+
                 match single with
-                | LaneFolded _ -> folded <- folded + 1
-                | LaneHalted _ -> halted <- halted + 1
+                | LaneFolded _ ->
+                    folded <- folded + 1
+                    foldLaw.Saw()
+                | LaneHalted _ ->
+                    halted <- halted + 1
+                    haltLaw.Saw()
                 | LaneRejected _ -> rejected <- rejected + 1
             | _ ->
                 let small = shrinkLanes (fun ls -> List.length (outcomesOf ls) > 1) lanes
                 let smallOutcomes = outcomesOf small
 
-                let msg =
-                    "seed="
-                    + string seed
-                    + " iter="
-                    + string i
-                    + ": "
-                    + string (List.length smallOutcomes)
-                    + " distinct outcomes over "
-                    + string (List.length (arrivalOrders (List.length small)))
-                    + " sampled arrival order(s) of "
-                    + string (List.length small)
-                    + " lane(s); shrunk to\n"
-                    + renderLanes w.Encode small
-                    + "\noutcomes:\n"
-                    + (smallOutcomes |> List.map renderOutcome |> String.concat "\n")
+                let msg () =
+                    at (
+                        string (List.length smallOutcomes)
+                        + " distinct outcomes over "
+                        + string (List.length (arrivalOrders (List.length small)))
+                        + " sampled arrival order(s) of "
+                        + string (List.length small)
+                        + " lane(s); shrunk to
+"
+                        + renderLanes w.Encode small
+                        + "
+outcomes:
+"
+                        + (smallOutcomes
+                           |> List.map renderOutcome
+                           |> String.concat
+                               "
+")
+                    )
 
                 if (smallOutcomes |> List.map kindTag |> List.distinct |> List.length) > 1 then
-                    if classCx.IsNone then
-                        classCx <- Some msg
+                    classLaw.Check(false, msg)
                 else
-                    match List.head smallOutcomes with
-                    | LaneHalted _ ->
-                        if haltCx.IsNone then
-                            haltCx <- Some msg
-                    | _ ->
-                        if foldCx.IsNone then
-                            foldCx <- Some msg
+                    classLaw.Saw()
 
-        [ { Law = "lane-fold determinism (every arrival order of a folding lane set folds to one state hash)"
-            Passed = foldCx.IsNone
-            Counterexample = foldCx }
-          { Law =
-              "lane-halt determinism (a halting lane set halts with the same canonical report under every arrival order)"
-            Passed = haltCx.IsNone
-            Counterexample = haltCx }
-          { Law =
-              "outcome classification is arrival-order-invariant (no lane set folds under one order and halts under another)"
-            Passed = classCx.IsNone
-            Counterexample = classCx }
-          // The two coverage guards this pack shipped by hand in Phase 100 — the ones that caught
-          // 150 halting trials out of 150 — expressed through the kit's shared adequacy guard
-          // (Phase 121), so the remedy sentence and the counts read the same here as everywhere.
-          //
-          // Phase 245 — a lane set the reducer rejects under every order is COUNTED beside the two
-          // demanded outcomes and not demanded itself: law 1 holds over it, but it tests neither a
-          // clean fold nor a halt, so a sample made mostly of rejections must say so, and a domain
-          // whose reducer never rejects must not be starved for it.
-          SampleAdequacy.reachedBeside
-              "FoldConfluence"
-              "lane-fold outcome"
-              seed
-              [ "folded", folded; "halted", halted ]
-              [ "rejected", rejected ] ]
+                    match List.head smallOutcomes with
+                    | LaneHalted _ -> haltLaw.Check(false, msg)
+                    | _ -> foldLaw.Check(false, msg))
+
+        LawKit.results [ foldLaw; haltLaw; classLaw ]
+        // The two coverage guards this pack shipped by hand in Phase 100 — the ones that caught
+        // 150 halting trials out of 150 — expressed through the kit's shared adequacy guard
+        // (Phase 121), so the remedy sentence and the counts read the same here as everywhere.
+        //
+        // Phase 245 — a lane set the reducer rejects under every order is COUNTED beside the two
+        // demanded outcomes and not demanded itself: law 1 holds over it, but it tests neither a
+        // clean fold nor a halt, so a sample made mostly of rejections must say so, and a domain
+        // whose reducer never rejects must not be starved for it.
+        //
+        // Phase 297 — the guard carries the family's roster id, as every guard in the kit does.
+        @ [ SampleAdequacy.reachedBeside
+                "FoldConfluence.laneFoldLawsWith"
+                "lane-fold outcome"
+                seed
+                [ "folded", folded; "halted", halted ]
+                [ "rejected", rejected ] ]
 
     /// The fold-confluence laws (Phase 100) pinned to `OpStream.defaultHash` — the shape a domain
     /// runs. See `laneFoldLawsWith` for the law text, the sampling bound, and the coverage guards.

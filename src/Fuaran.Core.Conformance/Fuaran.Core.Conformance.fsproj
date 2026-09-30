@@ -4,13 +4,38 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Conformance</PackageId>
-    <Description>Fuaran.Core.Conformance — a property-based law kit a domain runs against its own witness to certify it conforms to the Fuaran.Core op algebra + op-stream: apply totality, canApply≡apply, apply∘invert=identity, verifyChain, and replay determinism. FSharp.Core only (a deterministic uint32-LCG generator, no FsCheck), Fable-clean.</Description>
+    <Description>Fuaran.Core.Conformance — a property-based law kit a domain runs against its own witness to certify it conforms to the Fuaran.Core op algebra + op-stream: apply totality, canApply≡apply, apply∘invert=identity, verifyChain, and replay determinism. FSharp.Core only (a deterministic uint32 xorshift32 generator, no FsCheck), Fable-clean.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Phase 121 — the sample-adequacy guard, and with it `LawResult`. FIRST, because every
-         family below declares its demands through it, and because the guard deliberately depends
-         on no family it guards — which is also why the shared verdict type moved here. -->
+    <!-- Phase 297 — the verdict and adequacy types (`LawResult`, `CaseCount`, `AdequacyClass`),
+         moved out of SampleAdequacy.fs unchanged, FIRST; then the law-family roster, which
+         declares each family's adequacy class and refusal verdict on the family's own record and
+         carries strings, not laws, so it depends on nothing but those types; then the guard,
+         whose census is a projection of the roster. The roster sat LAST until this phase, where
+         appending kept it clear of every family; it moved because the guard reads it, and it
+         still depends on no family. -->
+    <Compile Include="LawResult.fs" />
+    <Compile Include="Families.fs" />
+    <!-- Phase 121 — the sample-adequacy guard. Ahead of every family, because every family
+         declares its demands through it, and it deliberately depends on no family it guards. -->
     <Compile Include="SampleAdequacy.fs" />
+    <!-- Phase 297 — the kit is split by topic behind a facade. `ConfRng` (the generator) and the
+         witness records come first because every family reads them; `LawKit` (the runner —
+         internal) next; then the eight topic modules, each internal, in an order that is free
+         except where one family runs another (`SurfaceLaws` last of them only by habit); and
+         `Conformance.fs` LAST — the public facade of one-line forwards plus `certify` /
+         `certifyStream`, whose bodies the suite reads to derive which families are base-run. -->
+    <Compile Include="ConfRng.fs" />
+    <Compile Include="ConformanceWitnesses.fs" />
+    <Compile Include="LawKit.fs" />
+    <Compile Include="TreeLaws.fs" />
+    <Compile Include="StreamLaws.fs" />
+    <Compile Include="IntegrityLaws.fs" />
+    <Compile Include="ConcurrencyLaws.fs" />
+    <Compile Include="SeamLaws.fs" />
+    <Compile Include="FunctionLaws.fs" />
+    <Compile Include="PropagationLaws.fs" />
+    <Compile Include="SurfaceLaws.fs" />
     <Compile Include="Conformance.fs" />
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->
@@ -37,12 +62,6 @@
          OpStream and OpStream.Dag byte-identical to the original. A vector family with a runner
          (the WireNullTolerance shape), not a `LawResult` family, so it carries no roster row. -->
     <Compile Include="StringEscapeVectors.fs" />
-    <!-- Phase 184 — the law-family roster, exported as data. LAST, and the position is a
-         property rather than a habit: it declares the enumeration of every family above it and
-         depends on none of them (it carries strings, not laws), so appending is the only
-         placement that cannot make the roster a compile-order question. A family added to any
-         module above gains its record here in the same commit. -->
-    <Compile Include="Families.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

@@ -1,4 +1,4 @@
-﻿module Fuaran.Core.Tests.ConformanceTests
+module Fuaran.Core.Tests.ConformanceTests
 
 // Phase 243 — the op-algebra conformance kit, self-proven against the in-repo reference
 // witness, plus a deliberately-broken witness whose failure is reproduced from a seed.
@@ -521,8 +521,8 @@ let tests =
 
               Expect.equal
                   (List.length results)
-                  4
-                  "exact-replay + deterministic + tamper + identity-order laws reported"
+                  5
+                  "exact-replay + deterministic + tamper + identity-order laws, and the Phase 297 tampered-capture guard, reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -749,7 +749,7 @@ let tests =
           <| fun _ ->
               // sound encoder (encNode) over varied trees — collision-free.
               let good = Conformance.encoderInjectivityLaws artw encNode genTree 4242 200
-              Expect.equal (List.length good) 1 "one injectivity law reported"
+              Expect.equal (List.length good) 2 "one injectivity law and its searched-size guard reported (Phase 297)"
 
               Expect.isTrue
                   (good |> List.forall (fun r -> r.Passed))
@@ -896,7 +896,10 @@ let tests =
           <| fun _ ->
               let dflt = Conformance.hashFnLaws sw streamGen OpStream.defaultHash 4242 200
 
-              Expect.equal (List.length dflt) 3 "determinism + parity + tamper laws reported"
+              Expect.equal
+                  (List.length dflt)
+                  4
+                  "determinism + parity + tamper laws and the tamper-arm guard reported (Phase 297)"
 
               if dflt |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -945,7 +948,10 @@ let tests =
           <| fun _ ->
               let results = Conformance.attributedLaws sw streamGen OpStream.defaultHash 4242 200
 
-              Expect.equal (List.length results) 3 "replay-parity + tamper + round-trip laws reported"
+              Expect.equal
+                  (List.length results)
+                  4
+                  "replay-parity + tamper + round-trip laws and the re-attribution guard reported (Phase 297)"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -1056,8 +1062,7 @@ let functionVerifyTests =
               match broken.Counterexample with
               | Some cx ->
                   match cx.Defect with
-                  | Conformance.ValidatorRejected ds ->
-                      Expect.isNonEmpty ds "the validator's defect travels in the counterexample"
+                  | ValidatorRejected ds -> Expect.isNonEmpty ds "the validator's defect travels in the counterexample"
                   | other -> failtestf "expected ValidatorRejected, got %A" other
 
                   Expect.stringContains
@@ -1081,13 +1086,13 @@ let functionVerifyTests =
               let sound =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 5)) countReg Map.empty 100 7
 
-              Expect.equal sound.Coverage (Conformance.Exhaustive 6) "6 ints in [0,5], all enumerated"
+              Expect.equal sound.Coverage (Exhaustive 6) "6 ints in [0,5], all enumerated"
               Expect.isTrue sound.Verified "every value in [0,5] respects the ≤5 rule"
 
               let broken =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 10)) countReg Map.empty 100 7
 
-              Expect.equal broken.Coverage (Conformance.Exhaustive 11) "11 ints in [0,10], the whole space"
+              Expect.equal broken.Coverage (Exhaustive 11) "11 ints in [0,10], the whole space"
               Expect.isFalse broken.Verified "exhaustive enumeration finds the >5 values"
 
           testCase "symbolic mode samples a large space with the coverage reported (coverage honesty)"
@@ -1096,8 +1101,54 @@ let functionVerifyTests =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 100000)) countReg Map.empty 50 7
 
               match report.Coverage with
-              | Conformance.Sampled(50, Some 100001) -> ()
+              | Sampled(50, Some 100001) -> ()
               | other -> failtestf "expected Sampled(50, Some 100001), got %A" other
+
+          // Phase 297 — the space size is an int64 product that saturates, so a multi-hole space too
+          // large for an `int` can neither wrap into an exhaustive enumeration nor be misreported.
+          testCase "symbolic mode sizes a multi-hole space without wrapping (Phase 297)"
+          <| fun _ ->
+              let holes (n: int) (lo, hi) =
+                  { RNode.node
+                        "mh"
+                        "template"
+                        [ for k in 1..n -> RNode.hole (sprintf "h%d" k) "field" "count" (ValueHole(IntRange(lo, hi))) ] with
+                      Eff = Effect.pureDeterministic }
+
+              // 100^4 = 10^8 fits an int: sampled, and the size reported exactly.
+              let fits =
+                  Conformance.verifyFunctionSymbolic artw (holes 4 (0, 99)) countReg Map.empty 50 7
+
+              match fits.Coverage with
+              | Sampled(50, Some 100000000) -> ()
+              | other -> failtestf "four holes of 100: expected Sampled(50, Some 100000000), got %A" other
+
+              // 1000^4 = 10^12: as an unchecked `int` product this wrapped to a negative number, which
+              // passed `<= maxCases` and materialised the full cartesian product. It samples now, and
+              // the size — too large for the report's `int` — is reported unknown, never wrapped.
+              let wraps =
+                  Conformance.verifyFunctionSymbolic artw (holes 4 (0, 999)) countReg Map.empty 50 7
+
+              match wraps.Coverage with
+              | Sampled(50, None) -> ()
+              | other -> failtestf "four holes of 1,000: expected Sampled(50, None), got %A" other
+
+              Expect.isFalse wraps.Verified "values above five are drawn, and the validator catches one"
+
+          testCase "a hole over the whole int range is sampled, not refused as an overflowing size (Phase 297)"
+          <| fun _ ->
+              // `hi - lo + 1` for IntRange(0, Int32.MaxValue) overflowed `int` and read as an empty
+              // domain, reporting a false DidNotApply. Sized in int64 it samples, and the ≤5 rule's real
+              // counterexample surfaces.
+              let report =
+                  Conformance.verifyFunctionSymbolic artw (countOnly (0, System.Int32.MaxValue)) countReg Map.empty 50 7
+
+              match report.Counterexample with
+              | Some cx ->
+                  match cx.Defect with
+                  | ValidatorRejected _ -> ()
+                  | other -> failtestf "expected the validator's defect, got %A" other
+              | None -> failtest "a count over the whole int range must surface a value above five"
 
           testCase "symbolic mode varies value holes while slots are pinned via fixedArgs"
           <| fun _ ->
@@ -1107,7 +1158,7 @@ let functionVerifyTests =
               let report =
                   Conformance.verifyFunctionSymbolic artw (tplCount (0, 5)) countReg fixedArgs 100 7
 
-              Expect.equal report.Coverage (Conformance.Exhaustive 6) "only the count hole varies (6 cases)"
+              Expect.equal report.Coverage (Exhaustive 6) "only the count hole varies (6 cases)"
               Expect.isTrue report.Verified "clean across the pinned-slot param space"
 
           testCase "verifyFunction surfaces an undeclared effect as a defect (Fork-3 cross-check)"
@@ -1128,7 +1179,7 @@ let functionVerifyTests =
               match report.Counterexample with
               | Some cx ->
                   match cx.Defect with
-                  | Conformance.EffectObserved(_, observed) ->
+                  | EffectObserved(_, observed) ->
                       Expect.equal observed.Determinism Clock "the observed clock effect is named"
                   | other -> failtestf "expected EffectObserved, got %A" other
               | None -> failtest "the effect leak must surface a counterexample"
@@ -1169,7 +1220,10 @@ let functionVerifyTests =
               let results =
                   Conformance.casLaws sw stratifiedStreamGen OpStream.defaultHash 4242 200
 
-              Expect.equal (List.length results) 5 "match + stale + race laws, and the two Phase 223 guards"
+              Expect.equal
+                  (List.length results)
+                  6
+                  "match + stale + race laws, the two Phase 223 guards, and the Phase 297 race-arm guard"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -1882,7 +1936,14 @@ let refusableFamilyTests =
               for family, results in
                   [ "Conformance.opAlgebra", Conformance.opAlgebra nodew idw opGen 999 200
                     "Conformance.reducer", Conformance.reducer sw.Apply streamGen None 314 200 ] do
-                  for side in [ "accepted op"; "refused op" ] do
+                  // Phase 297 — opAlgebra's accepted-op guard also demands every op kind.
+                  let accepted =
+                      if family = "Conformance.opAlgebra" then
+                          "accepted op and op kind"
+                      else
+                          "accepted op"
+
+                  for side in [ accepted; "refused op" ] do
                       let g = guardNamed family side results
                       Expect.isTrue g.Passed (sprintf "%s: %s — %A" family side g.Counterexample)
 
@@ -1920,20 +1981,42 @@ let refusableFamilyTests =
           <| fun _ ->
               let results = Conformance.opAlgebra nodew idw loneLeafGen 999 1
 
+              // Phase 297 — the accept-side laws are COVERED by the accepted-op guard, so a run that
+              // never accepted an op reads them through the guard (green here, red there) rather
+              // than as three "never reached" reds beside a red guard.
               Expect.isTrue
                   (subjectOf results |> List.forall (fun r -> r.Passed))
                   "every subject law is green over one drawn op"
 
               let starved =
-                  [ "accepted op"; "refused op" ]
+                  [ "accepted op and op kind"; "refused op" ]
                   |> List.filter (fun side -> not (guardNamed "Conformance.opAlgebra" side results).Passed)
 
-              Expect.equal (List.length starved) 1 "one op reaches one side, and the other is reported starved"
+              // One drawn op is one kind, so the accepted-op guard is starved on the five kinds it did
+              // not draw whichever side the op reached; the refused side is starved iff the op applied.
+              Expect.isNonEmpty starved "one op cannot reach both sides and every kind"
+
+              Expect.contains
+                  starved
+                  "accepted op and op kind"
+                  "one drawn op leaves five kinds unreached, and the guard says so"
 
           testCase "go-red: certify's verdict moves with opAlgebra's guard"
           <| fun _ ->
+              // Phase 297 — a witness under which NO node can hold children never asserts the three
+              // `ReplaceChildren` laws, and those cells are strict (no guard counts holders), so
+              // `certify` would now stop at the witness laws, honestly. The leaf is a holder here so
+              // the run gets as far as the algebra guard this test is about.
               let report =
-                  Conformance.certify nodew idw loneLeafGen sw streamGen OpStream.defaultHash 12345 1
+                  Conformance.certify
+                      nodew
+                      idw
+                      { loneLeafGen with CanHold = None }
+                      sw
+                      streamGen
+                      OpStream.defaultHash
+                      12345
+                      1
 
               let redGuards =
                   report.Results
