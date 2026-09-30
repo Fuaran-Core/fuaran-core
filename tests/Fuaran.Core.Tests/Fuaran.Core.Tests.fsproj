@@ -33,6 +33,7 @@
     <Compile Include="EffectAuditTests.fs" />
     <Compile Include="SchemaTests.fs" />
     <Compile Include="ConformanceTests.fs" />
+    <Compile Include="KeyedApplyTests.fs" />
     <Compile Include="FootprintTests.fs" />
     <Compile Include="ConcurrencyTests.fs" />
     <Compile Include="WitnessLawTests.fs" />

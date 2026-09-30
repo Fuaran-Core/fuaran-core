@@ -107,26 +107,36 @@ first is this library's: structural (the invariant above), vocabulary (your wire
 whether a kind and its fields are ones you know), and rule families (your own pre-emit lint). A
 claim that says only "valid" has not said which, and `Tree.WellFormed` exists so that it can.
 
-**A node your domain holds in a keyed, non-structural position is invisible to that traversal**,
-and uniqueness over those positions is **your domain's obligation, not this library's.** If your
-node type keeps children anywhere `Children` does not report them — a case table, a fallback slot,
-a named alternative, an argument position — then run your own id check over your own full walk
-before handing an op to `Ops.apply`; this engine cannot see those nodes and will not pretend to.
+**A node your domain holds in a keyed, non-structural position is invisible to that traversal** —
+and, since Phase 286, you declare those positions once and the engine walks them. If your node type
+keeps children anywhere `Children` does not report them — a case table, a fallback slot, a named
+alternative, an argument position — supply a `KeyedWitness`: the nodes each node holds in keyed
+positions (`KeyedChildren`), an arity-preserving rebuild of them (`ReplaceKeyedChildren`), a way to
+place one there (`PlaceKeyedChild`), and your own full-walk id check (`IdsUnique`). Then
+`Tree.traversal nodew keyw` is a witness every navigator (`tryFind`, `path`, `Index.build`,
+`updateNode`, …) reaches those nodes through; `Tree.idsKeyed` / `wellFormedKeyed` /
+`graftWellFormedKeyed` are the keyed walks; and `Ops.applyContainedKeyed` refuses a `DuplicateId`
+held in a keyed position on either side of an insert, and addresses nodes below one. The unkeyed
+`Ops.apply` / `applyContained` are unchanged: they see only `Children`, so a domain that uses them
+still owes its own check over its own walk.
 
-**And certify that check rather than assuming it.** `Conformance.keyedChildrenLaws` takes a
-`KeyedWitness`: your declaration of which ids a node holds in keyed positions, a way to place one
-there, and the check itself. It then BUILDS the two trees the check exists to refuse — an id held
-both in a keyed position and in the witness surface, and one id held in two keyed positions — and
-requires your check to refuse them, over your own generator at your own witness. Building them is
-the point: your generator mints fresh ids, so a law quantified over what it draws would certify a
-check that checks nothing. A domain with no keyed position declares the empty list, and the report
-says it was vacuous **by declaration** rather than passing quietly.
+**And certify the declaration rather than assuming it.** `Conformance.keyedApplyLaws` BUILDS the
+collisions the unkeyed engine is blind to — an id held keyed in the tree against a structural graft,
+the reverse, and keyed against keyed — and requires `applyContainedKeyed` to refuse exactly the
+inserts your own check refuses afterwards; a keyed position your `KeyedChildren` forgets is the
+disagreement it reports. `Conformance.keyedChildrenLaws` certifies your check itself. Building the
+collisions is the point: your generator mints fresh ids, so a law quantified over what it draws
+would certify a check that checks nothing. A domain with no keyed position declares the empty list,
+and the report says it was vacuous **by declaration** rather than passing quietly.
 
-That boundary is deliberate rather than a gap waiting to be closed. `Children` is also what the
-engine **rebuilds** through, so widening the witness to reach keyed positions would oblige every
-domain to re-express them as an ordered list — a large change to what a domain must model, to buy
-a check the domain is far better placed to make. `Conformance.opAlgebra` certifies the invariant at
-exactly this scope over your own witness, with two laws that say different things: `"an accepted
+What stays deliberate is what the engine EDITS through. `Children` is what it **rebuilds**
+through — structural ops append to, filter and permute that list and nothing else — so a keyed
+position is read and located but never added to, vacated or reordered by a skeleton op; a
+`RemoveNode` or `MoveNode` of a node held directly in one is refused as `KeyedPosition`. Widening
+`Children` itself to reach keyed positions would oblige every domain to re-express them as an
+ordered list the engine may restructure, which is the change Phase 189 declined and Phase 286 keeps
+declining. `Conformance.opAlgebra` certifies the invariant at
+the structural scope over your own witness, with two laws that say different things: `"an accepted
 insert introduces no id already present"` is about the op that can create a duplicate, and
 `"apply's accept path preserves Tree.WellFormed"` is about every op, so a `MoveNode` or a `Batch`
 that broke it could not hide behind the first.

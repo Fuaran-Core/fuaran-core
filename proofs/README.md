@@ -33,7 +33,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `oracle/Chain.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `JsonParse.fst` | The fifth model (Phase 146): the recursive-descent JSON PARSER — `Json.parseDetailedWithPolicy`'s `skipWs` / `expect` / `parseString` / `parseNumber` / `parseValue` / `parseObject` / `parseArray`, the depth counter, both numeric guards and the `EraseMemberNull` fork — with `parse_total`, `depth_bound_exact`, `int53_guard_exact`, `error_kind_exhaustive` and `null_absorption_is_erasure` proved. This is the boundary theorem 1 named. Shares nothing with the models above but `oracle/Prims.fs`. |
 | `oracle/JsonParse.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
-| `Preservation.fst` | The sixth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. |
+| `Preservation.fst` | The sixth model (Phase 138): the APPLY ENGINE — `Ops.apply`'s totality with its per-clause rejection characterisation, all-or-nothing rejection, id uniqueness preserved by every accepted operation, `Ops.canApply` agreeing with `apply`, and `Ops.invert`'s round trip. It `open`s `TreeOps` (and through it `DagFold`) rather than remodelling the tree: the theorem is about the algebra that model already describes. Since Phase 286, section 12 models the KEYED engine (`Ops.applyContainedKeyed`) over a two-list tree and shows its insert is the unkeyed insert over the keyed walk, so uniqueness is preserved over every keyed position a domain declares (`keyed_apply_preserves_wf`); that section is not extracted. |
 | `oracle/Preservation.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `TreeDiff.fst` | The seventh model (Phase 141): the DIFF — `Diff.toOps`'s two refusals characterised exactly, its four passes clause for clause, what each pass guarantees about the block it emits, and `Diff.toOpsContained`'s pre-emptive container refusal. Named `TreeDiff` and not `Diff` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`. It `open`s `TreeOps` (and through it `DagFold`); it is independent of `Preservation.fst`. |
 | `oracle/TreeDiff.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -641,7 +641,7 @@ over-read.
 | `parser-float-readback-opaque` | `model-bridge` | `permanent` |
 | `parser-alphabet-bridge` | `model-bridge` | `permanent` |
 | `lawful-abstract-witness` | `domain-obligation` | `Conformance.witnessLaws` |
-| `witness-surface-scope` | `domain-obligation` | `Conformance.keyedChildrenLaws` |
+| `witness-surface-scope` | `domain-obligation` | `Conformance.keyedApplyLaws` |
 | `canon-numeral-layouts` | `model-bridge` | `permanent` |
 | `canon-key-comparator` | `model-bridge` | `permanent` |
 | `canon-character-bridge` | `model-bridge` | `permanent` |
@@ -693,13 +693,23 @@ check against it — refusing an id held in a keyed position that the witness su
 one held in two keyed positions, both BUILT rather than drawn — so the row is now an obligation with
 a law like any other.
 
-**What did NOT change is the boundary itself.** The witness surface is unwidened: `Ops` still sees
-exactly what `Children` reports, and the root [`README.md`](../README.md) still says of the keyed
-positions that "this engine cannot see those nodes and will not pretend to". What is certified is
-the DOMAIN'S check, at the domain's own witness — which is what the row always said the obligation
-was. A domain that declares no keyed position runs the family and is told, in the adequacy line,
-that its report is vacuous by declaration; that is a different thing from a green run, and the
-report says which one it is.
+**What did NOT change then was the boundary itself.** The witness surface was unwidened: `Ops`
+still saw exactly what `Children` reports. What was certified was the DOMAIN'S check, at the
+domain's own witness — which is what the row always said the obligation was. A domain that declares
+no keyed position runs the family and is told, in the adequacy line, that its report is vacuous by
+declaration; that is a different thing from a green run, and the report says which one it is.
+
+**What Phase 286 changed, and why the row moved to `Conformance.keyedApplyLaws`.** The declaration
+now reaches the engine. `KeyedWitness` carries the keyed NODES (`KeyedChildren`, with an
+arity-preserving `ReplaceKeyedChildren`), `Tree.traversal` walks them, and `Ops.applyContainedKeyed`
+refuses a `DuplicateId` over the keyed walk — proved in `Preservation.fst` section 12
+(`keyed_apply_preserves_wf`), which shows the keyed insert is the unkeyed insert over the traversal
+and transfers `apply_preserves_wf` rather than re-proving it. `Children` is still what the engine
+rebuilds through: keyed positions are located and read, never appended to, vacated or reordered.
+So the uniqueness is Core's refusal given the declaration, and what the domain still owes is the
+DECLARATION — that it reports every keyed position the domain's own walk sees. That is exactly what
+`keyedApplyLaws`' agreement law measures, over collisions built through `PlaceKeyedChild`, which is
+why the row's discharge moved there. The unkeyed forms keep the Phase 189 boundary unchanged.
 
 **Why `propagation-change-set-and-prior` stopped being a `premise` (Phase 211).** The same move,
 one row further on. What theorem 11 still assumes after Phase 209 is about the EVALUATOR — that a

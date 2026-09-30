@@ -1573,6 +1573,9 @@ let private prodRejClass (r: Rejection<string>) =
     | NotAContainer _ -> "NotAContainer"
     | ReorderMismatch _ -> "ReorderMismatch"
     | Rejected _ -> "Rejected"
+    // Phase 286: raised only by the keyed engine, which the oracle does not run — so the class
+    // never reaches a comparison, and it has no model counterpart to meet there.
+    | KeyedPosition _ -> "KeyedPosition"
 
 let private modelRejClass (r: TreeOps.rejection) =
     match r with

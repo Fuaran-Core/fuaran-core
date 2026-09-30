@@ -25,6 +25,59 @@ type NodeWitness<'Node, 'Id> =
       Children: 'Node -> 'Node list
       ReplaceChildren: 'Node -> 'Node list -> 'Node }
 
+/// The domain-supplied KEYED-CHILDREN declaration (Phase 189; moved here from the conformance kit
+/// and widened by Phase 286): the nodes a domain holds where `NodeWitness.Children` does not report
+/// them — a case table, a fallback slot, a named alternative, an argument position — together with
+/// the domain's own full-walk id check over them.
+///
+/// **Why this is a witness of its own and not a field of `NodeWitness`.** `Children` is what the
+/// engine REBUILDS through: a structural edit appends to it, filters it and permutes it. Widening
+/// it to reach keyed positions would oblige every domain to re-express a case table as an ordered
+/// list the engine may restructure. That reasoning (Phase 189) stands, so the keyed positions stay
+/// a separate declaration and the engine never adds to, removes from or reorders them.
+///
+/// **What the engine does with it (Phase 286).** It READS it. `Tree.traversal` derives the
+/// `NodeWitness` whose walk covers both surfaces, so every navigator reaches a node held in a keyed
+/// position; `Tree.wellFormedKeyed` / `Tree.graftWellFormedKeyed` hold id uniqueness over that
+/// walk; and `Ops.applyContainedKeyed` refuses a `DuplicateId` there and addresses nodes below a
+/// keyed position. A domain declares its keyed positions ONCE, here, and stops re-deriving the walk.
+///
+/// **A domain with no keyed position declares none** — `KeyedChildren = fun _ -> []`,
+/// `ReplaceKeyedChildren = fun n _ -> n`, `PlaceKeyedChild = fun _ _ -> None` — and every keyed form
+/// then answers exactly what its unkeyed form does.
+type KeyedWitness<'Node, 'Id> =
+    {
+        /// The domain's own id check, named as a reader of a counterexample would look for it —
+        /// name the thing an author calls ("the full walk in `Doc.validate`"), not the module it
+        /// lives in.
+        Surface: string
+        /// The nodes this node holds in keyed, non-structural positions — the ones `Children` does
+        /// not report — in the domain's own order. `[]` for a node that holds none, and
+        /// `fun _ -> []` for a domain that has none at all. The ids these nodes carry are what
+        /// Phase 189's `HasKeyedChildren` declared; that list is now DERIVED (`Tree.keyedIds`)
+        /// rather than stated a second time, so the declaration the kit certifies and the one the
+        /// engine reads cannot disagree.
+        KeyedChildren: 'Node -> 'Node list
+        /// Rebuild a node with new nodes in its keyed positions, ARITY-PRESERVING: given a list as
+        /// long as `KeyedChildren n`, position for position, the result holds exactly that list
+        /// there and is otherwise `n` — the same content, the same `Children`. It never adds or
+        /// vacates a position; that is a domain edit, not a rebuild. This is the seam
+        /// `Tree.traversal` rebuilds through, so a walk that rewrites a node below a keyed position
+        /// can put it back. `fun n _ -> n` for a domain that has none.
+        ReplaceKeyedChildren: 'Node -> 'Node list -> 'Node
+        /// Place a node carrying `id` in a keyed position of this node, or `None` where this node
+        /// has no keyed position to place into. The kit BUILDS its collisions through this rather
+        /// than drawing them: a generator's contract is a fresh id, so a drawn sample can never
+        /// exhibit the defect those laws are about, and a law quantified over the drawn sample
+        /// alone would certify a check that checked nothing (`opAlgebra`'s built arm, for the same
+        /// reason).
+        PlaceKeyedChild: 'Node -> 'Id -> 'Node option
+        /// The domain's own full-walk id check: `true` when this tree's ids are unique over the
+        /// domain's OWN walk, keyed positions included. It is the obligation the kit certifies, so
+        /// it is the domain's function and never derived from the fields above.
+        IdsUnique: 'Node -> bool
+    }
+
 /// Generic tree addressing / walking / structural update, generic over the `'Node`
 /// and `'Id` witnesses. No domain `NodeKind` is ever in scope here.
 module Tree =
@@ -55,12 +108,14 @@ module Tree =
     /// families. Nothing here says anything about the other two, and a reader who wants "is this
     /// tree valid" has to say which question they are asking.
     ///
-    /// **Scope: the WITNESS SURFACE.** `Tree.ids` walks `NodeWitness.Children`, so this predicate
-    /// quantifies over exactly the nodes Core can reach and rebuild through. A domain that holds
-    /// nodes in KEYED, NON-STRUCTURAL positions — a switch case table, a named slot map — keeps
-    /// them outside `Children`, so they are invisible here and uniqueness over them is the domain's
-    /// own obligation. The predicate says so rather than implying a whole-tree guarantee Core cannot
-    /// see; see the README, and Phase 137, which scoped the insert validator the same way.
+    /// **Scope: the WITNESS SURFACE.** `Tree.ids` walks `NodeWitness.Children`, so `wellFormed`
+    /// quantifies over exactly the nodes Core rebuilds through. A domain that holds nodes in KEYED,
+    /// NON-STRUCTURAL positions — a switch case table, a named slot map — keeps them outside
+    /// `Children`, so they are invisible to the unkeyed forms. Since Phase 286 that is no longer the
+    /// domain's own obligation: it declares those positions once, in a `KeyedWitness`, and
+    /// `Tree.wellFormedKeyed` / `Tree.graftWellFormedKeyed` return this same verdict over the walk
+    /// that includes them. The unkeyed forms keep their answer, which is the keyed forms' answer
+    /// for a domain that declares no keyed position.
     ///
     /// **One clause, not two, and that is a correction to how this was described.** The natural
     /// pairing is "unique ids AND a single root", but a `'Node` value IS its tree here: the walk
@@ -71,14 +126,16 @@ module Tree =
     /// and `Tree.Index.build`'s `Map.ofList` silently keeps the last. So the predicate has one
     /// clause and says why.
     type WellFormed<'Id> =
-        /// Every id the `Children` preorder reaches is distinct.
+        /// Every id the walk reaches is distinct — the `Children` preorder for the unkeyed forms,
+        /// the `Tree.traversal` preorder for the keyed ones.
         | Structural
-        /// The FIRST id, in `Children` preorder, that the tree carries twice.
+        /// The FIRST id, in that preorder, that the tree carries twice.
         | RepeatedId of 'Id
 
-    /// The first id in `ids` that `seen` already holds or that `ids` repeats within itself — the one
-    /// scan both public forms below project from, so "already in the tree" and "duplicated inside
-    /// the graft" cannot drift apart into two different notions of the same defect.
+    /// The first id in `candidates` that `seen` already holds or that `candidates` repeats within
+    /// itself — the one scan every uniqueness verdict here projects from, so "already in the tree"
+    /// and "duplicated inside the graft" cannot drift apart into two different notions of the same
+    /// defect.
     let private firstRepeat (idw: IdWitness<'Id>) (seen: Set<string>) (candidates: 'Id list) : 'Id option =
         let rec scan (seen: Set<string>) ids =
             match ids with
@@ -92,6 +149,15 @@ module Tree =
                     scan (Set.add k seen) rest
 
         scan seen candidates
+
+    /// The same scan, over ids a caller has already collected (Phase 286): the first of `incoming`
+    /// that `held` carries, or that `incoming` repeats within itself; `None` when admitting
+    /// `incoming` beside `held` keeps every id unique. `graftWellFormed` is this with `held` the
+    /// tree's ids and `incoming` the graft's, and `Ops.applyContainedKeyed` asks it about an
+    /// `UpdateNode` payload's keyed subtrees, whose ids arrive beside a tree the payload's target
+    /// keeps.
+    let firstRepeatedId (idw: IdWitness<'Id>) (held: 'Id list) (incoming: 'Id list) : 'Id option =
+        firstRepeat idw (held |> List.map idw.ToString |> Set.ofList) incoming
 
     /// Is `root` structurally well-formed, and if not, which id breaks it? One preorder scan.
     let wellFormed (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : WellFormed<'Id> =
@@ -112,14 +178,15 @@ module Tree =
     /// outranks its descendants'.
     ///
     /// This is the question every insert validator asks; `Ops`'s reads it, so the accept path and
-    /// this predicate cannot diverge.
+    /// this predicate cannot diverge. `Tree.graftWellFormedKeyed` asks it over the walk that
+    /// includes a domain's keyed positions, on both sides of the graft (Phase 286).
     let graftWellFormed
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (node: 'Node)
         (root: 'Node)
         : WellFormed<'Id> =
-        match firstRepeat idw (ids w root |> List.map idw.ToString |> Set.ofList) (ids w node) with
+        match firstRepeatedId idw (ids w root) (ids w node) with
         | Some d -> RepeatedId d
         | None -> Structural
 
@@ -317,6 +384,91 @@ module Tree =
         (root: 'Node)
         : 'Node =
         map w (fun n -> setId (rename (w.Id n)) n) root
+
+    // ---- the keyed walk (Phase 286) ----
+    // A domain that holds nodes in keyed positions declares them once, in a `KeyedWitness`, and
+    // every walk here reaches them through ONE derived witness rather than through a second copy of
+    // each walk. `traversal` is that witness; the named keyed forms below are the walks a caller
+    // reaches for most, and every other combinator in this module (`tryFind`, `parentOf`, `path`,
+    // `ancestors`, `updateNode`, `map`, `remapIds`, `Index.build`, …) takes `traversal nodew keyw`
+    // in place of `nodew` to reach a node held in a keyed position. For a domain that declares no
+    // keyed position every keyed form answers exactly what its unkeyed form does.
+
+    /// The ids of the nodes `n` holds in keyed positions, in the domain's order — Phase 189's
+    /// `HasKeyedChildren`, derived from `KeyedWitness.KeyedChildren` rather than declared beside it.
+    let keyedIds (w: NodeWitness<'Node, 'Id>) (keyw: KeyedWitness<'Node, 'Id>) (n: 'Node) : 'Id list =
+        keyw.KeyedChildren n |> List.map w.Id
+
+    /// The `NodeWitness` whose walk covers both surfaces: a node's children are the nodes it holds
+    /// in keyed positions, THEN its structural `Children`, and a rebuild splits the list back at
+    /// that boundary — the keyed prefix through `ReplaceKeyedChildren`, the rest through
+    /// `ReplaceChildren`.
+    ///
+    /// **Keyed first, and why.** A node's keyed positions are part of its own content (an
+    /// `UpdateNode` payload carries them; `ReplaceChildren` does not touch them), so the walk reads
+    /// them before it descends the structural list. It also makes the structural surface the TAIL
+    /// of the combined list, so appending a structural child — the one way `Ops` grows a node — is
+    /// appending to this witness's children too: the keyed engine's insert is literally the
+    /// unkeyed engine's insert over this walk, which is how `proofs/Preservation.fst` transfers the
+    /// preservation theorem to it, first offender included.
+    ///
+    /// **A READ-and-REBUILD witness, not an EDIT witness.** Its `ReplaceChildren` is exact on a list
+    /// as long as its `Children` — which is every list a rebuild-in-place walk passes (`updateNode`,
+    /// `map`, `remapIds`) — and requires the domain's `ReplaceChildren` not to move the keyed
+    /// positions (the `keyedApplyLaws` witness laws). Handing it to the structural ops would let
+    /// them append to, filter and permute keyed positions, which is exactly what Phase 189 kept them
+    /// from; `Ops.applyContainedKeyed` locates through it and edits through `nodew`.
+    let traversal (w: NodeWitness<'Node, 'Id>) (keyw: KeyedWitness<'Node, 'Id>) : NodeWitness<'Node, 'Id> =
+        { Id = w.Id
+          KindTag = w.KindTag
+          Children = fun n -> keyw.KeyedChildren n @ w.Children n
+          ReplaceChildren =
+            fun n cs ->
+                let keyedArity = List.length (keyw.KeyedChildren n)
+                let keyed, structural = List.splitAt (min keyedArity (List.length cs)) cs
+                keyw.ReplaceKeyedChildren (w.ReplaceChildren n structural) keyed }
+
+    /// Preorder over the keyed walk: node, then its keyed children's subtrees, then its structural
+    /// children's. Iterative, as `preorder` is (Phase 10) — it IS `preorder`, over `traversal`.
+    let preorderKeyed (w: NodeWitness<'Node, 'Id>) (keyw: KeyedWitness<'Node, 'Id>) (root: 'Node) : 'Node list =
+        preorder (traversal w keyw) root
+
+    /// Every id the keyed walk reaches, in `preorderKeyed` order.
+    let idsKeyed (w: NodeWitness<'Node, 'Id>) (keyw: KeyedWitness<'Node, 'Id>) (root: 'Node) : 'Id list =
+        ids (traversal w keyw) root
+
+    /// `fold` over the keyed walk.
+    let foldKeyed
+        (w: NodeWitness<'Node, 'Id>)
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (f: 'State -> 'Node -> 'State)
+        (state: 'State)
+        (root: 'Node)
+        : 'State =
+        fold (traversal w keyw) f state root
+
+    /// `wellFormed` over the keyed walk: id uniqueness over every id-bearing position the domain
+    /// declares, and the first offender in `preorderKeyed` order. For a domain with no keyed
+    /// position this is `wellFormed`.
+    let wellFormedKeyed
+        (w: NodeWitness<'Node, 'Id>)
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (root: 'Node)
+        : WellFormed<'Id> =
+        wellFormed (traversal w keyw) idw root
+
+    /// `graftWellFormed` over the keyed walk, on BOTH sides: an id the tree holds in a keyed
+    /// position, and an id the graft carries into one, are each seen. This is the scan
+    /// `Ops.applyContainedKeyed`'s `DuplicateId` refusal projects from.
+    let graftWellFormedKeyed
+        (w: NodeWitness<'Node, 'Id>)
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (node: 'Node)
+        (root: 'Node)
+        : WellFormed<'Id> =
+        graftWellFormed (traversal w keyw) idw node root
 
     // ---- build-once index (Phase 05) ----
     // The everyday navigators (`tryFind` / `parentOf` / `path` / `ancestors` / `depth`) each

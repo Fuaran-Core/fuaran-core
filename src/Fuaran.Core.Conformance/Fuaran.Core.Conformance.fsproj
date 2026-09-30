@@ -29,6 +29,7 @@
     <Compile Include="ConformanceWitnesses.fs" />
     <Compile Include="LawKit.fs" />
     <Compile Include="TreeLaws.fs" />
+    <Compile Include="KeyedApplyLaws.fs" />
     <Compile Include="StreamLaws.fs" />
     <Compile Include="IntegrityLaws.fs" />
     <Compile Include="ConcurrencyLaws.fs" />

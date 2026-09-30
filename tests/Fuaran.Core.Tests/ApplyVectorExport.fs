@@ -218,6 +218,9 @@ module ApplyVectorExport =
             Canon.typed "notAContainer" [ "target", JStr target; "kindTag", JStr kindTag ]
         | ReorderMismatch(parent, _, _) -> Canon.typed "reorderMismatch" [ "parent", JStr parent ]
         | Rejected(code, _) -> Canon.typed "rejected" [ "code", JStr code ]
+        // Phase 286 — raised only by `Ops.applyContainedKeyed`, which no apply vector runs, so no
+        // pinned vector carries it; the projection names it so the match stays total.
+        | KeyedPosition(target, holder) -> Canon.typed "keyedPosition" [ "target", JStr target; "holder", JStr holder ]
 
     // -----------------------------------------------------------------------
     //  the authored cases

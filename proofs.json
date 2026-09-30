@@ -1130,6 +1130,17 @@
       }
     },
     {
+      "id": "keyed-apply-preserves-wf",
+      "level": "proved",
+      "claim": "The keyed engine keeps id uniqueness over every id-bearing position a domain declares. An insert `Ops.applyContainedKeyed` accepts into a tree whose keyed walk (`Tree.traversal`: a node's keyed children, then its structural ones) repeats no id leaves a tree whose keyed walk repeats none. It is not a second preservation proof: `erase_kins` shows the keyed insert, read through the traversal, IS the unkeyed insert over the keyed walk — the structural list is the tail of the combined one, so appending to it appends to the combined list — and `kapply_insert_is_apply` that the keyed clause therefore answers exactly what `Ops.apply` answers there, so `apply_preserves_wf` transfers and its `InsertChild _ _, DuplicateId _` clause quantifies over the keyed walk (`keyed_dup_refusal_exact`). The model is a concrete two-list tree, not a parameter. The keyed engine's other clauses bring no id in, except `UpdateNode`'s keyed payload, whose check is tested (`KeyedApplyTests.fs`) and not modelled; the declaration's own accuracy is `witness-surface-scope`, a domain obligation.",
+      "phase": "fuaran-core#286",
+      "evidence": {
+        "theorem": "keyed_apply_preserves_wf",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "canapply-preserves",
       "level": "proved",
       "claim": "The dry run and the mutating call accept exactly the same operations, and what the mutating call then produces is well-formed. The sampled `canApply` = `apply` law becomes a corollary. The part worth naming is what the proof needed: two defensive `UnknownNode` fallbacks the shipped engine carries after its `parentOf` lookup are UNREACHABLE, because a non-root id the tree holds always has a parent — so the two surfaces cannot diverge by one of them taking a branch the other does not.",
@@ -1180,12 +1191,12 @@
     {
       "id": "witness-surface-scope",
       "level": "assumed",
-      "claim": "That the witness surface is the whole of the tree. `Tree.ids` walks `NodeWitness.Children`, so a node a domain holds in a keyed, non-structural position is invisible to the uniqueness scan, to every theorem above, and to the differential. Uniqueness over those positions is the domain's own obligation. Stated as an assumption rather than a limitation because it is what the theorems quantify over: they are true of the witness view, and the witness view is what `Ops` can see. A PERMANENT `premise` until Phase 189, on the reasoning that no kit law could discharge it — which was true of the surface the kit could SEE and stopped holding the moment a domain could DECLARE its keyed positions. `Conformance.keyedChildrenLaws` takes that declaration and certifies the domain's own full-walk id check against it, so the row is now an obligation with a law rather than a premise. The witness surface itself is unwidened: what is certified is the domain's check, at the domain's witness, and `Ops` still sees exactly what `Children` reports.",
+      "claim": "That the witness surface is the whole of the tree. `Tree.ids` walks `NodeWitness.Children`, so a node a domain holds in a keyed, non-structural position is invisible to the uniqueness scan, to every theorem above, and to the differential. Uniqueness over those positions was the domain's own obligation. Stated as an assumption rather than a limitation because it is what the theorems quantify over: they are true of the witness view, and the witness view is what `Ops` can see. A PERMANENT `premise` until Phase 189, on the reasoning that no kit law could discharge it — which was true of the surface the kit could SEE and stopped holding the moment a domain could DECLARE its keyed positions; `Conformance.keyedChildrenLaws` then certified the domain's own full-walk id check against that declaration. Phase 286 moved the uniqueness itself into Core: a domain that hands its `KeyedWitness` to `Ops.applyContainedKeyed` gets the `DuplicateId` refusal over the keyed walk (`keyed-apply-preserves-wf`), so what is left of the obligation is the DECLARATION — that `KeyedChildren` reports every keyed position the domain's own walk sees, and that `ReplaceKeyedChildren` and `ReplaceChildren` leave each other's positions alone. `Conformance.keyedApplyLaws` certifies exactly that: its agreement law holds the engine's refusal to the domain's own check over collisions BUILT through `PlaceKeyedChild`, and its witness laws hold the two rebuilds apart. The unkeyed `Ops` forms still see exactly what `Children` reports, and a domain that does not use the keyed forms keeps the Phase 189 obligation as it was.",
       "phase": "fuaran-core#138",
       "class": "domain-obligation",
-      "dischargedBy": "Conformance.keyedChildrenLaws",
+      "dischargedBy": "Conformance.keyedApplyLaws",
       "evidence": {
-        "assumption": "the domain's own full-walk id check refuses a tree holding one id in a keyed position and in the witness surface, or in two keyed positions — Conformance.keyedChildrenLaws"
+        "assumption": "the domain's KeyedWitness declares every keyed position its own full walk sees, and its two rebuilds leave each other's positions alone: applyContainedKeyed refuses exactly the inserts the domain's own id check would refuse afterwards, over collisions built through PlaceKeyedChild — Conformance.keyedApplyLaws"
       }
     },
     {

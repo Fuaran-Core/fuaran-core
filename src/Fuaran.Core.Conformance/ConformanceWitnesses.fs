@@ -87,43 +87,9 @@ type ConstructWitness<'T> =
     { Surface: string
       Construct: 'T -> Result<'T, string> }
 
-/// The domain-supplied KEYED-CHILDREN declaration (Phase 189): the nodes a domain holds where
-/// `NodeWitness.Children` does not report them — a case table, a fallback slot, a named
-/// alternative, an argument position — together with the domain's own full-walk id check over
-/// them.
-///
-/// **Why this is a witness of its own and not a field of `OpGen`.** `Children` is what the engine
-/// REBUILDS through, so widening the node witness to reach keyed positions would oblige every
-/// domain to re-express them as an ordered list — a large change to what a domain must model, to
-/// buy a check the domain is far better placed to make. The boundary stays where `README.md` puts
-/// it; what changes is that the obligation it leaves with the domain is now something the domain
-/// can RUN, on the `ConstructWitness` precedent: a domain opts in by supplying one, and a domain
-/// that supplies none is not silently certified.
-///
-/// **A domain with no keyed position declares the empty list**, and the family then reports
-/// vacuity BY DECLARATION rather than by silence — a green report over a witness that was never
-/// asked anything is the vacuity this kit exists to refuse.
-type KeyedWitness<'Node, 'Id> =
-    {
-        /// The domain's own id check, named as a reader of a counterexample would look for it —
-        /// name the thing an author calls ("the full walk in `Doc.validate`"), not the module it
-        /// lives in.
-        Surface: string
-        /// The ids this node holds in keyed, non-structural positions — the ones `Children` does
-        /// not report. `[]` for a node that holds none, and `fun _ -> []` for a domain that has
-        /// none at all.
-        HasKeyedChildren: 'Node -> 'Id list
-        /// Place `id` in a keyed position of this node, or `None` where this node has no keyed
-        /// position to place into. The kit BUILDS its collisions through this rather than drawing
-        /// them: a generator's contract is a fresh id, so a drawn sample can never exhibit the
-        /// defect these laws are about, and a law quantified over the drawn sample alone would
-        /// certify a check that checked nothing (`opAlgebra`'s built arm, for the same reason).
-        PlaceKeyedChild: 'Node -> 'Id -> 'Node option
-        /// The domain's own full-walk id check: `true` when this tree's ids are unique over the
-        /// domain's OWN walk, keyed positions included. This is the obligation being certified,
-        /// so it is the domain's function and never derived from the two above.
-        IdsUnique: 'Node -> bool
-    }
+// `KeyedWitness` (Phase 189) was declared here until Phase 286, which moved it to
+// `Fuaran.Core.Tree` beside `NodeWitness`: the keyed walks and `Ops.applyContainedKeyed` read it,
+// and neither can reference this assembly. The namespace is unchanged.
 
 /// The domain-supplied INCREMENTAL EVALUATOR (Phase 211): what a domain hands `Propagation.eval`
 /// and `Propagation.evalFrom`, together with the edits it re-evaluates under and the change set it
