@@ -2746,6 +2746,75 @@ reach. Carrying the per-side counts on a pass needs a place on `LawResult` to pu
 record-shape change to the kit's most-constructed type, and is left for a decision rather than
 taken inside this entry.
 
+### One string escaping on the spine: every control character is `\u00xx` (Phase 287, DECISIONS.md "the spine owns the string-escaping rule") — BREAKING, wire bytes; the managed surface moves `additive`
+
+**What changed.** `Wire.Json.escape` — and with it `Json.render`, `Json.encode`, every `Codec`
+built on them, and `Canon.render`, which now escapes through the same function — spells `\n`, `\r`
+and `\t` as `\u000a`, `\u000d` and `\u0009`. Before, those three had short forms and only the other
+twenty-nine control characters were `\u00xx`. The rule is now exactly three classes: `"` → `\"`,
+`\` → `\\`, `U+0000`–`U+001F` → lower-case `\u00xx`, nothing else. `Actor.encode` in
+`Fuaran.Core.OpStream` and `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` carry the same rule — they
+are deliberate copies of it, because DECISIONS.md D2 keeps both packages free of a `Wire` reference,
+and `StringEscapeVectors` (new, in `Fuaran.Core.Conformance`) pins every byte the three emit for
+every character the rule escapes against one table, so a copy cannot drift quietly. `Canon.render`'s
+bytes do not move: it already wrote `\u00xx` for every control character (WIRE_FORMAT §2 rule 6),
+and its private copy of the rule is deleted in favour of `Json.escape`.
+
+**Why.** The UI host's canonical encoder and the TypeScript twin already wrote every control
+character as `\u00xx`, and their comments claimed byte-identity with this package's `Actor.encode`.
+The claim was false, and the place it mattered was the chain hash: the UI's linear chain folds
+through `OpStream.canonicalConfig.Payload`, so for an actor id, model or version carrying CR, LF or
+TAB the .NET linear hash disagreed with the TypeScript linear hash AND with the .NET DAG hash of the
+same record. Nothing in any shared corpus carried such a record, which is why every host was green.
+The spine owns the rule now, and the rule is the one the hosts already held.
+
+**The class, stated plainly.** BREAKING on the wire and in the chain: any string containing `\n`,
+`\r` or `\t` renders to different bytes, and any chain record whose actor carries one of those three
+hashes differently. NOT breaking for a string or a record that carries none — which is every record
+this package's tests, its samples and the shared chain corpus have ever written — and the gate's
+managed-surface classes are `additive` (`OpStream.legacyEscapeConfig`; the `StringEscapeVectors`
+module). Reading is unchanged: `Json.parse`, `OpStream.fromJsonl` and `Dag.fromJsonl` accepted
+`\u000a` before and still accept `\n`, so a document written by either version reads under both.
+
+**What adopting it costs.**
+
+- **A consumer that renders strings through `Json.render` / a `Codec`** and pins their bytes — a
+  golden file, a hash over the encoding — sees the golden move exactly where a string carried one of
+  the three characters. This package's own such pins (`ParityVectors`' `witness/render` vectors, one
+  `Wire` test) moved that way in this change-set.
+- **A linear op-stream store written between Phase 320 and this change whose actors carry a
+  control character** no longer verifies under `canonicalConfig`. The Phase-255 shape covers it:
+  `verifyChainWith legacyEscapeConfig` confirms it intact, `rehash legacyEscapeConfig canonicalConfig`
+  cuts it over — `legacyEscapeConfig` is the outgoing payload, kept beside `legacyActorConfig` (which
+  is unchanged and still reproduces the pre-320 bytes, short escapes included, because that is what a
+  pre-320 writer wrote). A store whose actors carry NO control character has byte-identical payloads
+  under both configs: it verifies under `canonicalConfig` unmigrated, and the rehash is a no-op that
+  reproduces every hash — the suite proves that rather than assumes it.
+- **What no config reaches.** The chain config governs the ACTOR's spelling in the payload. A stored
+  OP whose own domain encoding carried a short escape (a `Codec` over `Json.render` with a newline
+  in a string) re-encodes to different bytes under the new rule, and `rehash` — which re-encodes
+  through the one witness it is handed — cannot verify such a chain under any config. Migrating it
+  needs the domain's OLD encoder for the verify leg and its new one for the rehash leg; no such
+  two-witness rehash ships here, because no known store needs it. That is a stated boundary of this
+  entry, recorded in the decision beside it, not an oversight.
+- **A DAG node whose actor carries a control character** has a different content id now, and a
+  content-addressed DAG has no rehash: its ids are its parent links. No known store holds one; a
+  host that does re-appends the history under the new ids.
+- **The shared chain corpus** (`chain/chain-corpus.json`, certified by the UI host and the
+  TypeScript twin) gains a record with a control-character actor when its resident emitter — which
+  lives in the UI host and folds THIS package's `canonicalConfig.Payload` at the version it pins —
+  is raised to a release carrying this change. It cannot be emitted from here; it lands with the
+  consumer's pin raise.
+
+**Measured on this change:** two baselines moved against their committed copy, both `additive`
+(`Fuaran.Core.OpStream`, 1 move; `Fuaran.Core.Conformance`, 14 moves, all the new module) — the
+gate's since-tag line reads `17 baseline(s) read, 4 moved`, the other two being the slot's earlier
+entries above (`Column` D72, `Idl.Codegen` Phase 230); the whole suite green
+with the two `ParityVectors` `Json.render` vectors and one `Wire` test re-pinned to the `\u00xx`
+bytes; the new `StringEscape` suite runs the vector family (over 350 checks, every control character
+through every escaper, both chain configs and the DAG line) and shows it going red on a row spelling
+`U+000A` as `\n`.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

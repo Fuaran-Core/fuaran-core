@@ -200,6 +200,16 @@ module internal FloatLayout =
 /// over canonical wire JSON.
 module Json =
 
+    /// THE string escape of the spine (Phase 287; DECISIONS.md "the spine owns the string-escaping
+    /// rule"). Exactly three classes are escaped and nothing else: `"` as `\"`, `\` as `\\`, and
+    /// every control character `U+0000`–`U+001F` as `\u00xx` with LOWER-CASE hex — including `\n`,
+    /// `\r` and `\t`, which have NO short form here. It is byte-for-byte the UI host's
+    /// `CanonicalJson.appendRawString` and the TypeScript twin's escaper, so a hash pre-image that
+    /// carries a string means one thing on every host. `Canon.render` escapes through this function
+    /// too; the two copies the standalone layers keep (`Actor.encode` in `Fuaran.Core.OpStream`,
+    /// `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` — D2 forbids them a reference here) are held
+    /// value-identical to it by `StringEscapeVectors` in the conformance kit. The parser accepts
+    /// both the short and the `\u` spelling, so nothing changes on read.
     let escape (s: string) : string =
         let sb = System.Text.StringBuilder()
 
@@ -207,9 +217,6 @@ module Json =
             match ch with
             | '"' -> sb.Append("\\\"") |> ignore
             | '\\' -> sb.Append("\\\\") |> ignore
-            | '\n' -> sb.Append("\\n") |> ignore
-            | '\r' -> sb.Append("\\r") |> ignore
-            | '\t' -> sb.Append("\\t") |> ignore
             | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
             | c -> sb.Append(c) |> ignore
 
@@ -649,18 +656,9 @@ module Canon =
 
     /// Canonical string escape (WIRE_FORMAT §2 rule 6): only `"`, `\`, and control chars
     /// (`U+0000`–`U+001F` → `\u00xx`, lower-case hex). No `\n`/`\r`/`\t` shortcuts — byte-for-byte
-    /// the UI host's `appendRawString`.
-    let private escape (s: string) : string =
-        let sb = System.Text.StringBuilder()
-
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append "\\\"" |> ignore
-            | '\\' -> sb.Append "\\\\" |> ignore
-            | c when c < ' ' -> sb.Append(sprintf "\\u%04x" (int c)) |> ignore
-            | c -> sb.Append c |> ignore
-
-        sb.ToString()
+    /// the UI host's `appendRawString`. Since Phase 287 this IS `Json.escape`: the spine has one
+    /// escaping rule, and the private copy that used to live here is gone.
+    let private escape (s: string) : string = Json.escape s
 
 
     /// The single canonical, cross-host float → string encoder (Phase 55). Non-finite floats render to

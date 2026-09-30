@@ -1,5 +1,69 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D75: the spine owns the string-escaping rule, the rule is `\u00xx` for every control character, and the standalone packages carry it as pinned copies rather than as a reference
+
+**Recorded by Phase 287. `Fuaran.Core.Wire`, `Fuaran.Core.OpStream`, `Fuaran.Core.OpStream.Dag`
+and the conformance kit; the wire bytes move (STABILITY.md, 0.33.0), the managed surface `additive`.**
+
+*The finding.* Two dialects of one canonical JSON met in the chain hash. `Wire.Json.escape` and
+`Actor.encode` spelled `\n`, `\r` and `\t` short and every other control character `\u00xx`; the UI
+host's canonical encoder, its own actor mirror and the TypeScript twin spelled all thirty-two
+`\u00xx` — and the twin's comment claimed byte-identity with this package. Because the UI's linear
+chain folds `OpStream.canonicalConfig.Payload`, an actor carrying CR, LF or TAB had one .NET linear
+hash, another TypeScript linear hash, and a third .NET DAG hash. Every host was green because no
+shared corpus carried such an actor. `Canon.render` already held the hosts' spelling, so this
+package had both dialects INSIDE it, one private copy apart.
+
+*The ruling.* The spine owns the rule, and the rule is the hosts': `"` → `\"`, `\` → `\\`, every
+`U+0000`–`U+001F` → lower-case `\u00xx`, nothing else — no short forms, no `/` escape, no
+`\u` above the control range. `Wire.Json.escape` is the rule's home; `Canon.render` escapes through
+it and its private copy is deleted. This answers, for escaping, the open question recorded
+beside the spine's convergence plan — whether Core's op-stream payload adopts the unified
+discipline when streams cross hosts: yes, and Core is where the answer lives. Key ORDER of the payload (author-ordered
+`{seq,actor,op}`) is deterministic as it stands and is not moved here.
+
+*One function, or one rule? The phase asked for one function, and D2 says no.* The shard's task was
+that `OpStream`'s escaper "takes the shared one". It cannot without a `Fuaran.Core.OpStream` →
+`Fuaran.Core.Wire` project reference, and D2 (2026-06-17) is exactly the decision that there is none:
+`OpStream` and `Wire` are standalone so an op-stream-only consumer pays for nothing else, and both
+`OpStream.fs` (its `fnv1a` copy of `Hash.fnv1a`) and `DagOpStream.fs` (its scanner) already cite D2
+as the reason they carry copies. Adding the edge would also put `Fable.Core` on every op-stream
+consumer's restore graph through `Wire`'s package reference. So the shape taken is D2's own: **one
+rule, three value-identical copies, held equal by a vector family** — `StringEscapeVectors`
+enumerates the whole escape alphabet (every control character, the quote, the backslash, a
+plain-text control) and pins, for each, the bytes of `Json.escape`, `Canon.render`, `Json.render`,
+`Actor.encode` (both cases), both chain configs' payloads and `Dag.toJsonl`'s node line against one
+table, plus the two named actors the phase asks the chain laws to carry. Inside `OpStream` the two
+copies it had (`Actor`'s and the module's) ARE one function now, `JsonString.quote`, internal. The
+`fnv1a` precedent is the reason this is a decision and not debt: a copy the kit compares is
+the standalone packages' sanctioned way to share a rule, and the alternative — a reference — was
+declined once already for a stronger reason than convenience.
+
+*The migration shape.* On the Phase-255 seam: `canonicalConfig` is the `\u00xx` payload;
+`legacyEscapeConfig` is the outgoing one, beside `legacyActorConfig`, and a store written under it
+verifies with `verifyChainWith legacyEscapeConfig` and cuts over with `rehash legacyEscapeConfig
+canonicalConfig`. `legacyActorConfig` keeps the SHORT escapes on its bare string, because it exists
+to reproduce a pre-320 writer's bytes and that writer wrote `\n`. A control-free store has identical
+payloads under both configs — verified unmigrated, and the rehash reproduces every hash — and the
+suite proves it on a three-record store rather than asserting it.
+
+*Two boundaries, stated rather than left.* (1) The chain config governs the actor's spelling. A
+stored OP whose own `Codec` output carried a short escape re-encodes differently, and `rehash`
+re-encodes through the one witness it is handed, so no config verifies such a chain; migrating it
+needs the domain's old encoder on the verify leg and its new one on the rehash leg. No two-witness
+rehash ships, because no known store needs one; the day one does, that is the shape to build, not a
+third config. (2) A content-addressed DAG has no rehash — its ids are its parent links — so a DAG
+node with a control-character actor takes a new id and a host re-appends. Neither is residue: each
+is a design property of a seam this phase did not change, written where its next reader will look.
+
+*Not done here, and why.* The shared chain corpus's control-character record is emitted by the UI
+host's `HashChain.computeHash`, which folds this package's `canonicalConfig.Payload` at the version
+the host PINS. Emitting it from a tree that pins the old bytes would golden the wrong hash; emitting
+it by hand would break the resident-emitter rule the corpus is certified under. It lands with the
+consumer's pin raise, and the consumer-side phase that depends on this one carries it. `SampleAdequacy`'s
+census deliberately does not enrol `StringEscapeVectors`, on the `WireNullTolerance` precedent: a
+fixed vector table has no sample that could miss anything.
+
 ## 2026-09-30 — D74: the proof leg's module-cone selector is Phase 164's sanctioned form of a cheaper leg; a shared checked-module cache stays DECLINED
 
 **Recorded by Phase 328. Tooling under `proofs/` and the test project; no package surface moves.**
