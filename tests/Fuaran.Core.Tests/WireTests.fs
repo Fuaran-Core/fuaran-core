@@ -50,8 +50,9 @@ let tests =
 
           testCase "JSON escaping handles quotes and control chars"
           <| fun _ ->
+              // Phase 287: a newline is `\u000a`, never the short `\n` — the one rule every host holds.
               let json = Json.render (JStr "a\"b\nc")
-              Expect.equal json "\"a\\\"b\\nc\"" "escaped"
+              Expect.equal json "\"a\\\"b\\u000ac\"" "escaped"
 
           testCase "value round-trips through the codec"
           <| fun _ ->

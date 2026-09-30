@@ -11,14 +11,44 @@ type Actor =
     | Human of id: string
     | Agent of model: string * version: string * id: string
 
-/// Companion helpers for `Actor` — the canonical hash pre-image (`encode`), the stable id
-/// projection, and the pre-Phase-320 migration lift.
-[<RequireQualifiedAccess>]
-module Actor =
+/// The spine's JSON string escape as THIS package carries it (Phase 287). A DELIBERATE COPY of
+/// `Wire.Json.escape`: `Fuaran.Core.OpStream` is standalone by design and takes no `Wire`
+/// dependency (DECISIONS.md D2), so the rule is copied here exactly as `Hash.fnv1a` is copied
+/// into `OpStream` below, and for the same reason it is held VALUE-IDENTICAL rather than trusted —
+/// `StringEscapeVectors` in the conformance kit compares every byte this module emits for a
+/// control character against `Wire.Json.escape`'s, so a copy that drifts is caught rather than
+/// discovered as a chain that verifies on one host and not another.
+///
+/// The rule: exactly three classes are escaped and nothing else — `"` as `\"`, `\` as `\\`, and
+/// every control character `U+0000`–`U+001F` as `\u00xx` with LOWER-CASE hex. `\n`, `\r` and `\t`
+/// have NO short form; that is what the UI host's `CanonicalJson.appendRawString` and the
+/// TypeScript twin already write, and what made their chain hashes disagree with this package's
+/// before Phase 287. Fable-clean (no `System.Text.Json` on the encode path).
+///
+/// `quoteLegacy` is the spelling this package wrote BEFORE Phase 287 — the three short forms, and
+/// `\u00xx` only for the other control characters. It exists so a chain hashed under the old bytes
+/// can still be verified and rehashed (`OpStream.legacyEscapeConfig`, `OpStream.legacyActorConfig`);
+/// nothing writes it.
+module internal JsonString =
 
-    /// Minimal JSON string escaping (Fable-clean — mirrors `OpStream`'s private `jstr`). Kept
-    /// local so `Actor.encode` is byte-identical to the rest of the canonical-JSON surface.
-    let private jstr (s: string) : string =
+    /// `"` + the escaped body + `"` — the canonical spelling of `s` as a JSON string literal.
+    let quote (s: string) : string =
+        let sb = System.Text.StringBuilder()
+        sb.Append('"') |> ignore
+
+        for ch in s do
+            match ch with
+            | '"' -> sb.Append("\\\"") |> ignore
+            | '\\' -> sb.Append("\\\\") |> ignore
+            | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
+            | c -> sb.Append(c) |> ignore
+
+        sb.Append('"') |> ignore
+        sb.ToString()
+
+    /// The pre-Phase-287 spelling: `\n` / `\r` / `\t` short, every other control character
+    /// `\u00xx`. Verification and migration only.
+    let quoteLegacy (s: string) : string =
         let sb = System.Text.StringBuilder()
         sb.Append('"') |> ignore
 
@@ -35,21 +65,33 @@ module Actor =
         sb.Append('"') |> ignore
         sb.ToString()
 
+/// Companion helpers for `Actor` — the canonical hash pre-image (`encode`), the stable id
+/// projection, and the pre-Phase-320 migration lift.
+[<RequireQualifiedAccess>]
+module Actor =
+
+    /// `encode` under an explicit string quoter — the one shape both the canonical pre-image and
+    /// the pre-287 legacy payload are built from, so the two can differ ONLY in how a string is
+    /// spelled. Internal: the quoter is not a choice a consumer makes.
+    let internal encodeWith (quote: string -> string) (a: Actor) : string =
+        match a with
+        | Human id -> "{\"kind\":\"human\",\"id\":" + quote id + "}"
+        | Agent(model, version, id) ->
+            "{\"kind\":\"agent\",\"model\":"
+            + quote model
+            + ",\"version\":"
+            + quote version
+            + ",\"id\":"
+            + quote id
+            + "}"
+
     /// The canonical JSON object the chain hash folds over. Field order is fixed (`kind` first,
     /// then the case fields in declaration order) so the pre-image is stable across hosts:
     ///   `Human`  → `{"kind":"human","id":<id>}`
     ///   `Agent`  → `{"kind":"agent","model":<model>,"version":<version>,"id":<id>}`
-    let encode (a: Actor) : string =
-        match a with
-        | Human id -> "{\"kind\":\"human\",\"id\":" + jstr id + "}"
-        | Agent(model, version, id) ->
-            "{\"kind\":\"agent\",\"model\":"
-            + jstr model
-            + ",\"version\":"
-            + jstr version
-            + ",\"id\":"
-            + jstr id
-            + "}"
+    /// Strings are spelled by `JsonString.quote` — every control character as `\u00xx` (Phase 287),
+    /// so `Agent("m\n", "1", "id")` encodes to `{"kind":"agent","model":"m\u000a",…}` on every host.
+    let encode (a: Actor) : string = encodeWith JsonString.quote a
 
     /// The stable attribution id of either case.
     let id (a: Actor) : string =
@@ -162,6 +204,10 @@ type HashFn = string -> string -> string
 /// bumped the hash format**: `actor` is now the typed `Actor` *object* rather than a bare string,
 /// so the canonical payload is no longer byte-identical to the pre-320 chain — a stream persisted
 /// before Phase 320 verifies under `legacyActorConfig` and `rehash`es to the new canonical form.
+/// **Phase 287 changed the string spelling inside it**: every control character in the actor's
+/// strings is `\u00xx` now, where `\n` / `\r` / `\t` were short escapes — a stream persisted
+/// between the two, whose actors carry such a character, verifies under `legacyEscapeConfig` and
+/// `rehash`es to canonical the same way; one whose actors carry none hashes identically under both.
 type StreamConfig =
     { Payload: int -> Actor -> string -> string
       Genesis: string }
@@ -355,27 +401,16 @@ module OpStream =
     /// computes the same hashes. That was not true before `0.6.0`; see the copy note above.
     let defaultHash: HashFn = fun prev payload -> fnv1a (prev + "|" + payload)
 
-    /// Minimal JSON string escaping (Fable-clean — no System.Text.Json on the encode path).
-    let private jstr (s: string) : string =
-        let sb = System.Text.StringBuilder()
-        sb.Append('"') |> ignore
-
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append("\\\"") |> ignore
-            | '\\' -> sb.Append("\\\\") |> ignore
-            | '\n' -> sb.Append("\\n") |> ignore
-            | '\r' -> sb.Append("\\r") |> ignore
-            | '\t' -> sb.Append("\\t") |> ignore
-            | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
-            | c -> sb.Append(c) |> ignore
-
-        sb.Append('"') |> ignore
-        sb.ToString()
+    /// JSON string spelling for every line, snapshot, capture and envelope this module emits —
+    /// the ONE escaper this package carries (`JsonString.quote`, the D2 copy of `Wire.Json.escape`,
+    /// every control character as `\u00xx` since Phase 287). Fable-clean.
+    let private jstr (s: string) : string = JsonString.quote s
 
     /// The canonical `{seq, actor, op}` payload the chain hash is computed over. Since Phase 320
     /// the `actor` is the typed `Actor` *object* (`Actor.encode`), so altering the attribution
-    /// changes the hash — attribution is folded into the integrity chain.
+    /// changes the hash — attribution is folded into the integrity chain. Since Phase 287 the
+    /// actor's strings carry every control character as `\u00xx`, the spelling the UI host's DAG
+    /// chain and the TypeScript twin already fold, so the linear hash of a record agrees with both.
     let private payloadOf (seq: int) (actor: Actor) (opJson: string) : string =
         "{\"seq\":"
         + string seq
@@ -389,18 +424,47 @@ module OpStream =
     /// for every `append` / `verifyChain` call.
     let canonicalConfig: StreamConfig = { Payload = payloadOf; Genesis = "" }
 
+    /// The **pre-Phase-287** canonical payload — the same `{seq,actor,op}` envelope over the same
+    /// typed `Actor` object, but with `\n`, `\r` and `\t` inside the actor's strings spelled as the
+    /// short escapes `\n` / `\r` / `\t` rather than `\u000a` / `\u000d` / `\u0009`. The migration
+    /// entry point for a stream persisted between Phase 320 and Phase 287: `verifyChainWith
+    /// legacyEscapeConfig` to confirm it is intact, then `rehash legacyEscapeConfig canonicalConfig`
+    /// to cut over — the Phase-255 shape, beside `legacyActorConfig`.
+    ///
+    /// A record whose actor holds no control character has the SAME payload under both configs, so
+    /// for such a stream the rehash is a no-op that reproduces every hash — which is the case for
+    /// every store this package's own tests and consumers have written. The rehash proves that
+    /// rather than assuming it: `verifyChainWith canonicalConfig` over an unmigrated control-free
+    /// store already passes.
+    let private legacyEscapePayload (seq: int) (actor: Actor) (opJson: string) : string =
+        "{\"seq\":"
+        + string seq
+        + ",\"actor\":"
+        + Actor.encodeWith JsonString.quoteLegacy actor
+        + ",\"op\":"
+        + opJson
+        + "}"
+
+    /// The pre-Phase-287 canonical config (typed actor with short control escapes + `""` genesis).
+    /// The `fromCfg` for a string-escaping migration `rehash`. See `legacyEscapePayload`.
+    let legacyEscapeConfig: StreamConfig =
+        { Payload = legacyEscapePayload
+          Genesis = "" }
+
     /// The **pre-Phase-320** canonical payload — it folded the actor as a *bare JSON string*
     /// (`"actor":"alice"`) rather than the typed object. The migration entry point for a stream
     /// persisted before the typed-actor change: read it with `fromJsonlLegacyActor` (which lifts
     /// each bare-string actor to `Human`), `verifyChainWith legacyActorConfig` to confirm it is
     /// intact, then `rehash legacyActorConfig canonicalConfig` to cut over — the standard
     /// Phase-255 migration shape. Pre-320 streams only ever held `Human` actors; an `Agent`
-    /// reaching this payload is migration misuse, so it folds in just the id (best effort).
+    /// reaching this payload is migration misuse, so it folds in just the id (best effort). The
+    /// bare string keeps the pre-287 short escapes (`JsonString.quoteLegacy`): this payload
+    /// reproduces the bytes a pre-320 writer produced, and that writer wrote `\n`.
     let private legacyActorPayload (seq: int) (actor: Actor) (opJson: string) : string =
         "{\"seq\":"
         + string seq
         + ",\"actor\":"
-        + jstr (Actor.id actor)
+        + JsonString.quoteLegacy (Actor.id actor)
         + ",\"op\":"
         + opJson
         + "}"

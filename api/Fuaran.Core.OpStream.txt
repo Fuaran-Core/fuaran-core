@@ -91,6 +91,7 @@ method Fuaran.Core.OpStream.verifyChain`3(Microsoft.FSharp.Core.FSharpFunc`2<Sys
 property Fuaran.Core.KeyIndexModule.empty : Fuaran.Core.KeyIndex { get }
 property Fuaran.Core.OpStream.canonicalConfig : Fuaran.Core.StreamConfig { get }
 property Fuaran.Core.OpStream.legacyActorConfig : Fuaran.Core.StreamConfig { get }
+property Fuaran.Core.OpStream.legacyEscapeConfig : Fuaran.Core.StreamConfig { get }
 property Fuaran.Core.OpStream.noAttestation : Fuaran.Core.IAttestationSink { get }
 record-field Fuaran.Core.Attestation.Head #0 : System.String
 record-field Fuaran.Core.Attestation.KeyId #1 : System.String

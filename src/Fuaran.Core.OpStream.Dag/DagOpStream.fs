@@ -369,7 +369,14 @@ module Dag =
     // witness's own Encode output embedded raw (preserved byte-for-byte); nodes are emitted
     // in id-sorted order so output is stable for a fixed DAG.
 
-    /// Minimal JSON string escaping (Fable-clean — no System.Text.Json on the encode path).
+    /// JSON string spelling for the node line — the spine's one escaping rule (Phase 287): `"`,
+    /// `\`, and every control character `U+0000`–`U+001F` as lower-case `\u00xx`, with NO short
+    /// form for `\n` / `\r` / `\t`. A DELIBERATE COPY of `Wire.Json.escape`, for the reason the
+    /// scanner below is one: this module takes no `Core.Wire` dependency (D2). It is held
+    /// VALUE-IDENTICAL to the original by `StringEscapeVectors` in the conformance kit — which
+    /// pins `toJsonl`'s bytes for a node id carrying a control character against
+    /// `Wire.Json.escape`'s — so the copy cannot drift quietly. (The `actor` member is spelled by
+    /// `Actor.encode`, the linear package's copy of the same rule.) Fable-clean.
     let private jstr (s: string) : string =
         let sb = System.Text.StringBuilder()
         sb.Append('"') |> ignore
@@ -378,9 +385,6 @@ module Dag =
             match ch with
             | '"' -> sb.Append("\\\"") |> ignore
             | '\\' -> sb.Append("\\\\") |> ignore
-            | '\n' -> sb.Append("\\n") |> ignore
-            | '\r' -> sb.Append("\\r") |> ignore
-            | '\t' -> sb.Append("\\t") |> ignore
             | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
             | c -> sb.Append(c) |> ignore
 
