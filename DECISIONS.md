@@ -2664,6 +2664,53 @@ coverage guard and names the nine cases it stopped reaching; and four decoy type
 leak, the same leak on the bridge, a positional tuple, and a clean type — pin the surface rule's
 behaviour in both directions.
 
+**Amended 2026-09-30 (Phase 231) — the premise is re-measured; ruling (B) was taken on a finding
+that does not hold, and this phase does NOT execute it.**
+
+*The consumer this entry named, measured at `fuaran-dotnet@5768b1e` (2026-09-29).* Nothing there
+references this package. The C# veneer (`src/Fuaran.UI.CSharp/`) references the host's own F#
+projects and `FSharp.Core` only (`Fuaran.UI.CSharp.csproj:41-47`), and it keeps its rule without the
+facade, three ways: `JVal` is wrapped in the veneer's own `Payload` struct, which constructs the F#
+cases directly (`Facade/Actions.cs:50-80`); `Transform` and `ColExpr` are carried on its public
+surface as the F# types, deliberately, so that one algebra has one spelling
+(`Facade/Bindings.cs:253-283`); and the hole-declaration family is constructed only as an empty list
+(`Factories/Structural.cs:52`). The VB dialect names no Core type. The unblock this entry priced was
+met another way, so **(A) is declined**: there is nothing for that consumer to adopt.
+
+*The consumer the ruling did not have.* The maintainer ruled (B) on 2026-09-30, on a measurement
+that found no consumer of the package anywhere. There is one, and this repository's own record names
+it: `Fuaran.Core.DataFrame.CSharp`, the dataframe half Phase 257 split out (D68, call 5) and Phase 258
+moved to the compute repository, is BUILT OVER this package. At
+`Fuaran-Core/fuaran-core-compute@8a39a42` its project takes `Fuaran.Core.CSharp` as a
+`PackageReference` (`src/Fuaran.Core.DataFrame.CSharp/Fuaran.Core.DataFrame.CSharp.csproj:12`), and
+its public members take this package's types: `Expr.Literal(CellValue)` (`Expr.cs:56`),
+`Expr.Cast(ColumnKind, Expr)` (`Expr.cs:94`), `AggregateSpec.Of(string, AggregateFunction, string)`
+(`Steps.cs:116`), and `Step.Join` / `Union` / `Intersect` / `Except` over a `SourceValue`
+(`Steps.cs:418-496`). The public `Vocabulary` bridge here exists for exactly that reader
+(`src/Fuaran.Core.CSharp/Vocabularies.cs:68-70`). The compute repository pins this spine through one
+property and a cut here raises it, so deleting the package at `0.33.0` would leave that repository
+unable to raise past `0.32.0` without a breaking change of its own.
+
+*What that changes, and what it does not.* It is not this entry's first criterion: the dataframe half
+is the other half of the same facade, not a second independent C# consumer, so the exception is not
+retired. It is not the second either: no generator emits this surface. What it removes is the ground
+(B) was taken on — no consumer, no unblock — and deleting a package a published package is built over
+is not a call to make on a premise the record contradicts. So the package, its proof project, its
+`api/` baseline and its exclusion entries are unchanged, and the ruling returns to the maintainer
+with the options that are actually open:
+
+- **(B), widened** — delete this package and the dataframe half together, a breaking removal in both
+  repositories in one change-set.
+- **(B′), moved rather than removed** — the package continues from the compute repository under the
+  same id and namespace, beside the one package that reads it: the rule D66 applied to the dataframe
+  half when its producer changed.
+- **(C), kept with a dated re-measurement** — still declined by default, for the reason this entry
+  gave: it is how an exception becomes permanent.
+
+Whichever is taken, this entry's second criterion — a source generator emitting a C# veneer over a
+closed union from the IDL — remains the route by which a hand-written facade here is retired rather
+than moved.
+
 ## 2026-09-12 — D27: a conformance kit that certifies only the codec certifies the wrong half — and "not adopted" is NOT PASSED
 
 **Decided (Phase 126, `0.22.0`).** `Fuaran.Core.Conformance` gains `ConstructWitness<'T>` and

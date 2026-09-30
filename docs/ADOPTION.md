@@ -69,7 +69,9 @@ table values over them), the artifact-function declaration family (`ValueSpace`,
 The dataframe algebra's half of the facade (`ColExpr`, `Transform`, `Pipeline` and the step specs
 under them) is `Fuaran.Core.DataFrame.CSharp`, split out by Phase 257 and — like the dataframe layer it
 wraps — produced since Phase 258 by the compute repository; see
-[The dataframe path](#the-dataframe-path) below.
+[The dataframe path](#the-dataframe-path) below. That half is built over this package — its public
+members take `CellValue`, `ColumnKind`, `AggregateFunction` and `SourceValue` from it — so a C# tier
+on the dataframe path depends on both.
 
 Construction is factory methods and reading is a total `Match` / `Switch` per union. **No public member mentions an F# option, list, function or
 positional tuple at any generic depth, except on a member named exactly `ToCore` or `FromCore`** —
@@ -156,4 +158,4 @@ adoption prints `conformance: GREEN`.
   above): why a codec round trip cannot see a widened builder, and how to answer for the family.
 - [`../tests/Fuaran.Core.CSharp.Proof/Authoring.cs`](../tests/Fuaran.Core.CSharp.Proof/Authoring.cs) —
   the worked C# consumer for step 2c, and [`../DECISIONS.md`](../DECISIONS.md) D28 for why that
-  package exists on one consumer and what deletes it.
+  package exists on one consumer, what deletes it, and its Phase 231 re-measurement.
