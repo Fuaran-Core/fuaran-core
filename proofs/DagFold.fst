@@ -276,13 +276,29 @@ let rec replay (#op:eqtype) (#state #rej:Type)
 
 (* F#: `LaneFoldOutcome`. `LaneFolded` carries the state where F# carries the domain's hash of
    it; `LaneHalted` carries the report where F# carries its canonical rendering. Both are
-   renderings of what is carried here. *)
+   renderings of what is carried here. `LanesRejected` (Phase 300) carries the rejecting lanes
+   where F# carries `canonicalRejectionReport` of them — `ReconcileFault.LanesRejected`, which
+   `foldOnce` renders into its `LaneRejected` case; `LaneRejected` is the rejection of the
+   composed replay, which a domain satisfying the diamond never reaches. *)
 type lane_outcome (op:eqtype) (state rej:Type) =
-  | LaneFolded   : state -> lane_outcome op state rej
-  | LaneHalted   : list (conflict op) -> lane_outcome op state rej
-  | LaneRejected : rej -> lane_outcome op state rej
+  | LaneFolded    : state -> lane_outcome op state rej
+  | LaneHalted    : list (conflict op) -> lane_outcome op state rej
+  | LaneRejected  : rej -> lane_outcome op state rej
+  | LanesRejected : list (list op) -> lane_outcome op state rej
 
-(* F#: `FoldConfluence.foldOnce`, from the point where the lane deltas are known. *)
+(* F#: step 4 of `Dag.reconcileMany` (Phase 300) — every lane replayed ON ITS OWN from the base
+   state, before anything is composed; the lanes that do not apply, in the order given. A lane's
+   own replay is a property of the lane, so which lanes land here is a property of the set. *)
+let rec rejecting (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (s0:state) (lanes:list (list op))
+  : Tot (list (list op)) =
+  match lanes with
+  | [] -> []
+  | l :: t ->
+    if Ok? (replay apply l s0) then rejecting apply s0 t else l :: rejecting apply s0 t
+
+(* F#: `FoldConfluence.foldOnce`, from the point where the lane deltas are known: the pairwise
+   interference sweep, then (Phase 300) the lanes-apply test, then the composed replay. *)
 let fold_once (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (fp:op -> footprint)
   (s0:state) (lanes:list (list op))
@@ -290,9 +306,12 @@ let fold_once (#op:eqtype) (#state #rej:Type)
   match reconcile_many fp lanes with
   | Error cs -> LaneHalted cs
   | Ok script ->
-    match replay apply script s0 with
-    | Ok s -> LaneFolded s
-    | Error r -> LaneRejected r
+    match rejecting apply s0 lanes with
+    | [] ->
+      (match replay apply script s0 with
+       | Ok s -> LaneFolded s
+       | Error r -> LaneRejected r)
+    | rs -> LanesRejected rs
 
 (* ======================================================================================
    4. The canonical reading of a halt report (F#: `canonicalConflictReport` — one entry per
@@ -317,6 +336,7 @@ let outcome_equiv (#op:eqtype) (#state #rej:Type) (o1 o2:lane_outcome op state r
   | LaneFolded s1, LaneFolded s2 -> s1 == s2
   | LaneHalted c1, LaneHalted c2 -> same_report c1 c2
   | LaneRejected r1, LaneRejected r2 -> r1 == r2
+  | LanesRejected r1, LanesRejected r2 -> forall (l:list op). mem l r1 <==> mem l r2
   | _, _ -> False
 
 (* ======================================================================================
@@ -769,12 +789,61 @@ let fold_confluence_halt #op #state #rej apply fp s0 ls1 ls2 p =
   all_conflicts_perm_empty fp ls1 ls2 p;
   FStar.Classical.forall_intro (all_conflicts_perm fp ls1 ls2 p)
 
-(* The theorem. Its one DOMAIN hypothesis is `independence_diamond` — the promise Phase 80
-   certifies and `ProofOracleTests.fs` measures on the reference witness. `lanes_apply` is
-   not a domain promise but a statement about the lane set in hand: the lanes all apply
-   from the base state, which is the lane set `foldOnce`'s generators produce and the only
-   one the fold half was ever about. A lane set with a rejecting lane is outside the claim
-   (the halt half above still covers it whenever it halts). *)
+(* ---- the lanes-apply test (Phase 300): which lanes reject is a property of the SET ---- *)
+
+let rec mem_rejecting (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (s0:state) (lanes:list (list op)) (l:list op)
+  : Lemma (ensures mem l (rejecting apply s0 lanes) <==> (mem l lanes /\ not (Ok? (replay apply l s0))))
+          (decreases lanes)
+  = match lanes with
+    | [] -> ()
+    | _ :: t -> mem_rejecting apply s0 t l
+
+(* The test passes exactly on the lane sets the fold half used to ASSUME. *)
+let rejecting_nil_iff (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (s0:state) (lanes:list (list op))
+  : Lemma (ensures is_empty (rejecting apply s0 lanes) <==> lanes_apply apply lanes s0)
+  = FStar.Classical.forall_intro (mem_rejecting apply s0 lanes);
+    match rejecting apply s0 lanes with
+    | [] -> ()
+    | l :: _ -> assert (mem l (rejecting apply s0 lanes))
+
+let rejecting_perm_mem (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (s0:state)
+  (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2) (l:list op)
+  : Lemma (ensures mem l (rejecting apply s0 ls1) <==> mem l (rejecting apply s0 ls2))
+  = mem_rejecting apply s0 ls1 l;
+    mem_rejecting apply s0 ls2 l;
+    perm_mem ls1 ls2 p l
+
+(* THE THEOREM, TOTAL (Phase 300). Its one DOMAIN hypothesis is `independence_diamond` — the
+   promise Phase 80 certifies and `ProofOracleTests.fs` measures on the reference witness — and
+   there is NO hypothesis about the lane set: `fold_once` tests that every lane applies from the
+   base BEFORE it composes anything, so a lane set with a rejecting lane is refused with the SET of
+   rejecting lanes under every arrival order, and the `lanes_apply` premise the fold half used to
+   carry is discharged by the fold itself rather than assumed of its input. *)
+val fold_confluence_total (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (s0:state)
+  (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2)
+  : Lemma (requires independence_diamond fp apply)
+          (ensures outcome_equiv (fold_once apply fp s0 ls1) (fold_once apply fp s0 ls2))
+
+let fold_confluence_total #op #state #rej apply fp s0 ls1 ls2 p =
+  match all_conflicts fp ls1 with
+  | [] ->
+    all_conflicts_perm_empty fp ls1 ls2 p;
+    FStar.Classical.forall_intro (rejecting_perm_mem apply s0 ls1 ls2 p);
+    rejecting_nil_iff apply s0 ls1;
+    rejecting_nil_iff apply s0 ls2;
+    (match rejecting apply s0 ls1 with
+     | [] -> replay_perm apply fp ls1 ls2 p s0
+     | l :: _ -> assert (mem l (rejecting apply s0 ls2)))
+  | _ ->
+    fold_confluence_halt apply fp s0 ls1 ls2 p
+
+(* The theorem as Phase 131 stated it, kept because `Skeleton.fst` and the Core-to-domain
+   template instantiate it: the fold half for a lane set whose lanes all apply from the base.
+   Since Phase 300 it is a corollary of `fold_confluence_total`, which drops that premise. *)
 val fold_confluence (#op:eqtype) (#state #rej:Type)
   (apply:op -> state -> outcome state rej) (fp:op -> footprint) (s0:state)
   (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2)
@@ -782,12 +851,7 @@ val fold_confluence (#op:eqtype) (#state #rej:Type)
           (ensures outcome_equiv (fold_once apply fp s0 ls1) (fold_once apply fp s0 ls2))
 
 let fold_confluence #op #state #rej apply fp s0 ls1 ls2 p =
-  match all_conflicts fp ls1 with
-  | [] ->
-    all_conflicts_perm_empty fp ls1 ls2 p;
-    replay_perm apply fp ls1 ls2 p s0
-  | _ ->
-    fold_confluence_halt apply fp s0 ls1 ls2 p
+  fold_confluence_total apply fp s0 ls1 ls2 p
 
 (* ======================================================================================
    11. The DAG beneath the fold (Phase 134).
@@ -3734,3 +3798,247 @@ let merge_base_is_divergence_acyclic (#op:eqtype) (lt:string -> string -> bool) 
     anc_stable d (drop_by fuel (rev ln1.lops)) fuel m.nid;
     off_cycle_of_witness d fuel m wm;
     merge_base_is_divergence lt d mint m fuel ln1 ln2
+
+(* ======================================================================================
+   15. The reconcile's PARTITION (Phase 300) — `reconcile_sound` and the order-free fold.
+
+   WHAT IS MODELLED. `Dag.reconcile` and `Dag.reconcileMany` no longer take each lane's delta as
+   `between base head` and concatenate — which applied history two heads SHARE twice (a
+   fast-forward, a duplicate head, a criss-cross over `mergeBase`'s tie-break). They PARTITION the
+   region above the base by node id, and this section is that partition clause for clause (F#:
+   the private `region` in DagOpStream.fs):
+
+     - `owners x cs` — how many heads' closures hold `x` (F#: `owners`);
+     - `shared_ids`  — the drain order, kept to the ids above the base held by two or more
+                       closures (F#: `Shared`);
+     - `excl_ids`    — one head's exclusive delta: above the base, in its closure, held by no other
+                       (F#: one `Exclusive` entry);
+     - `excl_lanes`  — one exclusive delta per closure, in head order (F#: `Exclusive`);
+     - `reconcile_ids` — the ids of the `Ok` script: `shared ++ exclusive_1 ++ … ++ exclusive_n`.
+
+   The closures (`cs`, one per deduplicated head) and the base closure (`base_c`) are the lists
+   `ancestors_of` computes (section 11); `order` is the Kahn drain over the union of the heads'
+   closures (F#: `topoCoreMany`), whose distinctness and completeness on an acyclic set are
+   section 13's `drain_linear_extension` / `drain_total_on_acyclic`. Nothing here is a parameter
+   standing in for the reconcile: the partition is the function production computes.
+
+   WHAT IS PROVED.
+     - `reconcile_sound` — for ANY duplicate-free enumeration `order`, the script's ids are
+       duplicate-free (each node appears AT MOST ONCE, however the heads overlap, and even when a
+       head is named twice), and a node is in the script EXACTLY when it is enumerated, is not in
+       the base's closure, and is held by at least one head. So when `order` enumerates the union
+       of the closures — the drain's own guarantee — the script is the region above the base, once.
+     - `excl_is_exclusive` — every node of a head's exclusive delta is in that head's closure and in
+       no other: the conflict sweep compares deltas that genuinely belong to one lane each.
+     - `reconcile_fold_order_free` — permuting the heads leaves the shared region IDENTICAL and
+       permutes the exclusive lanes; with `fold_confluence_total` the checked fold of those lanes
+       is outcome-equivalent from whatever state the shared region reached. The N-lane reconcile
+       is arrival-order-invariant from the DAG, under the diamond and nothing else.
+
+   WHAT IS NOT PROVED, AND WHY (the shard's replay premise, refuted). "Replaying the script from
+   `replayTo base` equals `replayTo` of a merge of the heads, under the diamond" is FALSE of a
+   history whose merged branches do not commute: `replayTo` drains the merged closure by id, a
+   tie-break, so such a history has no order-free replay for any script to equal. A fast-forward
+   whose later head merged a side branch that writes the cell the shared history writes is the
+   witness; `ReconcileShapeTests.fs` pins it. What IS true, and proved above, is the half no
+   premise is needed for: each node once, exactly the region, arrival-order-invariant.
+   ====================================================================================== *)
+
+(* F#: the `owners` count in `region`. *)
+let rec owners (x:string) (cs:list (list string)) : Tot nat =
+  match cs with
+  | [] -> 0
+  | c :: t -> (if mem x c then 1 else 0) + owners x t
+
+(* F#: `List.filter` over the drain order. *)
+let rec keep (f:string -> bool) (l:list string) : Tot (list string) =
+  match l with
+  | [] -> []
+  | x :: t -> if f x then x :: keep f t else keep f t
+
+(* F#: `region`'s `Shared`. *)
+let shared_pred (base_c:list string) (cs:list (list string)) (x:string) : Tot bool =
+  not (mem x base_c) && owners x cs >= 2
+
+let shared_ids (order base_c:list string) (cs:list (list string)) : Tot (list string) =
+  keep (shared_pred base_c cs) order
+
+(* F#: one entry of `region`'s `Exclusive`. `cs_all` is the whole closure list the count runs over. *)
+let excl_pred (base_c:list string) (cs_all:list (list string)) (c:list string) (x:string) : Tot bool =
+  not (mem x base_c) && mem x c && owners x cs_all = 1
+
+let excl_ids (order base_c:list string) (cs_all:list (list string)) (c:list string)
+  : Tot (list string) =
+  keep (excl_pred base_c cs_all c) order
+
+(* F#: `region`'s `Exclusive` — one lane per closure, in head order. *)
+let rec excl_lanes (order base_c:list string) (cs_all cs:list (list string))
+  : Tot (list (list string)) (decreases cs) =
+  match cs with
+  | [] -> []
+  | c :: t -> excl_ids order base_c cs_all c :: excl_lanes order base_c cs_all t
+
+(* F#: the ids of the `Ok` script, `opsOf dag r.Shared @ List.concat deltas`. *)
+let reconcile_ids (order base_c:list string) (cs:list (list string)) : Tot (list string) =
+  app (shared_ids order base_c cs) (concat (excl_lanes order base_c cs cs))
+
+(* ---- 15.1 the list algebra ---- *)
+
+let rec mem_keep (f:string -> bool) (l:list string) (x:string)
+  : Lemma (ensures mem x (keep f l) == (mem x l && f x)) [SMTPat (mem x (keep f l))]
+  = match l with
+    | [] -> ()
+    | _ :: t -> mem_keep f t x
+
+let rec distinct_keep (f:string -> bool) (l:list string)
+  : Lemma (requires distinct l) (ensures distinct (keep f l))
+  = match l with
+    | [] -> ()
+    | _ :: t -> distinct_keep f t
+
+let rec distinct_app_disjoint (l m:list string)
+  : Lemma (requires distinct l /\ distinct m /\ (forall (x:string). mem x l ==> not (mem x m)))
+          (ensures distinct (app l m))
+  = match l with
+    | [] -> ()
+    | _ :: t -> distinct_app_disjoint t m
+
+let rec keep_ext (f g:string -> bool) (l:list string)
+  : Lemma (requires forall (x:string). f x == g x) (ensures keep f l == keep g l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_ext f g t
+
+(* ---- 15.2 each node once, exactly the region ---- *)
+
+let rec mem_excl_lanes (order base_c:list string) (cs_all cs:list (list string)) (x:string)
+  : Lemma (ensures mem x (concat (excl_lanes order base_c cs_all cs)) <==>
+                   (mem x order /\ not (mem x base_c) /\ owners x cs_all = 1 /\ owners x cs >= 1))
+          (decreases cs)
+  = match cs with
+    | [] -> ()
+    | _ :: t -> mem_excl_lanes order base_c cs_all t x
+
+let rec distinct_excl_lanes (order base_c:list string) (cs_all cs:list (list string))
+  : Lemma (requires distinct order /\ (forall (x:string). owners x cs <= owners x cs_all))
+          (ensures distinct (concat (excl_lanes order base_c cs_all cs)))
+          (decreases cs)
+  = match cs with
+    | [] -> ()
+    | c :: t ->
+      let e = excl_ids order base_c cs_all c in
+      let rest = concat (excl_lanes order base_c cs_all t) in
+      distinct_keep (excl_pred base_c cs_all c) order;
+      distinct_excl_lanes order base_c cs_all t;
+      (* a node exclusive to `c` is held once in all; one in a later lane is held by `t` too, so it
+         would be held twice by `c :: t` — which `cs_all` bounds from above *)
+      let aux (x:string) : Lemma (mem x e ==> not (mem x rest)) =
+        mem_excl_lanes order base_c cs_all t x;
+        assert (owners x cs <= owners x cs_all);
+        assert (owners x cs == (if mem x c then 1 else 0) + owners x t)
+      in
+      FStar.Classical.forall_intro aux;
+      distinct_app_disjoint e rest
+
+(* THEOREM (Phase 300). Each node appears at most once in the reconcile's script, and the script's
+   nodes are exactly the enumerated nodes above the base that some head holds — for ANY closures:
+   overlapping, nested (a head that is an ancestor of another), or repeated (a head named twice). *)
+val reconcile_sound (order base_c:list string) (cs:list (list string))
+  : Lemma (requires distinct order)
+          (ensures distinct (reconcile_ids order base_c cs) /\
+                   (forall (x:string). mem x (reconcile_ids order base_c cs) <==>
+                                       (mem x order /\ not (mem x base_c) /\ owners x cs >= 1)))
+
+let reconcile_sound order base_c cs =
+  distinct_keep (shared_pred base_c cs) order;
+  distinct_excl_lanes order base_c cs cs;
+  FStar.Classical.forall_intro (mem_excl_lanes order base_c cs cs);
+  distinct_app_disjoint (shared_ids order base_c cs) (concat (excl_lanes order base_c cs cs))
+
+(* A head's exclusive delta is its own: in its closure, in no other. *)
+let excl_is_exclusive (order base_c:list string) (cs:list (list string)) (c:list string) (x:string)
+  : Lemma (requires mem x (excl_ids order base_c cs c))
+          (ensures mem x c /\ owners x cs = 1 /\ not (mem x base_c))
+  = ()
+
+(* ---- 15.3 arrival order: the partition is a function of the head SET ---- *)
+
+let rec owners_perm (cs1 cs2:list (list string)) (p:perm (list string) cs1 cs2) (x:string)
+  : Lemma (ensures owners x cs1 == owners x cs2) (decreases p)
+  = match p with
+    | PNil -> ()
+    | PSkip _ m1 m2 p' -> owners_perm m1 m2 p' x
+    | PSwap _ _ _ -> ()
+    | PTrans m1 m2 m3 p12 p23 -> owners_perm m1 m2 p12 x; owners_perm m2 m3 p23 x
+
+let rec excl_lanes_ext (order base_c:list string) (a1 a2 cs:list (list string))
+  : Lemma (requires forall (x:string). owners x a1 == owners x a2)
+          (ensures excl_lanes order base_c a1 cs == excl_lanes order base_c a2 cs)
+          (decreases cs)
+  = match cs with
+    | [] -> ()
+    | c :: t ->
+      keep_ext (excl_pred base_c a1 c)
+               (excl_pred base_c a2 c) order;
+      excl_lanes_ext order base_c a1 a2 t
+
+[@@ noextract_to "FSharp"]  (* proof-only, as `perm` itself *)
+let rec perm_excl_lanes (order base_c:list string) (a cs1 cs2:list (list string))
+  (p:perm (list string) cs1 cs2)
+  : Tot (perm (list string) (excl_lanes order base_c a cs1) (excl_lanes order base_c a cs2))
+        (decreases p)
+  = match p with
+    | PNil -> PNil
+    | PSkip c m1 m2 p' ->
+      PSkip (excl_ids order base_c a c) (excl_lanes order base_c a m1) (excl_lanes order base_c a m2)
+            (perm_excl_lanes order base_c a m1 m2 p')
+    | PSwap c1 c2 l ->
+      PSwap (excl_ids order base_c a c1) (excl_ids order base_c a c2) (excl_lanes order base_c a l)
+    | PTrans m1 m2 m3 p12 p23 ->
+      PTrans (excl_lanes order base_c a m1) (excl_lanes order base_c a m2) (excl_lanes order base_c a m3)
+             (perm_excl_lanes order base_c a m1 m2 p12) (perm_excl_lanes order base_c a m2 m3 p23)
+
+(* F#: `opsOf dag` — each id to its node's op; here any function of the id. *)
+let rec ops_by (#op:eqtype) (opof:string -> op) (ids:list string) : Tot (list op) =
+  match ids with
+  | [] -> []
+  | x :: t -> opof x :: ops_by opof t
+
+let rec lanes_by (#op:eqtype) (opof:string -> op) (ls:list (list string)) : Tot (list (list op)) =
+  match ls with
+  | [] -> []
+  | l :: t -> ops_by opof l :: lanes_by opof t
+
+[@@ noextract_to "FSharp"]  (* proof-only, as `perm` itself *)
+let rec perm_lanes_by (#op:eqtype) (opof:string -> op) (l1 l2:list (list string))
+  (p:perm (list string) l1 l2)
+  : Tot (perm (list op) (lanes_by opof l1) (lanes_by opof l2)) (decreases p)
+  = match p with
+    | PNil -> PNil
+    | PSkip l m1 m2 p' -> PSkip (ops_by opof l) (lanes_by opof m1) (lanes_by opof m2) (perm_lanes_by opof m1 m2 p')
+    | PSwap x y l -> PSwap (ops_by opof x) (ops_by opof y) (lanes_by opof l)
+    | PTrans m1 m2 m3 p12 p23 ->
+      PTrans (lanes_by opof m1) (lanes_by opof m2) (lanes_by opof m3)
+             (perm_lanes_by opof m1 m2 p12) (perm_lanes_by opof m2 m3 p23)
+
+(* THEOREM (Phase 300). `Dag.reconcileMany` over the same heads named in two orders: the shared
+   region is the SAME list, so it replays to the same state `s`; and from `s` the checked fold of
+   the exclusive lanes — interference sweep, lanes-apply test, composed replay — is
+   outcome-equivalent. The one hypothesis is the diamond. *)
+val reconcile_fold_order_free (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (opof:string -> op) (s:state)
+  (order base_c:list string) (cs1 cs2:list (list string)) (p:perm (list string) cs1 cs2)
+  : Lemma (requires independence_diamond fp apply)
+          (ensures shared_ids order base_c cs1 == shared_ids order base_c cs2 /\
+                   outcome_equiv (fold_once apply fp s (lanes_by opof (excl_lanes order base_c cs1 cs1)))
+                                 (fold_once apply fp s (lanes_by opof (excl_lanes order base_c cs2 cs2))))
+
+let reconcile_fold_order_free #op #state #rej apply fp opof s order base_c cs1 cs2 p =
+  FStar.Classical.forall_intro (owners_perm cs1 cs2 p);
+  keep_ext (shared_pred base_c cs1)
+           (shared_pred base_c cs2) order;
+  excl_lanes_ext order base_c cs1 cs2 cs1;
+  let pe = perm_excl_lanes order base_c cs2 cs1 cs2 p in
+  fold_confluence_total apply fp s (lanes_by opof (excl_lanes order base_c cs2 cs1))
+                                   (lanes_by opof (excl_lanes order base_c cs2 cs2))
+                                   (perm_lanes_by opof _ _ pe)

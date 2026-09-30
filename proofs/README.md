@@ -22,7 +22,7 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 
 | File | What it is |
 |---|---|
-| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`); and, since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter; and, since Phase 158, `Dag.mergeBase` and `Dag.between` over a MERGED HEAD under that drain — the shape a clone folds after a pull — with `between_merged`, `reconcile_many_merged_eq` and `merge_base_is_divergence` proved. Every definition names its F# counterpart. |
+| `DagFold.fst` | The model: `Ops.independent`, `Dag.conflicts`, `Dag.reconcileMany`, the replay and `FoldConfluence.foldOnce`, over an abstract `op`/`state`/`rej`, with `fold_confluence` proved; and, since Phase 134, the DAG beneath them — `DagNode` / `Dag.T` / `Dag.ancestorsOf` / `Dag.between` / `Dag.betweenOps` for the base-plus-N-chains shape, with `between_chain` and `fold_confluence_dag` proved; and, since Phase 142, `topoOrder`'s own frontier drain, with the uniqueness of a spine's topological order proved (`spine_order_forced`, `kahn_drain_is_such_an_enumeration`); and, since Phase 156, that drain over an ABSTRACT node set at an abstract total order on ids, with `drain_deterministic`, `drain_linear_extension` and `drain_total_on_acyclic` proved and the dangling-parent policy carried as a parameter; and, since Phase 158, `Dag.mergeBase` and `Dag.between` over a MERGED HEAD under that drain — the shape a clone folds after a pull — with `between_merged`, `reconcile_many_merged_eq` and `merge_base_is_divergence` proved; and, since Phase 300, the lanes-apply test inside `fold_once` and the reconcile's PARTITION of the region above the base, with `fold_confluence_total`, `reconcile_sound` and `reconcile_fold_order_free` proved. Every definition names its F# counterpart. |
 | `oracle/DagFold.fs` | **Generated** — the model extracted to F# by F\*'s own code generator. The suite runs it beside production. |
 | `WireDecode.fst` | The second model (Phase 135): `Decode`'s combinators, a reference vocabulary with its encoder and kind-dispatch node decoder, and the Phase 102 read policy, with `decode_total`, `decode_node_wf`, `decode_encode_roundtrip` and `lenient_agrees_off_policy` proved. Shares nothing with `DagFold.fst` but `oracle/Prims.fs`. |
 | `oracle/WireDecode.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
@@ -74,12 +74,14 @@ sampling. Nothing proves it; everything in the fold half rests on it; and the `P
 family now **measures it on the reference tree witness**, so the hypothesis is not merely stated
 about the domain it names.
 
-The fold half asks one thing more, and it is a statement about the lane set in hand rather than a
-promise about the domain: `lanes_apply` — every lane applies cleanly from the base state. That is
-the lane set `foldOnce`'s generators produce, and it is the set the fold half was always about. A
-lane set with a **rejecting** lane is outside the fold claim, exactly as it is outside Phase 80's;
-`outcome_equiv` still has a both-rejected arm, and the theorem simply says nothing about when it is
-taken. **The halt half asks for neither** — `fold_confluence_halt` is stated and proved with no
+The fold half USED to ask one thing more, a statement about the lane set in hand rather than a
+promise about the domain: `lanes_apply` — every lane applies cleanly from the base state. Since
+Phase 300 the fold discharges it itself: `fold_once` (F#: `foldOnce`, `Dag.reconcileMany`'s
+lanes-apply step) replays every lane on its own from the base BEFORE composing anything and refuses a
+set with a rejecting lane with the SET of rejecting lanes, so `fold_confluence_total` holds with
+the diamond as its only hypothesis and the `lanes-apply` row is retired. Before that change a lane
+set with a rejecting lane folded under one arrival order and rejected under another in production,
+and the pack blamed a domain that satisfies the diamond. **The halt half asks for neither** — `fold_confluence_halt` is stated and proved with no
 hypothesis about `apply` at all, because whether a lane set halts and what it halts with are
 properties of the footprints alone.
 
@@ -316,6 +318,30 @@ the drain's, which Phase 156 makes deterministic and no theorem here says more a
 (size, id) tie-break decides, and what it decides is a policy rather than a fact. And hashing,
 still: distinctness is the premise.
 
+
+### The total fold and the reconcile's partition (Phase 300)
+
+`fold_confluence_total` is `fold_confluence` with the lane-set premise gone. `fold_once` — like
+production's `foldOnce` and `Dag.reconcileMany` since this phase — replays every lane ON ITS OWN from
+the base before it composes anything, and refuses a set with a rejecting lane with the SET of
+rejecting lanes (`LanesRejected`, compared as a set by `outcome_equiv`). Which lanes reject is a
+property of the set, so the refusal is the same under every permutation, and `rejecting_nil_iff`
+shows the test passes on exactly the lane sets `lanes_apply` described: the premise is discharged by
+the fold rather than assumed of its input, and the `lanes-apply` row is retired. The one hypothesis
+left is the domain's diamond.
+
+Section 15 models the reconcile's partition clause for clause (F#: `region` in `DagOpStream.fs`):
+the SHARED ids — above the base, held by two or more heads' closures — once and first, then one
+EXCLUSIVE delta per head. `reconcile_sound` proves the script's ids duplicate-free and exactly the
+enumerated nodes above the base some head holds, for ANY closures — a fast-forward, a head named
+twice, a criss-cross — which is the double application the old `between`-and-concatenate rule got
+wrong. `reconcile_fold_order_free` composes the partition's invariance under a permutation of the
+heads with `fold_confluence_total`. What the phase asked for beyond that — that the script replays
+to `replayTo` of a merge of the heads, under the diamond — is REFUTED rather than proved: a merged
+history whose branches do not commute has no order-free replay for a script to equal, and
+`ReconcileShapeTests.fs` pins a witness. The `reconcile-differential` row runs the extracted
+partition beside production over the four shapes, and the extracted checked fold beside `foldOnce`
+over a rejecting-lane pool.
 ## What the corpus covers
 
 The differential host draws lane sets from three pools and compares, per lane set and per sampled
@@ -483,10 +509,10 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      78/80 certified by sampling is now a theorem at level 1. Two boundaries come with that and
      are stated as their own entries below rather than folded into this one, because they are
      about the tree algebra and not about the fold.
-   - **The lane set is assumed to apply.** The fold half is stated for a lane set whose every lane
-     applies cleanly from the base state (`lanes_apply`), which is what `foldOnce`'s generators
-     produce and what the differential host draws. Nothing is proved about a lane set one of whose
-     lanes rejects; the halt half still covers it whenever it halts.
+   - **The lane set is no longer assumed to apply** (Phase 300). `fold_once` tests every lane on
+     its own from the base before composing anything and refuses a rejecting set with the set of
+     rejecting lanes, so `fold_confluence_total` covers every lane set; the `lanes_apply` premise
+     survives only in the corollary `fold_confluence` that `Skeleton.fst` instantiates.
    - **Node ids are distinct** — the hash-collision assumption, and since Phase 134 the ONLY thing
      the delta recovery assumes about content addressing. `Dag.nodeHash` is injective on
      (sorted parents, actor, encoded op) unless the hash collides; two nodes sharing a content id
@@ -574,7 +600,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 24 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 23 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -583,7 +609,7 @@ place together with the contract it implies.
   the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
   law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
   witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
-  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 7 rows.
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 6 rows.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
@@ -604,7 +630,6 @@ over-read.
 | Row | Class | Discharged by / closes |
 |---|---|---|
 | `independence-diamond` | `domain-obligation` | `Conformance.footprintLaws` |
-| `lanes-apply` | `domain-obligation` | `Conformance.concurrencyLaws` |
 | `dag-outside-the-model` | `model-bridge` | `unscheduled` |
 | `extractor-and-compiler-trusted` | `premise` | — |
 | `sets-are-lists` | `model-bridge` | `permanent` |
@@ -2294,8 +2319,9 @@ no `{{` — and its content is which holes are obligations: **exactly one**. `{{
 in the domain's own module proving `independence_diamond` for its footprint and its apply, which is
 the `independence-diamond` row of the contract table PROVED at that domain rather than sampled by
 `Conformance.footprintLaws`; here it is `TreeOps.op_independence_diamond`. What remains in the
-theorem's `requires`, `lanes_apply`, is the `lanes-apply` row and stays sampled, because it is a
-statement about the lane set in hand and not about the domain. What the template does NOT give is
+theorem's `requires`, `lanes_apply`, is a statement about the lane set in hand and not about the
+domain — and since Phase 300 it is not an assumption at all: `fold_confluence_total` proves the
+same conclusion without it, so the instance's premise is redundant and no ladder row carries it. What the template does NOT give is
 Theorem 5's preservation clauses, Theorem 6's diff clauses and this algebra's own diamond: those are
 stated about `TreeOps`'s algebra, so a domain whose state is the skeleton tree inherits them by
 copying the files, and a domain with its own apply models its own. The ten models and the template

@@ -6,12 +6,59 @@
     {
       "id": "fold-confluence",
       "level": "proved",
-      "claim": "On the model, for every N and every permutation of a lane set, the fold halts with the same canonical conflict report or folds to the same state. Proved with no assume and no admit under --report_assumes error; the fold half under `independence_diamond` for a lane set whose lanes all apply from the base, the halt half under no hypothesis at all.",
+      "claim": "On the model, for every N and every permutation of a lane set, the fold halts with the same canonical conflict report or folds to the same state. Proved with no assume and no admit under --report_assumes error; the fold half under `independence_diamond` for a lane set whose lanes all apply from the base, the halt half under no hypothesis at all. Since Phase 300 a corollary of `fold-confluence-total`, which drops the lane-set premise; kept because `Skeleton.fst` and the Core-to-domain template instantiate it.",
       "phase": "fuaran-core#131",
       "evidence": {
         "theorem": "fold_confluence",
         "model": "proofs/DagFold.fst",
         "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "fold-confluence-total",
+      "level": "proved",
+      "claim": "Fold confluence with NO hypothesis about the lane set: `fold_once` (F#: `FoldConfluence.foldOnce`, and `Dag.reconcileMany`'s lanes-apply step) replays every lane on its own from the base BEFORE composing anything and refuses a set with a rejecting lane with the set of rejecting lanes, so for every permutation of any lane set the outcome is the same fold, the same canonical halt report, or the same rejecting-lane set. The one hypothesis is the domain's `independence_diamond`; the `lanes_apply` premise the fold half carried is discharged by the fold itself (`rejecting_nil_iff`), which retired its assumed row.",
+      "phase": "fuaran-core#300",
+      "evidence": {
+        "theorem": "fold_confluence_total",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "reconcile-sound",
+      "level": "proved",
+      "claim": "The reconcile's partition of the region above the base (F#: `region` in DagOpStream.fs, clause for clause: shared history held by two or more heads' closures, one exclusive delta per head) puts each node in the script AT MOST ONCE, and exactly the enumerated nodes above the base that some head holds — for any closures, overlapping, nested (a fast-forward), repeated (a duplicate head) or criss-crossed. Stated over any duplicate-free enumeration of the heads' closures, which the drain is by `general-topological-order`. The shard's further clause, that the script replays to `replayTo` of a merge of the heads under the diamond, is REFUTED rather than proved: a merged history whose branches do not commute has no order-free replay of its own (`ReconcileShapeTests.fs` pins the witness).",
+      "phase": "fuaran-core#300",
+      "evidence": {
+        "theorem": "reconcile_sound",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "reconcile-order-free",
+      "level": "proved",
+      "claim": "`Dag.reconcileMany` over the same heads named in two orders: the shared region is the same list, and from the state it reaches the checked fold of the exclusive lanes is outcome-equivalent (`reconcile_fold_order_free`, composing the partition's invariance under a permutation of the closures with `fold_confluence_total`). Under the diamond and nothing else.",
+      "phase": "fuaran-core#300",
+      "evidence": {
+        "theorem": "reconcile_fold_order_free",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "reconcile-differential",
+      "level": "tested",
+      "claim": "The extracted partition (`reconcile_ids` over the model's own closures and drain) is production's `Dag.reconcile` script over the four shapes the old rule got wrong — disjoint, fast-forward, duplicate head and criss-cross over `mergeBase` — with the old rule shown to differ from it on the pool; and the extracted checked fold renders what production's `foldOnce` renders over a pool of lane sets carrying a lane that does not apply, identically under every arrival order.",
+      "phase": "fuaran-core#300",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/DagFold.fst",
+        "cases": [
+          "the extracted reconcile partition is production's over the four shapes",
+          "the extracted fold and production refuse a rejecting-lane pool identically, under every arrival order"
+        ]
       }
     },
     {
@@ -213,25 +260,14 @@
       }
     },
     {
-      "id": "lanes-apply",
-      "level": "assumed",
-      "claim": "The fold half is stated for a lane set whose every lane applies cleanly from the base state. Nothing is proved about a lane set one of whose lanes rejects; the halt half still covers it whenever it halts.",
-      "phase": "fuaran-core#132",
-      "class": "domain-obligation",
-      "dischargedBy": "Conformance.concurrencyLaws",
-      "evidence": {
-        "assumption": "lanes_apply — every lane of the set applies from the base state"
-      }
-    },
-    {
       "id": "dag-outside-the-model",
       "level": "assumed",
-      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it' and by Phase 158 a second time. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is MODELLED since Phase 158, clause for clause, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`); what stays outside is `mergeBase` over heads with SEVERAL maximal common ancestors — a criss-cross merge — where the (closure size, id) tie-break decides and what it decides is a policy rather than a fact, and the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
+      "claim": "What of the DAG layer remains outside the model, narrowed by Phase 134 from 'all of it' and by Phase 158 a second time. Hashing is abstracted behind an opaque minting function; what it buys is stated separately as `node-ids-distinct`. `Dag.mergeBase` is MODELLED since Phase 158, clause for clause, and proved to locate the divergence point for heads whose lanes hang off one merged node (`merge-base-divergence`); what stays outside is `mergeBase` over heads with SEVERAL maximal common ancestors — a criss-cross merge — where the (closure size, id) tie-break decides and what it decides is a policy rather than a fact (since Phase 300 stated as 'a maximal common ancestor', and no longer load-bearing for the reconcile, whose partition applies the history the tie-break leaves out exactly once: `reconcile-sound`; its criss-cross determinism is a theorem for the reachability-indexed implementation Phase 289 lands), and the recovery of a delta that itself contains a two-parent node, which is no spine and has no append order to be identified with. The ancestor closure, the difference against the base's closure, the lookup and the fold built on them are not assumed at either shape: see `dag-delta-recovery`, `fold-from-the-dag`, `dag-delta-recovery-merged-head` and `fold-from-a-merged-dag`.",
       "phase": "fuaran-core#134",
       "class": "model-bridge",
       "closes": "unscheduled",
       "evidence": {
-        "assumption": "The hash function itself is correct; and Dag.mergeBase is correct where two heads share several maximal common ancestors (a criss-cross merge), which no theorem here reaches"
+        "assumption": "The hash function itself is correct; and Dag.mergeBase's tie-break among several maximal common ancestors (a criss-cross merge) is deterministic over the implementation Phase 289 lands, which no theorem here reaches yet"
       }
     },
     {

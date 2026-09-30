@@ -268,8 +268,8 @@ let mergeLawTests =
 
               Expect.equal
                   (List.length results)
-                  6
-                  "clean + cross + conflicted + determinism laws + the Phase 121 outcome and independence adequacy guards reported"
+                  8
+                  "clean + shared-once + cross + conflicted + determinism laws + the outcome, shape (Phase 300) and independence adequacy guards reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

@@ -306,6 +306,7 @@ type lane_outcome<'op, 'state, 'rej> =
 | LaneFolded of 'state
 | LaneHalted of Prims.list<conflict<'op>>
 | LaneRejected of 'rej
+| LanesRejected of Prims.list<Prims.list<'op>>
 
 
 let uu___is_LaneFolded = (fun ( projectee  :  lane_outcome<'op, 'state, 'rej> ) -> (match (projectee) with
@@ -353,17 +354,58 @@ let __proj__LaneRejected__item___0 = (fun ( projectee  :  lane_outcome<'op, 'sta
      end))
 
 
+let uu___is_LanesRejected = (fun ( projectee  :  lane_outcome<'op, 'state, 'rej> ) -> (match (projectee) with
+| LanesRejected (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__LanesRejected__item___0 = (fun ( projectee  :  lane_outcome<'op, 'state, 'rej> ) -> (match (projectee) with
+| LanesRejected (_0) -> begin
+     _0
+     end))
+
+
+let rec rejecting = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( s0  :  'state ) ( lanes  :  Prims.list<Prims.list<'op>> ) -> (match (lanes) with
+| [] -> begin
+     []
+     end
+| (l)::t -> begin
+      
+if (match ((replay apply l s0)) with
+| Ok (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) then begin
+     (rejecting apply s0 t)
+     end else begin
+     (l)::(rejecting apply s0 t)
+     end
+     end))
+
+
 let fold_once = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( fp  :  'op  ->  footprint ) ( s0  :  'state ) ( lanes  :  Prims.list<Prims.list<'op>> ) -> (match ((reconcile_many fp lanes)) with
 | Error (cs) -> begin
      LaneHalted (cs)
      end
 | Ok (script) -> begin
+     (match ((rejecting apply s0 lanes)) with
+| [] -> begin
      (match ((replay apply script s0)) with
 | Ok (s) -> begin
      LaneFolded (s)
      end
 | Error (r) -> begin
      LaneRejected (r)
+     end)
+     end
+| rs -> begin
+     LanesRejected (rs)
      end)
      end))
 
@@ -1159,6 +1201,76 @@ let merge_base = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) 
      end
 | (c)::t -> begin
      Found ((max_by (deeper lt d fuel) c t))
+     end))
+
+
+let rec owners : Prims.string  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.nat = (fun ( x  :  Prims.string ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (match (cs) with
+| [] -> begin
+     (Prims.parse_int "0")
+     end
+| (c)::t -> begin
+     (( 
+if (mem x c) then begin
+     (Prims.parse_int "1")
+     end else begin
+     (Prims.parse_int "0")
+     end) + (owners x t))
+     end))
+
+
+let rec keep : (Prims.string  ->  Prims.bool)  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( f  :  Prims.string  ->  Prims.bool ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+      
+if (f x) then begin
+     (x)::(keep f t)
+     end else begin
+     (keep f t)
+     end
+     end))
+
+
+let shared_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.string  ->  Prims.bool = (fun ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) ( x  :  Prims.string ) -> ((not ((mem x base_c))) && ((owners x cs) >= (Prims.parse_int "2"))))
+
+
+let shared_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (keep (shared_pred base_c cs) order))
+
+
+let excl_pred : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.bool = (fun ( base_c  :  Prims.list<Prims.string> ) ( cs_all  :  Prims.list<Prims.list<Prims.string>> ) ( c  :  Prims.list<Prims.string> ) ( x  :  Prims.string ) -> (((not ((mem x base_c))) && (mem x c)) && (Prims.op_Equals (owners x cs_all) (Prims.parse_int "1"))))
+
+
+let excl_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs_all  :  Prims.list<Prims.list<Prims.string>> ) ( c  :  Prims.list<Prims.string> ) -> (keep (excl_pred base_c cs_all c) order))
+
+
+let rec excl_lanes : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.list<Prims.string>> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs_all  :  Prims.list<Prims.list<Prims.string>> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (match (cs) with
+| [] -> begin
+     []
+     end
+| (c)::t -> begin
+     ((excl_ids order base_c cs_all c))::(excl_lanes order base_c cs_all t)
+     end))
+
+
+let reconcile_ids : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string> = (fun ( order  :  Prims.list<Prims.string> ) ( base_c  :  Prims.list<Prims.string> ) ( cs  :  Prims.list<Prims.list<Prims.string>> ) -> (app (shared_ids order base_c cs) (concat (excl_lanes order base_c cs cs))))
+
+
+let rec ops_by = (fun ( opof  :  Prims.string  ->  'op ) ( ids  :  Prims.list<Prims.string> ) -> (match (ids) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+     ((opof x))::(ops_by opof t)
+     end))
+
+
+let rec lanes_by = (fun ( opof  :  Prims.string  ->  'op ) ( ls  :  Prims.list<Prims.list<Prims.string>> ) -> (match (ls) with
+| [] -> begin
+     []
+     end
+| (l)::t -> begin
+     ((ops_by opof l))::(lanes_by opof t)
      end))
 
 

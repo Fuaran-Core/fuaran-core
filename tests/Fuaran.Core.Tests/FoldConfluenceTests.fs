@@ -579,9 +579,12 @@ let foldConfluenceTests =
                   let baseId, headA, headB, dag = build a b
 
                   Expect.equal
-                      (Dag.reconcileMany planFootprint dag baseId [ headA; headB ])
+                      (Dag.reconcileMany planW planFootprint dag baseId basePlan [ headA; headB ]
+                       |> Result.mapError (function
+                           | ReconcileFault.LanesInterfere cs -> cs
+                           | other -> failwithf "unexpected refusal %A" other))
                       (Dag.reconcile planFootprint dag baseId headA headB)
-                      "the N-lane fold is the two-head fold at N = 2"
+                      "the N-lane fold is the two-head fold at N = 2, where both lanes apply"
 
           testCase "Dag.reconcileMany folds three disjoint lanes and halts on any interfering pair"
           <| fun _ ->
@@ -611,7 +614,7 @@ let foldConfluenceTests =
               let baseId, heads, dag =
                   build [ [ AddItem("n1", "t") ]; [ AddItem("n2", "t") ]; [ Retitle("p1", "t") ] ]
 
-              match Dag.reconcileMany planFootprint dag baseId heads with
+              match Dag.reconcileMany planW planFootprint dag baseId basePlan heads with
               | Ok script -> Expect.equal (List.length script) 3 "every disjoint lane's op is in the merge script"
               | Error cs -> failtestf "three disjoint lanes should fold clean; got %A" cs
 
@@ -620,9 +623,10 @@ let foldConfluenceTests =
               let baseId2, heads2, dag2 =
                   build [ [ AddItem("n1", "t") ]; [ AddItem("n2", "t") ]; [ AddItem("n1", "u") ] ]
 
-              match Dag.reconcileMany planFootprint dag2 baseId2 heads2 with
+              match Dag.reconcileMany planW planFootprint dag2 baseId2 basePlan heads2 with
               | Ok _ -> failtest "a colliding lane pair must halt the whole fold"
-              | Error cs -> Expect.isNonEmpty cs "the halt names the interference" ]
+              | Error(ReconcileFault.LanesInterfere cs) -> Expect.isNonEmpty cs "the halt names the interference"
+              | Error other -> failtestf "a colliding lane pair halts on interference, not %A" other ]
 
 // ---------------------------------------------------------------------------
 //  Phase 245 — the adequacy line counts rejected lanes beside folded and halted ones
@@ -658,7 +662,10 @@ let rejectedLaneTests =
 
               let cx = defaultArg adequacy.Counterexample ""
               Expect.stringContains cx "folded=0 halted=0" "the demanded outcomes read zero"
-              Expect.stringContains cx "rejected=20" "and the line names the lanes that were rejected instead"
+              // Phase 300 — every drawn lane set is judged in three shapes (disjoint, duplicate head,
+              // fast-forward), so twenty draws are sixty judged lane sets, each counted.
+              Expect.stringContains cx "rejected=60" "and the line names the lanes that were rejected instead"
+              Expect.stringContains cx "duplicate-head=20 fast-forward=20" "and the two shared-history shapes it drew"
 
           testCase "a rejected lane is counted, not demanded — the work-plan reference stays green"
           <| fun _ ->

@@ -288,7 +288,7 @@ module Families =
               treeWitness
               (Some StrongerPromise)
               []
-              (Guarded [ "reconcile outcome"; "delta-pair independence" ])
+              (Guarded [ "reconcile outcome"; "reconcile shape"; "delta-pair independence" ])
               (Drawn, "a reconcile Error arises from OpGen-drawn scripts; guarded on reconcile outcome")
           c
               "footprintLaws"
@@ -301,7 +301,7 @@ module Families =
               "concurrencyLaws"
               treeWitness
               (Some StrongerPromise)
-              [ "lanes-apply" ]
+              []
               (Guarded [ "independent pair (delegates to concurrencyLawsWith)" ])
               (NoRefusal, "delegates to concurrencyLawsWith")
           c
