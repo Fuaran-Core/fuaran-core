@@ -399,6 +399,38 @@ let private classOf (id: string) : AdequacyClass =
     | Some(_, k) -> k
     | None -> failwithf "%s has no census row (SampleAdequacy.census) — the roster and the census disagree" id
 
+/// Phase 297 — what one family's guards say against the roster and its census class: every guard
+/// label is a roster id (a delegating family emits its delegate's, which is one), a `Guarded` family
+/// emits at least one guard, and an `Unconditional` family emits none. Pure, so the go-red perturbs
+/// its input rather than the tree.
+let guardDefects (ids: Set<string>) (id: string) (klass: AdequacyClass) (results: LawResult list) : string list =
+    let opening = SampleAdequacy.guardOpening
+
+    let labelOf (law: string) =
+        let rest = law.Substring opening.Length
+        let at = rest.IndexOf "): "
+        if at < 0 then rest else rest.Substring(0, at)
+
+    let guards =
+        results
+        |> List.filter (fun r -> r.Law.StartsWith(opening, System.StringComparison.Ordinal))
+
+    let bare =
+        guards
+        |> List.map (fun r -> labelOf r.Law)
+        |> List.filter (fun l -> not (Set.contains l ids))
+        |> List.distinct
+        |> List.map (fun l -> sprintf "%s: a guard is labelled `%s`, which is not a roster id" id l)
+
+    let classDefect =
+        match klass, guards with
+        | Guarded _, [] -> [ sprintf "%s: the census says Guarded and the family emits no guard" id ]
+        | Unconditional _, _ :: _ ->
+            [ sprintf "%s: the census says Unconditional and the family emits %d guard(s)" id (List.length guards) ]
+        | _ -> []
+
+    bare @ classDefect
+
 /// The measured census: one `CaseCount` per family, in roster order. This is what the generated
 /// `docs/conformance-families.{md,json}` render their `cases` column from.
 let cases () : (string * CaseCount) list =
@@ -409,9 +441,10 @@ let cases () : (string * CaseCount) list =
 /// Phase 223 — the six families Phase 220's audit found drawing a refusal population a run could
 /// silently miss, with the dimensions each is now `Guarded` over. Five are this repository's since
 /// Phase 258: `transformLaws` left with the dataframe layer it reads (D66), and the compute
-/// repository's suite holds its row.
+/// repository's suite holds its row. Since Phase 297 `casLaws` also counts its race arm (two
+/// `appendIf` calls at one head that both apply), which is drawn too.
 let private drawnRefusalSix: (string * string list) list =
-    [ "Conformance.casLaws", [ "accepted"; "refused" ]
+    [ "Conformance.casLaws", [ "accepted"; "refused"; "race arm" ]
       "Conformance.idempotencyLaws", [ "accepted"; "refused" ]
       "Conformance.aiSurfaceLaws", [ "accepted"; "refused"; "allowed"; "parked"; "denied" ]
       "Conformance.columnarValidatorLaws", [ "null cell"; "out-of-range cell" ]
@@ -602,6 +635,106 @@ let vacuityTests =
                   delegated.Starved
                   [ "the sample reached every arm the laws distinguish" ]
                   "and the dimension is cut at the guard's own `): `, not at an assumed family name"
+
+          // ---- Phase 297: guards the census can see, and a class read off the code ----
+
+          testCase
+              "every guard is labelled with a roster id, every Guarded family emits one, and no Unconditional family does"
+          <| fun _ ->
+              // Until Phase 297 seven families labelled their guards with a bare entry name and one
+              // with its module name, so a census keyed by roster id read none of them; and the
+              // census class was a declaration nothing compared with what the family emits. Both
+              // are read off the reference run here.
+              let ids = Set.ofList KitRoster.ids
+
+              let defects =
+                  [ for r in runs.Value do
+                        yield! guardDefects ids r.Id (classOf r.Id) r.Results ]
+
+              Expect.isEmpty
+                  defects
+                  (sprintf "guard labels or census classes disagree with the code:\n%s" (String.concat "\n" defects))
+
+          testCase "the guard-label check goes red in all three directions — made-up runs"
+          <| fun _ ->
+              let ids = Set.ofList [ "M.f"; "M.fWith" ]
+
+              let guard (label: string) =
+                  { Law =
+                      SampleAdequacy.lawPrefix label
+                      + "the sample reached every arm the laws distinguish"
+                    Passed = true
+                    Counterexample = None }
+
+              let subject =
+                  { Law = "a"
+                    Passed = true
+                    Counterexample = None }
+
+              Expect.isEmpty
+                  (guardDefects ids "M.f" (Guarded [ "arm" ]) [ subject; guard "M.fWith" ])
+                  "a delegate's roster id is a legitimate label"
+
+              Expect.isNonEmpty
+                  (guardDefects ids "M.f" (Guarded [ "arm" ]) [ subject; guard "f" ])
+                  "a bare entry name is not a roster id"
+
+              Expect.isNonEmpty
+                  (guardDefects ids "M.f" (Guarded [ "arm" ]) [ subject ])
+                  "a Guarded family that emits no guard is named"
+
+              Expect.isNonEmpty
+                  (guardDefects ids "M.f" (Unconditional "built") [ subject; guard "M.f" ])
+                  "an Unconditional family that emits a guard is named"
+
+          testCase "a law the runner reports NEVER REACHED is starvation, under either class — made-up runs"
+          <| fun _ ->
+              let unreached =
+                  { Law = "the tamper law"
+                    Passed = false
+                    Counterexample = Some(SampleAdequacy.neverReached + " — widen the generator") }
+
+              let held =
+                  { Law = "the replay law"
+                    Passed = true
+                    Counterexample = None }
+
+              for klass in [ Unconditional "built"; Guarded [ "arm" ] ] do
+                  let measured = SampleAdequacy.cases "M.f" klass 10 [ held; unreached ]
+                  Expect.isTrue (SampleAdequacy.isVacuous measured) (sprintf "%A: a never-reached law is vacuity" klass)
+                  Expect.equal measured.Starved [ "the tamper law" ] "and the cell names the law"
+
+              let refuted =
+                  { unreached with
+                      Counterexample = Some "seed=1 iter=0: a real counterexample" }
+
+              Expect.isFalse
+                  (SampleAdequacy.isVacuous (SampleAdequacy.cases "M.f" (Unconditional "built") 10 [ held; refuted ]))
+                  "a law refuted by a counterexample is red, not starved — the census is not where that is read"
+
+          testCase "a constant generator starves dagLaws' tamper arm, and the census cell says so"
+          <| fun _ ->
+              // The shard's case in one family: the tamper arm runs only when a fresh draw differs
+              // from the op it replaces, so a generator that draws one op every time never tampers.
+              // The law is a strict runner cell, so it reds as never reached rather than passing.
+              let op0, _ = ConformanceTests.streamGen.Op(ConfRng.ofSeed 1)
+
+              let constant =
+                  { ConformanceTests.streamGen with
+                      Op = fun r -> op0, r }
+
+              let results =
+                  Conformance.dagLaws ConformanceTests.sw constant OpStream.defaultHash 4242 50
+
+              let measured =
+                  SampleAdequacy.cases "Conformance.dagLaws" (classOf "Conformance.dagLaws") 50 results
+
+              Expect.isTrue (SampleAdequacy.isVacuous measured) "the constant generator certified no tamper"
+
+              Expect.stringStarts
+                  (SampleAdequacy.renderCases measured)
+                  SampleAdequacy.vacuousToken
+                  "and the cell reads vacuous"
 
           // ---- Phase 220: the refusable-family audit ----
 

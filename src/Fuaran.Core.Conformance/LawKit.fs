@@ -96,7 +96,7 @@ module internal LawKit =
             | None when evidence <= 0 && coveredBy.IsNone ->
                 { Law = name
                   Passed = false
-                  Counterexample = Some("never reached" + unreachedRemedy) }
+                  Counterexample = Some(SampleAdequacy.neverReached + unreachedRemedy) }
             | None ->
                 { Law = name
                   Passed = true

@@ -244,7 +244,11 @@ module internal SurfaceLaws =
 
             // ---- pattern determinism ----
             match w.Patterns with
-            | [] -> ()
+            // An empty bank is checked WHOLE, not missed by the draw: there is no pattern to resolve
+            // and no generator that could reach one, so the law holds over the entire declared bank
+            // and is counted as asserted — the never-reached remedy (widen the generator) cannot
+            // apply to it.
+            | [] -> patterns.Saw()
             | bank ->
                 let card = rng.Choose bank
 
@@ -523,29 +527,26 @@ module internal SurfaceLaws =
     /// moved and how — the fields added and removed, and the route a deliberate widening takes.
     let witnessFieldsLaw (record: string) (pinned: string list) (t: System.Type) : LawResult =
         let law =
-            "witness surface ("
-            + record
-            + "): the record carries exactly its frozen fields, in declaration order"
+            LawKit.LawCell(
+                "witness surface ("
+                + record
+                + "): the record carries exactly its frozen fields, in declaration order"
+            )
 
         if not (Microsoft.FSharp.Reflection.FSharpType.IsRecord t) then
-            { Law = law
-              Passed = false
-              Counterexample =
-                Some(
+            law.Check(
+                false,
+                fun () ->
                     record
                     + " is no longer an F# record, so its field set cannot be read — the freeze names a record"
-                ) }
+            )
         else
             let actual =
                 Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
                 |> Array.map (fun p -> p.Name)
                 |> Array.toList
 
-            if actual = pinned then
-                { Law = law
-                  Passed = true
-                  Counterexample = None }
-            else
+            let mismatch () =
                 let render (xs: string list) =
                     if List.isEmpty xs then "none" else String.concat ", " xs
 
@@ -558,22 +559,21 @@ module internal SurfaceLaws =
                     else
                         ""
 
-                { Law = law
-                  Passed = false
-                  Counterexample =
-                    Some(
-                        record
-                        + " declares ["
-                        + String.concat "; " actual
-                        + "] where the freeze pins ["
-                        + String.concat "; " pinned
-                        + "] — added: "
-                        + render added
-                        + "; removed: "
-                        + render removed
-                        + reordered
-                        + ". A frozen witness does not grow: compose a new witness record that embeds it (STABILITY.md, \"Witness-record field freeze\"), or, before 1.0 only, widen it deliberately — edit its entry in Conformance.frozenWitnessFields and record the widening in STABILITY.md in the same commit."
-                    ) }
+                record
+                + " declares ["
+                + String.concat "; " actual
+                + "] where the freeze pins ["
+                + String.concat "; " pinned
+                + "] — added: "
+                + render added
+                + "; removed: "
+                + render removed
+                + reordered
+                + ". A frozen witness does not grow: compose a new witness record that embeds it (STABILITY.md, \"Witness-record field freeze\"), or, before 1.0 only, widen it deliberately — edit its entry in Conformance.frozenWitnessFields and record the widening in STABILITY.md in the same commit."
+
+            law.Check((actual = pinned), mismatch)
+
+        law.Result
 
     /// The seventh law: every record in `records` whose name ends in `Witness` is classified —
     /// frozen (`frozenWitnessFields`) or declared outside the freeze (`unfrozenWitnesses`) — and
@@ -612,14 +612,12 @@ module internal SurfaceLaws =
               if not (List.isEmpty both) then
                   "declared both frozen and outside the freeze: " + String.concat ", " both ]
 
-        { Law =
-            "witness surface: every public record named `…Witness` is frozen or declared outside the freeze, and every classified name exists"
-          Passed = List.isEmpty problems
-          Counterexample =
-            if List.isEmpty problems then
-                None
-            else
-                Some(String.concat "; " problems) }
+        let law =
+            LawKit.LawCell
+                "witness surface: every public record named `…Witness` is frozen or declared outside the freeze, and every classified name exists"
+
+        law.Check(List.isEmpty problems, fun () -> String.concat "; " problems)
+        law.Result
 
 #if !FABLE_COMPILER
     /// Every public type in the kit's own assembly and in the Fuaran.Core assemblies it references,

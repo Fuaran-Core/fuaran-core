@@ -927,14 +927,18 @@ module internal TreeLaws =
         match gen.CanHold with
         | Some canHold -> containerLawsOver canHold nodew idw gen seed iterations
         | None ->
-            [ { Law = "the domain declares a container predicate (OpGen.CanHold)"
-                Passed = false
-                Counterexample =
-                  Some(
-                      "seed="
-                      + string seed
-                      + ": OpGen.CanHold is None, so there is no container capability to certify — a domain without one has nothing for this family to say, and answering with a green report would look like certification of a claim nobody made"
-                  ) } ]
+            let declared =
+                LawKit.LawCell "the domain declares a container predicate (OpGen.CanHold)"
+
+            declared.Check(
+                false,
+                fun () ->
+                    "seed="
+                    + string seed
+                    + ": OpGen.CanHold is None, so there is no container capability to certify — a domain without one has nothing for this family to say, and answering with a green report would look like certification of a claim nobody made"
+            )
+
+            LawKit.results [ declared ]
 
     /// **The witness surface's own boundary, certified rather than assumed** (Phase 189).
     ///

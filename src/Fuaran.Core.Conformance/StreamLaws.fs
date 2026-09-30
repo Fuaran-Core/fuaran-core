@@ -395,8 +395,9 @@ module internal StreamLaws =
         // multi-identity guard (Phase 40): a journal of two distinct effect identities replays
         // correctly in record order, but a replay that requests the wrong identity at the head
         // surfaces a *named* mismatch rather than silently handing back the other effect's value.
-        let v1, rA = draw (ConfRng.ofSeed (seed + 7))
-        let v2, _ = draw rA
+        let fixedDraws = LawKit.Draws(seed + 7)
+        let v1 = fixedDraws.Draw draw
+        let v2 = fixedDraws.Draw draw
         let _, c1 = OpStream.captureEffect hashFn encode "clock" "alpha" (fun () -> v1) []
         let _, caps = OpStream.captureEffect hashFn encode "random" "beta" (fun () -> v2) c1
 

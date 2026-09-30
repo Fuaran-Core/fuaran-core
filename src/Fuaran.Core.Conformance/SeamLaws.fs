@@ -1232,9 +1232,9 @@ module internal SeamLaws =
 
         match regResult with
         | Error e ->
-            [ { Law = "capability pipeline registry built"
-                Passed = false
-                Counterexample = Some(sprintf "%A" e) } ]
+            let built = LawKit.LawCell "capability pipeline registry built"
+            built.Check(false, fun () -> sprintf "%A" e)
+            LawKit.results [ built ]
         | Ok reg ->
             let good =
                 { Nodes =

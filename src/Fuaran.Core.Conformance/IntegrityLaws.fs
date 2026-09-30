@@ -874,16 +874,21 @@ module internal IntegrityLaws =
             // was never given has certified nothing. A domain that has decided the family does not
             // apply records that in its own conformance census as a reasoned non-use; it does not
             // run the family with no witness and read the green.
-            [ { Law =
-                  "construct-then-encode ("
-                  + domain
-                  + "): NOT ADOPTED - no ConstructWitness supplied"
-                Passed = false
-                Counterexample =
-                  Some(
-                      domain
-                      + " supplies no ConstructWitness, so its authoring surface is uncertified: the codec round-trip laws beside this one prove only that bytes survive decode and encode, never that the smart constructors an author calls rebuild a corpus document to the same bytes. Supply a witness, or record the family as a reasoned non-use in the domain's conformance census rather than running it with none."
-                  ) } ]
+            let adopted =
+                LawKit.LawCell(
+                    "construct-then-encode ("
+                    + domain
+                    + "): NOT ADOPTED - no ConstructWitness supplied"
+                )
+
+            adopted.Check(
+                false,
+                fun () ->
+                    domain
+                    + " supplies no ConstructWitness, so its authoring surface is uncertified: the codec round-trip laws beside this one prove only that bytes survive decode and encode, never that the smart constructors an author calls rebuild a corpus document to the same bytes. Supply a witness, or record the family as a reasoned non-use in the domain's conformance census rather than running it with none."
+            )
+
+            LawKit.results [ adopted ]
         | Some w ->
             // The sample is the caller's corpus rather than a draw, so there is no seed and no
             // cursor; the non-vacuity law is the family's own guard on that sample, and the two

@@ -184,13 +184,14 @@ module internal FunctionLaws =
         (seed: int)
         (iterations: int)
         : FunctionVerifyReport<'Node, 'Id> =
-        let mutable rng = ConfRng.ofSeed seed
+        // A VERIFIER, not a law family: it stops at the first counterexample, which it returns as
+        // a typed report rather than as a law. It draws through the runner's cursor all the same.
+        let rng = LawKit.Draws seed
         let mutable counterexample = None
         let mutable i = 0
 
         while counterexample.IsNone && i < iterations do
-            let pset, r' = genParams fn rng
-            rng <- r'
+            let pset = rng.Draw(genParams fn)
             counterexample <- verifyCase w reg fn seed i pset
             i <- i + 1
 
@@ -393,28 +394,19 @@ module internal FunctionLaws =
               Counterexample = cx }
         else
             // sampled — draw `maxCases` param-sets, each varying hole drawn from its domain.
-            let mutable rng = ConfRng.ofSeed seed
+            let rng = LawKit.Draws seed
             let mutable cx = None
             let mutable i = 0
 
             while cx.IsNone && i < maxCases do
-                let mutable r = rng
-
                 let valueArgs =
                     valueHoles
                     |> List.map (fun (a, d) ->
                         match d with
                         | FiniteDom [] -> a, "" // an unsatisfiable hole — apply rejects (kept total)
-                        | FiniteDom xs ->
-                            let v, r' = ConfRng.choose xs r
-                            r <- r'
-                            a, v
-                        | SampledDom(sampler, _) ->
-                            let v, r' = sampler r
-                            r <- r'
-                            a, v)
+                        | FiniteDom xs -> a, rng.Choose xs
+                        | SampledDom(sampler, _) -> a, rng.Draw sampler)
 
-                rng <- r
                 cx <- verifyCase w reg fn seed i (psetOf valueArgs)
                 i <- i + 1
 
@@ -446,7 +438,7 @@ module internal FunctionLaws =
                 |> sprintf "validator faulted the result — %s"
             | EffectObserved(declared, observed) -> sprintf "effect leak — declared %A, observed %A" declared observed
 
-        sprintf "seed=%d iter=%d: { %s } ⇒ %s" cx.Seed cx.Iteration pset defect
+        LawKit.failAt cx.Seed cx.Iteration (sprintf "{ %s } ⇒ %s" pset defect)
 
     /// The artifact-function verification laws (Phase 48) — the teeth on `verifyFunction`. A domain
     /// supplies the witness, a `sound` function (correct-by-construction across its param space), a

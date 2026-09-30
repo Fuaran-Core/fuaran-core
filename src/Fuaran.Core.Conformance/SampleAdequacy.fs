@@ -82,8 +82,9 @@ type CaseCount =
         /// iterations.
         Cases: int
         /// The guarded dimensions whose own adequacy law went red — the sides of the family the
-        /// sample never reached, named without their `sample adequacy (<family>): ` prefix. Empty
-        /// on a run that reached everything it declared.
+        /// sample never reached, named without their `sample adequacy (<family>): ` prefix — and,
+        /// since Phase 297, every subject law the runner reports never reached, named by its text.
+        /// Empty on a run that reached everything it declared.
         Starved: string list
     }
 
@@ -264,6 +265,14 @@ module SampleAdequacy =
     [<Literal>]
     let vacuousToken = "vacuous"
 
+    /// The opening of the counterexample a law carries when it asserted NOTHING in its run — the
+    /// runner's non-degeneracy rule (Phase 302, carried by Phase 297's `LawCell`): a law asserted
+    /// only inside an arm no guard counts, and never reached, reds ITSELF rather than reporting a
+    /// green it never earned. `cases` reads it back as starvation, whatever the family's class,
+    /// because a subject law that was never asserted is vacuity on the side that law is about.
+    [<Literal>]
+    let neverReached = "never reached"
+
     /// The cases one family's run exercised — the measurement this module has always taken and
     /// never emitted.
     ///
@@ -285,11 +294,24 @@ module SampleAdequacy =
 
         let subject = results |> List.filter (isGuard >> not)
 
-        let starved =
+        // Phase 297 — a subject law the runner reports NEVER REACHED is starved in its own right,
+        // under either class: it is the one red a gated arm with no counting guard can show, and a
+        // census cell that rendered a number over it would claim cases the law never saw.
+        let unreached =
+            subject
+            |> List.filter (fun r ->
+                not r.Passed
+                && (match r.Counterexample with
+                    | Some cx -> hasPrefix neverReached cx
+                    | None -> false))
+            |> List.map (fun r -> r.Law)
+
+        let guardStarved =
             match klass with
             // An `Unconditional` family declares that every iteration BUILDS the evidence for
-            // every branch, and the suite holds that declaration to the tree. So the only way it
-            // can be vacuous is by running nothing at all, which `Cases` already says.
+            // every branch, and the suite holds that declaration to the tree. So it carries no
+            // guard to starve: it is vacuous by running nothing at all, which `Cases` already says,
+            // or by a law the runner reports never reached, which `unreached` above says.
             | Unconditional _ -> []
             // A `Guarded` family's guard is the measurement. A red guard law names a dimension the
             // sample never reached — vacuity on the side the law is about, which a total cannot
@@ -299,6 +321,8 @@ module SampleAdequacy =
                 results
                 |> List.filter (fun r -> isGuard r && not r.Passed)
                 |> List.map (fun r -> dimension r.Law)
+
+        let starved = guardStarved @ unreached
 
         { Family = family
           Cases = List.length subject * (max 0 iterations)
@@ -394,7 +418,9 @@ module SampleAdequacy =
           // nothing and all five still report green. The sink is a PARAMETER, so whether the
           // evidence is built is a property of the run — which is what `Guarded` means, and the
           // family that certifies the unsigned path is `noAttestationVacuityLaws` beside it.
-          "Conformance.attestationLaws", Guarded [ "signing outcome" ]
+          //
+          // Phase 297 — the op-forgery arm is demanded by the same guard.
+          "Conformance.attestationLaws", Guarded [ "signing outcome and op tamper" ]
 
           // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
           // found and left for this phase. Each was `Unconditional` on the strength of what every
@@ -405,7 +431,10 @@ module SampleAdequacy =
           //
           // `match ≡ append` compares a domain refusal with a CAS `Domain` rejection only when the
           // caller's StreamGen draws a refused op.
-          "Conformance.casLaws", Guarded [ "accepted"; "refused" ]
+          //
+          // Phase 297 — and the race arm (two appendIf calls at one head that BOTH apply) is drawn
+          // too, so it is counted beside them.
+          "Conformance.casLaws", Guarded [ "accepted"; "refused"; "race arm" ]
           // `fresh ≡ append` and the true-head CAS arm forward a domain refusal verbatim only when
           // the drawn fresh op is refused; `Duplicate` and `StaleHead` beside them are built.
           "Conformance.idempotencyLaws", Guarded [ "accepted"; "refused" ]
@@ -447,10 +476,23 @@ module SampleAdequacy =
           "Conformance.witnessLaws", Unconditional "each iteration rebuilds a drawn node and re-reads every accessor"
           "Conformance.diffLaws", Unconditional "each iteration diffs a pair and re-applies the emitted script"
           "Conformance.normalizeLaws", Unconditional "each iteration normalises a drawn script and compares both ways"
-          "Conformance.snapshotLawsWith", Unconditional "each iteration takes a snapshot and replays across it"
+          // Phase 297 — the snapshot arm runs only over a chain long enough to cut, which the domain's
+          // generator decides. Its two laws are STRICT runner cells: a run that never cuts a snapshot
+          // reds them itself ("never reached") and `cases` reads that as starvation, so the family
+          // needs no guard of its own to be seen starving.
+          "Conformance.snapshotLawsWith",
+          Unconditional
+              "each iteration takes a snapshot and replays across it; a run whose chains are too short to cut one reds both laws as never reached"
           "Conformance.snapshotLaws", Unconditional "delegates to snapshotLawsWith"
-          "Conformance.dagLaws", Unconditional "each iteration builds, replays, tampers and round-trips one DAG"
-          "Conformance.captureReplayLaws", Unconditional "each iteration records, replays and tampers one session"
+          // Phase 297 — the tamper arm runs only when a fresh draw differs from the op it replaces;
+          // the law is a STRICT runner cell, so a run that never draws a differing op reds it as
+          // never reached rather than passing it.
+          "Conformance.dagLaws",
+          Unconditional
+              "each iteration builds, replays and round-trips one DAG, and tampers it whenever a fresh draw differs; a run that never tampers reds the tamper law as never reached"
+          // Phase 297 — moved out of `Unconditional`: the tamper arm runs only when a fresh draw
+          // encodes differently from the value it replaces, which the domain's generator decides.
+          "Conformance.captureReplayLaws", Guarded [ "tampered" ]
           "Conformance.capabilityLaws",
           Unconditional "each iteration exercises accept, reject and unknown-arg on a built declaration"
           "Conformance.queryLaws",
@@ -476,18 +518,26 @@ module SampleAdequacy =
           Unconditional "each iteration applies the caller-supplied under-declared function twice"
           "Conformance.canonicalFloatLaws",
           Unconditional "each iteration renders a drawn float and the three non-finite tokens"
-          "Conformance.encoderInjectivityLaws", Unconditional "each iteration hashes a drawn pair of trees"
+          // Phase 297 — moved out of `Unconditional`, where "each iteration hashes a drawn pair of
+          // trees" was false: each iteration hashes ONE tree against a seen-map, so a generator that
+          // draws one tree every time compared nothing and passed green. The family now counts the
+          // distinct trees it saw and the pairs it compared, as `codecInjectivityLaws` does.
+          "Conformance.encoderInjectivityLaws", Guarded [ "distinct tree (seen / compared)" ]
           "Conformance.codecInjectivityLaws",
           Unconditional
               "the left-inverse law is BUILT by every iteration — one drawn op round-tripped through the domain's own Decode, and a codec with a total left inverse is injective — so the family's weight does not rest on the collision search beside it, whose own third law fails when the draw was too narrow to compare anything"
           "Conformance.projectionLaws", Unconditional "each iteration projects, re-imports and scopes the same tree"
           "Conformance.noAttestationVacuityLaws",
           Unconditional "each iteration asks the no-op sink to sign and to verify"
-          "Conformance.hashFnLaws", Unconditional "each iteration reorders, drops and bit-flips the same chain"
+          // Phase 297 — moved out of `Unconditional`: the reorder, drop and bit-flip arms each need a
+          // chain long enough to perturb, which the domain's generator decides (a generator refused
+          // every time builds none). The family counts each arm and emits the guard.
+          "Conformance.hashFnLaws", Guarded [ "tamper arm (reorder / drop / bit-flip)" ]
           "Conformance.hashFnAdversarialLaws",
           Unconditional "the budget IS the sample size, and it is the caller's own declared parameter"
-          "Conformance.attributedLaws",
-          Unconditional "each iteration lifts, re-attributes and round-trips the same stream"
+          // Phase 297 — moved out of `Unconditional`: the re-attribution tamper runs only over a
+          // non-empty lifted stream, which the domain's generator decides; the family counts it.
+          "Conformance.attributedLaws", Guarded [ "tampered chain (re-attributed)" ]
           "Conformance.chainBreakReasonLaws",
           Unconditional
               "each iteration BUILDS all three break kinds on both walkers — a renumbered sequence, a repointed prev-link, and a payload tampered with its sequence and link left intact — rather than drawing them, and the family's own last two laws fail if any kind was not actually observed"

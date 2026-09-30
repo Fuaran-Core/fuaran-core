@@ -748,7 +748,7 @@ let tests =
           <| fun _ ->
               // sound encoder (encNode) over varied trees — collision-free.
               let good = Conformance.encoderInjectivityLaws artw encNode genTree 4242 200
-              Expect.equal (List.length good) 1 "one injectivity law reported"
+              Expect.equal (List.length good) 2 "one injectivity law and its searched-size guard reported (Phase 297)"
 
               Expect.isTrue
                   (good |> List.forall (fun r -> r.Passed))
@@ -895,7 +895,10 @@ let tests =
           <| fun _ ->
               let dflt = Conformance.hashFnLaws sw streamGen OpStream.defaultHash 4242 200
 
-              Expect.equal (List.length dflt) 3 "determinism + parity + tamper laws reported"
+              Expect.equal
+                  (List.length dflt)
+                  4
+                  "determinism + parity + tamper laws and the tamper-arm guard reported (Phase 297)"
 
               if dflt |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -944,7 +947,10 @@ let tests =
           <| fun _ ->
               let results = Conformance.attributedLaws sw streamGen OpStream.defaultHash 4242 200
 
-              Expect.equal (List.length results) 3 "replay-parity + tamper + round-trip laws reported"
+              Expect.equal
+                  (List.length results)
+                  4
+                  "replay-parity + tamper + round-trip laws and the re-attribution guard reported (Phase 297)"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
