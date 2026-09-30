@@ -39,10 +39,9 @@ with the string-vs-Guid identity axis resolved as a witness parameter rather tha
 | **`Fuaran.Core.Idl`** | the interface-definition model: a typed description of a domain's node vocabulary (kinds, unions, enums, records, four-way optionality, a declarable node envelope, hosted slots), the schema-driven canonical encoder/decoder derived from it, a deterministic adversarial sampler, the canonical `idl.json` artifact projection, and the host-neutral sanitisation floor | a declared vocabulary (data) |
 | **`Fuaran.Core.Idl.Codegen`** | the generation half of the IDL engine: the F# structural-layer emitter with its declared-support channel, the TypeScript encoder backend, the JSON-schema emitter, the scaffold writer, the codegen trust boundary, and the stability diff classifier over two `idl.json` revisions. Build-time and .NET-only — it emits source, so its contract is the shape of what it emits | the same declared vocabulary |
 | **`Fuaran.Core.Idl.Cli`** | the stability classifier as a command (`fuaran-core-idl`): the wire severity per changed member with the reason it applies, the wire-profile evolution, and the F# consequence classes, exiting 0 / 3 / 4 for absorbable / breaking / undecided. Build-time and .NET-only | — |
-| **`Fuaran.Core.CSharp`** | a C#-shaped facade over the closed F# unions a non-F# authoring veneer has to construct and read — the column layer (`CellValue`, `TableValue`, `SourceValue`, the column vocabularies and their `Vocabulary` bridge), the artifact-function hole-declaration family, and the wire JSON model — with construction by factory method and reading by `Match`/`Switch`. The compute repository's `Fuaran.Core.DataFrame.CSharp` is built over it and takes its column types on its own public surface, so it is that package's dependency as well as a surface of its own (DECISIONS.md D28, amended by Phase 231). .NET-only, and deliberately NOT part of the Fable-clean set | — |
 
 Dependency order: `Tree` → `Ops` → (`OpStream` → `OpStream.Dag`; `Wire` standalone); `Column` over `Wire`; `Validator` over `Tree` + `Column`; `Function` over `Tree`/`Ops`/`Wire`; `Query` over `Column` + `Function`; `Conformance` over all of the above.
-Beside that spine, and all four read by `Conformance` so they precede it: `Observer` standalone; `Projection` over `Tree`; `Propagation` over `Tree` + `Ops`; `AiSurface` over `Wire` + `Ops`. Then the build-time and veneer tier, which nothing above depends on: `Idl` over `Wire` → `Idl.Codegen` over `Idl` → `Idl.Cli` over `Idl.Codegen`; `CSharp` over `Column` + `Function` + `Wire`.
+Beside that spine, and all four read by `Conformance` so they precede it: `Observer` standalone; `Projection` over `Tree`; `Propagation` over `Tree` + `Ops`; `AiSurface` over `Wire` + `Ops`. Then the build-time tier, which nothing above depends on: `Idl` over `Wire` → `Idl.Codegen` over `Idl` → `Idl.Cli` over `Idl.Codegen`.
 
 **The compute strand is produced elsewhere (Phase 258, D66).** `Fuaran.Core.DataFrame`,
 `Fuaran.Core.Column.Ops`, `Fuaran.Core.DataFrame.Conformance` and `Fuaran.Core.DataFrame.CSharp`
@@ -51,6 +50,14 @@ continue, under the same ids and namespaces, from
 this repository published them up to `0.32.0`, and those versions stay on nuget.org. They are built
 over the packages above and read by none of them, and a test here refuses any project, package
 reference or built assembly that brings one of the four ids back into this tree.
+
+**The C# facade is removed (Phase 231, DECISIONS.md D28).** `Fuaran.Core.CSharp`, the C#-shaped
+facade over the column layer, the hole-declaration family and the wire JSON model, was published
+from `0.22.0` to `0.32.0` and is not produced from `0.33.0`: the consumer it was shipped for never
+adopted it. Its one reader, the compute repository's `Fuaran.Core.DataFrame.CSharp`, is removed by
+that repository in the release that raises its pin to `0.33.0`, so neither half of the facade
+continues. A C# tier authors through the F# surface; a C# veneer over Core's closed unions returns
+when the IDL can generate one (D28's second criterion). The published versions stay on nuget.org.
 
 **This table is a derived roster, not a hand-kept list.** Its rows are held equal to the packable
 projects under `src/` by `PackageRosterTests` in the suite `./verify.ps1` runs, so a package that

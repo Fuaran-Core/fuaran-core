@@ -32,8 +32,9 @@ module Fuaran.Core.Tests.FableSmokeCompletenessTests
 //  * The derivation covers every project type under `src/`, not just `.fsproj`.
 //    A C# project cannot ship F# sources for Fable, so the temptation is to
 //    filter it out — but a packable project excused BY THE SHAPE OF THE
-//    DERIVATION is excused with no reason on the record. `Fuaran.Core.CSharp` is
-//    therefore an ordinary exclusions entry.
+//    DERIVATION is excused with no reason on the record. A packable C# project
+//    is therefore an ordinary exclusions entry (the C# facade carried one from
+//    Phase 128 until Phase 231 removed the package at `0.33.0`).
 //
 //  * "No Fable compiler here" is CHECKED, not asserted (217.F): no script or
 //    workflow in the repository invokes `dotnet fable`, the tool manifest does not

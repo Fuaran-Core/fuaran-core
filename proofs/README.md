@@ -746,10 +746,10 @@ deletes an exclusion — at which point the gate names the gap, and keeps naming
 exists. That is the whole mechanism: the exclusions are not a way of avoiding proofs, they are the
 list of proofs nobody has asked for, written down where deleting a line is how you ask.
 
-### The eight exclusions, and the two reasons that were not carried
+### The seven exclusions, and the two reasons that were not carried
 
-The eight packages with no model are `Fuaran.Core.CSharp` and `Fuaran.Core.Idl.Cli` (**`facade`** —
-surfaces over modelled packages, whose every claim is their callee's restated in a second syntax);
+The seven packages with no model are `Fuaran.Core.Idl.Cli` (**`facade`** — a surface over modelled
+packages, whose every claim is its callee's restated in a second syntax);
 `Fuaran.Core.Conformance`, `Fuaran.Core.Validator` and `Fuaran.Core.Observer`
 (**`content-free-seam`** — generic seams whose content is supplied entirely by the domain, so there
 is no concrete computation here for a theorem to be about); and `Fuaran.Core.Projection`,
@@ -767,7 +767,9 @@ row). The file keeps the retirement under `$retired` so the next reader finds th
 entry was. Phase 258 then moved the package itself, with both compute models and their rows, to
 [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) (DECISIONS.md D66), and with it the two
 exclusions Phase 257 had filed for `Fuaran.Core.DataFrame.CSharp` and
-`Fuaran.Core.DataFrame.Conformance`: the eight above are this repository's whole list again.
+`Fuaran.Core.DataFrame.Conformance`: the eight left were this repository's whole list again. Phase 231
+then removed `Fuaran.Core.CSharp`, the other `facade` entry, with the package itself (DECISIONS.md D28),
+which leaves the seven above.
 
 Phase 203 was filed naming four reasons and this file carries three, which is a correction and is
 recorded rather than quietly absorbed. **`tooling`** was written for `Fuaran.Core.Idl.Codegen`'s

@@ -2628,6 +2628,49 @@ it to `Human` by design.
 write with these readers, read the `Error` case of `fromJsonl` where it may have ignored it; it was
 previously unreachable for an actor-kind fault.
 
+### The C# facade is removed (Phase 231, DECISIONS.md D28) — BREAKING, `removal`
+
+**What changed.** `Fuaran.Core.CSharp` is no longer produced by this repository. It shipped at
+`0.22.0` (Phase 128) under D9's single-consumer exception, as a C#-shaped facade over the column
+layer (`CellValue`, `TableValue`, `SourceValue`, `ColumnKind`, `AggregateFunction` and the
+`Vocabulary` bridge), the artifact-function hole-declaration family and the wire JSON model
+(`JsonValue`). Phase 231 re-measured D28's premise: the consumer it was shipped for never adopted it
+and keeps its rule another way, and the one package that reads it is the compute repository's
+`Fuaran.Core.DataFrame.CSharp` — the dataframe half of the same facade, which that repository removes
+in the release that raises its pin to `0.33.0`. So both halves go, and D28's other criterion, a C#
+veneer generated from the IDL, is the route by which one returns. With the package went its proof
+project (`tests/Fuaran.Core.CSharp.Proof`, and the gate stage that ran it), its baseline
+(`api/Fuaran.Core.CSharp.txt`), its entries in `fable-exclusions.json` and
+`proofs/coverage-exclusions.json` (seven exclusions remain), and its row in the README roster.
+
+| Package id | Last emitted here | Continues from |
+|---|---|---|
+| `Fuaran.Core.CSharp` | `0.32.0` | nowhere — removed, not moved |
+
+**Class: `removal` — breaking, and it RIDES this slot.** A package id a consumer can pin stops being
+produced. The `0.33.0` slot was opened by a `removal` (Phase 258) and is an untagged, publicly
+unpinned draft, so a change of the same class rides it and `<Version>` does not move. The surface
+gate reads the baselines of the packages the tree still ships, so a package that leaves takes its
+baseline with it and no class is printed for it: measured on this change, `17 baseline(s) read, 3
+moved`, the three being the other entries in this slot, and the class of this entry is its
+statement rather than a gate output. No surviving package's public surface moves.
+
+**The decimal entry above names facade members that never ship.** `ColumnKind.Decimal`,
+`CellValue.Decimal`, `CellValue.TryDecimal` and the `onDecimal` argument were added to this package
+in this same untagged slot; with the package removed they are not released, and the `retype` the gate
+printed for `Fuaran.Core.CSharp` there costs no consumer anything.
+
+**What adopting it costs.**
+
+- **A consumer that pins `Fuaran.Core.CSharp`** keeps restoring what it pinned — `0.22.0` to `0.32.0`
+  stay on nuget.org — and cannot raise it past `0.32.0`. To move its other `Fuaran.Core.*` pins to
+  `0.33.0` it drops the reference and constructs Core's values through the F# surface, wrapping only
+  what it authors.
+- **The compute repository's `Fuaran.Core.DataFrame.CSharp`** is the one known reader. It is removed
+  in the same change-set that raises that repository's pin to `0.33.0`, because its reference to this
+  package cannot resolve after it.
+- **A consumer that never referenced the package** changes nothing.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

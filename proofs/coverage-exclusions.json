@@ -10,12 +10,6 @@
   "$reasonsNotCarried": "Phase 203 was filed naming four reasons and carries three. `tooling` (a build-time tool whose contract is the shape of what it emits) was written for `Fuaran.Core.Idl.Codegen`'s emitter, and by the time this file was cut that package HAD a model: the six generated-vocabulary modules are its F* target's own output, and `check.ps1`'s header says in as many words that what the leg proves over them is the F* BACKEND. A `tooling` entry for it would have been stale on arrival, which is exactly what this file's second direction fails. `leaving-core` was written for a `Lease` package that had already left. A closed vocabulary term with no entry is a term nothing tests — so both were dropped rather than carried, and `content-free-seam` was added for the three packages whose content is the domain's. The reasoning is recorded in `README.md` under \"Coverage is total or declared\".",
   "exclusions": [
     {
-      "package": "Fuaran.Core.CSharp",
-      "reason": "facade",
-      "phase": "fuaran-core#203",
-      "note": "The C# authoring facade. It constructs the same values the F# packages construct, through a syntax a .NET-only consumer can state — so every claim a theorem here would make is a claim about `Fuaran.Core.Tree` and `Fuaran.Core.Ops`, which are modelled. What is genuinely its own is the MAPPING from the fluent surface to those values, which is one line per case and is held by the certification tests rather than by a model. It is an ordinary entry rather than a project type the derivation filters out, on the Phase 185 rule: a package excused by the shape of the derivation is excused with no reason on the record."
-    },
-    {
       "package": "Fuaran.Core.Idl.Cli",
       "reason": "facade",
       "phase": "fuaran-core#203",

@@ -59,34 +59,16 @@ green while breaking every program that BUILDS a value. This family rebuilds eac
 through your constructors and re-encodes it. A domain supplying no witness is reported by name as
 not adopted, never as passed. See [`construct-then-encode.md`](construct-then-encode.md).
 
-## 2c. If your authoring tier is C# or VB, author through the facade
+## 2c. If your authoring tier is C# or VB
 
-`Fuaran.Core.CSharp` (Phase 128) is a C#-shaped surface over the closed unions a non-F# authoring
-tier has to build and read: the column layer (`Cell` / `ColumnType` / `AggFn` / `DataSource` and the
-table values over them), the artifact-function declaration family (`ValueSpace`, `HoleKind`,
-`HoleDecl`, `EffectClass`, `SigEntry`, `Signature`), and the wire JSON model (`JVal`).
-
-The dataframe algebra's half of the facade (`ColExpr`, `Transform`, `Pipeline` and the step specs
-under them) is `Fuaran.Core.DataFrame.CSharp`, split out by Phase 257 and — like the dataframe layer it
-wraps — produced since Phase 258 by the compute repository; see
-[The dataframe path](#the-dataframe-path) below. That half is built over this package — its public
-members take `CellValue`, `ColumnKind`, `AggregateFunction` and `SourceValue` from it — so a C# tier
-on the dataframe path depends on both.
-
-Construction is factory methods and reading is a total `Match` / `Switch` per union. **No public member mentions an F# option, list, function or
-positional tuple at any generic depth, except on a member named exactly `ToCore` or `FromCore`** —
-that pair is the whole bridge, and the package's own gate prints the census of every member using it.
-So a tier that keeps a rule like *every authored value passes through the declared surface* can keep
-it strictly, instead of reflecting into union cases or hand-rolling a mirror of a vocabulary it does
-not own.
-
-Two things to know before you take the dependency. It is **.NET-only** and deliberately outside the
-Fable-compile gate — a C# assembly is not Fable-compiled — so a browser tier authors through the F#
-surface or a host implementation instead. And it holds **no logic**: every member constructs a wrapped
-value, reads one, or forwards to a function the F# side already publishes, so there is no second
-semantics to keep in step. `tests/Fuaran.Core.CSharp.Proof` is the worked consumer — read it as the
-template the way you read `samples/adoption` for the F# path; it also carries the round-trip law and
-the coverage guard that reddens when a wrapped union grows a case the facade has no spelling for.
+There is no C# facade from `0.33.0`. `Fuaran.Core.CSharp` (Phase 128) — a C#-shaped surface over the
+column layer, the artifact-function declaration family and the wire JSON model — was published up to
+`0.32.0` and removed by Phase 231, because the consumer it was shipped for kept its rule another way
+and never adopted it; its dataframe half, `Fuaran.Core.DataFrame.CSharp`, is removed by the compute
+repository in the release that raises its pin to `0.33.0`. The versions already published stay on
+nuget.org. A C# or VB tier constructs Core's values through the F# surface, wrapping only what it
+authors, and a generated C# veneer over Core's closed unions is the route by which a facade returns
+(DECISIONS.md D28).
 
 ## 3. Re-express the op-stream
 
@@ -128,8 +110,9 @@ OpStream.fromJsonl streamW jsonl  : Result<_, string>              // portable �
 
 `Fuaran.Core.DataFrame` (the `Transform` pipeline and its reference evaluator, the typed delta, the
 incremental seam), `Fuaran.Core.Column.Ops` (the columnar op algebra), `Fuaran.Core.DataFrame.Conformance`
-(the law families over them, `transformLaws` among them) and `Fuaran.Core.DataFrame.CSharp` (the
-dataframe half of the C# facade) are produced by their own repository,
+(the law families over them, `transformLaws` among them) and, until that repository's release that
+raises its pin to `0.33.0`, `Fuaran.Core.DataFrame.CSharp` (the dataframe half of the removed C#
+facade, step 2c) are produced by their own repository,
 [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute), from `0.33.0`,
 under the same package ids and the same namespaces (DECISIONS.md D66; Phase 258 removed them here).
 Adopting the dataframe path is adopting that repository's packages: its `docs/` carry the
@@ -156,6 +139,5 @@ adoption prints `conformance: GREEN`.
   the dataframe facade and the incremental-evaluation guide live since Phase 258.
 - [`construct-then-encode.md`](construct-then-encode.md) — certifying the authoring surface (step 2b
   above): why a codec round trip cannot see a widened builder, and how to answer for the family.
-- [`../tests/Fuaran.Core.CSharp.Proof/Authoring.cs`](../tests/Fuaran.Core.CSharp.Proof/Authoring.cs) —
-  the worked C# consumer for step 2c, and [`../DECISIONS.md`](../DECISIONS.md) D28 for why that
-  package exists on one consumer, what deletes it, and its Phase 231 re-measurement.
+- [`../DECISIONS.md`](../DECISIONS.md) D28 — why the C# facade of step 2c shipped on one consumer,
+  the Phase 231 re-measurement that removed it, and what would bring a C# veneer back.

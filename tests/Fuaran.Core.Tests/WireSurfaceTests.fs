@@ -338,7 +338,6 @@ let internal notWire: (string * string) list =
       "Fuaran.Core.Projection", "renders TEXT for a model to read, not a wire document"
       "Fuaran.Core.Conformance",
       "a law kit; the law corpus it exports is pinned by its own emission test (`--emit-laws`)"
-      "Fuaran.Core.CSharp", "a C# facade over packages baselined here; it emits through them"
       "Fuaran.Core.Idl.Cli", "a command-line host over Fuaran.Core.Idl; it emits through it" ]
 
 /// Build every document of one root: `(name, emitted bytes)`, plus the construction logs for the

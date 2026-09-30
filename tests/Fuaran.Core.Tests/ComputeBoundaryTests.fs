@@ -52,8 +52,7 @@ let spine: string list =
       "Fuaran.Core.Idl"
       "Fuaran.Core.Idl.Codegen"
       "Fuaran.Core.Idl.Cli"
-      "Fuaran.Core.Conformance"
-      "Fuaran.Core.CSharp" ]
+      "Fuaran.Core.Conformance" ]
 
 /// The compute side of the line: the four ids the compute repository produces.
 let compute: Set<string> =
