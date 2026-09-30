@@ -1,5 +1,113 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D75: an incomplete match is a build error, the publication sweep is a standing arm of the suite, and the pack's reproducibility is re-measured — path-length-independent content, still no byte-identity claim
+
+**Recorded by Phase 294. Gate and packaging only; no package surface moves (STABILITY.md `0.33.0 — DRAFT`).**
+The repository's promise rests on closed unions matched exhaustively, and its gate did not enforce
+it. Four blind spots, each closed where it was found, and one earlier measurement re-run.
+
+*`FS0025` is an error, by number.* `Directory.Build.props` adds `FS0025` to `WarningsAsErrors` and
+leaves `TreatWarningsAsErrors` false. The escalation is deliberately ONE diagnostic: turning every
+warning into a gate would make a toolchain upgrade that adds a warning a red build nobody chose.
+The recorded cases are the argument — Phase 135's `Incremental.reasonString`, "a
+`MatchFailureException` waiting for the first fall-back that reaches it", and Phase 266's `(_, Anti)`
+both shipped as a warning. **The escalation revealed no incomplete match in the spine, the suites or
+the sample** (a no-incremental build of the whole solution with the code forced on, and again with
+it passed on the command line), so landing it cost no rewrite, and a deliberately incomplete match added to a spine project fails the build with the error.
+
+*The one exception, and how it is held.* The extracted proof oracle is F\* output. The extractor emits
+one projector per field of a union case as a `match` over that single case, partial by construction,
+because the model's own proof discharges the other cases and F# cannot see the proof; there are many
+such sites. Its project file takes the code out of `NoWarn` AND out of `WarningsAsErrors`, with the reason
+beside it. **Both edits are needed, and the second needs a third:** the compiler lets a
+warning-as-error win over a `NoWarn`, and a `-p:WarningsAsErrors=...` on the command line is a global
+property no project file overrides, so the project names `TreatAsLocalProperty="WarningsAsErrors"`
+on its root element. Without that, the very command a session runs to prove its tree survives the
+escalation would fail in the one project that is allowed to carry it.
+
+*The publication sweep is a standing arm of the suite.* `PublicationBoundaryTests` sweeps every tracked
+file (plus untracked-and-not-ignored files: what a commit would publish) — source comments, docs,
+READMEs, ledgers, workflow files — one line at a time against `publication-boundary.json`. It is a
+suite family and not a launcher stage, so it runs in `verify.ps1`, in CI and in a contributor's
+`dotnet run` alike, with no environment. Four properties are what keep it from going quietly green,
+each a go-red in the suite: every rule carries an `example` it must flag, and the file is refused
+when a pattern does not match its own example (a rule cannot be edited into silence); a carried
+exception is exempt only where its file AND its text match, and one that matches nothing fails (an
+exception cannot outlive its line); the swept set must contain the files whose absence would make a
+green meaningless; and the carried set is printed on every run. The rules are a committed list, so a
+change to what is banned is reviewed as a change to a list. Phase citations are not vocabulary and
+stay allowed everywhere; the operator-command rule is case-sensitive because the plain English
+phrase is not a command.
+
+*Two shard premises were wrong, and the sweep records the corrected model.* The shard asked for the
+private workspace path in the two ledgers to become "a relative path". It already IS the relative
+form the registry defines: a copy registry record names each consumer copy relative to the workspace
+root, because that is the only root that can address a file in a different repository, and the
+registry's own source calls the parent-relative alternative the worse one (it bakes the producer's
+depth into every record); the version ledger requires the same `<repo>:<path>` shape. Rewriting it
+breaks or degrades the freshness sweep the ledgers exist for. The two lines are therefore CARRIED,
+file-and-text exact, and printed on every run; the `regen` commands beside them, which were free
+text naming the same path, are rewritten generically. The sweep also found what the shard did not
+list: 101 lines across 32 files, beyond the named doc comments — the ledgers themselves
+(`DECISIONS.md`, `STABILITY.md`), `proofs/**` prose including four `.fst` comments, and test comments —
+all rewritten in generic terms in the same change.
+
+*The scheduling clause reads data, not an environment variable.* The proof-coverage clause that
+checks a `model-bridge` row's `closes` phase is open read `FUARAN_CORE_ROADMAP`, a path to another
+repository's rendered index, which public CI never set: the first real scheduling claim in
+`proofs.json` would have reddened it permanently, and a public test was tied to the layout of a
+private projection. It now reads the committed `tests/Fuaran.Core.Tests/open-phases.json`: either `{ "open": [ids] }`
+or `{ "inert": "<reason>" }`, exactly one, both refused when malformed. **The file is declared inert
+today**, because nothing writes the list and a hand-kept one goes stale silently, which would let a
+stale scheduling claim pass; under the inert form a row that makes a scheduling claim FAILS, as it
+did without an oracle. No row carries a phase-form `closes`, so the clause is vacuous on today's data
+and the suite says so. Replacing the inert form with a list is the act of whoever owns the phases,
+when a writer for it exists; this decision does not schedule one.
+
+*The publish workflow.* It now refuses a ref that is not a tag (a dispatch on a branch has no
+version to check and is refused rather than waved through), refuses a tag that is not `v<Version>`
+for the `<Version>` in `Directory.Build.props`, and runs `verify.ps1` before it packs, on the full
+history and tags the roster checks read. It does not run the proof leg, which needs the pinned prover
+on Windows and stays in CI; publishing a commit whose CI run is red is a choice the workflow does not
+make for the operator.
+
+*D29 re-measured.* D29 (Phase 129) measured that a locally packed assembly was not byte-identical to
+the published one and named three causes: the compiler feature band (`rollForward:
+latestFeature`), the operating system, and no property pinning embedded source paths. This phase sets
+`Deterministic` and, on a CI runner, `ContinuousIntegrationBuild`, which is the third cause, so the
+measurement is re-run on `Fuaran.Core.Idl.Codegen`, the package D29 measured, packing the same commit
+from two checkouts on the same machine and SDK:
+
+| Checkout paths | `ContinuousIntegrationBuild` | Assembly |
+|---|---|---|
+| same path, packed twice | on | byte-identical |
+| different paths, different LENGTH | off | different; the embedded PDB path is each absolute path |
+| different paths, different LENGTH | on | different by 67 bytes, every one in the PE debug-directory layout |
+| different paths, EQUAL length | on | byte-identical |
+
+The embedded PDB path is `/_/src/Fuaran.Core.Idl.Codegen/obj/...` in both CI-on builds, so the
+property does what it is for; the 67 bytes are the compiler's PE writer placing the debug-directory
+blobs at offsets that depend on the LENGTH of the original absolute path (the section's virtual size
+moves by 24 bytes, the PDB checksum entry moves with it, and the content hash, the module id and the
+timestamp derived from it are equal). **Verdict: the third cause is narrowed from "embedded paths" to
+"the length of the checkout path", and it is not closed; the other two are untouched.** On a hosted
+runner the workspace path is fixed by the runner's own convention, so two publishes from one runner
+image with the same SDK should produce the same assembly (an inference from the table, not a
+measurement on a runner), and that is the strongest claim it supports. **Byte-identity of a local
+pack against the published package is still NOT claimed**, for D29's reasons, which stand. Not
+measured, deliberately: a comparison against the published `0.32.0` package, which needs a download,
+and the operating-system cause, which needs a second operating system. The falsifier for the equal-
+length row is the different-length row beside it, run both ways: equal lengths agreeing while unequal
+lengths disagree is what makes length, and not anything else about the path, the cause.
+
+*Consequences the pack-all tooling should expect.* A pack now writes a `snupkg` beside each `nupkg`,
+so a packing script that globs `*.nupkg` leaves the symbols behind and one that copies the output
+folder carries both. Nothing in this repository relies on either.
+
+*Not done, and why.* `verify.ps1` is changed only by a patch the driver lands (`#Requires`, the
+global `LASTEXITCODE` seeds, and `fantomas --check` over `samples` as well), because that file is the
+gate's own and is not a worker's to commit; `run.ps1` carries the same changes directly.
+
 ## 2026-09-30 — D74: the proof leg's module-cone selector is Phase 164's sanctioned form of a cheaper leg; a shared checked-module cache stays DECLINED
 
 **Recorded by Phase 328. Tooling under `proofs/` and the test project; no package surface moves.**

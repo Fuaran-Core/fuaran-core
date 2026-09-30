@@ -46,7 +46,7 @@ module Fuaran.Core.Tests.ProofCoverageTests
 //    `closes`, because every bridge is `permanent` or `unscheduled`. It is stated plainly rather
 //    than left to be discovered, and it is not vacuous as CODE: the go-reds exercise both the
 //    shipped-phase and the no-oracle arms. The oracle is a COMMITTED data file,
-//    `proofs/open-phases.json` (Phase 294): either the list of open phase ids or a declaration that
+//    `tests/Fuaran.Core.Tests/open-phases.json` (Phase 294): either the list of open phase ids or a declaration that
 //    no list is kept, with the reason. It replaces an environment variable that named a private
 //    projection's rendered index — a public test tied to another repository's output, which public
 //    CI never set, so the first real scheduling claim would have reddened it permanently. Where a
@@ -101,7 +101,7 @@ type CoverageInputs =
         /// The law names a `law-tested-by-design` entry may cite — the shipped kit's declared
         /// roster, for the same reason `Proofs.Ladder` reads it there.
         Laws: Set<string>
-        /// The phase ids that are OPEN on this side, from `proofs/open-phases.json`. `None` is the
+        /// The phase ids that are OPEN on this side, from `tests/Fuaran.Core.Tests/open-phases.json`. `None` is the
         /// file's declared-inert form — "no list is kept" — which is a finding for any row that makes
         /// a scheduling claim and inert for every row that does not.
         OpenPhases: Set<string> option
@@ -315,7 +315,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
                           id
                           "closes-open"
                           (sprintf
-                              "schedules `closes: %s` and proofs/open-phases.json declares no list of open phases — record the open phases there; a scheduling claim nothing can check must not read as green"
+                              "schedules `closes: %s` and tests/Fuaran.Core.Tests/open-phases.json declares no list of open phases — record the open phases there; a scheduling claim nothing can check must not read as green"
                               c) ],
                     Some "scheduled"
                 | Some openSet when Set.contains n openSet -> [], Some "scheduled"
@@ -523,7 +523,7 @@ let contractSection (readmeText: string) : string =
         | -1 -> rest
         | j -> rest.Substring(0, j)
 
-/// The open phases on this side, from `proofs/open-phases.json`. The roadmap store is not in this
+/// The open phases on this side, from `tests/Fuaran.Core.Tests/open-phases.json`. The roadmap store is not in this
 /// repository — it cannot be, since phases routinely name siblings a public repository must not —
 /// so what this repository keeps is the one fact the clause needs, as DATA: the ids of the phases
 /// that are open. The file has exactly one of two shapes, and a file with both or neither is
@@ -582,9 +582,9 @@ let openPhasesFromJson (text: string) : Result<Set<string> option, string> =
         Error(sprintf "open-phases.json is not valid JSON: %s" e.Message)
 
 let private liveOpenPhases () =
-    match openPhasesFromJson (File.ReadAllText(Snapshots.repoFile "proofs/open-phases.json")) with
+    match openPhasesFromJson (File.ReadAllText(Snapshots.repoFile "tests/Fuaran.Core.Tests/open-phases.json")) with
     | Ok phases -> phases
-    | Error why -> failwithf "proofs/open-phases.json is malformed: %s" why
+    | Error why -> failwithf "tests/Fuaran.Core.Tests/open-phases.json is malformed: %s" why
 
 let private liveInputs () =
     use exclusionsDoc = liveExclusionsDoc ()
@@ -975,8 +975,12 @@ let proofCoverageTests =
               try
                   Environment.SetEnvironmentVariable("FUARAN_CORE_ROADMAP", null)
 
-                  match openPhasesFromJson (File.ReadAllText(Snapshots.repoFile "proofs/open-phases.json")) with
+                  match
+                      openPhasesFromJson (
+                          File.ReadAllText(Snapshots.repoFile "tests/Fuaran.Core.Tests/open-phases.json")
+                      )
+                  with
                   | Ok _ -> ()
-                  | Error why -> failtestf "proofs/open-phases.json is malformed: %s" why
+                  | Error why -> failtestf "tests/Fuaran.Core.Tests/open-phases.json is malformed: %s" why
               finally
                   Environment.SetEnvironmentVariable("FUARAN_CORE_ROADMAP", before) ]

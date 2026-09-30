@@ -2746,6 +2746,38 @@ reach. Carrying the per-side counts on a pass needs a place on `LawResult` to pu
 record-shape change to the kit's most-constructed type, and is left for a decision rather than
 taken inside this entry.
 
+### The gate closes its blind spots, and the packages gain metadata (Phase 294) — ADDITIVE; no public surface moves
+
+**What changed.** Two halves, neither of which touches a type, a function or a wire byte.
+
+*The build.* `FS0025` (an incomplete match) is an error in every project of this repository, by
+number in `Directory.Build.props` rather than through `TreatWarningsAsErrors`. The one exception is
+the extracted proof oracle, which carries its own override with the reason beside it. Turning it on
+revealed no incomplete match anywhere in the spine, the suites or the sample, so nothing had to be
+rewritten to land it. It is a property of how THIS repository compiles: the `fable/` source
+distribution a consumer compiles is built under the consumer's own settings, so no consumer meets it.
+
+*The packages.* Every packable id now builds `Deterministic`, with `ContinuousIntegrationBuild` set
+on a CI runner (and only there: locally it would hide real source paths from a debugger), ships the
+inputs SourceLink reads (`RepositoryUrl`, `PublishRepositoryUrl`, `EmbedUntrackedSources`), carries its
+symbols as a `snupkg` beside the `nupkg`, and gains `PackageReadmeFile` (the repository README) and
+`PackageTags`. A packed id is therefore two files rather than one, and the nuspec gains `readme`,
+`tags` and the `repository` commit.
+
+*The release path.* The publish workflow refuses a ref that is not the tag `v<Version>` for the
+`<Version>` in `Directory.Build.props`, runs the repository gate (`verify.ps1`) before it packs, and
+pushes the symbol packages beside the packages.
+
+**What adopting it costs.** Nothing. A consumer restores the same assemblies with more metadata
+beside them; `api/` and the wire baselines did not move.
+
+**Class: additive.** The packages gain metadata and the gate gains arms; no public surface changes.
+See DECISIONS.md D75 for the `FS0025` override, the publication sweep (a standing arm of the suite)
+and the re-run of D29's reproducibility measurement: with the CI property set, two checkouts at
+paths of equal length produce byte-identical assemblies, and paths of different length differ in
+67 bytes of PE debug-directory padding and nothing else; byte-identity of a local pack against the
+published package is still not claimed.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

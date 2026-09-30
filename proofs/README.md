@@ -803,7 +803,7 @@ token in this directory to get wrong.
 `closes`; every bridge is `permanent` or `unscheduled`. It is not vacuous as code — the go-reds
 exercise both the shipped-phase arm and the no-oracle arm — and the oracle is worth naming: the
 roadmap store for this repository's own side is not in this repository and cannot be, so the
-family reads `proofs/open-phases.json`, a committed file that holds either the ids of the open
+family reads `tests/Fuaran.Core.Tests/open-phases.json`, a committed file that holds either the ids of the open
 phases or a declaration, with the reason, that no list is kept (it is declared inert today). It
 reads no environment variable, so public CI runs the clause exactly as a contributor does. Where a
 row makes a scheduling claim and the file is inert, the clause FAILS. A check that reads as green
