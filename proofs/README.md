@@ -903,6 +903,9 @@ pwsh ./proofs/check.ps1 -Extract   # after editing a model: rewrite its oracle/*
 pwsh ./proofs/check.ps1 -Strict    # turn a cost finding (below) from a warning into a red leg
 pwsh ./proofs/check.ps1 -NoFloor   # do not enforce the per-module time floors (below)
 pwsh ./proofs/check.ps1 -CacheDir <dir>   # put the checked-module cache somewhere you name
+pwsh ./proofs/check.ps1 -Since origin/main  # only the module CONE that changed against a tree (below)
+pwsh ./proofs/check.ps1 -Modules TreeOps,Skeleton   # a cone named by hand
+pwsh ./proofs/check.ps1 -Since HEAD -PlanOnly       # print the cone and what the kit would check; run nothing
 pwsh ./verify.ps1 -Proofs          # the whole repo gate plus the proof leg
 pwsh ./proofs/kit/extraction-post-pass.tests.ps1   # the extraction post-pass's go-red proof (finding 7)
 ```
@@ -918,6 +921,86 @@ budget entry to `modules.json` beside it. The first
 run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`; `FSTAR_HOME`
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
+
+### The module cone — `-Since`, `-Modules`, and when to run which (Phase 328)
+
+A phase that edits one model used to pay for all twenty-one: the leg checks every registered module
+or none. `-Since <tree>` checks only the **cone** — the registered modules whose inputs changed
+between `<tree>` and the working tree — still cold, still under every gate the full leg applies,
+and prints every registered module `IN`, `DEP` or `OUT` with the path that put it there. It is the
+safe form of a cache: it recomputes from the tree every time, and the only thing it reuses is the
+knowledge of what did not change. A shared checked-module cache would buy more and is still
+declined, for the reason the section on the cold cache below gives (DECISIONS.md D74).
+
+**What puts a module in.** Soundness is the whole of the selector's correctness, so the rule is
+written as what a module's verdict *reads*:
+
+- its model `proofs/<M>.fst` — and then **every module that references it, however transitively**,
+  because a check re-reads everything it references;
+- its committed oracle `proofs/oracle/<M>.fs`, which the extraction diff reads;
+- a production source under `src/<Package>/` for a package its `modules.json` entry names — Phase
+  203's `packages`, which is where the map from subject to model lives (`../proofs.json`'s rows name
+  models and theorems, never a source path);
+- its `modules.json` entry (the floor there is a gate), its registration in `$modules`, or its
+  membership of `$proofOnly`.
+
+**Every** module is in when a shared input of the whole leg moved: `fstar-pin.json`, the kit's
+engine or post-pass, `check.ps1`'s *code* (a comment-only edit is not a code change), an unregistered
+model, or any path under `proofs/` the selector does not classify — an unknown input defaults to
+"it matters". Documentation, `kit/templates/`, the kit's own `*.tests.ps1`, `coverage-exclusions.json`
+and the oracle project's `Prims.fs` put nothing in: the prover and the extraction never read them,
+and the host step that does is never narrowed.
+
+**References are read from the models' code, and they are wider than `open`.** F\* also resolves a
+module named by an abbreviation or by a qualified name, with no `open` anywhere — `WireCanon`
+reaches `JsonParse` by `module JP = JsonParse` and by nothing else, so a selector that followed
+`open` lines alone would leave `WireCanon` stale after a `JsonParse` edit. The reading takes every
+`open` / `include` / `friend`, every abbreviation and every qualified `M.x`, with comments and string
+literals blanked first (these models name each other constantly in prose). It over-approximates
+F\*'s own dependency scan, which can cost prover time and never soundness; the `Proofs.Cone` family
+holds it to an independent reading of every declared `open` and abbreviation, and to acyclicity,
+which F\* requires and which prose read as code would break.
+
+**`DEP` is not `IN`.** A module the cone references whose own inputs did not change is checked
+*ahead* of the modules that need it — on a cold cache the prover must check it anyway before it can
+check them — and listed as `DEP`, so every clock the leg prints is its own module's and a budget or
+floor is compared against the module it was seeded for. `-Modules <list>` is exactly what it
+names and nothing else, so there a named module's clock includes whatever it references; use
+`-Since` when the timings matter.
+
+**Where it is computed.** In the host test project (`--proof-cone`, beside `parseModules` in
+`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`), which `check.ps1` builds and asks before it hands
+the kit the cone. That placement is the point rather than a convenience: the roster is read by the
+same function the `Proofs.Ladder` family reads it with, so the ladder and the selector cannot
+disagree about which models exist. The kit is handed the cone and a copy of `modules.json` without
+the entries of registered modules left `OUT`, so its both-ways budget coverage still fires for every
+module it checks and for any orphan entry; the kit itself is unchanged. **With neither switch,
+`check.ps1` hands the kit exactly the arguments it handed it before this phase**, so the full leg's
+verdict cannot move — `-PlanOnly` prints those arguments, and the family holds them to the roster.
+
+**An empty cone is green only over a recorded strict run.** A green `-Strict` *full* run writes
+`proofs/last-strict.json` — the tree it verified, and the run — and whoever ran it commits the file.
+An empty cone exits green only when that tree is an ancestor of HEAD **and** the cone against it is
+empty too, so an empty cone against some later tree cannot lean on a baseline that predates a change
+nobody verified. Otherwise the leg says it has **no strict baseline** and exits 1. The record is
+refused, in yellow and without touching the verdict, when the working tree differs from HEAD in
+anything a module reads: that run verified bytes no commit holds.
+
+**The gate policy the selector serves:**
+
+| who | runs | when |
+|---|---|---|
+| a phase's worker | `check.ps1 -Since <the tree the phase started from>` — the cone, cold | before hand-over, on a phase that touches a model, an oracle or a covered source |
+| the integrator | the full leg, `check.ps1 -Runs 3` (what CI runs) | at every tier landing |
+| a release freeze | `check.ps1 -Strict -Runs 3` over the committed candidate, and the record it writes committed | at every freeze, which is what makes the next empty cone green |
+
+**What it measured.** The twenty-one entries in `modules.json` record 783 s of slowest-observed cold
+checks between them (1,710 s of budget), and a quiet cold pass of the whole leg measured ×0.29 of
+that (Phase 171). The first cone run — `Chain.fst` perturbed by a comment, `-Since HEAD -Runs 1
+-SkipOracleHost` on a machine with 2.7 GB free — put exactly `Chain` in, checked it in 46 s against
+its 60 s budget, re-extracted and diffed its oracle, ran the kit's refusal tests and exited green in
+82 s of wall clock, the first prover download included. The same tree with nothing changed exits 1,
+naming the absent baseline, before the prover is touched.
 
 ### What `==== proofs: green` stands behind — and what it does not (Phase 221)
 

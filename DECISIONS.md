@@ -1,5 +1,64 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D74: the proof leg's module-cone selector is Phase 164's sanctioned form of a cheaper leg; a shared checked-module cache stays DECLINED
+
+**Recorded by Phase 328. Tooling under `proofs/` and the test project; no package surface moves.**
+The proof leg checks every registered model or none, and a phase that edits one model paid for all
+twenty-one. There are two ways to stop paying for the ones that did not change, and they are not
+equally safe.
+
+*The one declined, again.* A checked-module cache shared between invocations — or between runs,
+machines, or a baseline and its descendants — would make a pass nearly free. Phase 164 made the cache
+per invocation because that is exactly what let an orphaned run's `.checked` files pass as a cold
+verification on 2026-09-14 (`TreeOps 0s`, then `==== proofs: green`), and nothing about that has
+changed: a `.checked` file is evidence some *other* run produced, about bytes this run did not look
+at. The per-module floor catches the loud case and not the quiet one — eight of the twenty-one
+modules (`Skeleton`, `Limits` and `WireVersioning` among them) have floors of 0, and a warm read of
+them is indistinguishable from a fast one.
+**Declined; the per-invocation cache stands.**
+
+*The one taken.* `check.ps1 -Since <tree>` — the **module cone**. It recomputes from the tree every
+time, verifies what it selects cold, under every gate the full leg applies, and reuses only the
+knowledge of what did not change. That is the property Phase 164 protects, kept: nothing is taken on
+trust from a previous run except in one place, stated next. The selector is this decision's
+sanctioned form of a cheaper leg, and a later phase that wants more speed extends the selector
+rather than reopening the cache.
+
+*The one place a previous run is trusted, and its guard.* An **empty** cone verifies nothing, so its
+green must lean on something: it is green only when `proofs/last-strict.json` records a green
+`-Strict` full run whose tree is an ancestor of HEAD, **and** the cone against that tree is empty too.
+Without a record the leg says it has no strict baseline and exits 1. A green `-Strict` full run
+writes the record, and refuses to — without changing its verdict — over a working tree that differs
+from HEAD in anything a module reads.
+
+*Soundness is the selector's whole correctness, and three choices follow from it.*
+
+1. **The edges are wider than `open`.** A module is in when it references a changed model however
+   transitively, and "references" is every `open` / `include` / `friend`, every module abbreviation and
+   every qualified name in the model's code, comments and strings blanked. The phase that proposed the
+   selector named `open` lines as the edges; measured, `WireCanon` reaches `JsonParse` only through
+   `module JP = JsonParse`, so an `open`-only reading would have left it stale.
+2. **The subject map is `modules.json`'s `packages`, not `proofs.json`.** The proposal named the
+   ladder's rows as the map from production source to model; the rows name models and theorems and
+   no source path. Phase 203's `packages` is the only place a package is joined to a model, so it is
+   the map, read rather than restated.
+3. **An unknown input defaults to "it matters".** Any path under `proofs/` the selector does not
+   classify puts every module in, and so does any change to the code (not the comments) of
+   `check.ps1` or the kit's engine. A missed input would pass stale evidence; an extra one costs time.
+
+*Where it lives.* The cone is computed in the test project beside `parseModules`, so the ladder and
+the selector read the roster with ONE function; `check.ps1` asks it (`--proof-cone`) and hands the
+kit the cone. The kit — copied into other repositories by declaration — is not touched. With neither
+switch `check.ps1` hands the kit the arguments it always did, so the full leg's verdict cannot move;
+the `Proofs.Cone` family holds that, the three perturbations the phase names, and the git half end
+to end over a scratch history.
+
+*A figure corrected on the way.* The proposal sized the problem at 2,742 s of measured cold checks
+(about 46 minutes a pass). The twenty-one `measuredSeconds` sum to 783 s — each the slowest cold run
+ever observed, most under contention — and 1,710 s of budget; a quiet pass is about ×0.29 of the
+first figure (Phase 171). The selector is still worth having, since a one-model cone measured 46 s
+of prover time under contention against that 783 s, but the saving is a quarter of what was claimed.
+
 ## 2026-09-30 — D73: the IDL spike scaffolding leaves `src/` — the operator tool moves to the CLI, the mini vocabulary stays as a test fixture, and relocating the spike under `tests/` is DECLINED
 
 **Recorded on the `0.33.0` draft (Phase 230). Executes the maintainer's ruling of 2026-09-20: DELETE.**

@@ -22,6 +22,17 @@
 #   -Strict          promote every cost finding to a red leg
 #   -NoFloor         do not enforce the per-module time floors declared in modules.json
 #   -CacheDir <dir>  put the checked-module cache somewhere you name
+#
+# Phase 328 adds the MODULE-CONE SELECTOR — three flags, and with none of them the leg is exactly
+# the leg it was (the kit is handed the same arguments, so its verdict cannot move):
+#   -Since <tree>    verify, cold, only the models whose inputs changed between <tree> and the
+#                    working tree — the cone — and print every registered module IN, DEP or OUT
+#                    with the reason. An EMPTY cone is green only over a recorded strict run.
+#   -Modules <list>  name a cone by hand (`-Modules TreeOps,Skeleton`): exactly those modules.
+#   -PlanOnly        print what the kit would be handed, and stop before the prover runs.
+# And a green -Strict FULL run now records itself in proofs/last-strict.json (commit the file),
+# which is the baseline an empty cone leans on. The selector section below says how the cone is
+# computed and why each input puts a module in it.
 [CmdletBinding()]
 param(
     [switch] $Extract,
@@ -29,7 +40,12 @@ param(
     [switch] $Strict,
     [switch] $NoFloor,
     [string] $CacheDir,
-    [int]    $Runs = 1
+    [int]    $Runs = 1,
+    [string] $Since,
+    # Bound as -Modules; named $Cone because PowerShell variables ignore case, and `$modules` is the
+    # roster literal below, which would overwrite a parameter of that name.
+    [Alias('Modules')][string[]] $Cone,
+    [switch] $PlanOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -227,6 +243,160 @@ if ($Strict) { $legArgs.Strict = $true }
 if ($NoFloor) { $legArgs.NoFloor = $true }
 if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
 
+# ---- Phase 328 — the module-cone selector ----------------------------------------------------------
+#
+# WHY. One cold pass of the whole leg checks every registered model, and a phase that edits one
+# model pays for all of them. A SHARED checked-module cache would make that cheap and is declined —
+# Phase 164 made the cache per invocation precisely so that evidence nobody produced in this run
+# cannot pass (see the README's "Cold cache" section and DECISIONS.md D74). The selector is the
+# safe form of the same saving: it recomputes from the tree EVERY time, still verifies cold, and
+# the only thing it reuses is the knowledge of what did not change.
+#
+# WHAT. `-Since <tree>` asks the host test project (`--proof-cone`, `ProofsLadderTests.fs`) for the
+# cone: the registered modules whose model, committed oracle, `modules.json` entry, registration or
+# covered production sources (`modules.json`'s `packages`) changed between <tree> and the working
+# tree, plus every module that references a changed model, however transitively — and EVERY module
+# when a shared input of the leg moved (the prover pin, the kit's engine, this script's code). It
+# runs there, not here, so that the roster is read by `parseModules` — the very function the
+# `Proofs.Ladder` family reads it with — and the two can never disagree about which models exist.
+# The kit is then handed the cone (IN) and the modules the cone references (DEP, checked ahead of
+# the modules that need them, so every clock is the module's own) in the roster's order, with a
+# copy of `modules.json` that drops only the entries of registered modules left OUT — so the kit's
+# both-ways budget coverage still fires for everything it checks and for any orphan entry.
+#
+# THE EMPTY CONE is green only when `proofs/last-strict.json` records a green -Strict FULL run on
+# an ancestor of HEAD and the cone against THAT tree is empty too; otherwise the leg says it has
+# no strict baseline and exits 1. A green -Strict full run writes that record — unless the working
+# tree differs from HEAD in anything a module reads, because then it verified bytes no commit
+# holds. Commit the file it writes.
+#
+# WITH NEITHER SWITCH nothing below changes `$legArgs`: the kit is handed exactly the arguments it
+# was handed before this phase, so the full leg's verdict cannot move. `-PlanOnly` prints what the
+# kit would be handed and stops, which is how the Proofs.Cone family holds that claim.
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$hostProjectDir = Join-Path $repoRoot 'tests/Fuaran.Core.Tests'
+$hostProjectPath = Join-Path $hostProjectDir 'Fuaran.Core.Tests.fsproj'
+$coneWork = Join-Path $PSScriptRoot "obj/cone-$PID"
+$selected = $null   # $null is the full leg
+$coneBudget = $null
+
+function Remove-ConeWork {
+    if (Test-Path $coneWork) { Remove-Item $coneWork -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+function Stop-Leg([string] $message, [int] $code = 1) {
+    Remove-ConeWork
+    Write-Host "==== proofs: $message" -ForegroundColor Red
+    exit $code
+}
+
+# Ask the host project. Its answer comes back as a JSON file, printed lines included, so that no
+# console code page sits between the two processes. The build is incremental, and the host step
+# builds the same project anyway. With -Soft a failure to answer returns $null instead of ending the
+# leg: that is for the strict record, which must never turn a green leg red.
+function Invoke-ConeTool([string[]] $ToolArgs, [switch] $Soft) {
+    New-Item -ItemType Directory -Force $coneWork | Out-Null
+    $answerPath = Join-Path $coneWork 'answer.json'
+    if (Test-Path $answerPath) { Remove-Item $answerPath -Force }
+
+    $global:LASTEXITCODE = 0
+    & dotnet build $hostProjectPath --nologo -v q | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        $why = "the cone selector could not build $hostProjectPath (exit $LASTEXITCODE); it reads the roster with the ladder's own parser, so it runs from the test project"
+        if ($Soft) { Write-Host "==== proofs: $why" -ForegroundColor Yellow; return $null }
+        Stop-Leg $why $LASTEXITCODE
+    }
+
+    $global:LASTEXITCODE = 0
+    & dotnet run --project $hostProjectDir --no-build -- --proof-cone @ToolArgs --out $answerPath | Out-Host
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $answerPath)) {
+        $why = "the cone selector could not answer (exit $LASTEXITCODE); its reason is printed above"
+        if ($Soft) { Write-Host "==== proofs: $why" -ForegroundColor Yellow; return $null }
+        Stop-Leg $why 1
+    }
+
+    return (Get-Content $answerPath -Raw | ConvertFrom-Json)
+}
+
+if ($Since -or $Cone) {
+    # Sweep the work directories of cone runs that were killed before they could remove their own,
+    # by the kit's rule for its caches: only a directory whose process is gone.
+    foreach ($stale in (Get-ChildItem (Join-Path $PSScriptRoot 'obj') -Directory -Filter 'cone-*' -ErrorAction SilentlyContinue)) {
+        $stalePid = 0
+        if (-not [int]::TryParse($stale.Name.Substring('cone-'.Length), [ref] $stalePid)) { continue }
+        if ($stalePid -eq $PID -or (Get-Process -Id $stalePid -ErrorAction SilentlyContinue)) { continue }
+        Remove-Item $stale.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+if ($Since -and $Cone) { Stop-Leg '-Since and -Modules each name a cone; pass one of them' }
+
+$width = ($modules | Measure-Object -Property Length -Maximum).Maximum
+
+if ($Cone) {
+    # Split as well as accept an array: through `pwsh -File`, `-Modules A,B` arrives as ONE string.
+    $named = @($Cone | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
+    if ($named.Count -eq 0) { Stop-Leg '-Modules names no module' }
+    $unknown = @($named | Where-Object { $modules -notcontains $_ })
+    if ($unknown.Count -gt 0) {
+        Stop-Leg "-Modules names $($unknown -join ', '), which `$modules does not register; the registered modules are $($modules -join ', ')"
+    }
+    $selected = @($modules | Where-Object { $named -contains $_ })
+
+    Write-Host ("==== proofs: cone named by hand (-Modules) -- $($selected.Count) of $($modules.Count) registered module(s) IN, " +
+        "0 checked as a dependency, $($modules.Count - $selected.Count) OUT") -ForegroundColor Cyan
+    foreach ($module in $modules) {
+        if ($selected -contains $module) { Write-Host ('     IN   {0}  named by -Modules' -f $module.PadRight($width)) -ForegroundColor Green }
+        else { Write-Host ('     OUT  {0}  not named' -f $module.PadRight($width)) -ForegroundColor DarkGray }
+    }
+    Write-Host ('     A hand cone is exactly what it names. A module a named one references is still checked by the prover, ' +
+        'inside the named module''s clock, so a cost line here is not a cold measurement of that module alone; -Since lists them.') -ForegroundColor DarkGray
+}
+elseif ($Since) {
+    $answer = Invoke-ConeTool @('--since', $Since)
+    foreach ($line in @($answer.lines)) {
+        $colour = if ($line.StartsWith('====')) { 'Cyan' }
+        elseif ($line.Length -ge 8 -and $line.Substring(5, 3) -eq 'IN ') { 'Green' }
+        elseif ($line.Length -ge 8 -and $line.Substring(5, 3) -eq 'DEP') { 'Cyan' }
+        else { 'DarkGray' }
+        Write-Host $line -ForegroundColor $colour
+    }
+
+    switch ($answer.verdict) {
+        'verify' { $selected = @($answer.verify) }
+        'empty-green' {
+            Remove-ConeWork
+            Write-Host "==== proofs: green -- $($answer.message)" -ForegroundColor Green
+            exit 0
+        }
+        default { Stop-Leg $answer.message 1 }
+    }
+}
+
+if ($null -ne $selected) {
+    $coneBudget = Get-Content (Join-Path $PSScriptRoot 'modules.json') -Raw | ConvertFrom-Json
+    $coneBudget.modules = @($coneBudget.modules | Where-Object { $selected -contains $_.module -or $modules -notcontains $_.module })
+    $legArgs.Modules = $selected
+    $legArgs.BudgetFile = Join-Path $coneWork 'modules.json'
+}
+
+if ($PlanOnly) {
+    Write-Host "==== proofs: plan -- the kit checks $(@($legArgs.Modules).Count) module(s): $($legArgs.Modules -join ', ')"
+    if ($null -ne $coneBudget) {
+        Write-Host "==== proofs: plan -- budget file: proofs/modules.json without the entries of registered modules left OUT ($(@($coneBudget.modules).Count) entries)"
+    }
+    else {
+        Write-Host '==== proofs: plan -- budget file: the declared proofs/modules.json'
+    }
+    Remove-ConeWork
+    exit 0
+}
+
+if ($null -ne $coneBudget) {
+    New-Item -ItemType Directory -Force $coneWork | Out-Null
+    $coneBudget | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $legArgs.BudgetFile -Encoding utf8NoBOM
+}
+
 # `&` and not `.`: a dot-sourced script's `exit` does NOT propagate to its caller, so a dot-source
 # here would print the kit's red line and then return 0 — a green leg over a failed proof, which
 # is the very class Phase 164 was about. Measured both ways before choosing.
@@ -234,11 +404,25 @@ if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
 # it read, so a failed host build and a refuted model both came back green (Phase 221): the choice
 # of `&` was right, and what it exposed was a defect in the kit, now removed.
 & (Join-Path $PSScriptRoot 'kit/check-proof-leg.ps1') @legArgs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$legExit = $LASTEXITCODE
+Remove-ConeWork
+if ($legExit -ne 0) { exit $legExit }
 
 # Then the leg's own refusals, run the same way (Phase 221): a scratch leg over a failed host build,
 # a host filter that cannot run and a refuted model must each exit non-zero, beside a green control.
 # A few seconds, and after the leg so the prover is already installed. This is what lets the green
 # above be cited as "every step was able to fail" rather than only as "no step said it failed".
 & (Join-Path $PSScriptRoot 'kit/check-proof-leg.tests.ps1') -ProofsDir $PSScriptRoot
-exit $LASTEXITCODE
+$refusalsExit = $LASTEXITCODE
+if ($refusalsExit -ne 0 -or -not $Strict -or $null -ne $selected) { exit $refusalsExit }
+
+# Phase 328 — a green -Strict FULL run records itself as the baseline an empty cone may lean on.
+# It never changes the verdict: the leg is green whatever the record says, and a record that could
+# not be written says why in yellow.
+$record = Invoke-ConeTool @('--record-strict', "$Runs") -Soft
+Remove-ConeWork
+if ($null -ne $record) {
+    if ($record.recorded) { Write-Host "==== proofs: $($record.message)" -ForegroundColor Green }
+    else { Write-Host "==== proofs: strict baseline $($record.message)" -ForegroundColor Yellow }
+}
+exit 0
