@@ -150,4 +150,8 @@ let main argv =
     // the `--emit-laws` reason: a suite that rewrote a committed artefact on every run could
     // not also be the thing that notices it has changed.
     | "--emit-fstar" :: _ -> IdlFStarTargetTests.emit ()
+    // Phase 328 — the half of `proofs/check.ps1 -Since <tree>` that decides which registered
+    // models are in the module cone, and records a green `-Strict` full run as the baseline an
+    // empty cone may lean on. `check.ps1` calls it; the arguments are in `coneCli`'s own comment.
+    | "--proof-cone" :: rest -> ProofsLadderTests.coneCli rest
     | _ -> runTestsInAssemblyWithCLIArgs [] argv
