@@ -516,7 +516,7 @@ module internal SurfaceLaws =
           "ConstructWitness",
           "a conformance-kit input (Phase 126): constructed only to run `constructThenEncodeLaws`, and versioned with that family"
           "KeyedWitness",
-          "a conformance-kit input (Phase 189): constructed only to run `keyedChildrenLaws`, and versioned with that family"
+          "a conformance-kit input (Phase 189) that the apply path also reads since Phase 286 (`Tree.traversal`, `Ops.applyContainedKeyed`); it is still being widened inside the 0.33.0 draft, so whether it joins the freeze is decided when that version is released, not by the commit that widens it"
           "EvaluatorWitness",
           "a conformance-kit input (Phase 211): constructed only to run the two `propagationEvaluatorLaws` families, and versioned with them" ]
 

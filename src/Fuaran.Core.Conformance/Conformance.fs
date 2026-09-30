@@ -135,6 +135,17 @@ module Conformance =
         : LawResult list =
         TreeLaws.keyedChildrenLaws keyw nodew idw gen seed iterations
 
+    /// Forward — see `KeyedApplyLaws.keyedApplyLaws` (Phase 286).
+    let keyedApplyLaws
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        KeyedApplyLaws.keyedApplyLaws keyw nodew idw gen seed iterations
+
     /// Forward — see `StreamLaws.streamLaws`.
     let streamLaws
         (sw: StreamWitness<'Op, 'State, 'Rej>)

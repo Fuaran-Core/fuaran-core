@@ -497,6 +497,19 @@
       "refusal": "drawn"
     },
     {
+      "id": "Conformance.keyedApplyLaws",
+      "module": "Conformance",
+      "entry": "keyedApplyLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "1500",
+      "adequacy": "guarded-reached",
+      "refusal": "built"
+    },
+    {
       "id": "Conformance.keyedChildrenLaws",
       "module": "Conformance",
       "entry": "keyedChildrenLaws",

@@ -1406,7 +1406,14 @@ let private caseNode (id: string) =
 
 let keyw: KeyedWitness<KNode, string> =
     { Surface = "the reference domain's full walk (Children + the case table)"
-      HasKeyedChildren = fun n -> n.Cases |> List.map (fun (_, c) -> c.Id)
+      KeyedChildren = fun n -> n.Cases |> List.map snd
+      ReplaceKeyedChildren =
+        fun n ks ->
+            if List.length ks = List.length n.Cases then
+                { n with
+                    Cases = List.map2 (fun (label, _) c -> label, c) n.Cases ks }
+            else
+                n
       PlaceKeyedChild =
         fun n id ->
             Some
@@ -1418,7 +1425,8 @@ let keyw: KeyedWitness<KNode, string> =
 /// `Children` does not report, declares the empty list and says so.
 let private noKeyed: KeyedWitness<RNode, string> =
     { Surface = "Tree.ids over the reference witness"
-      HasKeyedChildren = fun _ -> []
+      KeyedChildren = fun _ -> []
+      ReplaceKeyedChildren = fun n _ -> n
       PlaceKeyedChild = fun _ _ -> None
       IdsUnique =
         fun t ->

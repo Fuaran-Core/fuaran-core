@@ -17,7 +17,6 @@ ctor Fuaran.Core.Families+RefusalAudit..ctor(System.String, Fuaran.Core.Families
 ctor Fuaran.Core.Families+RefusalVerdict..ctor(Fuaran.Core.Families+RefusalPopulation, System.String)
 ctor Fuaran.Core.Families+Roster..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>>)
 ctor Fuaran.Core.FunctionVerifyReport`2..ctor(System.Boolean, Fuaran.Core.VerifyCoverage, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.VerifyCounterexample`2<!0, !1>>)
-ctor Fuaran.Core.KeyedWitness`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpOption`1<!0>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>)
 ctor Fuaran.Core.LaneGen`2..ctor(!1, !0, Microsoft.FSharp.Core.FSharpFunc`2<System.Int32, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<!0>>, Fuaran.Core.ConfRng+T>>>)
 ctor Fuaran.Core.LawResult..ctor(System.String, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.MemoSample`1..ctor(!0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!0>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!0>>, !0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!0>>)
@@ -103,6 +102,7 @@ method Fuaran.Core.Conformance.functionVerifyLaws`2(Fuaran.Core.ArtifactWitness`
 method Fuaran.Core.Conformance.hashFnAdversarialLaws(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.hashFnLaws`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.StreamGen`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.idempotencyLaws`3(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.StreamGen`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
+method Fuaran.Core.Conformance.keyedApplyLaws`2(Fuaran.Core.KeyedWitness`2<!!0, !!1>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.keyedChildrenLaws`2(Fuaran.Core.KeyedWitness`2<!!0, !!1>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.memoLaws`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Fuaran.Core.MemoSample`1<!!0>, Fuaran.Core.ConfRng+T>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.memoSoundnessLaws`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
@@ -237,10 +237,6 @@ record-field Fuaran.Core.Families+Roster.RefusalAudit #2 : Microsoft.FSharp.Coll
 record-field Fuaran.Core.FunctionVerifyReport`2.Counterexample #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.VerifyCounterexample`2<!0, !1>>
 record-field Fuaran.Core.FunctionVerifyReport`2.Coverage #1 : Fuaran.Core.VerifyCoverage
 record-field Fuaran.Core.FunctionVerifyReport`2.Verified #0 : System.Boolean
-record-field Fuaran.Core.KeyedWitness`2.HasKeyedChildren #1 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!1>>
-record-field Fuaran.Core.KeyedWitness`2.IdsUnique #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>
-record-field Fuaran.Core.KeyedWitness`2.PlaceKeyedChild #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpOption`1<!0>>>
-record-field Fuaran.Core.KeyedWitness`2.Surface #0 : System.String
 record-field Fuaran.Core.LaneGen`2.BaseOp #1 : !0
 record-field Fuaran.Core.LaneGen`2.Lanes #2 : Microsoft.FSharp.Core.FSharpFunc`2<System.Int32, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Collections.FSharpList`1<!0>>, Fuaran.Core.ConfRng+T>>>
 record-field Fuaran.Core.LaneGen`2.State0 #0 : !1
@@ -302,7 +298,6 @@ type Fuaran.Core.Families+RefusalVerdict (record)
 type Fuaran.Core.Families+Roster (record)
 type Fuaran.Core.FoldConfluence (module)
 type Fuaran.Core.FunctionVerifyReport`2 (record)
-type Fuaran.Core.KeyedWitness`2 (record)
 type Fuaran.Core.LaneFoldOutcome (union)
 type Fuaran.Core.LaneFoldOutcome+LaneFolded (type)
 type Fuaran.Core.LaneFoldOutcome+LaneHalted (type)

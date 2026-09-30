@@ -128,6 +128,16 @@ let private runs =
                    ConformanceTests.kGen
                    1890
                    200)
+           run
+               "Conformance.keyedApplyLaws"
+               300
+               (Conformance.keyedApplyLaws
+                   ConformanceTests.keyw
+                   ConformanceTests.knodew
+                   idw
+                   KeyedApplyTests.deepGen
+                   2860
+                   300)
 
            // ---- stream-shaped opt-ins ----
            run

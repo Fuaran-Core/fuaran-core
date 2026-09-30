@@ -1012,18 +1012,19 @@ module internal TreeLaws =
     /// SEE, and it stopped holding the moment a domain could declare those positions itself. This
     /// family is that declaration and the three laws it buys.
     ///
-    /// **What it does NOT do is widen the witness surface.** The engine still cannot reach a
-    /// keyed position, `Ops.apply` still refuses only what `Children` reports, and the reasons
-    /// `README.md` gives for that stand. What is certified here is the DOMAIN'S check, at the
-    /// domain's own witness, over the domain's own generator — which is what the obligation was
-    /// always about.
+    /// **What it does NOT do is widen the witness surface.** `Children` is still what the engine
+    /// rebuilds through, and the reasons `README.md` gives for that stand. What is certified here
+    /// is the DOMAIN'S check, at the domain's own witness, over the domain's own generator. Since
+    /// Phase 286 the same declaration also reaches the engine — `Ops.applyContainedKeyed` refuses a
+    /// keyed collision itself — and `keyedApplyLaws` certifies that the engine's refusal and this
+    /// check agree; the keyed ids read here are `Tree.keyedIds`, derived from `KeyedChildren`.
     ///
     /// Three laws, and the pair after the first is where the content is:
     ///
     /// - **The check ACCEPTS a walk with no repeat.** The anti-vacuity arm, and it is first
     ///   because without it `fun _ -> false` passes everything below. Measured only where the
-    ///   kit's own walk — every id `Children` reports, plus every id a node declares keyed —
-    ///   repeats nothing, because a tree the kit can see a collision in is one the check is
+    ///   kit's own walk — `Tree.idsKeyed`, every id `Children` reaches plus every id held in or
+    ///   below a keyed position — repeats nothing, because a tree the kit can see a collision in is one the check is
     ///   RIGHT to refuse.
     /// - **The check REFUSES an id held in a keyed position that the witness surface also
     ///   holds.** BUILT, never drawn: `gen.FreshNode`'s contract is an id the tree does not
@@ -1035,7 +1036,7 @@ module internal TreeLaws =
     ///   the surface passes the law above and fails this one.
     ///
     /// **A domain that declares NO keyed position passes VACUOUSLY and the report says so** —
-    /// `HasKeyedChildren` empty everywhere and `PlaceKeyedChild` answering `None` everywhere is a
+    /// `KeyedChildren` empty everywhere and `PlaceKeyedChild` answering `None` everywhere is a
     /// DECLARATION that there is nothing here to certify, and the adequacy line says that in
     /// those words rather than reporting three laws nothing reached. A domain that declares keyed
     /// positions and gives the kit no way to BUILD one is the other case entirely, and fails the
@@ -1076,7 +1077,7 @@ module internal TreeLaws =
         let keyOf (n: 'Node) = idw.ToString(nodew.Id n)
 
         let keyedKeysOf (n: 'Node) =
-            keyw.HasKeyedChildren n |> List.map idw.ToString
+            Tree.keyedIds nodew keyw n |> List.map idw.ToString
 
         /// The kit's own full walk: every id the witness surface reports, plus every id a node
         /// declares in a keyed position. It is the kit's model of the domain's walk and never the
@@ -1119,7 +1120,9 @@ module internal TreeLaws =
             declaredKeyed <- declaredKeyed + List.length (keyedKeys tree)
 
             // ---- arm 1: a full walk that repeats no id is ACCEPTED (the anti-vacuity arm) ----
-            let walk = surfaceKeys tree @ keyedKeys tree
+            // The keyed walk (Phase 286): every id `Children` reaches, every id a node holds in a
+            // keyed position, and every id below one — a keyed node's own subtree included.
+            let walk = Tree.idsKeyed nodew keyw tree |> List.map idw.ToString
 
             if List.length (List.distinct walk) = List.length walk then
                 cleanWalks <- cleanWalks + 1
@@ -1156,7 +1159,7 @@ module internal TreeLaws =
                     fun () ->
                         at (
                             sprintf
-                                "%s ACCEPTED a tree holding %s both in the witness surface and in a keyed position of %s (kind %s) — the engine cannot see the keyed one, so nothing else will refuse it, and every theorem about this tree is then about a different tree from the one the domain holds"
+                                "%s ACCEPTED a tree holding %s both in the witness surface and in a keyed position of %s (kind %s) — the unkeyed engine cannot see the keyed one, so nothing on that path will refuse it, and every theorem about this tree is then about a different tree from the one the domain holds"
                                 keyw.Surface
                                 victimKey
                                 (keyOf holder)

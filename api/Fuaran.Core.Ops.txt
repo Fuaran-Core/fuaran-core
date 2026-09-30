@@ -14,6 +14,7 @@ field Fuaran.Core.Diff+DiffError`1+Tags.RootIdMismatch : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.TargetNotAContainer : System.Int32 (literal)
 field Fuaran.Core.Rejection`1+Tags.CannotRemoveRoot : System.Int32 (literal)
 field Fuaran.Core.Rejection`1+Tags.DuplicateId : System.Int32 (literal)
+field Fuaran.Core.Rejection`1+Tags.KeyedPosition : System.Int32 (literal)
 field Fuaran.Core.Rejection`1+Tags.NotAContainer : System.Int32 (literal)
 field Fuaran.Core.Rejection`1+Tags.Rejected : System.Int32 (literal)
 field Fuaran.Core.Rejection`1+Tags.ReorderMismatch : System.Int32 (literal)
@@ -31,10 +32,12 @@ method Fuaran.Core.Diff.toOpsContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0,
 method Fuaran.Core.Diff.toOps`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
 method Fuaran.Core.Ops.applyAllWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.Tuple`3<System.Int32, Fuaran.Core.Rejection`1<!!1>, !!0>>
 method Fuaran.Core.Ops.applyAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.Tuple`3<System.Int32, Fuaran.Core.Rejection`1<!!1>, !!0>>
+method Fuaran.Core.Ops.applyContainedKeyed`2(Fuaran.Core.KeyedWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.Rejection`1<!!1>>
 method Fuaran.Core.Ops.applyContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.Rejection`1<!!1>>
 method Fuaran.Core.Ops.apply`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.Rejection`1<!!1>>
 method Fuaran.Core.Ops.canApplyAllWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.Tuple`2<System.Int32, Fuaran.Core.Rejection`1<!!1>>>
 method Fuaran.Core.Ops.canApplyAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.Tuple`2<System.Int32, Fuaran.Core.Rejection`1<!!1>>>
+method Fuaran.Core.Ops.canApplyContainedKeyed`2(Fuaran.Core.KeyedWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Rejection`1<!!1>>
 method Fuaran.Core.Ops.canApplyContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Rejection`1<!!1>>
 method Fuaran.Core.Ops.canApply`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Rejection`1<!!1>>
 method Fuaran.Core.Ops.footprint`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>) : Fuaran.Core.Footprint
@@ -68,6 +71,7 @@ type Fuaran.Core.OpScriptProposal`2 (record)
 type Fuaran.Core.Ops (module)
 type Fuaran.Core.Rejection`1 (union)
 type Fuaran.Core.Rejection`1+DuplicateId (type)
+type Fuaran.Core.Rejection`1+KeyedPosition (type)
 type Fuaran.Core.Rejection`1+NotAContainer (type)
 type Fuaran.Core.Rejection`1+Rejected (type)
 type Fuaran.Core.Rejection`1+ReorderMismatch (type)
@@ -89,6 +93,7 @@ union-case Fuaran.Core.Diff+DiffError`1.NewRootIdMismatch #0(before: !0, after: 
 union-case Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer #2(target: !0, kindTag: System.String)
 union-case Fuaran.Core.Rejection`1.CannotRemoveRoot #2()
 union-case Fuaran.Core.Rejection`1.NewDuplicateId #1(Item: !0)
+union-case Fuaran.Core.Rejection`1.NewKeyedPosition #7(target: !0, holder: !0)
 union-case Fuaran.Core.Rejection`1.NewNotAContainer #4(target: !0, kindTag: System.String)
 union-case Fuaran.Core.Rejection`1.NewRejected #6(code: System.String, message: System.String)
 union-case Fuaran.Core.Rejection`1.NewReorderMismatch #5(parent: !0, expected: Microsoft.FSharp.Collections.FSharpList`1<!0>, got: Microsoft.FSharp.Collections.FSharpList`1<!0>)
