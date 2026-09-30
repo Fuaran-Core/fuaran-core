@@ -3,7 +3,8 @@
 **Status:** spike complete — **GO**. Advisory findings note for the schema-driven codegen capability
 (Phase 317) and the IDL-canonical direction (substrate-as-asset brief). Amends no shipped contract.
 
-> **This document describes `Fuaran.Core.Idl.Spike`, not the production engine** (Phase 201). Every gap it
+> **This document describes the inversion spike — the `Fuaran.Core.Idl.Spike` project, deleted from
+> `src/` by Phase 230 — not the production engine** (Phase 201). Every gap it
 > records is a gap in the SPIKE, measured in 2026 against a five-kind mini IDL and an illustrative,
 > uncompiled emitter; the production `Fuaran.Core.Idl` + `Fuaran.Core.Idl.Codegen` have moved a long way
 > past it, and a §3 item still reading "not yet built" was reporting the spike's state and nothing else.
@@ -14,8 +15,9 @@
 > costs) is what a second IDL adopter meets, and that has not aged.
 
 **Artefacts:** [`src/Fuaran.Core.Idl/`](../src/Fuaran.Core.Idl/) (the IDL model + a schema-driven encoder +
-an illustrative F#-type emitter), [`src/Fuaran.Core.Idl.Spike/`](../src/Fuaran.Core.Idl.Spike/) (the mini UI
-IDL + the authored corpus trees), and `tests/Fuaran.Core.Tests/IdlSpikeTests.fs` (the gate).
+an illustrative F#-type emitter), [`tests/Fuaran.Core.Tests/MiniIdl.fs`](../tests/Fuaran.Core.Tests/MiniIdl.fs)
+(the mini UI IDL + the authored corpus trees — the spike project it came from was deleted in Phase 230, and
+its vocabulary stays as a test fixture), and `tests/Fuaran.Core.Tests/IdlSpikeTests.fs` (the gate).
 
 ## 1. Result
 

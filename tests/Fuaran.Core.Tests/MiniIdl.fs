@@ -1,16 +1,24 @@
-module Fuaran.Core.Idl.Spike.Fixtures
+module Fuaran.Core.Tests.MiniIdl
 
 open Fuaran.Core.Idl
 
 // ---------------------------------------------------------------------------
-// Phase 316 spike + Phase 317 increment 1 (generics). The mini UI IDL now covers
-// 8 kinds and a *parameterised* value-union `Binding<'T>` — one definition that,
-// instantiated at `float` (Metric.source) and `bool` (Button.disabled), produces
-// the right wire for both. Kinds: a layout (Card / Stack, children + nesting), a
-// display family (Heading / Badge / Metric / Markdown / Divider), an input with
-// an action (Button → Chain). Value-unions: TextSource / Binding<'T> / Format /
-// Action.
+// The mini UI IDL — a reference vocabulary for the IDL engine tests (Phase 230).
+//
+// It began as the inversion spike's vocabulary (Phases 316 and 317) and lived in
+// a `src/` project of its own; Phase 230 took that project out of `src/` and kept
+// here what the suite certifies against. Seven kinds — Heading, Badge, Button,
+// Metric, Markdown, Box (a layout with children and nesting) and Tabs — and a
+// *parameterised* value-union `Binding<'T>`: one definition that, instantiated at
+// `float` (Metric.value) and `bool` (Button.disabled), produces the right wire
+// for both. Value-unions: TextSource / Binding<'T> / Format / Action / Layout.
+//
+// It is the only vocabulary in the suite that declares a transparent union (the
+// bare-string `TextSource.Literal`), so the tests that need that shape read it
+// from here. `MiniGenerated.fs` is the F# emitted from it, committed and checked
+// for drift by `IdlSpikeTests`.
 // ---------------------------------------------------------------------------
+
 
 /// The mini UI IDL — the canonical source the codec is driven from.
 let miniIdl: Idl =

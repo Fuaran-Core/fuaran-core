@@ -39,7 +39,7 @@ let private neutralVocabularies =
     [ "reference", refIdl
       "second-domain", SecondDomainSpike.docIdl
       "score-domain", ScoreDomainSpike.scoreIdl
-      "spike", Fuaran.Core.Idl.Spike.Fixtures.miniIdl ]
+      "spike", Fuaran.Core.Tests.MiniIdl.miniIdl ]
 
 /// The round-trip sweep runs over the certification set PLUS the value-coverage
 /// vocabulary, which exists only to exercise the artifact's `IdlValue` projection and
@@ -1351,7 +1351,7 @@ let declaredDefaultProperty =
               // `miniIdl` declares `TextSource.Literal` transparent in its own policy —
               // since Phase 180 outright, where it used to inherit the declaration from
               // `HardenPolicy.Default`. So this is the live class, not a synthetic one.
-              let idl = Fuaran.Core.Idl.Spike.Fixtures.miniIdl
+              let idl = Fuaran.Core.Tests.MiniIdl.miniIdl
 
               Expect.equal
                   (idl.Unions

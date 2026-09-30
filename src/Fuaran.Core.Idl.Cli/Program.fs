@@ -23,12 +23,14 @@ open Fuaran.Core.Idl
 //     printing both sides. That is the form that belongs in a `run.ps1`, because
 //     it is the form that can go red for the right reason.
 //
-// Everything is written to stdout, including refusals. A gate that captures the
-// command's output gets the whole record in one stream, and nothing depends on
-// how the calling shell treats a native command's stderr.
+// Everything `classify` and `table` write goes to stdout, including refusals. A gate
+// that captures the command's output gets the whole record in one stream, and nothing
+// depends on how the calling shell treats a native command's stderr. `spike-proposal`
+// (Phase 230: moved here from the repository's test runner, behaviour unchanged) is the
+// operator-facing exception: its refusals stay on stderr, as they always were.
 //
-// FSharp.Core only — no argument-parsing dependency. The surface is two verbs and
-// two options; a parser combinator library for that would be a dependency every
+// FSharp.Core only — no argument-parsing dependency. The surface is three verbs and
+// a few options; a parser combinator library for that would be a dependency every
 // consumer of the tool inherits in exchange for nothing.
 // ---------------------------------------------------------------------------
 
@@ -41,6 +43,8 @@ let private usage =
     + "  fuaran-core-idl classify <before.json> <after.json> [--manifest <manifest.json>]\n"
     + "                                                      [--expect <class>]\n"
     + "  fuaran-core-idl table\n"
+    + "  fuaran-core-idl spike-proposal <proposal.json> --idl <idl.json> [--corpus <dir>]\n"
+    + "                                 [--out <report.md>] [--seed <int>] [--vectors <int>]\n"
     + "  fuaran-core-idl --help\n"
     + "\n"
     + "CLASSIFY\n"
@@ -63,6 +67,15 @@ let private usage =
     + "  Prints the F# consequence table — the classes and the reason each applies.\n"
     + "  External surface guards and corpus gates cite this table rather than each\n"
     + "  re-deriving the mapping from the compiler's behaviour.\n"
+    + "\n"
+    + "SPIKE-PROPOSAL\n"
+    + "  Prices a vocabulary-change proposal against the vocabulary in --idl without\n"
+    + "  cutting a branch or writing a declaration: the delta is applied to an\n"
+    + "  in-memory copy and four legs run (generate, corpus, fuzz, candidates), then the\n"
+    + "  stability cost is reported. --corpus names the directory holding the `nodes/`\n"
+    + "  family; without it the corpus leg reports not-checked and the run is not green.\n"
+    + "  Exits 0 every leg passed, 1 a leg failed, 2 the document did not read. A green\n"
+    + "  exit removes one objection; it is never a recommendation.\n"
     + "\n"
     + "EXIT CODES (classify, without --expect)\n"
     + "  0  unchanged / host-surface / additive — a consumer absorbs it by repinning\n"
@@ -155,12 +168,105 @@ let private classify (beforePath: string) (afterPath: string) (rest: string list
 
                         1
 
+/// Phase 702 — price a vocabulary-change proposal against a vocabulary without cutting a
+/// branch or writing a declaration. Phase 230 moved it here from the repository's own test
+/// runner (where it was the `--spike-proposal` flag); the flags, the report and the exit
+/// codes are unchanged, which is why its refusals still go to stderr rather than stdout.
+///
+/// The vocabulary is an ARGUMENT (`--idl <idl.json>`), read through `Artifact.parse` —
+/// Phase 114's inversion is what makes that possible, and Phase 123 is where it was needed:
+/// the entry point used to name a domain's vocabulary because that vocabulary happened to
+/// live in the test project, which is exactly the coupling D14 removes. It is branchless by
+/// construction — the delta is applied to an in-memory `Idl` value that exists for the
+/// duration of the call — so an abandoned spike leaves no residue anywhere.
+///
+/// The corpus leg reads the `nodes/` family of the corpus directory named by `--corpus
+/// <dir>`. When none is named the leg reports "not checked" and the run is not green: a
+/// spike whose additive claim went unexamined must not read as a spike that examined it and
+/// found nothing.
+///
+/// Exit: 0 every leg passed · 1 a leg failed · 2 the document did not read. A green exit is
+/// the removal of one objection, never a recommendation — nothing downstream of this command
+/// may treat 0 as an admission.
+let private spikeProposal (proposalPath: string) (rest: string list) : int =
+    let flag name =
+        rest
+        |> List.pairwise
+        |> List.tryPick (fun (a, b) -> if a = name then Some b else None)
+
+    let intFlag name fallback =
+        match flag name with
+        | Some v ->
+            match System.Int32.TryParse v with
+            | true, n -> n
+            | _ -> fallback
+        | None -> fallback
+
+    let corpus =
+        match flag "--corpus" with
+        | None -> []
+        | Some root ->
+            let dir = Path.Combine(root, "nodes")
+
+            if not (Directory.Exists dir) then
+                []
+            else
+                Directory.GetFiles(dir, "*.json")
+                |> Array.filter (fun p -> not ((Path.GetFileName p).EndsWith ".expected.json"))
+                |> Array.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
+                |> Array.map (fun p -> Path.GetFileName p, File.ReadAllText p)
+                |> List.ofArray
+
+    let baseIdl =
+        match flag "--idl" with
+        | None -> Error "no --idl <idl.json> given — the spike prices a proposal AGAINST a vocabulary"
+        | Some path ->
+            if File.Exists path then
+                Artifact.parse (File.ReadAllText path)
+            else
+                Error(sprintf "--idl names no file: %s" path)
+
+    match baseIdl, Proposal.parse (File.ReadAllText proposalPath) with
+    | Error e, _ ->
+        eprintfn "spike-proposal: the vocabulary did not read — %s" e
+        2
+    | _, Error e ->
+        eprintfn "spike-proposal: the document did not read — %s" e
+        2
+    | Ok baseVocabulary, Ok proposal ->
+        match
+            ProposalSpike.run
+                { Base = baseVocabulary
+                  Proposal = proposal
+                  Corpus = corpus
+                  // Pinned, not clock-derived: a divergence a spike finds has to
+                  // reproduce from the report alone on another machine.
+                  FuzzSeed = intFlag "--seed" 20260826
+                  FuzzVectors = intFlag "--vectors" 200
+                  External = [] }
+        with
+        | Error e ->
+            eprintfn "spike-proposal: %s" e
+            2
+        | Ok report ->
+            let text = ProposalSpike.render report
+
+            match flag "--out" with
+            | Some out ->
+                File.WriteAllText(out, text)
+                printfn "wrote %s" out
+            | None -> printf "%s" text
+
+            if report.Green then 0 else 1
+
 [<EntryPoint>]
 let main argv =
     match List.ofArray argv with
     | "classify" :: before :: after :: rest -> classify before after rest
     | [ "classify" ]
     | [ "classify"; _ ] -> refuse "classify needs two paths: <before.json> <after.json>"
+    | "spike-proposal" :: proposalPath :: rest -> spikeProposal proposalPath rest
+    | [ "spike-proposal" ] -> refuse "spike-proposal needs a proposal document: <proposal.json>"
     | [ "table" ] ->
         printf "%s" Diff.consequenceTable
         0

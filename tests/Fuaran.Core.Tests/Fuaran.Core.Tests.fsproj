@@ -62,6 +62,11 @@
          and apply/ copy-freshness legs further down); reads ChildProcess.fs above and nothing
          else here. -->
     <Compile Include="SiblingCorpus.fs" />
+    <!-- Phase 230 — the mini IDL and the F# emitted from it, carried here when the spike
+         project left `src/`. They are the fixtures IdlSpikeTests, IdlProposalTests and the
+         certification and end-of-line families read, so they sit before every one of them. -->
+    <Compile Include="MiniIdl.fs" />
+    <Compile Include="MiniGenerated.fs" />
     <Compile Include="IdlSpikeTests.fs" />
     <Compile Include="IdlEnumWireTests.fs" />
     <!-- Phases 108/109 - the declared wire shape (discriminator key + node envelope),
@@ -73,8 +78,8 @@
     <Compile Include="IdlAnnotationTests.fs" />
     <Compile Include="IdlKindAnnotationTests.fs" />
     <!-- Phase 702 — the vocabulary-change proposal document and the branchless spike
-         that prices it. Reads the mini IDL from Fuaran.Core.Idl.Spike, so after the
-         Idl families above. -->
+         that prices it (the harness lives in Fuaran.Core.Idl.Cli since Phase 230). Reads
+         MiniIdl.fs, so after the Idl families above. -->
     <Compile Include="IdlProposalTests.fs" />
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
@@ -281,7 +286,9 @@
          Fuaran.Core.Idl.Codegen (the compiled-codegen drift guard, the schema leg, the
          cross-host fuzz). It is the one consumer that legitimately wants everything. -->
     <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Codegen\Fuaran.Core.Idl.Codegen.fsproj" />
-    <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Spike\Fuaran.Core.Idl.Spike.fsproj" />
+    <!-- Phase 230 — the operator command, for the proposal-pricing harness it carries
+         (internal to it, visible to this assembly). -->
+    <ProjectReference Include="..\..\src\Fuaran.Core.Idl.Cli\Fuaran.Core.Idl.Cli.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.AiSurface\Fuaran.Core.AiSurface.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />

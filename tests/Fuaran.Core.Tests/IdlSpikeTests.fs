@@ -6,9 +6,9 @@ open System.Diagnostics
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
-open Fuaran.Core.Idl.Spike.Fixtures
+open Fuaran.Core.Tests.MiniIdl
 
-module G = Fuaran.Core.Idl.Spike.Generated
+module G = Fuaran.Core.Tests.MiniGenerated
 
 // ---------------------------------------------------------------------------
 // Phase 316 — IDL inversion spike gate. Proves the IDL drives the codec in BOTH
@@ -22,7 +22,7 @@ module G = Fuaran.Core.Idl.Spike.Generated
 // Two proof layers: the schema-DRIVEN interpreter (Encode/Decode walk the IDL at
 // runtime, round-tripping the corpus, incl. generics — Phase 316 + 317 inc. 1),
 // and *real code emission* (Phase 317 inc. 2–3): `Gen.fsharpModule` emits a
-// compiling F# module (`Generated.fs`, in the build) for all 8 kinds, handling
+// compiling F# module (`MiniGenerated.fs`, in the build) for all 8 kinds, handling
 // every feature class — optionals, generics (`Binding<'T>` by codec-passing),
 // lists, and node nesting. Its generated encoder round-trips heading/badge/button/
 // stack byte-identical; a drift guard checks the generator still reproduces it.
@@ -38,7 +38,7 @@ let private wire (name: string) =
     | Some s -> s
     | None -> failwithf "no vendored wire snapshot for '%s'" name
 
-/// The kinds the generated F# encoder (`Generated.fs`) covers — the 6-kind slice
+/// The kinds the generated F# encoder (`MiniGenerated.fs`) covers — the 6-kind slice
 /// (Fuaran-UI 0.2.0: Card / Stack unified into `Box`, Divider retired), plus
 /// `Tabs`, the Phase 689 `'Msg`-threading spike kind. This list and the one in
 /// `Program.fs`'s `--regen-snapshots` must stay in step: the generative
@@ -56,7 +56,7 @@ let private generatedKinds =
 let private corpusFamily = "nodes"
 
 let private tryFindGenerated () : string option =
-    let rel = Path.Combine("src", "Fuaran.Core.Idl.Spike", "Generated.fs")
+    let rel = Path.Combine("tests", "Fuaran.Core.Tests", "MiniGenerated.fs")
 
     let rec climb (dir: string) (budget: int) =
         if budget < 0 || isNull dir then
@@ -263,14 +263,14 @@ let tests =
 
               Expect.equal (G.encodeNode stack) (wire "stack-1") "generated encoder byte mismatch for stack-1")
 
-          testCase "real code emission: the generator still reproduces the committed Generated.fs" (fun _ ->
+          testCase "real code emission: the generator still reproduces the committed MiniGenerated.fs" (fun _ ->
               let generated =
-                  match Gen.fsharpModule "Fuaran.Core.Idl.Spike.Generated" miniIdl generatedKinds with
+                  match Gen.fsharpModule "Fuaran.Core.Tests.MiniGenerated" miniIdl generatedKinds with
                   | Ok s -> s
                   | Error e -> failtestf "codegen rejected the spike vocabulary: %A" e
 
               match tryFindGenerated () with
-              | None -> skiptest "Generated.fs not found on disk — drift guard skipped"
+              | None -> skiptest "MiniGenerated.fs not found on disk — drift guard skipped"
               | Some path ->
                   // Regeneration escape hatch: FUARAN_REGEN=1
                   // rewrites the committed file instead of asserting, so a deliberate
@@ -291,7 +291,7 @@ let tests =
                   Expect.equal
                       generated
                       (File.ReadAllText path)
-                      "the generator no longer reproduces Generated.fs byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+                      "the generator no longer reproduces MiniGenerated.fs byte-for-byte — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
 
           testCase "snapshot store: the committed spike.json IS what the store renders (byte-for-byte)" (fun _ ->
               // D30's third artefact. The two guards above cover the generated F# modules;
