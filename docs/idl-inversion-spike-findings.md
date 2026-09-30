@@ -26,7 +26,7 @@ A ~150-line IDL covering **five kinds** — `Card` (layout, children + optional 
 schema-driven codec that produces canonical wire JSON **byte-identical to the committed corpus** for all
 five fixtures (`heading-1`, `badge-1`, `btn-1`, `metric-1`, `card-1`), and proves it **in both directions**:
 the authoring leg (authored `IdlValue` → encode → wire) and the round-trip leg (wire → decode → re-encode →
-wire). Verified by an Expecto gate (6 spike tests green; full Core suite **264 passed, 0 failed**). The gate
+wire). Verified, at the time of the spike (Phase 316), by an Expecto gate that then ran green; the counts it reported then are not restated here, because nothing holds them to a suite that has since grown. The gate
 is **self-contained** — the expected bytes are a vendored snapshot, so it is never vacuous — with a **drift
 guard** that confirms the snapshot still matches the live `Fuaran-UI/wire-format-fixtures/nodes/` corpus when
 checked out alongside (it ran, not skipped). A negative control diverges; the encoder rejects authored fields

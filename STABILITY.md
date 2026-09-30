@@ -399,7 +399,7 @@ its field set — read by reflection from the compiled record — equal to the p
 `Conformance.frozenWitnessFields` **by name and in declaration order**, and a seventh law holding
 that every public record named `…Witness` in the Fuaran.Core assemblies the kit references is
 either frozen there or declared outside the freeze, with its reason, in
-`Conformance.unfrozenWitnesses` (today the six conformance-kit inputs — `CapabilitySeamWitness`,
+`Conformance.unfrozenWitnesses` (at this entry the conformance-kit inputs — `CapabilitySeamWitness`,
 `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`, `KeyedWitness`,
 `EvaluatorWitness` — each constructed only to run the opt-in family that takes it). A field added,
 removed, renamed or reordered on a frozen record turns the gate red **by the record's name**, and
@@ -2160,8 +2160,8 @@ of the facade mentions a type from `FSharp.Core`, a type from a `Fuaran.Core.*` 
 positional `Tuple` / `ValueTuple`, at any depth of a generic argument — **except** on a member named
 exactly `ToCore` or `FromCore`. That pair is the declared bridge, and it has to exist: the facade's
 whole job is to hand Core its own values. The gate asserts the rule and PRINTS the bridge census, so
-how wide the exemption actually is stays visible rather than merely permitted; today it is 36 members,
-two per facade type.
+how wide the exemption actually is stays visible rather than merely permitted; when the facade
+shipped it was 36 members, two per facade type.
 
 **Three things this package deliberately is not.**
 

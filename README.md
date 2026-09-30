@@ -3,9 +3,9 @@
 [![CI](https://github.com/Fuaran-Core/fuaran-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Fuaran-Core/fuaran-core/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/Fuaran.Core.Tree.svg)](https://www.nuget.org/packages/Fuaran.Core.Tree) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 The shared cross-domain substrate for the Fuaran family — the genericity-extracted
-spine that the UI, Calc, Documents, CAD, Office (and future) domain tiers consume as a
-peer dependency, so each domain stops re-implementing the same op-stream / op-algebra /
-tree / wire / validator / artifact-function machinery five times over.
+spine that the domain tiers (UI, Calc, Documents, CAD, Office and the adopters since) consume
+as a peer dependency, so each domain stops re-implementing the same op-stream / op-algebra /
+tree / wire / validator / artifact-function machinery for itself.
 
 **Apache-2.0. FSharp.Core + Fable.Core only** (Fable.Core is a compile-time dependency for
 the dual .NET/Fable pipeline — no runtime behaviour rides on it). No domain dependency, no
@@ -14,9 +14,11 @@ over domain-witness records** — the core owns **no base node type**. Each doma
 `NodeKind` DU stays sovereign and exhaustively matched — closed unions + exhaustive total
 matching are the load-bearing F# constraint the whole pattern rests on.
 
-This repo is the realisation of the rule-of-three extraction: the substrate is extracted
-only now, against five shipped artifact-witness spines (UI, Calc, Documents, CAD, Office),
-with the string-vs-Guid identity axis resolved as a witness parameter rather than guessed.
+This repo is the realisation of the rule-of-three extraction: the substrate was extracted
+only once five artifact-witness spines had shipped (UI, Calc, Documents, CAD, Office), with the
+string-vs-Guid identity axis resolved as a witness parameter rather than guessed. That is the
+history, not the current roster: further domains have adopted it since, and the witness-record
+field freeze in [`STABILITY.md`](STABILITY.md) names the domains whose adoption it rests on.
 
 ## Packages
 
@@ -224,9 +226,12 @@ fold as a differential oracle. What the theorem covers, what it assumes and how 
 in [`proofs/README.md`](proofs/README.md); `./verify.ps1 -Proofs` (and CI's `proofs` job) installs
 the pinned prover and checks it.
 
-398 conformance tests exercise every layer against an in-repo reference witness (a tiny
+The conformance suite exercises every layer against an in-repo reference witness (a tiny
 string-id domain) — proving the generics work **without depending on any domain
-workspace**. Domain adoption (re-expressing each domain's machinery over `Fuaran.Core.*`)
+workspace**. The suite asserts that every law family is exercised, and non-vacuous, at that
+reference witness; the generated [`docs/conformance-families.md`](docs/conformance-families.md)
+is the roster. No test count is stated here, because a figure only this paragraph held would be
+asserted by nothing — `PackageRosterTests` refuses one. Domain adoption (re-expressing each domain's machinery over `Fuaran.Core.*`)
 is deliberately out of scope here; it lands on each domain workspace's own roadmap.
 
 **A green law family is not the same claim as an exercised one, and the roster says which it
@@ -241,7 +246,7 @@ number — when the run certified nothing, naming the starved dimension; `unmeas
 separate state of a rendering handed no run at all. Every family reaches a non-zero, non-starved
 count here, which is what lets a host read a zero in its own census as a fact about its own
 witness rather than about the kit. The instance that proves it: `attestationLaws` at
-`OpStream.noAttestation` reports five green laws over zero signed heads, and now says so.
+`OpStream.noAttestation` reports its laws green over zero signed heads, and now says so.
 
 ## Adopting a domain
 

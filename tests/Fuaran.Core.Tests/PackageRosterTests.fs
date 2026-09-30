@@ -16,9 +16,9 @@ module Fuaran.Core.Tests.PackageRosterTests
 // prose a person writes; a gate that generated that column would be describing the file
 // layout rather than the design.
 //
-// Five properties, each with a go-red case beside it over synthetic input. The live case
+// Each property has a go-red case beside it over synthetic input. The live case
 // alone cannot show a classifier works — every one of these reads a real file that is
-// expected to be correct, so a classifier that matched nothing would pass all five.
+// expected to be correct, so a classifier that matched nothing would pass them all.
 //
 //   1. README rows = the packable set.
 //   2. No packable project sits outside `src/` — the SCOPE property 1's derivation assumes,
@@ -27,6 +27,8 @@ module Fuaran.Core.Tests.PackageRosterTests
 //   3. Some entry header in STABILITY.md names the standing `<Version>`.
 //   4. No "no `vX.Y.Z` tag exists" sentence survives the tag it denies.
 //   5. Every release TAG at or above a declared floor has an entry header naming it.
+//   6. The README states no bare count of tests (Phase 233) — a figure nothing asserts is a
+//      claim the document cannot keep true; the suite's own census is docs/conformance-families.md.
 //
 // Property 5 is Phase 205, and it exists because property 3 structurally cannot see what
 // it caught. Property 3 quantifies over the STANDING `<Version>` — one number — so a slot
@@ -173,6 +175,26 @@ let internal readmePackageIds (readme: string) : string list =
         else
             let m = Regex.Match(cells[0], "`([^`]+)`")
             if m.Success then Some(m.Groups[1].Value.Trim()) else None)
+
+/// Every bare count of tests a document states — a number, or a number word, then at most two
+/// words, then `tests` / `test cases` / `assertions` ("398 conformance tests", "1,334 testCases").
+/// The suite cannot hold such a figure to what it actually runs, so the README states none
+/// (Phase 233); the claim it makes instead — every law family is exercised and non-vacuous at the
+/// reference witness — is asserted by `ConformanceVacuityTests`, and the generated
+/// `docs/conformance-families.md` is the roster.
+let internal bareTestCounts (text: string) : string list =
+    let number =
+        @"\d[\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|hundred|thousand"
+
+    Regex.Matches(
+        text,
+        @"\b(?:"
+        + number
+        + @")\s+(?:[\w`.\-]+\s+){0,2}(?:tests|test\s+cases|testcases|assertions)\b",
+        RegexOptions.IgnoreCase
+    )
+    |> Seq.map (fun m -> m.Value)
+    |> Seq.toList
 
 /// `(shipping but undocumented, documented but not shipping)`.
 let internal rosterDiff (packable: string list) (documented: string list) : string list * string list =
@@ -547,6 +569,46 @@ let tests =
               Expect.isTrue
                   (isPackable (Some "false") "<IsPackable>true</IsPackable>")
                   "the project's own declaration wins over the fallback"
+          }
+
+          test "the README states no bare count of tests" {
+              withRoot (fun root ->
+                  let readme = File.ReadAllText(Path.Combine(root, "README.md"))
+
+                  Expect.isGreaterThan
+                      readme.Length
+                      0
+                      "the README was read — an empty read would make the absence below vacuous"
+
+                  Expect.isEmpty
+                      (bareTestCounts readme)
+                      "the README states a test count that nothing asserts. Remedy: remove it, or reword it as a dated historical note; the suite already asserts that every law family is exercised and non-vacuous at the reference witness (docs/conformance-families.md).")
+          }
+
+          test "the bare-test-count reader flags a count and passes the claims the README makes instead" {
+              Expect.equal
+                  (bareTestCounts "398 conformance tests exercise every layer against an in-repo reference witness")
+                  [ "398 conformance tests" ]
+                  "the sentence Phase 233 removed is found"
+
+              Expect.equal
+                  (bareTestCounts "the suite declares 1,334 testCases across 90 files")
+                  [ "1,334 testCases" ]
+                  "a thousands-separated number and the testCase spelling are found"
+
+              Expect.equal
+                  (bareTestCounts "Nine spike tests are green")
+                  [ "Nine spike tests" ]
+                  "a number word is found, at the start of a sentence too"
+
+              Expect.isEmpty
+                  (bareTestCounts
+                      "every law family is exercised and non-vacuous at the reference witness; five green laws over zero cases")
+                  "a count of laws, families or packages is not a count of tests"
+
+              Expect.isEmpty
+                  (bareTestCounts "The conformance tests run against a reference witness.")
+                  "no number, no count"
           }
 
           test "the README reader takes the Packages table and stops at the next heading" {
