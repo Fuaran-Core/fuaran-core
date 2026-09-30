@@ -20,43 +20,28 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable verify = None
-        let mutable replay = None
-        let mutable tamper = None
+        let verify = LawKit.LawCell "verifyChain accepts an intact chain"
+        let replay = LawKit.LawCell "replay re-derives the live state"
+        let tamper = LawKit.LawCell "verifyChain detects a tampered op"
         let mutable accepted = 0
         let mutable tampered = 0
 
-        for i in 0 .. iterations - 1 do
-            let mutable state = gen.State0
-            let mutable recs = OpStream.empty
+        LawKit.run iterations seed (fun rng _ at ->
+            // a rejected op just doesn't extend the chain — `buildChain` counts the ones that did
+            let state, recs, acceptedHere = LawKit.buildChain hashFn sw gen rng
+            accepted <- accepted + acceptedHere
 
-            for _ in 0..5 do
-                let op, r' = gen.Op rng
-                rng <- r'
-
-                match OpStream.append hashFn sw (Human "conf") op state recs with
-                | Ok(s', recs') ->
-                    accepted <- accepted + 1
-                    state <- s'
-                    recs <- recs'
-                | Error _ -> () // a rejected op just doesn't extend the chain
-
-            if not (OpStream.verifyChain hashFn sw recs) && verify.IsNone then
-                verify <- Some(sprintf "seed=%d iter=%d: an intact chain failed verifyChain" seed i)
+            verify.Check(OpStream.verifyChain hashFn sw recs, fun () -> at "an intact chain failed verifyChain")
 
             match OpStream.replay sw gen.State0 recs with
-            | Ok s when s = state -> ()
-            | other ->
-                if replay.IsNone then
-                    replay <- Some(sprintf "seed=%d iter=%d: replay≠live state (got %A)" seed i other)
+            | Ok s when s = state -> replay.Saw()
+            | other -> replay.Check(false, fun () -> at (sprintf "replay≠live state (got %A)" other))
 
             match recs with
             | [] -> ()
             | _ ->
-                let tIdx, r2 = ConfRng.intBelow (List.length recs) rng
-                let newOp, r3 = gen.Op r2
-                rng <- r3
+                let tIdx = rng.IntBelow(List.length recs)
+                let newOp = rng.Draw gen.Op
                 let orig = List.item tIdx recs
 
                 // Only a genuinely-different op is a tamper the chain must detect.
@@ -66,20 +51,14 @@ module internal StreamLaws =
                     let forged =
                         recs |> List.mapi (fun j r -> if j = tIdx then { r with Op = newOp } else r)
 
-                    if OpStream.verifyChain hashFn sw forged && tamper.IsNone then
-                        tamper <- Some(sprintf "seed=%d iter=%d: a tampered op was not detected" seed i)
+                    tamper.Check(
+                        not (OpStream.verifyChain hashFn sw forged),
+                        fun () -> at "a tampered op was not detected"
+                    ))
 
-        [ { Law = "verifyChain accepts an intact chain"
-            Passed = verify.IsNone
-            Counterexample = verify }
-          { Law = "replay re-derives the live state"
-            Passed = replay.IsNone
-            Counterexample = replay }
-          { Law = "verifyChain detects a tampered op"
-            Passed = tamper.IsNone
-            Counterexample = tamper }
-          SampleAdequacy.reached "Conformance.streamLaws" "accepted op" seed [ "accepted", accepted ]
-          SampleAdequacy.reached "Conformance.streamLaws" "tampered chain" seed [ "tampered", tampered ] ]
+        LawKit.results [ verify; replay; tamper ]
+        @ [ SampleAdequacy.reached "Conformance.streamLaws" "accepted op" seed [ "accepted", accepted ]
+            SampleAdequacy.reached "Conformance.streamLaws" "tampered chain" seed [ "tampered", tampered ] ]
 
     /// Domain-reducer laws (Phase 254) — certify a domain's *own* reducer
     /// `apply : 'Op -> 'State -> Result<'State, 'Rej>` (Doc's `DocOp` apply, Calc's, …), not
@@ -95,10 +74,9 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable totality = None
-        let mutable determinism = None
-        let mutable envelope = None
+        let totality = LawKit.LawCell "reducer totality (never throws)"
+        let determinism = LawKit.LawCell "reducer replay determinism"
+        let envelope = LawKit.LawCell "rejection enumerates its alternatives"
         // Phase 220 — the outcome populations the laws branch on, both DRAWN from the domain's
         // own generator: replay determinism reads the accepted ops, the envelope law reads the
         // refused ones, and totality is the claim that a refusal is TYPED rather than thrown —
@@ -106,13 +84,12 @@ module internal StreamLaws =
         let mutable acceptedN = 0
         let mutable refusedN = 0
 
-        for i in 0 .. iterations - 1 do
+        LawKit.run iterations seed (fun rng _ at ->
             let mutable state = gen.State0
             let mutable accepted = []
 
             for _ in 0..5 do
-                let op, r' = gen.Op rng
-                rng <- r'
+                let op = rng.Draw gen.Op
 
                 let res =
                     try
@@ -120,10 +97,10 @@ module internal StreamLaws =
                     with _ ->
                         None
 
+                totality.Check(res.IsSome, fun () -> at "apply threw (not a typed rejection)")
+
                 match res with
-                | None ->
-                    if totality.IsNone then
-                        totality <- Some(sprintf "seed=%d iter=%d: apply threw (not a typed rejection)" seed i)
+                | None -> ()
                 | Some(Ok st') ->
                     acceptedN <- acceptedN + 1
                     state <- st'
@@ -132,10 +109,8 @@ module internal StreamLaws =
                     refusedN <- refusedN + 1
 
                     match namesAlternatives with
-                    | Some p when not (p rej) && envelope.IsNone ->
-                        envelope <-
-                            Some(sprintf "seed=%d iter=%d: a rejection did not enumerate its alternatives" seed i)
-                    | _ -> ()
+                    | Some p -> envelope.Check(p rej, fun () -> at "a rejection did not enumerate its alternatives")
+                    | None -> ()
 
             // replay the accepted ops from State0 — must reproduce the live state
             let replayed =
@@ -143,22 +118,12 @@ module internal StreamLaws =
                 ||> List.fold (fun acc op -> acc |> Result.bind (fun s -> apply op s))
 
             match replayed with
-            | Ok st when st = state -> ()
-            | other ->
-                if determinism.IsNone then
-                    determinism <- Some(sprintf "seed=%d iter=%d: replay ≠ live state (got %A)" seed i other)
+            | Ok st when st = state -> determinism.Saw()
+            | other -> determinism.Check(false, fun () -> at (sprintf "replay ≠ live state (got %A)" other)))
 
-        [ { Law = "reducer totality (never throws)"
-            Passed = totality.IsNone
-            Counterexample = totality }
-          { Law = "reducer replay determinism"
-            Passed = determinism.IsNone
-            Counterexample = determinism } ]
+        LawKit.results [ totality; determinism ]
         @ (match namesAlternatives with
-           | Some _ ->
-               [ { Law = "rejection enumerates its alternatives"
-                   Passed = envelope.IsNone
-                   Counterexample = envelope } ]
+           | Some _ -> LawKit.results [ envelope ]
            | None -> [])
         // Phase 220 — `Guarded ["accepted"; "refused"]`, after the subject laws so their positions
         // are unchanged for every caller that reads them by index.
@@ -186,17 +151,22 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable bounded = None
-        let mutable across = None
+        let bounded =
+            LawKit.LawCell "bounded replay (replayFrom snapshot tail = replay from origin)"
 
-        for i in 0 .. iterations - 1 do
+        let across = LawKit.LawCell "verifyAcross accepts an intact (snapshot, tail)"
+        // The snapshot arm runs only over a non-empty chain, and whether the chain is non-empty is
+        // the generator's doing — a generator whose every op is refused never reaches it, and both
+        // cells then report "never reached" rather than green (the runner's evidence count, Phase
+        // 302). A census-visible guard NAMING the starved arm is a later widening: it adds a result,
+        // which every count-pinning reader of this family sees.
+
+        LawKit.run iterations seed (fun rng _ at ->
             let mutable state = gen.State0
             let mutable recs = OpStream.empty
 
             for _ in 0..5 do
-                let op, r' = gen.Op rng
-                rng <- r'
+                let op = rng.Draw gen.Op
 
                 match OpStream.appendWith cfg hashFn sw (Human "conf") op state recs with
                 | Ok(s', recs') ->
@@ -207,34 +177,22 @@ module internal StreamLaws =
             let len = List.length recs
 
             if len > 0 then
-                let atSeq, r2 = ConfRng.intBelow (len + 1) rng
-                rng <- r2
+                let atSeq = rng.IntBelow(len + 1)
 
                 match OpStream.compact hashFn stateEncode sw gen.State0 recs atSeq with
                 | Ok(snap, tail) ->
                     match OpStream.replayFrom sw snap tail, OpStream.replay sw gen.State0 recs with
-                    | Ok a, Ok b when a = b -> ()
+                    | Ok a, Ok b when a = b -> bounded.Saw()
                     | other ->
-                        if bounded.IsNone then
-                            bounded <-
-                                Some(sprintf "seed=%d iter=%d: replayFrom ≠ replay-from-origin (%A)" seed i other)
+                        bounded.Check(false, fun () -> at (sprintf "replayFrom ≠ replay-from-origin (%A)" other))
 
-                    if
-                        not (OpStream.verifyAcrossWith cfg hashFn stateEncode sw snap tail)
-                        && across.IsNone
-                    then
-                        across <-
-                            Some(sprintf "seed=%d iter=%d: verifyAcrossWith rejected an intact (snapshot, tail)" seed i)
-                | Error e ->
-                    if bounded.IsNone then
-                        bounded <- Some(sprintf "seed=%d iter=%d: compact failed: %s" seed i e)
+                    across.Check(
+                        OpStream.verifyAcrossWith cfg hashFn stateEncode sw snap tail,
+                        fun () -> at "verifyAcrossWith rejected an intact (snapshot, tail)"
+                    )
+                | Error e -> bounded.Check(false, fun () -> at (sprintf "compact failed: %s" e)))
 
-        [ { Law = "bounded replay (replayFrom snapshot tail = replay from origin)"
-            Passed = bounded.IsNone
-            Counterexample = bounded }
-          { Law = "verifyAcross accepts an intact (snapshot, tail)"
-            Passed = across.IsNone
-            Counterexample = across } ]
+        LawKit.results [ bounded; across ]
 
     /// Snapshot / compaction laws (Phase 07): **bounded replay** (`replayFrom` a compacted
     /// checkpoint equals `replay` from origin) and **verifyAcross accepts an intact boundary**.
@@ -261,78 +219,58 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable verify = None
-        let mutable determinism = None
-        let mutable tamper = None
-        let mutable roundtrip = None
+        let verify = LawKit.LawCell "verifyDag accepts an intact DAG"
+        let determinism = LawKit.LawCell "replayTo is deterministic"
+        let tamper = LawKit.LawCell "verifyDag detects a tampered node"
+        let roundtrip = LawKit.LawCell "DAG JSONL round-trip preserves the DAG"
+        // The tamper arm runs only when the fresh draw differs from the op it replaces — a
+        // generator that keeps drawing the same op never tampers, and `tamper` then reports "never
+        // reached" rather than green (Phase 302). A census-visible guard naming the starved arm is
+        // a later widening (see `snapshotLawsWith`).
 
-        for i in 0 .. iterations - 1 do
+        LawKit.run iterations seed (fun rng _ at ->
             // a fork+merge DAG: genesis g; a, b both children of g; merge m of (a, b)
-            let op0, r0 = gen.Op rng
-            let opA, r1 = gen.Op r0
-            let opB, r2 = gen.Op r1
-            let opM, r3 = gen.Op r2
-            rng <- r3
+            let op0 = rng.Draw gen.Op
+            let opA = rng.Draw gen.Op
+            let opB = rng.Draw gen.Op
+            let opM = rng.Draw gen.Op
 
-            let g, d1 = Dag.append hashFn sw (Human "conf") op0 "" Dag.empty
-            let a, d2 = Dag.append hashFn sw (Human "conf") opA g d1
-            let b, d3 = Dag.append hashFn sw (Human "conf") opB g d2
-            let m, dag = Dag.merge hashFn sw (Human "conf") opM a b d3
+            let _, _, _, m, dag = LawKit.randomDag hashFn sw false op0 opA opB opM
 
-            if not (Dag.verifyDag hashFn sw dag) && verify.IsNone then
-                verify <- Some(sprintf "seed=%d iter=%d: verifyDag rejected an intact DAG" seed i)
+            verify.Check(Dag.verifyDag hashFn sw dag, fun () -> at "verifyDag rejected an intact DAG")
 
             // Determinism (Phase 18): build the SAME logical history with a permuted append order
             // (B before A) and confirm it converges to the same content-addressed DAG + head and
             // replays to the same state — a genuine convergence check, not the prior `f x <> f x`
             // self-comparison. (Content addressing is append-order-insensitive, so a regression
             // that leaked insertion order into a node id would diverge here.)
-            let g', e1 = Dag.append hashFn sw (Human "conf") op0 "" Dag.empty
-            let b', e2 = Dag.append hashFn sw (Human "conf") opB g' e1
-            let a', e3 = Dag.append hashFn sw (Human "conf") opA g' e2
-            let m', dag' = Dag.merge hashFn sw (Human "conf") opM a' b' e3
+            let _, _, _, m', dag' = LawKit.randomDag hashFn sw true op0 opA opB opM
 
-            if
-                (dag'.Nodes <> dag.Nodes
-                 || m' <> m
-                 || Dag.replayTo sw gen.State0 dag' m' <> Dag.replayTo sw gen.State0 dag m)
-                && determinism.IsNone
-            then
-                determinism <-
-                    Some(sprintf "seed=%d iter=%d: a permuted-construction history diverged (nodes/head/replay)" seed i)
+            determinism.Check(
+                not (
+                    dag'.Nodes <> dag.Nodes
+                    || m' <> m
+                    || Dag.replayTo sw gen.State0 dag' m' <> Dag.replayTo sw gen.State0 dag m
+                ),
+                fun () -> at "a permuted-construction history diverged (nodes/head/replay)"
+            )
 
             // tamper one node's op with a genuinely-different op
-            let newOp, r4 = gen.Op rng
-            rng <- r4
+            let newOp = rng.Draw gen.Op
 
             let tid, tnode = dag.Nodes |> Map.toList |> List.head
 
             if sw.Encode tnode.Op <> sw.Encode newOp then
-                let tampered = { Dag.T.Nodes = Map.add tid { tnode with Op = newOp } dag.Nodes }
+                let forged = { Dag.T.Nodes = Map.add tid { tnode with Op = newOp } dag.Nodes }
 
-                if Dag.verifyDag hashFn sw tampered && tamper.IsNone then
-                    tamper <- Some(sprintf "seed=%d iter=%d: a tampered DAG node was not detected" seed i)
+                tamper.Check(not (Dag.verifyDag hashFn sw forged), fun () -> at "a tampered DAG node was not detected")
 
             // JSONL persistence round-trip (Phase 01 is shipped)
             match Dag.fromJsonl sw (Dag.toJsonl sw.Encode dag) with
-            | Ok dag' when dag'.Nodes = dag.Nodes -> ()
-            | other ->
-                if roundtrip.IsNone then
-                    roundtrip <- Some(sprintf "seed=%d iter=%d: DAG JSONL round-trip ≠ original (%A)" seed i other)
+            | Ok dag' when dag'.Nodes = dag.Nodes -> roundtrip.Saw()
+            | other -> roundtrip.Check(false, fun () -> at (sprintf "DAG JSONL round-trip ≠ original (%A)" other)))
 
-        [ { Law = "verifyDag accepts an intact DAG"
-            Passed = verify.IsNone
-            Counterexample = verify }
-          { Law = "replayTo is deterministic"
-            Passed = determinism.IsNone
-            Counterexample = determinism }
-          { Law = "verifyDag detects a tampered node"
-            Passed = tamper.IsNone
-            Counterexample = tamper }
-          { Law = "DAG JSONL round-trip preserves the DAG"
-            Passed = roundtrip.IsNone
-            Counterexample = roundtrip } ]
+        LawKit.results [ verify; determinism; tamper; roundtrip ]
 
     /// The determinism-capture / replay laws (Phase 27) — the teeth on `OpStream.captureEffect` /
     /// `replayEffect`. A domain supplies a value `Codec` (`encode`/`decode`) and a `draw` of a
@@ -358,21 +296,28 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable exact = None
-        let mutable deterministic = None
-        let mutable tamper = None
+        let exact =
+            LawKit.LawCell "replay-with-capture is byte-identical to the recorded session"
 
-        for i in 0 .. iterations - 1 do
+        let deterministic =
+            LawKit.LawCell "a deterministic effect emits no capture (replay re-evaluates live)"
+
+        let tamper = LawKit.LawCell "verifyCaptures detects a tampered capture"
+
+        let multiIdentity =
+            LawKit.LawCell "replayEffect enforces effect-identity order (a misordered replay is a named error)"
+        // The tamper arm runs only when the fresh draw encodes differently from the capture it
+        // replaces — a `draw` that keeps yielding the same value never tampers.
+        let mutable tampered = 0
+
+        LawKit.run iterations seed (fun rng _ at ->
             // record a non-deterministic session: 1..5 effects, each a fresh draw, journalled.
-            let k, r0 = ConfRng.intBelow 5 rng
-            rng <- r0
+            let k = rng.IntBelow 5
             let mutable captures = []
             let mutable recorded = []
 
             for _ in 0..k do
-                let v, r' = draw rng
-                rng <- r'
+                let v = rng.Draw draw
                 // the recorded "live source" draws v; captureEffect journals it under "random".
                 let got, caps' =
                     OpStream.captureEffect hashFn encode "random" "eff" (fun () -> v) captures
@@ -385,12 +330,9 @@ module internal StreamLaws =
             let mutable replayed = []
             let mutable replayOk = true
 
-            for orig in recorded do
+            for _ in recorded do
                 // a divergent live fallback: if replay ever re-evaluated, it would diverge from orig.
-                let liveDifferent () =
-                    let v, r' = draw rng
-                    rng <- r'
-                    v
+                let liveDifferent () = rng.Draw draw
 
                 match OpStream.replayEffect decode "eff" "random" liveDifferent cursor with
                 | Ok(v, rest) ->
@@ -398,19 +340,19 @@ module internal StreamLaws =
                     replayed <- replayed @ [ v ]
                 | Error _ -> replayOk <- false
 
-            if
-                exact.IsNone
-                && (not replayOk
+            exact.Check(
+                not (
+                    not replayOk
                     || replayed <> recorded
                     || not (List.isEmpty cursor)
                     // byte-identity: each replayed value re-encodes to the journalled value.
-                    || (List.zip replayed captures |> List.exists (fun (v, c) -> encode v <> c.Value)))
-            then
-                exact <- Some(sprintf "seed=%d iter=%d: replay-with-capture ≠ recorded session" seed i)
+                    || (List.zip replayed captures |> List.exists (fun (v, c) -> encode v <> c.Value))
+                ),
+                fun () -> at "replay-with-capture ≠ recorded session"
+            )
 
             // deterministic pass-through: no capture emitted, replay re-evaluates live, journal intact.
-            let dv, r1 = draw rng
-            rng <- r1
+            let dv = rng.Draw draw
 
             let dGot, dCaps =
                 OpStream.captureEffect hashFn encode OpStream.deterministicTag "eff" (fun () -> dv) []
@@ -418,72 +360,62 @@ module internal StreamLaws =
             let dReplay =
                 OpStream.replayEffect decode "eff" OpStream.deterministicTag (fun () -> dv) dCaps
 
-            if
-                deterministic.IsNone
-                && (dGot <> dv || not (List.isEmpty dCaps) || dReplay <> Ok(dv, []))
-            then
-                deterministic <-
-                    Some(sprintf "seed=%d iter=%d: a deterministic effect was captured or altered replay" seed i)
+            deterministic.Check(
+                not (dGot <> dv || not (List.isEmpty dCaps) || dReplay <> Ok(dv, [])),
+                fun () -> at "a deterministic effect was captured or altered replay"
+            )
 
             // tamper: replace a captured value with a genuinely-different encoding ⇒ verifyCaptures fails.
             match captures with
             | [] -> ()
             | _ ->
-                let tIdx, r2 = ConfRng.intBelow (List.length captures) rng
-                let newV, r3 = draw r2
-                rng <- r3
+                let tIdx = rng.IntBelow(List.length captures)
+                let newV = rng.Draw draw
                 let newValue = encode newV
                 let orig = List.item tIdx captures
 
                 if orig.Value <> newValue then
-                    let tampered =
+                    tampered <- tampered + 1
+
+                    let forged =
                         captures
                         |> List.mapi (fun j c -> if j = tIdx then { c with Value = newValue } else c)
 
-                    if OpStream.verifyCaptures hashFn tampered && tamper.IsNone then
-                        tamper <- Some(sprintf "seed=%d iter=%d: a tampered capture was not detected" seed i)
+                    tamper.Check(
+                        not (OpStream.verifyCaptures hashFn forged),
+                        fun () -> at "a tampered capture was not detected"
+                    ))
 
         // multi-identity guard (Phase 40): a journal of two distinct effect identities replays
         // correctly in record order, but a replay that requests the wrong identity at the head
         // surfaces a *named* mismatch rather than silently handing back the other effect's value.
-        let multiIdentity =
-            let v1, rA = draw (ConfRng.ofSeed (seed + 7))
-            let v2, _ = draw rA
-            let _, c1 = OpStream.captureEffect hashFn encode "clock" "alpha" (fun () -> v1) []
-            let _, caps = OpStream.captureEffect hashFn encode "random" "beta" (fun () -> v2) c1
+        let v1, rA = draw (ConfRng.ofSeed (seed + 7))
+        let v2, _ = draw rA
+        let _, c1 = OpStream.captureEffect hashFn encode "clock" "alpha" (fun () -> v1) []
+        let _, caps = OpStream.captureEffect hashFn encode "random" "beta" (fun () -> v2) c1
 
-            // in record order: alpha then beta — both hit their captures byte-identically.
-            let inOrder =
-                match OpStream.replayEffect decode "alpha" "clock" (fun () -> v1) caps with
-                | Ok(a, rest) ->
-                    match OpStream.replayEffect decode "beta" "random" (fun () -> v2) rest with
-                    | Ok(b, []) -> encode a = c1.Head.Value && encode b = (List.item 1 caps).Value
-                    | _ -> false
+        // in record order: alpha then beta — both hit their captures byte-identically.
+        let inOrder =
+            match OpStream.replayEffect decode "alpha" "clock" (fun () -> v1) caps with
+            | Ok(a, rest) ->
+                match OpStream.replayEffect decode "beta" "random" (fun () -> v2) rest with
+                | Ok(b, []) -> encode a = c1.Head.Value && encode b = (List.item 1 caps).Value
                 | _ -> false
+            | _ -> false
 
-            // out of order: requesting beta while the head is alpha must be a named error.
-            let misordered =
-                match OpStream.replayEffect decode "beta" "random" (fun () -> v2) caps with
-                | Error msg -> msg.Contains "identity mismatch"
-                | Ok _ -> false
+        // out of order: requesting beta while the head is alpha must be a named error.
+        let misordered =
+            match OpStream.replayEffect decode "beta" "random" (fun () -> v2) caps with
+            | Error msg -> msg.Contains "identity mismatch"
+            | Ok _ -> false
 
-            if inOrder && misordered then
-                None
-            else
-                Some(sprintf "seed=%d: replayEffect did not enforce effect-identity order" seed)
+        multiIdentity.Check(
+            inOrder && misordered,
+            fun () -> sprintf "seed=%d: replayEffect did not enforce effect-identity order" seed
+        )
 
-        [ { Law = "replay-with-capture is byte-identical to the recorded session"
-            Passed = exact.IsNone
-            Counterexample = exact }
-          { Law = "a deterministic effect emits no capture (replay re-evaluates live)"
-            Passed = deterministic.IsNone
-            Counterexample = deterministic }
-          { Law = "verifyCaptures detects a tampered capture"
-            Passed = tamper.IsNone
-            Counterexample = tamper }
-          { Law = "replayEffect enforces effect-identity order (a misordered replay is a named error)"
-            Passed = multiIdentity.IsNone
-            Counterexample = multiIdentity } ]
+        LawKit.results [ exact; deterministic; tamper; multiIdentity ]
+        @ [ SampleAdequacy.reached "Conformance.captureReplayLaws" "tampered" seed [ "tampered", tampered ] ]
 
     /// The compare-and-append (CAS) laws (Phase 79) — certify `OpStream.appendIf` is a sound
     /// optimistic-concurrency primitive over a domain's `StreamWitness`. Three properties:
@@ -502,37 +434,32 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable matchLaw = None
-        let mutable staleLaw = None
-        let mutable raceLaw = None
+        let matchLaw = LawKit.LawCell "appendIf with the true head ≡ append"
+
+        let staleLaw =
+            LawKit.LawCell "appendIf with a stale head rejects, naming the actual head (stream unchanged)"
+
+        let raceLaw =
+            LawKit.LawCell "two racing appendIf calls off one base admit exactly one winner under any serialisation"
+
         let actor = Human "conf"
         // Phase 223 — the match arm's two outcome populations, both DRAWN from the caller's
         // StreamGen: `match ≡ append` compares a domain refusal with a CAS `Domain` rejection only
         // when the drawn op is refused, and compares two accepted appends only when it is not.
         let mutable accepted = 0
         let mutable refused = 0
+        // The race arm runs only when BOTH drawn writers apply against the base — a generator
+        // that refuses often enough leaves the race law with nothing to serialise.
+        let mutable races = 0
 
-        for i in 0 .. iterations - 1 do
+        LawKit.run iterations seed (fun rng _ at ->
             // Build a random base chain (as streamLaws does) — the CAS is exercised against its head.
-            let mutable state = gen.State0
-            let mutable recs = OpStream.empty
-
-            for _ in 0..5 do
-                let op, r' = gen.Op rng
-                rng <- r'
-
-                match OpStream.append hashFn sw actor op state recs with
-                | Ok(s', recs') ->
-                    state <- s'
-                    recs <- recs'
-                | Error _ -> ()
+            let state, recs, _ = LawKit.buildChain hashFn sw gen rng
 
             let baseHead = OpStream.head recs
 
             // ---- match ≡ append ----
-            let opM, rM = gen.Op rng
-            rng <- rM
+            let opM = rng.Draw gen.Op
             let viaAppend = OpStream.append hashFn sw actor opM state recs
             let viaCas = OpStream.appendIf hashFn sw baseHead actor opM state recs
 
@@ -546,36 +473,31 @@ module internal StreamLaws =
                 | Error e, Error(AppendRejection.Domain e2) -> e = e2
                 | _ -> false
 
-            if not matchOk && matchLaw.IsNone then
-                matchLaw <- Some(sprintf "seed=%d iter=%d: appendIf(trueHead) ≢ append" seed i)
+            matchLaw.Check(matchOk, fun () -> at "appendIf(trueHead) ≢ append")
 
             // ---- stale head rejects, naming the actual head; stream unchanged ----
-            let opS, rS = gen.Op rng
-            rng <- rS
+            let opS = rng.Draw gen.Op
             let staleHead = baseHead + "!" // guaranteed ≠ baseHead
 
             match OpStream.appendIf hashFn sw staleHead actor opS state recs with
-            | Error(AppendRejection.StaleHead(expected, actual)) when expected = staleHead && actual = baseHead -> () // recs is an immutable value the caller still holds — there is no partial write
+            | Error(AppendRejection.StaleHead(expected, actual)) when expected = staleHead && actual = baseHead ->
+                staleLaw.Saw() // recs is an immutable value the caller still holds — there is no partial write
             | other ->
-                if staleLaw.IsNone then
-                    staleLaw <-
-                        Some(
-                            sprintf
-                                "seed=%d iter=%d: appendIf(staleHead) did not name the actual head (got %A)"
-                                seed
-                                i
-                                other
-                        )
+                staleLaw.Check(
+                    false,
+                    fun () -> at (sprintf "appendIf(staleHead) did not name the actual head (got %A)" other)
+                )
 
             // ---- race: exactly one of two writers off one base head wins, either order ----
-            let opA, rA = gen.Op rng
-            let opB, rB = gen.Op rA
-            rng <- rB
+            let opA = rng.Draw gen.Op
+            let opB = rng.Draw gen.Op
 
             // A genuine CAS race needs both ops to individually apply against the base — a domain
             // reject is not a CAS outcome, so skip the race check for that iteration.
             match OpStream.append hashFn sw actor opA state recs, OpStream.append hashFn sw actor opB state recs with
             | Ok _, Ok _ ->
+                races <- races + 1
+
                 // The first writer commits against the base head → succeeds and advances the chain; the
                 // second still holds baseHead as its expectation → StaleHead. Exactly one winner.
                 let serialise first second =
@@ -586,27 +508,19 @@ module internal StreamLaws =
                         | _ -> false
                     | _ -> false
 
-                if not (serialise opA opB && serialise opB opA) && raceLaw.IsNone then
-                    raceLaw <-
-                        Some(
-                            sprintf "seed=%d iter=%d: two racing appendIf calls did not admit exactly one winner" seed i
-                        )
-            | _ -> ()
+                raceLaw.Check(
+                    serialise opA opB && serialise opB opA,
+                    fun () -> at "two racing appendIf calls did not admit exactly one winner"
+                )
+            | _ -> ())
 
-        [ { Law = "appendIf with the true head ≡ append"
-            Passed = matchLaw.IsNone
-            Counterexample = matchLaw }
-          { Law = "appendIf with a stale head rejects, naming the actual head (stream unchanged)"
-            Passed = staleLaw.IsNone
-            Counterexample = staleLaw }
-          { Law = "two racing appendIf calls off one base admit exactly one winner under any serialisation"
-            Passed = raceLaw.IsNone
-            Counterexample = raceLaw }
-          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws so their positions
-          // are unchanged. A StreamGen that never draws a refused op leaves `match ≡ append`
-          // certified on the accept path alone, and green.
-          SampleAdequacy.reached "Conformance.casLaws" "accepted op" seed [ "accepted", accepted ]
-          SampleAdequacy.reached "Conformance.casLaws" "refused op" seed [ "refused", refused ] ]
+        LawKit.results [ matchLaw; staleLaw; raceLaw ]
+        // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws so their positions
+        // are unchanged. A StreamGen that never draws a refused op leaves `match ≡ append`
+        // certified on the accept path alone, and green.
+        @ [ SampleAdequacy.reached "Conformance.casLaws" "accepted op" seed [ "accepted", accepted ]
+            SampleAdequacy.reached "Conformance.casLaws" "refused op" seed [ "refused", refused ]
+            SampleAdequacy.reached "Conformance.casLaws" "race arm" seed [ "both apply", races ] ]
 
     // ---- idempotent append (Phase 82) ----
     // The at-least-once claim the agent retry loop rests on: a re-sent invocation key converges
@@ -639,19 +553,35 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable freshLaw = None
-        let mutable dupLaw = None
-        let mutable parityLaw = None
-        let mutable casLaw = None
+        let freshLaw =
+            LawKit.LawCell
+                "appendIdempotent with a fresh key ≡ append (chain-identical; index gains exactly the new entry)"
+
+        let dupLaw =
+            LawKit.LawCell
+                "re-appending a seen key is Duplicate naming the entry the key first produced (stream untouched)"
+
+        let parityLaw =
+            LawKit.LawCell "KeyIndex.ofStream agrees with the incrementally-maintained index (rebuild parity)"
+
+        let casLaw =
+            LawKit.LawCell
+                "idempotency precedes the CAS (a seen key converges under any head; a fresh key CASes as appendIf)"
+
         let actor = Human "conf"
         // Phase 223 — the fresh-key arms' outcome populations, DRAWN from the caller's StreamGen:
         // `fresh ≡ append` and the true-head CAS arm forward a domain refusal verbatim only when the
         // drawn op is refused, which is a property of the run.
         let mutable accepted = 0
         let mutable refused = 0
+        // The gated arms — the two fresh-key arms run only when the drawn op's key is not already in
+        // the index, and the seen-key arm (duplicate convergence + the stale-head retry) only over a
+        // non-empty chain, all three decided by what the generator drew — are held by the runner's
+        // evidence count: an arm never reached reports its law "never reached" rather than green
+        // (Phase 302). A census-visible guard naming the starved arm is a later widening (see
+        // `snapshotLawsWith`).
 
-        for i in 0 .. iterations - 1 do
+        LawKit.run iterations seed (fun rng _ at ->
             // Build a base chain THROUGH appendIdempotent, threading (state, records, index) — a
             // generated op whose key is already seen (or whose apply rejects) extends nothing,
             // which is itself the primitive under test. Rebuild parity is checked at every step.
@@ -660,8 +590,7 @@ module internal StreamLaws =
             let mutable index = KeyIndex.empty
 
             for _ in 0..5 do
-                let op, r' = gen.Op rng
-                rng <- r'
+                let op = rng.Draw gen.Op
 
                 match OpStream.appendIdempotent hashFn sw (keyOf op) actor op state index recs with
                 | Ok(AppendOutcome.Appended(s', recs', idx')) ->
@@ -671,14 +600,15 @@ module internal StreamLaws =
                 | Ok(AppendOutcome.Duplicate _)
                 | Error _ -> ()
 
-                if KeyIndex.ofStream keyOf recs <> index && parityLaw.IsNone then
-                    parityLaw <- Some(sprintf "seed=%d iter=%d: ofStream ≠ the incrementally-maintained index" seed i)
+                parityLaw.Check(
+                    KeyIndex.ofStream keyOf recs = index,
+                    fun () -> at "ofStream ≠ the incrementally-maintained index"
+                )
 
             let baseHead = OpStream.head recs
 
             // ---- fresh ≡ append (chain-identity + index extended by exactly the new entry) ----
-            let opF, rF = gen.Op rng
-            rng <- rF
+            let opF = rng.Draw gen.Op
 
             if (KeyIndex.tryFind (keyOf opF) index).IsNone then
                 let viaAppend = OpStream.append hashFn sw actor opF state recs
@@ -701,67 +631,51 @@ module internal StreamLaws =
                     | Error e, Error e2 -> e = e2
                     | _ -> false
 
-                if not freshOk && freshLaw.IsNone then
-                    freshLaw <- Some(sprintf "seed=%d iter=%d: appendIdempotent(fresh key) ≢ append" seed i)
+                freshLaw.Check(freshOk, fun () -> at "appendIdempotent(fresh key) ≢ append")
 
             // ---- duplicate convergence: a seen key names the entry it FIRST produced ----
             if not (List.isEmpty recs) then
-                let pick, rP = ConfRng.intBelow (List.length recs) rng
-                rng <- rP
+                let pick = rng.IntBelow(List.length recs)
                 let key = keyOf (List.item pick recs).Op
                 let first = recs |> List.find (fun r -> keyOf r.Op = key)
-                let opD, rD = gen.Op rng
-                rng <- rD
+                let opD = rng.Draw gen.Op
 
                 match OpStream.appendIdempotent hashFn sw key actor opD state index recs with
-                | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash -> () // recs/index are immutable values the caller still holds — the stream is byte-identical
+                | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
+                    dupLaw.Saw() // recs/index are immutable values the caller still holds — the stream is byte-identical
                 | other ->
-                    if dupLaw.IsNone then
-                        dupLaw <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: a seen key did not converge on its first entry (got %A)"
-                                    seed
-                                    i
-                                    other
-                            )
+                    dupLaw.Check(
+                        false,
+                        fun () -> at (sprintf "a seen key did not converge on its first entry (got %A)" other)
+                    )
 
                 // ---- idempotency-before-CAS: the lost-ack retry converges under a stale head ----
                 let staleHead = baseHead + "!" // guaranteed ≠ baseHead
 
                 match OpStream.appendIdempotentIf hashFn sw key staleHead actor opD state index recs with
-                | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash -> ()
+                | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
+                    casLaw.Saw()
                 | other ->
-                    if casLaw.IsNone then
-                        casLaw <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: a seen key under a stale head did not converge on Duplicate (got %A)"
-                                    seed
-                                    i
-                                    other
-                            )
+                    casLaw.Check(
+                        false,
+                        fun () ->
+                            at (sprintf "a seen key under a stale head did not converge on Duplicate (got %A)" other)
+                    )
 
             // ---- fresh key through the CAS: stale head refuses; the true head ≡ append ----
-            let opC, rC = gen.Op rng
-            rng <- rC
+            let opC = rng.Draw gen.Op
 
             if (KeyIndex.tryFind (keyOf opC) index).IsNone then
                 let staleHead = baseHead + "!"
 
                 match OpStream.appendIdempotentIf hashFn sw (keyOf opC) staleHead actor opC state index recs with
                 | Error(AppendRejection.StaleHead(expected, actual)) when expected = staleHead && actual = baseHead ->
-                    ()
+                    casLaw.Saw()
                 | other ->
-                    if casLaw.IsNone then
-                        casLaw <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: a fresh key under a stale head was not StaleHead (got %A)"
-                                    seed
-                                    i
-                                    other
-                            )
+                    casLaw.Check(
+                        false,
+                        fun () -> at (sprintf "a fresh key under a stale head was not StaleHead (got %A)" other)
+                    )
 
                 let viaAppend = OpStream.append hashFn sw actor opC state recs
 
@@ -778,26 +692,14 @@ module internal StreamLaws =
                     | Error e, Error(AppendRejection.Domain e2) -> e = e2
                     | _ -> false
 
-                if not matchOk && casLaw.IsNone then
-                    casLaw <- Some(sprintf "seed=%d iter=%d: appendIdempotentIf(fresh key, true head) ≢ append" seed i)
+                casLaw.Check(matchOk, fun () -> at "appendIdempotentIf(fresh key, true head) ≢ append"))
 
-        [ { Law = "appendIdempotent with a fresh key ≡ append (chain-identical; index gains exactly the new entry)"
-            Passed = freshLaw.IsNone
-            Counterexample = freshLaw }
-          { Law = "re-appending a seen key is Duplicate naming the entry the key first produced (stream untouched)"
-            Passed = dupLaw.IsNone
-            Counterexample = dupLaw }
-          { Law = "KeyIndex.ofStream agrees with the incrementally-maintained index (rebuild parity)"
-            Passed = parityLaw.IsNone
-            Counterexample = parityLaw }
-          { Law = "idempotency precedes the CAS (a seen key converges under any head; a fresh key CASes as appendIf)"
-            Passed = casLaw.IsNone
-            Counterexample = casLaw }
-          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A StreamGen that
-          // never draws a refused fresh op leaves the verbatim-forwarding half of `fresh ≡ append`
-          // and of the true-head CAS arm certified by nothing, and green.
-          SampleAdequacy.reached "Conformance.idempotencyLaws" "accepted fresh op" seed [ "accepted", accepted ]
-          SampleAdequacy.reached "Conformance.idempotencyLaws" "refused fresh op" seed [ "refused", refused ] ]
+        LawKit.results [ freshLaw; dupLaw; parityLaw; casLaw ]
+        // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A StreamGen that
+        // never draws a refused fresh op leaves the verbatim-forwarding half of `fresh ≡ append`
+        // and of the true-head CAS arm certified by nothing, and green.
+        @ [ SampleAdequacy.reached "Conformance.idempotencyLaws" "accepted fresh op" seed [ "accepted", accepted ]
+            SampleAdequacy.reached "Conformance.idempotencyLaws" "refused fresh op" seed [ "refused", refused ] ]
 
     /// **Every reason this library MINTS is a named case** (Phase 125) — the law that makes
     /// `ChainBreakReason.Unrecognised` an honest arm rather than a hedge.
@@ -820,68 +722,73 @@ module internal StreamLaws =
     /// rather than being swept into the nearest-looking case — which is the defect the consumer's
     /// pre-typed form had, and the reason this type is worth its breaking change.
     let chainBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
-        // A self-contained int-op witness: the claim is about THIS library's walkers, not about a
+        // The kit's own int-op witness: the claim is about THIS library's walkers, not about a
         // host's, so there is no caller witness to take.
-        let sw: StreamWitness<int, int, string> =
-            { Apply = fun op state -> Ok(state + op)
-              Encode = string
-              Decode =
-                fun s ->
-                    match System.Int32.TryParse s with
-                    | true, v -> Ok v
-                    | false, _ -> Error("not an int: " + s) }
+        let sw = LawKit.intWitness
 
         let hashFn = OpStream.defaultHash
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable unnamed = None
-        let mutable roundTrip = None
-        let mutable verbatim = None
+
+        let unnamed =
+            LawKit.LawCell "every reason the chain walkers mint is a NAMED ChainBreakReason case"
+
+        let roundTrip =
+            LawKit.LawCell "ChainBreakReason.ofString (toString r) = r on every named case"
+
+        let verbatim =
+            LawKit.LawCell "ChainBreakReason.ofString carries an unknown reason into Unrecognised verbatim"
+
+        let opWalk =
+            LawKit.LawCell "non-vacuity: the op walk produced every break kind it can produce"
+
+        let captureWalk =
+            LawKit.LawCell "non-vacuity: the capture walk produced every break kind it can produce"
+
         let mutable seenOp = Set.empty
         let mutable seenCapture = Set.empty
 
         // The reason a break carries, or None when the walk found the chain intact — which is
         // itself a defect here, since every input below is deliberately broken.
-        let reasonOf (label: string) (i: int) (b: ChainBreak option) : ChainBreakReason option =
+        let reasonOf (label: string) (at: string -> string) (b: ChainBreak option) : ChainBreakReason option =
             match b with
             | Some br ->
                 // Qualified since Phase 147: `DagBreakReason` declares an `Unrecognised` too, and
                 // both are in scope here. The .NET compiler resolves this from the scrutinee's type;
                 // FABLE does not, and reported it as an error on a tree .NET had built clean.
                 (match br.Reason with
-                 | ChainBreakReason.Unrecognised s when unnamed.IsNone ->
-                     unnamed <-
-                         Some(
-                             sprintf
-                                 "seed=%d iter=%d: the %s walk minted an unnamed reason %s — a walker inside this library must stay inside the named cases, or ChainBreakReason gives a consumer back the untyped string it exists to remove"
-                                 seed
-                                 i
-                                 label
-                                 s
-                         )
-                 | _ -> ())
+                 | ChainBreakReason.Unrecognised s ->
+                     unnamed.Check(
+                         false,
+                         fun () ->
+                             at (
+                                 sprintf
+                                     "the %s walk minted an unnamed reason %s — a walker inside this library must stay inside the named cases, or ChainBreakReason gives a consumer back the untyped string it exists to remove"
+                                     label
+                                     s
+                             )
+                     )
+                 | _ -> unnamed.Saw())
 
                 Some br.Reason
             | None ->
-                if unnamed.IsNone then
-                    unnamed <-
-                        Some(
+                unnamed.Check(
+                    false,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: the %s walk reported NO break over a deliberately broken chain, so this family is measuring nothing"
-                                seed
-                                i
+                                "the %s walk reported NO break over a deliberately broken chain, so this family is measuring nothing"
                                 label
                         )
+                )
 
                 None
 
-        for i in 0 .. iterations - 1 do
+        LawKit.run iterations seed (fun rng _ at ->
             // ---- a sound op chain of four records ----
             let mutable state = 0
             let mutable recs = OpStream.empty
 
             for _ in 0..3 do
-                let op, r' = ConfRng.intBelow 50 rng
-                rng <- r'
+                let op = rng.IntBelow 50
 
                 match OpStream.append hashFn sw (Human "conf") (op + 1) state recs with
                 | Ok(s', recs') ->
@@ -897,7 +804,9 @@ module internal StreamLaws =
                     recs
                     |> List.mapi (fun j r -> if j = len - 1 then { r with Seq = r.Seq + 7 } else r)
 
-                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw renumbered) with
+                match
+                    reasonOf "op" at (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw renumbered)
+                with
                 | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
                 | None -> ()
 
@@ -910,7 +819,7 @@ module internal StreamLaws =
                         else
                             r)
 
-                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw repointed) with
+                match reasonOf "op" at (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw repointed) with
                 | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
                 | None -> ()
 
@@ -920,7 +829,7 @@ module internal StreamLaws =
                     recs
                     |> List.mapi (fun j r -> if j = len - 1 then { r with Op = r.Op + 1000 } else r)
 
-                match reasonOf "op" i (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw tampered) with
+                match reasonOf "op" at (OpStream.firstChainBreakWith OpStream.canonicalConfig hashFn sw tampered) with
                 | Some r -> seenOp <- Set.add (ChainBreakReason.toString r) seenOp
                 | None -> ()
 
@@ -941,7 +850,7 @@ module internal StreamLaws =
                     caps
                     |> List.mapi (fun j c -> if j = clen - 1 then { c with Seq = c.Seq + 7 } else c)
 
-                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capRenumbered) with
+                match reasonOf "capture" at (OpStream.firstCaptureBreak hashFn capRenumbered) with
                 | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
                 | None -> ()
 
@@ -953,7 +862,7 @@ module internal StreamLaws =
                         else
                             c)
 
-                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capRepointed) with
+                match reasonOf "capture" at (OpStream.firstCaptureBreak hashFn capRepointed) with
                 | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
                 | None -> ()
 
@@ -961,43 +870,39 @@ module internal StreamLaws =
                     caps
                     |> List.mapi (fun j c -> if j = clen - 1 then { c with Value = c.Value + "9" } else c)
 
-                match reasonOf "capture" i (OpStream.firstCaptureBreak hashFn capTampered) with
+                match reasonOf "capture" at (OpStream.firstCaptureBreak hashFn capTampered) with
                 | Some r -> seenCapture <- Set.add (ChainBreakReason.toString r) seenCapture
                 | None -> ()
 
             // ---- the string pair, both directions ----
             for named in [ SequenceMismatch; PrevHashLinkBroken; HashMismatch ] do
-                if
-                    ChainBreakReason.ofString (ChainBreakReason.toString named) <> named
-                    && roundTrip.IsNone
-                then
-                    roundTrip <-
-                        Some(
+                roundTrip.Check(
+                    ChainBreakReason.ofString (ChainBreakReason.toString named) = named,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: ofString (toString %A) = %A — the rendering and the parse disagree, so a consumer reading a logged reason back does not recover the case that wrote it"
-                                seed
-                                i
+                                "ofString (toString %A) = %A — the rendering and the parse disagree, so a consumer reading a logged reason back does not recover the case that wrote it"
                                 named
                                 (ChainBreakReason.ofString (ChainBreakReason.toString named))
                         )
+                )
 
-            let alien, rA = ConfRng.intBelow 1000 rng
-            rng <- rA
+            let alien = rng.IntBelow 1000
             let alienText = "a reason this library does not mint #" + string alien
 
             match ChainBreakReason.ofString alienText with
-            | ChainBreakReason.Unrecognised s when s = alienText -> ()
+            | ChainBreakReason.Unrecognised s when s = alienText -> verbatim.Saw()
             | other ->
-                if verbatim.IsNone then
-                    verbatim <-
-                        Some(
+                verbatim.Check(
+                    false,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: ofString %s = %A — an unknown reason must land in Unrecognised carrying its own text, never be swept into a named case, which is a claim about which check failed that nothing established"
-                                seed
-                                i
+                                "ofString %s = %A — an unknown reason must land in Unrecognised carrying its own text, never be swept into a named case, which is a claim about which check failed that nothing established"
                                 alienText
                                 other
                         )
+                ))
 
         // The capture walk spells the digest failure differently; `toString` renders one spelling
         // for the single `HashMismatch` case, so both walks are expected to have observed the same
@@ -1011,37 +916,23 @@ module internal StreamLaws =
         let missing (seen: Set<string>) =
             Set.difference expected seen |> Set.toList |> String.concat ", "
 
-        [ { Law = "every reason the chain walkers mint is a NAMED ChainBreakReason case"
-            Passed = unnamed.IsNone
-            Counterexample = unnamed }
-          { Law = "ChainBreakReason.ofString (toString r) = r on every named case"
-            Passed = roundTrip.IsNone
-            Counterexample = roundTrip }
-          { Law = "ChainBreakReason.ofString carries an unknown reason into Unrecognised verbatim"
-            Passed = verbatim.IsNone
-            Counterexample = verbatim }
-          { Law = "non-vacuity: the op walk produced every break kind it can produce"
-            Passed = Set.isEmpty (Set.difference expected seenOp)
-            Counterexample =
-              if Set.isEmpty (Set.difference expected seenOp) then
-                  None
-              else
-                  Some(
-                      "the op walk never reported: "
-                      + missing seenOp
-                      + " — the laws above hold vacuously for the break kinds that were never produced"
-                  ) }
-          { Law = "non-vacuity: the capture walk produced every break kind it can produce"
-            Passed = Set.isEmpty (Set.difference expected seenCapture)
-            Counterexample =
-              if Set.isEmpty (Set.difference expected seenCapture) then
-                  None
-              else
-                  Some(
-                      "the capture walk never reported: "
-                      + missing seenCapture
-                      + " — the laws above hold vacuously for the break kinds that were never produced"
-                  ) } ]
+        opWalk.Check(
+            Set.isEmpty (Set.difference expected seenOp),
+            fun () ->
+                "the op walk never reported: "
+                + missing seenOp
+                + " — the laws above hold vacuously for the break kinds that were never produced"
+        )
+
+        captureWalk.Check(
+            Set.isEmpty (Set.difference expected seenCapture),
+            fun () ->
+                "the capture walk never reported: "
+                + missing seenCapture
+                + " — the laws above hold vacuously for the break kinds that were never produced"
+        )
+
+        LawKit.results [ unnamed; roundTrip; verbatim; opWalk; captureWalk ]
 
     /// **Every reason the DAG walker MINTS is a named case** (Phase 147) — the sibling of
     /// `chainBreakReasonLaws`, and the law that makes `DagBreakReason.Unrecognised` an honest arm
@@ -1068,70 +959,70 @@ module internal StreamLaws =
     /// `Dag.fromJsonlVerified`'s error bytes unchanged across this type's introduction, so the round
     /// trip is a compatibility claim and not only a tidiness one.
     let dagBreakReasonLaws (seed: int) (iterations: int) : LawResult list =
-        // A self-contained int-op witness: the claim is about THIS library's walker, not about a
+        // The kit's own int-op witness: the claim is about THIS library's walker, not about a
         // host's, so there is no caller witness to take.
-        let sw: StreamWitness<int, int, string> =
-            { Apply = fun op state -> Ok(state + op)
-              Encode = string
-              Decode =
-                fun s ->
-                    match System.Int32.TryParse s with
-                    | true, v -> Ok v
-                    | false, _ -> Error("not an int: " + s) }
+        let sw = LawKit.intWitness
 
         let hashFn = OpStream.defaultHash
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable unnamed = None
-        let mutable roundTrip = None
-        let mutable verbatim = None
+
+        let unnamed =
+            LawKit.LawCell "every reason the DAG walker mints is a NAMED DagBreakReason case"
+
+        let roundTrip =
+            LawKit.LawCell "DagBreakReason.ofString (toString r) = r on every named case"
+
+        let verbatim =
+            LawKit.LawCell "DagBreakReason.ofString carries an unknown reason into Unrecognised verbatim"
+
+        let dagWalk =
+            LawKit.LawCell "non-vacuity: the DAG walk produced every break kind it can produce"
+
         let mutable seen = Set.empty
 
         // The reason a break carries, or None when the walk found the DAG intact — which is itself a
         // defect here, since every input below is deliberately broken.
-        let reasonOf (label: string) (i: int) (b: DagBreak option) : DagBreakReason option =
+        let reasonOf (label: string) (at: string -> string) (b: DagBreak option) : DagBreakReason option =
             match b with
             | Some br ->
                 // Qualified: `ChainBreakReason` declares an `Unrecognised` too, and both are in
                 // scope here — the sibling family below is the reason this file sees both.
                 (match br.Reason with
-                 | DagBreakReason.Unrecognised s when unnamed.IsNone ->
-                     unnamed <-
-                         Some(
-                             sprintf
-                                 "seed=%d iter=%d: the %s walk minted an unnamed reason %s — the walker inside this library must stay inside the named cases, or DagBreakReason gives a consumer back the untyped string it exists to remove"
-                                 seed
-                                 i
-                                 label
-                                 s
-                         )
-                 | _ -> ())
+                 | DagBreakReason.Unrecognised s ->
+                     unnamed.Check(
+                         false,
+                         fun () ->
+                             at (
+                                 sprintf
+                                     "the %s walk minted an unnamed reason %s — the walker inside this library must stay inside the named cases, or DagBreakReason gives a consumer back the untyped string it exists to remove"
+                                     label
+                                     s
+                             )
+                     )
+                 | _ -> unnamed.Saw())
 
                 Some br.Reason
             | None ->
-                if unnamed.IsNone then
-                    unnamed <-
-                        Some(
+                unnamed.Check(
+                    false,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: the %s walk reported NO break over a deliberately broken DAG, so this family is measuring nothing"
-                                seed
-                                i
+                                "the %s walk reported NO break over a deliberately broken DAG, so this family is measuring nothing"
                                 label
                         )
+                )
 
                 None
 
-        for i in 0 .. iterations - 1 do
+        LawKit.run iterations seed (fun rng _ at ->
             // ---- a sound DAG: genesis, two children, a merge — every node shape the walker meets ----
-            let op0, r0 = ConfRng.intBelow 50 rng
-            let opA, r1 = ConfRng.intBelow 50 r0
-            let opB, r2 = ConfRng.intBelow 50 r1
-            let opM, r3 = ConfRng.intBelow 50 r2
-            rng <- r3
+            let op0 = rng.IntBelow 50
+            let opA = rng.IntBelow 50
+            let opB = rng.IntBelow 50
+            let opM = rng.IntBelow 50
 
-            let g, d1 = Dag.append hashFn sw (Human "conf") op0 "" Dag.empty
-            let a, d2 = Dag.append hashFn sw (Human "conf") (opA + 1) g d1
-            let b, d3 = Dag.append hashFn sw (Human "conf") (opB + 1) g d2
-            let _, dag = Dag.merge hashFn sw (Human "conf") (opM + 1) a b d3
+            let g, _, _, _, dag =
+                LawKit.randomDag hashFn sw false op0 (opA + 1) (opB + 1) (opM + 1)
 
             // content id: tamper the OP and leave the map KEY exactly as it was. That is the threat
             // the content id exists to catch, and it is precisely not a rewrite.
@@ -1140,7 +1031,7 @@ module internal StreamLaws =
             let tampered =
                 { Dag.T.Nodes = Map.add tid { tnode with Op = tnode.Op + 1000 } dag.Nodes }
 
-            match reasonOf "content-id" i (Dag.firstBreak hashFn sw tampered) with
+            match reasonOf "content-id" at (Dag.firstBreak hashFn sw tampered) with
             | Some r -> seen <- Set.add (DagBreakReason.toString r) seen
             | None -> ()
 
@@ -1149,43 +1040,39 @@ module internal StreamLaws =
             // parent check is the one that fires — the only way to reach that arm.
             let orphaned = { Dag.T.Nodes = Map.remove g dag.Nodes }
 
-            match reasonOf "missing-parent" i (Dag.firstBreak hashFn sw orphaned) with
+            match reasonOf "missing-parent" at (Dag.firstBreak hashFn sw orphaned) with
             | Some r -> seen <- Set.add (DagBreakReason.toString r) seen
             | None -> ()
 
             // ---- the string pair, both directions ----
             for named in [ ContentIdMismatch; MissingParent ] do
-                if
-                    DagBreakReason.ofString (DagBreakReason.toString named) <> named
-                    && roundTrip.IsNone
-                then
-                    roundTrip <-
-                        Some(
+                roundTrip.Check(
+                    DagBreakReason.ofString (DagBreakReason.toString named) = named,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: ofString (toString %A) = %A — the rendering and the parse disagree, so a consumer reading a logged reason back does not recover the case that wrote it"
-                                seed
-                                i
+                                "ofString (toString %A) = %A — the rendering and the parse disagree, so a consumer reading a logged reason back does not recover the case that wrote it"
                                 named
                                 (DagBreakReason.ofString (DagBreakReason.toString named))
                         )
+                )
 
-            let alien, rA = ConfRng.intBelow 1000 rng
-            rng <- rA
+            let alien = rng.IntBelow 1000
             let alienText = "a reason this library does not mint #" + string alien
 
             match DagBreakReason.ofString alienText with
-            | DagBreakReason.Unrecognised s when s = alienText -> ()
+            | DagBreakReason.Unrecognised s when s = alienText -> verbatim.Saw()
             | other ->
-                if verbatim.IsNone then
-                    verbatim <-
-                        Some(
+                verbatim.Check(
+                    false,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: ofString %s = %A — an unknown reason must land in Unrecognised carrying its own text, never be swept into a named case, which is a claim about which check failed that nothing established"
-                                seed
-                                i
+                                "ofString %s = %A — an unknown reason must land in Unrecognised carrying its own text, never be swept into a named case, which is a claim about which check failed that nothing established"
                                 alienText
                                 other
                         )
+                ))
 
         let expected =
             [ DagBreakReason.toString ContentIdMismatch
@@ -1194,23 +1081,12 @@ module internal StreamLaws =
 
         let missing = Set.difference expected seen
 
-        [ { Law = "every reason the DAG walker mints is a NAMED DagBreakReason case"
-            Passed = unnamed.IsNone
-            Counterexample = unnamed }
-          { Law = "DagBreakReason.ofString (toString r) = r on every named case"
-            Passed = roundTrip.IsNone
-            Counterexample = roundTrip }
-          { Law = "DagBreakReason.ofString carries an unknown reason into Unrecognised verbatim"
-            Passed = verbatim.IsNone
-            Counterexample = verbatim }
-          { Law = "non-vacuity: the DAG walk produced every break kind it can produce"
-            Passed = Set.isEmpty missing
-            Counterexample =
-              if Set.isEmpty missing then
-                  None
-              else
-                  Some(
-                      "the DAG walk never reported: "
-                      + (missing |> Set.toList |> String.concat ", ")
-                      + " — the laws above hold vacuously for the break kinds that were never produced"
-                  ) } ]
+        dagWalk.Check(
+            Set.isEmpty missing,
+            fun () ->
+                "the DAG walk never reported: "
+                + (missing |> Set.toList |> String.concat ", ")
+                + " — the laws above hold vacuously for the break kinds that were never produced"
+        )
+
+        LawKit.results [ unnamed; roundTrip; verbatim; dagWalk ]

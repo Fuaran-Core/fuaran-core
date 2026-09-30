@@ -345,3 +345,39 @@ module internal LawKit =
                 match System.Int32.TryParse s with
                 | true, v -> Ok v
                 | false, _ -> Error("not an int: " + s) }
+
+    // ---- the DAG builder -----------------------------------------------------------------------
+
+    /// The fork-and-merge DAG the DAG families build per iteration, over four ops the caller has
+    /// already drawn: a genesis `g` carrying `op0`; `a` and `b`, both children of `g`, carrying
+    /// `opA` and `opB`; and `m`, the merge of `(a, b)` carrying `opM` — every node shape the walker
+    /// meets, under the `Human "conf"` actor. `bFirst` appends `b` before `a` (the merge's parent
+    /// order stays `(a, b)`), which is how `dagLaws` builds the same logical history twice and asks
+    /// whether it converges. The ops are parameters rather than draws because the two families
+    /// draw them differently (`dagLaws` through its `StreamGen`, `dagBreakReasonLaws` as ints), and
+    /// each keeps its own draw order. Returns the four content ids and the DAG. Copied into both
+    /// families before Phase 297.
+    let randomDag
+        (hashFn: HashFn)
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (bFirst: bool)
+        (op0: 'Op)
+        (opA: 'Op)
+        (opB: 'Op)
+        (opM: 'Op)
+        : string * string * string * string * Dag.T<'Op> =
+        let actor = Human "conf"
+        let g, d1 = Dag.append hashFn sw actor op0 "" Dag.empty
+
+        let a, b, d3 =
+            if bFirst then
+                let b, d2 = Dag.append hashFn sw actor opB g d1
+                let a, d3 = Dag.append hashFn sw actor opA g d2
+                a, b, d3
+            else
+                let a, d2 = Dag.append hashFn sw actor opA g d1
+                let b, d3 = Dag.append hashFn sw actor opB g d2
+                a, b, d3
+
+        let m, dag = Dag.merge hashFn sw actor opM a b d3
+        g, a, b, m, dag

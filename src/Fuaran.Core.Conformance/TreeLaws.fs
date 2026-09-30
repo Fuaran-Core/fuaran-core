@@ -9,6 +9,8 @@ module internal TreeLaws =
     /// `Children (ReplaceChildren n cs) = cs`, `Id`/`KindTag` preserved under rebuild, and
     /// the `IdWitness` round-trip + reflexivity. The `ReplaceChildren` laws are checked only
     /// on nodes that `CanHold` children (a leaf is not required to round-trip a child list).
+    /// Phase 297 adds the rebuild identity — `ReplaceChildren n (Children n) = n` on every holder —
+    /// because the engine relies on it (`UpdateNode` rebuilds a node over its own children).
     let witnessLaws
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -17,71 +19,80 @@ module internal TreeLaws =
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable rcRoundTrip = None
-        let mutable idPreserved = None
-        let mutable kindStable = None
-        let mutable idRoundTrip = None
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            rng <- r1
+        let rcRoundTrip =
+            LawKit.LawCell "ReplaceChildren round-trip (Children(ReplaceChildren n cs) = cs)"
+
+        let idPreserved = LawKit.LawCell "ReplaceChildren preserves Id"
+        let kindStable = LawKit.LawCell "ReplaceChildren preserves KindTag"
+        let idRoundTrip = LawKit.LawCell "IdWitness round-trip + reflexivity"
+
+        let rebuildIdentity =
+            LawKit.LawCell "ReplaceChildren rebuild identity (ReplaceChildren n (Children n) = n)"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
 
             match Tree.preorder nodew tree |> List.filter canHold with
             | [] -> ()
             | holders ->
-                let n, r2 = ConfRng.choose holders rng
-                rng <- r2
-                let k, r3 = ConfRng.intBelow 3 rng
-                rng <- r3
+                let n = rng.Choose holders
+                let k = rng.IntBelow 3
                 // a candidate child list of fresh nodes (ids disjoint from the tree)
                 let mutable cs = []
                 let mutable seen = Tree.ids nodew tree |> List.map idw.ToString |> Set.ofList
 
                 for _ in 1..k do
-                    let fresh, r' = gen.FreshNode seen rng
-                    rng <- r'
+                    let fresh = rng.Draw(gen.FreshNode seen)
                     seen <- Set.add (idw.ToString(nodew.Id fresh)) seen
                     cs <- cs @ [ fresh ]
 
                 let rebuilt = nodew.ReplaceChildren n cs
 
-                if nodew.Children rebuilt <> cs && rcRoundTrip.IsNone then
-                    rcRoundTrip <-
-                        Some(
+                rcRoundTrip.Check(
+                    nodew.Children rebuilt = cs,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: Children(ReplaceChildren n cs) ≠ cs for node %s (kind %s) — ReplaceChildren is not total"
-                                seed
-                                i
+                                "Children(ReplaceChildren n cs) ≠ cs for node %s (kind %s) — ReplaceChildren is not total"
                                 (idw.ToString(nodew.Id n))
                                 (nodew.KindTag n)
                         )
+                )
 
-                if not (idw.Equals (nodew.Id rebuilt) (nodew.Id n)) && idPreserved.IsNone then
-                    idPreserved <- Some(sprintf "seed=%d iter=%d: Id changed under ReplaceChildren" seed i)
+                idPreserved.Check(
+                    idw.Equals (nodew.Id rebuilt) (nodew.Id n),
+                    fun () -> at "Id changed under ReplaceChildren"
+                )
 
-                if nodew.KindTag rebuilt <> nodew.KindTag n && kindStable.IsNone then
-                    kindStable <- Some(sprintf "seed=%d iter=%d: KindTag changed under ReplaceChildren" seed i)
+                kindStable.Check(
+                    nodew.KindTag rebuilt = nodew.KindTag n,
+                    fun () -> at "KindTag changed under ReplaceChildren"
+                )
+
+                // Phase 297 — every holder rebuilt over its own children is itself, structurally.
+                for h in holders do
+                    rebuildIdentity.Check(
+                        nodew.ReplaceChildren h (nodew.Children h) = h,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "ReplaceChildren n (Children n) ≠ n for node %s (kind %s) — rebuilding a node over its own children changed it"
+                                    (idw.ToString(nodew.Id h))
+                                    (nodew.KindTag h)
+                            )
+                    )
 
             for id in Tree.ids nodew tree do
-                if not (idw.Equals id id) && idRoundTrip.IsNone then
-                    idRoundTrip <- Some(sprintf "seed=%d iter=%d: Equals is not reflexive" seed i)
-                elif not (idw.Equals (idw.OfString(idw.ToString id)) id) && idRoundTrip.IsNone then
-                    idRoundTrip <-
-                        Some(sprintf "seed=%d iter=%d: OfString∘ToString ≠ id for %s" seed i (idw.ToString id))
+                if not (idw.Equals id id) then
+                    idRoundTrip.Check(false, fun () -> at "Equals is not reflexive")
+                else
+                    idRoundTrip.Check(
+                        idw.Equals (idw.OfString(idw.ToString id)) id,
+                        fun () -> at (sprintf "OfString∘ToString ≠ id for %s" (idw.ToString id))
+                    ))
 
-        [ { Law = "ReplaceChildren round-trip (Children(ReplaceChildren n cs) = cs)"
-            Passed = rcRoundTrip.IsNone
-            Counterexample = rcRoundTrip }
-          { Law = "ReplaceChildren preserves Id"
-            Passed = idPreserved.IsNone
-            Counterexample = idPreserved }
-          { Law = "ReplaceChildren preserves KindTag"
-            Passed = kindStable.IsNone
-            Counterexample = kindStable }
-          { Law = "IdWitness round-trip + reflexivity"
-            Passed = idRoundTrip.IsNone
-            Counterexample = idRoundTrip } ]
+        LawKit.results [ rcRoundTrip; idPreserved; kindStable; idRoundTrip; rebuildIdentity ]
 
     /// The op-algebra laws: apply totality (never throws), `canApply` ≡ `apply` (same
     /// accept/reject + envelope), apply∘invert = identity on every applyable op, — Phase 137 —
@@ -109,12 +120,14 @@ module internal TreeLaws =
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable totality = None
-        let mutable equivalence = None
-        let mutable inversion = None
-        let mutable uniqueness = None
-        let mutable preservation = None
+        let totality = LawKit.LawCell "apply totality (never throws)"
+        let equivalence = LawKit.LawCell "canApply ≡ apply (accept/reject + envelope)"
+        let inversion = LawKit.LawCell "apply ∘ invert = identity"
+
+        let uniqueness =
+            LawKit.LawCell "an accepted insert introduces no id already present"
+
+        let preservation = LawKit.LawCell "apply's accept path preserves Tree.WellFormed"
         // Phase 220 — the apply-outcome populations every law above branches on. `canApply ≡
         // apply` and totality are claims about BOTH sides; inversion, uniqueness and preservation
         // read the accepted side alone. Counted over the drawn and the built arms together, because
@@ -123,6 +136,8 @@ module internal TreeLaws =
         // multi-node subtree.
         let mutable accepted = 0
         let mutable refused = 0
+        // Phase 297 — the kind of every DRAWN op, for the op-kind guard.
+        let kinds = LawKit.OpKindTally()
 
         /// The first id `t` carries twice (by key), if any — the post-condition an accepted insert
         /// must not create.
@@ -140,10 +155,10 @@ module internal TreeLaws =
 
             scan Set.empty (Tree.ids nodew t)
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            let op, r2 = LawKit.genOp nodew idw gen tree r1
-            rng <- r2
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
+            let op = rng.Draw(LawKit.genOp nodew idw gen tree)
+            kinds.Note op
 
             /// Phase 139 — the sampled twin of the apply-engine preservation theorem: if the
             /// pre-state is `Tree.WellFormed` and `apply` ACCEPTS, the post-state is too. Quantified
@@ -156,37 +171,39 @@ module internal TreeLaws =
             /// it malformed without any of that being apply's doing. A generator that happened to
             /// draw a malformed tree would otherwise turn a true theorem into a red law.
             let notePreserves (origin: string) (op: SkeletonOp<'Node, 'Id>) (pre: 'Node) (post: 'Node) =
-                if preservation.IsNone && Tree.isWellFormed nodew idw pre then
+                if Tree.isWellFormed nodew idw pre then
                     match Tree.wellFormed nodew idw post with
                     | Tree.RepeatedId d ->
-                        preservation <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: an ACCEPTED %s %A left a WELL-FORMED tree carrying id %s twice"
-                                    seed
-                                    i
-                                    origin
-                                    op
-                                    (idw.ToString d)
-                            )
-                    | Tree.Structural -> ()
+                        preservation.Check(
+                            false,
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "an ACCEPTED %s %A left a WELL-FORMED tree carrying id %s twice"
+                                        origin
+                                        op
+                                        (idw.ToString d)
+                                )
+                        )
+                    | Tree.Structural -> preservation.Saw()
 
             /// Record an accepted insert that left a repeated id behind. Shared by the drawn and the
             /// built arms, because the property is the same one either way.
             let noteIfRepeats (origin: string) (inserted: 'Node) (post: 'Node) =
                 match repeatedId post with
-                | Some d when uniqueness.IsNone ->
-                    uniqueness <-
-                        Some(
-                            sprintf
-                                "seed=%d iter=%d: an ACCEPTED %s insert left id %s in the tree twice — the inserted subtree carried ids %A"
-                                seed
-                                i
-                                origin
-                                d
-                                (Tree.ids nodew inserted |> List.map idw.ToString)
-                        )
-                | _ -> ()
+                | Some d ->
+                    uniqueness.Check(
+                        false,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "an ACCEPTED %s insert left id %s in the tree twice — the inserted subtree carried ids %A"
+                                    origin
+                                    d
+                                    (Tree.ids nodew inserted |> List.map idw.ToString)
+                            )
+                    )
+                | None -> uniqueness.Saw()
 
             let applied =
                 try
@@ -194,10 +211,10 @@ module internal TreeLaws =
                 with _ ->
                     None
 
+            totality.Check(applied.IsSome, fun () -> at (sprintf "apply threw on %A" op))
+
             match applied with
-            | None ->
-                if totality.IsNone then
-                    totality <- Some(sprintf "seed=%d iter=%d: apply threw on %A" seed i op)
+            | None -> ()
             | Some res ->
                 let chk = Ops.canApplyContained canHold nodew idw op tree
 
@@ -207,9 +224,10 @@ module internal TreeLaws =
                     | Error e1, Error e2 -> e1 = e2
                     | _ -> false
 
-                if not equiv && equivalence.IsNone then
-                    equivalence <-
-                        Some(sprintf "seed=%d iter=%d: canApply≠apply on %A (apply=%A canApply=%A)" seed i op res chk)
+                equivalence.Check(
+                    equiv,
+                    fun () -> at (sprintf "canApply≠apply on %A (apply=%A canApply=%A)" op res chk)
+                )
 
                 (match res with
                  | Ok _ -> accepted <- accepted + 1
@@ -229,18 +247,16 @@ module internal TreeLaws =
 
                     match Ops.invert nodew idw op tree with
                     | Error e ->
-                        if inversion.IsNone then
-                            inversion <-
-                                Some(sprintf "seed=%d iter=%d: invert failed (%A) on an applyable %A" seed i e op)
+                        inversion.Check(false, fun () -> at (sprintf "invert failed (%A) on an applyable %A" e op))
                     | Ok inv ->
-                        match Ops.applyContained canHold nodew idw inv post with
-                        | Ok restored when restored = tree -> ()
-                        | other ->
-                            if inversion.IsNone then
-                                inversion <-
-                                    Some(
-                                        sprintf "seed=%d iter=%d: apply∘invert≠identity on %A (got %A)" seed i op other
-                                    )
+                        let restored = Ops.applyContained canHold nodew idw inv post
+
+                        inversion.Check(
+                            (match restored with
+                             | Ok r when r = tree -> true
+                             | _ -> false),
+                            fun () -> at (sprintf "apply∘invert≠identity on %A (got %A)" op restored)
+                        )
                 | Error _ -> ()
 
             // ---- Phase 137: the deliberate-collision arm (BUILT, not drawn) ----
@@ -257,12 +273,11 @@ module internal TreeLaws =
             match Tree.preorder nodew tree |> List.filter canHold with
             | [] -> ()
             | holders ->
-                let parent, r3 = ConfRng.choose holders rng
-                let victim, r4 = ConfRng.choose (Tree.preorder nodew tree) r3
+                let parent = rng.Choose holders
+                let victim = rng.Choose(Tree.preorder nodew tree)
                 let treeKeys = Tree.ids nodew tree |> List.map idw.ToString |> Set.ofList
-                let shell, r5 = gen.FreshNode treeKeys r4
-                let inner, r6 = gen.FreshNode (Set.add (idw.ToString(nodew.Id shell)) treeKeys) r5
-                rng <- r6
+                let shell = rng.Draw(gen.FreshNode treeKeys)
+                let inner = rng.Draw(gen.FreshNode(Set.add (idw.ToString(nodew.Id shell)) treeKeys))
 
                 let candidates =
                     [ "descendant-collision", nodew.ReplaceChildren shell [ victim ]
@@ -290,11 +305,13 @@ module internal TreeLaws =
                             with _ ->
                                 None
 
+                        totality.Check(
+                            applied.IsSome,
+                            fun () -> at (sprintf "apply threw on the built %s insert" origin)
+                        )
+
                         match applied with
-                        | None ->
-                            if totality.IsNone then
-                                totality <-
-                                    Some(sprintf "seed=%d iter=%d: apply threw on the built %s insert" seed i origin)
+                        | None -> ()
                         | Some res ->
                             // the `canApply ≡ apply` family, re-run over the widened op population
                             let chk = Ops.canApplyContained canHold nodew idw colliding tree
@@ -305,17 +322,17 @@ module internal TreeLaws =
                                 | Error e1, Error e2 -> e1 = e2
                                 | _ -> false
 
-                            if not equiv && equivalence.IsNone then
-                                equivalence <-
-                                    Some(
+                            equivalence.Check(
+                                equiv,
+                                fun () ->
+                                    at (
                                         sprintf
-                                            "seed=%d iter=%d: canApply≠apply on the built %s insert (apply=%A canApply=%A)"
-                                            seed
-                                            i
+                                            "canApply≠apply on the built %s insert (apply=%A canApply=%A)"
                                             origin
                                             res
                                             chk
                                     )
+                            )
 
                             (match res with
                              | Ok _ -> accepted <- accepted + 1
@@ -325,30 +342,20 @@ module internal TreeLaws =
                             | Ok post ->
                                 noteIfRepeats origin candidate post
                                 notePreserves origin colliding tree post
-                            | Error _ -> ()
+                            | Error _ -> ())
 
-        [ { Law = "apply totality (never throws)"
-            Passed = totality.IsNone
-            Counterexample = totality }
-          { Law = "canApply ≡ apply (accept/reject + envelope)"
-            Passed = equivalence.IsNone
-            Counterexample = equivalence }
-          { Law = "apply ∘ invert = identity"
-            Passed = inversion.IsNone
-            Counterexample = inversion }
-          { Law = "an accepted insert introduces no id already present"
-            Passed = uniqueness.IsNone
-            Counterexample = uniqueness }
-          { Law = "apply's accept path preserves Tree.WellFormed"
-            Passed = preservation.IsNone
-            Counterexample = preservation }
-          // Phase 220 — `Guarded ["accepted"; "refused"]`. A generator that never draws a refused
-          // op (and a witness that cannot carry the built collision) leaves totality and
-          // `canApply ≡ apply` certified on the accept path alone; one that never draws an
-          // accepted op leaves three of the five laws asserting nothing. Either is a green run
-          // that tested nothing on the side a law is about, so it reports the guard, not a pass.
-          SampleAdequacy.reached "Conformance.opAlgebra" "accepted op" seed [ "accepted", accepted ]
-          SampleAdequacy.reached "Conformance.opAlgebra" "refused op" seed [ "refused", refused ] ]
+        LawKit.results [ totality; equivalence; inversion; uniqueness; preservation ]
+        @ [
+            // Phase 220 — `Guarded ["accepted"; "refused"]`. A generator that never draws a refused
+            // op (and a witness that cannot carry the built collision) leaves totality and
+            // `canApply ≡ apply` certified on the accept path alone; one that never draws an
+            // accepted op leaves three of the five laws asserting nothing. Either is a green run
+            // that tested nothing on the side a law is about, so it reports the guard, not a pass.
+            SampleAdequacy.reached "Conformance.opAlgebra" "accepted op" seed [ "accepted", accepted ]
+            SampleAdequacy.reached "Conformance.opAlgebra" "refused op" seed [ "refused", refused ]
+            // Phase 297 — every op kind `genOp` draws, or the laws above were certified over a
+            // narrower algebra than the one the engine ships.
+            LawKit.opKindGuard "Conformance.opAlgebra" seed kinds.Counts ]
 
     /// The structural-diff laws (Phase 03) — certify `Diff.toOps` against a domain's own
     /// witness. Build a random `before`, derive `after` by applying a random valid op sequence,
@@ -365,21 +372,24 @@ module internal TreeLaws =
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable reconstruction = None
-        let mutable applyability = None
-        let mutable survivor = None
 
-        for i in 0 .. iterations - 1 do
-            let before, r1 = gen.Tree rng
-            rng <- r1
+        let reconstruction =
+            LawKit.LawCell "diff reconstruction (applyAll(toOps before after) before = after)"
+
+        let applyability =
+            LawKit.LawCell "diff applyability (canApplyAll accepts the emitted script)"
+
+        let survivor =
+            LawKit.LawCell "diff survivor preservation (no RemoveNode on a survived id)"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let before = rng.Draw gen.Tree
 
             // derive `after` by applying a few random valid ops (rejected ops are skipped)
             let mutable after = before
 
             for _ in 1..4 do
-                let op, r' = LawKit.genOp nodew idw gen after rng
-                rng <- r'
+                let op = rng.Draw(LawKit.genOp nodew idw gen after)
 
                 match Ops.applyContained canHold nodew idw op after with
                 | Ok t' -> after <- t'
@@ -387,21 +397,20 @@ module internal TreeLaws =
 
             match Diff.toOps nodew idw before after with
             | Error e ->
-                if reconstruction.IsNone then
-                    reconstruction <-
-                        Some(sprintf "seed=%d iter=%d: toOps errored on a valid before/after: %A" seed i e)
+                reconstruction.Check(false, fun () -> at (sprintf "toOps errored on a valid before/after: %A" e))
             | Ok ops ->
-                match Ops.applyAll nodew idw ops before with
-                | Ok rebuilt when rebuilt = after -> ()
-                | other ->
-                    if reconstruction.IsNone then
-                        reconstruction <- Some(sprintf "seed=%d iter=%d: applyAll(toOps) ≠ after (got %A)" seed i other)
+                let rebuilt = Ops.applyAll nodew idw ops before
+
+                reconstruction.Check(
+                    (match rebuilt with
+                     | Ok r when r = after -> true
+                     | _ -> false),
+                    fun () -> at (sprintf "applyAll(toOps) ≠ after (got %A)" rebuilt)
+                )
 
                 match Ops.canApplyAll nodew idw ops before with
-                | Ok() -> ()
-                | Error(j, e) ->
-                    if applyability.IsNone then
-                        applyability <- Some(sprintf "seed=%d iter=%d: emitted op %d rejects: %A" seed i j e)
+                | Ok() -> applyability.Saw()
+                | Error(j, e) -> applyability.Check(false, fun () -> at (sprintf "emitted op %d rejects: %A" j e))
 
                 let survivors =
                     Set.intersect
@@ -416,20 +425,10 @@ module internal TreeLaws =
 
                 match badRemove with
                 | Some t ->
-                    if survivor.IsNone then
-                        survivor <-
-                            Some(sprintf "seed=%d iter=%d: RemoveNode targets a survivor %s" seed i (idw.ToString t))
-                | None -> ()
+                    survivor.Check(false, fun () -> at (sprintf "RemoveNode targets a survivor %s" (idw.ToString t)))
+                | None -> survivor.Saw())
 
-        [ { Law = "diff reconstruction (applyAll(toOps before after) before = after)"
-            Passed = reconstruction.IsNone
-            Counterexample = reconstruction }
-          { Law = "diff applyability (canApplyAll accepts the emitted script)"
-            Passed = applyability.IsNone
-            Counterexample = applyability }
-          { Law = "diff survivor preservation (no RemoveNode on a survived id)"
-            Passed = survivor.IsNone
-            Counterexample = survivor } ]
+        LawKit.results [ reconstruction; applyability; survivor ]
 
     /// The CONTAINER-AWARE structural-diff laws (Phase 141) — `Diff.toOpsContained` certified
     /// through the container-aware sequence surface, with the witness's own `canHold`.
@@ -478,11 +477,19 @@ module internal TreeLaws =
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable reconstruction = None
-        let mutable applyability = None
-        let mutable refusal = None
-        let mutable correspondence = None
+
+        let reconstruction =
+            LawKit.LawCell "contained diff reconstruction (applyAllWith (toOpsContained before after) before = after)"
+
+        let applyability =
+            LawKit.LawCell "contained diff applyability (canApplyAllWith accepts the emitted script)"
+
+        let refusal =
+            LawKit.LawCell "contained diff refuses exactly a non-container after-parent"
+
+        let correspondence =
+            LawKit.LawCell
+                "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through applyContained refuses NotAContainer(t, k))"
         // Phase 223 — the refusal IFF's two directions, counted over every pair it is asked of
         // (the derived pair and the minted probe). The demanding direction is reached only where
         // `after` carries a node the witness's `canHold` rejects, which is DRAWN.
@@ -502,29 +509,31 @@ module internal TreeLaws =
 
         /// Phase 228 — the offending nesting `after` carries at `t`, built as a graft and applied
         /// through `Ops.applyContained`: it must refuse with `NotAContainer(t, k)`
-        let checkCorrespondence (i: int) (after: 'Node) (t: 'Id) (k: string) =
+        let checkCorrespondence (at: string -> string) (after: 'Node) (t: 'Id) (k: string) =
             match Tree.tryFind nodew idw t after, Tree.parentOf nodew idw t after with
             | Some graft, Some host ->
                 match Ops.apply nodew idw (RemoveNode t) after with
                 | Ok cut when Tree.tryFind nodew idw (nodew.Id host) cut |> Option.exists canHold ->
-                    match Ops.applyContained canHold nodew idw (InsertChild(nodew.Id host, graft)) cut with
-                    | Error(NotAContainer(t', k')) when idw.Equals t t' && k = k' -> ()
-                    | other ->
-                        if correspondence.IsNone then
-                            correspondence <-
-                                Some(
-                                    sprintf
-                                        "seed=%d iter=%d: toOpsContained refused with TargetNotAContainer(%s, %s), but grafting the same subtree through applyContained answered %A"
-                                        seed
-                                        i
-                                        (idw.ToString t)
-                                        k
-                                        other
-                                )
+                    let answer =
+                        Ops.applyContained canHold nodew idw (InsertChild(nodew.Id host, graft)) cut
+
+                    correspondence.Check(
+                        (match answer with
+                         | Error(NotAContainer(t', k')) when idw.Equals t t' && k = k' -> true
+                         | _ -> false),
+                        fun () ->
+                            at (
+                                sprintf
+                                    "toOpsContained refused with TargetNotAContainer(%s, %s), but grafting the same subtree through applyContained answered %A"
+                                    (idw.ToString t)
+                                    k
+                                    answer
+                            )
+                    )
                 | _ -> ()
             | _ -> ()
 
-        let checkRefusal (i: int) (before: 'Node) (after: 'Node) =
+        let checkRefusal (at: string -> string) (before: 'Node) (after: 'Node) =
             let expected = violates after
 
             if expected then
@@ -534,7 +543,7 @@ module internal TreeLaws =
 
             match Diff.toOpsContained canHold nodew idw before after with
             | Error(Diff.TargetNotAContainer(p, k)) when expected ->
-                checkCorrespondence i after p k
+                checkCorrespondence at after p k
 
                 // the node it names must be one `after` really carries, really has children, and
                 // the predicate really rejects
@@ -542,124 +551,104 @@ module internal TreeLaws =
                     Tree.tryFind nodew idw p after
                     |> Option.map (fun n -> not (List.isEmpty (nodew.Children n)) && not (canHold n))
 
-                if named <> Some true && refusal.IsNone then
-                    refusal <-
-                        Some(
+                refusal.Check(
+                    (named = Some true),
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: TargetNotAContainer named %s, which is not a childful non-container of `after`"
-                                seed
-                                i
+                                "TargetNotAContainer named %s, which is not a childful non-container of `after`"
                                 (idw.ToString p)
                         )
+                )
             | Error(Diff.TargetNotAContainer(p, _)) ->
-                if refusal.IsNone then
-                    refusal <-
-                        Some(
+                refusal.Check(
+                    false,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: TargetNotAContainer(%s) on an `after` every parent of which can hold children"
-                                seed
-                                i
+                                "TargetNotAContainer(%s) on an `after` every parent of which can hold children"
                                 (idw.ToString p)
                         )
+                )
             | _ when expected ->
-                if refusal.IsNone then
-                    refusal <-
-                        Some(
-                            sprintf
-                                "seed=%d iter=%d: `after` nests under a non-container and the diff did not refuse"
-                                seed
-                                i
-                        )
-            | _ -> ()
+                refusal.Check(false, fun () -> at "`after` nests under a non-container and the diff did not refuse")
+            | _ -> refusal.Saw()
 
-        for i in 0 .. iterations - 1 do
-            let before, r1 = gen.Tree rng
-            rng <- r1
+        LawKit.run iterations seed (fun rng _ at ->
+            let before = rng.Draw gen.Tree
 
             // derive `after` with the container-aware engine, so the pair is one the witness's own
             // predicate admits — the reconstruction and applyability laws are about THAT pair
             let mutable after = before
 
             for _ in 1..4 do
-                let op, r' = LawKit.genOp nodew idw gen after rng
-                rng <- r'
+                let op = rng.Draw(LawKit.genOp nodew idw gen after)
 
                 match Ops.applyContained canHold nodew idw op after with
                 | Ok t' -> after <- t'
                 | Error _ -> ()
 
-            checkRefusal i before after
+            checkRefusal at before after
 
             match Diff.toOpsContained canHold nodew idw before after with
             | Error e ->
-                if not (violates after) && reconstruction.IsNone then
-                    reconstruction <-
-                        Some(sprintf "seed=%d iter=%d: toOpsContained errored on a container-valid pair: %A" seed i e)
+                if not (violates after) then
+                    reconstruction.Check(
+                        false,
+                        fun () -> at (sprintf "toOpsContained errored on a container-valid pair: %A" e)
+                    )
             | Ok ops ->
-                match Ops.applyAllWith canHold nodew idw ops before with
-                | Ok rebuilt when rebuilt = after -> ()
-                | other ->
-                    if reconstruction.IsNone then
-                        reconstruction <-
-                            Some(sprintf "seed=%d iter=%d: applyAllWith(toOpsContained) ≠ after (got %A)" seed i other)
+                let rebuilt = Ops.applyAllWith canHold nodew idw ops before
+
+                reconstruction.Check(
+                    (match rebuilt with
+                     | Ok r when r = after -> true
+                     | _ -> false),
+                    fun () -> at (sprintf "applyAllWith(toOpsContained) ≠ after (got %A)" rebuilt)
+                )
 
                 match Ops.canApplyAllWith canHold nodew idw ops before with
-                | Ok() -> ()
+                | Ok() -> applyability.Saw()
                 | Error(j, e) ->
-                    if applyability.IsNone then
-                        applyability <-
-                            Some(sprintf "seed=%d iter=%d: emitted op %d rejects under canHold: %A" seed i j e)
+                    applyability.Check(false, fun () -> at (sprintf "emitted op %d rejects under canHold: %A" j e))
 
             // and the minted probe: graft a child under a node the predicate refuses, so the
             // refusal direction of the third law is exercised rather than merely stated
             match firstRefused after with
             | Some offender when not (violates after) ->
-                let fresh, r2 =
-                    gen.FreshNode (Tree.ids nodew after |> List.map idw.ToString |> Set.ofList) rng
-
-                rng <- r2
+                let fresh =
+                    rng.Draw(gen.FreshNode(Tree.ids nodew after |> List.map idw.ToString |> Set.ofList))
 
                 match
                     Tree.updateNode nodew idw (nodew.Id offender) (fun n -> nodew.ReplaceChildren n [ fresh ]) after
                 with
                 | Some violating ->
-                    checkRefusal i before violating
+                    checkRefusal at before violating
 
                     // and the plain diff must ACCEPT the same pair: the refusal is the container
                     // check's contribution and nothing else's
                     match Diff.toOps nodew idw before violating with
-                    | Ok _ -> ()
+                    | Ok _ -> refusal.Saw()
                     | Error e ->
-                        if refusal.IsNone then
-                            refusal <-
-                                Some(
+                        refusal.Check(
+                            false,
+                            fun () ->
+                                at (
                                     sprintf
-                                        "seed=%d iter=%d: the plain toOps also refused the probe (%A), so the refusal is not the container check's"
-                                        seed
-                                        i
+                                        "the plain toOps also refused the probe (%A), so the refusal is not the container check's"
                                         e
                                 )
+                        )
                 | None -> ()
-            | _ -> ()
+            | _ -> ())
 
-        [ { Law = "contained diff reconstruction (applyAllWith (toOpsContained before after) before = after)"
-            Passed = reconstruction.IsNone
-            Counterexample = reconstruction }
-          { Law = "contained diff applyability (canApplyAllWith accepts the emitted script)"
-            Passed = applyability.IsNone
-            Counterexample = applyability }
-          { Law = "contained diff refuses exactly a non-container after-parent"
-            Passed = refusal.IsNone
-            Counterexample = refusal }
-          { Law =
-              "contained diff refusal corresponds (TargetNotAContainer(t, k) ⇒ the same graft through applyContained refuses NotAContainer(t, k))"
-            Passed = correspondence.IsNone
-            Counterexample = correspondence }
-          // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A witness whose
-          // `canHold` refuses nothing (or supplies none) exercises only the trivial direction of the
-          // refusal IFF; that is now reported as the guard, not as a pass.
-          SampleAdequacy.reached "Conformance.diffContainedLaws" "container-valid pair" seed [ "accepted", accepted ]
-          SampleAdequacy.reached "Conformance.diffContainedLaws" "refused pair" seed [ "refused", refused ] ]
+        LawKit.results [ reconstruction; applyability; refusal; correspondence ]
+        @ [
+            // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A witness whose
+            // `canHold` refuses nothing (or supplies none) exercises only the trivial direction of the
+            // refusal IFF; that is now reported as the guard, not as a pass.
+            SampleAdequacy.reached "Conformance.diffContainedLaws" "container-valid pair" seed [ "accepted", accepted ]
+            SampleAdequacy.reached "Conformance.diffContainedLaws" "refused pair" seed [ "refused", refused ] ]
 
     /// The op-script normalisation laws (Phase 23) — the teeth on `Ops.normalize`. Build a random
     /// *applyable* script (apply random ops, keep the accepted ones), then check: **preservation**
@@ -673,53 +662,32 @@ module internal TreeLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable preservation = None
-        let mutable idempotence = None
-        let mutable nonGrowth = None
+        let preservation =
+            LawKit.LawCell "normalize preservation (applyAll(normalize ops) = applyAll ops)"
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            rng <- r1
+        let idempotence =
+            LawKit.LawCell "normalize idempotence (normalize ∘ normalize = normalize)"
+
+        let nonGrowth = LawKit.LawCell "normalize never lengthens a script"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
 
             // collect an applyable script: thread random ops, keep the accepted ones
-            let mutable cur = tree
-            let mutable accepted = []
-
-            for _ in 1..6 do
-                let op, r' = LawKit.genOp nodew idw gen cur rng
-                rng <- r'
-
-                match Ops.applyContained canHold nodew idw op cur with
-                | Ok t' ->
-                    cur <- t'
-                    accepted <- accepted @ [ op ]
-                | Error _ -> ()
+            let accepted = rng.Draw(LawKit.collectScript None nodew idw gen 6 tree)
 
             let normd = Ops.normalize nodew idw accepted
 
-            if
-                Ops.applyAll nodew idw normd tree <> Ops.applyAll nodew idw accepted tree
-                && preservation.IsNone
-            then
-                preservation <- Some(sprintf "seed=%d iter=%d: applyAll(normalize ops) ≠ applyAll ops" seed i)
+            preservation.Check(
+                Ops.applyAll nodew idw normd tree = Ops.applyAll nodew idw accepted tree,
+                fun () -> at "applyAll(normalize ops) ≠ applyAll ops"
+            )
 
-            if Ops.normalize nodew idw normd <> normd && idempotence.IsNone then
-                idempotence <- Some(sprintf "seed=%d iter=%d: normalize is not idempotent" seed i)
+            idempotence.Check(Ops.normalize nodew idw normd = normd, fun () -> at "normalize is not idempotent")
 
-            if List.length normd > List.length accepted && nonGrowth.IsNone then
-                nonGrowth <- Some(sprintf "seed=%d iter=%d: normalize lengthened the script" seed i)
+            nonGrowth.Check(List.length normd <= List.length accepted, fun () -> at "normalize lengthened the script"))
 
-        [ { Law = "normalize preservation (applyAll(normalize ops) = applyAll ops)"
-            Passed = preservation.IsNone
-            Counterexample = preservation }
-          { Law = "normalize idempotence (normalize ∘ normalize = normalize)"
-            Passed = idempotence.IsNone
-            Counterexample = idempotence }
-          { Law = "normalize never lengthens a script"
-            Passed = nonGrowth.IsNone
-            Counterexample = nonGrowth } ]
+        LawKit.results [ preservation; idempotence; nonGrowth ]
 
     /// The body of `containerLaws`, under a predicate the domain actually declared. Private so the
     /// census's reflection over public `…Laws` entry points sees one family rather than two.
@@ -731,10 +699,14 @@ module internal TreeLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable blind = None
-        let mutable preservation = None
-        let mutable graftRefusal = None
+        let blind =
+            LawKit.LawCell "canHold is child-blind (perturbing a node's children leaves it unchanged)"
+
+        let preservation =
+            LawKit.LawCell "applyContained preserves the container invariant over this witness"
+
+        let graftRefusal =
+            LawKit.LawCell "a graft with an interior non-container is refused, naming that node"
         // the three built arms, counted so an arm nothing reached is REPORTED rather than assumed
         let mutable perturbations = 0
         let mutable probes = 0
@@ -759,15 +731,13 @@ module internal TreeLaws =
         let keysOf (n: 'Node) =
             Tree.ids nodew n |> List.map idw.ToString
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            rng <- r1
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
             let treeKeys = keysOf tree |> Set.ofList
 
             // ---- arm 1: child-blindness, by PERTURBATION (built, never drawn) ----
-            let subject, r2 = ConfRng.choose (Tree.preorder nodew tree) rng
-            let filler, r3 = gen.FreshNode treeKeys r2
-            rng <- r3
+            let subject = rng.Choose(Tree.preorder nodew tree)
+            let filler = rng.Draw(gen.FreshNode treeKeys)
 
             let kids = nodew.Children subject
             let emptied = nodew.ReplaceChildren subject []
@@ -776,13 +746,12 @@ module internal TreeLaws =
             let notePerturbation (label: string) (rebuilt: 'Node) =
                 perturbations <- perturbations + 1
 
-                if canHold rebuilt <> canHold subject && blind.IsNone then
-                    blind <-
-                        Some(
+                blind.Check(
+                    canHold rebuilt = canHold subject,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: canHold READS THE CHILD LIST — node %s (kind %s) answers %b holding %d child(ren) and %b %s. A predicate that changes under an edit can be satisfied at the instant applyContained checks it and violated by the very insert that check licensed, so applyContained does not preserve the container invariant for this domain (proofs/Preservation.fst, contained_needs_child_blind). Write canHold over the node's own kind, or its own fields, and never over its children."
-                                seed
-                                i
+                                "canHold READS THE CHILD LIST — node %s (kind %s) answers %b holding %d child(ren) and %b %s. A predicate that changes under an edit can be satisfied at the instant applyContained checks it and violated by the very insert that check licensed, so applyContained does not preserve the container invariant for this domain (proofs/Preservation.fst, contained_needs_child_blind). Write canHold over the node's own kind, or its own fields, and never over its children."
                                 (idw.ToString(nodew.Id subject))
                                 (nodew.KindTag subject)
                                 (canHold subject)
@@ -790,6 +759,7 @@ module internal TreeLaws =
                                 (canHold rebuilt)
                                 label
                         )
+                )
 
             if
                 not (List.isEmpty kids)
@@ -808,8 +778,7 @@ module internal TreeLaws =
             // Phase 161 retired the `contained_op` hypothesis, so the only premise left is that the
             // INPUT tree satisfies the invariant. A generator that draws a tree already in violation
             // is not tested by this law, and is not failed by it either.
-            let op, r4 = LawKit.genOp nodew idw gen tree rng
-            rng <- r4
+            let op = rng.Draw(LawKit.genOp nodew idw gen tree)
 
             if (firstUncontained tree).IsNone then
                 match Ops.applyContained canHold nodew idw op tree with
@@ -817,29 +786,29 @@ module internal TreeLaws =
                     probes <- probes + 1
 
                     match firstUncontained post with
-                    | Some offender when preservation.IsNone ->
-                        preservation <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: the container invariant BROKE across an ACCEPTED %A — node %s (kind %s) holds %d child(ren) in the result and canHold refuses it, though every node with children satisfied canHold in the input"
-                                    seed
-                                    i
-                                    op
-                                    (idw.ToString(nodew.Id offender))
-                                    (nodew.KindTag offender)
-                                    (List.length (nodew.Children offender))
-                            )
-                    | _ -> ()
+                    | Some offender ->
+                        preservation.Check(
+                            false,
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "the container invariant BROKE across an ACCEPTED %A — node %s (kind %s) holds %d child(ren) in the result and canHold refuses it, though every node with children satisfied canHold in the input"
+                                        op
+                                        (idw.ToString(nodew.Id offender))
+                                        (nodew.KindTag offender)
+                                        (List.length (nodew.Children offender))
+                                )
+                        )
+                    | None -> preservation.Saw()
                 | Error _ -> ()
 
             // ---- arm 3: a graft carrying an interior offender is refused, NAMING it (built) ----
             // The offender is the graft's own root — a fresh node given a child, where the domain's
             // own predicate refuses it. That is Phase 140's `cx_nested_graft` shape expressed over
             // the domain's own nodes.
-            let shell, r5 = gen.FreshNode treeKeys rng
+            let shell = rng.Draw(gen.FreshNode treeKeys)
             let shellKey = idw.ToString(nodew.Id shell)
-            let inner, r6 = gen.FreshNode (Set.add shellKey treeKeys) r5
-            rng <- r6
+            let inner = rng.Draw(gen.FreshNode(Set.add shellKey treeKeys))
             let graft = nodew.ReplaceChildren shell [ inner ]
             let graftKeys = keysOf graft
 
@@ -848,7 +817,9 @@ module internal TreeLaws =
             // `DuplicateId` first (D38's precedence), and would measure that instead.
             let usable =
                 sameIdentity shell graft
-                && nodew.Children graft |> List.map (fun c -> idw.ToString(nodew.Id c)) = [ idw.ToString(nodew.Id inner) ]
+                && nodew.Children graft |> List.map (fun c -> idw.ToString(nodew.Id c)) = [ idw.ToString(
+                                                                                                nodew.Id inner
+                                                                                            ) ]
                 && not (canHold graft)
                 && List.length (List.distinct graftKeys) = List.length graftKeys
                 && graftKeys |> List.forall (fun k -> not (treeKeys.Contains k))
@@ -861,56 +832,44 @@ module internal TreeLaws =
             with
             | [] -> ()
             | holders ->
-                let parent, r7 = ConfRng.choose holders rng
-                rng <- r7
+                let parent = rng.Choose holders
                 grafts <- grafts + 1
 
                 match Ops.applyContained canHold nodew idw (InsertChild(nodew.Id parent, graft)) tree with
                 | Error(NotAContainer(named, kindTag)) ->
-                    if
-                        graftRefusal.IsNone
-                        && (not (idw.Equals named (nodew.Id shell)) || kindTag <> nodew.KindTag shell)
-                    then
-                        graftRefusal <-
-                            Some(
+                    graftRefusal.Check(
+                        idw.Equals named (nodew.Id shell) && kindTag = nodew.KindTag shell,
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: the interior refusal named %s (kind %s), but the offending node is %s (kind %s) — a caller repairs the node the envelope names, so naming another one sends them to the wrong place"
-                                    seed
-                                    i
+                                    "the interior refusal named %s (kind %s), but the offending node is %s (kind %s) — a caller repairs the node the envelope names, so naming another one sends them to the wrong place"
                                     (idw.ToString named)
                                     kindTag
                                     shellKey
                                     (nodew.KindTag shell)
                             )
+                    )
                 | other ->
-                    if graftRefusal.IsNone then
-                        graftRefusal <-
-                            Some(
+                    graftRefusal.Check(
+                        false,
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: a graft whose root %s (kind %s) holds a child while canHold refuses it was answered with %A — it must be NotAContainer naming that node (DECISIONS D38; proofs/Preservation.fst, nested_graft_refused)"
-                                    seed
-                                    i
+                                    "a graft whose root %s (kind %s) holds a child while canHold refuses it was answered with %A — it must be NotAContainer naming that node (DECISIONS D38; proofs/Preservation.fst, nested_graft_refused)"
                                     shellKey
                                     (nodew.KindTag shell)
                                     other
                             )
+                    ))
 
-        [ { Law = "canHold is child-blind (perturbing a node's children leaves it unchanged)"
-            Passed = blind.IsNone
-            Counterexample = blind }
-          { Law = "applyContained preserves the container invariant over this witness"
-            Passed = preservation.IsNone
-            Counterexample = preservation }
-          { Law = "a graft with an interior non-container is refused, naming that node"
-            Passed = graftRefusal.IsNone
-            Counterexample = graftRefusal }
-          SampleAdequacy.reached
-              "Conformance.containerLaws"
-              "built arm"
-              seed
-              [ "child perturbation", perturbations
-                "invariant probe", probes
-                "interior graft", grafts ] ]
+        LawKit.results [ blind; preservation; graftRefusal ]
+        @ [ SampleAdequacy.reached
+                "Conformance.containerLaws"
+                "built arm"
+                seed
+                [ "child perturbation", perturbations
+                  "invariant probe", probes
+                  "interior graft", grafts ] ]
 
     /// **The container capability's two obligations, certified rather than assumed** (Phase 161).
     ///
@@ -1027,10 +986,14 @@ module internal TreeLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable accepted = None
-        let mutable surfaceClash = None
-        let mutable twiceKeyed = None
+        let accepted =
+            LawKit.LawCell "the domain's id check accepts a tree whose full walk repeats no id"
+
+        let surfaceClash =
+            LawKit.LawCell "the domain's id check refuses an id held in a keyed position and in the witness surface"
+
+        let twiceKeyed =
+            LawKit.LawCell "the domain's id check refuses an id held in two keyed positions"
         // the three arms, counted so an arm nothing reached is REPORTED rather than assumed
         let mutable cleanWalks = 0
         let mutable surfaceBuilds = 0
@@ -1079,9 +1042,8 @@ module internal TreeLaws =
                 Some rebuilt
             | _ -> None
 
-        for i in 0 .. iterations - 1 do
-            let tree, r1 = gen.Tree rng
-            rng <- r1
+        LawKit.run iterations seed (fun rng _ at ->
+            let tree = rng.Draw gen.Tree
             let nodes = Tree.preorder nodew tree
             declaredKeyed <- declaredKeyed + List.length (keyedKeys tree)
 
@@ -1091,22 +1053,21 @@ module internal TreeLaws =
             if List.length (List.distinct walk) = List.length walk then
                 cleanWalks <- cleanWalks + 1
 
-                if not (keyw.IdsUnique tree) && accepted.IsNone then
-                    accepted <-
-                        Some(
+                accepted.Check(
+                    keyw.IdsUnique tree,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: %s REFUSED a tree whose full walk (%d id(s), %d of them keyed) repeats nothing — a check that refuses a lawful tree certifies nothing by refusing an unlawful one, and the two laws below would pass for a check that refuses everything"
-                                seed
-                                i
+                                "%s REFUSED a tree whose full walk (%d id(s), %d of them keyed) repeats nothing — a check that refuses a lawful tree certifies nothing by refusing an unlawful one, and the two laws below would pass for a check that refuses everything"
                                 keyw.Surface
                                 (List.length walk)
                                 (List.length (keyedKeys tree))
                         )
+                )
 
             // ---- arm 2: an id held keyed AND in the witness surface is REFUSED (built) ----
-            let holder, r2 = ConfRng.choose nodes rng
-            let victim, r3 = ConfRng.choose nodes r2
-            rng <- r3
+            let holder = rng.Choose nodes
+            let victim = rng.Choose nodes
             let victimKey = keyOf victim
 
             match
@@ -1119,28 +1080,26 @@ module internal TreeLaws =
                 ->
                 surfaceBuilds <- surfaceBuilds + 1
 
-                if keyw.IdsUnique clashed && surfaceClash.IsNone then
-                    surfaceClash <-
-                        Some(
+                surfaceClash.Check(
+                    not (keyw.IdsUnique clashed),
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: %s ACCEPTED a tree holding %s both in the witness surface and in a keyed position of %s (kind %s) — the engine cannot see the keyed one, so nothing else will refuse it, and every theorem about this tree is then about a different tree from the one the domain holds"
-                                seed
-                                i
+                                "%s ACCEPTED a tree holding %s both in the witness surface and in a keyed position of %s (kind %s) — the engine cannot see the keyed one, so nothing else will refuse it, and every theorem about this tree is then about a different tree from the one the domain holds"
                                 keyw.Surface
                                 victimKey
                                 (keyOf holder)
                                 (nodew.KindTag holder)
                         )
+                )
             | _ -> ()
 
             // ---- arm 3: one id held in TWO keyed positions is REFUSED (built) ----
-            let fresh, r4 = gen.FreshNode (Set.ofList walk) rng
-            rng <- r4
+            let fresh = rng.Draw(gen.FreshNode(Set.ofList walk))
             let freshId = nodew.Id fresh
             let freshKey = idw.ToString freshId
-            let a, r5 = ConfRng.choose nodes rng
-            let b, r6 = ConfRng.choose nodes r5
-            rng <- r6
+            let a = rng.Choose nodes
+            let b = rng.Choose nodes
 
             if not (idw.Equals (nodew.Id a) (nodew.Id b)) then
                 let built =
@@ -1158,44 +1117,50 @@ module internal TreeLaws =
                     ->
                     keyedBuilds <- keyedBuilds + 1
 
-                    if keyw.IdsUnique doubled && twiceKeyed.IsNone then
-                        twiceKeyed <-
-                            Some(
+                    twiceKeyed.Check(
+                        not (keyw.IdsUnique doubled),
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: %s ACCEPTED a tree holding %s in a keyed position of BOTH %s and %s — the id occurs nowhere in the witness surface, so a check that compares the keyed positions against the surface alone passes the law above and lets this one through"
-                                    seed
-                                    i
+                                    "%s ACCEPTED a tree holding %s in a keyed position of BOTH %s and %s — the id occurs nowhere in the witness surface, so a check that compares the keyed positions against the surface alone passes the law above and lets this one through"
                                     keyw.Surface
                                     freshKey
                                     (keyOf a)
                                     (keyOf b)
                             )
-                | _ -> ()
+                    )
+                | _ -> ())
 
-        [ { Law = "the domain's id check accepts a tree whose full walk repeats no id"
-            Passed = accepted.IsNone
-            Counterexample = accepted }
-          { Law = "the domain's id check refuses an id held in a keyed position and in the witness surface"
-            Passed = surfaceClash.IsNone
-            Counterexample = surfaceClash }
-          { Law = "the domain's id check refuses an id held in two keyed positions"
-            Passed = twiceKeyed.IsNone
-            Counterexample = twiceKeyed }
-          (if declaredKeyed = 0 && placementsTaken = 0 then
-               // Vacuous BY DECLARATION, which is a different thing from an arm nothing reached:
-               // the witness was asked for a keyed position on every iteration and answered that
-               // it has none. Passing is the honest verdict, and saying which verdict it is — in
-               // the adequacy line every consumer's census reads — is what keeps it from looking
-               // like three laws certified.
-               { Law =
-                   "sample adequacy (Conformance.keyedChildrenLaws): the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION"
-                 Passed = true
-                 Counterexample = None }
-           else
-               SampleAdequacy.reached
-                   "Conformance.keyedChildrenLaws"
-                   "built arm"
-                   seed
-                   [ "clean full walk", cleanWalks
-                     "keyed id in the witness surface", surfaceBuilds
-                     "one id in two keyed positions", keyedBuilds ]) ]
+        if declaredKeyed = 0 && placementsTaken = 0 then
+            // Vacuous BY DECLARATION, which is a different thing from an arm nothing reached:
+            // the witness was asked for a keyed position on every iteration and answered that
+            // it has none. Passing is the honest verdict, and saying which verdict it is — in
+            // the adequacy line every consumer's census reads — is what keeps it from looking
+            // like three laws certified. A cell that took no evidence here reports that verdict
+            // rather than the runner's "never reached": the declaration, not the sample, is what
+            // left the arm empty.
+            let byDeclaration (c: LawKit.LawCell) : LawResult =
+                if c.Evidence = 0 then
+                    { Law = c.Name
+                      Passed = true
+                      Counterexample = None }
+                else
+                    c.Result
+
+            [ byDeclaration accepted
+              byDeclaration surfaceClash
+              byDeclaration twiceKeyed
+              { Law =
+                  SampleAdequacy.lawPrefix "Conformance.keyedChildrenLaws"
+                  + "the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION"
+                Passed = true
+                Counterexample = None } ]
+        else
+            LawKit.results [ accepted; surfaceClash; twiceKeyed ]
+            @ [ SampleAdequacy.reached
+                    "Conformance.keyedChildrenLaws"
+                    "built arm"
+                    seed
+                    [ "clean full walk", cleanWalks
+                      "keyed id in the witness surface", surfaceBuilds
+                      "one id in two keyed positions", keyedBuilds ] ]
