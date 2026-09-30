@@ -235,7 +235,9 @@ let private runs =
                          "ud"
                          "template"
                          [ { RNode.hole "c" "field" "count" (ValueHole(IntRange(0, 5))) with
-                               Eff = { Host = Pure; Determinism = Clock } } ] with
+                               Eff =
+                                   { Host = Pure
+                                     Determinism = Effect.clock } } ] with
                        Eff = Effect.pureDeterministic }
 
                 let underDeclaredArgs = Map.ofList [ "ud/c", ValueArg "3" ]

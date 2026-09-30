@@ -6714,19 +6714,30 @@ let private hostOfModel (h: ModelCap.host_effect) : HostEffect =
     | ModelCap.ReadsHost -> ReadsHost
     | ModelCap.WritesHost -> WritesHost
 
+/// Every determinism set over the three factors (Phase 319), the empty set first — the closed
+/// alphabet the model's characteristic vector ranges over.
+let private allDeterminismSets: DeterminismSource list =
+    [ for mask in 0..7 ->
+          [ ClockFactor; RandomFactor; NetworkFactor ]
+          |> List.indexed
+          |> List.filter (fun (k, _) -> (mask >>> k) &&& 1 = 1)
+          |> List.map snd
+          |> Set.ofList ]
+
+/// The set as the model's characteristic vector: a flag per factor, set exactly when the factor
+/// is a member.
 let private detToModel (d: DeterminismSource) : ModelCap.determinism_source =
-    match d with
-    | Deterministic -> ModelCap.Deterministic
-    | Clock -> ModelCap.Clock
-    | Random -> ModelCap.Random
-    | Network -> ModelCap.Network
+    { ModelCap.determinism_source.has_clock = Set.contains ClockFactor d
+      ModelCap.determinism_source.has_random = Set.contains RandomFactor d
+      ModelCap.determinism_source.has_network = Set.contains NetworkFactor d }
 
 let private detOfModel (d: ModelCap.determinism_source) : DeterminismSource =
-    match d with
-    | ModelCap.Deterministic -> Deterministic
-    | ModelCap.Clock -> Clock
-    | ModelCap.Random -> Random
-    | ModelCap.Network -> Network
+    [ d.has_clock, ClockFactor
+      d.has_random, RandomFactor
+      d.has_network, NetworkFactor ]
+    |> List.filter fst
+    |> List.map snd
+    |> Set.ofList
 
 let private effToModel (e: EffectClass) : ModelCap.effect_class =
     { ModelCap.effect_class.host = hostToModel e.Host
@@ -6917,12 +6928,19 @@ let private capToModel (c: Capability) : ModelCap.capability =
 let private effPool =
     [ Effect.pureDeterministic
       { Host = ReadsHost
-        Determinism = Deterministic }
-      { Host = Pure; Determinism = Clock }
+        Determinism = Effect.deterministic }
+      { Host = Pure
+        Determinism = Effect.clock }
       { Host = WritesHost
-        Determinism = Random }
+        Determinism = Effect.random }
       { Host = ReadsHost
-        Determinism = Network } ]
+        Determinism = Effect.network }
+      { Host = Pure
+        Determinism = Set.ofList [ ClockFactor; RandomFactor ] }
+      { Host = ReadsHost
+        Determinism = Set.ofList [ ClockFactor; NetworkFactor ] }
+      { Host = WritesHost
+        Determinism = Set.ofList [ ClockFactor; RandomFactor; NetworkFactor ] } ]
 
 let private genSpace (r: ConfRng.T) : ValueSpace * ConfRng.T =
     let roll, r1 = ConfRng.intBelow 5 r
@@ -7971,11 +7989,10 @@ let private qHostToModel (h: HostEffect) : ModelQuery.host_effect =
     | WritesHost -> ModelQuery.WritesHost
 
 let private qDetToModel (d: DeterminismSource) : ModelQuery.determinism_source =
-    match d with
-    | Deterministic -> ModelQuery.Deterministic
-    | Clock -> ModelQuery.Clock
-    | Random -> ModelQuery.Random
-    | Network -> ModelQuery.Network
+    { ModelQuery.determinism_source.has_clock = Set.contains ClockFactor d
+      ModelQuery.determinism_source.has_random = Set.contains RandomFactor d
+      ModelQuery.determinism_source.has_network = Set.contains NetworkFactor d }
+
 
 /// A declaration as the model reads it. `keepRequired = false` is the FORGETFUL bridge the
 /// go-red uses: every param crosses as optional, so the model stops seeing step 2.
@@ -8213,7 +8230,7 @@ let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
               Required = (req = 0) }
         )
 
-    let det, r5 = ConfRng.choose [ Deterministic; Clock; Random; Network ] rng
+    let det, r5 = ConfRng.choose allDeterminismSets rng
     let page, r6 = ConfRng.intBelow 3 r5
     rng <- r6
 
@@ -12966,6 +12983,86 @@ let proofOracleTests =
 
                   // seeded, replayable
                   Expect.equal (fnDifferential readers 1770 200) t "same seed => identical tally"
+          testCase
+              "the capability oracle's determinism label and effect lattice are production's over every determinism set and a pool of labels"
+          <| fun _ ->
+              let diffs = ResizeArray<string>()
+
+              for a in allDeterminismSets do
+                  let tag = Effect.determinismTag a
+
+                  if tag <> ModelCap.determinism_tag (detToModel a) then
+                      diffs.Add(sprintf "determinismTag differs on %A: production %s" a tag)
+
+                  if Effect.tryDeterminismOfTag tag <> Some a then
+                      diffs.Add(sprintf "production's tryDeterminismOfTag does not invert its own label %s" tag)
+
+                  if ModelCap.det_of_tag tag <> toMOpt (Some(detToModel a)) then
+                      diffs.Add(sprintf "the model's det_of_tag does not invert the label %s" tag)
+
+                  for b in allDeterminismSets do
+                      let ea = { Host = Pure; Determinism = a }
+                      let eb = { Host = ReadsHost; Determinism = b }
+
+                      if effToModel (Effect.join ea eb) <> ModelCap.join (effToModel ea) (effToModel eb) then
+                          diffs.Add(sprintf "join differs on %A and %A" a b)
+
+                      if Effect.covers ea eb <> ModelCap.covers (effToModel ea) (effToModel eb) then
+                          diffs.Add(sprintf "covers differs on %A over %A" a b)
+
+                      if Effect.covers eb ea <> ModelCap.covers (effToModel eb) (effToModel ea) then
+                          diffs.Add(sprintf "covers differs on %A over %A" b a)
+
+              // The pool: every canonical label, every reordering and repetition of factors, the
+              // empty member, the spellings a reader might guess — production and model refuse the
+              // same strings and accept the same ones.
+              let pool =
+                  (allDeterminismSets |> List.map Effect.determinismTag)
+                  @ [ "random+clock"
+                      "network+random"
+                      "network+clock+random"
+                      "clock+clock"
+                      "deterministic+clock"
+                      "clock+deterministic"
+                      ""
+                      "+"
+                      "clock+"
+                      "+clock"
+                      "Clock"
+                      "clock random"
+                      "clock,random"
+                      "wall" ]
+
+              for s in pool do
+                  let prod = Effect.tryDeterminismOfTag s |> Option.map detToModel |> toMOpt
+
+                  if prod <> ModelCap.det_of_tag s then
+                      diffs.Add(
+                          sprintf "the readings of %A differ: production %A, model %A" s prod (ModelCap.det_of_tag s)
+                      )
+
+              // Teeth: a model that read the label through the chain this replaced (the highest
+              // factor names the class) would collapse every multi-factor set onto one label, and
+              // the comparison above would name it.
+              let collapsed (d: DeterminismSource) =
+                  if Set.contains NetworkFactor d then "network"
+                  elif Set.contains RandomFactor d then "random"
+                  elif Set.contains ClockFactor d then "clock"
+                  else "deterministic"
+
+              let collapseWitnesses =
+                  allDeterminismSets
+                  |> List.filter (fun d -> collapsed d <> Effect.determinismTag d)
+
+              Expect.equal
+                  (List.length collapseWitnesses)
+                  4
+                  "a chain-shaped label disagrees with the set label on exactly the four multi-factor sets"
+
+              match List.ofSeq diffs with
+              | d :: _ -> failtestf "the capability oracle and production DISAGREE on the determinism set\n%s" d
+              | [] -> ()
+
 
           testCase
               "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations"
@@ -13321,7 +13418,7 @@ let proofOracleTests =
                     ResultSchema = [ "n", IntType ]
                     Effect =
                       { Host = ReadsHost
-                        Determinism = Network }
+                        Determinism = Effect.network }
                     Source = Ref "src-t"
                     TimeoutMs = None
                     PageSize = None }
@@ -13423,7 +13520,7 @@ let proofOracleTests =
                     ResultSchema = [ "n", IntType ]
                     Effect =
                       { Host = ReadsHost
-                        Determinism = Network }
+                        Determinism = Effect.network }
                     Source = Ref "src-f"
                     TimeoutMs = None
                     PageSize = None }
@@ -13505,7 +13602,7 @@ let proofOracleTests =
                     ResultSchema = [ "n", IntType ]
                     Effect =
                       { Host = ReadsHost
-                        Determinism = Network }
+                        Determinism = Effect.network }
                     Source = Ref "src-f"
                     TimeoutMs = None
                     PageSize = None }
@@ -13682,7 +13779,7 @@ let proofOracleTests =
                     ResultSchema = [ "n", IntType ]
                     Effect =
                       { Host = ReadsHost
-                        Determinism = Network }
+                        Determinism = Effect.network }
                     Source = Ref "src-adv"
                     TimeoutMs = None
                     PageSize = None }

@@ -189,7 +189,10 @@ let wideHash: HashFn =
 let genComposition (rng: ConfRng.T) : Conformance.CompositionSample<RNode, RNode> * ConfRng.T =
     let v, r1 = ConfRng.intBelow 11 rng // an in-space value for the count hole (0..10)
     let det, r2 = ConfRng.intBelow 4 r1 // vary the inner effect so the join is non-trivial
-    let determinism = [ Deterministic; Clock; Random; Network ] |> List.item det
+
+    let determinism =
+        [ Effect.deterministic; Effect.clock; Effect.random; Effect.network ]
+        |> List.item det
 
     let outer =
         RNode.node
@@ -226,7 +229,10 @@ let genComposition (rng: ConfRng.T) : Conformance.CompositionSample<RNode, RNode
 let genComposition2 (rng: ConfRng.T) : Conformance.CompositionSample<RNode, R2Node> * ConfRng.T =
     let v, r1 = ConfRng.intBelow 11 rng
     let det, r2 = ConfRng.intBelow 4 r1
-    let determinism = [ Deterministic; Clock; Random; Network ] |> List.item det
+
+    let determinism =
+        [ Effect.deterministic; Effect.clock; Effect.random; Effect.network ]
+        |> List.item det
 
     let outer =
         RNode.node
@@ -264,7 +270,7 @@ let genMemo (rng: ConfRng.T) : Conformance.MemoSample<RNode> * ConfRng.T =
     let v2, r2 = ConfRng.intBelow 11 r1
     let alt = if v2 = v1 then (v1 + 1) % 11 else v2 // guarantee ArgsAlt ≠ Args
     let det, r3 = ConfRng.intBelow 3 r2
-    let determinism = [ Clock; Random; Network ] |> List.item det // a non-deterministic source
+    let determinism = [ Effect.clock; Effect.random; Effect.network ] |> List.item det // a non-deterministic source
 
     let fullArgs c =
         Map.ofList
@@ -538,15 +544,15 @@ let tests =
                   results
                   "same seed ⇒ identical report"
 
-          // Phase 30 — the invocable-capability laws; Phase 210 added the three envelope laws, Phase 229 the slotted-artifact law.
+          // Phase 30 — the invocable-capability laws; Phase 210 added the three envelope laws, Phase 229 the slotted-artifact law, Phase 319 the two capture-effect laws.
           testCase "capabilityLaws certify validation + replay + enumeration + round-trip + envelope (Phase 30)"
           <| fun _ ->
               let results = Conformance.capabilityLaws 4242 200
 
               Expect.equal
                   (List.length results)
-                  8
-                  "validation + replay + enumeration + round-trip + the three envelope laws + the slotted-artifact law (Phase 229) reported"
+                  10
+                  "validation + replay + enumeration + round-trip + the three envelope laws + the slotted-artifact law (Phase 229) + the capture-covers law and its under-declaration converse (Phase 319) reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -703,7 +709,9 @@ let tests =
                         "ud"
                         "template"
                         [ { RNode.hole "c" "field" "count" (ValueHole(IntRange(0, 5))) with
-                              Eff = { Host = Pure; Determinism = Clock } } ] with
+                              Eff =
+                                  { Host = Pure
+                                    Determinism = Effect.clock } } ] with
                       Eff = Effect.pureDeterministic }
 
               let underDeclaredArgs = Map.ofList [ "ud/c", ValueArg "3" ]
@@ -1169,7 +1177,9 @@ let functionVerifyTests =
                         "lk"
                         "template"
                         [ { RNode.hole "c" "field" "count" (ValueHole(IntRange(0, 5))) with
-                              Eff = { Host = Pure; Determinism = Clock } } ] with
+                              Eff =
+                                  { Host = Pure
+                                    Determinism = Effect.clock } } ] with
                       Eff = Effect.pureDeterministic }
 
               let report = Conformance.verifyFunction artw leaky Validator.empty genParamsFor 1 25
@@ -1180,7 +1190,7 @@ let functionVerifyTests =
               | Some cx ->
                   match cx.Defect with
                   | EffectObserved(_, observed) ->
-                      Expect.equal observed.Determinism Clock "the observed clock effect is named"
+                      Expect.equal observed.Determinism Effect.clock "the observed clock effect is named"
                   | other -> failtestf "expected EffectObserved, got %A" other
               | None -> failtest "the effect leak must surface a counterexample"
 

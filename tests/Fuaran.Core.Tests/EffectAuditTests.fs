@@ -7,7 +7,9 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
-let private clock = { Host = Pure; Determinism = Clock }
+let private clock =
+    { Host = Pure
+      Determinism = Effect.clock }
 
 [<Tests>]
 let tests =
@@ -39,8 +41,8 @@ let tests =
               | Ok composed ->
                   match Function.auditEffect artw composed with
                   | Error(declared, actual) ->
-                      Expect.equal declared.Determinism Deterministic "declared was deterministic"
-                      Expect.equal actual.Determinism Clock "actual leaked clock"
+                      Expect.equal declared.Determinism Effect.deterministic "declared was deterministic"
+                      Expect.equal actual.Determinism Effect.clock "actual leaked clock"
                   | Ok() -> failtest "expected the clock leak to be caught"
               | Error e -> failtestf "compose failed: %A" e
 
@@ -70,7 +72,7 @@ let tests =
                         [ { RNode.leaf "w" "para" "" with
                               Eff =
                                   { Host = WritesHost
-                                    Determinism = Deterministic } } ] with
+                                    Determinism = Effect.deterministic } } ] with
                       Eff = Effect.pureDeterministic }
 
               match Function.auditEffect artw writer with

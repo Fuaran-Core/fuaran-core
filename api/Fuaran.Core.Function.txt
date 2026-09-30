@@ -5,10 +5,10 @@
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 ctor Fuaran.Core.ArtifactWitness`2..ctor(Fuaran.Core.NodeWitness`2<!0, !1>, Fuaran.Core.IdWitness`1<!1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.HoleDecl>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.EffectClass>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Arg`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>>>)
-ctor Fuaran.Core.Capability..ctor(System.String, Fuaran.Core.Signature, Fuaran.Core.DeterminismSource, Fuaran.Core.Placement)
+ctor Fuaran.Core.Capability..ctor(System.String, Fuaran.Core.Signature, Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>, Fuaran.Core.Placement)
 ctor Fuaran.Core.CapabilityPipeline..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PipelineNode>)
 ctor Fuaran.Core.CapabilityRegistry..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Capability>)
-ctor Fuaran.Core.EffectClass..ctor(Fuaran.Core.HostEffect, Fuaran.Core.DeterminismSource)
+ctor Fuaran.Core.EffectClass..ctor(Fuaran.Core.HostEffect, Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>)
 ctor Fuaran.Core.FunctionEntry..ctor(Fuaran.Core.Capability, System.String)
 ctor Fuaran.Core.FunctionRegistry..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.FunctionEntry>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>)
 ctor Fuaran.Core.HandlerBinding`1..ctor(!0, Fuaran.Core.EffectClass)
@@ -38,10 +38,9 @@ field Fuaran.Core.BindHandlerError+Tags.UnknownActionAddr : System.Int32 (litera
 field Fuaran.Core.Deferred`1+Tags.Failed : System.Int32 (literal)
 field Fuaran.Core.Deferred`1+Tags.Pending : System.Int32 (literal)
 field Fuaran.Core.Deferred`1+Tags.Ready : System.Int32 (literal)
-field Fuaran.Core.DeterminismSource+Tags.Clock : System.Int32 (literal)
-field Fuaran.Core.DeterminismSource+Tags.Deterministic : System.Int32 (literal)
-field Fuaran.Core.DeterminismSource+Tags.Network : System.Int32 (literal)
-field Fuaran.Core.DeterminismSource+Tags.Random : System.Int32 (literal)
+field Fuaran.Core.DeterminismFactor+Tags.ClockFactor : System.Int32 (literal)
+field Fuaran.Core.DeterminismFactor+Tags.NetworkFactor : System.Int32 (literal)
+field Fuaran.Core.DeterminismFactor+Tags.RandomFactor : System.Int32 (literal)
 field Fuaran.Core.HoleKind+Tags.ActionHole : System.Int32 (literal)
 field Fuaran.Core.HoleKind+Tags.RepeatHole : System.Int32 (literal)
 field Fuaran.Core.HoleKind+Tags.SlotHole : System.Int32 (literal)
@@ -121,8 +120,9 @@ method Fuaran.Core.Deferred.map`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!1>, 
 method Fuaran.Core.Deferred.toResult`1(Fuaran.Core.Deferred`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>
 method Fuaran.Core.Deferred.tryValue`1(Fuaran.Core.Deferred`1<!!0>) : Microsoft.FSharp.Core.FSharpOption`1<!!0>
 method Fuaran.Core.Effect.covers(Fuaran.Core.EffectClass, Fuaran.Core.EffectClass) : System.Boolean
-method Fuaran.Core.Effect.determinismTag(Fuaran.Core.DeterminismSource) : System.String
+method Fuaran.Core.Effect.determinismTag(Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>) : System.String
 method Fuaran.Core.Effect.join(Fuaran.Core.EffectClass, Fuaran.Core.EffectClass) : Fuaran.Core.EffectClass
+method Fuaran.Core.Effect.tryDeterminismOfTag(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>>
 method Fuaran.Core.Function.applyMemoComposed`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, !!0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0, Fuaran.Core.MemoCache`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<!!0, Fuaran.Core.MemoCache`1<!!0>>, Fuaran.Core.ApplyError>
 method Fuaran.Core.Function.applyMemo`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0, Fuaran.Core.MemoCache`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<!!0, Fuaran.Core.MemoCache`1<!!0>>, Fuaran.Core.ApplyError>
 method Fuaran.Core.Function.apply`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Arg`1<!!0>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.ApplyError>
@@ -155,7 +155,11 @@ method Fuaran.Core.Registry.register(Fuaran.Core.Capability, Fuaran.Core.Capabil
 method Fuaran.Core.Registry.tryFind(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>
 method Fuaran.Core.Space.slotKindOf(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Space.validate(Fuaran.Core.ValueSpace, System.String) : System.Boolean
+property Fuaran.Core.Effect.clock : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor> { get }
+property Fuaran.Core.Effect.deterministic : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor> { get }
+property Fuaran.Core.Effect.network : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor> { get }
 property Fuaran.Core.Effect.pureDeterministic : Fuaran.Core.EffectClass { get }
+property Fuaran.Core.Effect.random : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor> { get }
 property Fuaran.Core.FunctionRegistryModule.empty : Fuaran.Core.FunctionRegistry { get }
 property Fuaran.Core.Registry.empty : Fuaran.Core.CapabilityRegistry { get }
 record-field Fuaran.Core.ArtifactWitness`2.Bind #4 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Arg`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>>>
@@ -163,13 +167,13 @@ record-field Fuaran.Core.ArtifactWitness`2.Effect #3 : Microsoft.FSharp.Core.FSh
 record-field Fuaran.Core.ArtifactWitness`2.Holes #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.HoleDecl>>
 record-field Fuaran.Core.ArtifactWitness`2.IdW #1 : Fuaran.Core.IdWitness`1<!1>
 record-field Fuaran.Core.ArtifactWitness`2.Tree #0 : Fuaran.Core.NodeWitness`2<!0, !1>
-record-field Fuaran.Core.Capability.Determinism #2 : Fuaran.Core.DeterminismSource
+record-field Fuaran.Core.Capability.Determinism #2 : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>
 record-field Fuaran.Core.Capability.Id #0 : System.String
 record-field Fuaran.Core.Capability.Placement #3 : Fuaran.Core.Placement
 record-field Fuaran.Core.Capability.Signature #1 : Fuaran.Core.Signature
 record-field Fuaran.Core.CapabilityPipeline.Nodes #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PipelineNode>
 record-field Fuaran.Core.CapabilityRegistry.Capabilities #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Capability>
-record-field Fuaran.Core.EffectClass.Determinism #1 : Fuaran.Core.DeterminismSource
+record-field Fuaran.Core.EffectClass.Determinism #1 : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>
 record-field Fuaran.Core.EffectClass.Host #0 : Fuaran.Core.HostEffect
 record-field Fuaran.Core.FunctionEntry.Capability #0 : Fuaran.Core.Capability
 record-field Fuaran.Core.FunctionEntry.ResultType #1 : System.String
@@ -241,8 +245,8 @@ type Fuaran.Core.Deferred`1 (union)
 type Fuaran.Core.Deferred`1+Failed (type)
 type Fuaran.Core.Deferred`1+Ready (type)
 type Fuaran.Core.Deferred`1+Tags (type)
-type Fuaran.Core.DeterminismSource (union)
-type Fuaran.Core.DeterminismSource+Tags (type)
+type Fuaran.Core.DeterminismFactor (union)
+type Fuaran.Core.DeterminismFactor+Tags (type)
 type Fuaran.Core.Effect (module)
 type Fuaran.Core.EffectClass (record)
 type Fuaran.Core.Function (module)
@@ -336,10 +340,9 @@ union-case Fuaran.Core.BindHandlerError.NewUnknownActionAddr #0(addr: System.Str
 union-case Fuaran.Core.Deferred`1.NewFailed #2(message: System.String)
 union-case Fuaran.Core.Deferred`1.NewReady #1(Item: !0)
 union-case Fuaran.Core.Deferred`1.Pending #0()
-union-case Fuaran.Core.DeterminismSource.Clock #1()
-union-case Fuaran.Core.DeterminismSource.Deterministic #0()
-union-case Fuaran.Core.DeterminismSource.Network #3()
-union-case Fuaran.Core.DeterminismSource.Random #2()
+union-case Fuaran.Core.DeterminismFactor.ClockFactor #0()
+union-case Fuaran.Core.DeterminismFactor.NetworkFactor #2()
+union-case Fuaran.Core.DeterminismFactor.RandomFactor #1()
 union-case Fuaran.Core.HoleKind.NewActionHole #3(effect: Fuaran.Core.EffectClass)
 union-case Fuaran.Core.HoleKind.NewRepeatHole #2(countSpace: Fuaran.Core.ValueSpace)
 union-case Fuaran.Core.HoleKind.NewSlotHole #1(kindConstraint: Microsoft.FSharp.Core.FSharpOption`1<System.String>)

@@ -62,8 +62,8 @@ type QueryParam =
       Required: bool }
 
 /// A query declaration: a named, registrable data-acquisition contract. Pure data — it carries no
-/// host code. `Effect` reuses `Function`'s two-axis `EffectClass` verbatim (`Deterministic` =
-/// pure relational/synthetic, re-evaluable; `Network`/`Clock` = captured result replayed). `Source`
+/// host code. `Effect` reuses `Function`'s two-axis `EffectClass` verbatim (an empty determinism set = pure
+/// relational/synthetic, re-evaluable; a set naming `Network` and/or `Clock` = captured result replayed). `Source`
 /// is the `Column` `DataSource` (`Embedded` template or host-resolved `Ref`). `ResultSchema` is the
 /// typed shape the query produces — so a UI can be typed against it in a schema-only (no-rows) fetch.
 type Query =
@@ -315,20 +315,12 @@ module QueryCodec =
         | "writesHost" -> Ok WritesHost
         | other -> Error("unknown host effect: " + other)
 
-    let private detStr =
-        function
-        | Deterministic -> "deterministic"
-        | Clock -> "clock"
-        | Random -> "random"
-        | Network -> "network"
+    let private detStr = Effect.determinismTag
 
-    let private detOf =
-        function
-        | "deterministic" -> Ok Deterministic
-        | "clock" -> Ok Clock
-        | "random" -> Ok Random
-        | "network" -> Ok Network
-        | other -> Error("unknown determinism source: " + other)
+    let private detOf (tag: string) =
+        match Effect.tryDeterminismOfTag tag with
+        | Some set -> Ok set
+        | None -> Error("unknown determinism source: " + tag)
 
     let private effectJson (e: EffectClass) : JVal =
         JObj [ "host", JStr(hostStr e.Host); "determinism", JStr(detStr e.Determinism) ]
