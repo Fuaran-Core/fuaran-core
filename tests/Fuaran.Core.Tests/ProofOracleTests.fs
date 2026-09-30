@@ -10480,6 +10480,21 @@ let proofOracleTests =
                   [ "leading zeros small"; "leading zeros int53"; "trailing dot" ]
                   "the carved near misses"
 
+          // Phase 299 — the integer reader is the invariant one, so the differential answers the
+          // same under a culture whose negative sign is not U+002D. Before, `-5` fell to the float
+          // path there, and every near miss carrying a negative integer disagreed with the model.
+          testCase "… and under fa-IR and he-IL, whose negative sign is not U+002D"
+          <| fun _ ->
+              for culture in [ "fa-IR"; "he-IL" ] do
+                  let saved = System.Globalization.CultureInfo.CurrentCulture
+                  System.Globalization.CultureInfo.CurrentCulture <- System.Globalization.CultureInfo culture
+
+                  try
+                      JsonParseDiff.sweep RejectNull 512 JsonParseDiff.nearMisses
+                      |> JsonParseDiff.expectAgreement ("near misses, strict, under " + culture)
+                  finally
+                      System.Globalization.CultureInfo.CurrentCulture <- saved
+
           testCase "… and under the tolerant read policy, where the member-null fork lives"
           <| fun _ ->
               JsonParseDiff.sweep EraseMemberNull 512 JsonParseDiff.nearMisses

@@ -3147,7 +3147,6 @@ fingerprint — a Fable consumer re-runs its parity leg against this draft.
 
 **Not done here.** The extracted parser model still reads the pre-299 grammar; the parser
 differential carves out exactly these refusals until Phase 306 restates `proofs/JsonParse.fst`.
-`Function.fs` still says "six-code envelope" in one doc comment (another phase's file this tier).
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 

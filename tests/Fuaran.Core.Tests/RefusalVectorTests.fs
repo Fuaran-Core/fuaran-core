@@ -249,4 +249,22 @@ let tests =
                           path)
 
               check (RefusalCorpus.vectorsPath root) (RefusalCorpus.render ())
-              check (RefusalCorpus.manifestPath root) (RefusalCorpus.renderManifest ()) ]
+              check (RefusalCorpus.manifestPath root) (RefusalCorpus.renderManifest ())
+
+          // The amendment's culture leg: the corpus answers the same under a culture whose negative
+          // sign is not U+002D, because the parser's integer reader is the invariant one.
+          testCase "every vector gets the same outcome under fa-IR and he-IL"
+          <| fun _ ->
+              let invariant = RefusalCorpus.vectors |> List.map RefusalCorpus.outcome
+
+              for culture in [ "fa-IR"; "he-IL" ] do
+                  let saved = System.Globalization.CultureInfo.CurrentCulture
+                  System.Globalization.CultureInfo.CurrentCulture <- System.Globalization.CultureInfo culture
+
+                  try
+                      Expect.equal
+                          (RefusalCorpus.vectors |> List.map RefusalCorpus.outcome)
+                          invariant
+                          (sprintf "the corpus under %s" culture)
+                  finally
+                      System.Globalization.CultureInfo.CurrentCulture <- saved ]
