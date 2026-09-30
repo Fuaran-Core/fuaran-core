@@ -1,0 +1,253 @@
+namespace Fuaran.Core
+
+/// The domain-supplied op-algebra generator: how to build a random tree, and how to mint
+/// a fresh node whose id avoids a given set (for `InsertChild`). `CanHold` (Phase 251) is
+/// the container capability — `Some p` exercises the laws through `Ops.applyContained` so a
+/// witness whose `ReplaceChildren` is partial on leaves certifies green without restricting
+/// the generator to containers; `None` uses the plain `apply` (every node can hold children).
+type OpGen<'Node, 'Id> =
+    { Tree: ConfRng.T -> 'Node * ConfRng.T
+      FreshNode: Set<string> -> ConfRng.T -> 'Node * ConfRng.T
+      CanHold: ('Node -> bool) option }
+
+/// The domain-supplied op-stream generator: the base state and a random op source.
+type StreamGen<'Op, 'State> =
+    { State0: 'State
+      Op: ConfRng.T -> 'Op * ConfRng.T }
+
+// ---- Phase 246: the seam witnesses ----
+//
+// The seam families (`capabilityLaws`, `queryLaws`, `capabilityPipelineLaws`) take a seed and
+// certify Core's own fixtures, so a domain's registry, body and host dispatch are out of their
+// reach: downstream consumers' measurements (Phase 246) planted a host that ran the body before the
+// registry refused, and every seam family stayed green. These three records are what a domain hands
+// the witness-taking forms instead. They COMPOSE the seam's own types rather than growing any
+// frozen witness (STABILITY's "compose, never grow").
+
+/// A domain's capability seam, as `Conformance.capabilityLawsWith` certifies it (Phase 246).
+///
+/// - `Registry` — the registry the domain dispatches against. The laws read it as the ORACLE: a
+///   call whose id is registered and whose arguments `Capability.validateArgs` accepts must reach
+///   the body, and every other call must be refused with the registry's own error.
+/// - `Body` — the domain's body, handed the call's arguments first, in the shape
+///   `Registry.dispatch` wants after them. The kit wraps it to count how often it runs.
+/// - `Dispatch` — the domain's HOST path: the function its surface actually calls to invoke a
+///   capability, handed the id, the arguments and the body to run. A host that delegates to Core
+///   passes `Registry.dispatch registry`; a host with its own wiring passes that wiring, which is the
+///   point — a defect in it (a body run before the registry refuses) is what the family can see.
+/// - `GenCall` — the calls a model could make: registered and invented ids, arguments in space, out
+///   of space, missing and stray. The family is starved unless it reaches a settled, a pending and a
+///   refused dispatch.
+type CapabilitySeamWitness<'v> =
+    { Registry: CapabilityRegistry
+      Body: (string * string) list -> Capability -> unit -> Deferred<'v>
+      Dispatch:
+          string -> (string * string) list -> (Capability -> unit -> Deferred<'v>) -> Result<Deferred<'v>, InvokeError>
+      GenCall: ConfRng.T -> (string * (string * string) list) * ConfRng.T }
+
+/// A domain's query seam, as `Conformance.queryLawsWith` certifies it (Phase 246) — the query
+/// mirror of `CapabilitySeamWitness`: `Queries` is the oracle, `Resolver` the domain's resolver
+/// (handed the call's arguments first), `Dispatch` the host path (`QueryRegistry.dispatch queries`
+/// for a host that delegates to Core), and `GenQuery` the calls a model could make.
+type QuerySeamWitness =
+    { Queries: QueryRegistry
+      Resolver: (string * Cell) list -> Query -> Deferred<QueryResult>
+      Dispatch:
+          string
+              -> (string * Cell) list
+              -> (Query -> Deferred<QueryResult>)
+              -> Result<Deferred<QueryResult>, QueryError>
+      GenQuery: ConfRng.T -> (string * (string * Cell) list) * ConfRng.T }
+
+/// A domain's capability pipelines, as `Conformance.capabilityPipelineLawsWith` certifies them
+/// (Phase 246): the registry they compose against, and the pipelines the domain builds.
+type CapabilityPipelineWitness =
+    { PipelineRegistry: CapabilityRegistry
+      GenPipeline: ConfRng.T -> CapabilityPipeline * ConfRng.T }
+
+// `LawResult` — one law's verdict — is defined in `SampleAdequacy.fs`, which is compiled ahead of
+// this file. It moved there in Phase 121 for one reason: the adequacy guard produces `LawResult`s
+// like every family here does, and every family here declares its demands through the guard, so the
+// guard has to precede them — and it deliberately depends on no family, which makes it the right
+// place for the type they all share.
+
+/// The domain-supplied AUTHORING surface (Phase 126): how to rebuild a decoded value through the
+/// smart constructors / builders a program actually writes against, rather than through the decoded
+/// record itself. `Surface` names that surface in the report — it is read by a human reading a
+/// counterexample, so name the thing an author calls ("the smart constructors", "the `ui` builders"),
+/// not the module it lives in.
+///
+/// `Construct` returns a `Result` because an authoring surface is allowed to REFUSE: a constructor
+/// that validates is the common case, and a refusal of a value the domain's own codec just decoded is
+/// itself a finding (`constructThenEncodeLaws`' second law), not an exception.
+///
+/// It is deliberately NOT part of any existing witness. A domain opts in by supplying one, and a
+/// domain that supplies none is reported by name rather than skipped — see `constructThenEncodeLaws`.
+type ConstructWitness<'T> =
+    { Surface: string
+      Construct: 'T -> Result<'T, string> }
+
+/// The domain-supplied KEYED-CHILDREN declaration (Phase 189): the nodes a domain holds where
+/// `NodeWitness.Children` does not report them — a case table, a fallback slot, a named
+/// alternative, an argument position — together with the domain's own full-walk id check over
+/// them.
+///
+/// **Why this is a witness of its own and not a field of `OpGen`.** `Children` is what the engine
+/// REBUILDS through, so widening the node witness to reach keyed positions would oblige every
+/// domain to re-express them as an ordered list — a large change to what a domain must model, to
+/// buy a check the domain is far better placed to make. The boundary stays where `README.md` puts
+/// it; what changes is that the obligation it leaves with the domain is now something the domain
+/// can RUN, on the `ConstructWitness` precedent: a domain opts in by supplying one, and a domain
+/// that supplies none is not silently certified.
+///
+/// **A domain with no keyed position declares the empty list**, and the family then reports
+/// vacuity BY DECLARATION rather than by silence — a green report over a witness that was never
+/// asked anything is the vacuity this kit exists to refuse.
+type KeyedWitness<'Node, 'Id> =
+    {
+        /// The domain's own id check, named as a reader of a counterexample would look for it —
+        /// name the thing an author calls ("the full walk in `Doc.validate`"), not the module it
+        /// lives in.
+        Surface: string
+        /// The ids this node holds in keyed, non-structural positions — the ones `Children` does
+        /// not report. `[]` for a node that holds none, and `fun _ -> []` for a domain that has
+        /// none at all.
+        HasKeyedChildren: 'Node -> 'Id list
+        /// Place `id` in a keyed position of this node, or `None` where this node has no keyed
+        /// position to place into. The kit BUILDS its collisions through this rather than drawing
+        /// them: a generator's contract is a fresh id, so a drawn sample can never exhibit the
+        /// defect these laws are about, and a law quantified over the drawn sample alone would
+        /// certify a check that checked nothing (`opAlgebra`'s built arm, for the same reason).
+        PlaceKeyedChild: 'Node -> 'Id -> 'Node option
+        /// The domain's own full-walk id check: `true` when this tree's ids are unique over the
+        /// domain's OWN walk, keyed positions included. This is the obligation being certified,
+        /// so it is the domain's function and never derived from the two above.
+        IdsUnique: 'Node -> bool
+    }
+
+/// The domain-supplied INCREMENTAL EVALUATOR (Phase 211): what a domain hands `Propagation.eval`
+/// and `Propagation.evalFrom`, together with the edits it re-evaluates under and the change set it
+/// names for each. `Conformance.propagationEvaluatorLaws` runs it.
+///
+/// **Why this is a witness of its own.** The agreement theorem (`evalfrom_agrees`,
+/// `proofs/Propagation.fst`) is generic over the evaluator, so the evaluator is the model's
+/// PARAMETER and stays outside every theorem. What the theorem assumes of it — that it is a
+/// function of what it reads, and that a change set names every node on which it moved — can only
+/// be checked at the evaluator a domain actually runs. The kit's own `propagationEvalLaws`
+/// certifies the DRIVER over a toy evaluator; this certifies an ADOPTER, over its own.
+///
+/// `'Model` is whatever the domain evaluates — a sheet of formulas, a pipeline, a document — and
+/// every other field reads it, so one generated model yields the map, the evaluator and the edits
+/// the domain would hand the driver for it.
+type EvaluatorWitness<'Model, 'V> =
+    {
+        /// The domain's evaluator, named as a reader of a counterexample would look for it — name
+        /// the thing an author calls ("the cell evaluator in `Sheet.recalc`"), not the module.
+        Surface: string
+        /// A generated domain model, drawn from the domain's own generator.
+        Model: ConfRng.T -> 'Model * ConfRng.T
+        /// The dependency map the domain hands `Propagation.eval` / `evalFrom` for this model.
+        Deps: 'Model -> Map<string, Set<string>>
+        /// The domain's per-node evaluator for this model — exactly what it hands the driver.
+        EvalNode: 'Model -> (string -> 'V option) -> string -> Result<'V, string>
+        /// An edit to the model, and the change set the domain would hand `evalFrom` for it. The
+        /// change set is the CLAIM being certified, so it is the domain's and never derived by the
+        /// kit — a kit that computed it from the edit would agree with the domain by construction.
+        Change: 'Model -> ConfRng.T -> ('Model * Set<string>) * ConfRng.T
+    }
+
+/// The aggregate certification report.
+type ConformanceReport =
+    { Results: LawResult list
+      AllPassed: bool }
+
+/// The composition sample (Phase 47) a domain supplies per draw to certify cross-witness
+/// `composeAcross`. `Outer` is an `'A`-function carrying TWO independent typed slots (`SlotA`,
+/// `SlotB`, by absolute address) plus its value-hole bindings (`OuterArgs`, addr → in-space
+/// value). `ClosedInner` is a fully-bound `'B`-function whose `embed`-lift fits either slot.
+/// `OpenInnerA` / `OpenInnerB` each carry exactly one open value hole sharing the name
+/// `OpenHoleName` but at DISTINCT ids (so the two re-rooted copies get distinct absolute
+/// addresses — the hygiene case), fillable with `OpenHoleArg`.
+type CompositionSample<'A, 'B> =
+    { Outer: 'A
+      SlotA: string
+      SlotB: string
+      OuterArgs: (string * string) list
+      ClosedInner: 'B
+      OpenInnerA: 'B
+      OpenInnerB: 'B
+      OpenHoleName: string
+      OpenHoleArg: string }
+
+// ---- artifact-function property-verification (Phase 48) ----
+// Lift verification from "is this *tree* valid?" to "does this *function* produce a valid tree
+// for ALL (sampled / symbolic) valid param sets?" — property-test an artifact-function against
+// a domain `Validator.Registry` (the validity oracle the verifier *drives*, read-only). The
+// correct-by-construction property no freeform code-gen can offer: a saved typed-tree function
+// is certified valid across its whole binding space, not just one instance. The function-under-
+// test, the validator registry, and the param-set source all ride as per-call parameters (GP2);
+// no new witness field (additive over the frozen `ArtifactWitness`).
+
+/// Why one param-set failed verification (Phase 48) — a typed defect, never a throw (GP4).
+type VerifyDefect<'Id> =
+    /// the "valid" param-set was itself rejected by `apply` (a generator producing an
+    /// out-of-space / unbound set, or a non-total function).
+    | DidNotApply of ApplyError
+    /// `apply` produced a tree the domain validator faulted (≥1 `Severity.Error` defect).
+    | ValidatorRejected of Defect<'Id> list
+    /// the applied tree observes an effect its declared class does not cover (Fork-3 cross-check).
+    | EffectObserved of declared: EffectClass * observed: EffectClass
+
+/// A reproducible counterexample: the offending param-set, the defect, and the seed/iteration
+/// (a failure is reproduced by re-running the same seed — deterministic seed-replay).
+type VerifyCounterexample<'Node, 'Id> =
+    { ParamSet: (string * Arg<'Node>) list
+      Defect: VerifyDefect<'Id>
+      Seed: int
+      Iteration: int }
+
+/// How the param space was covered — coverage honesty (never silently sample-and-claim-verified):
+/// the whole finite space was enumerated (`Exhaustive`), or a sample of `drawn` cases was taken
+/// from a space of `SpaceSize` (`None` = unbounded: a hole ranges over `FloatRange` / `StringLen`
+/// / `AnyString`).
+type VerifyCoverage =
+    | Exhaustive of cases: int
+    | Sampled of drawn: int * spaceSize: int option
+
+/// The verification verdict: certified across the covered param space, or a counterexample.
+type FunctionVerifyReport<'Node, 'Id> =
+    { Verified: bool
+      Coverage: VerifyCoverage
+      Counterexample: VerifyCounterexample<'Node, 'Id> option }
+
+// ---- memoised application (Phase 49) ----
+// The teeth on `Function.applyMemo` (content-addressed application caching) + its collapse of
+// op-stream replay into re-application over the memo.
+
+/// The memo sample (Phase 49) a domain supplies per draw to certify `Function.applyMemo`. `PureFn`
+/// is a memoisable (fully pure & deterministic) function with a valid full param-set `Args`;
+/// `ArgsAlt` is a DIFFERENT valid full param-set (it must key distinctly — the "a param change
+/// misses" case). `EffectingFn` is a non-memoisable (non-deterministic / host-effecting) function
+/// with a valid full param-set `EffectingArgs` (the soundness-guard case — never served from cache).
+type MemoSample<'Node> =
+    { PureFn: 'Node
+      Args: Map<string, Arg<'Node>>
+      ArgsAlt: Map<string, Arg<'Node>>
+      EffectingFn: 'Node
+      EffectingArgs: Map<string, Arg<'Node>> }
+
+/// The domain-supplied CONTENT-EDIT generator (Phase 297): given a node the tree holds, an edited
+/// node carrying the SAME id — what `UpdateNode` rewrites a node with. The kit cannot draw a content
+/// edit on its own (it does not know what a node's content is), so without one it draws the
+/// identity update — `UpdateNode n` for a node `n` already in the tree — which exercises every
+/// `UpdateNode` path (validation, rebuild, invert, footprint, conflict detection) over an edit
+/// that changes nothing. A domain that supplies one certifies the same laws over real edits.
+///
+/// It composes rather than growing `OpGen` ("compose, never grow", STABILITY.md): a domain that
+/// has no content edits constructs nothing new.
+type UpdateGen<'Node> =
+    {
+        /// An edited copy of `node`, with the same id. The kit never reads the copy's children —
+        /// `UpdateNode` keeps the tree's — so a generator may return any children it likes.
+        Update: 'Node -> ConfRng.T -> 'Node * ConfRng.T
+    }

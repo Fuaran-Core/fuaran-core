@@ -4,13 +4,30 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Conformance</PackageId>
-    <Description>Fuaran.Core.Conformance — a property-based law kit a domain runs against its own witness to certify it conforms to the Fuaran.Core op algebra + op-stream: apply totality, canApply≡apply, apply∘invert=identity, verifyChain, and replay determinism. FSharp.Core only (a deterministic uint32-LCG generator, no FsCheck), Fable-clean.</Description>
+    <Description>Fuaran.Core.Conformance — a property-based law kit a domain runs against its own witness to certify it conforms to the Fuaran.Core op algebra + op-stream: apply totality, canApply≡apply, apply∘invert=identity, verifyChain, and replay determinism. FSharp.Core only (a deterministic uint32 xorshift32 generator, no FsCheck), Fable-clean.</Description>
   </PropertyGroup>
   <ItemGroup>
     <!-- Phase 121 — the sample-adequacy guard, and with it `LawResult`. FIRST, because every
          family below declares its demands through it, and because the guard deliberately depends
          on no family it guards — which is also why the shared verdict type moved here. -->
     <Compile Include="SampleAdequacy.fs" />
+    <!-- Phase 297 — the kit is split by topic behind a facade. `ConfRng` (the generator) and the
+         witness records come first because every family reads them; `LawKit` (the runner —
+         internal) next; then the eight topic modules, each internal, in an order that is free
+         except where one family runs another (`SurfaceLaws` last of them only by habit); and
+         `Conformance.fs` LAST — the public facade of one-line forwards plus `certify` /
+         `certifyStream`, whose bodies the suite reads to derive which families are base-run. -->
+    <Compile Include="ConfRng.fs" />
+    <Compile Include="ConformanceWitnesses.fs" />
+    <Compile Include="LawKit.fs" />
+    <Compile Include="TreeLaws.fs" />
+    <Compile Include="StreamLaws.fs" />
+    <Compile Include="IntegrityLaws.fs" />
+    <Compile Include="ConcurrencyLaws.fs" />
+    <Compile Include="SeamLaws.fs" />
+    <Compile Include="FunctionLaws.fs" />
+    <Compile Include="PropagationLaws.fs" />
+    <Compile Include="SurfaceLaws.fs" />
     <Compile Include="Conformance.fs" />
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->

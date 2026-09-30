@@ -1,4 +1,4 @@
-﻿module Fuaran.Core.Tests.ConformanceTests
+module Fuaran.Core.Tests.ConformanceTests
 
 // Phase 243 — the op-algebra conformance kit, self-proven against the in-repo reference
 // witness, plus a deliberately-broken witness whose failure is reproduced from a seed.
@@ -1055,8 +1055,7 @@ let functionVerifyTests =
               match broken.Counterexample with
               | Some cx ->
                   match cx.Defect with
-                  | Conformance.ValidatorRejected ds ->
-                      Expect.isNonEmpty ds "the validator's defect travels in the counterexample"
+                  | ValidatorRejected ds -> Expect.isNonEmpty ds "the validator's defect travels in the counterexample"
                   | other -> failtestf "expected ValidatorRejected, got %A" other
 
                   Expect.stringContains
@@ -1080,13 +1079,13 @@ let functionVerifyTests =
               let sound =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 5)) countReg Map.empty 100 7
 
-              Expect.equal sound.Coverage (Conformance.Exhaustive 6) "6 ints in [0,5], all enumerated"
+              Expect.equal sound.Coverage (Exhaustive 6) "6 ints in [0,5], all enumerated"
               Expect.isTrue sound.Verified "every value in [0,5] respects the ≤5 rule"
 
               let broken =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 10)) countReg Map.empty 100 7
 
-              Expect.equal broken.Coverage (Conformance.Exhaustive 11) "11 ints in [0,10], the whole space"
+              Expect.equal broken.Coverage (Exhaustive 11) "11 ints in [0,10], the whole space"
               Expect.isFalse broken.Verified "exhaustive enumeration finds the >5 values"
 
           testCase "symbolic mode samples a large space with the coverage reported (coverage honesty)"
@@ -1095,7 +1094,7 @@ let functionVerifyTests =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 100000)) countReg Map.empty 50 7
 
               match report.Coverage with
-              | Conformance.Sampled(50, Some 100001) -> ()
+              | Sampled(50, Some 100001) -> ()
               | other -> failtestf "expected Sampled(50, Some 100001), got %A" other
 
           testCase "symbolic mode varies value holes while slots are pinned via fixedArgs"
@@ -1106,7 +1105,7 @@ let functionVerifyTests =
               let report =
                   Conformance.verifyFunctionSymbolic artw (tplCount (0, 5)) countReg fixedArgs 100 7
 
-              Expect.equal report.Coverage (Conformance.Exhaustive 6) "only the count hole varies (6 cases)"
+              Expect.equal report.Coverage (Exhaustive 6) "only the count hole varies (6 cases)"
               Expect.isTrue report.Verified "clean across the pinned-slot param space"
 
           testCase "verifyFunction surfaces an undeclared effect as a defect (Fork-3 cross-check)"
@@ -1127,7 +1126,7 @@ let functionVerifyTests =
               match report.Counterexample with
               | Some cx ->
                   match cx.Defect with
-                  | Conformance.EffectObserved(_, observed) ->
+                  | EffectObserved(_, observed) ->
                       Expect.equal observed.Determinism Clock "the observed clock effect is named"
                   | other -> failtestf "expected EffectObserved, got %A" other
               | None -> failtest "the effect leak must surface a counterexample"
