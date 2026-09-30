@@ -14,6 +14,12 @@ module internal SeamLaws =
     ///    via `OpStream.captureEffect` (keyed by `Capability.invocationKey` + `determinismTag`),
     ///    replays through `replayEffect` **byte-identically** even when the live source would now
     ///    produce a different value, and fully consumes the journal;
+    ///  - **a capture records the whole class** (Phase 319) — the declared determinism is a SET of
+    ///    factors, and the label a capture journals decodes back to exactly that set, so the effect
+    ///    a capture records covers every factor the body exercised (a body reading the clock beside a
+    ///    random source is journaled as both, never as its least deterministic member). Its
+    ///    companion law is the converse: a body that reads a factor OUTSIDE the recorded class is
+    ///    not covered, and the difference names that factor;
     ///  - **stable enumeration** — `Registry.enumerate` is order-stable (by id) regardless of
     ///    insertion order;
     ///  - **declaration round-trip** — `CapabilityCodec.decode (encode c) = Ok c`;
@@ -56,6 +62,12 @@ module internal SeamLaws =
         let asyncAxis =
             LawKit.LawCell "dispatch settles, stays pending, or refuses typed before the body runs"
 
+        let capturedEffect =
+            LawKit.LawCell "the effect a capture records covers every determinism factor the body exercised"
+
+        let underDeclared =
+            LawKit.LawCell "a body that reads a factor outside the recorded effect is not covered, and is named"
+
         let typedFailure =
             LawKit.LawCell "a body failure is a typed BodyFailed, never Ok(Failed _)"
 
@@ -72,6 +84,19 @@ module internal SeamLaws =
             | _ -> Error("not an int: " + s)
 
         let hashFn = OpStream.defaultHash
+
+        // Every non-empty determinism set over the three factors, in a fixed order; iteration `i`
+        // declares the (i mod 7)th, so a run reaches the single-factor and the multi-factor labels
+        // without a further draw from the cursor (Phase 319).
+        let allFactors = [ ClockFactor; RandomFactor; NetworkFactor ]
+
+        let nonEmptySets =
+            [ for mask in 1..7 ->
+                  allFactors
+                  |> List.indexed
+                  |> List.filter (fun (k, _) -> (mask >>> k) &&& 1 = 1)
+                  |> List.map snd
+                  |> Set.ofList ]
 
         LawKit.run iterations seed (fun rng i at ->
             let lo = rng.IntBelow 50
@@ -92,7 +117,7 @@ module internal SeamLaws =
                   Holes = [ hole ]
                   Effect =
                     { Host = ReadsHost
-                      Determinism = Random } }
+                      Determinism = List.item (i % 7) nonEmptySets } }
 
             let cap = Capability.create ("cap-" + string i) sg (ClientIsland Pyodide)
 
@@ -128,6 +153,67 @@ module internal SeamLaws =
                     fun () -> at (sprintf "replay ≠ recorded invocation (%d vs %d)" v realized)
                 )
             | Error m -> replay.Check(false, fun () -> at (sprintf "replay errored: %s" m))
+
+            // The effect a capture records covers every factor the body exercised (Phase 319). The
+            // body reads the factors it is given, noting each; the journal is decoded back through
+            // the canonical label, and the set it names must equal the declared class and so cover
+            // every factor read — the whole class is journaled, not the least deterministic member.
+            let captureReading (readSet: Set<DeterminismFactor>) =
+                let seen = ref Set.empty
+
+                let body () =
+                    for f in readSet do
+                        seen.Value <- Set.add f seen.Value
+
+                    realized
+
+                let _, journal = OpStream.captureEffect hashFn encodeV det key body []
+
+                let recorded =
+                    match journal with
+                    | [ c ] -> Effect.tryDeterminismOfTag c.Determinism
+                    | _ -> None
+
+                recorded, seen.Value
+
+            let host = cap.Signature.Effect.Host
+
+            let covered (recorded: Set<DeterminismFactor>) (exercised: Set<DeterminismFactor>) =
+                Effect.covers { Host = host; Determinism = recorded } { Host = host; Determinism = exercised }
+
+            let declared = cap.Determinism
+
+            for readSet in [ declared; declared |> Set.toList |> List.truncate 1 |> Set.ofList ] do
+                match captureReading readSet with
+                | Some recorded, seen ->
+                    capturedEffect.Check(
+                        (recorded = declared && covered recorded seen),
+                        fun () ->
+                            at (
+                                sprintf
+                                    "the capture recorded %A but the body exercised %A of declared %A"
+                                    recorded
+                                    seen
+                                    declared
+                            )
+                    )
+                | None, _ ->
+                    capturedEffect.Check(false, fun () -> at "the capture journaled no decodable determinism label")
+
+            // A body that reads a factor OUTSIDE the class is not covered by the record, and the
+            // difference names exactly that factor — the law has teeth on an under-declaration.
+            match allFactors |> List.tryFind (fun f -> not (Set.contains f declared)) with
+            | Some outside ->
+                match captureReading (Set.add outside declared) with
+                | Some recorded, seen ->
+                    underDeclared.Check(
+                        (not (covered recorded seen))
+                        && Set.difference seen recorded = Set.singleton outside,
+                        fun () -> at (sprintf "a read of %A outside the recorded %A was not named" outside recorded)
+                    )
+                | None, _ ->
+                    underDeclared.Check(false, fun () -> at "the capture journaled no decodable determinism label")
+            | None -> ()
 
             // stable enumeration regardless of insertion order.
             let capB = Capability.create ("cap-a" + string i) sg BuildTime
@@ -307,7 +393,9 @@ module internal SeamLaws =
               envelope
               asyncAxis
               typedFailure
-              slotted ]
+              slotted
+              capturedEffect
+              underDeclared ]
 
     /// The capability-seam laws at a DOMAIN'S seam (Phase 246). `capabilityLaws` beside it builds
     /// its own capabilities from the seed and certifies Core's `Registry.dispatch`; it cannot see a
@@ -423,7 +511,7 @@ module internal SeamLaws =
                   ResultSchema = [ "n", IntType ]
                   Effect =
                     { Host = ReadsHost
-                      Determinism = Network }
+                      Determinism = Effect.network }
                   Source = Ref("src-" + string i)
                   TimeoutMs = Some 5000
                   PageSize = None }
@@ -1217,7 +1305,7 @@ module internal SeamLaws =
               Holes = []
               Effect =
                 { Host = ReadsHost
-                  Determinism = Random } }
+                  Determinism = Effect.random } }
 
         let consHole: SigEntry =
             { Addr = "x"

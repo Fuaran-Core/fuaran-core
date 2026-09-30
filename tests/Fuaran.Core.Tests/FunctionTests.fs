@@ -149,7 +149,9 @@ let tests =
           <| fun _ ->
               let inner =
                   { RNode.leaf "p" "para" "composed" with
-                      Eff = { Host = Pure; Determinism = Clock } }
+                      Eff =
+                          { Host = Pure
+                            Determinism = Effect.clock } }
 
               let outer = template ()
 
@@ -164,7 +166,7 @@ let tests =
 
               // effect join law: pure ∘ clock = clock (componentwise widest)
               let joined = Function.composedEffect artw inner outer
-              Expect.equal joined.Determinism Clock "determinism joined to clock"
+              Expect.equal joined.Determinism Effect.clock "determinism joined to clock"
               Expect.equal joined.Host Pure "host stays pure"
 
           testCase "compose rejects a slot kind mismatch"
@@ -201,17 +203,104 @@ let tests =
 
           testCase "effect join is the componentwise widest"
           <| fun _ ->
-              let clock = { Host = Pure; Determinism = Clock }
+              let clock =
+                  { Host = Pure
+                    Determinism = Effect.clock }
 
               let writes =
                   { Host = WritesHost
-                    Determinism = Deterministic }
+                    Determinism = Effect.deterministic }
 
               let j = Effect.join clock writes
               Expect.equal j.Host WritesHost "host widened"
-              Expect.equal j.Determinism Clock "determinism widened"
+              Expect.equal j.Determinism Effect.clock "determinism widened"
               Expect.isTrue (Effect.covers j clock) "join covers each input"
               Expect.isFalse (Effect.covers Effect.pureDeterministic clock) "pure does not cover clock"
+
+          // ---- Phase 319: the determinism axis is a SET of factors, joined by union ----
+
+          testCase "determinism is a set: join keeps every factor, and a declaration covers only the factors it names"
+          <| fun _ ->
+              let only d = { Host = Pure; Determinism = d }
+
+              let clockRandom = Effect.join (only Effect.clock) (only Effect.random)
+
+              Expect.equal
+                  clockRandom.Determinism
+                  (Set.ofList [ ClockFactor; RandomFactor ])
+                  "join of clock and random names BOTH — the chain this replaced kept only the maximum"
+
+              Expect.isTrue (Effect.covers clockRandom (only Effect.clock)) "the union covers the clock read"
+              Expect.isTrue (Effect.covers clockRandom (only Effect.random)) "and the random read"
+
+              Expect.isFalse
+                  (Effect.covers (only Effect.network) (only Effect.clock))
+                  "a network-only declaration does NOT cover a clock read — it once did, as the maximum"
+
+              Expect.isFalse
+                  (Effect.covers (only Effect.random) (only clockRandom.Determinism))
+                  "a random-only declaration does not cover a body that also reads the clock"
+
+              Expect.equal
+                  (Effect.join Effect.pureDeterministic (only Effect.network))
+                  (only Effect.network)
+                  "deterministic (the empty set) is the identity of the join"
+
+          testCase
+              "the canonical determinism label names the members in fixed order and is inverted only on canonical labels"
+          <| fun _ ->
+              let labels =
+                  [ Effect.deterministic, "deterministic"
+                    Effect.clock, "clock"
+                    Effect.random, "random"
+                    Effect.network, "network"
+                    Set.ofList [ ClockFactor; RandomFactor ], "clock+random"
+                    Set.ofList [ ClockFactor; NetworkFactor ], "clock+network"
+                    Set.ofList [ RandomFactor; NetworkFactor ], "random+network"
+                    Set.ofList [ ClockFactor; RandomFactor; NetworkFactor ], "clock+random+network" ]
+
+              for set, label in labels do
+                  Expect.equal (Effect.determinismTag set) label (sprintf "%A renders canonically" set)
+                  Expect.equal (Effect.tryDeterminismOfTag label) (Some set) (sprintf "%s names its set" label)
+
+              // a set has ONE spelling: every reordering, repetition and guess is refused
+              for bad in
+                  [ "random+clock"
+                    "network+random+clock"
+                    "clock+clock"
+                    "deterministic+clock"
+                    "clock+deterministic"
+                    ""
+                    "+"
+                    "clock+"
+                    "Clock"
+                    "clock,random"
+                    "wall" ] do
+                  Expect.isNone (Effect.tryDeterminismOfTag bad) (sprintf "%A is not a canonical label" bad)
+
+          testCase "the capability codec round-trips a multi-factor determinism and refuses a non-canonical label"
+          <| fun _ ->
+              let sg: Signature =
+                  { Name = "f"
+                    Holes = []
+                    Effect =
+                      { Host = ReadsHost
+                        Determinism = Set.ofList [ ClockFactor; RandomFactor ] } }
+
+              let cap = Capability.create "f" sg Server
+              let wire = CapabilityCodec.encode cap
+              Expect.stringContains wire "\"determinism\":\"clock+random\"" "the set is written as its canonical label"
+
+              match CapabilityCodec.decode wire with
+              | Ok c2 -> Expect.equal c2 cap "a multi-factor capability round-trips"
+              | Error m -> failtestf "decode failed: %s" m
+
+              let reordered = wire.Replace("clock+random", "random+clock")
+              Expect.notEqual reordered wire "the label was reordered"
+
+              match CapabilityCodec.decode reordered with
+              | Error _ -> ()
+              | Ok _ -> failtest "a reordered label is not canonical and must be refused"
 
           // ---- Phase 30: invocable Capability + registry ----
 
@@ -229,10 +318,10 @@ let tests =
                           Required = true } ]
                     Effect =
                       { Host = ReadsHost
-                        Determinism = Network } }
+                        Determinism = Effect.network } }
 
               let cap = Capability.create "score" sg Server
-              Expect.equal cap.Determinism Network "determinism mirrors the signature effect"
+              Expect.equal cap.Determinism Effect.network "determinism mirrors the signature effect"
               Expect.equal (Capability.determinismTag cap) "network" "tag matches the Phase 27 label"
 
           testCase "validateArgs accepts in-space and names every refusal"
@@ -458,7 +547,7 @@ let tests =
                           Required = true } ]
                     Effect =
                       { Host = ReadsHost
-                        Determinism = Random } }
+                        Determinism = Effect.random } }
 
               let cap = Capability.create "predict" sg (ClientIsland Pyodide)
 
@@ -479,7 +568,7 @@ let tests =
                     Holes = []
                     Effect =
                       { Host = ReadsHost
-                        Determinism = Random } }
+                        Determinism = Effect.random } }
 
               let cap = Capability.create "f" sg Server
               let wire = CapabilityCodec.encode cap
@@ -509,7 +598,7 @@ let tests =
 /// The handler-effect ceiling the button's `onClick` declares: it writes the host, deterministically.
 let private writesHost =
     { Host = WritesHost
-      Determinism = Deterministic }
+      Determinism = Effect.deterministic }
 
 /// A button artifact: a data `label` hole (filled by the AI) + an `onClick` action hole (a dispatch
 /// slot a human binds a handler to). The tree stays pure — the action hole carries no handler and no
@@ -611,12 +700,12 @@ let actionHoleTests =
                         { Handler = (fun () -> "x")
                           Effect =
                             { Host = WritesHost
-                              Determinism = Network } } ]
+                              Determinism = Effect.network } } ]
 
               match Function.bindHandlers artw handlers (buttonTpl ()) with
               | Error(HandlerEffectExceedsCeiling("btn/click", ceiling, handler)) ->
                   Expect.equal ceiling writesHost "names the declared ceiling"
-                  Expect.equal handler.Determinism Network "names the over-wide handler effect"
+                  Expect.equal handler.Determinism Effect.network "names the over-wide handler effect"
               | other -> failtestf "expected HandlerEffectExceedsCeiling, got %A" other
 
           testCase "bindHandlers rejects a handler on a non-action hole, and on an unknown address"
@@ -685,11 +774,11 @@ let composeAcrossTests =
                   { RNode.leaf "p" "para" "x" with
                       Eff =
                           { Host = ReadsHost
-                            Determinism = Clock } }
+                            Determinism = Effect.clock } }
 
               let joined = Function.composedEffectAcross artw artw inner (template ())
               Expect.equal joined.Host ReadsHost "host widened to the inner's"
-              Expect.equal joined.Determinism Clock "determinism widened to the inner's"
+              Expect.equal joined.Determinism Effect.clock "determinism widened to the inner's"
               Expect.isTrue (Effect.covers joined (artw.Effect(template ()))) "join covers the outer"
               Expect.isTrue (Effect.covers joined (artw.Effect inner)) "join covers the inner"
 
@@ -785,7 +874,9 @@ let memoTests =
           <| fun _ ->
               let effFn =
                   { template () with
-                      Eff = { Host = Pure; Determinism = Clock } }
+                      Eff =
+                          { Host = Pure
+                            Determinism = Effect.clock } }
 
               let args = fullArgs "5"
               let direct = Function.apply artw args effFn

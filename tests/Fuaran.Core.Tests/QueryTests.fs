@@ -15,7 +15,7 @@ let private sampleQuery: Query =
       ResultSchema = [ "region", StringType; "revenue", FloatType ]
       Effect =
         { Host = ReadsHost
-          Determinism = Network }
+          Determinism = Effect.network }
       Source = Ref "sales"
       TimeoutMs = Some 5000
       PageSize = Some 100 }
@@ -123,6 +123,20 @@ let tests =
           <| fun _ ->
               match QueryCodec.decode (QueryCodec.encode sampleQuery) with
               | Ok q2 -> Expect.equal q2 sampleQuery "declaration round-trip"
+              | Error e -> failtestf "decode failed: %A" e
+
+          testCase "a query with a multi-factor determinism round-trips and keys its capture by the canonical label"
+          <| fun _ ->
+              let q =
+                  { sampleQuery with
+                      Effect =
+                          { Host = ReadsHost
+                            Determinism = Set.ofList [ ClockFactor; NetworkFactor ] } }
+
+              Expect.equal (Query.determinismTag q) "clock+network" "the capture label names both factors"
+
+              match QueryCodec.decode (QueryCodec.encode q) with
+              | Ok q2 -> Expect.equal q2 q "a multi-factor declaration round-trips"
               | Error e -> failtestf "decode failed: %A" e
 
           testCase "query result round-trips through the codec"

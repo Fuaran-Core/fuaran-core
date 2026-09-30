@@ -231,12 +231,13 @@ type Snapshot<'State> =
 ///
 /// `Seq` is the capture's index in its own append-only chain; `Eff` is a stable effect-identity
 /// key (which boundary — so the seed-injection helper can find a capture); `Determinism` is the
-/// `Fuaran.Core.Function` determinism tag *label* (`"clock"`/`"random"`/`"network"`) — this layer
-/// sits below `Function` and stays FSharp.Core-only, so it keys on the label, not the DU (a
-/// consumer threads `Effect.determinismTag` in). `Value` is the realized value through the domain
-/// `Codec` (raw wire JSON, embedded verbatim like an op payload), so the journal round-trips
-/// byte-for-byte. A `Deterministic` effect emits no capture, so the determinism label is always
-/// one of the non-deterministic three.
+/// `Fuaran.Core.Function` determinism tag *label* (`"clock"`, `"clock+random"`, … — the member
+/// factors in canonical order joined by `+`) — this layer sits below `Function` and stays
+/// FSharp.Core-only, so it keys on the label, not the set (a consumer threads
+/// `Effect.determinismTag` in). `Value` is the realized value through the domain `Codec` (raw wire
+/// JSON, embedded verbatim like an op payload), so the journal round-trips byte-for-byte. A
+/// `Deterministic` effect emits no capture, so the determinism label is always a non-deterministic
+/// label: one or more factors.
 type EffectCapture =
     { Seq: int
       Eff: string
@@ -1353,8 +1354,8 @@ module OpStream =
     /// The determinism label below which an effect needs no capture — the `Deterministic` tag.
     /// `Fuaran.Core.Function`'s `Effect.determinismTag` projects `Deterministic` to exactly this
     /// string; the capture seam keys on the label rather than referencing the DU (this layer sits
-    /// below `Function` and stays FSharp.Core-only). The non-deterministic labels are `"clock"`,
-    /// `"random"`, `"network"`.
+    /// below `Function` and stays FSharp.Core-only). A non-deterministic label names one or more of
+    /// `clock`, `random`, `network`, in that order, joined by `+` (`"clock"`, `"clock+random"`).
     [<Literal>]
     let deterministicTag = "deterministic"
 

@@ -134,6 +134,19 @@ module LawVectorExport =
               Cap: Capability
               CapB: Capability }
 
+        /// Every non-empty determinism set over the three factors, in `capabilityLaws`' order:
+        /// mask `1..7`, bit 0 the clock, bit 1 a random source, bit 2 the network. Iteration `i`
+        /// declares the `(i mod 7)`th, so a twelve-iteration file carries all seven labels
+        /// (`clock`, `random`, `clock+random`, `network`, `clock+network`, `random+network`,
+        /// `clock+random+network`) — the rows the determinism set moved (Phase 319).
+        let nonEmptySets: Set<DeterminismFactor> list =
+            [ for mask in 1..7 ->
+                  [ ClockFactor; RandomFactor; NetworkFactor ]
+                  |> List.indexed
+                  |> List.filter (fun (k, _) -> (mask >>> k) &&& 1 = 1)
+                  |> List.map snd
+                  |> Set.ofList ]
+
         let draws () : Draw list =
             let mutable rng = ConfRng.ofSeed seed
 
@@ -158,7 +171,7 @@ module LawVectorExport =
                         Holes = [ hole ]
                         Effect =
                           { Host = ReadsHost
-                            Determinism = Random } }
+                            Determinism = List.item (i % 7) nonEmptySets } }
 
                   yield
                       { Iteration = i
@@ -249,7 +262,7 @@ module LawVectorExport =
             + "`iterations` iterations, computed by calling the pinned kit. A host reproduces the sample with its own "
             + "ConfRng: per iteration draw intBelow(50) = lo, intBelow(50) = span (hi = lo + span + 1), intBelow(1000) = "
             + "the captured value, and build one capability per iteration over a single required value hole `h0` in "
-            + "IntRange(lo, hi) with effect readsHost/random. `capability` and `declaration` members carry a canonical "
+            + "IntRange(lo, hi) with effect readsHost and the determinism set of the (i mod 7)th non-empty subset of {clock, random, network} in mask order (mask 1..7, bit 0 clock, bit 1 random, bit 2 network; the label names the members in that order joined by `+`). `capability` and `declaration` members carry a canonical "
             + "capability declaration as a JSON STRING — decode it with the host's capability codec. `validateArgs` "
             + "vectors expect accept, or reject with a named error class and the offending address. `invocationKey` "
             + "vectors expect the effect-identity key a non-deterministic invocation is journalled under, its "

@@ -306,46 +306,24 @@ let uu___is_WritesHost : host_effect  ->  Prims.bool = (fun ( projectee  :  host
      false
      end))
 
-type determinism_source =
-| Deterministic
-| Clock
-| Random
-| Network
+type determinism_source = {has_clock : Prims.bool; has_random : Prims.bool; has_network : Prims.bool}
 
 
-let uu___is_Deterministic : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Deterministic -> begin
-     true
-     end
-| uu___ -> begin
-     false
+let __proj__Mkdeterminism_source__item__has_clock : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
+| {has_clock = has_clock; has_random = has_random; has_network = has_network} -> begin
+     has_clock
      end))
 
 
-let uu___is_Clock : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Clock -> begin
-     true
-     end
-| uu___ -> begin
-     false
+let __proj__Mkdeterminism_source__item__has_random : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
+| {has_clock = has_clock; has_random = has_random; has_network = has_network} -> begin
+     has_random
      end))
 
 
-let uu___is_Random : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Random -> begin
-     true
-     end
-| uu___ -> begin
-     false
-     end))
-
-
-let uu___is_Network : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
-| Network -> begin
-     true
-     end
-| uu___ -> begin
-     false
+let __proj__Mkdeterminism_source__item__has_network : determinism_source  ->  Prims.bool = (fun ( projectee  :  determinism_source ) -> (match (projectee) with
+| {has_clock = has_clock; has_random = has_random; has_network = has_network} -> begin
+     has_network
      end))
 
 type effect_class = {host : host_effect; determinism : determinism_source}
@@ -627,19 +605,42 @@ let cell_type : cell  ->  FStar_Pervasives_Native.option<column_type> = (fun ( c
      end))
 
 
-let determinism_tag : determinism_source  ->  Prims.string = (fun ( d  :  determinism_source ) -> (match (d) with
-| Deterministic -> begin
-     "deterministic"
+let determinism_tag : determinism_source  ->  Prims.string = (fun ( d  :  determinism_source ) ->  
+if d.has_clock then begin
+      
+if d.has_random then begin
+      
+if d.has_network then begin
+     "clock+random+network"
+     end else begin
+     "clock+random"
      end
-| Clock -> begin
+     end else begin
+      
+if d.has_network then begin
+     "clock+network"
+     end else begin
      "clock"
      end
-| Random -> begin
+     end
+     end else begin
+      
+if d.has_random then begin
+      
+if d.has_network then begin
+     "random+network"
+     end else begin
      "random"
      end
-| Network -> begin
+     end else begin
+      
+if d.has_network then begin
      "network"
-     end))
+     end else begin
+     "deterministic"
+     end
+     end
+     end)
 
 
 let determinism_tag_of : query  ->  Prims.string = (fun ( q  :  query ) -> (determinism_tag q.q_effect.determinism))

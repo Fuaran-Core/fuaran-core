@@ -196,6 +196,73 @@ still being widened inside this draft, so the freeze decision belongs to the rel
 shape; `SurfaceLaws.unfrozenWitnesses` says so. The footprint (`Ops.footprint`) still reads the
 structural surface; carrying keyed ids into it is Phase 247's.
 
+## 2026-09-30 — D82: determinism is a SET of factors joined by union — the chain is declined, the journal is why, and a breaking change on the open draft is not a reason to keep the wrong answer
+
+**Recorded by Phase 319. BREAKING; rides the `0.33.0` draft (STABILITY.md "The determinism axis is a SET of factors").**
+`EffectClass.Determinism` was a total order — `Deterministic < Clock < Random < Network` — joined by
+maximum. Two readings of one axis were both defensible, and the phase existed to rule between them
+before a capture journal keys on the axis and before a host adopts the effect algebra as a contract:
+
+- **(A) the chain stands.** "The least deterministic factor names the class." `join` is the maximum,
+  `covers` is the order, and the documentation says a declared class names the least deterministic
+  factor and a journal captures the whole class.
+- **(B) a factor set.** "Every factor is a fact." `Determinism` is `Set<DeterminismFactor>`, the empty
+  set is `Deterministic`, `join` is union, `covers` is superset, and the label renders the set
+  canonically.
+
+**Ruled: (B). (A) is DECLINED.** The reason is the capture journal. Under the chain, `join Clock Random`
+is `Random`: the clock factor is dropped, so a journal entry for a body that read both carries one
+label, and a replay that re-seeds the random source and not the clock reads as exact. The same
+chain says a `Network` declaration `covers` a clock read, so a declaration can be honest without
+naming a factor its body reads. Under the set, the label a capture records IS the whole class, and
+`covers` is exactly "the declaration names every factor the body reads". The set is strictly more
+informative than the chain — the chain is its projection by maximum rank, and the reverse loses the
+clock beside a random read — so nothing the chain could say is lost and what it could not say is now
+stateable. A downstream platform already models this axis as a factor set with union as the join,
+and a downstream application-composition layer mirrors that shape; both are precedent only, cited
+for the shape and taking no dependency in either direction (the pillars stay decoupled; the shared
+form is a set of three named factors, nothing more). That `0.33.0` is an open, already-breaking draft
+slot made the cost of the change low, but it is not what decided it: a breaking change is not good
+enough reason to keep the wrong answer.
+
+**What the decision fixes.**
+
+- **The type.** `DeterminismFactor = ClockFactor | RandomFactor | NetworkFactor`;
+  `DeterminismSource` is an alias for `Set<DeterminismFactor>`, kept so the conformance kit's
+  witness builders keep their signature. The factor alphabet is closed; adding a factor is a
+  `union-widening` of `DeterminismFactor` and a wire-vocabulary widening.
+- **The algebra.** `Effect.join` is union on this axis (the host axis stays a chain), associative,
+  commutative, idempotent, with `Set.empty` its identity; `Effect.covers` is `Set.isSubset actual
+  declared` beside the host rank. The proof models restate these (`Capability.fst` section 1) and
+  the effect law and the audit law hold unchanged.
+- **The label.** Canonical, in a FIXED factor order (clock, random, network — held by an explicit
+  list, not by the derived comparison, so reordering the union cases cannot reorder a wire label),
+  joined by `+`; a single factor keeps the label it always had. The inverse accepts only the
+  canonical spelling, so a set has one wire spelling and the capability codec's cross-check of the
+  wire tag against the signature stays meaningful.
+- **The mapping for a reader of the old shape.** A set maps to the chain by MAXIMUM RANK: the empty set
+  is `Deterministic`, otherwise the highest-ranked member (`Clock` 1, `Random` 2, `Network` 3) names
+  the class. The map is many-to-one: `{Random}` and `{Clock, Random}` both read as `Random`, which
+  is the information the chain lost.
+  A chain value lifts to the set by the one-member set (`Deterministic` to the empty set); the lift
+  is a section of the projection, not its inverse.
+- **The law.** `capabilityLaws` certifies that the effect a capture records covers every factor the
+  body exercised, and that a read outside the recorded class is not covered and is named. The
+  journal is unchanged in shape: it keys on the label string and the label now names a set.
+
+**What is not decided here, and whose it is.** A host that mirrors the old four-token vocabulary as
+a closed enum — a generated wire chain in a UI host, a name-mapping function in an orchestration
+layer — keeps reading single-factor labels unchanged and must accept or refuse the `+` labels at its
+own next raise; that work is on those hosts' own sides and is not reached from here. A capture
+keyed per invocation (Phase 318) inherits the set: its key already carries the label.
+
+**Declined alternatives.** (A) above. A *bitmask* representation would make the canonical order
+implicit and the wire label a number; it was rejected because the label is a readable contract
+other hosts certify against and the set is the shape the downstream precedents already use. A
+*tagged union of `Deterministic | Nondeterministic of Set`* (the shape one downstream layer uses to
+keep the empty set out of the second case) was not adopted: the empty set is already `Deterministic`
+here, so the wrapper would add a case and an invariant to maintain and buy nothing.
+
 ## 2026-09-30 — D75: an incomplete match is a build error, the publication sweep is a standing arm of the suite, and the pack's reproducibility is re-measured — path-length-independent content, still no byte-identity claim
 
 **Recorded by Phase 294. Gate and packaging only; no package surface moves (STABILITY.md `0.33.0 — DRAFT`).**

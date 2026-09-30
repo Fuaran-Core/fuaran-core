@@ -159,12 +159,10 @@ type host_effect =
   | ReadsHost
   | WritesHost
 
-(* F#: `DeterminismSource`. *)
-type determinism_source =
-  | Deterministic
-  | Clock
-  | Random
-  | Network
+(* F#: `DeterminismSource` = `Set<DeterminismFactor>` (`ClockFactor | RandomFactor | NetworkFactor`),
+   represented by its characteristic vector over that alphabet (Phase 319): a factor is a member
+   exactly when its flag is set, so the empty set — `Deterministic` — is the all-false vector. *)
+type determinism_source = { has_clock: bool; has_random: bool; has_network: bool }
 
 (* F#: `EffectClass`. *)
 type effect_class = { host: host_effect; determinism: determinism_source }
@@ -215,13 +213,26 @@ let cell_type (c:cell) : Tot (option column_type) =
   | Decimal _ -> Some DecimalType
   | Null -> None
 
-(* F#: `Effect.determinismTag`. *)
+(* F#: `Effect.determinismTag` — the canonical label of a set: `"deterministic"` for the empty set,
+   otherwise the member factors' names in the fixed order clock, random, network, joined by `+`.
+   Written as the eight labels the rendering produces. Section 1 of `Capability.fst` proves this
+   table a bijection and carries the lattice over the same type; this model reads the label only. *)
 let determinism_tag (d:determinism_source) : Tot string =
-  match d with
-  | Deterministic -> "deterministic"
-  | Clock -> "clock"
-  | Random -> "random"
-  | Network -> "network"
+  if d.has_clock then
+    (if d.has_random then
+       (if d.has_network then "clock+random+network" else "clock+random")
+     else
+       (if d.has_network then "clock+network" else "clock"))
+  else
+    (if d.has_random then
+       (if d.has_network then "random+network" else "random")
+     else
+       (if d.has_network then "network" else "deterministic"))
+
+(* The label is injective: two sets with one label are one set — the capture key cannot confuse
+   two determinism classes. *)
+let determinism_tag_injective (a b:determinism_source)
+  : Lemma (requires determinism_tag a == determinism_tag b) (ensures a == b) = ()
 
 (* F#: `Query.determinismTag`. *)
 let determinism_tag_of (q:query) : Tot string = determinism_tag q.q_effect.determinism

@@ -829,9 +829,10 @@ module internal FunctionLaws =
     ///    space: the verdict is about the tree's structure for each binding, NOT output determinism or
     ///    quality (a structurally-valid but value-varying output still verifies);
     ///  - **verification makes no output-determinism / quality claim** — the structural verdict is
-    ///    effect-class-AGNOSTIC: every determinism axis (`Deterministic` / `Clock` / `Random` /
-    ///    `Network`) yields the SAME verdict — all verify for the sound function, none verify for the
-    ///    broken one — so "verified" certifies structure, never the determinism class of the effect.
+    ///    effect-class-AGNOSTIC: every determinism set (`Deterministic`, each of `Clock` / `Random` /
+    ///    `Network`, and every combination of them) yields the SAME verdict — all verify for the sound
+    ///    function, none verify for the broken one — so "verified" certifies structure, never the
+    ///    determinism class of the effect.
     ///
     /// This is the executable form of the contract clarification in the `verifyFunction` doc +
     /// `STABILITY.md`: the capability never over-claims a quality / determinism guarantee. Deterministic
@@ -845,7 +846,15 @@ module internal FunctionLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let axes = [ Deterministic; Clock; Random; Network ]
+        // Every determinism set over the three factors — the empty set (`Deterministic`), each factor
+        // alone, and every combination — because the axis is a set since Phase 319.
+        let axes: DeterminismSource list =
+            [ for mask in 0..7 ->
+                  [ ClockFactor; RandomFactor; NetworkFactor ]
+                  |> List.indexed
+                  |> List.filter (fun (k, _) -> (mask >>> k) &&& 1 = 1)
+                  |> List.map snd
+                  |> Set.ofList ]
 
         let stochasticVerifies =
             LawKit.LawCell "a stochastic-effect function verifies for structural validity across its param space"
@@ -858,7 +867,7 @@ module internal FunctionLaws =
         // evidence is the run having been made, not an iteration.
 
         // a stochastic (Random) sound function verifies on structure across the sampled param space.
-        (let rep = verifyFunction w (mkSound Random) reg genParams seed iterations
+        (let rep = verifyFunction w (mkSound Effect.random) reg genParams seed iterations
 
          stochasticVerifies.Check(
              rep.Verified,

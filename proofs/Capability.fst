@@ -5,8 +5,9 @@
 
    WHAT IS MODELLED. `src/Fuaran.Core.Function/Function.fs` — three surfaces of one file:
 
-     - the EFFECT LATTICE (`Effect.join` / `Effect.covers` and the two rank tables they are
-       written through), the VALUE SPACES (`Space.validate` / `Space.isBounded`) and the hole
+     - the EFFECT LATTICE (`Effect.join` / `Effect.covers` over a host chain beside a determinism SET,
+       the set written as its characteristic vector since Phase 319), the VALUE SPACES
+       (`Space.validate` / `Space.isBounded`) and the hole
        vocabulary (`HoleKind` / `HoleDecl` / `SigEntry` / `Signature` / `Arg` / `ApplyError`);
      - the FUNCTION ALGEBRA over the domain-witness record: `Function.signature`,
        `signatureExcluding`, `isTotal`, the private `guardTotal` / `validateArg` / `bindArgs` and
@@ -204,7 +205,8 @@ let rec distinct (l:list string) : Tot bool =
    the F# expression it stands for. *)
 (* ======================================================================================
    1. The effect lattice — `HostEffect`, `DeterminismSource`, `EffectClass`, `Effect.join`,
-      `Effect.covers`, written through the same two rank tables the F# uses.
+      `Effect.covers`. The host axis is written through the rank tables the F# uses; the
+      determinism axis is a SET of factors (Phase 319), written as its characteristic vector.
    ====================================================================================== *)
 
 (* F#: `HostEffect`. *)
@@ -213,18 +215,21 @@ type host_effect =
   | ReadsHost
   | WritesHost
 
-(* F#: `DeterminismSource`. *)
-type determinism_source =
-  | Deterministic
-  | Clock
-  | Random
-  | Network
+(* F#: `DeterminismSource` = `Set<DeterminismFactor>`, `DeterminismFactor` being the closed three-case
+   union `ClockFactor | RandomFactor | NetworkFactor`. The set is represented by its CHARACTERISTIC
+   VECTOR over that alphabet: a factor is a member exactly when its flag is set, so `Set.empty` is
+   the all-false vector — `Deterministic`. The representation is the model's; the differential host
+   bridges it to the F# `Set` through membership, factor by factor. *)
+type determinism_source = { has_clock: bool; has_random: bool; has_network: bool }
 
 (* F#: `EffectClass`. *)
 type effect_class = { host: host_effect; determinism: determinism_source }
 
+(* F#: `Effect.deterministic` — `Set.empty`. *)
+let deterministic : determinism_source = { has_clock = false; has_random = false; has_network = false }
+
 (* F#: `Effect.pureDeterministic`. *)
-let pure_deterministic : effect_class = { host = Pure; determinism = Deterministic }
+let pure_deterministic : effect_class = { host = Pure; determinism = deterministic }
 
 (* F#: `Effect.hostRank`. *)
 let host_rank (h:host_effect) : Tot int =
@@ -233,55 +238,87 @@ let host_rank (h:host_effect) : Tot int =
   | ReadsHost -> 1
   | WritesHost -> 2
 
-(* F#: `Effect.detRank`. *)
-let det_rank (d:determinism_source) : Tot int =
-  match d with
-  | Deterministic -> 0
-  | Clock -> 1
-  | Random -> 2
-  | Network -> 3
-
 (* F#: `Effect.hostOf` — `0 -> Pure | 1 -> ReadsHost | _ -> WritesHost`. *)
 let host_of (n:int) : Tot host_effect =
   if n = 0 then Pure else if n = 1 then ReadsHost else WritesHost
 
-(* F#: `Effect.detOf` — `0 -> Deterministic | 1 -> Clock | 2 -> Random | _ -> Network`. *)
-let det_of (n:int) : Tot determinism_source =
-  if n = 0 then Deterministic else if n = 1 then Clock else if n = 2 then Random else Network
-
 (* F#: `max`. *)
 let max_int (a b:int) : Tot int = if a >= b then a else b
 
-(* F#: `Effect.join` — componentwise widest. *)
+(* F#: `Set.union` over the determinism factors — a factor is in the union when it is in either. *)
+let det_union (a b:determinism_source) : Tot determinism_source =
+  { has_clock = a.has_clock || b.has_clock;
+    has_random = a.has_random || b.has_random;
+    has_network = a.has_network || b.has_network }
+
+(* F#: `Set.isSubset a b` — every factor of `a` is in `b`. *)
+let det_subset (a b:determinism_source) : Tot bool =
+  (not a.has_clock || b.has_clock) &&
+  (not a.has_random || b.has_random) &&
+  (not a.has_network || b.has_network)
+
+(* F#: `Effect.join` — the host axis widest, the determinism axis the union. *)
 let join (a b:effect_class) : Tot effect_class =
   { host = host_of (max_int (host_rank a.host) (host_rank b.host));
-    determinism = det_of (max_int (det_rank a.determinism) (det_rank b.determinism)) }
+    determinism = det_union a.determinism b.determinism }
 
-(* F#: `Effect.covers` — declared at least as wide as actual, on both axes. *)
+(* F#: `Effect.covers` — the declared host at least as wide, and the declared determinism a SUPERSET
+   of the actual: `Set.isSubset actual.Determinism declared.Determinism`. *)
 let covers (declared actual:effect_class) : Tot bool =
   host_rank declared.host >= host_rank actual.host &&
-  det_rank declared.determinism >= det_rank actual.determinism
+  det_subset actual.determinism declared.determinism
 
-(* F#: `Effect.determinismTag`. *)
+(* F#: `Effect.determinismTag` — the canonical label of a set: `"deterministic"` for the empty set,
+   otherwise the member factors' names in the fixed order clock, random, network, joined by `+`.
+   Written as the eight labels the rendering produces, so that nothing about the joining is left
+   to the prover's string reasoning. *)
 let determinism_tag (d:determinism_source) : Tot string =
-  match d with
-  | Deterministic -> "deterministic"
-  | Clock -> "clock"
-  | Random -> "random"
-  | Network -> "network"
+  if d.has_clock then
+    (if d.has_random then
+       (if d.has_network then "clock+random+network" else "clock+random")
+     else
+       (if d.has_network then "clock+network" else "clock"))
+  else
+    (if d.has_random then
+       (if d.has_network then "random+network" else "random")
+     else
+       (if d.has_network then "network" else "deterministic"))
 
-(* The two tables are inverse on the ranks they produce — the fact every lattice law rests on. *)
+(* F#: `Effect.tryDeterminismOfTag` — the inverse: the set a CANONICAL label names, `None` for any
+   other string (a reordered, repeated, empty or unknown member; `deterministic` beside a factor). *)
+let det_of_tag (s:string) : Tot (option determinism_source) =
+  if s = "deterministic" then Some deterministic
+  else if s = "clock" then Some { has_clock = true; has_random = false; has_network = false }
+  else if s = "random" then Some { has_clock = false; has_random = true; has_network = false }
+  else if s = "network" then Some { has_clock = false; has_random = false; has_network = true }
+  else if s = "clock+random" then Some { has_clock = true; has_random = true; has_network = false }
+  else if s = "clock+network" then Some { has_clock = true; has_random = false; has_network = true }
+  else if s = "random+network" then Some { has_clock = false; has_random = true; has_network = true }
+  else if s = "clock+random+network" then Some { has_clock = true; has_random = true; has_network = true }
+  else None
+
+(* The host table is inverse on the ranks it produces — the fact the host half of every lattice
+   law rests on. (The determinism axis needs no such fact: the union is pointwise.) *)
 let host_of_rank (h:host_effect) : Lemma (host_of (host_rank h) == h) = ()
-let det_of_rank (d:determinism_source) : Lemma (det_of (det_rank d) == d) = ()
+
+(* The label is a BIJECTION between the eight sets and the eight canonical labels, in both
+   directions: a set has exactly one wire spelling, and a label names at most one set. *)
+let det_tag_roundtrip (d:determinism_source) : Lemma (det_of_tag (determinism_tag d) == Some d) = ()
+
+let det_tag_canonical (s:string) (d:determinism_source)
+  : Lemma (requires det_of_tag s == Some d) (ensures determinism_tag d == s) = ()
+
+let det_tag_injective (a b:determinism_source)
+  : Lemma (requires determinism_tag a == determinism_tag b) (ensures a == b) = ()
 
 let join_comm (a b:effect_class) : Lemma (join a b == join b a) = ()
 
 let join_idem (a:effect_class) : Lemma (join a a == a) =
-  host_of_rank a.host; det_of_rank a.determinism
+  host_of_rank a.host
 
 let join_pure (a:effect_class)
   : Lemma (join pure_deterministic a == a /\ join a pure_deterministic == a)
-  = host_of_rank a.host; det_of_rank a.determinism
+  = host_of_rank a.host
 
 let join_assoc (a b c:effect_class) : Lemma (join (join a b) c == join a (join b c)) = ()
 
@@ -639,6 +676,25 @@ let create (id:string) (sg:signature) (p:placement) : Tot capability =
 
 (* F#: `Capability.determinismTag`. *)
 let determinism_tag_of (c:capability) : Tot string = determinism_tag c.c_determinism
+
+(* THE CAPTURE RECORDS THE WHOLE CLASS (Phase 319). F#: the law `capabilityLaws` samples — the label
+   a capture journals is `Capability.determinismTag`, it decodes back to EXACTLY the capability's
+   declared determinism set, and so the effect a capture records covers every factor a body
+   exercises that the declaration names. The chain this replaced could not say this: a `Random`
+   class covered a clock read without naming it. *)
+let capture_records_declared (c:capability)
+  : Lemma (det_of_tag (determinism_tag_of c) == Some c.c_determinism)
+  = det_tag_roundtrip c.c_determinism
+
+(* A body exercising a set inside the declared one is covered by what the capture records, and a
+   body exercising a factor outside it is NOT — the exercised set is named by the difference. *)
+let capture_covers_exercised (c:capability) (host:host_effect) (exercised:determinism_source)
+  : Lemma (
+      (det_subset exercised c.c_determinism ==>
+         covers { host = host; determinism = c.c_determinism } { host = host; determinism = exercised }) /\
+      (not (det_subset exercised c.c_determinism) ==>
+         not (covers { host = host; determinism = c.c_determinism } { host = host; determinism = exercised })))
+  = ()
 
 (* F#: `(string * string) list` — a typed invocation's args, addr → value. *)
 type invocation = list (string & string)

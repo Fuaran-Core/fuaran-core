@@ -655,13 +655,13 @@ the op-stream from *structural* tamper-evidence to *full deterministic behaviora
 
 **Opaque determinism-label rule.** `EffectCapture.Determinism` is an **open label space**. The core
 interprets exactly one value — `"deterministic"`, the label of an effect that emits no capture. Every
-**other** label (`"clock"` / `"random"` / `"network"` and any host- or domain-minted label) is
+**other** label (`"clock"` / `"random"` / `"network"`, the composite `"clock+random"` spellings of a factor set, and any host- or domain-minted label) is
 **opaque and reserved to the effect supplier**: the core carries it verbatim through the hash-chained
 journal and keys replay ordering on the `Eff` identity, never on interpreting the label. A conformant
 host MUST carry a non-`"deterministic"` label without interpretation — inventing or re-meaning one is
 a host/domain concern, not a wire change. This is the open-label counterpart of the `IdWitness`
 posture: identity/label vocabulary is supplied, not fixed, and the substrate stays FSharp.Core-only by
-never depending on the `Fuaran.Core.Function` `Determinism` DU.
+never depending on the `Fuaran.Core.Function` `Determinism` set.
 
 **The guarantee is *outcome*-faithful, not *trajectory*-faithful.** Replay reproduces the values the
 boundary *returned*; it does not reproduce the internal path a stateful effect took to produce them.
@@ -3262,6 +3262,85 @@ domain obligation and is discharged by `Conformance.keyedApplyLaws` now — what
 the declaration's accuracy — and `Conformance.keyedChildrenLaws` discharges nothing; the generated family
 census and the `api/` baselines for `Fuaran.Core.Tree`, `Fuaran.Core.Ops` and `Fuaran.Core.Conformance`
 are regenerated.
+
+### The determinism axis is a SET of factors, joined by union (Phase 319, DECISIONS.md D82) — BREAKING, `retype` + `removal`; the `determinism` wire vocabulary WIDENS
+
+**What changed.** `DeterminismSource` was a four-case chain — `Deterministic < Clock < Random <
+Network` — joined by maximum, so `join Clock Random` was `Random` (the clock factor dropped) and a
+`Network` declaration `covers` a clock read without naming it. It is now an ALIAS for
+`Set<DeterminismFactor>`, where `DeterminismFactor` is the closed union `ClockFactor | RandomFactor |
+NetworkFactor`: `Deterministic` is the empty set, `Effect.join` is union on the determinism axis,
+`Effect.covers` is superset, and a capture journal can say what a body read.
+
+| Was | Is |
+|---|---|
+| `Deterministic` | `Effect.deterministic` (`Set.empty`) |
+| `Clock` / `Random` / `Network` | `Effect.clock` / `Effect.random` / `Effect.network` (one-member sets) |
+| `d = Deterministic` | `Set.isEmpty d` |
+| a `match` on the four cases | set membership, `Set.contains ClockFactor d` |
+| `max` of two classes | `Set.union` |
+| `declared >= actual` | `Set.isSubset actual declared` |
+
+The chain is the projection of the set by maximum rank (empty → `Deterministic`, otherwise the member
+of highest rank); the reverse loses information, which is the argument for the set and the reading
+for anyone holding the old shape.
+
+**The label.** `Effect.determinismTag` renders the set canonically: `"deterministic"` for the empty
+set, otherwise the member factors in the fixed order clock, random, network joined by `+` —
+`"clock"`, `"random"`, `"network"` (unchanged), `"clock+random"`, `"clock+network"`,
+`"random+network"`, `"clock+random+network"`. `Effect.tryDeterminismOfTag` (new) inverts it on
+exactly the canonical labels; a reordered, repeated, empty or unknown member is `None`, so a set has
+one wire spelling. The capability and query codecs decode through it and refuse anything else with
+the message they always used (`unknown determinism: …` / `unknown determinism source: …`).
+
+**Wire.** The four single-token labels (`deterministic`, `clock`, `random`, `network`) are byte-identical, so a document emitted for a single-factor
+class does not move. The vocabulary WIDENS: a composed or multi-factor class now emits a `+` label
+where the chain emitted its maximum, and a strict decoder that accepts only the four old tokens
+refuses them. `api/wire/Fuaran.Core.Function.txt` and `api/wire/Fuaran.Core.Query.txt` are
+regenerated and classed `breaking`. The wire-surface exemplar builder samples a set as a one-member
+set, so those baselines pin the three singleton labels and no longer carry a `deterministic` variant
+document; the empty set and the four multi-factor labels are pinned by `conformance/laws/capability-laws.json`
+(below) and by `FunctionTests`.
+
+**Journals.** No capture journal is invalidated. `replayEffect` consumes by effect identity and does
+not compare the label, and `verifyCaptures` hashes the label as recorded. A journal recorded under a
+composed class that the chain had joined to its maximum keeps its maximum label and replays; new
+captures of such a class carry the richer one.
+
+**Laws and corpus.** `Conformance.capabilityLaws` gains two laws, BUILT every iteration: the effect a
+capture records covers every factor the body exercised (the journaled label decodes back to exactly
+the declared set), and its converse — a body that reads a factor outside the recorded class is not
+covered and the difference names that factor. Each iteration now declares a non-empty set drawn by
+index, so a run reaches all seven labels with no further draw from the cursor.
+`verifyHonestyLaws` ranges over the eight sets rather than the four chain values. The capability law
+vectors (`conformance/laws/capability-laws.json`) are RE-EMITTED: the twelve iterations carry all
+seven non-empty labels in their declarations and `determinismTag` rows, where every row was `random`;
+the file's description states the new sample.
+
+**Proofs.** `Capability.fst` and `Query.fst` move with the type: the set is modelled as its
+characteristic vector over the closed three-factor alphabet, `join` is the pointwise union and
+`covers` the pointwise subset, and the canonical label is proved a bijection with the eight sets
+(`det_tag_roundtrip`, `det_tag_canonical`, `det_tag_injective`). The effect law and the audit law
+(`effect_law`, `audit_effect_join`) hold unchanged over the new lattice, and two new theorems state
+the capture seam: `capture_records_declared` and `capture_covers_exercised`. The committed oracle
+extractions are regenerated and the differential host compares the label, its inverse, `join` and
+`covers` over every set and pair.
+
+**What adopting it costs.**
+
+- **A consumer that names `Deterministic` / `Clock` / `Random` / `Network`** as values or patterns
+  stops compiling (`removal`); the table above is the whole migration. A match over the old union
+  is an `FS0025`-class failure by construction; there is no silent miscompile.
+- **A consumer that constructs `EffectClass` or `Capability`** re-types the `Determinism` field
+  (`retype`).
+- **A host that mirrors the vocabulary as a closed enum** — a generated wire chain in a UI tier, a
+  name-mapping function in an orchestration layer — moves at its next raise: it must accept the `+`
+  label or refuse composed classes by name. Nothing on the Core side reaches those hosts before
+  they raise their pin.
+- **A consumer that wrote `covers Network …` to mean "any non-deterministic read"** must name the
+  factors it accepts; the declaration is now exactly the factors it lists.
+
+**Rollback.** None: the chain is the set's projection and the set cannot be reconstructed from it.
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
