@@ -805,6 +805,74 @@ let memoTests =
                   | Error e -> failtestf "unexpected %A" e
               | Error e -> failtestf "unexpected %A" e
 
+          // Phase 290 — the key is INJECTIVE: the two aliases the bare-join key admitted must miss.
+          testCase
+              "applyMemo: a value spelling the separator and the next binding is not served the two-binding result (Phase 290)"
+          <| fun _ ->
+              // `{tpl/c = "5\u0001tpl/s=s…"; tpl/t = …}` spelt, under the bare join the key used
+              // until Phase 290, the same pre-image as `{tpl/c = "5"; tpl/s = …; tpl/t = …}` — so a
+              // cache holding the latter served its tree for the former, whose own `apply` is a
+              // REFUSAL (`tpl/s` is a declared hole left unbound).
+              let full = fullArgs "5"
+
+              let forged =
+                  full
+                  |> Map.remove "tpl/s"
+                  |> Map.add
+                      "tpl/c"
+                      (ValueArg(
+                          "5"
+                          + Hash.foldSep
+                          + "tpl/s=s"
+                          + Tree.encodePreimage nodew encNode (RNode.leaf "p" "para" "hi")
+                      ))
+
+              match Function.applyMemo artw encNode full (template ()) Memo.empty with
+              | Ok(_, c1) ->
+                  let direct = Function.apply artw forged (template ())
+                  Expect.isError direct "the forged set is refused by apply — a hole is unbound"
+
+                  match Function.applyMemo artw encNode forged (template ()) c1 with
+                  | Ok(_, _) -> failtest "the forged set was SERVED from the cache"
+                  | Error e -> Expect.equal direct (Error e) "applyMemo answers exactly what apply answers"
+              | Error e -> failtestf "unexpected %A" e
+
+          testCase "applyMemo: two functions one MoveNode apart — one preorder — key distinctly (Phase 290)"
+          <| fun _ ->
+              // `MoveNode(s, c)` re-nests the slot hole under the count hole: the preorder is
+              // unchanged (tpl, t, c, s), so under the arity-free fold both functions had ONE
+              // `encodeHash` and one memo key — and the moved hole's address changed, so the cached
+              // result of the first is the wrong answer for the second (whose own `apply` refuses
+              // `tpl/s` as an unknown address).
+              let flat = template ()
+
+              let nested =
+                  match Ops.apply nodew idw (MoveNode("s", "c")) flat with
+                  | Ok t -> t
+                  | Error e -> failtestf "the move was refused: %A" e
+
+              Expect.equal
+                  (Tree.preorder nodew nested |> List.map (fun n -> n.Id))
+                  (Tree.preorder nodew flat |> List.map (fun n -> n.Id))
+                  "the premise: one preorder"
+
+              Expect.notEqual
+                  (Tree.encodeHash nodew encNode flat)
+                  (Tree.encodeHash nodew encNode nested)
+                  "distinct digests"
+
+              let args = fullArgs "5"
+
+              match Function.applyMemo artw encNode args flat Memo.empty with
+              | Ok(_, c1) ->
+                  let direct = Function.apply artw args nested
+                  Expect.isError direct "the moved hole's address is unknown to the nested function"
+
+                  match Function.applyMemo artw encNode args nested c1 with
+                  | Ok(_, _) -> failtest "the nested function was SERVED the flat function's tree"
+                  | Error e -> Expect.equal direct (Error e) "applyMemo answers exactly what apply answers"
+              | Error e -> failtestf "unexpected %A" e
+
           // subtree-level memo: a single-hole edit re-derives only the affected path.
           testCase "applyMemoComposed: editing only the OUTER hole reuses the unchanged inner (a hit)"
           <| fun _ ->

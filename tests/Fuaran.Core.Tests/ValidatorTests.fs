@@ -75,7 +75,11 @@ let tests =
                       Message = ""
                       Node = None } ]
 
-              Expect.equal (Validator.canonicalCodes a) "AB" "sorted, U+0001-joined"
+              Expect.equal
+                  (Validator.canonicalCodes a)
+                  "A\u0001B\u0001"
+                  "sorted, each code escaped and U+0001-terminated (Phase 290)"
+
               Expect.equal (Validator.canonicalCodes a) (Validator.canonicalCodes b) "order-independent"
 
           // Phase 25 — delimiter-safe canonicalCodes: a code containing the old ',' no longer aliases.
@@ -94,6 +98,26 @@ let tests =
                   (Validator.canonicalCodes aliasing)
                   (Validator.canonicalCodes split)
                   "a comma-bearing single code is distinct from two codes"
+
+          // Phase 290 — the U+0001 join itself was a bare join: a code spelling the separator aliased
+          // two codes. Through `Hash.canonicalFields` the projection is injective over sorted lists.
+          testCase "canonicalCodes cannot be aliased by the separator in a code (Phase 290)"
+          <| fun _ ->
+              let mk code : Defect<string> =
+                  { Code = code
+                    Severity = Severity.Info
+                    Message = ""
+                    Node = None }
+
+              Expect.notEqual
+                  (Validator.canonicalCodes [ mk ("A" + Hash.foldSep + "B") ])
+                  (Validator.canonicalCodes [ mk "A"; mk "B" ])
+                  "a separator-bearing single code is distinct from two codes"
+
+              Expect.notEqual
+                  (Validator.canonicalCodes [ mk ("A" + Hash.fieldEsc) ])
+                  (Validator.canonicalCodes [ mk "A" ])
+                  "the escape character is a code character like any other"
 
           // Phase 25 — severity summary.
           testCase "summary counts defects by severity"
@@ -152,7 +176,11 @@ let tests =
 
               let defects = ColumnValidator.validate reg t
               Expect.equal (Validator.summary defects).Errors 1 "one error via the shared summary"
-              Expect.equal (Validator.canonicalCodes defects) "COL-NOTNULL" "canonical projection"
+
+              Expect.equal
+                  (Validator.canonicalCodes defects)
+                  (Hash.canonicalFields [ "COL-NOTNULL" ])
+                  "canonical projection"
 
           testCase "columnarValidatorLaws certify determinism + soundness (Phase 37)"
           <| fun _ ->

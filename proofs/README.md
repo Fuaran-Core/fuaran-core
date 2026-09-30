@@ -2467,6 +2467,46 @@ every kind tag: the verdicts still agree, because no clause reads a kind, and th
 lose — so a green report is known to be a comparison that can fail. The diamond family has its own,
 a blind footprint over a hand-made pair of same-parent inserts, which must break.
 
+### The digest pre-image sees the shape (Phase 290)
+
+The result hash above ran through `Tree.encodeHash`, and until Phase 290 that fold — with
+`Tree.contentHash` and the memo key `Function.applyMemo` serves a cached tree on — read the
+**preorder alone**: each node's label, and nothing about where its subtree ends. A preorder does not
+determine a tree. `root(a(a1,a2), b(b1))` and `root(a(a1,a2,b(b1)))` visit the same nodes in the
+same order and are one accepted `MoveNode(b, a)` apart; under any per-node encoder, however
+injective, they folded to one string, and a memo keyed on it served one function's tree for the
+other. The differential could not see this either: a bridge that re-nests every insert under the
+parent's deepest last descendant keeps the preorder and moves the shape, and it **agreed** with
+production on the accepted-result hash (measured before the fold changed).
+
+The fold now carries each node's **arity** beside its label, and section 21 of `TreeOps.fst`
+proves that is enough and that it was needed:
+
+- **`preorder_arity_injective`** — the (label, arity) preorder is injective over ordered trees, with
+  no hypothesis: the label is the (id, kind) pair the witness shows and the arity is computed. The
+  induction (`shape_prefix` / `shape_all_prefix`) carries a suffix, because a node's children are
+  read out of the middle of the list: a shape followed by anything is read back uniquely, and a
+  child *list* is read back uniquely once its length is known — which is exactly what the parent's
+  arity supplies. Dropping the arity from the model's `shape` refutes `shape_prefix` at the line
+  that reads the two child lists' lengths off the heads (measured).
+- **`preorder_alone_aliases`** — the premise, evaluated rather than argued: the shard's pair has one
+  label preorder, two shapes, and the second is the first under `apply (MoveNode "b" "a")`.
+- **`digest_fields_injective`** — the two fields per node the F# fold writes (the rendered label,
+  then the arity as a numeral) recover the shape, and so the tree. This one is **conditional** and
+  says so: the label renderer (production's caller-supplied `encode`) and the numeral renderer
+  (`string` on an int) are parameters, with their injectivity as hypotheses. Those are the
+  encoder-injectivity obligation `Conformance.encoderInjectivityLaws` samples at a domain's witness
+  and the numeral premise theorem 3 already carries. The step from the field list to the one string
+  the hash reads is `Hash.canonicalFields`, proved injective as `enc_injective` in `Query.fst` and
+  not restated here; whether two distinct pre-images hash apart under FNV-1a is not claimed, which
+  is why `applyMemo` keys on the pre-image itself rather than on its digest.
+
+The differential pairs to it (`tree-digest-differential`): at every state the pool reaches,
+production's `Tree.encodePreimage` under the witness label equals `Hash.canonicalFields` over the
+extracted `TreeOps.fields` of `TreeOps.shape`, with the model's (id, kind) rendered exactly as the
+production label renders it — so the theorem is known to be about the string the memo keys on. The
+mis-nesting bridge is its go-red: it now loses on the result hash and on no verdict.
+
 ### Two things this model cost that the first two did not
 
 Both are extensions of the Phase 131 findings rather than new classes, and both are worth knowing
@@ -2503,7 +2543,11 @@ before the fourth model is written.
    the pinned unknown-parent clause is NECESSARY over this `Footprint` record
    (`relocation_clause_is_necessary`, with `relocation_disjoint_diamond`,
    `relocation_diamond_fails_for_a_remove` and `relocation_footprints_coincide` under it, plus
-   `relocation_move_pair_also_fails` and the `still_refused` enumeration). F\* 2026.09.06,
+   `relocation_move_pair_also_fails` and the `still_refused` enumeration); and, since Phase 290,
+   that the digest pre-image is injective over ordered trees (`preorder_arity_injective`, with
+   the label-preorder alias `preorder_alone_aliases` evaluated beside it) and that its rendered
+   field list recovers the tree under the two renderer premises (`digest_fields_injective`,
+   conditional and named as such above). F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
    `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply` and `Ops.footprint` over

@@ -266,6 +266,10 @@
          Snapshots.fs, so it follows all four; appended at the end of the list (append-only
          registration). -->
     <Compile Include="WireSurfaceTests.fs" />
+    <!-- Phase 290 — the KEY ROSTER: the list above `Hash.canonicalFields` held to `src/` both ways
+         (every call site is a listed key, every listed key is a call site, no bare U+0001 join
+         anywhere). Reads Snapshots.fs for the repository root; appended (append-only). -->
+    <Compile Include="HashRosterTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

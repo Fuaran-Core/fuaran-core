@@ -136,4 +136,80 @@ let tests =
               Expect.notEqual
                   (Tree.encodeHash nodew enc a)
                   (Tree.encodeHash nodew enc b)
-                  "boundary-aliased trees hash distinctly with the separator" ]
+                  "boundary-aliased trees hash distinctly with the separator"
+
+          testCase "encodeHash and contentHash see the tree's SHAPE — two trees, one preorder (Phase 290)"
+          <| fun _ ->
+              // `root(a(a1,a2), b(b1))` and `root(a(a1,a2,b(b1)))` have the SAME preorder — id for
+              // id, kind for kind, value for value — and are one `MoveNode(b, a)` apart. Until
+              // Phase 290 both folds ran over the preorder alone, so they hashed EQUAL under every
+              // encoder, and a memo keyed on `encodeHash` served one tree for the other. The arity
+              // fold sees where `b` hangs.
+              let flat =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "a" "section" [ RNode.leaf "a1" "para" "x"; RNode.leaf "a2" "para" "y" ]
+                        RNode.node "b" "section" [ RNode.leaf "b1" "para" "z" ] ]
+
+              let nested =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node
+                            "a"
+                            "section"
+                            [ RNode.leaf "a1" "para" "x"
+                              RNode.leaf "a2" "para" "y"
+                              RNode.node "b" "section" [ RNode.leaf "b1" "para" "z" ] ] ]
+
+              Expect.equal
+                  (Tree.preorder nodew flat |> List.map (fun n -> n.Id, n.Kind, n.Value))
+                  (Tree.preorder nodew nested |> List.map (fun n -> n.Id, n.Kind, n.Value))
+                  "the two trees share one preorder — the premise"
+
+              Expect.notEqual (Tree.contentHash nodew flat) (Tree.contentHash nodew nested) "contentHash sees the shape"
+
+              Expect.notEqual
+                  (Tree.encodeHash nodew encNode flat)
+                  (Tree.encodeHash nodew encNode nested)
+                  "encodeHash sees the shape under the reference encoder"
+
+              // And under an encoder that carries the ids too — the shard's "including one that
+              // carries ids": the ids are the same in both preorders, so only the arity can tell.
+              let withIds (n: RNode) = n.Id + "|" + n.Kind + "|" + n.Value
+
+              Expect.notEqual
+                  (Tree.encodeHash nodew withIds flat)
+                  (Tree.encodeHash nodew withIds nested)
+                  "encodeHash sees the shape under an id-carrying encoder"
+
+              Expect.notEqual
+                  (Tree.encodePreimage nodew withIds flat)
+                  (Tree.encodePreimage nodew withIds nested)
+                  "and the pre-image itself differs, not merely its digest"
+
+              // The digest is the pre-image's FNV-1a, and the pre-image is the canonical field
+              // encoding of (encoding, arity) pairs in preorder — pinned here so a re-derivation
+              // elsewhere (a host twin) has the exact shape.
+              Expect.equal
+                  (Tree.encodePreimage nodew withIds flat)
+                  (Hash.canonicalFields
+                      [ "root|doc|"
+                        "2"
+                        "a|section|"
+                        "2"
+                        "a1|para|x"
+                        "0"
+                        "a2|para|y"
+                        "0"
+                        "b|section|"
+                        "1"
+                        "b1|para|z"
+                        "0" ])
+                  "the pre-image is (encode, arity) per preorder node through canonicalFields"
+
+              Expect.equal
+                  (Tree.encodeHash nodew withIds flat)
+                  (Hash.fnv1a (Tree.encodePreimage nodew withIds flat))
+                  "encodeHash is the FNV-1a of encodePreimage" ]

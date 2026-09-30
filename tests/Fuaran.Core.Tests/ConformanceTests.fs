@@ -304,12 +304,13 @@ let tests =
 
               Expect.equal
                   (report.Results |> List.length)
-                  19
+                  20
                   // algebra gained the insert-uniqueness law in Phase 137, the
                   // WellFormed-preservation law in Phase 139, and — Phase 220 — its two
                   // accepted/refused adequacy guards; the stream laws gained their accepted-op
-                  // and tampered-chain guards in Phase 245.
-                  "witness (4) + algebra (5 + 2 guards) + diff (3) + stream (3 + 2 guards) laws reported"
+                  // and tampered-chain guards in Phase 245; the witness laws gained the
+                  // identities-agree law in Phase 290.
+                  "witness (5) + algebra (5 + 2 guards) + diff (3) + stream (3 + 2 guards) laws reported"
 
           // ---- Phase 145: the op codec's own injectivity, the content-id theorem's fourth premise ----
 
@@ -611,8 +612,8 @@ let tests =
 
               Expect.equal
                   (List.length results)
-                  4
-                  "equals-direct + param-miss + effecting-bypass + replay-parity laws reported"
+                  5
+                  "equals-direct + param-miss + effecting-bypass + replay-parity + separator-miss (Phase 290) laws reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

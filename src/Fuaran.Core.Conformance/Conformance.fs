@@ -337,8 +337,12 @@ module Conformance =
     /// The witness laws (Phase 253) — check the `NodeWitness`/`IdWitness` is well-formed
     /// *before* the algebra laws run, so a defect localises to the accessor that's wrong
     /// instead of surfacing as a downstream `apply ∘ invert` failure (the F1 lesson):
-    /// `Children (ReplaceChildren n cs) = cs`, `Id`/`KindTag` preserved under rebuild, and
-    /// the `IdWitness` round-trip + reflexivity. The `ReplaceChildren` laws are checked only
+    /// `Children (ReplaceChildren n cs) = cs`, `Id`/`KindTag` preserved under rebuild, the
+    /// `IdWitness` round-trip + reflexivity, and (Phase 290) that the witness's two identities
+    /// are one relation — `Equals a b ⇔ ToString a = ToString b` — over every drawn pair AND
+    /// over BUILT pairs (a drawn id against its case-flipped and whitespace-padded string read
+    /// back through `OfString`), because the reference generator never draws the pair that
+    /// exhibits a case-insensitive `Equals`. The `ReplaceChildren` laws are checked only
     /// on nodes that `CanHold` children (a leaf is not required to round-trip a child list).
     let witnessLaws
         (nodew: NodeWitness<'Node, 'Id>)
@@ -353,6 +357,30 @@ module Conformance =
         let mutable idPreserved = None
         let mutable kindStable = None
         let mutable idRoundTrip = None
+        let mutable identitiesAgree = None
+
+        // Phase 290 — the two identities are ONE relation: `Equals a b ⇔ ToString a = ToString b`.
+        // The spine reads ids both ways (`tryFind` / `parentOf` / `updateNode` through `Equals`;
+        // `wellFormed` / `graftWellFormed` / `Index` / `Diff` through the string key), so a witness
+        // whose `Equals` is coarser than its `ToString` — case-insensitive over a case-preserving
+        // string — passes every other law here and then lets `InsertChild(p, node "A")` beside an
+        // existing `"a"` through the duplicate check while `updateNode "a"` rewrites both. Refused
+        // HERE, by name, rather than downstream by the first duplicate id.
+        let askBoth (where: string) (a: 'Id) (b: 'Id) =
+            let byEquals = idw.Equals a b
+            let byString = idw.ToString a = idw.ToString b
+
+            if byEquals <> byString && identitiesAgree.IsNone then
+                identitiesAgree <-
+                    Some(
+                        sprintf
+                            "%s: Equals says %b but ToString says %b for %s and %s — the witness carries two identities"
+                            where
+                            byEquals
+                            byString
+                            (idw.ToString a)
+                            (idw.ToString b)
+                    )
 
         for i in 0 .. iterations - 1 do
             let tree, r1 = gen.Tree rng
@@ -401,6 +429,38 @@ module Conformance =
                     idRoundTrip <-
                         Some(sprintf "seed=%d iter=%d: OfString∘ToString ≠ id for %s" seed i (idw.ToString id))
 
+            // ---- Phase 290: Equals a b ⇔ ToString a = ToString b ----
+            // DRAWN: every ordered pair of ids the tree carries. With the reference generator this
+            // arm is green for a case-insensitive witness in every family today — a generator that
+            // never draws two ids differing only in case cannot exhibit the defect — which is why
+            // the BUILT arm below exists and is the one that bites.
+            let ids = Tree.ids nodew tree
+
+            for a in ids do
+                for b in ids do
+                    askBoth (sprintf "seed=%d iter=%d (drawn)" seed i) a b
+
+            // BUILT: perturb each drawn id's string — the string itself (the ⇐ direction: an id
+            // `Equals` keeps apart that `ToString` renders alike), its upper- and lower-case forms
+            // and a whitespace-padded form (the ⇒ direction: an `Equals` blind to a difference
+            // `ToString` shows) — read each back through `OfString`, and ask both identities about
+            // the pair. A witness whose `OfString` REFUSES a perturbation (an int id handed
+            // `"12 "`) cannot represent that pair at all and so cannot carry the defect for it;
+            // the arm reports nothing for that perturbation rather than failing, so the law stays
+            // true over what the witness can construct, just narrower.
+            for id in ids do
+                let s = idw.ToString id
+
+                for s' in List.distinct [ s; s.ToUpperInvariant(); s.ToLowerInvariant(); s + " "; " " + s ] do
+                    match
+                        (try
+                            Some(idw.OfString s')
+                         with _ ->
+                             None)
+                    with
+                    | Some p -> askBoth (sprintf "seed=%d iter=%d (built from %s)" seed i s) id p
+                    | None -> ()
+
         [ { Law = "ReplaceChildren round-trip (Children(ReplaceChildren n cs) = cs)"
             Passed = rcRoundTrip.IsNone
             Counterexample = rcRoundTrip }
@@ -412,7 +472,10 @@ module Conformance =
             Counterexample = kindStable }
           { Law = "IdWitness round-trip + reflexivity"
             Passed = idRoundTrip.IsNone
-            Counterexample = idRoundTrip } ]
+            Counterexample = idRoundTrip }
+          { Law = "IdWitness identities agree (Equals a b ⇔ ToString a = ToString b), drawn and built"
+            Passed = identitiesAgree.IsNone
+            Counterexample = identitiesAgree } ]
 
     /// The op-algebra laws: apply totality (never throws), `canApply` ≡ `apply` (same
     /// accept/reject + envelope), apply∘invert = identity on every applyable op, — Phase 137 —
@@ -3092,7 +3155,11 @@ module Conformance =
     ///  - **replay-as-re-application matches direct replay** — folding `OpStream.replay` over a
     ///    memo-carrying state (each recorded op re-applied through `applyMemo`) reproduces the
     ///    non-memo `OpStream.replay` result exactly, with a repeated op served from the cache (op-stream
-    ///    replay collapses into re-application over the same memo).
+    ///    replay collapses into re-application over the same memo);
+    ///  - **a value spelling the separator and the next binding misses** (Phase 290) — BUILT from the
+    ///    drawn param-set: `{a = "X\u0001b=vY"}` against the cached `{a = "X"; b = "Y"}` must answer
+    ///    exactly what `apply` answers and must not be a hit, so the memo key is known to be injective
+    ///    in the arguments rather than a bare join a value can forge.
     ///
     /// `'Node` needs equality (it compares result trees + replay states). Opt-in like `compositionLaws`
     /// — a domain that memoises application runs it alongside its base certification.
@@ -3109,10 +3176,61 @@ module Conformance =
         let mutable paramMiss = None
         let mutable effectingBypassed = None
         let mutable replayParity = None
+        let mutable separatorMiss = None
 
         for i in 0 .. iterations - 1 do
             let s, r = draw rng
             rng <- r
+
+            // ---- 5. (Phase 290) a value spelling the separator and the next binding MISSES ----
+            // BUILT, never drawn: take the drawn param-set, and where its first two addresses in
+            // key order are `a` and `b`, replace the pair with ONE binding `a = "<a's value>" +
+            // U+0001 + "b=" + <b's bare tag>` — the value that spelt `{a = "X"; b = "Y"}`'s whole
+            // pre-image under the bare join the key used until Phase 290 (`{a = "X\u0001b=vY"}`).
+            // The cache holds the drawn set's result; the built set must not be served it. What
+            // is asked is stronger than "a miss": `applyMemo` must answer exactly what `apply`
+            // answers for the built set — here a refusal, since `b` is a declared hole left
+            // unbound — and the hit count must not move. Only a `ValueArg` at `a` can carry the
+            // spelling, so a sample whose first address is a slot reports nothing for this arm.
+            (match s.Args |> Map.toList |> List.sortBy fst |> List.truncate 2 with
+             | [ (a, ValueArg va); (b, bArg) ] ->
+                 // `b`'s fields as the key spells them — the case tag and the payload a slot arg
+                 // rides as (`Tree.encodePreimage`) — so the forged value is exactly what a bare
+                 // join of the CURRENT fields would run into, not an approximation of one.
+                 let bareTag =
+                     match bArg with
+                     | ValueArg vb -> "v" + vb
+                     | SlotArg n -> "s" + Tree.encodePreimage w.Tree encode n
+
+                 let built =
+                     s.Args
+                     |> Map.remove b
+                     |> Map.add a (ValueArg(va + Hash.foldSep + b + "=" + bareTag))
+
+                 match Function.applyMemo w encode s.Args s.PureFn Memo.empty with
+                 | Ok(_, c1) ->
+                     let direct = Function.apply w built s.PureFn
+                     let memo = Function.applyMemo w encode built s.PureFn c1
+
+                     let served =
+                         match memo with
+                         | Ok(t, c2) -> c2.Hits <> c1.Hits || direct <> Ok t
+                         | Error e -> direct <> Error e
+
+                     if served && separatorMiss.IsNone then
+                         separatorMiss <-
+                             Some(
+                                 sprintf
+                                     "seed=%d iter=%d: a value spelling U+0001 and the next binding (%s = %A) was served the cached result of the two-binding set — the memo key is not injective"
+                                     seed
+                                     i
+                                     a
+                                     (va + Hash.foldSep + b + "=" + bareTag)
+                             )
+                 | Error e ->
+                     if separatorMiss.IsNone then
+                         separatorMiss <- Some(sprintf "seed=%d iter=%d: first apply errored: %A" seed i e)
+             | _ -> ())
 
             // ---- 1. a memoised apply equals the direct apply (pure fn); a re-apply is a hit ----
             (match Function.apply w s.Args s.PureFn, Function.applyMemo w encode s.Args s.PureFn Memo.empty with
@@ -3263,7 +3381,10 @@ module Conformance =
             Counterexample = effectingBypassed }
           { Law = "replay-as-re-application matches direct replay (a repeat served from cache)"
             Passed = replayParity.IsNone
-            Counterexample = replayParity } ]
+            Counterexample = replayParity }
+          { Law = "a value spelling the separator and the next binding misses (the memo key is injective)"
+            Passed = separatorMiss.IsNone
+            Counterexample = separatorMiss } ]
 
     // ---- signature-typed function registry (Phase 50) ----
     // The teeth on `FunctionEntry` / `FunctionRegistry` + `findBySignature`: the artifact-function

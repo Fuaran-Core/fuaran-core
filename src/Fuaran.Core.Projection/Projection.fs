@@ -81,17 +81,16 @@ module Projection =
     let private oneLine (s: string) =
         s.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ")
 
-    /// The per-node content digest: FNV-1a over id + kind + the witness `Encode`
-    /// (fields separated by the shared `Hash.foldSep`, so adjacent cells cannot
-    /// run together into a colliding pre-image). Everything on the line derives
-    /// from this pre-image (snippet included, via `Encode`'s injectivity), which
-    /// is exactly what makes "line changes iff digest changes" a law.
+    /// The per-node content digest: FNV-1a over the three fields id, kind and the
+    /// witness `Encode`, through `Hash.canonicalFields` — each field escaped and
+    /// terminated, so a cell that spells the separator cannot run into the next
+    /// (until Phase 290 the three were joined on the bare `Hash.foldSep`, which an
+    /// `Encode` can spell). Everything on the line derives from this pre-image
+    /// (snippet included, via `Encode`'s injectivity), which is exactly what makes
+    /// "line changes iff digest changes" a law. That two distinct pre-images hash
+    /// apart under FNV-1a is not claimed.
     let digestOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (node: 'Node) : string =
-        pw.IdW.ToString(pw.Tree.Id node)
-        + Hash.foldSep
-        + pw.Tree.KindTag node
-        + Hash.foldSep
-        + pw.Encode node
+        Hash.canonicalFields [ pw.IdW.ToString(pw.Tree.Id node); pw.Tree.KindTag node; pw.Encode node ]
         |> Hash.fnv1a
 
     /// Project one node at `depth` into its terse line.

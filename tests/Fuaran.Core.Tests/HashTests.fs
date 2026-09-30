@@ -22,9 +22,23 @@ let private bcl (s: string) =
     |> Array.map (fun b -> b.ToString "x2")
     |> String.concat ""
 
+/// Phase 290 — the ILL-FORMED rows: lone and ill-ordered surrogates, which the encoder must map
+/// to the platform's replacement bytes (`EF BF BD` per unit that is not half of a pair) rather
+/// than consume the next unit unchecked (`"\uD801\uD800"` was U+10000's four bytes) or write
+/// CESU-style. Built from escapes: a raw surrogate does not survive a UTF-8 checkout.
+let private illFormed =
+    [ "\uD800" // a lone high surrogate
+      "\uDFFF" // a lone low surrogate
+      "a\uD83D" // a high surrogate at the end of the string
+      "\uD801\uD800" // a high surrogate followed by a high one — NOT the pair for U+10000
+      "\uD83Dz" // a high surrogate followed by ASCII
+      "\uDE00\uD83D" // a pair written backwards
+      "\uD83D\uDE00\uDE00" ] // a well-formed pair, then a stray low half
+
 /// Inputs chosen for the three things the ASCII vectors cannot reach: multi-byte UTF-8 (two-, three-
 /// and four-byte sequences, including a ZWJ sequence of surrogate pairs), the 55/56/64-byte padding
-/// boundary where a second block is forced, and a long multi-block body.
+/// boundary where a second block is forced, and a long multi-block body — plus, since Phase 290, the
+/// ill-formed rows above, where the encoder must give the platform's replacement bytes.
 let private parityCorpus =
     [ ""
       "a"
@@ -39,6 +53,7 @@ let private parityCorpus =
       System.String('x', 63)
       System.String('x', 64) // exactly one block, so the pad is a whole extra block
       System.String('x', 65) ]
+    @ illFormed
 
 [<Tests>]
 let tests =

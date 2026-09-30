@@ -37,6 +37,16 @@ let private expected: (string * string) list =
       "sha256/unicode", "2c65957a04b33db60d702542c13fa9fda67c69e1d1e54c727270eb2ff685d871"
       "sha256/of-bytes", "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
       "utf8Bytes/unicode", "636166c3a92fe697a5e69cace8aa9e2ff09f9880"
+      // Phase 290: the platform's replacement bytes (`EF BF BD`) per ill-formed unit, taken from
+      // `System.Text.UTF8Encoding` — `HashTests` asserts the same rows against it directly.
+      "utf8Bytes/ill-formed-lone-high", "efbfbd"
+      "utf8Bytes/ill-formed-lone-low", "efbfbd"
+      "utf8Bytes/ill-formed-high-at-end", "61efbfbd"
+      "utf8Bytes/ill-formed-high-then-nonlow", "efbfbdefbfbd"
+      "utf8Bytes/ill-formed-high-then-ascii", "efbfbd7a"
+      "utf8Bytes/ill-formed-low-then-high", "efbfbdefbfbd"
+      "utf8Bytes/ill-formed-beside-a-pair", "f09f9880efbfbd"
+      "sha256/ill-formed-lone-high", "83d544ccc223c057d2bf80d3f2a32982c32c3c0db8e2674820da5064783fb097"
       "canonicalFloat/zero", "0"
       "canonicalFloat/neg-zero", "0"
       "canonicalFloat/one-and-a-half", "1.5"

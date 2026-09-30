@@ -61,7 +61,7 @@ let tests =
 
                   failtestf "reference witness failed a witness law:\n%s" msg
 
-              Expect.equal (List.length results) 4 "four witness laws reported"
+              Expect.equal (List.length results) 5 "five witness laws reported (Phase 290 added the identities law)"
 
           testCase "a leaf-no-op ReplaceChildren fails the round-trip law with a localised message (F1)"
           <| fun _ ->
@@ -83,7 +83,7 @@ let tests =
           testCase "certify runs witness laws first and short-circuits on a witness defect"
           <| fun _ ->
               // reuse the counter stream witness from ConformanceTests is out of scope here;
-              // a witness defect must short-circuit, so the report is just the 4 witness laws.
+              // a witness defect must short-circuit, so the report is just the 5 witness laws.
               let broken =
                   { nodew with
                       ReplaceChildren = fun n _ -> n }
@@ -97,4 +97,67 @@ let tests =
                   Conformance.certify broken idw opGen sw { State0 = 0; Op = fun r -> 1, r } OpStream.defaultHash 7 100
 
               Expect.isFalse report.AllPassed "a witness defect fails certification"
-              Expect.equal (List.length report.Results) 4 "algebra/stream laws short-circuited" ]
+              Expect.equal (List.length report.Results) 5 "algebra/stream laws short-circuited"
+
+          // Phase 290 — the two identities are one relation. A case-insensitive `Equals` over a
+          // case-preserving `ToString` passes reflexivity and the round trip, and every other law
+          // here; it must fail THIS one, on a BUILT pair, because the reference generator never
+          // draws two ids differing only in case.
+          testCase "a witness whose Equals is coarser than its ToString is refused (Phase 290)"
+          <| fun _ ->
+              let caseBlind =
+                  { idw with
+                      Equals = fun a b -> System.String.Equals(a, b, System.StringComparison.OrdinalIgnoreCase) }
+
+              let results = Conformance.witnessLaws nodew caseBlind opGen 7 100
+
+              let law =
+                  results |> List.find (fun r -> r.Law.StartsWith "IdWitness identities agree")
+
+              Expect.isFalse law.Passed "Equals a b ⇔ ToString a = ToString b fails for a case-blind Equals"
+
+              match law.Counterexample with
+              | Some msg ->
+                  Expect.stringContains msg "(built from" "the pair that bites is the BUILT one, not a drawn one"
+                  Expect.stringContains msg "two identities" "the message names the defect"
+              | None -> failtest "expected a counterexample"
+
+              // Every OTHER witness law is still green for it — which is exactly why the law exists.
+              for r in results do
+                  if not (r.Law.StartsWith "IdWitness identities agree") then
+                      Expect.isTrue r.Passed (sprintf "%s still passes for the case-blind witness" r.Law)
+
+              // And `certify` short-circuits on it, so the kit refuses the witness by name rather
+              // than the apply engine refusing the first duplicate id.
+              let sw: StreamWitness<int, int, string> =
+                  { Apply = fun op st -> Ok(st + op)
+                    Encode = string
+                    Decode = fun _ -> Ok 0 }
+
+              let report =
+                  Conformance.certify
+                      nodew
+                      caseBlind
+                      opGen
+                      sw
+                      { State0 = 0; Op = fun r -> 1, r }
+                      OpStream.defaultHash
+                      7
+                      100
+
+              Expect.isFalse report.AllPassed "certification refuses the case-blind witness"
+              Expect.equal (List.length report.Results) 5 "and short-circuits at the witness laws"
+
+          testCase "a witness whose ToString is coarser than its Equals is refused too (Phase 290)"
+          <| fun _ ->
+              // The other direction: two ids `Equals` keeps apart that `ToString` renders alike.
+              let lossy =
+                  { idw with
+                      ToString = fun s -> s.ToUpperInvariant() }
+
+              let results = Conformance.witnessLaws nodew lossy opGen 7 100
+
+              let law =
+                  results |> List.find (fun r -> r.Law.StartsWith "IdWitness identities agree")
+
+              Expect.isFalse law.Passed "ToString a = ToString b with Equals a b false is refused" ]

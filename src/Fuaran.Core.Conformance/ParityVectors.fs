@@ -134,6 +134,20 @@ let vectors: (string * string) list =
       "sha256/unicode", Hash.sha256Hex unicodeSample
       "sha256/of-bytes", Hash.sha256HexOfBytes (Hash.utf8Bytes twoBlock)
       "utf8Bytes/unicode", hexOf (Hash.utf8Bytes unicodeSample)
+      // Phase 290 — the ILL-FORMED rows: what the encoder does to a lone or ill-ordered surrogate
+      // is the platform's answer (`EF BF BD` per unit that is not half of a pair), pinned on both
+      // pipelines and asserted against `System.Text.Encoding.UTF8` on .NET. Written as escapes:
+      // a raw surrogate cannot survive a UTF-8 checkout. `high-then-nonlow` is the pair that
+      // encoded as U+10000's four bytes until Phase 290; `high-then-high` and `low-then-high` are
+      // two replacements each, never a pair read backwards.
+      "utf8Bytes/ill-formed-lone-high", hexOf (Hash.utf8Bytes "\uD800")
+      "utf8Bytes/ill-formed-lone-low", hexOf (Hash.utf8Bytes "\uDFFF")
+      "utf8Bytes/ill-formed-high-at-end", hexOf (Hash.utf8Bytes "a\uD83D")
+      "utf8Bytes/ill-formed-high-then-nonlow", hexOf (Hash.utf8Bytes "\uD801\uD800")
+      "utf8Bytes/ill-formed-high-then-ascii", hexOf (Hash.utf8Bytes "\uD83Dz")
+      "utf8Bytes/ill-formed-low-then-high", hexOf (Hash.utf8Bytes "\uDE00\uD83D")
+      "utf8Bytes/ill-formed-beside-a-pair", hexOf (Hash.utf8Bytes "\uD83D\uDE00\uDE00")
+      "sha256/ill-formed-lone-high", Hash.sha256Hex "\uD800"
 
       // ---- Wire.Canon.canonicalFloat — the pinned cross-host float layout (Phase 55) ----
       "canonicalFloat/zero", Canon.canonicalFloat 0.0

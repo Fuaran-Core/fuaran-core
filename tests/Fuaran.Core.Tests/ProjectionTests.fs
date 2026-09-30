@@ -206,12 +206,10 @@ let tests =
                       + " "
                       + nodew.KindTag node
                       + " #"
+                      // Phase 290: the three cells through `Hash.canonicalFields` (each escaped and
+                      // terminated), no longer a bare `foldSep` join an `Encode` could spell.
                       + Hash.fnv1a (
-                          idw.ToString(nodew.Id node)
-                          + Hash.foldSep
-                          + nodew.KindTag node
-                          + Hash.foldSep
-                          + rEncode node
+                          Hash.canonicalFields [ idw.ToString(nodew.Id node); nodew.KindTag node; rEncode node ]
                       )
                       + (if node.Value = "" then "" else " " + node.Value)
 

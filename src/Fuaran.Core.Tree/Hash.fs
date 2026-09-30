@@ -58,16 +58,21 @@ module Hash =
 
         h.ToString("x8")
 
-    /// The fold/join separator shared by the content-hash folds (`Tree.contentHash` /
-    /// `Tree.encodeHash`) and the cross-host parity projections (`Validator.canonicalCodes`):
-    /// the ASCII unit-separator-class control byte `U+0001` (SOH). No canonical wire encoding
-    /// emits it unescaped, so two adjacent fields cannot run together into a colliding pre-image.
-    /// Named once here so the parity-relevant constant is defined in a single place.
-    let foldSep = ""
+    /// The field TERMINATOR of every canonical pre-image on the spine (`canonicalField` below):
+    /// the ASCII control byte `U+0001` (SOH). Since Phase 290 no key joins on it bare — every key
+    /// in the roster at `canonicalFields` goes through the escaped, terminated field encoding,
+    /// where a value that happens to spell the byte cannot run into the next field. Named once
+    /// here so the parity-relevant constant is defined in a single place.
+    let foldSep = "\u0001"
 
     /// The escape character `canonicalField` writes before a `foldSep` or a `fieldEsc` a field
     /// carries: `U+0010` (DLE, the data-link escape). Named beside `foldSep` so the two symbols of
     /// the field encoding are defined in one place.
+    ///
+    /// Both are written as `\u` escapes, never as the raw control byte (`foldSep` was, until
+    /// Phase 290): a raw `U+0001` in the source is invisible in a diff and silently dropped or
+    /// normalised by some editors, and a raw NUL beside it would make git classify the file as
+    /// binary and stop end-of-line normalisation for it. The escape says what the byte is.
     let fieldEsc = "\u0010"
 
     /// ONE field of an injective canonical pre-image (Phase 225): the field with every `fieldEsc`
@@ -83,9 +88,25 @@ module Hash =
     /// The canonical pre-image of a field sequence: each field through `canonicalField`, then
     /// concatenated. INJECTIVE — two field lists with one pre-image are one list — which is
     /// proved of this encoding (`invocation_key_injective` in `proofs/Query.fst` and
-    /// `proofs/Capability.fst`). Both capture-key seams (`Query.invocationKey`,
-    /// `Capability.invocationKey`) and `CapabilityPipeline.nodeInvocationKey` build their
-    /// pre-image through it, so the three cannot drift apart again.
+    /// `proofs/Capability.fst`).
+    ///
+    /// **THE KEY ROSTER (Phase 290).** Every key the spine mints that is not a chain hash builds
+    /// its pre-image through this function, and the list below IS the roster: the `Hash.Roster`
+    /// family (`tests/Fuaran.Core.Tests/HashRosterTests.fs`) reads it from this comment and holds
+    /// it to the tree both ways — every call site of `canonicalFields` under `src/` is one of these
+    /// definitions, and no definition under `src/` joins fields on a bare `foldSep` any more — so a
+    /// new key cannot be minted without joining the list, and a listed key cannot quietly leave
+    /// the encoding. Two of Phase 225's three were the first entries; the rest joined in Phase 290
+    /// (until then they joined on the bare separator, which a value can spell).
+    ///   - `Query.invocationKey`
+    ///   - `Capability.invocationKey`
+    ///   - `CapabilityPipeline.nodeInvocationKey`
+    ///   - `Function.memoKey`
+    ///   - `Projection.digestOf`
+    ///   - `Validator.canonicalCodes`
+    ///   - `Tree.preimageWith` (the one pre-image `Tree.contentHash`, `Tree.encodePreimage` and
+    ///     `Tree.encodeHash` share)
+    ///   - `Tree.Index.fingerprintOf`
     let canonicalFields (fields: string list) : string =
         fields |> List.map canonicalField |> String.concat ""
 
@@ -213,6 +234,21 @@ module Hash =
     /// UTF-8 encode a string to bytes (BMP + surrogate pairs), pure managed. `System.Text.Encoding`
     /// does not exist under Fable, and this is the encoder `sha256Hex` hashes through — exposed
     /// because a caller composing a digest pre-image out of parts needs the same bytes.
+    ///
+    /// **Byte-for-byte the platform's answer, ill-formed input included (Phase 290).** A high
+    /// surrogate is a pair only when the NEXT unit is a low surrogate (`DC00..DFFF`); a lone
+    /// surrogate of either half, or a high one followed by anything else, encodes as the
+    /// replacement character's three bytes `EF BF BD` — which is what `System.Text.Encoding.UTF8`
+    /// emits, and what the parity corpus (`ParityVectors`, the `utf8Bytes/ill-formed-*` rows)
+    /// pins on both pipelines. Until Phase 290 the low half was consumed unchecked, so
+    /// `"\uD801\uD800"` produced the four bytes of U+10000 and a lone surrogate was written
+    /// CESU-style — the platform-parity claim was tested over a well-formed corpus only.
+    ///
+    /// **What replacement does NOT buy: injectivity.** The platform maps `"\uD800"`, `"\uDFFF"` and
+    /// `"\uFFFD"` to ONE byte string, so a digest over ill-formed input has a second pre-image by
+    /// construction. This is the UNGUARDED, platform-parity path, and it says so; wherever a
+    /// digest must name one string, an ill-formed unit is refused before it reaches here — that
+    /// guarded form is Phase 306's.
     let utf8Bytes (s: string) : byte[] =
         let out = ResizeArray<byte>()
         let mutable i = 0
@@ -220,12 +256,18 @@ module Hash =
         while i < s.Length do
             let c = int s[i]
 
+            let pairs =
+                c >= 0xD800
+                && c <= 0xDBFF
+                && i + 1 < s.Length
+                && (let lo = int s[i + 1] in lo >= 0xDC00 && lo <= 0xDFFF)
+
             if c < 0x80 then
                 out.Add(byte c)
             elif c < 0x800 then
                 out.Add(byte (0xC0 ||| (c >>> 6)))
                 out.Add(byte (0x80 ||| (c &&& 0x3F)))
-            elif c >= 0xD800 && c <= 0xDBFF && i + 1 < s.Length then
+            elif pairs then
                 let lo = int s[i + 1]
                 let cp = 0x10000 + ((c - 0xD800) <<< 10) + (lo - 0xDC00)
                 out.Add(byte (0xF0 ||| (cp >>> 18)))
@@ -233,6 +275,11 @@ module Hash =
                 out.Add(byte (0x80 ||| ((cp >>> 6) &&& 0x3F)))
                 out.Add(byte (0x80 ||| (cp &&& 0x3F)))
                 i <- i + 1
+            elif c >= 0xD800 && c <= 0xDFFF then
+                // A lone or ill-ordered surrogate: U+FFFD, as the platform encoder writes it.
+                out.Add(byte 0xEF)
+                out.Add(byte 0xBF)
+                out.Add(byte 0xBD)
             else
                 out.Add(byte (0xE0 ||| (c >>> 12)))
                 out.Add(byte (0x80 ||| ((c >>> 6) &&& 0x3F)))
@@ -358,5 +405,8 @@ module Hash =
         sb.ToString()
 
     /// Lowercase-hex SHA-256 over the UTF-8 bytes of a string — the form nearly every call site
-    /// wants. Byte-for-byte the platform's answer on .NET, and the same answer under Fable.
+    /// wants. Byte-for-byte the platform's answer on .NET, ill-formed surrogates included (the
+    /// replacement bytes `utf8Bytes` describes), and the same answer under Fable. Over an
+    /// ill-formed string it therefore has the platform's second pre-images too; the guarded,
+    /// refusing form is Phase 306's.
     let sha256Hex (input: string) : string = sha256HexOfBytes (utf8Bytes input)
