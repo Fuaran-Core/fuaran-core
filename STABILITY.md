@@ -2671,6 +2671,81 @@ printed for `Fuaran.Core.CSharp` there costs no consumer anything.
   package cannot resolve after it.
 - **A consumer that never referenced the package** changes nothing.
 
+### `streamLaws` guards its sample, `laneFoldLaws` counts its rejected lanes, and an aggregate's pass reads its counts (Phase 245) — BREAKING for a stream generator that never reaches an accepted op or a tampered chain; no public surface moves
+
+**What changed.** `Conformance.streamLaws` was censused `Unconditional` ("each iteration applies,
+replays and tampers the same chain"), which is true only of a generator whose ops the domain
+accepts. The chain is built from ops the caller's `StreamGen` DRAWS, and a refused op does not
+extend it. A downstream consumer measured this at `0.30.0`: with a generator whose every op the
+domain refused, every chain was empty and all three stream laws — an intact chain verifies, replay
+re-derives the live state, a tampered op is detected — held green over nothing, inside `certify`
+and `certifyStream` alike. The family now counts the ops it accepted and the chains it actually
+tampered, and reports two `sample adequacy (Conformance.streamLaws)` laws, `accepted op` and
+`tampered chain`, on the Phase 220 pattern. Its census row is `Guarded [ "accepted"; "tampered chain" ]`
+and its refusal-audit row is `drawn` (the tampered chain is built only over a chain the generator
+fills).
+
+**The second side is the tampered chain, not a non-empty one.** The shard asked for "at least one
+accepted op and at least one non-empty chain". In this family's loop those are the same event — a
+chain is non-empty exactly when an op was accepted into it — so a guard over both would demand one
+thing twice. The evidence the third law reads is a chain it TAMPERED, and a generator that draws
+one op, always the same one, fills every chain and never tampers any of them (every substitute
+encodes like the op it replaces). That is the second side.
+
+**`FoldConfluence.laneFoldLaws` / `laneFoldLawsWith` count `LaneRejected`.** A lane set the reducer
+rejects under every arrival order is now counted beside the folded and halted sets the guard
+demands, and named in the guard's counterexample
+(`lane-fold outcome reached folded=0 halted=0 (counted beside them, not demanded: rejected=20)`).
+It is counted and not DEMANDED: the fold-determinism law holds over it, but it tests neither a clean
+fold nor a halt, and a domain whose reducer accepts everything its footprint lets through must not
+be starved for never producing one. A sample made only of rejected lanes was already starved (both
+demanded outcomes read zero); the line now says why. The law text is unchanged.
+
+**An aggregate's pass reads its counts through `SampleAdequacy.cases`.** `certify` and
+`certifyStream` return every law and every guard of the families they run, so
+`SampleAdequacy.cases "<aggregate>" (Guarded …) iterations report.Results` is the aggregate's
+subject laws times its iterations, with every starved side named — `1000` for `certifyStream` at
+200 iterations over the reference domain. The suite holds that reading, and the generated
+`docs/conformance-families.md` says it in its `Cases` paragraph. Every family's own count was
+already carried on the pass path by Phase 196's `cases` column; this entry adds nothing to
+`CaseCount` or to `LawResult`.
+
+**Class.** The surface gate prints no move: the rejected count is rendered through an `internal`
+helper beside `SampleAdequacy.reached`, whose own signature and law text are unchanged. By the
+reading `0.31.0` applied to `certify` (Phase 220), a verdict change on a certifying family is
+breaking whatever its member's surface class, and this is one: `streamLaws`, `certify` and
+`certifyStream` go RED for a generator that never reaches an accepted op or a tampered chain. The
+shard called the change additive; that holds for the `laneFoldLaws` half and not for the
+`streamLaws` half. This slot is untagged and already breaking, so the change rides it. No baseline
+under `api/` moved. No wire surface moved. `docs/conformance-families.{md,json}` are regenerated:
+`Conformance.streamLaws` reads `guarded-reached` and `drawn` where it read `unconditional` and
+`built`.
+
+**What adopting it costs.**
+
+- **A domain whose stream generator reaches an accepted op and a tampered chain** — any generator
+  that draws two ops that encode differently and that the domain accepts — sees two extra green
+  `LawResult`s from `streamLaws` and from each aggregate. A law-count assertion pinned at the old
+  count moves by two (`certifyStream` reports nine, `certify` nineteen at a witness whose `opAlgebra`
+  and `diffLaws` report as the kit's reference does).
+- **A domain whose generator is refused every time, or draws one op only,** turns red, deliberately:
+  its stream laws were certifying nothing. Widen the generator — draw an op the domain accepts, and
+  a second that encodes differently — rather than raising the iteration count.
+- **A `laneFoldLaws` caller** sees a longer counterexample on a red guard and nothing else.
+
+**Shown failing first.** The new tests were run before the guards existed: the `streamLaws` guard
+tests failed or errored (no guard law to find, and `certify` / `certifyStream` green over a
+generator that refuses every op), and the rejected-lane test failed on a counterexample reading
+`folded=0 halted=0` with no mention of the twenty rejected lane sets. Each passes now; the reference
+stream generator reaches both guarded sides on twenty further seeds at the census's size.
+
+**Not done here: the reached counts of a PASSING guard.** A green guard still carries
+`Counterexample = None`, so a guarded family that reached a side six times in two hundred reports
+the same pass as one that reached it every time; the census's `Cases` is the run's size, not its
+reach. Carrying the per-side counts on a pass needs a place on `LawResult` to put them, which is a
+record-shape change to the kit's most-constructed type, and is left for a decision rather than
+taken inside this entry.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

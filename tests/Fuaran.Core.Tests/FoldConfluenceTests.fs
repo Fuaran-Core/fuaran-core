@@ -623,3 +623,49 @@ let foldConfluenceTests =
               match Dag.reconcileMany planFootprint dag2 baseId2 heads2 with
               | Ok _ -> failtest "a colliding lane pair must halt the whole fold"
               | Error cs -> Expect.isNonEmpty cs "the halt names the interference" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 245 — the adequacy line counts rejected lanes beside folded and halted ones
+// ---------------------------------------------------------------------------
+
+/// Every op this reducer is handed is refused with ONE reason, and the blind footprint never halts,
+/// so every lane set replays into a rejection — the same rejection under every arrival order (a
+/// reason naming the op would differ by which lane arrived first, and law 1 would rightly see a
+/// divergence), so the three subject laws hold over it and certify nothing about folding or
+/// halting.
+let private rejectW: StreamWitness<string, string, string> =
+    { Apply = fun _ _ -> Error "refused"
+      Encode = id
+      Decode = Ok }
+
+[<Tests>]
+let rejectedLaneTests =
+    testList
+        "FoldConfluence.rejectedLanes"
+        [ testCase "go-red: a sample of only rejected lanes is starved, and the adequacy line names the rejections"
+          <| fun _ ->
+              let results =
+                  FoldConfluence.laneFoldLaws rejectW blindFootprint id appendLaneGen 3 7 20
+
+              Expect.isTrue
+                  (results
+                   |> List.filter (fun r -> not (r.Law.StartsWith SampleAdequacy.guardOpening))
+                   |> List.forall (fun r -> r.Passed))
+                  "the subject laws hold over lane sets that all reject — which is the problem"
+
+              let adequacy = lawNamed "sample adequacy" results
+              Expect.isFalse adequacy.Passed "a sample of only rejected lanes is starved"
+
+              let cx = defaultArg adequacy.Counterexample ""
+              Expect.stringContains cx "folded=0 halted=0" "the demanded outcomes read zero"
+              Expect.stringContains cx "rejected=20" "and the line names the lanes that were rejected instead"
+
+          testCase "a rejected lane is counted, not demanded — the work-plan reference stays green"
+          <| fun _ ->
+              // The work-plan reference reaches both demanded outcomes; whether it also reaches a
+              // rejection is the domain's business, and a guard that DEMANDED one would starve every
+              // domain whose reducer accepts what its footprint lets through.
+              let results =
+                  FoldConfluence.laneFoldLaws planW planFootprint planHash planLaneGen 3 4100 150
+
+              Expect.isTrue (lawNamed "sample adequacy" results).Passed "the guard does not demand a rejection" ]

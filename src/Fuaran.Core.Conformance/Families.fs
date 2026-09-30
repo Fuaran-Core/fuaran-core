@@ -287,8 +287,8 @@ module Families =
           r "Conformance.diffLaws" NoRefusal "a refused op is skipped while building `after`; no law reads it"
           r
               "Conformance.streamLaws"
-              Built
-              "the tampered chain it must reject is built each iteration; a rejected append is only skipped"
+              Drawn
+              "the tampered chain it must reject is built only over a chain the caller's StreamGen fills, and a refused append is skipped; guarded on accepted op and tampered chain (Phase 245)"
           r
               "Conformance.reducer"
               Drawn
@@ -434,7 +434,7 @@ module Families =
           r
               "FoldConfluence.laneFoldLawsWith"
               Drawn
-              "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome" ]
+              "LaneHalted and LaneRejected come from the caller's LaneGen; guarded on lane-fold outcome, with rejected lane sets counted beside it (Phase 245)" ]
 
     /// The audit row for one family, if the roster audits it (the suite holds that it always does).
     let tryRefusal (id: string) : RefusalAudit option =
@@ -702,7 +702,11 @@ module Families =
           "guarded dimension was starved, and the starved dimension is named in the cell. `vacuous`"
           "is the state a family passing green while exercising nothing used to render as, which is"
           "what this column exists to make impossible to read past. `unmeasured` means no run was"
-          "handed to the renderer, which is a different fact and deliberately a different word."
+          "handed to the renderer, which is a different fact and deliberately a different word. A"
+          "green run carries its count on the pass path through `SampleAdequacy.cases`, and an"
+          "aggregate's report reads the same way: `certify` and `certifyStream` return every law and"
+          "every guard of the families they run, so `cases` over the report is their subject laws"
+          "times the iterations, with every starved side named (Phase 245)."
           ""
           "**Adequacy.** How the family's green run is to be read. `unconditional` — every iteration"
           "builds every branch the laws distinguish, so a green run is a pass. `guarded-reached` — the"

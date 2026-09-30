@@ -711,8 +711,8 @@
       "optIn": false,
       "discharges": [],
       "cases": "600",
-      "adequacy": "unconditional",
-      "refusal": "built"
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.verifyHonestyLaws",

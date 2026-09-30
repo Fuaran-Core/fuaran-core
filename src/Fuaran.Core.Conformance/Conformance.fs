@@ -683,6 +683,14 @@ module Conformance =
 
     /// The op-stream laws: `verifyChain` accepts an intact chain and rejects a tampered
     /// op; `replay` re-derives the live state from the base state.
+    ///
+    /// Phase 245 — `Guarded [ "accepted"; "tampered chain" ]`. Every chain is built from ops the
+    /// caller's generator DRAWS, and a drawn op the domain refuses does not extend it. A generator
+    /// whose every op is refused leaves every chain empty, and all three laws hold over an empty
+    /// chain; one whose every tamper encodes like the op it replaces never runs the tamper law. So
+    /// the family counts the accepted ops and the chains it actually tampered, and reports the
+    /// guard rather than a pass. (A non-empty chain is exactly a chain with an accepted op in it, so
+    /// the second side is the tampered chain the third law reads, not merely a non-empty one.)
     let streamLaws
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
@@ -694,6 +702,8 @@ module Conformance =
         let mutable verify = None
         let mutable replay = None
         let mutable tamper = None
+        let mutable accepted = 0
+        let mutable tampered = 0
 
         for i in 0 .. iterations - 1 do
             let mutable state = gen.State0
@@ -705,6 +715,7 @@ module Conformance =
 
                 match OpStream.append hashFn sw (Human "conf") op state recs with
                 | Ok(s', recs') ->
+                    accepted <- accepted + 1
                     state <- s'
                     recs <- recs'
                 | Error _ -> () // a rejected op just doesn't extend the chain
@@ -728,10 +739,12 @@ module Conformance =
 
                 // Only a genuinely-different op is a tamper the chain must detect.
                 if sw.Encode orig.Op <> sw.Encode newOp then
-                    let tampered =
+                    tampered <- tampered + 1
+
+                    let forged =
                         recs |> List.mapi (fun j r -> if j = tIdx then { r with Op = newOp } else r)
 
-                    if OpStream.verifyChain hashFn sw tampered && tamper.IsNone then
+                    if OpStream.verifyChain hashFn sw forged && tamper.IsNone then
                         tamper <- Some(sprintf "seed=%d iter=%d: a tampered op was not detected" seed i)
 
         [ { Law = "verifyChain accepts an intact chain"
@@ -742,7 +755,9 @@ module Conformance =
             Counterexample = replay }
           { Law = "verifyChain detects a tampered op"
             Passed = tamper.IsNone
-            Counterexample = tamper } ]
+            Counterexample = tamper }
+          SampleAdequacy.reached "Conformance.streamLaws" "accepted op" seed [ "accepted", accepted ]
+          SampleAdequacy.reached "Conformance.streamLaws" "tampered chain" seed [ "tampered", tampered ] ]
 
     /// Domain-reducer laws (Phase 254) — certify a domain's *own* reducer
     /// `apply : 'Op -> 'State -> Result<'State, 'Rej>` (Doc's `DocOp` apply, Calc's, …), not

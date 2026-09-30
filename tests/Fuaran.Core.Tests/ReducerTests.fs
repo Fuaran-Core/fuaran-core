@@ -109,10 +109,15 @@ let tests =
           <| fun _ ->
               // F7: a domain with no uniform node tree certifies via the op-stream + reducer
               // seams alone. The report bundles streamLaws (3) + reducer laws (2) + the reducer's
-              // accepted/refused guards (2, Phase 220) = 7.
+              // accepted/refused guards (2, Phase 220) + the stream laws' accepted-op and
+              // tampered-chain guards (2, Phase 245) = 9.
               let report = Conformance.certifyStream sw gen OpStream.defaultHash 271 200
               Expect.isTrue report.AllPassed "a well-formed reducer-only domain certifies green"
-              Expect.equal (List.length report.Results) 7 "3 op-stream laws + 2 reducer laws + 2 reducer guards"
+
+              Expect.equal
+                  (List.length report.Results)
+                  9
+                  "3 op-stream laws + 2 reducer laws + 2 reducer guards + 2 stream guards"
 
           testCase "certifyStream surfaces a throwing reducer through the bundled report"
           <| fun _ ->
