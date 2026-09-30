@@ -1,5 +1,59 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D73: the IDL spike scaffolding leaves `src/` — the operator tool moves to the CLI, the mini vocabulary stays as a test fixture, and relocating the spike under `tests/` is DECLINED
+
+**Recorded on the `0.33.0` draft (Phase 230). Executes the maintainer's ruling of 2026-09-20: DELETE.**
+Two things in `src/` were the IDL inversion spike's scaffolding, kept after the inversion shipped:
+`Fuaran.Core.Idl.Spike` (never packable) and `ProposalSpike.fs`, compiled into the packable
+`Fuaran.Core.Idl.Codegen`. The question was whether the operator tool the second one backs
+(`--spike-proposal`, generalised by Phase 123) moves to `Fuaran.Core.Idl.Cli` and the project is
+deleted, or the spike is kept deliberately as a second-domain certification fixture and moves under
+`tests/`. The ruling is the first. **Relocating the spike under `tests/` is declined**, and a
+generic spine does not carry its own inversion-era archaeology in `src/`.
+
+*What moved where.*
+
+| Was | Is |
+|---|---|
+| `ProposalSpike.fs` in `Fuaran.Core.Idl.Codegen` (public: `ProposalSpike`, `SpikeInput`, `SpikeLeg`, `SpikeReport`, `ExternalLeg`) | `src/Fuaran.Core.Idl.Cli/ProposalSpike.fs`, internal, behind the `spike-proposal` verb; flags, report and exit codes unchanged. A `removal` from Codegen's public surface, riding the `0.33.0` draft (STABILITY.md) |
+| the `--spike-proposal` flag of the test runner | gone there; `IdlProposalTests` drives the harness in-process (internals visible to the suite) and the verb end to end as a process |
+| `src/Fuaran.Core.Idl.Spike/` (`Spike.fs`, `Generated.fs`) | deleted from `src/` and the solution; the vocabulary and the F# emitted from it are `tests/Fuaran.Core.Tests/MiniIdl.fs` and `MiniGenerated.fs` |
+| Phase 185's vacuity guard (`packable < total` over `src/`) | proved on a fixture tree built for the test; see below |
+
+*Why the mini vocabulary is kept, and why that is not the relocation the ruling declined.* The
+ruling declined keeping the SPIKE — the project, as a named second-domain fixture — under `tests/`.
+What the suite still certifies against is narrower and measured. `miniIdl` is the only vocabulary
+declaring a transparent union (`TextSource.Literal`, a bare-string arm), which `ReferenceIdl.fs` does
+not, so it is the only source of the bare-value-arm, `transparentCase` and D33 coverage, of the
+snapshot surface (`snapshots/spike.json`), of one of the four neutral vocabularies
+`IdlCertificationTests` walks, and of the engine-level legs `IdlSpikeTests` holds (the 500-vector F#
+and TypeScript sweep, the TypeScript decoder round-trip, the witness and schema legs). Deleting it
+with the project would have removed that coverage to satisfy a tidiness ruling, which is debt, not
+tidiness. So the fixtures stay in the test project under names that say what they are, and the
+project, the harness and the `src/` footprint go. Whether to rename the remaining `Spike`-named test
+files and `miniIdl`'s role beside `ReferenceIdl.fs` is a separate, open question and is not decided
+here.
+
+*What was lost, stated.* `Fuaran.Core.Idl.Spike` compiled the generated F# against the model half
+alone — it deliberately did not reference `Fuaran.Core.Idl.Codegen` (Phase 97), so that the output
+could not quietly come to need the generator. `MiniGenerated.fs` compiles in the test project, which
+references everything, exactly as `DocGenerated.fs` already did; that one property — "the emitted
+source builds against the model assembly alone" — is no longer checked by a compile. It is still
+checked by what the emitted source names: the byte-for-byte drift guard pins the file to the
+generator's output, and that output opens only `Fuaran.Core` and uses the wire, tree and validator
+seams — it names no codegen type. A compile-level check on a model-only project would be a project
+under `tests/` again, which is the relocation declined.
+
+*The vacuity guard.* `FableSmokeCompletenessTests` asserted that at least one project under `src/`
+declares `IsPackable=false`, so the derivation was seen to filter. The spike was the only such
+project, so deleting it leaves an assertion that cannot pass; leaving the assertion, and adding an
+unpackable project to `src/` to satisfy it, would be the guard dictating the tree. The guard is
+re-seated: the derivation takes the directory it reads, the test builds a src-shaped tree in its
+own output directory (one project that ships `fable/`, one that opts out of it, one
+`IsPackable=false`), and asserts the filter drops exactly that one. The go-red is a second tree with
+no unpackable project, over which the same comparison reads `false` — the guard is able to fail.
+`fable-exclusions.json` and the roster tests are unchanged in verdict.
+
 ## 2026-09-27 — D72: the column model gains an EXACT decimal, carried as canonical text
 
 **Recorded on the `0.33.0` draft. RATIFIED by the maintainer on 2026-09-27, as written.** The scalar

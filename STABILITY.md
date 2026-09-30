@@ -2480,6 +2480,37 @@ job's. **The Fable gate has not been run over this change.** The new code is wri
 Fable-clean subset the rest of the package keeps, and that is a claim until the gate every cut
 cites says so; a release of this slot waits on it.
 
+### The proposal-pricing harness leaves `Fuaran.Core.Idl.Codegen` for the CLI (Phase 230) — BREAKING, `removal`
+
+**What changed.** `ProposalSpike` (`run`, `render`) and the four records it is driven and reported
+through — `SpikeInput`, `SpikeLeg`, `SpikeReport`, `ExternalLeg` — are no longer public members of
+`Fuaran.Core.Idl.Codegen`. The harness prices a vocabulary-change proposal against a vocabulary
+without cutting a branch; it is an operator tool, not part of the generation library, and it now
+lives behind the command that runs it, as the `spike-proposal` verb of `fuaran-core-idl`
+(`Fuaran.Core.Idl.Cli`), internal to that assembly. Its flags (`--idl`, `--corpus`, `--out`, `--seed`,
+`--vectors`), report and exit codes (0 every leg passed, 1 a leg failed, 2 the document did not read)
+are the ones the repository's own test runner carried as `--spike-proposal`, which no longer exists
+there. The `Fuaran.Core.Idl.Spike` project, which was never packable, is gone from `src/`; the mini
+vocabulary and the F# emitted from it moved into the test project as fixtures. No other package's
+surface moves, and `api/Fuaran.Core.Idl.Cli.txt` does not move either (the harness is internal).
+
+**Class: `removal` — breaking, and it RIDES this slot rather than advancing it.** The surface gate
+printed `Fuaran.Core.Idl.Codegen removal 27 move(s)`, every one a `-` line over the harness and its
+four records (constructors, record fields, the two functions, the type entries), and nothing added.
+A consumer compiled against any of them would stop compiling, so this is a removal of members a
+consumer could have pinned, and it is classed as one. The `0.33.0` slot was already opened by a
+breaking change (`removal`, Phase 258) and is an untagged, publicly unpinned draft, so a change of
+the same class rides it: `<Version>` does not move and the baseline `api/Fuaran.Core.Idl.Codegen.txt`
+is regenerated in the same commit.
+
+**What adopting it costs.** A consumer of `Fuaran.Core.Idl.Codegen` that called `ProposalSpike.run` /
+`render` replaces the call with the command: `fuaran-core-idl spike-proposal <proposal.json> --idl
+<idl.json> [--corpus <dir>]`, which takes the vocabulary as an artifact file rather than an `Idl`
+value and writes the report to standard output. The in-process `ExternalLeg` hook (a generated
+TypeScript module run under a JavaScript runtime) was never reachable from the command and is not
+reachable now; a consumer that used it has the harness source in this repository's history. A
+consumer that never referenced those names changes nothing.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

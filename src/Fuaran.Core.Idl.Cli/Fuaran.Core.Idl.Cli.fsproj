@@ -18,7 +18,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>fuaran-core-idl</ToolCommandName>
     <PackageId>Fuaran.Core.Idl.Cli</PackageId>
-    <Description>Fuaran.Core.Idl.Cli — the IDL stability classifier as a command (`fuaran-core-idl`). Classifies the delta between two `idl.json` revisions: the wire severity per changed member with the reason it applies, the wire-profile evolution, and the F# consequence classes a consumer compiled against the generated structural layer meets. Exits 0 / 3 / 4 for absorbable / breaking / undecided, or asserts a declared class with `--expect`. .NET-only and build-time; the classification it prints lives in Fuaran.Core.Idl.Codegen.</Description>
+    <Description>Fuaran.Core.Idl.Cli — the IDL stability classifier as a command (`fuaran-core-idl`). Classifies the delta between two `idl.json` revisions: the wire severity per changed member with the reason it applies, the wire-profile evolution, and the F# consequence classes a consumer compiled against the generated structural layer meets. Exits 0 / 3 / 4 for absorbable / breaking / undecided, or asserts a declared class with `--expect`; `spike-proposal` prices a vocabulary-change proposal against a vocabulary. .NET-only and build-time; the classification it prints lives in Fuaran.Core.Idl.Codegen.</Description>
   </PropertyGroup>
   <ItemGroup>
     <!-- No Fable source distribution, for the reason Fuaran.Core.Idl.Codegen states: the
@@ -29,7 +29,16 @@
     <Content Remove="*.fs" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Phase 230 — the proposal-pricing harness (`spike-proposal`), moved here from
+         Fuaran.Core.Idl.Codegen. Before Program.fs, which routes to it. Internal to this
+         assembly, so the tool's public surface (api/Fuaran.Core.Idl.Cli.txt) does not move. -->
+    <Compile Include="ProposalSpike.fs" />
     <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The test suite drives the harness in-process, as it did when the harness was a
+         library; nothing else sees it. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Idl.Codegen\Fuaran.Core.Idl.Codegen.fsproj" />

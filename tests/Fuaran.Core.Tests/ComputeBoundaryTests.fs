@@ -51,7 +51,6 @@ let spine: string list =
       "Fuaran.Core.AiSurface"
       "Fuaran.Core.Idl"
       "Fuaran.Core.Idl.Codegen"
-      "Fuaran.Core.Idl.Spike"
       "Fuaran.Core.Idl.Cli"
       "Fuaran.Core.Conformance"
       "Fuaran.Core.CSharp" ]
