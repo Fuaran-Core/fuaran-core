@@ -2746,6 +2746,134 @@ reach. Carrying the per-side counts on a pass needs a place on `LawResult` to pu
 record-shape change to the kit's most-constructed type, and is left for a decision rather than
 taken inside this entry.
 
+### The kit gets a runner, splits by topic behind a facade, declares each family once, and gives `…With` one meaning (Phase 297) — BREAKING: `record-widening` of `Families.LawFamily`, six report types move to namespace level, and verdict changes; obsolete forwards for this draft
+
+**What changed.** `Conformance.fs` — laid out by the order its parts arrived, not by topic — is a
+public facade now, compiled last: one-line forwards with full signatures, plus `certify` and
+`certifyStream`. The families live in eight internal topic modules ahead of it (`TreeLaws`,
+`StreamLaws`, `IntegrityLaws`, `ConcurrencyLaws`, `SeamLaws`, `FunctionLaws`, `PropagationLaws`,
+`SurfaceLaws`), with `ConfRng` and the witness records in files of their own. Every family, the
+fold-confluence pack and the null-tolerance vectors among them, runs over one internal runner
+(`LawKit`): one loop, one cursor, one first-counterexample cell, one result tail, where there were
+sixty copies of each. Every seed replays to the same sample it drew before, and every law and
+counterexample text is unchanged; the suite's pinned counterexamples are the evidence.
+
+- **A law the run never asserted is not green.** Each law is a cell that counts its evidence. A law
+  asserted only inside an arm the family's own adequacy guard counts reads through that guard (the
+  guard is red, and says why, once); a law whose arm no guard counts is STRICT and reds itself as
+  `never reached`, naming the remedy — widen the generator. `SampleAdequacy.cases` reads a
+  never-reached law as starvation under either census class, so the census cell says `vacuous`
+  rather than a number. `SampleAdequacy.neverReached` is the counterexample's opening.
+- **Guards the census can see.** Every guard is labelled with its family's roster id
+  (`sample adequacy (Conformance.<entry>): …`); seven were labelled with a bare name and one with
+  its module name. `concurrencyLawsWith`'s coverage law is a guard now. `hashFnLaws` (its tamper
+  arms), `attributedLaws` (the re-attribution), `captureReplayLaws` (the tampered capture) and
+  `encoderInjectivityLaws` (distinct trees seen and compared — its old census reason was false)
+  count their gated arms and are censused `Guarded`; `casLaws` counts its race arm and
+  `attestationLaws` its op tamper. `snapshotLawsWith`'s snapshot arm, `dagLaws`' tamper and
+  `idempotencyLaws`' gated arm are held by strict cells: several readers pin those families' result
+  counts, and a strict cell is red at zero without a new result. The suite holds every census class
+  to what the family emits at the reference witness — a `Guarded` family emits a roster-labelled
+  guard, an `Unconditional` one emits none.
+- **`genOp` draws every op kind.** A `Batch` of one to three structural ops, and an `UpdateNode`:
+  the identity update of a drawn node, or a domain content edit through the new opt-in
+  `UpdateGen<'Node>` record (compose it; `OpGen` does not grow). `opAlgebra`, `footprintLaws`,
+  `mergeConflictLaws`, `reconcileLaws`, `concurrencyLaws` / `concurrencyLawsWith` and
+  `arbitrationLaws` demand all six kinds — folded into each family's existing guard (its dimension
+  reads "… and op kind"), not added as a result.
+- **One record per family.** `Families.LawFamily` gains `Adequacy : AdequacyClass` and
+  `Refusal : RefusalVerdict` (new: `Population` and `Why`). Each family row declares both;
+  `SampleAdequacy.census` forwards to `Families.census`, and `Families.refusalAudit` is a
+  projection (`censusOf` / `refusalAuditOf` project any list). The renderings read the record. The
+  roster now compiles ahead of the guard module, so `LawResult`, `AdequacyDemand`, `CaseCount` and
+  `AdequacyClass` moved, unchanged and under the same names, into `LawResult.fs`. The JSON export
+  escapes through `Json.escape`.
+- **`WireNullTolerance.laws ()`** answers the null-tolerance vectors as `LawResult`s, one per
+  vector, so the family is rostered, censused (`Unconditional`: a fixed corpus) and measured.
+  `check` and `run` are unchanged.
+- **`verifyFunctionSymbolic` sizes in `int64`.** The space-size product saturates at
+  `maxCases + 1` (four holes of 1,000 wrapped negative as an `int`, passed `<= maxCases` and were
+  enumerated whole), `domainOf` sizes a range in `int64` (`IntRange(0, Int32.MaxValue)` read as
+  empty and reported a false `DidNotApply`), the cartesian product is a lazy sequence, and a
+  `Sampled` size too large for its `int` is reported `None`.
+- **Smaller corrections.** The two `Option.get` sites in `capabilityLaws` and `queryLaws` fail a
+  law instead of throwing. `memoSoundnessLaws` honours its `iterations`. An empty AI-surface pattern
+  bank is checked whole rather than reported never reached. Stale comments (a fixed `certify` result
+  count, a green no-attestation run, an LCG) are corrected, and so is the package description.
+
+**The naming rule.** A bare entry name is the family at its default — the kit's own fixtures, or a
+pinned parameter at its default value. `…With` means exactly one thing: **the same laws with a
+pinned parameter injected, last before `seed`**. `…At` is **the domain-witness form** — the laws run
+at a domain's own seam, witness or policy instead of the kit's fixtures. A family that chains the
+DOMAIN'S ops under the domain's hash posture takes `hashFn`; a family whose chain is built over the
+kit's own fixtures defaults it to `OpStream.defaultHash`. Brought under it on this draft:
+
+| Was | Now | For this draft |
+|---|---|---|
+| `capabilityLawsWith` | `capabilityLawsAt` | obsolete forward, own roster id and guard label |
+| `queryLawsWith` | `queryLawsAt` | obsolete forward, own roster id and guard label |
+| `capabilityPipelineLawsWith` | `capabilityPipelineLawsAt` | obsolete forward, own roster id and guard label |
+| `aiSurfaceLaws` (the domain's policy — the inverse of every other bare name) | `aiSurfaceLawsAt` | obsolete forward; the bare name is retired, not reassigned |
+| `reconcileLaws` (hash hard-coded) | `reconcileLawsWith … hashFn seed iterations` | `reconcileLaws` pins `OpStream.defaultHash` and stays |
+
+`propagationEvaluatorLawsWith` already conforms (its pinned `evalNodeWith` sits last before
+`seed`), and `aiSurfaceLawsUnderKitPolicy` keeps its explicit name. **Not yet conforming:**
+`snapshotLawsWith` (its `StreamConfig` is first), `concurrencyLawsWith` (its footprint projection is
+first) and `FoldConfluence.laneFoldLawsWith` (its `hashFn` sits mid-signature). An obsolete forward
+cannot carry an old parameter order under the name the rule assigns, so each is a reorder in place,
+breaking without a forward; they move together in one later change rather than one at a time. A
+phase that adds a `…With` or `…At` family (Phase 249's `footprintLawsWith` is the next) follows the
+rule from its first commit.
+
+**Class.** The surface gate reads this as breaking on three counts, and the phase's own shard, which
+called it additive, is wrong on all three:
+
+- **`record-widening`** of `Families.LawFamily` (two fields). Every consumer that builds a
+  `LawFamily` as a full record literal fails to compile (FS0764) until it supplies `Adequacy` and
+  `Refusal` — the dataframe share of the roster, `DataFrameFamilies.roster` in the compute
+  repository, is one. A consumer that only reads the roster is unaffected; `Families.Roster` keeps
+  its `RefusalAudit` and `Census` fields, and this package fills them by projection.
+- **Six report types move to namespace level** — `CompositionSample`, `VerifyDefect`,
+  `VerifyCounterexample`, `VerifyCoverage`, `FunctionVerifyReport`, `MemoSample`, nested in
+  `module Conformance` until now. Abbreviations in the facade keep every `Conformance.<Type>`
+  annotation compiling, but an abbreviation does not carry union CASES: `Conformance.Exhaustive`,
+  `Conformance.Sampled`, `Conformance.ValidatorRejected` and their siblings are spelled without the
+  prefix now. The IL names move, so the change is binary-breaking too. The API baseline therefore
+  moves for the split — the shard's "byte-identical across the split" was not available together
+  with its own instruction to promote the types.
+- **Verdict changes.** A family that certified nothing now says so: a strict cell reds a law no run
+  reached, the newly counted families red a starved arm, the op-drawing families red a sample that
+  missed an op kind, and `witnessLaws`' rebuild laws red a witness under which no node holds
+  children (so `certify` stops at the witness laws there). The kit's reference witnesses reach every
+  side. Law counts move for `hashFnLaws`, `attributedLaws`, `captureReplayLaws`,
+  `encoderInjectivityLaws` and `casLaws` (one guard each); `concurrencyLawsWith` reports one subject
+  law fewer and one guard more.
+- **Additive beside them.** `capabilityLawsAt`, `queryLawsAt`, `capabilityPipelineLawsAt`,
+  `aiSurfaceLawsAt`, `reconcileLawsWith`, `WireNullTolerance.laws`, `UpdateGen`,
+  `Families.RefusalVerdict` / `census` / `censusOf` / `refusalAuditOf`, `SampleAdequacy.neverReached`.
+
+`api/Fuaran.Core.Conformance.txt` and `docs/conformance-families.{md,json}` are regenerated (66
+families: the five renamed-or-added entries and `WireNullTolerance.laws` join the sixty). No wire
+surface moved; the law vectors under `conformance/laws/` draw exactly as before.
+
+**What adopting it costs.**
+
+- **A domain calling `capabilityLawsWith`, `queryLawsWith`, `capabilityPipelineLawsWith` or
+  `aiSurfaceLaws`** gets a deprecation warning naming the new entry and nothing else on this draft;
+  the forward runs the same laws under the old roster id. Rename the call before the forward goes.
+- **A domain building a `LawFamily` literal** adds the two fields.
+- **A domain matching `Conformance.Exhaustive` (or any case of the six moved unions)** drops the
+  `Conformance.` prefix.
+- **A domain whose generator never reached a side a law is about** turns red, deliberately. Widen
+  the generator — draw an op the domain accepts and one it refuses, every op kind, two values that
+  encode differently — rather than raising the iteration count or hunting a seed.
+
+**Not done here.** The `LawResult` widening that would carry a passing guard's reached counts is a
+recorded decision still open, and this phase does not take it. `ConformanceTests.fs` is not split
+along the new seams in this change: sibling phases in the same batch append cases to it, and a split
+would turn each of their appends into a cross-file conflict. A hash that answers one digest for
+everything still leaves `hashFnLaws` green — measured, and its missing op-tamper arm is Phase 302's.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

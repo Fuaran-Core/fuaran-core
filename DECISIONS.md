@@ -1,5 +1,50 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D75: the law kit gets a runner and a facade, each family is declared once, and `…With` means one thing
+
+**Recorded by Phase 297. `Fuaran.Core.Conformance`; rides the `0.33.0` draft (STABILITY.md, "The kit
+gets a runner…").** Three decisions, taken together because each is what makes the next one cheap.
+
+*The runner.* Every law family is written over one internal module, `LawKit`: one loop, one cursor
+over `ConfRng`, one first-counterexample cell (`LawCell`), one result tail. A kit-wide guarantee is
+threaded through that module once instead of through sixty copies — which is how the drift the
+phase was filed for happened (guards labelled three different ways, a coverage law the census could
+not see, a census reason nobody could check). The cell counts its evidence, and the rule it applies
+is the one Phase 302 asked for: a law asserted only in an arm the family's own guard counts reads
+through that guard; a law whose arm no guard counts reds itself at zero evidence. **Every gated arm
+is counted by a named guard or held by the cell — never neither.** The runner is internal on
+purpose: how a family keeps its evidence is the kit's business, which is what lets it change under
+every family at once. It preserves draw order, so every recorded seed still reproduces its sample.
+
+*The facade.* `Conformance.fs` is the public surface and is compiled last; the families live in
+internal topic modules ahead of it. A forward is one line with the family's full signature, so the
+facade is the contract a reader reads top to bottom, and the roster ids and the aggregates the suite
+reads off this file's source stay where they were. The six report types nested in the module moved
+to namespace level because the families that build them now compile before it; abbreviations keep
+the type names, and the one thing an abbreviation cannot carry — a qualified union case — is the
+source change the split costs a consumer.
+
+*One declaration per family.* A family's adequacy class and refusal verdict are fields of its
+`LawFamily` record; `SampleAdequacy.census` and `Families.refusalAudit` are projections. Until now
+they were three lists held equal only by tests, and each test could catch a family missing from one
+list but none could make the lists one. Making the census a projection moved the roster ahead of the
+guard module in compile order, and the shared verdict types into a file of their own ahead of both.
+
+*The naming rule.* A bare name is the family at its default. `…With` is the same laws with a pinned
+parameter injected, last before `seed`; `…At` is the domain-witness form; a family that chains the
+domain's own ops takes `hashFn`, and one over the kit's fixtures defaults it. The renamed entries
+keep obsolete forwards through this draft under their own roster ids, so nothing that pins them
+moves on the day the rule lands. The bare `aiSurfaceLaws` is RETIRED, not reassigned to the
+kit-policy form its name would now suggest: a name that changes meaning under a caller is worse than
+one that disappears. Three `…With` entries whose pinned parameter is not last before `seed`
+(`snapshotLawsWith`, `concurrencyLawsWith`, `laneFoldLawsWith`) cannot take a forward under the name
+the rule gives them; they are reordered together, in one breaking change, rather than one at a time.
+
+**Declined here, and why.** Widening `LawResult` to carry a passing guard's reached counts is a
+recorded open decision and is not taken by this phase: the runner makes it a one-module change
+whenever it is ruled. Splitting `ConformanceTests.fs` along the new seams waits for a change that no
+sibling phase is appending cases to.
+
 ## 2026-09-30 — D74: the proof leg's module-cone selector is Phase 164's sanctioned form of a cheaper leg; a shared checked-module cache stays DECLINED
 
 **Recorded by Phase 328. Tooling under `proofs/` and the test project; no package surface moves.**
