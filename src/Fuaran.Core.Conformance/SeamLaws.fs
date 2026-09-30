@@ -330,8 +330,15 @@ module internal SeamLaws =
     /// drawn calls; a generator that never reaches one of the three is starved, and the family says
     /// so rather than reporting green. A thrown `Body` or `Dispatch` is a failure of the first law.
     ///
-    /// The capability instance of `LawKit.seamLaws` (Phase 297); `queryLawsWith` is the query one.
-    let capabilityLawsWith (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
+    /// The capability instance of `LawKit.seamLaws` (Phase 297); `queryLawsAt` is the query one.
+    /// `family` is the roster id the guard is labelled with — `Conformance.capabilityLawsAt`, or the
+    /// `…With` spelling for the obsolete forward that keeps its own id for one draft.
+    let capabilityLawsAt
+        (family: string)
+        (w: CapabilitySeamWitness<'v>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
         let known = Registry.enumerate w.Registry |> List.map (fun c -> c.Id)
 
         LawKit.seamLaws
@@ -345,7 +352,7 @@ module internal SeamLaws =
               Dispatch = fun id args body -> w.Dispatch id args (fun c () -> body c)
               Gen = w.GenCall
               Rendering =
-                { Family = "Conformance.capabilityLawsWith"
+                { Family = family
                   Laws =
                     "capability dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
                     "a refusal precedes the body at the domain's host (refused: no body; dispatched: exactly one)",
@@ -588,8 +595,9 @@ module internal SeamLaws =
     /// **Vacuity.** Guarded on the three outcomes — settled, pending and refused before the
     /// resolver — each of which the domain's generator must reach.
     ///
-    /// The query instance of `LawKit.seamLaws` (Phase 297); `capabilityLawsWith` is the capability one.
-    let queryLawsWith (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
+    /// The query instance of `LawKit.seamLaws` (Phase 297); `capabilityLawsAt` is the capability one.
+    /// `family` labels the guard, as there.
+    let queryLawsAt (family: string) (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
         let known = QueryRegistry.enumerate w.Queries |> List.map (fun q -> q.Id)
 
         LawKit.seamLaws
@@ -603,7 +611,7 @@ module internal SeamLaws =
               Dispatch = w.Dispatch
               Gen = w.GenQuery
               Rendering =
-                { Family = "Conformance.queryLawsWith"
+                { Family = family
                   Laws =
                     "query dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
                     "a refused dispatch runs no resolver at the domain's host (refused: none; dispatched: exactly one)",
@@ -1292,7 +1300,15 @@ module internal SeamLaws =
     ///
     /// **Vacuity.** The default-deny arms are built per `Invoke` node, so a generator whose pipelines
     /// carry none builds nothing; the guard counts the `Invoke` nodes reached.
-    let capabilityPipelineLawsWith (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
+    ///
+    /// `family` labels the guard — `Conformance.capabilityPipelineLawsAt`, or the obsolete `…With`
+    /// forward's own id for one draft.
+    let capabilityPipelineLawsAt
+        (family: string)
+        (w: CapabilityPipelineWitness)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
         let composes =
             LawKit.LawCell "every pipeline the domain builds type-checks against its own registry"
 
@@ -1385,11 +1401,7 @@ module internal SeamLaws =
                             )))
 
         LawKit.results [ composes; roundtrip; keys; deny ]
-        @ [ SampleAdequacy.reached
-                "Conformance.capabilityPipelineLawsWith"
-                "built default-deny arm"
-                seed
-                [ "invoke node", invokeNodes ] ]
+        @ [ SampleAdequacy.reached family "built default-deny arm" seed [ "invoke node", invokeNodes ] ]
 
     // ---- incremental capability-pipeline evaluation (Phase 62) ----
     // The teeth on `CapabilityPipeline.evalFrom`: the incremental path re-invokes only the

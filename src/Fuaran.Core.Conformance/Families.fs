@@ -279,6 +279,15 @@ module Families =
               treeWitness
               (Some StrongerPromise)
               []
+              (Guarded [ "reconcile outcome; delta-pair independence (delegates to reconcileLawsWith)" ])
+              (Drawn, "delegates to reconcileLawsWith")
+          // Phase 297 — the reconcile laws under the domain's own chain hash, the pinned parameter
+          // last before the seed (the naming rule); the bare form pins `OpStream.defaultHash`.
+          c
+              "reconcileLawsWith"
+              treeWitness
+              (Some StrongerPromise)
+              []
               (Guarded [ "reconcile outcome"; "delta-pair independence" ])
               (Drawn, "a reconcile Error arises from OpGen-drawn scripts; guarded on reconcile outcome")
           c
@@ -495,13 +504,22 @@ module Families =
           // leaves those arms untested, and one that allows everything is exactly that. The kit-
           // policy form rolls the decision itself and keeps the two Phase 223 dimensions.
           c
-              "aiSurfaceLaws"
+              "aiSurfaceLawsAt"
               [ "AiSurfaceWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ])
               (Drawn,
                "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one, and since Phase 246 the deny and park arms are reached only when the domain's own Decide chooses them; unknown tool and unknown id are built")
+          // Phase 297 — the obsolete bare name of `aiSurfaceLawsAt`, rostered through the 0.33.0 draft
+          // under its own id and guard label.
+          c
+              "aiSurfaceLaws"
+              [ "AiSurfaceWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ])
+              (Drawn, "an obsolete forward of aiSurfaceLawsAt, under its own id")
           c
               "aiSurfaceLawsUnderKitPolicy"
               [ "AiSurfaceWitness" ]
@@ -516,7 +534,7 @@ module Families =
           // Phase 246 — the seam families at a domain's seam: every outcome is a call the domain's
           // generator DRAWS, so each of the three is a dimension the run can miss.
           c
-              "capabilityLawsWith"
+              "capabilityLawsAt"
               [ "CapabilitySeamWitness" ]
               (Some NeedsWitnessCapability)
               []
@@ -524,13 +542,37 @@ module Families =
               (Drawn,
                "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused")
           c
-              "queryLawsWith"
+              "queryLawsAt"
               [ "QuerySeamWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "settled"; "pending"; "refused" ])
               (Drawn,
                "every refusal the three laws read is a call the domain's generator draws; guarded on settled, pending and refused")
+          c
+              "capabilityPipelineLawsAt"
+              [ "CapabilityPipelineWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "invoke node" ])
+              (Built,
+               "the unregistered-capability and undeclared-argument pipelines are built from every drawn Invoke node; guarded on invoke node")
+          // Phase 297 — the three `…With` spellings the naming rule renamed `…At`, rostered through
+          // the 0.33.0 draft as obsolete forwards under their own ids and guard labels.
+          c
+              "capabilityLawsWith"
+              [ "CapabilitySeamWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "settled"; "pending"; "refused" ])
+              (Drawn, "an obsolete forward of capabilityLawsAt, under its own id")
+          c
+              "queryLawsWith"
+              [ "QuerySeamWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "settled"; "pending"; "refused" ])
+              (Drawn, "an obsolete forward of queryLawsAt, under its own id")
           // The default-deny arms are BUILT, but per drawn `Invoke` node — a generator of Source-only
           // pipelines builds none of them.
           c
@@ -539,8 +581,7 @@ module Families =
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "invoke node" ])
-              (Built,
-               "the unregistered-capability and undeclared-argument pipelines are built from every drawn Invoke node; guarded on invoke node")
+              (Built, "an obsolete forward of capabilityPipelineLawsAt, under its own id")
 
           // Phase 189 — the same shape, one axis further out: the collision arms are BUILT through
           // the domain's own `PlaceKeyedChild`, and whether the witness honours a placement is the

@@ -326,6 +326,19 @@ module Conformance =
         : LawResult list =
         ConcurrencyLaws.mergeConflictLaws nodew idw gen seed iterations
 
+    /// Forward — see `ConcurrencyLaws.reconcileLawsWith`: the reconcile laws under the domain's own
+    /// chain hash (Phase 297), the pinned parameter last before `seed`.
+    let reconcileLawsWith
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (encode: 'Node -> string)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ConcurrencyLaws.reconcileLawsWith nodew idw gen encode hashFn seed iterations
+
     /// Forward — see `ConcurrencyLaws.reconcileLaws`.
     let reconcileLaws
         (nodew: NodeWitness<'Node, 'Id>)
@@ -374,16 +387,26 @@ module Conformance =
     /// Forward — see `SeamLaws.capabilityLaws`.
     let capabilityLaws (seed: int) (iterations: int) : LawResult list = SeamLaws.capabilityLaws seed iterations
 
-    /// Forward — see `SeamLaws.capabilityLawsWith`.
+    /// Forward — see `SeamLaws.capabilityLawsAt`: the capability seam laws at a DOMAIN'S seam.
+    let capabilityLawsAt (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
+        SeamLaws.capabilityLawsAt "Conformance.capabilityLawsAt" w seed iterations
+
+    /// Obsolete — `capabilityLawsAt` (Phase 297's naming rule).
+    [<System.Obsolete("Renamed capabilityLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
     let capabilityLawsWith (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
-        SeamLaws.capabilityLawsWith w seed iterations
+        SeamLaws.capabilityLawsAt "Conformance.capabilityLawsWith" w seed iterations
 
     /// Forward — see `SeamLaws.queryLaws`.
     let queryLaws (seed: int) (iterations: int) : LawResult list = SeamLaws.queryLaws seed iterations
 
-    /// Forward — see `SeamLaws.queryLawsWith`.
+    /// Forward — see `SeamLaws.queryLawsAt`: the query seam laws at a DOMAIN'S seam.
+    let queryLawsAt (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
+        SeamLaws.queryLawsAt "Conformance.queryLawsAt" w seed iterations
+
+    /// Obsolete — `queryLawsAt` (Phase 297's naming rule).
+    [<System.Obsolete("Renamed queryLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
     let queryLawsWith (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
-        SeamLaws.queryLawsWith w seed iterations
+        SeamLaws.queryLawsAt "Conformance.queryLawsWith" w seed iterations
 
     /// Forward — see `SeamLaws.registryLaws`.
     let registryLaws (seed: int) (iterations: int) : LawResult list = SeamLaws.registryLaws seed iterations
@@ -407,9 +430,14 @@ module Conformance =
     let capabilityPipelineLaws (seed: int) (iterations: int) : LawResult list =
         SeamLaws.capabilityPipelineLaws seed iterations
 
-    /// Forward — see `SeamLaws.capabilityPipelineLawsWith`.
+    /// Forward — see `SeamLaws.capabilityPipelineLawsAt`: the pipeline laws at a DOMAIN'S registry.
+    let capabilityPipelineLawsAt (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
+        SeamLaws.capabilityPipelineLawsAt "Conformance.capabilityPipelineLawsAt" w seed iterations
+
+    /// Obsolete — `capabilityPipelineLawsAt` (Phase 297's naming rule).
+    [<System.Obsolete("Renamed capabilityPipelineLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
     let capabilityPipelineLawsWith (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
-        SeamLaws.capabilityPipelineLawsWith w seed iterations
+        SeamLaws.capabilityPipelineLawsAt "Conformance.capabilityPipelineLawsWith" w seed iterations
 
     /// Forward — see `SeamLaws.capabilityPipelineIncrementalLaws`.
     let capabilityPipelineIncrementalLaws (seed: int) (iterations: int) : LawResult list =
@@ -543,7 +571,22 @@ module Conformance =
         : LawResult list =
         SurfaceLaws.projectionLaws pw applyOps wireEncode gen seed iterations
 
-    /// Forward — see `SurfaceLaws.aiSurfaceLaws`.
+    /// Forward — see `SurfaceLaws.aiSurfaceLawsAt`: the AI-surface laws under the DOMAIN'S own
+    /// policy. `aiSurfaceLawsUnderKitPolicy` is the kit-fixture form beside it.
+    let aiSurfaceLawsAt
+        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
+        (genOp: ConfRng.T -> 'Op * ConfRng.T)
+        (state0: 'State)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        SurfaceLaws.aiSurfaceLawsAt "Conformance.aiSurfaceLawsAt" w genOp state0 seed iterations
+
+    /// Obsolete — `aiSurfaceLawsAt` (Phase 297's naming rule). The bare name carried the domain's
+    /// policy, the INVERSE of every other bare name in the kit (a bare name is the kit-fixture or
+    /// pinned-default form); it is retired rather than reassigned, because a name that changes
+    /// meaning under a caller is worse than one that disappears.
+    [<System.Obsolete("Renamed aiSurfaceLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
     let aiSurfaceLaws
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
@@ -551,7 +594,7 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        SurfaceLaws.aiSurfaceLaws w genOp state0 seed iterations
+        SurfaceLaws.aiSurfaceLawsAt "Conformance.aiSurfaceLaws" w genOp state0 seed iterations
 
     /// Forward — see `SurfaceLaws.aiSurfaceLawsUnderKitPolicy`.
     let aiSurfaceLawsUnderKitPolicy

@@ -26,6 +26,10 @@ module Fuaran.Core.Tests.ConformanceVacuityTests
 // file measures the run the repository actually stands behind rather than a cheaper one drawn for
 // the census.
 
+// Phase 297 — the obsolete forwards the naming rule keeps for one draft are rostered families, so
+// their reference runs call them by their deprecated names on purpose.
+#nowarn "44"
+
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
@@ -94,6 +98,10 @@ let private runs =
                "Conformance.reconcileLaws"
                300
                (Conformance.reconcileLaws nodew idw ConformanceTests.opGen encNode 5353 300)
+           run
+               "Conformance.reconcileLawsWith"
+               300
+               (Conformance.reconcileLawsWith nodew idw ConformanceTests.opGen encNode OpStream.defaultHash 5353 300)
            run
                "Conformance.footprintLaws"
                300
@@ -280,6 +288,16 @@ let private runs =
                    42
                    200)
            run
+               "Conformance.aiSurfaceLawsAt"
+               200
+               (Conformance.aiSurfaceLawsAt
+                   AiSurfaceTests.policedWitness
+                   AiSurfaceTests.genNoteOp
+                   AiSurfaceTests.state0
+                   1234
+                   200)
+           // Phase 297 — the obsolete forwards the naming rule left for one draft, under their own ids.
+           run
                "Conformance.aiSurfaceLaws"
                200
                (Conformance.aiSurfaceLaws
@@ -297,7 +315,17 @@ let private runs =
                    AiSurfaceTests.state0
                    1234
                    200)
-           // Phase 246 — the seam families at the reference domain's seam.
+           // Phase 246 — the seam families at the reference domain's seam (`…At` since Phase 297, with
+           // the obsolete `…With` forwards beside them for one draft).
+           run
+               "Conformance.capabilityLawsAt"
+               300
+               (Conformance.capabilityLawsAt WitnessTakingFamiliesTests.capabilityWitness 2460 300)
+           run "Conformance.queryLawsAt" 300 (Conformance.queryLawsAt WitnessTakingFamiliesTests.queryWitness 2461 300)
+           run
+               "Conformance.capabilityPipelineLawsAt"
+               200
+               (Conformance.capabilityPipelineLawsAt WitnessTakingFamiliesTests.pipelineWitness 2462 200)
            run
                "Conformance.capabilityLawsWith"
                300
@@ -739,6 +767,62 @@ let vacuityTests =
                   (SampleAdequacy.renderCases measured)
                   SampleAdequacy.vacuousToken
                   "and the cell reads vacuous"
+
+          testCase "the newly counted families go red on a degenerate generator, never green over nothing"
+          <| fun _ ->
+              // Phase 297's cases, each at the reference witness with ONE thing made degenerate: a
+              // generator that draws one value every time (so no fresh draw ever differs, and one
+              // tree is hashed against itself), a generator refused every time (so there is no
+              // chain to re-attribute — `attributedLaws`' gate is a non-empty chain, not a differing
+              // draw, and a constant ACCEPTED op reaches it; `hashFnLaws`' length gates are starved the
+              // same way). Each run must be red, and a run whose red is starvation rather than a
+              // counterexample must read `vacuous` in the census. A hash answering one digest for
+              // everything still leaves `hashFnLaws` green — measured here, and the op-tamper arm that
+              // would catch it is Phase 302's, not this phase's.
+              let op0, _ = ConformanceTests.streamGen.Op(ConfRng.ofSeed 1)
+
+              let constantOps =
+                  { ConformanceTests.streamGen with
+                      Op = fun r -> op0, r }
+
+              let refusedOps =
+                  { ConformanceTests.streamGen with
+                      Op = fun r -> ConformanceTests.Dec ConformanceTests.overdraw, r }
+
+              let tree0, _ = ConformanceTests.genTree (ConfRng.ofSeed 1)
+
+              let degenerate =
+                  [ "Conformance.encoderInjectivityLaws",
+                    Conformance.encoderInjectivityLaws artw encNode (fun r -> tree0, r) 4242 200
+                    "Conformance.attributedLaws",
+                    Conformance.attributedLaws ConformanceTests.sw refusedOps OpStream.defaultHash 4242 200
+                    "Conformance.dagLaws",
+                    Conformance.dagLaws ConformanceTests.sw constantOps OpStream.defaultHash 4242 200
+                    "Conformance.captureReplayLaws",
+                    Conformance.captureReplayLaws
+                        (fun (n: int) -> Json.render (JInt n))
+                        (fun s -> Decode.parse s |> Result.bind Decode.asInt)
+                        (fun r -> 7, r)
+                        OpStream.defaultHash
+                        31337
+                        200
+                    "Conformance.hashFnLaws",
+                    Conformance.hashFnLaws ConformanceTests.sw refusedOps OpStream.defaultHash 4242 200 ]
+
+              let isStarvation (r: LawResult) =
+                  r.Law.StartsWith SampleAdequacy.guardOpening
+                  || (match r.Counterexample with
+                      | Some cx -> cx.StartsWith SampleAdequacy.neverReached
+                      | None -> false)
+
+              for id, results in degenerate do
+                  let red = results |> List.filter (fun r -> not r.Passed)
+                  Expect.isNonEmpty red (sprintf "%s reported green over a degenerate generator" id)
+
+                  if red |> List.forall isStarvation then
+                      Expect.isTrue
+                          (SampleAdequacy.isVacuous (SampleAdequacy.cases id (classOf id) 200 results))
+                          (sprintf "%s starved, so its census cell must read vacuous" id)
 
           // ---- Phase 220: the refusable-family audit ----
 

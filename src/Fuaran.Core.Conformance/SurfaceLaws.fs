@@ -431,14 +431,18 @@ module internal SurfaceLaws =
     /// four laws. Since `0.32.0` (Phase 246) the decision each drawn op meets is the witness's
     /// `Decide`, and the family is starved unless that policy allows, parks and denies something the
     /// generator draws. `aiSurfaceLawsUnderKitPolicy` is the pre-`0.32.0` behaviour.
-    let aiSurfaceLaws
+    ///
+    /// `family` labels the guards — `Conformance.aiSurfaceLawsAt`, or the obsolete bare name's own
+    /// id for one draft (Phase 297's naming rule: the domain-witness form is `…At`).
+    let aiSurfaceLawsAt
+        (family: string)
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (state0: 'State)
         (seed: int)
         (iterations: int)
         : LawResult list =
-        aiSurfaceRun "Conformance.aiSurfaceLaws" false w genOp state0 seed iterations
+        aiSurfaceRun family false w genOp state0 seed iterations
 
     /// The AI-surface laws with the KIT'S policy swapped in for the domain's (Phase 246 names it;
     /// it is `aiSurfaceLaws` as it stood before `0.32.0`). Per draw the kit rolls `Allow`,

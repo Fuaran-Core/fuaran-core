@@ -218,18 +218,22 @@ module internal ConcurrencyLaws =
     ///
     /// `'Node` needs equality. `encode` is the per-node content encoder (as `footprintLaws`). Mirrors
     /// `footprintLaws` — a domain that reconciles branches runs it.
-    let reconcileLaws
+    ///
+    /// `hashFn` is the chain hash the two reconciled DAGs are built under — the domain's posture since
+    /// Phase 297 (`reconcileLawsWith`); `reconcileLaws` pins `OpStream.defaultHash`, which is what
+    /// every run used before.
+    let reconcileLawsWith
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
+        (hashFn: HashFn)
         (seed: int)
         (iterations: int)
         : LawResult list =
         let canHold = gen.CanHold |> Option.defaultValue (fun _ -> true)
         let hashOf = Tree.encodeHash nodew encode
         let fp (op: SkeletonOp<'Node, 'Id>) = Ops.footprint nodew idw [ op ]
-        let hashFn = OpStream.defaultHash
 
         // A minimal StreamWitness so the branch deltas live in a REAL DAG (append needs Encode for the
         // content id; reconcile/betweenOps never call Apply or Decode). Encode is a structural
@@ -374,15 +378,27 @@ module internal ConcurrencyLaws =
 
         LawKit.results [ clean; cross; conflicted; determinism ]
         @ [ SampleAdequacy.reached
-                "Conformance.reconcileLaws"
+                "Conformance.reconcileLawsWith"
                 "reconcile outcome"
                 seed
                 [ "clean fold", cleanFolds; "conflicted fold", conflictedFolds ]
             SampleAdequacy.reached
-                "Conformance.reconcileLaws"
+                "Conformance.reconcileLawsWith"
                 "delta-pair independence and op kind"
                 seed
                 ([ "independent delta pair", independentDeltas ] @ kinds.Demands) ]
+
+
+    /// `reconcileLawsWith` pinned to `OpStream.defaultHash` — the laws and the guard are its.
+    let reconcileLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (encode: 'Node -> string)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        reconcileLawsWith nodew idw gen encode OpStream.defaultHash seed iterations
 
     // ---- confluence / interleaving law (Phase 80) ----
     // The coordination claim the agent-fleet substrate rests on: op-scripts `Ops.independent`
