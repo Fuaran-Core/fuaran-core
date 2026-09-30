@@ -38,7 +38,11 @@ means the run certified nothing, either because it asserted nothing at all or be
 guarded dimension was starved, and the starved dimension is named in the cell. `vacuous`
 is the state a family passing green while exercising nothing used to render as, which is
 what this column exists to make impossible to read past. `unmeasured` means no run was
-handed to the renderer, which is a different fact and deliberately a different word.
+handed to the renderer, which is a different fact and deliberately a different word. A
+green run carries its count on the pass path through `SampleAdequacy.cases`, and an
+aggregate's report reads the same way: `certify` and `certifyStream` return every law and
+every guard of the families they run, so `cases` over the report is their subject laws
+times the iterations, with every starved side named (Phase 245).
 
 **Adequacy.** How the family's green run is to be read. `unconditional` — every iteration
 builds every branch the laws distinguish, so a green run is a pass. `guarded-reached` — the
@@ -117,7 +121,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.registryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
 | `Conformance.snapshotLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
 | `Conformance.snapshotLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
-| `Conformance.streamLaws` | `Fuaran.Core.Conformance` | base run | — | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `built` |
+| `Conformance.streamLaws` | `Fuaran.Core.Conformance` | base run | — | `StreamWitness`, `StreamGen` | — | 600 | `guarded-reached` | `drawn` |
 | `Conformance.verifyHonestyLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 400 | `unconditional` | `drawn-miss-is-red` |
 | `Conformance.witnessLaws` | `Fuaran.Core.Conformance` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 400 | `unconditional` | `none` |
 | `Conformance.witnessSurfaceLaws` | `Fuaran.Core.Conformance` | opt-in | `no-witness-to-certify` | — | — | 7 | `unconditional` | `none` |

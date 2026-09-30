@@ -263,7 +263,9 @@ module FoldConfluence =
     ///    has not tested law 2 at all — which is precisely how a pack claiming to cover conflict
     ///    semantics ends up covering none. Both are reported as failures rather than silently
     ///    passing: a domain that sees the conflict-coverage law red should widen its lane
-    ///    generator until lanes collide, not conclude its ops cannot conflict.
+    ///    generator until lanes collide, not conclude its ops cannot conflict. Since Phase 245 the
+    ///    guard also counts the lane sets the reducer REJECTED, beside the two it demands, so a
+    ///    sample made of rejections is named as one rather than read as a thin but honest draw.
     ///
     /// Every divergence is `shrinkLanes`-reduced before it is reported, and the counterexample
     /// carries the seed, the iteration, the shrunk lanes in the domain's own encoding, and each
@@ -284,6 +286,7 @@ module FoldConfluence =
         let mutable classCx = None
         let mutable folded = 0
         let mutable halted = 0
+        let mutable rejected = 0
 
         let outcomesOf (ls: 'Op list list) =
             arrivalOrders (List.length ls)
@@ -299,7 +302,7 @@ module FoldConfluence =
                 match single with
                 | LaneFolded _ -> folded <- folded + 1
                 | LaneHalted _ -> halted <- halted + 1
-                | LaneRejected _ -> ()
+                | LaneRejected _ -> rejected <- rejected + 1
             | _ ->
                 let small = shrinkLanes (fun ls -> List.length (outcomesOf ls) > 1) lanes
                 let smallOutcomes = outcomesOf small
@@ -346,7 +349,17 @@ module FoldConfluence =
           // The two coverage guards this pack shipped by hand in Phase 100 — the ones that caught
           // 150 halting trials out of 150 — expressed through the kit's shared adequacy guard
           // (Phase 121), so the remedy sentence and the counts read the same here as everywhere.
-          SampleAdequacy.reached "FoldConfluence" "lane-fold outcome" seed [ "folded", folded; "halted", halted ] ]
+          //
+          // Phase 245 — a lane set the reducer rejects under every order is COUNTED beside the two
+          // demanded outcomes and not demanded itself: law 1 holds over it, but it tests neither a
+          // clean fold nor a halt, so a sample made mostly of rejections must say so, and a domain
+          // whose reducer never rejects must not be starved for it.
+          SampleAdequacy.reachedBeside
+              "FoldConfluence"
+              "lane-fold outcome"
+              seed
+              [ "folded", folded; "halted", halted ]
+              [ "rejected", rejected ] ]
 
     /// The fold-confluence laws (Phase 100) pinned to `OpStream.defaultHash` — the shape a domain
     /// runs. See `laneFoldLawsWith` for the law text, the sampling bound, and the coverage guards.

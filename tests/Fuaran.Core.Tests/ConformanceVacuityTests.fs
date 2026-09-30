@@ -668,6 +668,39 @@ let vacuityTests =
                       "guarded-reached"
                       (sprintf "%s reached both sides at the reference witness" id)
 
+          // ---- Phase 245: the stream family the aggregates share ----
+
+          testCase
+              "streamLaws is Guarded over accepted op / tampered chain, and reached at the reference witness on every seed tried"
+          <| fun _ ->
+              // The third base-run family certify and certifyStream are built from, and the last
+              // one whose chain was drawn but whose census row claimed every iteration built it.
+              let id = "Conformance.streamLaws"
+
+              Expect.equal
+                  (KitRoster.tryRefusal id |> Option.map (fun a -> a.Population))
+                  (Some Families.Drawn)
+                  "streamLaws is audited Drawn"
+
+              Expect.equal (classOf id) (Guarded [ "accepted"; "tampered chain" ]) "streamLaws is censused Guarded"
+              Expect.equal (KitRoster.adequacyToken (cases ()) id) "guarded-reached" "reached at the reference run"
+
+              // The same run the census is measured from, over twenty other seeds: a reference
+              // generator that starved here would be an intermittent red, not a finding.
+              for seed in [ 1..20 ] |> List.map (fun k -> k * 7919 + 3) do
+                  let results =
+                      Conformance.streamLaws
+                          ConformanceTests.sw
+                          ConformanceTests.streamGen
+                          OpStream.defaultHash
+                          seed
+                          200
+
+                  Expect.equal
+                      (KitRoster.adequacyToken [ id, SampleAdequacy.cases id (classOf id) 200 results ] id)
+                      "guarded-reached"
+                      (sprintf "%s at seed %d" id seed)
+
           // ---- Phase 223: the drawn-refusal families (six, five here since Phase 258) ----
 
           testCase "the drawn-refusal families are Guarded, and reached at the reference witness"

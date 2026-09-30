@@ -128,11 +128,26 @@ module SampleAdequacy =
     let private remedy =
         " — the law that reads it was never tested; WIDEN THE GENERATOR (raising the iteration count, or hunting a seed until the count turns positive, leaves the law certified by one trial)"
 
-    /// A verdict-coverage law over counts the family already keeps. Fails when any declared verdict
-    /// was reached zero times — and when the family declared NO verdicts at all, which is a demand
-    /// that demands nothing rather than a family with nothing to demand.
-    let reached (family: string) (dimension: string) (seed: int) (counts: (string * int) list) : LawResult =
+    /// `reached`, with a second set of counts the family KEEPS but does not DEMAND rendered beside
+    /// the demanded ones — Phase 245. An outcome the laws tolerate without being about it (a lane
+    /// set the reducer rejects under every arrival order) must not be demanded, or every domain
+    /// that never produces one starves; but it must be COUNTED, or a sample made of little else
+    /// reads the same as one that exercised the laws. The law text is `reached`'s, so a guard does
+    /// not change its name by counting more. Internal until a second family needs it.
+    let internal reachedBeside
+        (family: string)
+        (dimension: string)
+        (seed: int)
+        (counts: (string * int) list)
+        (beside: (string * int) list)
+        : LawResult =
         let missed = counts |> List.filter (fun (_, n) -> n <= 0) |> List.map fst
+
+        let besideText =
+            if List.isEmpty beside then
+                ""
+            else
+                " (counted beside them, not demanded: " + renderCounts beside + ")"
 
         { Law =
             lawPrefix family
@@ -159,10 +174,17 @@ module SampleAdequacy =
                     + dimension
                     + " reached "
                     + renderCounts counts
+                    + besideText
                     + " — never reached "
                     + String.concat ", " missed
                     + remedy
                 ) }
+
+    /// A verdict-coverage law over counts the family already keeps. Fails when any declared verdict
+    /// was reached zero times — and when the family declared NO verdicts at all, which is a demand
+    /// that demands nothing rather than a family with nothing to demand.
+    let reached (family: string) (dimension: string) (seed: int) (counts: (string * int) list) : LawResult =
+        reachedBeside family dimension seed counts []
 
     /// A span law over a measure the family already keeps: the widest sample must reach `atLeast`.
     let spanned (family: string) (measure: string) (atLeast: int) (seed: int) (widest: int) (n: int) : LawResult =
@@ -413,9 +435,16 @@ module SampleAdequacy =
           // direction — the "rather than missing a branch" this row used to excuse.
           "Conformance.diffContainedLaws", Guarded [ "accepted"; "refused" ]
 
+          // Phase 245 — moved out of `Unconditional`, where "each iteration applies, replays and
+          // tampers the same chain" was true only of a generator whose ops the domain accepts. The
+          // chain is built from DRAWN ops and a refused op does not extend it, so a generator that
+          // is refused every time leaves every chain empty and all three laws green over nothing;
+          // and the tamper is only drawn, so one whose every substitute encodes like the op it
+          // replaces never runs the tamper law. Both are the run's to reach.
+          "Conformance.streamLaws", Guarded [ "accepted"; "tampered chain" ]
+
           // ---- unconditional: every iteration builds the evidence for every branch ----
           "Conformance.witnessLaws", Unconditional "each iteration rebuilds a drawn node and re-reads every accessor"
-          "Conformance.streamLaws", Unconditional "each iteration applies, replays and tampers the same chain"
           "Conformance.diffLaws", Unconditional "each iteration diffs a pair and re-applies the emitted script"
           "Conformance.normalizeLaws", Unconditional "each iteration normalises a drawn script and compares both ways"
           "Conformance.snapshotLawsWith", Unconditional "each iteration takes a snapshot and replays across it"

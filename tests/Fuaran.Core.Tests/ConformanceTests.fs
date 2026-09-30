@@ -304,11 +304,12 @@ let tests =
 
               Expect.equal
                   (report.Results |> List.length)
-                  17
+                  19
                   // algebra gained the insert-uniqueness law in Phase 137, the
                   // WellFormed-preservation law in Phase 139, and — Phase 220 — its two
-                  // accepted/refused adequacy guards.
-                  "witness (4) + algebra (5 + 2 guards) + diff (3) + stream (3) laws reported"
+                  // accepted/refused adequacy guards; the stream laws gained their accepted-op
+                  // and tampered-chain guards in Phase 245.
+                  "witness (4) + algebra (5 + 2 guards) + diff (3) + stream (3 + 2 guards) laws reported"
 
           // ---- Phase 145: the op codec's own injectivity, the content-id theorem's fourth premise ----
 
@@ -1911,8 +1912,8 @@ let refusableFamilyTests =
 
               Expect.equal
                   (List.length report.Results)
-                  7
-                  "a starved guard does not short-circuit the stream laws — reducer (2 + 2 guards) + stream (3)"
+                  9
+                  "a starved guard does not short-circuit the stream laws — reducer (2 + 2 guards) + stream (3 + 2 guards, Phase 245)"
 
           testCase "go-red: an opAlgebra run too short to reach both sides reports the guard, not a pass"
           <| fun _ ->
@@ -2121,3 +2122,136 @@ let witnessSurfaceLawTests =
 
               for name, why in Conformance.unfrozenWitnesses do
                   Expect.isNotEmpty (why.Trim()) (sprintf "%s is declared outside the freeze with no reason" name) ]
+
+// ---------------------------------------------------------------------------
+//  Phase 245 — `streamLaws` guards its sample, and an aggregate's pass carries its counts
+// ---------------------------------------------------------------------------
+
+/// Every op this generator draws is an overdraw no reachable counter state absorbs, so every
+/// iteration's chain stays EMPTY. The three stream laws hold over an empty chain — an intact empty
+/// chain verifies, replaying nothing re-derives `State0`, and there is no op to tamper — which is
+/// the vacuous sample a consumer measured green at 0.30.0.
+let private allRefusedGen: StreamGen<CounterOp, int> =
+    { State0 = 0
+      Op = fun rng -> Dec overdraw, rng }
+
+/// One op, always the same one: every chain is non-empty, and every tamper the family draws
+/// encodes identically to the op it would replace, so the tamper law never runs. A non-empty
+/// chain is therefore not the evidence that law needs; a TAMPERED one is.
+let private oneOpGen: StreamGen<CounterOp, int> =
+    { State0 = 0
+      Op = fun rng -> Inc 1, rng }
+
+[<Tests>]
+let streamAdequacyTests =
+    testList
+        "Conformance.streamAdequacy"
+        [ testCase "the reference stream generator reaches both guarded sides of streamLaws"
+          <| fun _ ->
+              let results = Conformance.streamLaws sw streamGen OpStream.defaultHash 4242 200
+
+              for side in [ "accepted op"; "tampered chain" ] do
+                  let g = guardNamed "Conformance.streamLaws" side results
+                  Expect.isTrue g.Passed (sprintf "streamLaws: %s — %A" side g.Counterexample)
+
+          testCase "go-red: a generator that refuses every op starves both sides, never green"
+          <| fun _ ->
+              let results = Conformance.streamLaws sw allRefusedGen OpStream.defaultHash 4242 200
+
+              Expect.isTrue
+                  (subjectOf results |> List.forall (fun r -> r.Passed))
+                  "every subject law holds over an empty chain — which is the problem the guard exists for"
+
+              for side in [ "accepted op"; "tampered chain" ] do
+                  let g = guardNamed "Conformance.streamLaws" side results
+                  Expect.isFalse g.Passed (sprintf "the %s side is starved" side)
+
+                  Expect.stringContains
+                      (defaultArg g.Counterexample "")
+                      "=0"
+                      "the red guard carries the count it reached, not merely that it failed"
+
+              let measured =
+                  SampleAdequacy.cases "Conformance.streamLaws" (Guarded [ "accepted"; "tampered chain" ]) 200 results
+
+              Expect.isTrue (SampleAdequacy.isVacuous measured) "the census reads the run as starved"
+
+              Expect.equal
+                  (Families.adequacyToken [ "Conformance.streamLaws", measured ] "Conformance.streamLaws")
+                  "guarded-starved"
+                  "and the adequacy cell says `guarded-starved`, never a pass"
+
+          testCase "go-red: one repeated op builds non-empty chains it can never tamper, and that side is starved"
+          <| fun _ ->
+              let results = Conformance.streamLaws sw oneOpGen OpStream.defaultHash 4242 200
+
+              Expect.isTrue (guardNamed "Conformance.streamLaws" "accepted op" results).Passed "every draw was accepted"
+
+              Expect.isFalse
+                  (guardNamed "Conformance.streamLaws" "tampered chain" results).Passed
+                  "but no chain was ever tampered, so the tamper law asserted nothing"
+
+          testCase "go-red: certifyStream and certify go RED over a generator that refuses every op"
+          <| fun _ ->
+              let redStreamGuards (report: ConformanceReport) =
+                  report.Results
+                  |> List.filter (fun r ->
+                      not r.Passed
+                      && r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.streamLaws"))
+
+              let streamOnly =
+                  Conformance.certifyStream sw allRefusedGen OpStream.defaultHash 271 200
+
+              Expect.isFalse streamOnly.AllPassed "certifyStream no longer certifies an empty-chain run"
+              Expect.equal (List.length (redStreamGuards streamOnly)) 2 "both streamLaws sides are named"
+
+              let whole =
+                  Conformance.certify nodew idw opGen sw allRefusedGen OpStream.defaultHash 4242 200
+
+              Expect.isFalse whole.AllPassed "certify no longer certifies an empty-chain run"
+              Expect.equal (List.length (redStreamGuards whole)) 2 "and the red lines are streamLaws' guards"
+
+          testCase "an aggregate's pass path carries its counts, through SampleAdequacy.cases"
+          <| fun _ ->
+              // The aggregate returns every constituent family's laws, guards included, so the
+              // census derivation reads it as it reads one family: subject assertions times the
+              // iterations the aggregate was driven over, and every starved side by name.
+              let klass = Guarded [ "accepted"; "refused"; "tampered chain" ]
+
+              let green = Conformance.certifyStream sw streamGen OpStream.defaultHash 271 200
+              Expect.isTrue green.AllPassed "the reference domain certifies green"
+
+              let counted =
+                  SampleAdequacy.cases "Conformance.certifyStream" klass 200 green.Results
+
+              Expect.equal counted.Cases 1000 "reducer (2) + streamLaws (3) subject laws, over 200 iterations"
+              Expect.isEmpty counted.Starved "and nothing was starved"
+              Expect.equal (SampleAdequacy.renderCases counted) "1000" "a green run renders its count"
+
+              let whole =
+                  Conformance.certify nodew idw opGen sw streamGen OpStream.defaultHash 4242 200
+
+              Expect.isTrue whole.AllPassed "certify is green at the reference witness"
+
+              let wholeCounted =
+                  SampleAdequacy.cases "Conformance.certify" klass 200 whole.Results
+
+              Expect.equal
+                  wholeCounted.Cases
+                  (200 * List.length (subjectOf whole.Results))
+                  "certify's count is every subject law it reported, over its iterations"
+
+              Expect.isFalse (SampleAdequacy.isVacuous wholeCounted) "and it is not vacuous"
+
+              let starved =
+                  SampleAdequacy.cases
+                      "Conformance.certifyStream"
+                      klass
+                      200
+                      (Conformance.certifyStream sw allRefusedGen OpStream.defaultHash 271 200).Results
+
+              Expect.isTrue (SampleAdequacy.isVacuous starved) "a starved aggregate reads as vacuous"
+
+              Expect.isTrue
+                  (starved.Starved |> List.exists (fun d -> d.Contains "tampered chain"))
+                  (sprintf "and names the stream side it starved: %A" starved.Starved) ]
