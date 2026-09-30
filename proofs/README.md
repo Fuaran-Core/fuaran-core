@@ -4644,7 +4644,7 @@ names:
 > only"), hygiene ("bound by their absolute lexical address, never a bare name, so composition
 > cannot capture"), effect signature ("joined componentwise through composition").**
 
-`Capability.fst` models the file clause for clause — the effect lattice through its two rank tables,
+`Capability.fst` models the file clause for clause — the effect lattice (the host rank table, and since Phase 319 the determinism SET as its characteristic vector),
 the five-constructor value-space vocabulary and `Space.validate`, `signature` / `signatureExcluding`
 / `isTotal` / `guardTotal` / `validateArg` / `bindArgs` and the `apply` / `curry` that are its two
 faces, `compose` / `composedEffect` / `observedEffect` / `auditEffect`, and `Capability.create` /
@@ -4689,11 +4689,25 @@ Six theorems, over any witness, any readers, any registry and any host body:
 6. **`effect_law`** — `composedEffect` is `Effect.join`, and the join is the least class covering
    both parts (`join_least`): any class assigned to a composition that is below either part fails
    `covers`. Commutative, associative, idempotent, `pureDeterministic` the identity — a bounded
-   join-semilattice with `covers` its order, resting on the two rank tables being inverse on the
-   ranks they produce. **`audit_effect_join`** carries it to the walk: the observed effect is the
+   join-semilattice with `covers` its order, resting on the host rank table being inverse on the
+   ranks it produces (the determinism axis, a set joined by union, is pointwise and needs no table). **`audit_effect_join`** carries it to the walk: the observed effect is the
    least class covering every node (`observed_least`), an `Ok` audit says the root covers every
    descendant, and an `Error` audit exhibits a descendant it does not.
 
+
+### What Phase 319 changed here, and the two rows it added
+
+The determinism axis of `EffectClass` is a SET of factors joined by union, no longer a four-case chain
+joined by maximum (DECISIONS D79). The model writes the set as its characteristic vector over the closed
+three-factor alphabet, so `join` is the pointwise union and `covers` the pointwise subset, and every
+lattice theorem above is unchanged in statement. Two rows are new. **`det_tag_injective`** (with
+`det_tag_roundtrip` and `det_tag_canonical`) proves the canonical label a bijection with the eight sets —
+one set, one wire spelling, one set per label. **`capture_records_declared`** (with
+`capture_covers_exercised`) states the capture seam: the label a capture journals decodes to exactly the
+declared set, a body inside it is covered, and a body reading a factor outside it is not. The
+`Query.fst` model carries the same type and proves the label injective, because `Query.determinismTag`
+keys a query's capture. The oracle extractions of both are regenerated, and the differential host
+compares the label, its inverse, `join` and `covers` over every set and every pair.
 ### What Phase 210 changed here, and the one row it added
 
 The seam's host body answers in the `Deferred<'v>` envelope now — `invoke` takes

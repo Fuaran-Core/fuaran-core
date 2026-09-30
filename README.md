@@ -199,7 +199,8 @@ A saved typed tree behaves as a function of its declared holes. The contract bak
 2. **Hygiene** — holes bind by absolute lexical address (id-path), never bare name, so
    composition cannot capture.
 3. **Effect signature** — a mandatory two-axis effect/determinism class, joined
-   componentwise through `compose` (pure ∘ clock = clock).
+   componentwise through `compose` (pure ∘ clock = clock; clock ∘ random = clock + random — the determinism
+   axis is a set of factors joined by union).
 
 ## Build
 

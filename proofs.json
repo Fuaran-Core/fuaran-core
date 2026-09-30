@@ -1832,7 +1832,7 @@
     {
       "id": "function-effect-law",
       "level": "proved",
-      "claim": "Law 3, the effect signature. `composedEffect` is `Effect.join`, and the join is the LEAST class covering both parts — a class covers the join exactly when it covers each part (`join_least`), so any class a composition is assigned that is below either part fails `covers`. With `join_comm`, `join_assoc`, `join_idem` and `join_pure` the effect classes under `join` are a bounded join-semilattice with `pureDeterministic` at the bottom, `covers` is the order (`covers_refl` / `covers_trans` / `covers_antisym`), and the two rank tables are inverse on the ranks they produce (`host_of_rank` / `det_of_rank`) — the fact every one of those rests on.",
+      "claim": "Law 3, the effect signature. `composedEffect` is `Effect.join`, and the join is the LEAST class covering both parts — a class covers the join exactly when it covers each part (`join_least`), so any class a composition is assigned that is below either part fails `covers`. With `join_comm`, `join_assoc`, `join_idem` and `join_pure` the effect classes under `join` are a bounded join-semilattice with `pureDeterministic` at the bottom, `covers` is the order (`covers_refl` / `covers_trans` / `covers_antisym`), and the host rank table is inverse on the ranks it produces (`host_of_rank`) — the fact the host half of those rests on; since Phase 319 the determinism axis is a SET of factors joined by union (written as its characteristic vector), so its half of every one of those laws is pointwise and needs no table.",
       "phase": "fuaran-core#177",
       "evidence": {
         "theorem": "effect_law",
@@ -1852,6 +1852,28 @@
       }
     },
     {
+      "id": "function-determinism-label-bijection",
+      "level": "proved",
+      "claim": "The determinism axis is a SET of factors (Phase 319), and its canonical wire label is a BIJECTION with the eight sets over the closed three-factor alphabet: a set has exactly one label (`determinism_tag`, the fixed order clock, random, network joined by `+`), the label inverts to exactly that set (`det_tag_roundtrip`), a label names a set only if it is that set's canonical label (`det_tag_canonical`), and two sets with one label are one set (`det_tag_injective`). So the capture key cannot confuse two determinism classes and the capability codec's cross-check of the wire tag against the signature compares like with like. The set is modelled as its characteristic vector, bridged to the F# `Set` by the differential host factor by factor.",
+      "phase": "fuaran-core#319",
+      "evidence": {
+        "theorem": "det_tag_injective",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "capability-capture-records-declared",
+      "level": "proved",
+      "claim": "The capture seam records the WHOLE declared determinism class (Phase 319). The label a capture journals is `Capability.determinismTag`, and it decodes back to exactly the capability's declared set (`capture_records_declared`); a body whose exercised factors lie inside that set is covered by what the capture records, and a body exercising a factor outside it is NOT (`capture_covers_exercised`). This is what the chain this replaced could not say: a `Random` class covered a clock read without naming it. The body's own reads are a parameter of the statement — the theorem is about what the record says, and `capabilityLaws` samples it on the shipped seam against a body that notes the factors it reads.",
+      "phase": "fuaran-core#319",
+      "evidence": {
+        "theorem": "capture_records_declared",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "capability-differential",
       "level": "tested",
       "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, an accepted `Deferred` ENVELOPE rendered case for case (Phase 210: the draw reaches a settling, a pending and a failing body, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Since Phase 225 the capture key too: the extracted `invocation_key` agrees with `Capability.invocationKey` byte for byte over invocations drawn from an adversarial alphabet (both symbols of the key encoding, `=`, `#`, empty values), in the escaper case. Agreement is over the pools drawn, never over all inputs.",
@@ -1861,6 +1883,7 @@
         "model": "proofs/Capability.fst",
         "cases": [
           "the function oracle agrees with Function.signature, apply, curry, compose and auditEffect over generated artifacts and argument sets",
+          "the capability oracle's determinism label and effect lattice are production's over every determinism set and a pool of labels",
           "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations",
           "a capability oracle handed a BLIND int reader DISAGREES with Capability.validateArgs and Function.apply — the measurement can fail",
           "no handler runs on a refused dispatch — `unregistered_refused` and `validate_before_invoke`, on the shipped seam",
