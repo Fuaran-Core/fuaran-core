@@ -1103,6 +1103,52 @@ let functionVerifyTests =
               | Sampled(50, Some 100001) -> ()
               | other -> failtestf "expected Sampled(50, Some 100001), got %A" other
 
+          // Phase 297 — the space size is an int64 product that saturates, so a multi-hole space too
+          // large for an `int` can neither wrap into an exhaustive enumeration nor be misreported.
+          testCase "symbolic mode sizes a multi-hole space without wrapping (Phase 297)"
+          <| fun _ ->
+              let holes (n: int) (lo, hi) =
+                  { RNode.node
+                        "mh"
+                        "template"
+                        [ for k in 1..n -> RNode.hole (sprintf "h%d" k) "field" "count" (ValueHole(IntRange(lo, hi))) ] with
+                      Eff = Effect.pureDeterministic }
+
+              // 100^4 = 10^8 fits an int: sampled, and the size reported exactly.
+              let fits =
+                  Conformance.verifyFunctionSymbolic artw (holes 4 (0, 99)) countReg Map.empty 50 7
+
+              match fits.Coverage with
+              | Sampled(50, Some 100000000) -> ()
+              | other -> failtestf "four holes of 100: expected Sampled(50, Some 100000000), got %A" other
+
+              // 1000^4 = 10^12: as an unchecked `int` product this wrapped to a negative number, which
+              // passed `<= maxCases` and materialised the full cartesian product. It samples now, and
+              // the size — too large for the report's `int` — is reported unknown, never wrapped.
+              let wraps =
+                  Conformance.verifyFunctionSymbolic artw (holes 4 (0, 999)) countReg Map.empty 50 7
+
+              match wraps.Coverage with
+              | Sampled(50, None) -> ()
+              | other -> failtestf "four holes of 1,000: expected Sampled(50, None), got %A" other
+
+              Expect.isFalse wraps.Verified "values above five are drawn, and the validator catches one"
+
+          testCase "a hole over the whole int range is sampled, not refused as an overflowing size (Phase 297)"
+          <| fun _ ->
+              // `hi - lo + 1` for IntRange(0, Int32.MaxValue) overflowed `int` and read as an empty
+              // domain, reporting a false DidNotApply. Sized in int64 it samples, and the ≤5 rule's real
+              // counterexample surfaces.
+              let report =
+                  Conformance.verifyFunctionSymbolic artw (countOnly (0, System.Int32.MaxValue)) countReg Map.empty 50 7
+
+              match report.Counterexample with
+              | Some cx ->
+                  match cx.Defect with
+                  | ValidatorRejected _ -> ()
+                  | other -> failtestf "expected the validator's defect, got %A" other
+              | None -> failtest "a count over the whole int range must surface a value above five"
+
           testCase "symbolic mode varies value holes while slots are pinned via fixedArgs"
           <| fun _ ->
               let fixedArgs =
