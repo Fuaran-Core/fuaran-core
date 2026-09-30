@@ -397,3 +397,184 @@ module internal LawKit =
 
         let m, dag = Dag.merge hashFn sw actor opM a b d3
         g, a, b, m, dag
+
+    // ---- the dispatch-seam runner ----------------------------------------------------------------
+
+    /// The wording a dispatch-seam family renders its verdicts in — the half of `SeamAdapter` that is
+    /// text and the typed error a body failure becomes. The two seams name the same three laws in
+    /// their own words ("body" at a capability, "resolver" at a query) and answer a body failure with
+    /// their own error case (`BodyFailed` / `ExecutionFailed`); every counterexample the runner
+    /// writes is built from these so that each family reads exactly as it did before Phase 297.
+    type SeamRendering<'Err> =
+        {
+            /// The family's roster id (`Conformance.<entry>`), which the adequacy guard is named by.
+            Family: string
+            /// The three law texts in result order: the three outcomes, the refusal preceding the
+            /// body, and the host agreeing with its registry.
+            Laws: string * string * string
+            /// What the family calls the code a dispatch runs — "body" or "resolver".
+            Runner: string
+            /// The name of the typed error a body failure becomes — "BodyFailed" / "ExecutionFailed".
+            BodyFailedName: string
+            /// Read the body's own failure out of the seam's error, when the error is that case.
+            TryBodyFailed: 'Err -> string option
+            /// The typed error the registry answers a body failure with.
+            BodyFailed: string -> 'Err
+        }
+
+    /// What the two dispatch-seam families differ in, so that ONE runner (`seamLaws`) certifies both
+    /// the capability seam (`capabilityLawsWith`) and the query seam (`queryLawsWith`) — the body they
+    /// shared, line for line, before Phase 297. `'Entry` is what the registry holds (a `Capability`, a
+    /// `Query`), `'Args` a call's arguments, `'v` the body's payload and `'Err` the seam's typed
+    /// refusal.
+    type SeamAdapter<'Entry, 'Args, 'v, 'Err> =
+        {
+            /// The registry's lookup: the entry under an id, or the registry's own not-found refusal
+            /// naming the ids it holds.
+            Lookup: string -> Result<'Entry, 'Err>
+            /// The registry's argument validation for an entry.
+            Validate: 'Entry -> 'Args -> Result<unit, 'Err>
+            /// The domain's body at a call's arguments, in the shape the runner counts: the runner
+            /// wraps it so that every run is recorded before the answer is handed back.
+            Body: 'Args -> 'Entry -> Deferred<'v>
+            /// The host path: dispatch an id with arguments through the (counted) body the runner
+            /// hands it.
+            Dispatch: string -> 'Args -> ('Entry -> Deferred<'v>) -> Result<Deferred<'v>, 'Err>
+            /// The drawn call: an id and its arguments, from the domain's generator.
+            Gen: ConfRng.T -> (string * 'Args) * ConfRng.T
+            /// The rendering the two families differ in.
+            Rendering: SeamRendering<'Err>
+        }
+
+    /// The dispatch-seam laws at a DOMAIN'S seam (Phase 246), over whichever seam `adapter` names.
+    /// Every call the generator draws goes through the adapter's `Dispatch` with its `Body`,
+    /// counted, and the runner certifies the three laws the rendering names: every dispatch settles,
+    /// stays pending or is refused typed (`Ok(Failed _)` never escapes, and the body-failure error
+    /// carries the body's own failure); a typed refusal ran no body and a dispatched call ran it
+    /// exactly once; and a call reaches the body iff the registry admits it, a refused call carrying
+    /// the registry's own error. Guarded on the three outcomes ("dispatch outcome"); the second and
+    /// third laws are asserted only on a dispatch that returned, so a run in which they assert
+    /// nothing is one the guard counts nothing in, and they read through it (covered cells).
+    let seamLaws (adapter: SeamAdapter<'Entry, 'Args, 'v, 'Err>) (seed: int) (iterations: int) : LawResult list =
+        let r = adapter.Rendering
+        let outcomesLaw, precedesLaw, agreementLaw = r.Laws
+        let outcomes = LawCell outcomesLaw
+        let precedes = LawCell(precedesLaw, Some "dispatch outcome")
+        let agreement = LawCell(agreementLaw, Some "dispatch outcome")
+        let mutable settled = 0
+        let mutable pending = 0
+        let mutable refused = 0
+
+        run iterations seed (fun rng _ at ->
+            let id, args = rng.Draw adapter.Gen
+
+            let runs = ref 0
+            let answered = ref None
+
+            let counted (entry: 'Entry) =
+                runs.Value <- runs.Value + 1
+                let a = adapter.Body args entry
+                answered.Value <- Some a
+                a
+
+            let outcome =
+                try
+                    Ok(adapter.Dispatch id args counted)
+                with ex ->
+                    Error ex.Message
+
+            match outcome with
+            | Error m -> outcomes.Check(false, fun () -> at (sprintf "dispatching %s threw: %s" id m))
+            | Ok o ->
+                // ---- three outcomes ----
+                (match o with
+                 | Ok(Failed m) ->
+                     outcomes.Check(false, fun () -> at (sprintf "Ok(Failed %s) escaped the seam for %s" m id))
+                 | Error e ->
+                     (match r.TryBodyFailed e, answered.Value with
+                      | Some m, Some(Failed fm) when m = fm -> outcomes.Saw()
+                      | Some m, a ->
+                          outcomes.Check(
+                              false,
+                              fun () ->
+                                  at (sprintf "%s %s for %s, but the %s answered %A" r.BodyFailedName m id r.Runner a)
+                          )
+                      | None, _ -> outcomes.Saw())
+                 | Ok _ -> outcomes.Saw())
+
+                // ---- a refusal precedes the body ----
+                let dispatchedOnce () =
+                    precedes.Check(
+                        (runs.Value = 1),
+                        fun () ->
+                            at (sprintf "%s %A was dispatched and the %s ran %d time(s)" id args r.Runner runs.Value)
+                    )
+
+                match o with
+                | Ok(Ready _) ->
+                    settled <- settled + 1
+                    dispatchedOnce ()
+                | Ok Pending ->
+                    pending <- pending + 1
+                    dispatchedOnce ()
+                | Error e ->
+                    (match r.TryBodyFailed e with
+                     | Some _ -> dispatchedOnce ()
+                     | None ->
+                         refused <- refused + 1
+
+                         precedes.Check(
+                             (runs.Value = 0),
+                             fun () ->
+                                 at (
+                                     sprintf
+                                         "%s %A was refused (%A) after the %s ran %d time(s)"
+                                         id
+                                         args
+                                         e
+                                         r.Runner
+                                         runs.Value
+                                 )
+                         ))
+                | Ok(Failed _) -> ()
+
+                // ---- the host is the registry's ----
+                let admitted =
+                    match adapter.Lookup id with
+                    | Error e -> Error e
+                    | Ok entry -> adapter.Validate entry args
+
+                let expected =
+                    match admitted, answered.Value with
+                    | Error e, _ -> Some(Error e)
+                    | Ok(), Some(Ready v) -> Some(Ok(Ready v))
+                    | Ok(), Some Pending -> Some(Ok Pending)
+                    | Ok(), Some(Failed m) -> Some(Error(r.BodyFailed m))
+                    | Ok(), None -> None
+
+                match expected with
+                | Some e ->
+                    agreement.Check(
+                        (e = o),
+                        fun () -> at (sprintf "%s %A — the registry answers %A, the host answered %A" id args e o)
+                    )
+                | None ->
+                    agreement.Check(
+                        false,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "%s %A is admitted by the registry, and the host answered %A without running the %s"
+                                    id
+                                    args
+                                    o
+                                    r.Runner
+                            )
+                    ))
+
+        results [ outcomes; precedes; agreement ]
+        @ [ SampleAdequacy.reached
+                r.Family
+                "dispatch outcome"
+                seed
+                [ "settled", settled; "pending", pending; "refused", refused ] ]

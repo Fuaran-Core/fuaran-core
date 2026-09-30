@@ -39,15 +39,29 @@ module internal SeamLaws =
     /// duplicate a law rather than mirror one. What is mirrored is the part `queryLaws` could only
     /// state about ITS seam: the three outcomes, and the unreachable fourth.
     let capabilityLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable validation = None
-        let mutable replay = None
-        let mutable enumeration = None
-        let mutable roundtrip = None
-        let mutable envelope = None
-        let mutable asyncAxis = None
-        let mutable typedFailure = None
-        let mutable slotted = None
+        let validation =
+            LawKit.LawCell "arg-validation accepts in-space + rejects out-of-space / unknown args"
+
+        let replay =
+            LawKit.LawCell "a non-deterministic invocation replays byte-identically via capture"
+
+        let enumeration = LawKit.LawCell "registry enumeration is stable (id-sorted)"
+
+        let roundtrip =
+            LawKit.LawCell "capability declaration round-trips through the codec"
+
+        let envelope =
+            LawKit.LawCell "the envelope rides out of invoke / dispatch unchanged for Ready and Pending"
+
+        let asyncAxis =
+            LawKit.LawCell "dispatch settles, stays pending, or refuses typed before the body runs"
+
+        let typedFailure =
+            LawKit.LawCell "a body failure is a typed BodyFailed, never Ok(Failed _)"
+
+        let slotted =
+            LawKit.LawCell
+                "a capability over a slotted artifact is invocable; a non-conforming slot arg is refused by name"
 
         // value-codec for the captured realized value (an int — the stand-in for a model output).
         let encodeV (v: int) : string = string v
@@ -59,11 +73,10 @@ module internal SeamLaws =
 
         let hashFn = OpStream.defaultHash
 
-        for i in 0 .. iterations - 1 do
-            let lo, r1 = ConfRng.intBelow 50 rng
-            let span, r2 = ConfRng.intBelow 50 r1
+        LawKit.run iterations seed (fun rng i at ->
+            let lo = rng.IntBelow 50
+            let span = rng.IntBelow 50
             let hi = lo + span + 1
-            rng <- r2
 
             let hole: SigEntry =
                 { Addr = "h0"
@@ -87,26 +100,19 @@ module internal SeamLaws =
             let inSpace = string lo
 
             match Capability.validateArgs cap [ "h0", inSpace ] with
-            | Ok() -> ()
-            | Error e ->
-                if validation.IsNone then
-                    validation <- Some(sprintf "seed=%d iter=%d: rejected a valid arg: %A" seed i e)
+            | Ok() -> validation.Saw()
+            | Error e -> validation.Check(false, fun () -> at (sprintf "rejected a valid arg: %A" e))
 
             (match Capability.validateArgs cap [ "h0", string (hi + 1) ] with
-             | Error(ArgOutOfSpace _) -> ()
-             | other ->
-                 if validation.IsNone then
-                     validation <- Some(sprintf "seed=%d iter=%d: out-of-space not rejected: %A" seed i other))
+             | Error(ArgOutOfSpace _) -> validation.Saw()
+             | other -> validation.Check(false, fun () -> at (sprintf "out-of-space not rejected: %A" other)))
 
             (match Capability.validateArgs cap [ "nope", inSpace ] with
-             | Error(UnknownArg _) -> ()
-             | other ->
-                 if validation.IsNone then
-                     validation <- Some(sprintf "seed=%d iter=%d: unknown arg not rejected: %A" seed i other))
+             | Error(UnknownArg _) -> validation.Saw()
+             | other -> validation.Check(false, fun () -> at (sprintf "unknown arg not rejected: %A" other)))
 
             // byte-identical replay through the Phase 27 seam.
-            let realized, r3 = ConfRng.intBelow 1000 rng
-            rng <- r3
+            let realized = rng.IntBelow 1000
             let args = [ "h0", inSpace ]
             let key = Capability.invocationKey cap args
             let det = Capability.determinismTag cap
@@ -117,11 +123,11 @@ module internal SeamLaws =
 
             match OpStream.replayEffect decodeV key det liveDifferent caps with
             | Ok(v, rest) ->
-                if (v <> realized || not (List.isEmpty rest)) && replay.IsNone then
-                    replay <- Some(sprintf "seed=%d iter=%d: replay ≠ recorded invocation (%d vs %d)" seed i v realized)
-            | Error m ->
-                if replay.IsNone then
-                    replay <- Some(sprintf "seed=%d iter=%d: replay errored: %s" seed i m)
+                replay.Check(
+                    (v = realized && List.isEmpty rest),
+                    fun () -> at (sprintf "replay ≠ recorded invocation (%d vs %d)" v realized)
+                )
+            | Error m -> replay.Check(false, fun () -> at (sprintf "replay errored: %s" m))
 
             // stable enumeration regardless of insertion order.
             let capB = Capability.create ("cap-a" + string i) sg BuildTime
@@ -132,204 +138,176 @@ module internal SeamLaws =
             (match reg with
              | Ok r ->
                  let ids = Registry.enumerate r |> List.map (fun c -> c.Id)
-
-                 if ids <> List.sort ids && enumeration.IsNone then
-                     enumeration <- Some(sprintf "seed=%d iter=%d: enumerate not id-sorted: %A" seed i ids)
-             | Error e ->
-                 if enumeration.IsNone then
-                     enumeration <- Some(sprintf "seed=%d iter=%d: register failed: %A" seed i e))
+                 enumeration.Check((ids = List.sort ids), fun () -> at (sprintf "enumerate not id-sorted: %A" ids))
+             | Error e -> enumeration.Check(false, fun () -> at (sprintf "register failed: %A" e)))
 
             // declaration round-trip.
             match CapabilityCodec.decode (CapabilityCodec.encode cap) with
-            | Ok c2 ->
-                if c2 <> cap && roundtrip.IsNone then
-                    roundtrip <- Some(sprintf "seed=%d iter=%d: capability ≠ round-trip" seed i)
-            | Error m ->
-                if roundtrip.IsNone then
-                    roundtrip <- Some(sprintf "seed=%d iter=%d: decode failed: %s" seed i m)
+            | Ok c2 -> roundtrip.Check((c2 = cap), fun () -> at "capability ≠ round-trip")
+            | Error m -> roundtrip.Check(false, fun () -> at (sprintf "decode failed: %s" m))
 
             // ---- the Deferred envelope on the seam (Phase 210) ----
 
-            let creg = Registry.empty |> Registry.register cap |> Result.toOption |> Option.get
+            // A declaration the registry refuses is a failure of the first law the registration
+            // serves, and the iteration's remaining checks are skipped — never a throw.
+            match Registry.register cap Registry.empty with
+            | Error e -> envelope.Fail(at (sprintf "the built declaration was refused by the registry: %A" e))
+            | Ok creg ->
+                // SETTLED and PENDING: the body's envelope rides out of the seam unchanged, through the
+                // capability-level `invoke` and the registry-level `dispatch` alike.
+                for answer in [ Ready realized; Pending ] do
+                    let direct = Capability.invoke cap args (fun () -> answer)
+                    let dispatched = Registry.dispatch creg cap.Id args (fun _ () -> answer)
 
-            // SETTLED and PENDING: the body's envelope rides out of the seam unchanged, through the
-            // capability-level `invoke` and the registry-level `dispatch` alike.
-            for answer in [ Ready realized; Pending ] do
-                let direct = Capability.invoke cap args (fun () -> answer)
-                let dispatched = Registry.dispatch creg cap.Id args (fun _ () -> answer)
-
-                if (direct <> Ok answer || dispatched <> Ok answer) && envelope.IsNone then
-                    envelope <-
-                        Some(
-                            sprintf
-                                "seed=%d iter=%d: %A did not ride out unchanged (invoke %A, dispatch %A)"
-                                seed
-                                i
-                                answer
-                                direct
-                                dispatched
-                        )
-
-            // REFUSED: typed, and before the body runs — on a rejected arg set and on an
-            // unregistered id alike.
-            let ran = ref false
-
-            (match
-                Registry.dispatch creg cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
-                    ran.Value <- true
-                    Ready realized)
-             with
-             | Error(ArgOutOfSpace _) when not ran.Value -> ()
-             | other ->
-                 if asyncAxis.IsNone then
-                     asyncAxis <-
-                         Some(
-                             sprintf
-                                 "seed=%d iter=%d: refusal not typed-before-body (%A; body ran: %b)"
-                                 seed
-                                 i
-                                 other
-                                 ran.Value
-                         ))
-
-            (match
-                Registry.dispatch creg "no-such-capability" args (fun _ () ->
-                    ran.Value <- true
-                    Ready realized)
-             with
-             | Error(NoSuchCapability _) when not ran.Value -> ()
-             | other ->
-                 if asyncAxis.IsNone then
-                     asyncAxis <-
-                         Some(
-                             sprintf
-                                 "seed=%d iter=%d: an unregistered id was not refused before the body (%A; body ran: %b)"
-                                 seed
-                                 i
-                                 other
-                                 ran.Value
-                         ))
-
-            // a body's untyped failure never rides out of the seam: it becomes the enumerated
-            // `BodyFailed`, so `Ok(Failed _)` is unreachable. Exhausts the body's three answers
-            // rather than asserting the fourth away.
-            for answer in [ Ready realized; Pending; Failed("boom-" + string i) ] do
-                match Registry.dispatch creg cap.Id args (fun _ () -> answer), answer with
-                | Error(BodyFailed m), Failed fm when m = fm -> ()
-                | Ok d, (Ready _ | Pending) when d = answer -> ()
-                | other, _ ->
-                    if typedFailure.IsNone then
-                        typedFailure <-
-                            Some(
+                    envelope.Check(
+                        (direct = Ok answer && dispatched = Ok answer),
+                        fun () ->
+                            at (
                                 sprintf
-                                    "seed=%d iter=%d: a %A body did not project to a typed outcome: %A"
-                                    seed
-                                    i
+                                    "%A did not ride out unchanged (invoke %A, dispatch %A)"
                                     answer
-                                    other
+                                    direct
+                                    dispatched
                             )
+                    )
 
-            // Phase 229 — a capability over a slotted artifact is invocable. The artifact is a
-            // one-node witness declaring a CONSTRAINED slot (a drawn kind), an UNCONSTRAINED slot
-            // and a value hole; its signature is derived by `Function.signature`, never written by
-            // hand, so the law is about what the seam is actually given.
-            let kind = "k" + string (lo % 7)
-            let slotAddr, anyAddr, valueAddr = "tpl/body", "tpl/any", "tpl/n"
-
-            let slottedWitness: ArtifactWitness<unit, string> =
-                { Tree =
-                    { Id = fun () -> "tpl"
-                      KindTag = fun () -> "tpl"
-                      Children = fun () -> []
-                      ReplaceChildren = fun () _ -> () }
-                  IdW =
-                    { ToString = id
-                      OfString = id
-                      Equals = (=) }
-                  Holes =
-                    fun () ->
-                        [ { Addr = slotAddr
-                            Name = "body"
-                            Kind = SlotHole(Some kind) }
-                          { Addr = anyAddr
-                            Name = "any"
-                            Kind = SlotHole None }
-                          { Addr = valueAddr
-                            Name = "n"
-                            Kind = ValueHole(IntRange(lo, hi)) } ]
-                  Effect = fun () -> sg.Effect
-                  Bind = fun _ _ () -> Ok() }
-
-            let slottedCap =
-                Capability.create ("slotted-" + string i) (Function.signature slottedWitness "slotted" ()) Server
-
-            let tree (k: string) =
-                Json.render (Json.kindObj k [ "n", JInt i ])
-
-            let conforming =
-                [ slotAddr, tree kind; anyAddr, tree ("free" + string i); valueAddr, string lo ]
-
-            let wrongKind =
-                [ slotAddr, tree (kind + "x"); anyAddr, tree kind; valueAddr, string lo ]
-
-            let scalar = [ slotAddr, tree kind; anyAddr, string lo; valueAddr, string lo ]
-
-            let failSlotted msg =
-                if slotted.IsNone then
-                    slotted <- Some(sprintf "seed=%d iter=%d: %s" seed i msg)
-
-            match Registry.register slottedCap Registry.empty with
-            | Error e -> failSlotted (sprintf "a slotted capability did not register: %A" e)
-            | Ok sreg ->
-                if Registry.enumerate sreg |> List.map (fun c -> c.Id) <> [ slottedCap.Id ] then
-                    failSlotted "a registered slotted capability is not enumerated"
-
+                // REFUSED: typed, and before the body runs — on a rejected arg set and on an
+                // unregistered id alike.
                 let ran = ref false
 
-                let run a =
-                    ran.Value <- false
-
-                    Registry.dispatch sreg slottedCap.Id a (fun _ () ->
+                (match
+                    Registry.dispatch creg cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
                         ran.Value <- true
                         Ready realized)
-
-                (match run conforming with
-                 | Ok(Ready v) when v = realized && ran.Value -> ()
-                 | other -> failSlotted (sprintf "a conforming slot argument did not dispatch: %A" other))
-
-                (match run wrongKind with
-                 | Error(ArgOutOfSpace(a, SlotTree(Some c), _)) when a = slotAddr && c = kind && not ran.Value -> ()
+                 with
+                 | Error(ArgOutOfSpace _) when not ran.Value -> asyncAxis.Saw()
                  | other ->
-                     failSlotted (sprintf "a tree of the wrong kind was not refused by name before the body: %A" other))
+                     asyncAxis.Check(
+                         false,
+                         fun () -> at (sprintf "refusal not typed-before-body (%A; body ran: %b)" other ran.Value)
+                     ))
 
-                (match run scalar with
-                 | Error(UninvocableArg a) when a = anyAddr && not ran.Value -> ()
-                 | other -> failSlotted (sprintf "a scalar bound to a slot was not refused as uninvocable: %A" other))
+                (match
+                    Registry.dispatch creg "no-such-capability" args (fun _ () ->
+                        ran.Value <- true
+                        Ready realized)
+                 with
+                 | Error(NoSuchCapability _) when not ran.Value -> asyncAxis.Saw()
+                 | other ->
+                     asyncAxis.Check(
+                         false,
+                         fun () ->
+                             at (
+                                 sprintf
+                                     "an unregistered id was not refused before the body (%A; body ran: %b)"
+                                     other
+                                     ran.Value
+                             )
+                     ))
 
-        [ { Law = "arg-validation accepts in-space + rejects out-of-space / unknown args"
-            Passed = validation.IsNone
-            Counterexample = validation }
-          { Law = "a non-deterministic invocation replays byte-identically via capture"
-            Passed = replay.IsNone
-            Counterexample = replay }
-          { Law = "registry enumeration is stable (id-sorted)"
-            Passed = enumeration.IsNone
-            Counterexample = enumeration }
-          { Law = "capability declaration round-trips through the codec"
-            Passed = roundtrip.IsNone
-            Counterexample = roundtrip }
-          { Law = "the envelope rides out of invoke / dispatch unchanged for Ready and Pending"
-            Passed = envelope.IsNone
-            Counterexample = envelope }
-          { Law = "dispatch settles, stays pending, or refuses typed before the body runs"
-            Passed = asyncAxis.IsNone
-            Counterexample = asyncAxis }
-          { Law = "a body failure is a typed BodyFailed, never Ok(Failed _)"
-            Passed = typedFailure.IsNone
-            Counterexample = typedFailure }
-          { Law = "a capability over a slotted artifact is invocable; a non-conforming slot arg is refused by name"
-            Passed = slotted.IsNone
-            Counterexample = slotted } ]
+                // a body's untyped failure never rides out of the seam: it becomes the enumerated
+                // `BodyFailed`, so `Ok(Failed _)` is unreachable. Exhausts the body's three answers
+                // rather than asserting the fourth away.
+                for answer in [ Ready realized; Pending; Failed("boom-" + string i) ] do
+                    match Registry.dispatch creg cap.Id args (fun _ () -> answer), answer with
+                    | Error(BodyFailed m), Failed fm when m = fm -> typedFailure.Saw()
+                    | Ok d, (Ready _ | Pending) when d = answer -> typedFailure.Saw()
+                    | other, _ ->
+                        typedFailure.Check(
+                            false,
+                            fun () -> at (sprintf "a %A body did not project to a typed outcome: %A" answer other)
+                        )
+
+                // Phase 229 — a capability over a slotted artifact is invocable. The artifact is a
+                // one-node witness declaring a CONSTRAINED slot (a drawn kind), an UNCONSTRAINED slot
+                // and a value hole; its signature is derived by `Function.signature`, never written by
+                // hand, so the law is about what the seam is actually given.
+                let kind = "k" + string (lo % 7)
+                let slotAddr, anyAddr, valueAddr = "tpl/body", "tpl/any", "tpl/n"
+
+                let slottedWitness: ArtifactWitness<unit, string> =
+                    { Tree =
+                        { Id = fun () -> "tpl"
+                          KindTag = fun () -> "tpl"
+                          Children = fun () -> []
+                          ReplaceChildren = fun () _ -> () }
+                      IdW =
+                        { ToString = id
+                          OfString = id
+                          Equals = (=) }
+                      Holes =
+                        fun () ->
+                            [ { Addr = slotAddr
+                                Name = "body"
+                                Kind = SlotHole(Some kind) }
+                              { Addr = anyAddr
+                                Name = "any"
+                                Kind = SlotHole None }
+                              { Addr = valueAddr
+                                Name = "n"
+                                Kind = ValueHole(IntRange(lo, hi)) } ]
+                      Effect = fun () -> sg.Effect
+                      Bind = fun _ _ () -> Ok() }
+
+                let slottedCap =
+                    Capability.create ("slotted-" + string i) (Function.signature slottedWitness "slotted" ()) Server
+
+                let tree (k: string) =
+                    Json.render (Json.kindObj k [ "n", JInt i ])
+
+                let conforming =
+                    [ slotAddr, tree kind; anyAddr, tree ("free" + string i); valueAddr, string lo ]
+
+                let wrongKind =
+                    [ slotAddr, tree (kind + "x"); anyAddr, tree kind; valueAddr, string lo ]
+
+                let scalar = [ slotAddr, tree kind; anyAddr, string lo; valueAddr, string lo ]
+
+                let failSlotted msg = slotted.Check(false, fun () -> at msg)
+
+                match Registry.register slottedCap Registry.empty with
+                | Error e -> failSlotted (sprintf "a slotted capability did not register: %A" e)
+                | Ok sreg ->
+                    slotted.Check(
+                        Registry.enumerate sreg |> List.map (fun c -> c.Id) = [ slottedCap.Id ],
+                        fun () -> at "a registered slotted capability is not enumerated"
+                    )
+
+                    let ran = ref false
+
+                    let run a =
+                        ran.Value <- false
+
+                        Registry.dispatch sreg slottedCap.Id a (fun _ () ->
+                            ran.Value <- true
+                            Ready realized)
+
+                    (match run conforming with
+                     | Ok(Ready v) when v = realized && ran.Value -> slotted.Saw()
+                     | other -> failSlotted (sprintf "a conforming slot argument did not dispatch: %A" other))
+
+                    (match run wrongKind with
+                     | Error(ArgOutOfSpace(a, SlotTree(Some c), _)) when a = slotAddr && c = kind && not ran.Value ->
+                         slotted.Saw()
+                     | other ->
+                         failSlotted (
+                             sprintf "a tree of the wrong kind was not refused by name before the body: %A" other
+                         ))
+
+                    (match run scalar with
+                     | Error(UninvocableArg a) when a = anyAddr && not ran.Value -> slotted.Saw()
+                     | other ->
+                         failSlotted (sprintf "a scalar bound to a slot was not refused as uninvocable: %A" other)))
+
+        LawKit.results
+            [ validation
+              replay
+              enumeration
+              roundtrip
+              envelope
+              asyncAxis
+              typedFailure
+              slotted ]
 
     /// The capability-seam laws at a DOMAIN'S seam (Phase 246). `capabilityLaws` beside it builds
     /// its own capabilities from the seed and certifies Core's `Registry.dispatch`; it cannot see a
@@ -351,151 +329,37 @@ module internal SeamLaws =
     /// **Vacuity.** The guard counts settled, pending and refused-before-the-body dispatches over the
     /// drawn calls; a generator that never reaches one of the three is starved, and the family says
     /// so rather than reporting green. A thrown `Body` or `Dispatch` is a failure of the first law.
+    ///
+    /// The capability instance of `LawKit.seamLaws` (Phase 297); `queryLawsWith` is the query one.
     let capabilityLawsWith (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable outcomes = None
-        let mutable precedes = None
-        let mutable agreement = None
-        let mutable settled = 0
-        let mutable pending = 0
-        let mutable refused = 0
-
         let known = Registry.enumerate w.Registry |> List.map (fun c -> c.Id)
 
-        for i in 0 .. iterations - 1 do
-            let (id, args), r' = w.GenCall rng
-            rng <- r'
-
-            let runs = ref 0
-            let answered = ref None
-
-            let counted (c: Capability) () =
-                runs.Value <- runs.Value + 1
-                let a = w.Body args c ()
-                answered.Value <- Some a
-                a
-
-            let outcome =
-                try
-                    Ok(w.Dispatch id args counted)
-                with ex ->
-                    Error ex.Message
-
-            match outcome with
-            | Error m ->
-                if outcomes.IsNone then
-                    outcomes <- Some(sprintf "seed=%d iter=%d: dispatching %s threw: %s" seed i id m)
-            | Ok o ->
-                // ---- three outcomes ----
-                (match o, answered.Value with
-                 | Ok(Failed m), _ ->
-                     if outcomes.IsNone then
-                         outcomes <- Some(sprintf "seed=%d iter=%d: Ok(Failed %s) escaped the seam for %s" seed i m id)
-                 | Error(BodyFailed m), Some(Failed fm) when m = fm -> ()
-                 | Error(BodyFailed m), a ->
-                     if outcomes.IsNone then
-                         outcomes <-
-                             Some(
-                                 sprintf "seed=%d iter=%d: BodyFailed %s for %s, but the body answered %A" seed i m id a
-                             )
-                 | _ -> ())
-
-                // ---- a refusal precedes the body ----
-                match o with
-                | Ok(Ready _)
-                | Ok Pending
-                | Error(BodyFailed _) ->
-                    (match o with
-                     | Ok(Ready _) -> settled <- settled + 1
-                     | Ok Pending -> pending <- pending + 1
-                     | _ -> ())
-
-                    if runs.Value <> 1 && precedes.IsNone then
-                        precedes <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A was dispatched and the body ran %d time(s)"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    runs.Value
-                            )
-                | Error e ->
-                    refused <- refused + 1
-
-                    if runs.Value <> 0 && precedes.IsNone then
-                        precedes <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A was refused (%A) after the body ran %d time(s)"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    e
-                                    runs.Value
-                            )
-                | Ok(Failed _) -> ()
-
-                // ---- the host is the registry's ----
-                let admitted =
+        LawKit.seamLaws
+            { Lookup =
+                fun id ->
                     match Registry.tryFind id w.Registry with
                     | None -> Error(NoSuchCapability(id, known))
-                    | Some c -> Capability.validateArgs c args
-
-                let expected =
-                    match admitted, answered.Value with
-                    | Error e, _ -> Some(Error e)
-                    | Ok(), Some(Ready v) -> Some(Ok(Ready v))
-                    | Ok(), Some Pending -> Some(Ok Pending)
-                    | Ok(), Some(Failed m) -> Some(Error(BodyFailed m))
-                    | Ok(), None -> None
-
-                match expected with
-                | Some e when e = o -> ()
-                | Some e ->
-                    if agreement.IsNone then
-                        agreement <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A — the registry answers %A, the host answered %A"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    e
-                                    o
-                            )
-                | None ->
-                    if agreement.IsNone then
-                        agreement <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A is admitted by the registry, and the host answered %A without running the body"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    o
-                            )
-
-        [ { Law =
-              "capability dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes"
-            Passed = outcomes.IsNone
-            Counterexample = outcomes }
-          { Law = "a refusal precedes the body at the domain's host (refused: no body; dispatched: exactly one)"
-            Passed = precedes.IsNone
-            Counterexample = precedes }
-          { Law =
-              "the domain's host agrees with its registry (reaches the body iff admitted; refuses with the registry's error)"
-            Passed = agreement.IsNone
-            Counterexample = agreement }
-          SampleAdequacy.reached
-              "Conformance.capabilityLawsWith"
-              "dispatch outcome"
-              seed
-              [ "settled", settled; "pending", pending; "refused", refused ] ]
+                    | Some c -> Ok c
+              Validate = Capability.validateArgs
+              Body = fun args c -> w.Body args c ()
+              Dispatch = fun id args body -> w.Dispatch id args (fun c () -> body c)
+              Gen = w.GenCall
+              Rendering =
+                { Family = "Conformance.capabilityLawsWith"
+                  Laws =
+                    "capability dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
+                    "a refusal precedes the body at the domain's host (refused: no body; dispatched: exactly one)",
+                    "the domain's host agrees with its registry (reaches the body iff admitted; refuses with the registry's error)"
+                  Runner = "body"
+                  BodyFailedName = "BodyFailed"
+                  TryBodyFailed =
+                    fun e ->
+                        match e with
+                        | BodyFailed m -> Some m
+                        | _ -> None
+                  BodyFailed = BodyFailed } }
+            seed
+            iterations
 
     /// Certify the `Fuaran.Core.Query` data-acquisition seam (Phase 46): typed-param validation
     /// (in-type accepts; wrong-type + unknown reject; since Phase 226 the all-`Null` argument set,
@@ -511,14 +375,26 @@ module internal SeamLaws =
     /// three shapes MIRROR `deferredLaws` rather than delegating to it: that family takes no witness
     /// (it is self-contained at an `int` payload), so there is nothing to instantiate over a query.
     let queryLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable validation = None
-        let mutable replay = None
-        let mutable enumeration = None
-        let mutable roundtrip = None
-        let mutable envelope = None
-        let mutable asyncAxis = None
-        let mutable typedFailure = None
+        let validation =
+            LawKit.LawCell
+                "param-validation accepts in-type + rejects type-mismatch / unknown params / a required param bound to Null"
+
+        let replay =
+            LawKit.LawCell "a non-deterministic query replays byte-identically via capture"
+
+        let enumeration = LawKit.LawCell "query registry enumeration is stable (id-sorted)"
+
+        let roundtrip =
+            LawKit.LawCell "query declaration + result round-trip through the codec"
+
+        let envelope =
+            LawKit.LawCell "the query envelope round-trips the wire for Pending / Ready / Failed"
+
+        let asyncAxis =
+            LawKit.LawCell "dispatch settles, stays pending, or refuses typed before the resolver runs"
+
+        let typedFailure =
+            LawKit.LawCell "a resolver failure is a typed ExecutionFailed, never Ok(Failed _)"
 
         // value-codec for the captured realized result (the QueryResult itself, rendered canonically).
         let encodeV (qr: QueryResult) : string = QueryCodec.encodeResult qr
@@ -528,9 +404,8 @@ module internal SeamLaws =
 
         let hashFn = OpStream.defaultHash
 
-        for i in 0 .. iterations - 1 do
-            let nRows, r1 = ConfRng.intBelow 5 rng
-            rng <- r1
+        LawKit.run iterations seed (fun rng i at ->
+            let nRows = rng.IntBelow 5
 
             let q: Query =
                 { Id = "q-" + string i
@@ -548,22 +423,16 @@ module internal SeamLaws =
 
             // param-validation: in-type accepts; wrong-type + unknown reject.
             (match Query.validateParams q [ "p0", Int 42 ] with
-             | Ok() -> ()
-             | Error e ->
-                 if validation.IsNone then
-                     validation <- Some(sprintf "seed=%d iter=%d: rejected a valid param: %A" seed i e))
+             | Ok() -> validation.Saw()
+             | Error e -> validation.Check(false, fun () -> at (sprintf "rejected a valid param: %A" e)))
 
             (match Query.validateParams q [ "p0", Str "nope" ] with
-             | Error(ParamTypeMismatch _) -> ()
-             | other ->
-                 if validation.IsNone then
-                     validation <- Some(sprintf "seed=%d iter=%d: type-mismatch not rejected: %A" seed i other))
+             | Error(ParamTypeMismatch _) -> validation.Saw()
+             | other -> validation.Check(false, fun () -> at (sprintf "type-mismatch not rejected: %A" other)))
 
             (match Query.validateParams q [ "nope", Int 1 ] with
-             | Error(UnknownParam _) -> ()
-             | other ->
-                 if validation.IsNone then
-                     validation <- Some(sprintf "seed=%d iter=%d: unknown param not rejected: %A" seed i other))
+             | Error(UnknownParam _) -> validation.Saw()
+             | other -> validation.Check(false, fun () -> at (sprintf "unknown param not rejected: %A" other)))
 
             // `Required` means non-null (Phase 226): the all-`Null` argument set, BUILT from the
             // declaration rather than drawn, is refused as `RequiredParamsNull` naming every required
@@ -582,20 +451,17 @@ module internal SeamLaws =
                 qOpt.Params |> List.filter (fun p -> p.Required) |> List.map (fun p -> p.Name)
 
             (match Query.validateParams qOpt allNull with
-             | Error(RequiredParamsNull names) when names = requiredNames -> ()
+             | Error(RequiredParamsNull names) when names = requiredNames -> validation.Saw()
              | other ->
-                 if validation.IsNone then
-                     validation <-
-                         Some(
-                             sprintf "seed=%d iter=%d: a required param bound to Null was not refused: %A" seed i other
-                         ))
+                 validation.Check(
+                     false,
+                     fun () -> at (sprintf "a required param bound to Null was not refused: %A" other)
+                 ))
 
             (match Query.validateParams qOpt [ "p0", Int 42; "p1", Null ] with
-             | Ok() -> ()
+             | Ok() -> validation.Saw()
              | Error e ->
-                 if validation.IsNone then
-                     validation <-
-                         Some(sprintf "seed=%d iter=%d: an optional param bound to Null was refused: %A" seed i e))
+                 validation.Check(false, fun () -> at (sprintf "an optional param bound to Null was refused: %A" e)))
 
             // byte-identical replay of the realized result through the Phase 27 seam.
             let realized: QueryResult =
@@ -620,11 +486,8 @@ module internal SeamLaws =
 
             (match OpStream.replayEffect decodeV key det liveDifferent caps with
              | Ok(v, rest) ->
-                 if (v <> realized || not (List.isEmpty rest)) && replay.IsNone then
-                     replay <- Some(sprintf "seed=%d iter=%d: replay ≠ recorded result" seed i)
-             | Error m ->
-                 if replay.IsNone then
-                     replay <- Some(sprintf "seed=%d iter=%d: replay errored: %s" seed i m))
+                 replay.Check((v = realized && List.isEmpty rest), fun () -> at "replay ≠ recorded result")
+             | Error m -> replay.Check(false, fun () -> at (sprintf "replay errored: %s" m)))
 
             // stable enumeration regardless of insertion order.
             let qB = { q with Id = "q-a" + string i }
@@ -636,123 +499,81 @@ module internal SeamLaws =
              with
              | Ok r ->
                  let ids = QueryRegistry.enumerate r |> List.map (fun x -> x.Id)
-
-                 if ids <> List.sort ids && enumeration.IsNone then
-                     enumeration <- Some(sprintf "seed=%d iter=%d: enumerate not id-sorted: %A" seed i ids)
-             | Error e ->
-                 if enumeration.IsNone then
-                     enumeration <- Some(sprintf "seed=%d iter=%d: register failed: %A" seed i e))
+                 enumeration.Check((ids = List.sort ids), fun () -> at (sprintf "enumerate not id-sorted: %A" ids))
+             | Error e -> enumeration.Check(false, fun () -> at (sprintf "register failed: %A" e)))
 
             // declaration + result round-trip.
             (match QueryCodec.decode (QueryCodec.encode q) with
-             | Ok q2 ->
-                 if q2 <> q && roundtrip.IsNone then
-                     roundtrip <- Some(sprintf "seed=%d iter=%d: query ≠ round-trip" seed i)
-             | Error m ->
-                 if roundtrip.IsNone then
-                     roundtrip <- Some(sprintf "seed=%d iter=%d: query decode failed: %A" seed i m))
+             | Ok q2 -> roundtrip.Check((q2 = q), fun () -> at "query ≠ round-trip")
+             | Error m -> roundtrip.Check(false, fun () -> at (sprintf "query decode failed: %A" m)))
 
             (match QueryCodec.decodeResult (QueryCodec.encodeResult realized) with
-             | Ok qr2 ->
-                 if qr2 <> realized && roundtrip.IsNone then
-                     roundtrip <- Some(sprintf "seed=%d iter=%d: result ≠ round-trip" seed i)
-             | Error m ->
-                 if roundtrip.IsNone then
-                     roundtrip <- Some(sprintf "seed=%d iter=%d: result decode failed: %A" seed i m))
+             | Ok qr2 -> roundtrip.Check((qr2 = realized), fun () -> at "result ≠ round-trip")
+             | Error m -> roundtrip.Check(false, fun () -> at (sprintf "result decode failed: %A" m)))
 
             // ---- the Deferred envelope on the seam (Phase 198) ----
 
             // the envelope round-trips the wire for all three cases, at a QueryResult payload.
             for d in [ Pending; Ready realized; Failed("resolver-" + string i) ] do
                 match QueryCodec.decodeDeferredResult (QueryCodec.encodeDeferredResult d) with
-                | Ok d2 ->
-                    if d2 <> d && envelope.IsNone then
-                        envelope <- Some(sprintf "seed=%d iter=%d: Deferred<QueryResult> ≠ round-trip (%A)" seed i d)
-                | Error e ->
-                    if envelope.IsNone then
-                        envelope <- Some(sprintf "seed=%d iter=%d: Deferred<QueryResult> decode failed: %A" seed i e)
+                | Ok d2 -> envelope.Check((d2 = d), fun () -> at (sprintf "Deferred<QueryResult> ≠ round-trip (%A)" d))
+                | Error e -> envelope.Check(false, fun () -> at (sprintf "Deferred<QueryResult> decode failed: %A" e))
 
-            // a dispatch has exactly three outcomes, and the refusals stay typed and pre-resolver.
-            let reg =
-                QueryRegistry.empty |> QueryRegistry.register q |> Result.toOption |> Option.get
+            // a dispatch has exactly three outcomes, and the refusals stay typed and pre-resolver. A
+            // declaration the registry refuses is a failure of the first law the registration serves,
+            // and the iteration's remaining checks are skipped — never a throw.
+            match QueryRegistry.register q QueryRegistry.empty with
+            | Error e -> asyncAxis.Fail(at (sprintf "the built declaration was refused by the registry: %A" e))
+            | Ok reg ->
+                let goodArgs = [ "p0", Int 42 ]
 
-            let goodArgs = [ "p0", Int 42 ]
+                (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Ready realized) with
+                 | Ok(Ready r) when r = realized -> asyncAxis.Saw()
+                 | other ->
+                     asyncAxis.Check(false, fun () -> at (sprintf "a settled resolver did not settle: %A" other)))
 
-            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Ready realized) with
-             | Ok(Ready r) when r = realized -> ()
-             | other ->
-                 if asyncAxis.IsNone then
-                     asyncAxis <- Some(sprintf "seed=%d iter=%d: a settled resolver did not settle: %A" seed i other))
+                (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Pending) with
+                 | Ok Pending -> asyncAxis.Saw()
+                 | other ->
+                     asyncAxis.Check(false, fun () -> at (sprintf "a pending resolver did not stay pending: %A" other)))
 
-            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Pending) with
-             | Ok Pending -> ()
-             | other ->
-                 if asyncAxis.IsNone then
-                     asyncAxis <-
-                         Some(sprintf "seed=%d iter=%d: a pending resolver did not stay pending: %A" seed i other))
+                let ran = ref false
 
-            let ran = ref false
+                (match
+                    QueryRegistry.dispatch reg q.Id [ "p0", Str "nope" ] (fun _ ->
+                        ran.Value <- true
+                        Ready realized)
+                 with
+                 | Error(ParamTypeMismatch _) when not ran.Value -> asyncAxis.Saw()
+                 | other ->
+                     asyncAxis.Check(
+                         false,
+                         fun () ->
+                             at (sprintf "refusal not typed-before-resolve (%A; resolver ran: %b)" other ran.Value)
+                     ))
 
-            (match
-                QueryRegistry.dispatch reg q.Id [ "p0", Str "nope" ] (fun _ ->
-                    ran.Value <- true
-                    Ready realized)
-             with
-             | Error(ParamTypeMismatch _) when not ran.Value -> ()
-             | other ->
-                 if asyncAxis.IsNone then
-                     asyncAxis <-
-                         Some(
-                             sprintf
-                                 "seed=%d iter=%d: refusal not typed-before-resolve (%A; resolver ran: %b)"
-                                 seed
-                                 i
-                                 other
-                                 ran.Value
-                         ))
+                (match QueryRegistry.dispatch reg "no-such-query" goodArgs (fun _ -> Ready realized) with
+                 | Error(NoSuchQuery _) -> asyncAxis.Saw()
+                 | other ->
+                     asyncAxis.Check(false, fun () -> at (sprintf "an unregistered id was not refused: %A" other)))
 
-            (match QueryRegistry.dispatch reg "no-such-query" goodArgs (fun _ -> Ready realized) with
-             | Error(NoSuchQuery _) -> ()
-             | other ->
-                 if asyncAxis.IsNone then
-                     asyncAxis <- Some(sprintf "seed=%d iter=%d: an unregistered id was not refused: %A" seed i other))
+                // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
+                match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
+                | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> typedFailure.Saw()
+                | other ->
+                    typedFailure.Check(
+                        false,
+                        fun () -> at (sprintf "a resolver failure did not become ExecutionFailed: %A" other)
+                    ))
 
-            // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
-            (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
-             | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> ()
-             | other ->
-                 if typedFailure.IsNone then
-                     typedFailure <-
-                         Some(
-                             sprintf
-                                 "seed=%d iter=%d: a resolver failure did not become ExecutionFailed: %A"
-                                 seed
-                                 i
-                                 other
-                         ))
-
-        [ { Law =
-              "param-validation accepts in-type + rejects type-mismatch / unknown params / a required param bound to Null"
-            Passed = validation.IsNone
-            Counterexample = validation }
-          { Law = "a non-deterministic query replays byte-identically via capture"
-            Passed = replay.IsNone
-            Counterexample = replay }
-          { Law = "query registry enumeration is stable (id-sorted)"
-            Passed = enumeration.IsNone
-            Counterexample = enumeration }
-          { Law = "query declaration + result round-trip through the codec"
-            Passed = roundtrip.IsNone
-            Counterexample = roundtrip }
-          { Law = "the query envelope round-trips the wire for Pending / Ready / Failed"
-            Passed = envelope.IsNone
-            Counterexample = envelope }
-          { Law = "dispatch settles, stays pending, or refuses typed before the resolver runs"
-            Passed = asyncAxis.IsNone
-            Counterexample = asyncAxis }
-          { Law = "a resolver failure is a typed ExecutionFailed, never Ok(Failed _)"
-            Passed = typedFailure.IsNone
-            Counterexample = typedFailure } ]
+        LawKit.results
+            [ validation
+              replay
+              enumeration
+              roundtrip
+              envelope
+              asyncAxis
+              typedFailure ]
 
     /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsWith`'s three laws, over
     /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`
@@ -766,157 +587,37 @@ module internal SeamLaws =
     ///
     /// **Vacuity.** Guarded on the three outcomes — settled, pending and refused before the
     /// resolver — each of which the domain's generator must reach.
+    ///
+    /// The query instance of `LawKit.seamLaws` (Phase 297); `capabilityLawsWith` is the capability one.
     let queryLawsWith (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable outcomes = None
-        let mutable precedes = None
-        let mutable agreement = None
-        let mutable settled = 0
-        let mutable pending = 0
-        let mutable refused = 0
-
         let known = QueryRegistry.enumerate w.Queries |> List.map (fun q -> q.Id)
 
-        for i in 0 .. iterations - 1 do
-            let (id, args), r' = w.GenQuery rng
-            rng <- r'
-
-            let runs = ref 0
-            let answered = ref None
-
-            let counted (q: Query) =
-                runs.Value <- runs.Value + 1
-                let a = w.Resolver args q
-                answered.Value <- Some a
-                a
-
-            let outcome =
-                try
-                    Ok(w.Dispatch id args counted)
-                with ex ->
-                    Error ex.Message
-
-            match outcome with
-            | Error m ->
-                if outcomes.IsNone then
-                    outcomes <- Some(sprintf "seed=%d iter=%d: dispatching %s threw: %s" seed i id m)
-            | Ok o ->
-                // ---- three outcomes ----
-                (match o, answered.Value with
-                 | Ok(Failed m), _ ->
-                     if outcomes.IsNone then
-                         outcomes <- Some(sprintf "seed=%d iter=%d: Ok(Failed %s) escaped the seam for %s" seed i m id)
-                 | Error(ExecutionFailed(m, _)), Some(Failed fm) when m = fm -> ()
-                 | Error(ExecutionFailed(m, _)), a ->
-                     if outcomes.IsNone then
-                         outcomes <-
-                             Some(
-                                 sprintf
-                                     "seed=%d iter=%d: ExecutionFailed %s for %s, but the resolver answered %A"
-                                     seed
-                                     i
-                                     m
-                                     id
-                                     a
-                             )
-                 | _ -> ())
-
-                // ---- a refused dispatch runs no resolver ----
-                match o with
-                | Ok(Ready _)
-                | Ok Pending
-                | Error(ExecutionFailed _) ->
-                    (match o with
-                     | Ok(Ready _) -> settled <- settled + 1
-                     | Ok Pending -> pending <- pending + 1
-                     | _ -> ())
-
-                    if runs.Value <> 1 && precedes.IsNone then
-                        precedes <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A was dispatched and the resolver ran %d time(s)"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    runs.Value
-                            )
-                | Error e ->
-                    refused <- refused + 1
-
-                    if runs.Value <> 0 && precedes.IsNone then
-                        precedes <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A was refused (%A) after the resolver ran %d time(s)"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    e
-                                    runs.Value
-                            )
-                | Ok(Failed _) -> ()
-
-                // ---- the host is the registry's ----
-                let admitted =
+        LawKit.seamLaws
+            { Lookup =
+                fun id ->
                     match QueryRegistry.tryFind id w.Queries with
                     | None -> Error(NoSuchQuery(id, known))
-                    | Some q -> Query.validateParams q args
-
-                let expected =
-                    match admitted, answered.Value with
-                    | Error e, _ -> Some(Error e)
-                    | Ok(), Some(Ready v) -> Some(Ok(Ready v))
-                    | Ok(), Some Pending -> Some(Ok Pending)
-                    | Ok(), Some(Failed m) -> Some(Error(ExecutionFailed(m, [])))
-                    | Ok(), None -> None
-
-                match expected with
-                | Some e when e = o -> ()
-                | Some e ->
-                    if agreement.IsNone then
-                        agreement <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A — the registry answers %A, the host answered %A"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    e
-                                    o
-                            )
-                | None ->
-                    if agreement.IsNone then
-                        agreement <-
-                            Some(
-                                sprintf
-                                    "seed=%d iter=%d: %s %A is admitted by the registry, and the host answered %A without running the resolver"
-                                    seed
-                                    i
-                                    id
-                                    args
-                                    o
-                            )
-
-        [ { Law =
-              "query dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes"
-            Passed = outcomes.IsNone
-            Counterexample = outcomes }
-          { Law = "a refused dispatch runs no resolver at the domain's host (refused: none; dispatched: exactly one)"
-            Passed = precedes.IsNone
-            Counterexample = precedes }
-          { Law =
-              "the domain's host agrees with its query registry (reaches the resolver iff admitted; refuses with the registry's error)"
-            Passed = agreement.IsNone
-            Counterexample = agreement }
-          SampleAdequacy.reached
-              "Conformance.queryLawsWith"
-              "dispatch outcome"
-              seed
-              [ "settled", settled; "pending", pending; "refused", refused ] ]
+                    | Some q -> Ok q
+              Validate = Query.validateParams
+              Body = fun args q -> w.Resolver args q
+              Dispatch = w.Dispatch
+              Gen = w.GenQuery
+              Rendering =
+                { Family = "Conformance.queryLawsWith"
+                  Laws =
+                    "query dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
+                    "a refused dispatch runs no resolver at the domain's host (refused: none; dispatched: exactly one)",
+                    "the domain's host agrees with its query registry (reaches the resolver iff admitted; refuses with the registry's error)"
+                  Runner = "resolver"
+                  BodyFailedName = "ExecutionFailed"
+                  TryBodyFailed =
+                    fun e ->
+                        match e with
+                        | ExecutionFailed(m, _) -> Some m
+                        | _ -> None
+                  BodyFailed = fun m -> ExecutionFailed(m, []) } }
+            seed
+            iterations
 
     // ---- signature-typed function registry (Phase 50) ----
     // The teeth on `FunctionEntry` / `FunctionRegistry` + `findBySignature`: the artifact-function
@@ -939,17 +640,24 @@ module internal SeamLaws =
     ///    registered id with in-space args runs the body, and an out-of-space arg is rejected
     ///    (`ArgOutOfSpace`) before the body runs (the Capability trust posture, carried over).
     let registryLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable findable = None
-        let mutable nonMatch = None
-        let mutable narrowing = None
-        let mutable defaultDeny = None
+        let findable =
+            LawKit.LawCell "a function is findable by its declared result type + required holes (subsumption + exact)"
 
-        for i in 0 .. iterations - 1 do
-            let lo, r1 = ConfRng.intBelow 50 rng
-            let span, r2 = ConfRng.intBelow 50 r1
+        let nonMatch =
+            LawKit.LawCell "a non-matching query (wrong result type / unmet hole) returns it not"
+
+        let narrowing =
+            LawKit.LawCell
+                "a partial application narrows its signature in the index (content pack findable by the smaller context)"
+
+        let defaultDeny =
+            LawKit.LawCell
+                "dispatch stays default-deny + arg-validated (unregistered id refused, out-of-space arg rejected)"
+
+        LawKit.run iterations seed (fun rng i at ->
+            let lo = rng.IntBelow 50
+            let span = rng.IntBelow 50
             let hi = lo + span + 1
-            rng <- r2
 
             let mkHole addr : SigEntry =
                 { Addr = addr
@@ -973,9 +681,7 @@ module internal SeamLaws =
             let ent = FunctionRegistry.entry resultType cap
 
             match FunctionRegistry.empty |> FunctionRegistry.register ent with
-            | Error e ->
-                if findable.IsNone then
-                    findable <- Some(sprintf "seed=%d iter=%d: register failed: %A" seed i e)
+            | Error e -> findable.Check(false, fun () -> at (sprintf "register failed: %A" e))
             | Ok r ->
                 // ---- 1. findable by its declared result/holes — subsumption + exact ----
                 let fullQuery =
@@ -990,19 +696,10 @@ module internal SeamLaws =
                     FunctionRegistry.findBySignature Exact fullQuery r
                     |> List.map (fun e -> e.Capability.Id)
 
-                if
-                    (not (List.contains cap.Id bySub) || not (List.contains cap.Id byExact))
-                    && findable.IsNone
-                then
-                    findable <-
-                        Some(
-                            sprintf
-                                "seed=%d iter=%d: entry not findable by its own result/holes (sub=%A exact=%A)"
-                                seed
-                                i
-                                bySub
-                                byExact
-                        )
+                findable.Check(
+                    List.contains cap.Id bySub && List.contains cap.Id byExact,
+                    fun () -> at (sprintf "entry not findable by its own result/holes (sub=%A exact=%A)" bySub byExact)
+                )
 
                 // ---- 2. a non-matching query returns it not — wrong result type; unmet required hole ----
                 let wrongResult =
@@ -1016,16 +713,16 @@ module internal SeamLaws =
                 let nm1 = FunctionRegistry.findBySignature Subsumes wrongResult r
                 let nm2 = FunctionRegistry.findBySignature Subsumes missingHole r
 
-                if (not (List.isEmpty nm1) || not (List.isEmpty nm2)) && nonMatch.IsNone then
-                    nonMatch <-
-                        Some(
+                nonMatch.Check(
+                    List.isEmpty nm1 && List.isEmpty nm2,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: a non-matching query returned the entry (wrongResult=%d missingHole=%d)"
-                                seed
-                                i
+                                "a non-matching query returned the entry (wrongResult=%d missingHole=%d)"
                                 (List.length nm1)
                                 (List.length nm2)
                         )
+                )
 
                 // ---- 3. a partial application narrows its signature in the index ----
                 let pack =
@@ -1033,8 +730,7 @@ module internal SeamLaws =
 
                 (match FunctionRegistry.register pack r with
                  | Error e ->
-                     if narrowing.IsNone then
-                         narrowing <- Some(sprintf "seed=%d iter=%d: registering the content pack failed: %A" seed i e)
+                     narrowing.Check(false, fun () -> at (sprintf "registering the content pack failed: %A" e))
                  | Ok r2 ->
                      // the smaller context {h1} subsumes the pack (one required hole) but NOT the
                      // original (needs h0 + h1) — the narrowed signature is what is now in the index.
@@ -1051,21 +747,18 @@ module internal SeamLaws =
                          |> List.filter (fun h -> h.Required)
                          |> List.map (fun h -> h.Addr)
 
-                     if
-                         (not (List.contains pack.Capability.Id ids)
-                          || List.contains cap.Id ids
-                          || packRequired <> [ "h1" ])
-                         && narrowing.IsNone
-                     then
-                         narrowing <-
-                             Some(
+                     narrowing.Check(
+                         List.contains pack.Capability.Id ids
+                         && not (List.contains cap.Id ids)
+                         && packRequired = [ "h1" ],
+                         fun () ->
+                             at (
                                  sprintf
-                                     "seed=%d iter=%d: partial application did not narrow in the index (found=%A packRequired=%A)"
-                                     seed
-                                     i
+                                     "partial application did not narrow in the index (found=%A packRequired=%A)"
                                      ids
                                      packRequired
-                             ))
+                             )
+                     ))
 
                 // ---- 4. dispatch stays default-deny + arg-validated ----
                 // the body answers in the `Deferred` envelope since Phase 210; this one settles.
@@ -1085,31 +778,19 @@ module internal SeamLaws =
                     | Error(NoSuchCapability _), Ok(Ready 1), Error(ArgOutOfSpace _) -> true
                     | _ -> false
 
-                if not denyOk && defaultDeny.IsNone then
-                    defaultDeny <-
-                        Some(
+                defaultDeny.Check(
+                    denyOk,
+                    fun () ->
+                        at (
                             sprintf
-                                "seed=%d iter=%d: dispatch not default-deny / arg-validated (unreg=%A ok=%A bad=%A)"
-                                seed
-                                i
+                                "dispatch not default-deny / arg-validated (unreg=%A ok=%A bad=%A)"
                                 unreg
                                 okCall
                                 badArg
                         )
+                ))
 
-        [ { Law = "a function is findable by its declared result type + required holes (subsumption + exact)"
-            Passed = findable.IsNone
-            Counterexample = findable }
-          { Law = "a non-matching query (wrong result type / unmet hole) returns it not"
-            Passed = nonMatch.IsNone
-            Counterexample = nonMatch }
-          { Law =
-              "a partial application narrows its signature in the index (content pack findable by the smaller context)"
-            Passed = narrowing.IsNone
-            Counterexample = narrowing }
-          { Law = "dispatch stays default-deny + arg-validated (unregistered id refused, out-of-space arg rejected)"
-            Passed = defaultDeny.IsNone
-            Counterexample = defaultDeny } ]
+        LawKit.results [ findable; nonMatch; narrowing; defaultDeny ]
 
     // ---- content-pack loading contract (Phase 57) ----
     // The teeth on `PackManifest` / `ContentPack.load` + the signature-version compatibility check: a
@@ -1130,17 +811,23 @@ module internal SeamLaws =
     ///    (`signatureFingerprint sg ≠ signatureFingerprint sg'`), so the version check is real
     ///    change-detection, not a hand-incremented counter a host can forget to bump.
     let packLoadingLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable roundTrip = None
-        let mutable mismatch = None
-        let mutable unknownBase = None
-        let mutable shapeDerived = None
+        let roundTrip =
+            LawKit.LawCell "a content pack loads and each curried function is findable under its narrowed signature"
 
-        for i in 0 .. iterations - 1 do
-            let lo, r1 = ConfRng.intBelow 50 rng
-            let span, r2 = ConfRng.intBelow 50 r1
+        let mismatch =
+            LawKit.LawCell
+                "a pack pinned to a stale base-signature version is refused loudly (SignatureVersionMismatch)"
+
+        let unknownBase =
+            LawKit.LawCell "an unknown base is default-denied (UnknownBaseFunction enumerates the known ids)"
+
+        let shapeDerived =
+            LawKit.LawCell "the signature version is shape-derived (a changed hole set shifts the fingerprint)"
+
+        LawKit.run iterations seed (fun rng i at ->
+            let lo = rng.IntBelow 50
+            let span = rng.IntBelow 50
             let hi = lo + span + 1
-            rng <- r2
 
             let mkHole addr : SigEntry =
                 { Addr = addr
@@ -1164,9 +851,7 @@ module internal SeamLaws =
             let baseEntry = FunctionRegistry.entry resultType baseCap
 
             match FunctionRegistry.empty |> FunctionRegistry.register baseEntry with
-            | Error e ->
-                if roundTrip.IsNone then
-                    roundTrip <- Some(sprintf "seed=%d iter=%d: base register failed: %A" seed i e)
+            | Error e -> roundTrip.Check(false, fun () -> at (sprintf "base register failed: %A" e))
             | Ok reg ->
                 // ---- 1. load round-trip — curry h0; the narrowed entry is findable from {h1} ----
                 let pf = ContentPack.pack ("pack-" + string i) (Set.ofList [ "h0" ]) baseEntry
@@ -1178,9 +863,7 @@ module internal SeamLaws =
                       Functions = [ pf ] }
 
                 (match ContentPack.load manifest reg with
-                 | Error e ->
-                     if roundTrip.IsNone then
-                         roundTrip <- Some(sprintf "seed=%d iter=%d: load of a valid pack failed: %A" seed i e)
+                 | Error e -> roundTrip.Check(false, fun () -> at (sprintf "load of a valid pack failed: %A" e))
                  | Ok loaded ->
                      let smallQuery =
                          { ResultType = Some resultType
@@ -1190,15 +873,15 @@ module internal SeamLaws =
                          FunctionRegistry.findBySignature Subsumes smallQuery loaded
                          |> List.map (fun e -> e.Capability.Id)
 
-                     if not (List.contains pf.NewId ids) && roundTrip.IsNone then
-                         roundTrip <-
-                             Some(
+                     roundTrip.Check(
+                         List.contains pf.NewId ids,
+                         fun () ->
+                             at (
                                  sprintf
-                                     "seed=%d iter=%d: loaded packed function not findable under its narrowed signature (found=%A)"
-                                     seed
-                                     i
+                                     "loaded packed function not findable under its narrowed signature (found=%A)"
                                      ids
-                             ))
+                             )
+                     ))
 
                 // ---- 2. a stale-version pack fails loudly ----
                 let stale =
@@ -1209,21 +892,19 @@ module internal SeamLaws =
 
                 (match ContentPack.load staleManifest reg with
                  | Error(SignatureVersionMismatch(_, baseId, declared, actual)) ->
-                     if (baseId <> baseCap.Id || declared = actual) && mismatch.IsNone then
-                         mismatch <-
-                             Some(
+                     mismatch.Check(
+                         (baseId = baseCap.Id && declared <> actual),
+                         fun () ->
+                             at (
                                  sprintf
-                                     "seed=%d iter=%d: mismatch error fields wrong (base=%s declared=%s actual=%s)"
-                                     seed
-                                     i
+                                     "mismatch error fields wrong (base=%s declared=%s actual=%s)"
                                      baseId
                                      declared
                                      actual
                              )
+                     )
                  | other ->
-                     if mismatch.IsNone then
-                         mismatch <-
-                             Some(sprintf "seed=%d iter=%d: stale-version pack not refused loudly: %A" seed i other))
+                     mismatch.Check(false, fun () -> at (sprintf "stale-version pack not refused loudly: %A" other)))
 
                 // ---- 3. an unknown base is default-denied (enumerating the known ids) ----
                 let ghost =
@@ -1236,46 +917,24 @@ module internal SeamLaws =
 
                 (match ContentPack.load ghostManifest reg with
                  | Error(UnknownBaseFunction(_, "no-such-base", known)) ->
-                     if not (List.contains baseCap.Id known) && unknownBase.IsNone then
-                         unknownBase <-
-                             Some(
-                                 sprintf
-                                     "seed=%d iter=%d: UnknownBaseFunction did not enumerate the known ids (%A)"
-                                     seed
-                                     i
-                                     known
-                             )
+                     unknownBase.Check(
+                         List.contains baseCap.Id known,
+                         fun () -> at (sprintf "UnknownBaseFunction did not enumerate the known ids (%A)" known)
+                     )
                  | other ->
-                     if unknownBase.IsNone then
-                         unknownBase <-
-                             Some(sprintf "seed=%d iter=%d: unknown base not default-denied: %A" seed i other))
+                     unknownBase.Check(false, fun () -> at (sprintf "unknown base not default-denied: %A" other)))
 
                 // ---- 4. the version is genuinely shape-derived ----
                 let sg' =
                     { sg with
                         Holes = [ h0; h1; mkHole "h2" ] }
 
-                if
-                    ContentPack.signatureFingerprint sg = ContentPack.signatureFingerprint sg'
-                    && shapeDerived.IsNone
-                then
-                    shapeDerived <-
-                        Some(
-                            sprintf "seed=%d iter=%d: a changed hole set did not shift the signature fingerprint" seed i
-                        )
+                shapeDerived.Check(
+                    ContentPack.signatureFingerprint sg <> ContentPack.signatureFingerprint sg',
+                    fun () -> at "a changed hole set did not shift the signature fingerprint"
+                ))
 
-        [ { Law = "a content pack loads and each curried function is findable under its narrowed signature"
-            Passed = roundTrip.IsNone
-            Counterexample = roundTrip }
-          { Law = "a pack pinned to a stale base-signature version is refused loudly (SignatureVersionMismatch)"
-            Passed = mismatch.IsNone
-            Counterexample = mismatch }
-          { Law = "an unknown base is default-denied (UnknownBaseFunction enumerates the known ids)"
-            Passed = unknownBase.IsNone
-            Counterexample = unknownBase }
-          { Law = "the signature version is shape-derived (a changed hole set shifts the fingerprint)"
-            Passed = shapeDerived.IsNone
-            Counterexample = shapeDerived } ]
+        LawKit.results [ roundTrip; mismatch; unknownBase; shapeDerived ]
 
     // ---- aggregate null-skip (Phase 36; split by Phase 257) ----
     // The `Column.aggregate` half of what was `aggregateParityLaws`. The parity half compares the
@@ -1290,52 +949,41 @@ module internal SeamLaws =
     /// present-cell count, and `Sum` over a null-bearing column equals `Sum` over its present-only
     /// projection.
     let aggregateNullSkipLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable nullSkip = None
+        let nullSkip =
+            LawKit.LawCell "Column.aggregate skips Null cells (Count = present count; Sum ignores nulls)"
 
-        for i in 0 .. iterations - 1 do
-            let isInt, r1 = ConfRng.intBelow 2 rng
-            let nRows, r2 = ConfRng.intBelow 6 r1
-            rng <- r2
+        LawKit.run iterations seed (fun rng _ at ->
+            let isInt = rng.IntBelow 2
+            let nRows = rng.IntBelow 6
             let ty = if isInt = 0 then IntType else FloatType
-            let mutable r = rng
 
             let cells =
                 [ for _ in 0..nRows ->
-                      let k, r' = ConfRng.intBelow 4 r
-                      r <- r'
+                      let k = rng.IntBelow 4
 
                       if k = 0 then
                           Null
                       else
-                          let v, r'' = ConfRng.intBelow 200 r
-                          r <- r''
+                          let v = rng.IntBelow 200
 
                           if ty = IntType then
                               Int(v - 100)
                           else
                               Float(float (v - 100) * 0.5) ]
 
-            rng <- r
             let col = Column.create "c" ty cells
             let present = cells |> List.filter (fun c -> not (Cell.isNull c))
             let presentCol = Column.create "c" ty present
 
             (match Column.aggregate Count col with
-             | Ok(Int n) when n = List.length present -> ()
-             | other ->
-                 if nullSkip.IsNone then
-                     nullSkip <- Some(sprintf "seed=%d iter=%d: Count ≠ present count (%A)" seed i other))
+             | Ok(Int n) when n = List.length present -> nullSkip.Saw()
+             | other -> nullSkip.Check(false, fun () -> at (sprintf "Count ≠ present count (%A)" other)))
 
-            (match Column.aggregate Sum col, Column.aggregate Sum presentCol with
-             | Ok a, Ok b when a = b -> ()
-             | a, b ->
-                 if nullSkip.IsNone then
-                     nullSkip <- Some(sprintf "seed=%d iter=%d: Sum not null-skipping (%A vs %A)" seed i a b))
+            match Column.aggregate Sum col, Column.aggregate Sum presentCol with
+            | Ok a, Ok b when a = b -> nullSkip.Saw()
+            | a, b -> nullSkip.Check(false, fun () -> at (sprintf "Sum not null-skipping (%A vs %A)" a b)))
 
-        [ { Law = "Column.aggregate skips Null cells (Count = present count; Sum ignores nulls)"
-            Passed = nullSkip.IsNone
-            Counterexample = nullSkip } ]
+        LawKit.results [ nullSkip ]
 
     // ---- columnar validator (Phase 37) ----
     // The teeth on the `ColumnValidator` surface: stock rules over a `Table` emit located, severity-
@@ -1348,9 +996,11 @@ module internal SeamLaws =
     /// same table); and **soundness** (the count of `COL-NOTNULL` defects equals the number of null cells
     /// in the non-null column, and `COL-INRANGE` equals the number of out-of-range cells).
     let columnarValidatorLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable determinism = None
-        let mutable soundness = None
+        let determinism =
+            LawKit.LawCell "columnar validate is deterministic + byte-canonical (same table ⇒ same defects)"
+
+        let soundness =
+            LawKit.LawCell "columnar stock rules are sound (defect counts = injected faults)"
         // Phase 223 — the fault populations the soundness law counts. A fault-free sample
         // satisfies `defects = injected faults` as 0 = 0 and certifies nothing about either rule.
         let mutable nullsInjected = 0
@@ -1363,22 +1013,18 @@ module internal SeamLaws =
             |> ColumnValidator.register (ColumnValidator.ofType "s" StringType)
             |> ColumnValidator.register (ColumnValidator.unique [ "a" ])
 
-        for i in 0 .. iterations - 1 do
-            let nRows, r1 = ConfRng.intBelow 6 rng
-            rng <- r1
-            let mutable r = rng
+        LawKit.run iterations seed (fun rng i at ->
+            let nRows = rng.IntBelow 6
 
             // column a: int straying out of [0,100], with ~1/5 nulls
             let drawn =
                 [ for _ in 0..nRows ->
-                      let k, r' = ConfRng.intBelow 5 r
-                      r <- r'
+                      let k = rng.IntBelow 5
 
                       if k = 0 then
                           Null
                       else
-                          let v, r'' = ConfRng.intBelow 160 r
-                          r <- r''
+                          let v = rng.IntBelow 160
                           Int(v - 30) ]
 
             // Phase 223 — the roll is STRATIFIED by iteration index, so every run of three or more
@@ -1398,7 +1044,6 @@ module internal SeamLaws =
                 | _ -> drawn @ [ Int 150 ]
 
             let sCells = aCells |> List.map (fun _ -> Str "x")
-            rng <- r
 
             let t: Table =
                 { Schema = [ "a", IntType; "s", StringType ]
@@ -1406,13 +1051,11 @@ module internal SeamLaws =
 
             let defects = ColumnValidator.validate reg t
 
-            if
-                (ColumnValidator.validate reg t <> defects
-                 || Validator.canonicalCodes (ColumnValidator.validate reg t)
-                    <> Validator.canonicalCodes defects)
-                && determinism.IsNone
-            then
-                determinism <- Some(sprintf "seed=%d iter=%d: columnar validate is not deterministic" seed i)
+            determinism.Check(
+                ColumnValidator.validate reg t = defects
+                && Validator.canonicalCodes (ColumnValidator.validate reg t) = Validator.canonicalCodes defects,
+                fun () -> at "columnar validate is not deterministic"
+            )
 
             let nullCount = aCells |> List.filter Cell.isNull |> List.length
 
@@ -1433,36 +1076,33 @@ module internal SeamLaws =
             nullsInjected <- nullsInjected + nullCount
             outOfRangeInjected <- outOfRangeInjected + outOfRange
 
-            if
-                (notNullDefects <> nullCount || inRangeDefects <> outOfRange)
-                && soundness.IsNone
-            then
-                soundness <-
-                    Some(
+            soundness.Check(
+                (notNullDefects = nullCount && inRangeDefects = outOfRange),
+                fun () ->
+                    at (
                         sprintf
-                            "seed=%d iter=%d: defect counts ≠ injected faults (notNull %d/%d, inRange %d/%d)"
-                            seed
-                            i
+                            "defect counts ≠ injected faults (notNull %d/%d, inRange %d/%d)"
                             notNullDefects
                             nullCount
                             inRangeDefects
                             outOfRange
                     )
+            ))
 
-        [ { Law = "columnar validate is deterministic + byte-canonical (same table ⇒ same defects)"
-            Passed = determinism.IsNone
-            Counterexample = determinism }
-          { Law = "columnar stock rules are sound (defect counts = injected faults)"
-            Passed = soundness.IsNone
-            Counterexample = soundness }
-          // Phase 223 — `Guarded ["null cell"; "out-of-range cell"]`, after the subject laws. The
-          // stratified roll reaches both at three iterations; a shorter run reports the guard.
-          SampleAdequacy.reached "Conformance.columnarValidatorLaws" "injected null" seed [ "null cell", nullsInjected ]
-          SampleAdequacy.reached
-              "Conformance.columnarValidatorLaws"
-              "injected out-of-range value"
-              seed
-              [ "out-of-range cell", outOfRangeInjected ] ]
+        LawKit.results [ determinism; soundness ]
+        @ [
+            // Phase 223 — `Guarded ["null cell"; "out-of-range cell"]`, after the subject laws. The
+            // stratified roll reaches both at three iterations; a shorter run reports the guard.
+            SampleAdequacy.reached
+                "Conformance.columnarValidatorLaws"
+                "injected null"
+                seed
+                [ "null cell", nullsInjected ]
+            SampleAdequacy.reached
+                "Conformance.columnarValidatorLaws"
+                "injected out-of-range value"
+                seed
+                [ "out-of-range cell", outOfRangeInjected ] ]
 
     // ---- Deferred async-result envelope (Phase 32) ----
     // The teeth on `Deferred<'T>` + its wire codec + its Phase-27 replay interplay.
@@ -1476,10 +1116,14 @@ module internal SeamLaws =
     ///  - **replay interplay** — a `Ready` value (the realized result) journals through the Phase 27
     ///    capture seam and replays **byte-identically** even when the live source would now differ.
     let deferredLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable roundtrip = None
-        let mutable combinators = None
-        let mutable replay = None
+        let roundtrip =
+            LawKit.LawCell "Deferred round-trips the wire for Pending / Ready / Failed"
+
+        let combinators =
+            LawKit.LawCell "Deferred map / toResult behave (Ready lifts; Pending/Failed propagate)"
+
+        let replay =
+            LawKit.LawCell "a Ready value replays byte-identically via the Phase 27 capture seam"
 
         let encInt (n: int) : JVal = JInt n
 
@@ -1497,32 +1141,26 @@ module internal SeamLaws =
 
         let hashFn = OpStream.defaultHash
 
-        for i in 0 .. iterations - 1 do
-            let v, r1 = ConfRng.intBelow 1000 rng
-            rng <- r1
+        LawKit.run iterations seed (fun rng i at ->
+            let v = rng.IntBelow 1000
 
             let cases = [ Pending; Ready v; Failed("err" + string v) ]
 
             for d in cases do
                 match CapabilityCodec.decodeDeferred decInt (CapabilityCodec.encodeDeferred encInt d) with
-                | Ok d2 ->
-                    if d2 <> d && roundtrip.IsNone then
-                        roundtrip <- Some(sprintf "seed=%d iter=%d: Deferred ≠ round-trip (%A)" seed i d)
-                | Error m ->
-                    if roundtrip.IsNone then
-                        roundtrip <- Some(sprintf "seed=%d iter=%d: Deferred decode failed: %s" seed i m)
+                | Ok d2 -> roundtrip.Check((d2 = d), fun () -> at (sprintf "Deferred ≠ round-trip (%A)" d))
+                | Error m -> roundtrip.Check(false, fun () -> at (sprintf "Deferred decode failed: %s" m))
 
             let mapped = Deferred.map ((+) 1) (Ready v)
             let pendingMapped = Deferred.map ((+) 1) Pending
 
-            if
-                (mapped <> Ready(v + 1)
-                 || pendingMapped <> Pending
-                 || Deferred.toResult (Ready v) <> Ok v
-                 || Deferred.toResult (Failed "x") <> Error "x")
-                && combinators.IsNone
-            then
-                combinators <- Some(sprintf "seed=%d iter=%d: Deferred combinators disagree" seed i)
+            combinators.Check(
+                (mapped = Ready(v + 1)
+                 && pendingMapped = Pending
+                 && Deferred.toResult (Ready v) = Ok v
+                 && Deferred.toResult (Failed "x") = Error "x"),
+                fun () -> at "Deferred combinators disagree"
+            )
 
             // a Ready value replays byte-identically through the Phase 27 seam.
             let key = "deferred#" + string i
@@ -1531,21 +1169,13 @@ module internal SeamLaws =
 
             match OpStream.replayEffect decV key "network" liveDifferent caps with
             | Ok(rv, rest) ->
-                if (rv <> v || not (List.isEmpty rest)) && replay.IsNone then
-                    replay <- Some(sprintf "seed=%d iter=%d: Ready replay ≠ recorded (%d vs %d)" seed i rv v)
-            | Error m ->
-                if replay.IsNone then
-                    replay <- Some(sprintf "seed=%d iter=%d: Ready replay errored: %s" seed i m)
+                replay.Check(
+                    (rv = v && List.isEmpty rest),
+                    fun () -> at (sprintf "Ready replay ≠ recorded (%d vs %d)" rv v)
+                )
+            | Error m -> replay.Check(false, fun () -> at (sprintf "Ready replay errored: %s" m)))
 
-        [ { Law = "Deferred round-trips the wire for Pending / Ready / Failed"
-            Passed = roundtrip.IsNone
-            Counterexample = roundtrip }
-          { Law = "Deferred map / toResult behave (Ready lifts; Pending/Failed propagate)"
-            Passed = combinators.IsNone
-            Counterexample = combinators }
-          { Law = "a Ready value replays byte-identically via the Phase 27 capture seam"
-            Passed = replay.IsNone
-            Counterexample = replay } ]
+        LawKit.results [ roundtrip; combinators; replay ]
 
     // ---- serializable capability pipeline (Phase 35) ----
     // The teeth on `CapabilityPipeline`: type-checked composition (ill-typed edge ⇒ named error), a
@@ -1557,10 +1187,13 @@ module internal SeamLaws =
     /// **wire round-trip** (`encode`→`decode` is identity); and **per-node replay** (a node's realized
     /// value, journalled under `nodeInvocationKey`, replays byte-identically via the Phase-27 seam).
     let capabilityPipelineLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable typecheck = None
-        let mutable roundtrip = None
-        let mutable replay = None
+        let typecheck =
+            LawKit.LawCell "pipeline type-check accepts a well-typed DAG + names an ill-typed edge (EdgeTypeMismatch)"
+
+        let roundtrip = LawKit.LawCell "a capability pipeline round-trips the wire"
+
+        let replay =
+            LawKit.LawCell "a pipeline node replays byte-identically via the Phase 27 capture seam"
 
         let encV (n: int) : string = string n
 
@@ -1614,45 +1247,30 @@ module internal SeamLaws =
                     [ Invoke("n1", "prod", AnyString, [])
                       Invoke("n2", "cons", IntRange(0, 100), [ "x", FromNode "n1" ]) ] }
 
-            for i in 0 .. iterations - 1 do
-                let v, r1 = ConfRng.intBelow 100 rng
-                rng <- r1
+            LawKit.run iterations seed (fun rng _ at ->
+                let v = rng.IntBelow 100
 
                 (match CapabilityPipeline.typeCheck reg good, CapabilityPipeline.typeCheck reg bad with
-                 | Ok(), Error(EdgeTypeMismatch _) -> ()
-                 | g, b ->
-                     if typecheck.IsNone then
-                         typecheck <- Some(sprintf "seed=%d iter=%d: type-check disagreed (good=%A bad=%A)" seed i g b))
+                 | Ok(), Error(EdgeTypeMismatch _) -> typecheck.Saw()
+                 | g, b -> typecheck.Check(false, fun () -> at (sprintf "type-check disagreed (good=%A bad=%A)" g b)))
 
                 (match CapabilityPipeline.decode (CapabilityPipeline.encode good) with
-                 | Ok p2 ->
-                     if p2 <> good && roundtrip.IsNone then
-                         roundtrip <- Some(sprintf "seed=%d iter=%d: pipeline ≠ round-trip" seed i)
-                 | Error m ->
-                     if roundtrip.IsNone then
-                         roundtrip <- Some(sprintf "seed=%d iter=%d: pipeline decode failed: %s" seed i m))
+                 | Ok p2 -> roundtrip.Check((p2 = good), fun () -> at "pipeline ≠ round-trip")
+                 | Error m -> roundtrip.Check(false, fun () -> at (sprintf "pipeline decode failed: %s" m)))
 
                 // per-node replay byte-identity through the Phase 27 seam
                 let key = CapabilityPipeline.nodeInvocationKey (List.head good.Nodes)
                 let _, caps = OpStream.captureEffect hashFn encV "random" key (fun () -> v) []
 
-                (match OpStream.replayEffect decV key "random" (fun () -> v + 1) caps with
-                 | Ok(rv, rest) ->
-                     if (rv <> v || not (List.isEmpty rest)) && replay.IsNone then
-                         replay <- Some(sprintf "seed=%d iter=%d: node replay ≠ recorded (%d vs %d)" seed i rv v)
-                 | Error m ->
-                     if replay.IsNone then
-                         replay <- Some(sprintf "seed=%d iter=%d: node replay errored: %s" seed i m))
+                match OpStream.replayEffect decV key "random" (fun () -> v + 1) caps with
+                | Ok(rv, rest) ->
+                    replay.Check(
+                        (rv = v && List.isEmpty rest),
+                        fun () -> at (sprintf "node replay ≠ recorded (%d vs %d)" rv v)
+                    )
+                | Error m -> replay.Check(false, fun () -> at (sprintf "node replay errored: %s" m)))
 
-            [ { Law = "pipeline type-check accepts a well-typed DAG + names an ill-typed edge (EdgeTypeMismatch)"
-                Passed = typecheck.IsNone
-                Counterexample = typecheck }
-              { Law = "a capability pipeline round-trips the wire"
-                Passed = roundtrip.IsNone
-                Counterexample = roundtrip }
-              { Law = "a pipeline node replays byte-identically via the Phase 27 capture seam"
-                Passed = replay.IsNone
-                Counterexample = replay } ]
+            LawKit.results [ typecheck; roundtrip; replay ]
 
     /// The capability-pipeline laws at a DOMAIN'S pipelines and registry (Phase 246).
     /// `capabilityPipelineLaws` beside it builds a fixed two-node pipeline over a fixed registry and
@@ -1675,11 +1293,20 @@ module internal SeamLaws =
     /// **Vacuity.** The default-deny arms are built per `Invoke` node, so a generator whose pipelines
     /// carry none builds nothing; the guard counts the `Invoke` nodes reached.
     let capabilityPipelineLawsWith (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable composes = None
-        let mutable roundtrip = None
-        let mutable keys = None
-        let mutable deny = None
+        let composes =
+            LawKit.LawCell "every pipeline the domain builds type-checks against its own registry"
+
+        let roundtrip = LawKit.LawCell "a domain pipeline round-trips the wire"
+
+        let keys =
+            LawKit.LawCell "no two nodes of a domain pipeline share an invocation key"
+
+        let deny =
+            LawKit.LawCell(
+                "default deny at the domain's pipelines (an unregistered capability and an undeclared argument are each refused by name)",
+                Some "built default-deny arm"
+            )
+
         let mutable invokeNodes = 0
 
         let absentCapability =
@@ -1693,28 +1320,27 @@ module internal SeamLaws =
 
         let strayArg = "__no_such_hole__"
 
-        for i in 0 .. iterations - 1 do
-            let p, r' = w.GenPipeline rng
-            rng <- r'
+        LawKit.run iterations seed (fun rng _ at ->
+            let p = rng.Draw w.GenPipeline
 
             (match CapabilityPipeline.decode (CapabilityPipeline.encode p) with
-             | Ok p2 when p2 = p -> ()
+             | Ok p2 when p2 = p -> roundtrip.Saw()
              | other ->
-                 if roundtrip.IsNone then
-                     roundtrip <-
-                         Some(sprintf "seed=%d iter=%d: the pipeline did not round-trip the wire (%A)" seed i other))
+                 roundtrip.Check(false, fun () -> at (sprintf "the pipeline did not round-trip the wire (%A)" other)))
 
             let nodeKeys = p.Nodes |> List.map CapabilityPipeline.nodeInvocationKey
 
-            if List.length (List.distinct nodeKeys) <> List.length nodeKeys && keys.IsNone then
-                keys <- Some(sprintf "seed=%d iter=%d: two nodes share an invocation key: %A" seed i nodeKeys)
+            keys.Check(
+                List.length (List.distinct nodeKeys) = List.length nodeKeys,
+                fun () -> at (sprintf "two nodes share an invocation key: %A" nodeKeys)
+            )
 
             match CapabilityPipeline.typeCheck w.PipelineRegistry p with
             | Error e ->
-                if composes.IsNone then
-                    composes <-
-                        Some(sprintf "seed=%d iter=%d: the pipeline does not compose at its registry: %A" seed i e)
+                composes.Check(false, fun () -> at (sprintf "the pipeline does not compose at its registry: %A" e))
             | Ok() ->
+                composes.Saw()
+
                 let replaceAt (k: int) (n: PipelineNode) =
                     { Nodes = p.Nodes |> List.mapi (fun j m -> if j = k then n else m) }
 
@@ -1730,55 +1356,40 @@ module internal SeamLaws =
                                 w.PipelineRegistry
                                 (replaceAt k (Invoke(nid, absentCapability, outT, args)))
                         with
-                        | Error(PipelineNoSuchCapability(c, _)) when c = absentCapability -> ()
+                        | Error(PipelineNoSuchCapability(c, _)) when c = absentCapability -> deny.Saw()
                         | other ->
-                            if deny.IsNone then
-                                deny <-
-                                    Some(
+                            deny.Check(
+                                false,
+                                fun () ->
+                                    at (
                                         sprintf
-                                            "seed=%d iter=%d: node %s naming an unregistered capability was not refused: %A"
-                                            seed
-                                            i
+                                            "node %s naming an unregistered capability was not refused: %A"
                                             nid
                                             other
                                     )
+                            )
 
                         match
                             CapabilityPipeline.typeCheck
                                 w.PipelineRegistry
                                 (replaceAt k (Invoke(nid, capId, outT, args @ [ strayArg, Literal "0" ])))
                         with
-                        | Error(PipelineUnknownArg(m, a)) when m = nid && a = strayArg -> ()
+                        | Error(PipelineUnknownArg(m, a)) when m = nid && a = strayArg -> deny.Saw()
                         | other ->
-                            if deny.IsNone then
-                                deny <-
-                                    Some(
-                                        sprintf
-                                            "seed=%d iter=%d: node %s binding an undeclared argument was not refused: %A"
-                                            seed
-                                            i
-                                            nid
-                                            other
-                                    ))
+                            deny.Check(
+                                false,
+                                fun () ->
+                                    at (
+                                        sprintf "node %s binding an undeclared argument was not refused: %A" nid other
+                                    )
+                            )))
 
-        [ { Law = "every pipeline the domain builds type-checks against its own registry"
-            Passed = composes.IsNone
-            Counterexample = composes }
-          { Law = "a domain pipeline round-trips the wire"
-            Passed = roundtrip.IsNone
-            Counterexample = roundtrip }
-          { Law = "no two nodes of a domain pipeline share an invocation key"
-            Passed = keys.IsNone
-            Counterexample = keys }
-          { Law =
-              "default deny at the domain's pipelines (an unregistered capability and an undeclared argument are each refused by name)"
-            Passed = deny.IsNone
-            Counterexample = deny }
-          SampleAdequacy.reached
-              "Conformance.capabilityPipelineLawsWith"
-              "built default-deny arm"
-              seed
-              [ "invoke node", invokeNodes ] ]
+        LawKit.results [ composes; roundtrip; keys; deny ]
+        @ [ SampleAdequacy.reached
+                "Conformance.capabilityPipelineLawsWith"
+                "built default-deny arm"
+                seed
+                [ "invoke node", invokeNodes ] ]
 
     // ---- incremental capability-pipeline evaluation (Phase 62) ----
     // The teeth on `CapabilityPipeline.evalFrom`: the incremental path re-invokes only the
@@ -1798,10 +1409,21 @@ module internal SeamLaws =
     ///  - **effect-honesty on the dirty path** — a clean node takes its prior value and is not re-invoked;
     ///    a dirty node is re-invoked and takes the fresh value (never a stale prior on the dirty path).
     let capabilityPipelineIncrementalLaws (seed: int) (iterations: int) : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable byteIdentical = None
-        let mutable minimal = None
-        let mutable honesty = None
+        let byteIdentical =
+            LawKit.LawCell "evalFrom is byte-identical to a full eval over the changed inputs (every change-set)"
+
+        let minimal =
+            LawKit.LawCell(
+                "evalFrom re-invokes exactly the downstream-of-change nodes (minimal reuse set)",
+                Some "node reuse"
+            )
+
+        let honesty =
+            LawKit.LawCell(
+                "a clean node reuses its prior value (not re-invoked); a dirty node re-invokes (effect-honesty)",
+                Some "node reuse"
+            )
+
         let mutable dirtyNodes = 0
         let mutable cleanNodes = 0
 
@@ -1830,13 +1452,12 @@ module internal SeamLaws =
 
                     Ok(sum + 1)
 
-        for i in 0 .. iterations - 1 do
-            let s1v0, r1 = ConfRng.intBelow 1000 rng
-            let s2v0, r2 = ConfRng.intBelow 1000 r1
-            let s1v1, r3 = ConfRng.intBelow 1000 r2
-            let s2v1, r4 = ConfRng.intBelow 1000 r3
-            let ck, r5 = ConfRng.intBelow 3 r4
-            rng <- r5
+        LawKit.run iterations seed (fun rng _ at ->
+            let s1v0 = rng.IntBelow 1000
+            let s2v0 = rng.IntBelow 1000
+            let s1v1 = rng.IntBelow 1000
+            let s2v1 = rng.IntBelow 1000
+            let ck = rng.IntBelow 3
 
             let sv0 = Map.ofList [ "s1", s1v0; "s2", s2v0 ]
 
@@ -1848,9 +1469,7 @@ module internal SeamLaws =
                 | _ -> Map.ofList [ "s1", s1v1; "s2", s2v1 ], Set.ofList [ "s1"; "s2" ]
 
             match CapabilityPipeline.eval (bodyWith sv0 (ResizeArray())) pipeline with
-            | Error e ->
-                if byteIdentical.IsNone then
-                    byteIdentical <- Some(sprintf "seed=%d iter=%d: prior eval errored: %A" seed i e)
+            | Error e -> byteIdentical.Check(false, fun () -> at (sprintf "prior eval errored: %A" e))
             | Ok prior ->
                 let fullInvoked = ResizeArray()
                 let incrInvoked = ResizeArray()
@@ -1860,24 +1479,19 @@ module internal SeamLaws =
                     CapabilityPipeline.evalFrom (bodyWith sv1 incrInvoked) prior changed pipeline
 
                 // byte-identical to a full eval over the changed inputs
-                if viaIncr <> viaFull && byteIdentical.IsNone then
-                    byteIdentical <-
-                        Some(
-                            sprintf
-                                "seed=%d iter=%d: evalFrom ≠ eval (changed=%A)\n  incr=%A\n  full=%A"
-                                seed
-                                i
-                                changed
-                                viaIncr
-                                viaFull
-                        )
+                byteIdentical.Check(
+                    (viaIncr = viaFull),
+                    fun () -> at (sprintf "evalFrom ≠ eval (changed=%A)\n  incr=%A\n  full=%A" changed viaIncr viaFull)
+                )
 
                 // minimal re-invocation: evalFrom re-invokes exactly the dirty set
                 let dirty = CapabilityPipeline.dirtySet changed pipeline
                 let reInvoked = Set.ofSeq incrInvoked
 
-                if reInvoked <> dirty && minimal.IsNone then
-                    minimal <- Some(sprintf "seed=%d iter=%d: re-invoked=%A ≠ dirtySet=%A" seed i reInvoked dirty)
+                minimal.Check(
+                    (reInvoked = dirty),
+                    fun () -> at (sprintf "re-invoked=%A ≠ dirtySet=%A" reInvoked dirty)
+                )
 
                 // effect-honesty: clean nodes take their prior value & are not re-invoked; dirty nodes are.
                 match viaIncr with
@@ -1911,23 +1525,13 @@ module internal SeamLaws =
                                 None)
 
                     match fault with
-                    | Some f when honesty.IsNone -> honesty <- Some(sprintf "seed=%d iter=%d: %s" seed i f)
-                    | _ -> ()
-                | Error e ->
-                    if honesty.IsNone then
-                        honesty <- Some(sprintf "seed=%d iter=%d: evalFrom errored: %A" seed i e)
+                    | Some f -> honesty.Check(false, fun () -> at f)
+                    | None -> honesty.Saw()
+                | Error e -> honesty.Check(false, fun () -> at (sprintf "evalFrom errored: %A" e)))
 
-        [ { Law = "evalFrom is byte-identical to a full eval over the changed inputs (every change-set)"
-            Passed = byteIdentical.IsNone
-            Counterexample = byteIdentical }
-          { Law = "evalFrom re-invokes exactly the downstream-of-change nodes (minimal reuse set)"
-            Passed = minimal.IsNone
-            Counterexample = minimal }
-          { Law = "a clean node reuses its prior value (not re-invoked); a dirty node re-invokes (effect-honesty)"
-            Passed = honesty.IsNone
-            Counterexample = honesty }
-          SampleAdequacy.reached
-              "capabilityPipelineIncrementalLaws"
-              "node reuse"
-              seed
-              [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
+        LawKit.results [ byteIdentical; minimal; honesty ]
+        @ [ SampleAdequacy.reached
+                "Conformance.capabilityPipelineIncrementalLaws"
+                "node reuse"
+                seed
+                [ "dirty node", dirtyNodes; "clean node", cleanNodes ] ]
