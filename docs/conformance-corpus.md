@@ -8,7 +8,7 @@ gate.
 | Question | Who answers it | Where |
 |---|---|---|
 | **Is the artefact the suite runs Core's own?** | the default suite, over the committed `conformance/` directory in THIS checkout — no other repository is read | `tests/Fuaran.Core.Tests/LawVectorTests.fs`, `ApplyVectorTests.fs`, the `apply/` preservation differential in `ProofOracleTests.fs` |
-| **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (`roadmapctl copies <workspace-root>`, warn-first, on every estate sweep); and the in-suite legs — the `laws/` one runs whenever a corpus is present and REPORTS, failing where it is asked for (CI, on every push); the `apply/` one is still opt-in | `copies.json`; the two `… is fresh …` legs in `LawVectorTests.fs` / `ApplyVectorTests.fs` |
+| **Are the corpus copies fresh?** | the workspace copy registry, from `copies.json` at this repository's root (warn-first, on every workspace sweep); and the in-suite legs — the `laws/` one runs whenever a corpus is present and REPORTS, failing where it is asked for (CI, on every push); the `apply/` one is still opt-in | `copies.json`; the two `… is fresh …` legs in `LawVectorTests.fs` / `ApplyVectorTests.fs` |
 | **Are the hosts certified?** | each host's own certification kit, run in that host's repository against the corpus at the paths it has always read; `apply/manifest.json` records per-host adoption | not this repository's question — see [Adoption](#adoption) |
 
 ## What this repository owns
@@ -173,7 +173,7 @@ which is exactly the set of reads that is NOT about Core's own vectors:
 corpus's PRESENCE: a corpus checked out beside this one is compared whether or not the leg was asked
 for, and `FUARAN_CORE_CORPUS_FRESHNESS` decides only whether a finding FAILS the run. With no corpus
 anywhere the leg says **NOT CHECKED**, by name — never a quiet pass, which is the same rule that
-governs an unreachable sibling copy elsewhere in the estate: a single-repository checkout has no
+governs an unreachable sibling copy elsewhere in the workspace: a single-repository checkout has no
 siblings at all, and "nothing to check" must not read as "everything checked". A machine holding only
 this repository is still green.
 

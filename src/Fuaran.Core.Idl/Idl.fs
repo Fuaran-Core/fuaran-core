@@ -519,7 +519,7 @@ and IdlValue =
     /// domain in [[Idl.NodeFields]].
     ///
     /// **Why a sibling case rather than a fourth slot on [[VNode]].** Widening
-    /// `VNode`'s arity would break every authored construction site in the estate
+    /// `VNode`'s arity would break every authored construction site downstream
     /// — the vocabulary fixtures included — for a slot that is empty in almost all
     /// of them, so the envelope arrived as its own case and `VNode` stayed the
     /// envelope-free form it always was. Producers emit `VNode` when the envelope

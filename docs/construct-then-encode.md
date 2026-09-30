@@ -15,7 +15,7 @@ constructors are not on that path.
 The gap is not hypothetical. In the `@fuaran-ui/ui` 0.26.0 release (2026-09-11, recorded as
 fuaran#1661) one field widened in memory to a richer carrier. The decoder-encoder suite stayed green
 over thousands of vectors — every widened value encoded and decoded perfectly — and the only
-author-direction consumer in the estate broke on the pin bump, because what an author now *built*
+author-direction consumer broke on the pin bump, because what an author now *built*
 was not what the corpus *said*.
 
 So this family runs the corpus **through** the authoring surface: decode a document, rebuild it with

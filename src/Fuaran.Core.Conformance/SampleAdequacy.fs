@@ -243,8 +243,8 @@ module SampleAdequacy =
     //
     //  Everything above asserts adequacy INSIDE a run and then discards what it measured. A
     //  consumer's conformance census therefore renders the same "adopted" cell for a family that
-    //  exercised twelve hundred cases and one that exercised none, and the estate's own memory
-    //  names that class twice already. What follows is the measurement leaving the run: a family's
+    //  exercised twelve hundred cases and one that exercised none, and the maintainers' own records
+    //  name that class twice already. What follows is the measurement leaving the run: a family's
     //  results and the iterations they were driven over, read through the family's OWN census
     //  class, into one record a census can render as a column.
     //

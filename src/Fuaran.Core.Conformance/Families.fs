@@ -574,7 +574,7 @@ module Families =
     /// `refusal`, 3 from Phase 196's `cases` and 2 from Phase 194's `reason`. Each bump is free and
     /// therefore taken: a search of the workspace found no reader of this file outside this
     /// repository's own suite, so nothing keys on the old number, and a shape that changes under an
-    /// unmoved stamp is the drift class this estate keeps paying for elsewhere. Members are written
+    /// unmoved stamp is the drift class consumers keep paying for elsewhere. Members are written
     /// in that order and the array is sorted, so the rendering is byte-stable across runs and a diff
     /// shows only what moved. Two spaces of indent, `\n` line endings, and a trailing newline.
     ///

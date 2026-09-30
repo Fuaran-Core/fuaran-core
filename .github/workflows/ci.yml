@@ -51,6 +51,12 @@ jobs:
       # renamed, the suite says which directory it was told to read instead of reporting a
       # search that came up empty. It is also the form docs/conformance-corpus.md hands a
       # contributor whose clone lives somewhere else.
+      #
+      # Two suite families run here with NO environment at all, by design (Phase 294): the proof
+      # coverage scheduling clause reads its open-phase list from the committed
+      # proofs/open-phases.json, and the publication-boundary sweep reads the committed
+      # tests/Fuaran.Core.Tests/publication-boundary.json over every tracked file. A gate whose
+      # verdict depended on a variable this job never set would be a clause that cannot be red here.
       - name: Verify (./verify.ps1)
         shell: pwsh
         env:

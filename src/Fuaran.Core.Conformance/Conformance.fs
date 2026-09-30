@@ -8047,7 +8047,7 @@ module Conformance =
     // The gap is not hypothetical. In the `@fuaran-ui/ui` 0.26.0 release (2026-09-11, recorded as
     // fuaran#1661) one field widened in memory to a richer shape; the decoder-encoder suite stayed
     // green over thousands of vectors, because nothing in it ever built a value the way an author
-    // builds one - and the only author-direction consumer in the estate broke on the pin bump.
+    // builds one - and the only author-direction consumer broke on the pin bump.
     // A round-trip law cannot see that by construction: it starts from bytes and ends at bytes, and
     // the authoring surface is not on that path.
     //

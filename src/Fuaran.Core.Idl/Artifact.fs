@@ -532,7 +532,7 @@ module Artifact =
     /// The same indented, canonically-ordered layout [[render]] uses, over an arbitrary
     /// `JVal`. Exposed so a SIBLING document of the vocabulary — the declared-support
     /// record beside it — lays out identically without a second stringifier appearing in
-    /// the estate, which is the drift the module header names for `TJson`'s passthrough.
+    /// any consumer, which is the drift the module header names for `TJson`'s passthrough.
     let renderJson (v: JVal) : string = indent 0 v + "\n"
 
     // -----------------------------------------------------------------------
@@ -990,8 +990,8 @@ module Artifact =
     /// already-published bytes MEAN, silently and with a green build. The flip is safe
     /// now and only now: Phase 179 made [[json]] emit the block for every policy,
     /// `fuaran#1755` re-rendered `fuaran-dotnet/src/Fuaran.UI.Idl/idl.json` and the
-    /// shared cross-host corpus, and `roadmapctl copies` reports both host snapshots
-    /// of that corpus in step. So no artifact the estate publishes relies on this
+    /// shared cross-host corpus, and the workspace copy registry reports both host snapshots
+    /// of that corpus in step. So no artifact a consumer publishes relies on this
     /// answer, and one that did — rendered before Phase 179, carrying no block —
     /// decodes to a vocabulary that refuses to harden rather than one that hardens as
     /// a domain it never named.

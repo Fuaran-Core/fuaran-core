@@ -4,6 +4,14 @@ name: publish-packages
 # public, no-auth-restore channel. Bump <Version> in Directory.Build.props,
 # commit, then tag vX.Y.Z and push the tag to trigger this workflow.
 # Re-runs of the same tag are idempotent (--skip-duplicate).
+#
+# Phase 294 — a publish is the repository's own gate plus a tag that names what is packed:
+#   1. the ref must be a tag (a workflow_dispatch run on a branch is refused, because no version
+#      can be checked against a branch), and the tag must be `v<Version>` for the <Version> in
+#      Directory.Build.props — a mistyped tag packs the standing version under the wrong name;
+#   2. `verify.ps1` runs before anything is packed, with the same inputs the ci workflow gives it.
+#      The proof leg stays in ci (it needs the pinned prover on Windows); publishing a commit
+#      whose ci run is red is the operator's call to not make.
 on:
   push:
     tags: ['v*']
@@ -19,10 +27,46 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      # Full history and tags: the package-roster checks in verify.ps1 read the repository's
+      # release tags and refuse an empty list (see ci.yml).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Refuse a ref that is not the tag for <Version>
+        shell: pwsh
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REF_TYPE -ne 'tag') {
+              throw "publish runs on a tag; this run is on $($env:REF_TYPE) '$($env:REF_NAME)'. Push vX.Y.Z, or pick that tag when dispatching."
+          }
+          $node = Select-Xml -Path Directory.Build.props -XPath '//PropertyGroup/Version' | Select-Object -First 1
+          if ($null -eq $node) { throw 'Directory.Build.props declares no <Version>.' }
+          $version = $node.Node.InnerText.Trim()
+          $expected = "v$version"
+          if ($env:REF_NAME -ne $expected) {
+              throw "tag '$($env:REF_NAME)' does not equal the standing <Version> ($version): expected '$expected'. Nothing was packed."
+          }
+          Write-Host "tag $($env:REF_NAME) names <Version> $version"
+      # The wire-format conformance corpus is a build input of the gate's corpus leg, which is
+      # asked for by name exactly as ci.yml asks for it (an absent corpus fails, never skips).
+      - name: Check out the wire-format conformance corpus
+        uses: actions/checkout@v4
+        with:
+          repository: fuaran-ui/fuaran-ui-specification
+          path: wire-format-fixtures
+      - name: Verify (./verify.ps1)
+        shell: pwsh
+        env:
+          FUARAN_CORE_CORPUS_FRESHNESS: '1'
+          FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
+        run: ./verify.ps1
       - name: Pack (all packable src projects)
         run: dotnet pack Fuaran.Core.slnx -c Release -o ${{ runner.temp }}/nupkgs
       # Auth is Trusted Publishing (OIDC): a policy on nuget.org (repo owner /
@@ -37,6 +81,14 @@ jobs:
       - name: Push to nuget.org
         run: >
           dotnet nuget push "${{ runner.temp }}/nupkgs/*.nupkg"
+          --source https://api.nuget.org/v3/index.json
+          --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          --skip-duplicate
+      # The symbol packages (snupkg) travel beside the packages so a consumer can step into Core
+      # from the registry's symbol server. A separate push: the glob above matches .nupkg only.
+      - name: Push symbols to nuget.org
+        run: >
+          dotnet nuget push "${{ runner.temp }}/nupkgs/*.snupkg"
           --source https://api.nuget.org/v3/index.json
           --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           --skip-duplicate

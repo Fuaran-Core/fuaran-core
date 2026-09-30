@@ -4,10 +4,9 @@ obj/
 .vs/
 .idea/
 artifacts/
-# Fable-compile smoke gate (Phase 54) — the emitted JS + Fable cache are throwaway (the compile is the gate).
-# Both spellings: the gate emitted to out/ when this entry was written and emits to output/ now.
-tests/fable-smoke/out/
-tests/fable-smoke/output/
+# A contributor who compiles Core under Fable in place leaves the compiler's cache behind. No gate here
+# does (Phase 217 moved the compile to the consumer that owns a Fable toolchain, and with it the
+# `tests/fable-smoke/` and `tests/hash-parity-probe/` output paths this file used to ignore).
 fable_modules/
 .fable/
 
@@ -16,15 +15,6 @@ fable_modules/
 # checks it out, and the simplest place for a contributor to clone it. Ignored so that
 # cloning it there never makes the tree look dirty.
 /wire-format-fixtures/
-
-# The parity probe (tests/hash-parity-probe/) emits throwaway JS, same as the Fable smoke gate.
-tests/hash-parity-probe/out/
-tests/hash-parity-probe/probe-*.txt
-
-# The Fable value-parity leg (tests/fable-smoke/parity.ps1) emits its own throwaway JS, and
-# -KeepOutput writes the two captured runs beside it for inspection.
-tests/fable-smoke/out-parity/
-tests/fable-smoke/parity-*.txt
 
 # Phase 131 — the proof leg (proofs/check.ps1) installs the pinned F* release beside the model and
 # keeps its checked-module cache and fresh extraction under obj/; neither is source.

@@ -161,7 +161,7 @@ let apply_never_container_or_domain (o:op) (t:tree)
 
 (* The state a caller holds after asking for `o` — the result when it was accepted, the input when
    it was not. F#: `match Ops.apply w idw op root with Ok t -> t | Error _ -> root`, which is what
-   every caller in the estate writes. *)
+   every downstream caller writes. *)
 let state_after (o:op) (t:tree) : Tot tree =
   match apply o t with
   | Ok t' -> t'

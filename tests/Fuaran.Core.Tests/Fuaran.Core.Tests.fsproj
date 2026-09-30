@@ -266,6 +266,13 @@
          Snapshots.fs, so it follows all four; appended at the end of the list (append-only
          registration). -->
     <Compile Include="WireSurfaceTests.fs" />
+    <!-- Phase 294 — the publication boundary swept: no tracked file, source comment to workflow,
+         names anything a reader outside this public repository could not look up. The vocabulary is
+         DATA (publication-boundary.json beside this project), so a change to what is banned is a
+         change to a list. Reads Snapshots.fs for the repository root and ChildProcess.fs to ask git
+         which files are tracked, and no other test module; appended at the end of the list
+         (append-only registration). -->
+    <Compile Include="PublicationBoundaryTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

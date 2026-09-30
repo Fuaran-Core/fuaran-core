@@ -1,0 +1,86 @@
+{
+  "kind": "publicationBoundary",
+  "$comment": "The vocabulary no tracked file of this repository may carry, swept by PublicationBoundaryTests. This repository is public: a reader outside it can look up a public package, a public specification and a phase number, and cannot look up anything else, so a reference to a private neighbour (a project, a tool, a script, the operator command surface, the word for the wider ecosystem they live in) tells them a private layer exists and what it is called. Every rule is a case-insensitive .NET regular expression applied to one line at a time; the pattern is word-bounded wherever the term has an ordinary-English collision, because a sweep that cries wolf gets switched off. `example` is a line the rule must flag and is what the suite's go-red probes; a rule whose pattern does not match its own example fails the suite, so a rule can never be edited into silence. `carried` lists the knowingly-held exceptions: an exception is exempt only where its FILE and its TEXT both match, and one that matches nothing fails the suite, so an exception cannot outlive the line it was written for. The suite prints every carried exception on every run, including a green one. Phase citations (`Phase 294`, `fuaran-core#294`) are deliberately NOT banned: a number is not vocabulary, and it is what ties a change to its record. This file is the one tracked file the sweep skips, because it necessarily spells out every rule.",
+  "rules": [
+    {
+      "id": "strategy-project",
+      "pattern": "\\bDiametrical\\b(?! Ltd\\b)",
+      "say": "names a private strategy project; only the copyright holder's registered name (which the licence and the package metadata must carry) is held",
+      "example": "see the Diametrical strategy documents"
+    },
+    {
+      "id": "product-family",
+      "pattern": "\\bToolUp\\b",
+      "say": "names a product family outside this repository",
+      "example": "consumed by the ToolUp platform"
+    },
+    {
+      "id": "private-plane",
+      "pattern": "\\bFuaran[-.](Build|Roadmap|Dispatch|Judge|Witness|App)\\b",
+      "say": "names a component of a wider private system",
+      "example": "driven by Fuaran-Dispatch"
+    },
+    {
+      "id": "private-tool",
+      "pattern": "\\broadmapctl\\b|\\bfuaran-build\\b",
+      "say": "names a private tool; say \"the workspace copy registry\" or describe the check",
+      "example": "then run roadmapctl copies"
+    },
+    {
+      "id": "private-roadmap-side",
+      "pattern": "\\broadmap-engine\\b",
+      "say": "names a private roadmap side; cite the change by its own number, or say \"a downstream tooling phase\"",
+      "example": "tracked as roadmap-engine#1"
+    },
+    {
+      "id": "operator-commands",
+      "pattern": "\\b(?-i:Refine Roadmap|Accept suggestions|Suggest features|Prompt next|Make it so|Sync All)\\b",
+      "say": "names an operator command surface this repository is not driven by (matched case-sensitively: these are capitalised names, and the plain English phrase is not one)",
+      "example": "run Refine Roadmap first"
+    },
+    {
+      "id": "private-project",
+      "pattern": "\\bcookbook\\b|\\beval-suite\\b|\\borchestrator-demo\\b|Fuaran\\.UI\\.Orchestration",
+      "say": "names a private neighbouring project or package",
+      "example": "measured by the cookbook"
+    },
+    {
+      "id": "work-scheduling",
+      "pattern": "\\bcampaigns?\\b|\\bdispatch (take|fold|gate)\\b",
+      "say": "names the private work-scheduling vocabulary this repository is not driven by",
+      "example": "landed in a campaign"
+    },
+    {
+      "id": "private-script",
+      "pattern": "\\bpack-all\\.ps1\\b|\\binit\\.ps1\\b|\\bpull-all\\.ps1\\b|\\bpush-all\\.ps1\\b|\\bcheck-roadmaps\\.ps1\\b",
+      "say": "names a private build script; describe what it does instead",
+      "example": "run pack-all.ps1"
+    },
+    {
+      "id": "wider-ecosystem",
+      "pattern": "\\bsibling repos?\\b|\\bprivate siblings?\\b|\\bestates?\\b",
+      "say": "implies a wider private ecosystem; name the public artefact, or say \"a downstream consumer\"",
+      "example": "registered on the estate's copy registry"
+    },
+    {
+      "id": "workspace-path",
+      "pattern": "\\bFuaran/Fuaran-[A-Za-z]",
+      "say": "spells a path inside a private workspace; a public file addresses a checkout by its own name (\"the wire-format-fixtures checkout\")",
+      "example": "cd Fuaran/Fuaran-Core"
+    }
+  ],
+  "carried": [
+    {
+      "rule": "workspace-path",
+      "file": "copies.json",
+      "text": "\"Fuaran/Fuaran-UI/wire-format-fixtures/",
+      "why": "a copy registry record names each consumer copy relative to the WORKSPACE root, which is the only root that can address a file in a different repository; the registry defines the field that way and records a parent-relative spelling as the worse alternative (it bakes the producer's own depth into every record), so the path cannot be rewritten here without either breaking or degrading the freshness sweep it exists for"
+    },
+    {
+      "rule": "workspace-path",
+      "file": "version-derives.json",
+      "text": "\"Fuaran/Fuaran-UI/wire-format-fixtures:",
+      "why": "the version ledger names where a derived file's published copy lives as '<repo>:<path>', both relative to the workspace root and inside it, and refuses any other form; same constraint as copies.json"
+    }
+  ]
+}

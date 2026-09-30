@@ -1321,7 +1321,7 @@ for the interval between the Core push and the corpus push, because two reposito
 permission sets cannot be pushed simultaneously.
 
 **And option (A) remains declined, from earlier.** The 2026-09-15 bundle offered a stamp-INSENSITIVE
-fingerprint — teach the workspace copy registry to ignore `kitVersion`, estate-wide — and the
+fingerprint — teach the workspace copy registry to ignore `kitVersion` for every producer — and the
 operator declined it. It would buy the same quiet by making the registry structurally unable to see a
 stamp move on any copy of any file, which is a wider blast radius than the problem and removes the
 evidence rather than the noise. Phase 216 leaves the registry alone and works on the Core side of the
@@ -1353,7 +1353,7 @@ made). So the DISCOVERY moved:
   in step, and it does.
 
 **The leg's equality is unchanged and is still the registry's.** The reading refines
-`roadmapctl copies`' `fingerprint` rather than inventing a neighbouring notion of freshness: a
+the copy registry's `fingerprint` rather than inventing a neighbouring notion of freshness: a
 reading is taken only once the fingerprints have already disagreed, and it is taken from the
 registry's own normalisation. Doing that surfaced a defect in the normalisation itself, fixed here —
 `StartsWith(string)` compares by the current culture, under which U+FEFF is an IGNORABLE character,
@@ -1510,7 +1510,7 @@ other four clauses already refuse the pair. Bounds that can only inflate are wha
 conclusive. The instrument is `proofs/kit/measure-relocation-halts.ps1`; it takes ledger paths and a
 projection map as arguments and reads committed bytes only, so it runs offline against anything.
 
-**Population.** 72 recorded op-stream ledger files from the maintainers' own working estate — eight
+**Population.** 72 recorded op-stream ledger files from the maintainers' own working repositories — eight
 independent stores, their concurrent write lanes, their single-chain bases and their frozen
 predecessor archives. 55 carried ops and every op in all 55 was classified; the other 17 are signing
 and approval artefacts holding no ops. No line failed to parse. Each op was classified through the
@@ -1520,7 +1520,7 @@ exhaustive `'Op -> Footprint` match.
 **Result. T = 20,649,689 · C = 0 · M = 0.** Of 16,780 classified ops: 230 structural writes, **zero
 move-shaped relocations, and 22 remove-shaped ones — all 22 in frozen predecessor archives that are
 single linear chains with no concurrency at all.** So the pinned clause is not merely rarely decisive
-in this estate; it is VACUOUS. Every op on every live lane has an empty `UnknownParentWrites`, which
+in these repositories; it is VACUOUS. Every op on every live lane has an empty `UnknownParentWrites`, which
 makes `independent`'s last two clauses vacuously true, so no recorded fold was ever refused by them.
 
 **The falsifier, stated before the run, and the guards that answer it.** A zero is worthless if the
@@ -1544,7 +1544,7 @@ A fourth check, not planned and worth more than the three that were: the instrum
 ops reconcile exactly with an independent text search for that op's wire kind across the same trees —
 two unrelated methods, the same 22, in the same two files.
 
-### Why the answer is structural, and will not drift with estate growth
+### Why the answer is structural, and will not drift as the set of consumers grows
 
 A count of zero invites "not yet". This one is a property of the projection rather than of the sample.
 The consuming host's footprint projection has **exactly one arm** producing a non-empty
@@ -1677,11 +1677,11 @@ of the diff by the person who wrote it.
 
 **The gate is on the CLASSIFICATION, not on the class.** Additive or breaking, a classified move
 passes. This is the 2026-08-04 record-widening dispensation implemented rather than restated: the
-estate permits widening, so a gate that refused a breaking class would be enforcing a rule nobody
+repository's own policy permits widening, so a gate that refused a breaking class would be enforcing a rule nobody
 made. What it refuses is a surface that moved while its baseline stood still — the state in which
 no reviewer can apply the dispensation, because nothing says what there is to permit.
 
-**Rejected: a removal-only differ, which is the obvious reuse.** The shape already in the estate
+**Rejected: a removal-only differ, which is the obvious reuse.** The shape already in use elsewhere
 renders a flat token list and calls a removed token breaking and an added one additive. Half of
 what motivates this phase is invisible to it. Adding a case to a closed union REMOVES NOTHING — it
 emits a factory, an `IsCase` property and a `Tags` literal — so the reading is "ordinary growth",
@@ -1947,12 +1947,12 @@ empty) and calls the checked entry point; every existing caller is untouched, an
 signature and behaviour are unchanged.
 
 **Why the flip was stopped: the measurement refuted the premise that licensed it.** The phase's
-shard stated it plainly — "every vocabulary author in the estate that calls the hardener declares
+shard stated it plainly — "every vocabulary author in [the consuming repositories] that calls the hardener declares
 `Harden` explicitly — the UI tier does since 116 — so the change is breaking on paper and lands on
 no consumer". Measured first, as the shard's own first task required, that is false in the two
 places that decide it.
 
-**The estate measurement** (`grep -rn "Trust.harden\|Harden = \|HardenPolicy"` over `Fuaran/`,
+**The consumer measurement** (`grep -rn "Trust.harden\|Harden = \|HardenPolicy"` over `Fuaran/`,
 `*.fs`, excluding `bin/`, `obj/` and worktrees; 2026-09-15, `Fuaran.Core` at `<Version>` 0.24.0):
 
 | Repo | Site | Policy declared |
@@ -1962,10 +1962,10 @@ places that decide it.
 | `Fuaran-Core` | `tests/fable-smoke/Program.fs:324` | **`HardenPolicy.Default`** |
 | `Fuaran-Core` | 9 test vocabularies — `IdlAnnotationTests:71`, `IdlCertificationTests:253`, `IdlDiffTests:45`, `IdlEnumWireTests:56`, `IdlKindAnnotationTests:86`, `IdlStabilityClassTests:82`, `IdlWireShapeTests:44`, `ScoreDomainSpike:304`, `SecondDomainSpike:199` | **`HardenPolicy.Default`** |
 | `Fuaran-Core` | `tests/Fuaran.Core.Tests/IdlFStarTargetTests.fs:58` | `{ HardenPolicy.Default with TransparentUnions = [] }` — seven of eight members from the default |
-| `Fuaran-Core` | `tests/Fuaran.Core.Tests/ReferenceIdl.fs:202` | **its own, every member** — the only site in the estate that declares the tokens |
+| `Fuaran-Core` | `tests/Fuaran.Core.Tests/ReferenceIdl.fs:202` | **its own, every member** — the only site among the measured repositories that declares the tokens |
 
 Thirteen declaration sites take their tokens from the default; one declares its own. `Trust.harden`
-itself has exactly one caller in the estate — `IdlCertificationTests`, over `refIdl`, the one
+itself has exactly one caller among the measured repositories — `IdlCertificationTests`, over `refIdl`, the one
 vocabulary that would have survived the flip — which is precisely why a caller census alone reads
 as "lands on no consumer" and is the wrong census to take.
 
@@ -1973,7 +1973,7 @@ as "lands on no consumer" and is the wrong census to take.
 one.** `Artifact.render` omits the `harden` block exactly when `idl.Harden = HardenPolicy.Default`
 (`Artifact.fs:497`), and `Artifact.readHarden` resolves an absent block through `Default`
 (`Artifact.fs:971`, under a doc comment promising exactly that to every artifact written before the
-tokens were declarable). Both published `idl.json` artifacts in the estate —
+tokens were declarable). Both published `idl.json` artifacts —
 `fuaran-dotnet/src/Fuaran.UI.Idl/idl.json` and the **shared cross-host corpus**
 `wire-format-fixtures/idl.json` — carry no `harden` key. Emptying or removing `Default` therefore
 does not merely break a compile that could be fixed: it changes what already-published bytes MEAN,
@@ -2035,13 +2035,13 @@ session reaching for the flip should meet first.
 **CLOSED 2026-09-23 (Phase 180) — the route was walked and step two is taken.** The gate this entry
 set is met and was checked rather than assumed: `fuaran#1755` shipped at `bb10065`, both published
 `idl.json` artifacts carry an explicit `harden` block (line 437 of each, byte-identical to one
-another), and `roadmapctl copies` reports the shared corpus and both bundled host snapshots of it
+another), and the workspace copy registry reports the shared corpus and both bundled host snapshots of it
 `ok`. So `HardenPolicy.Default` is deleted, `Artifact.readHarden` resolves an absent block as
 `Undeclared`, and `Trust.harden` is the checked entry point — with `hardenOrRefuse` kept as its
 alias, because it is the name every caller written between 178 and 180 uses and the two now mean the
 same thing. Shipped on the `0.30.0` slot, class BREAKING, `STABILITY.md` carries the entry.
 
-**What the walk found that this entry's own measurement did not.** D40's estate grep listed thirteen
+**What the walk found that this entry's own measurement did not.** D40's consumer grep listed thirteen
 `HardenPolicy.Default` DECLARATION sites, and they were all thirteen. What it could not list is a
 CONSUMER of the default's meaning that never names the member: `Diff`'s artifact snapshot carried a
 literal second copy of the five tokens for its absent-block case, so retiring the reader answer
@@ -2067,7 +2067,7 @@ and the `apply/` pair — are committed HERE, under `conformance/` at the reposi
 default suite certifies the committed files: the oracle question (is every vector still true of this
 evaluator / engine?) and the freshness question (is the file what this kit renders?) are both asked
 of this checkout and no other. The shared wire-format corpus carries a **declared copy** of each,
-named in this repository's `copies.json` on the estate's copy registry (`roadmapctl copies`,
+named in this repository's `copies.json` on the workspace copy registry (
 `check: fingerprint`, `regen:` the exporter pointed at the corpus). The exporters default to
 `conformance/` and take a directory only to refresh the copy. Nothing moved OUT of the corpus: the
 hosts read `laws/` and `apply/` at the same paths with the same bytes — a copy is what they were
@@ -2107,7 +2107,7 @@ the copy's own freshness question, named with its one-line remedy, instead of re
 phase's gate days later. A leg that compared the copy modulo the stamp would be a fuzzy match, which
 the registry's own definition refuses; the honest report is "the copy is stale", because it is.
 
-**Why the registry rather than a bespoke freshness test.** The estate already has one answer to
+**Why the registry rather than a bespoke freshness test.** The workspace already has one answer to
 "has a generated cross-repo copy drifted from its source" — `copies.json` and the `copies` sweep,
 warn-first, offline, quoting the regenerating command verbatim — and the corpus's own `copies.json`
 already declares the ts/py bundled snapshots on it. A second mechanism would be the reinvention the
@@ -2290,7 +2290,7 @@ entry predicted. What was prose is now a theorem.
 **Rejected: widening `Footprint` to carry the discriminator.** A fifth address kind naming the
 relocation's kind, or a destroyed-subtree set, would let the clause split — and both are breaking
 changes to a record every consumer reads, taken on speculation about how much fold availability the
-move half actually buys. The estate has no measurement of that, and this phase's scope excluded the
+move half actually buys. There is no measurement of that, and this phase's scope excluded the
 record by charter. It stays available, priced, and unchosen; the price is recorded in STABILITY.md's
 0.24.0 entry so the next attempt starts from it rather than from the beginning.
 
@@ -2837,7 +2837,7 @@ different function into the same type, and they are not on that path — the law
 ends at bytes. So a field that widens in memory to a richer carrier keeps the suite green over
 thousands of vectors while breaking every program that BUILDS a value. That is a measured event
 rather than a hazard: the `@fuaran-ui/ui` 0.26.0 release of 2026-09-11 (fuaran#1661), where the only
-author-direction consumer in the estate broke on the pin bump against a fully green corpus. Rule of
+author-direction consumer broke on the pin bump against a fully green corpus. Rule of
 three is met three times over — the TypeScript builders, the F# smart constructors and the Documents
 builders are three authoring surfaces over three witnesses, and none of them was certified this way.
 
@@ -3001,7 +3001,7 @@ the verb. D19's contract is untouched: every result still equals `DataFrame.eval
 over the same source; the widening is the additive reclassification `STABILITY.md` already declared.
 
 **The gate D20 set was WAIVED for these two classes by operator decision, not met.** D20's rule is
-that a class is widened only after a fixture records what it costs, and the estate corpus still
+that a class is widened only after a fixture records what it costs, and the shared corpus still
 records no window or join footprint. The waiver's reasoning is that the consumer is not
 hypothetical — the UI tier's live-transform grids are ranked and running-total columns and a live
 table joined to a static lookup — and that the corpus vectors will be recorded from that consumer
@@ -3188,7 +3188,7 @@ walked frame rather than from a cache.
 **The saving is not in the sorting, and saying so is the point.** A sort evaluates no expression, so
 it contributes nothing to `rowsEvaluated`, exactly as a `GroupBy` contributes none. What the widening
 buys is that the steps BEFORE the sort stop re-evaluating every row — which is the whole cost a
-declined pipeline was paying. Measured on the estate's recompute fixture family: a filter-then-sort
+declined pipeline was paying. Measured on the shared recompute fixture family: a filter-then-sort
 pipeline over six rows with one cell edited falls from six row-evaluations to one. The footprint
 vocabulary therefore gains no case; a sort-bearing row-local pipeline reports `RowsRecomputed`.
 
@@ -3203,7 +3203,7 @@ moved". A merge that skipped the check answers a delta that named no row with a 
 order, and nothing in the delta would have said so.
 
 **A class is widened only after a fixture records what it costs, and `Window` is the standing case.**
-The estate's `incremental-recompute` fixture family records a footprint for the declined sort and none
+The shared `incremental-recompute` fixture family records a footprint for the declined sort and none
 for a window, so `Window` stays `StepNotRowLocal "window"` — not because a bounded frame is
 unanswerable, but because widening it would be an unmeasured claim. The rule is the phase's own gate
 and it is kept as a decision: measure, then widen. Two vectors of that family are vendored under
@@ -3276,7 +3276,7 @@ that cannot key the source degrades to a correct full evaluation rather than fai
 `Fuaran.Core.Footprint` (the op-script address set from the arbitration work). Two same-named types
 in one namespace across two packages is a collision for any consumer that opens both, and the
 compiler found it the moment the conformance project referenced both — which is the argument for
-keeping the estate's law kit referencing every package rather than only the ones it tests.
+keeping the law kit referencing every package rather than only the ones it tests.
 
 ## 2026-08-21 — D18: the column layer's delta is a monoid with four row states, and identity is a per-call witness
 
@@ -3338,7 +3338,7 @@ else.
 
 **The reason is portability, and it was measurable rather than aesthetic.** `Fuaran.Core.Idl` was the
 one project under `src/` absent from `tests/fable-smoke`, so "Core is Fable-clean on encode and
-decode" had an exception nobody had proven either way — and the estate's browser hosts are Fable. The
+decode" had an exception nobody had proven either way — and the downstream browser hosts are Fable. The
 obstruction was entirely emitter-side: one `CultureInfo.InvariantCulture` and two `StringBuilder`s,
 all three serving the TypeScript source backend. The model, the codec, the sampler and `Sanitize`
 touch none of it. Splitting therefore turned an unprovable claim into a gated one by moving the
@@ -3420,7 +3420,7 @@ corpus, and the parity probe carries a column per implementation.
 **Why the probe covers every implementation rather than the canonical one.** This is the general
 lesson, not a detail of this change. A probe that samples the function you were thinking about will
 report green for the reason you expected while the copy nobody was thinking about stays broken —
-which is what the estate's own audit found here, hours after the canonical fix was written and
+which is what an audit of the downstream consumers found here, hours after the canonical fix was written and
 believed complete. Going red was verified per implementation, not once: perturbing `OpStream`'s copy
 alone turns exactly its column red and leaves the other three untouched.
 
@@ -3473,7 +3473,7 @@ that a silent fallback is caught by shape rather than by review.
 **`fnv1a` moved file and did not change.** The `Hash` module now lives in its own `Hash.fs` rather
 than at the head of `Tree.fs`, because the digest is consumed across the spine and by domains that
 never touch a tree. `fnv1a` and `foldSep` are byte-identical through the move — pinned by their own
-vectors in the suite, since every stored content hash in the estate folds through them.
+vectors in the suite, since every stored content hash downstream folds through them.
 
 ## 2026-08-20 — D14: the IDL engine ships; a vocabulary does not
 

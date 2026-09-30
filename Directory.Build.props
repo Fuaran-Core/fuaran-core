@@ -2,6 +2,13 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Phase 294: an incomplete match over a closed union is an ERROR. The repository's promise rests
+         on closed unions with exhaustive matching, and FS0025 was a warning nobody read twice
+         (Phase 135's `Incremental.reasonString`, Phase 266's `(_, Anti)`). Escalated by number rather
+         than by TreatWarningsAsErrors, which would turn every other warning into a gate the day a
+         toolchain adds one. The extracted proof oracle switches FS0025 OFF in its own project file,
+         with the reason beside it. -->
+    <WarningsAsErrors>$(WarningsAsErrors);FS0025</WarningsAsErrors>
     <WarnOn>3390;$(WarnOn)</WarnOn>
     <!-- 0.1.11 (2026-07-22): the Phase 94 pilot-5 lenient wave (c5e7863) landed in
          Column.fs + DataFrame.fs AFTER 0.1.10 was packed, so the feed's 0.1.10
@@ -184,7 +191,7 @@
          `Fuaran.Core.Idl.Codegen` is the only package whose delivered content moves; the other
          nine `Fuaran.Core.*` are byte-unchanged and carry the new stamp only. Purely additive:
          every default shape that rendered before renders identically, and no existing IDL
-         declares a list default, so no emitted artefact in the estate changes but the one this
+         declares a list default, so no emitted artefact downstream changes but the one this
          phase adds. See fuaran#1080. -->
     <!-- 0.16.0 (2026-08-30): fuaran-core#108/#109 — the declared WIRE SHAPE. `Idl` gains a
          `Wire: WireShape` slot (discriminator key + node-envelope nesting); the interpreter,
@@ -315,7 +322,31 @@
     <PackageProjectUrl>https://github.com/Fuaran-Core/fuaran-core</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Fuaran-Core/fuaran-core</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PackageTags>fuaran;typed-tree;ops;op-stream;conformance;fsharp;fable</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <!-- Phase 294: a package that can be checked and traced. `Deterministic` is the SDK default and is
+       stated so a later edit cannot lose it quietly; `ContinuousIntegrationBuild` (CI only, never a
+       local build, where it would hide real source paths from the debugger) normalises embedded source
+       paths, which is the last of the three inputs DECISIONS.md D29 named for assembly byte-identity
+       that a property can pin. SourceLink ships with the SDK for a GitHub `RepositoryUrl`; the symbols
+       travel as a snupkg, so a consumer steps into Core from the registry's symbol server. -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true' Or '$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+  <!-- Unconditional: a property condition here would read IsPackable before the project body sets it,
+       and the symbols only matter at pack time, which a non-packable project never reaches. -->
+  <PropertyGroup>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
 
   <!-- Fable source distribution. Every packable
        Core project ships its F# source + .fsproj under `fable/` in the package, so a
