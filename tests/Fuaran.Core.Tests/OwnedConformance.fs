@@ -19,7 +19,7 @@ open System.IO
 //
 // So the source of truth is the committed `conformance/` directory at this
 // repository's root, and the corpus carries a DECLARED COPY (`copies.json`
-// beside it, on the estate's copy registry). The default suite reads from
+// beside it, on the workspace copy registry). The default suite reads from
 // here and is self-contained; the corpus copy's freshness is a separate,
 // opt-in question — see `SiblingCorpus`.
 //
@@ -68,7 +68,7 @@ let fingerprintLines (text: string) : string[] =
 
 /// Content equality insensitive to a UTF-8 BOM, line endings, per-line trailing whitespace
 /// and trailing blank lines — the `fingerprint` check of the workspace copy registry
-/// (`roadmapctl copies`), restated here so the in-suite freshness leg and the estate sweep
+/// (the workspace copy registry), restated here so the in-suite freshness leg and the workspace sweep
 /// answer the same question with the same equality. A weaker equality than bytes, never a
 /// fuzzy match: two texts with the same fingerprint differ only in what a checkout's
 /// end-of-line policy is allowed to change.

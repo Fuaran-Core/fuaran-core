@@ -430,7 +430,7 @@ module ApplyVectorExport =
             + (members |> List.map (fun (k, v) -> jstr k + ": " + v) |> String.concat ", ")
             + " }"
 
-    /// The digest convention the estate already uses everywhere else: `sha256:` + lowercase hex,
+    /// The digest convention already used everywhere else: `sha256:` + lowercase hex,
     /// over the canonical result bytes exactly as they appear in `expected.tree`.
     let hashOf (canonicalTree: string) : string =
         "sha256:" + Hash.sha256Hex canonicalTree

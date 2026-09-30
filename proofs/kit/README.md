@@ -12,7 +12,7 @@ will be behind the day the fourth moves**, because F\* releases weekly.
 This directory is that design, written once. This repository consumes it **in place**: its
 `proofs/check.ps1` is a thin caller that declares what this repository has and hands it to
 `check-proof-leg.ps1`. Another repository adopts it by **copying** the files listed below and
-declaring each copy in its own `copies.json`, so the estate's copy registry names a copy that has
+declaring each copy in its own `copies.json`, so the workspace copy registry names a copy that has
 drifted from this one before anybody meets a red gate they did not cause.
 
 **What it deliberately is not:** a package, a module, or a runtime dependency. An adopting
@@ -263,7 +263,7 @@ reason the factor is never multiplied into a measurement. Absent reads as "not r
 ## Importing a theorem (Phase 175)
 
 An adopter that wants a theorem rather than only a leg — fold confluence at its own witness, which is
-what the estate's three named adopters want — does three things, and the leg above is what checks
+what the three named adopters want — does three things, and the leg above is what checks
 the third. Nothing in it is a package or a reference; it is the same copy-by-declaration, with a
 template where the leg had a caller.
 

@@ -73,7 +73,7 @@ type SupportDocument =
 /// of trusted.
 ///
 /// Layout is `Artifact.renderJson`, not a second stringifier: one indented
-/// canonical renderer in the estate, so escaping and float layout cannot drift
+/// canonical renderer for the whole family, so escaping and float layout cannot drift
 /// between the two documents of one triple.
 module SupportArtifact =
 

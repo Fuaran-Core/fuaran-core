@@ -163,7 +163,7 @@ let tests =
           testCase "fnv1a's pinned values hold — the .NET side is canonical and has never moved"
           <| fun _ ->
               // These three have now survived both a file move and a rewrite of the multiply, which
-              // is the point of pinning them: content hashes across the estate fold through `fnv1a`,
+              // is the point of pinning them: content hashes downstream fold through `fnv1a`,
               // so a value that shifted here would silently invalidate every stored one. The
               // split-half multiply was adopted precisely because it leaves this side alone.
               Expect.equal (Hash.fnv1a "") "811c9dc5" "the empty string is the FNV-1a offset basis"

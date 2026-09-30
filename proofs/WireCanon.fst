@@ -10,7 +10,7 @@
    canonical form's converse.
 
    WHY THE PHASE EXISTS. §2 promises the twelve rules make the encoding DETERMINISTIC: structurally
-   equal values render byte-for-byte identically. Every digest in the estate needs the property
+   equal values render byte-for-byte identically. Every downstream digest needs the property
    nobody states — that equal BYTES imply equal VALUES. The op-stream chain id, the DAG content id,
    the teleport digest (§17.3) and cross-host attestation all hash the canonical rendering and read
    hash equality as value equality, and Phase 145 leaves `op_codec_injective` a parameter precisely
@@ -958,7 +958,7 @@ and read_kvs_roundtrip (#num #flt: eqtype) (w: wire num flt)
    ====================================================================================== *)
 
 (* EQUAL BYTES IMPLY EQUAL NORMAL FORMS. The converse §2 never stated, and the one every digest
-   in the estate rests on: an op-stream chain id, a DAG content id, a teleport digest and a
+   downstream rests on: an op-stream chain id, a DAG content id, a teleport digest and a
    cross-host attestation all hash this rendering and read hash equality as value equality.
    Straight out of the round trip, at the empty trailing context. *)
 [@@ noextract_to "FSharp"]

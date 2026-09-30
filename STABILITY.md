@@ -43,7 +43,7 @@ and both names. Before Phase 237 a case rendered its field types only, and a ren
 
 **The gate refuses an UNCLASSIFIED move, never a breaking one.** Additive or breaking, a move whose
 baseline moved with it passes; what fails is a surface that moved while its baseline stood still.
-The estate's record-widening dispensation stands — widening is permitted, widening *in silence* is
+The record-widening dispensation stands — widening is permitted, widening *in silence* is
 not — and the class below is what a reviewer applies it to.
 
 Regenerate with:
@@ -52,7 +52,7 @@ Regenerate with:
 CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
 ```
 
-**The hazard is the one the same switch carries elsewhere in the estate: it rewrites EVERY drifted
+**The hazard is the one the same switch carries elsewhere: it rewrites EVERY drifted
 baseline, not the one you were looking at.** An unrelated drift sitting in the tree lands in your
 commit silently. Stage the baselines you meant to move BY NAME and read the rest back out.
 
@@ -1725,7 +1725,7 @@ maintained `GroupBy` — reads the order it produced exactly as it would have re
 
 **The saving is NOT in the sorting.** A sort evaluates no expression, so it contributes nothing to
 `rowsEvaluated` — the same accounting a `GroupBy` gets, and for the same reason. What a widened sort
-buys is that the steps *before* it stop re-evaluating every row: on the estate's recompute fixture
+buys is that the steps *before* it stop re-evaluating every row: on the shared recompute fixture
 family, a filter-then-sort pipeline over six rows with one cell edited falls from six row-evaluations
 to one. A sort-bearing row-local pipeline therefore reports `RowsRecomputed`, and the footprint
 vocabulary gains no case.
@@ -1744,7 +1744,7 @@ skipped). The merge sorts through it rather than through a copy — a second com
 every corpus anyone thought to write and disagree on the first null, the first tie and the first
 misspelled key.
 
-**`Window` remains declined, deliberately and by type.** The estate's fixture family records no
+**`Window` remains declined, deliberately and by type.** The shared fixture family records no
 footprint for it, and this phase's own gate is that a class is not widened before it is measured — so
 a bounded-frame window stays `StepNotRowLocal "window"` until a vector exists to measure it against.
 _(SUPERSEDED by Phase 120, under an operator decision of 2026-09-02 that waived the corpus-side gate
@@ -1790,7 +1790,7 @@ existing four entry points evaluate byte-identically to before. The unit it coun
 of one step's expression against one row — a `Filter` and a `Derive` are charged the frame's row count
 where they stand, and every other verb, evaluating no per-row expression, is charged none.
 
-**The estate's `incremental-recompute` vectors vendored under
+**The shared `incremental-recompute` vectors vendored under
 `tests/Fuaran.Core.Tests/fixtures/incremental-recompute/` were re-pinned to the corrected readings**,
 with the before/after in that directory's `README.md`. Only the sort vector moved; the control
 vector's footprints were already on this scale, which is the control working. Re-recording them on
@@ -2218,7 +2218,7 @@ a round-trip law never calls it — it starts at bytes and ends at bytes. So a f
 memory to a richer carrier keeps a decoder-encoder suite green over thousands of vectors while
 breaking every program that BUILDS a value. That is not a constructed example: it is the
 `@fuaran-ui/ui` 0.26.0 release of 2026-09-11 (fuaran#1661), where the only author-direction consumer
-in the estate broke on the pin bump against a fully green corpus.
+broke on the pin bump against a fully green corpus.
 
 **A domain opts in, and one that does not is named.** `witness` is an option. `None` reports a
 single result — `construct-then-encode (<domain>): NOT ADOPTED — no ConstructWitness supplied` —
@@ -2304,7 +2304,7 @@ re-deriving the mapping from the compiler's behaviour.
 builds the two subject sets `Versioning.classify` compares — the members a revision retires, the
 members it introduces — and hands them over, so the additive-vs-breaking rule has one definition and
 this answer moves when it moves. `profileBump`'s prose is kept and is unchanged; what it could never
-do is be branched on, which is why nothing in the estate called `Versioning.bump` at all before this.
+do is be branched on, which is why nothing downstream called `Versioning.bump` at all before this.
 
 **An undecided verdict yields no profile.** `Bump` has a second case, and `bumpProfile` returns it
 whenever any row crosses an erased slot the artifact does not describe. Returning the base profile
@@ -2362,7 +2362,7 @@ next slot. The number itself is the release gesture's to move, not this phase's.
 178 was written to FLIP the default — `Undeclared` replacing `Default`, `Trust.harden` itself
 refusing — which would have been **breaking for a vocabulary that declared nothing**, and that is
 the class this document would be recording had the flip landed. It did not, because the flip's
-licensing premise was measured and refuted before the work: thirteen declaration sites in the estate
+licensing premise was measured and refuted before the work: thirteen declaration sites across the consuming repositories
 take their tokens from the default (the UI tier's own `Vocabulary.fs` among them), and both
 published `idl.json` artifacts — including the shared cross-host corpus — carry no `harden` block at
 all, which `Artifact.readHarden` resolves through `HardenPolicy.Default` by a promise stated in its
@@ -2745,6 +2745,38 @@ the same pass as one that reached it every time; the census's `Cases` is the run
 reach. Carrying the per-side counts on a pass needs a place on `LawResult` to put them, which is a
 record-shape change to the kit's most-constructed type, and is left for a decision rather than
 taken inside this entry.
+
+### The gate closes its blind spots, and the packages gain metadata (Phase 294) — ADDITIVE; no public surface moves
+
+**What changed.** Two halves, neither of which touches a type, a function or a wire byte.
+
+*The build.* `FS0025` (an incomplete match) is an error in every project of this repository, by
+number in `Directory.Build.props` rather than through `TreatWarningsAsErrors`. The one exception is
+the extracted proof oracle, which carries its own override with the reason beside it. Turning it on
+revealed no incomplete match anywhere in the spine, the suites or the sample, so nothing had to be
+rewritten to land it. It is a property of how THIS repository compiles: the `fable/` source
+distribution a consumer compiles is built under the consumer's own settings, so no consumer meets it.
+
+*The packages.* Every packable id now builds `Deterministic`, with `ContinuousIntegrationBuild` set
+on a CI runner (and only there: locally it would hide real source paths from a debugger), ships the
+inputs SourceLink reads (`RepositoryUrl`, `PublishRepositoryUrl`, `EmbedUntrackedSources`), carries its
+symbols as a `snupkg` beside the `nupkg`, and gains `PackageReadmeFile` (the repository README) and
+`PackageTags`. A packed id is therefore two files rather than one, and the nuspec gains `readme`,
+`tags` and the `repository` commit.
+
+*The release path.* The publish workflow refuses a ref that is not the tag `v<Version>` for the
+`<Version>` in `Directory.Build.props`, runs the repository gate (`verify.ps1`) before it packs, and
+pushes the symbol packages beside the packages.
+
+**What adopting it costs.** Nothing. A consumer restores the same assemblies with more metadata
+beside them; `api/` and the wire baselines did not move.
+
+**Class: additive.** The packages gain metadata and the gate gains arms; no public surface changes.
+See DECISIONS.md D75 for the `FS0025` override, the publication sweep (a standing arm of the suite)
+and the re-run of D29's reproducibility measurement: with the CI property set, two checkouts at
+paths of equal length produce byte-identical assemblies, and paths of different length differ in
+67 bytes of PE debug-directory padding and nothing else; byte-identity of a local pack against the
+published package is still not claimed.
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
@@ -3528,7 +3560,7 @@ key's value, and this file pins literal keys. So the committed file here carries
 and the corpus copy still carries the `0.30.0` ones, which is what the TS and Go ports and the UI
 tier's pinned kit certify against today. Re-syncing the copy now would redden those hosts before
 their ports move. fuaran#1860 re-syncs it with both ports at the UI tier's Core pin raise. Until
-then `roadmapctl copies` names the copy stale. The in-suite leg reads it as the recorded lag and
+then the workspace copy registry names the copy stale. The in-suite leg reads it as the recorded lag and
 never fails for it: every line must be byte-identical to this renderer's output, except the stamp
 and the `key` value of the twelve `invocationKey` vectors. Any other difference is still a
 divergence and is reported as one, fatal where the leg is asked for. The transform leg is unchanged
@@ -3771,7 +3803,7 @@ may ride it; they are left as written.
 > "same number, new contract"; until it does, the release note is where a consumer is told.
 
 **It was released after four phases rather than the eleven it was cut for**, which is a deliberate
-decision and not an abandonment. The slot was opened for a campaign across the hardening, IDL and
+decision and not an abandonment. The slot was opened for a programme of work across the hardening, IDL and
 compute strands; 180, 189, 188 and 190 landed in it, and the remaining seven phases were released
 from it so that consumers blocked on an unpublished version could move. Those phases open the next
 slot when the first of them changes the contract. A reader comparing this entry to the cut's stated
@@ -3844,9 +3876,9 @@ silently and with a green build. `DECISIONS.md` D40 measured that and refused th
 migration instead. Both steps of that migration are taken. Phase 179 made `Artifact.render` emit the
 block for every policy, so nothing this renderer writes relies on the absent-block answer;
 `fuaran#1755` re-rendered the two published artifacts — the UI tier's `idl.json` and the shared
-cross-host corpus — and both carry the block, byte-identical to each other, with `roadmapctl copies`
+cross-host corpus — and both carry the block, byte-identical to each other, with the workspace copy registry
 reporting the corpus and both bundled host snapshots in step. The set of artifacts whose meaning
-this flip could change is **empty in the estate**, which is the condition D40 named and the only
+this flip could change is **empty across the consuming repositories**, which is the condition D40 named and the only
 thing that ever gated it.
 
 **And the direction of the change is the safe one, which is why it is the direction taken.** An
@@ -4165,7 +4197,7 @@ a witness the base run does not).
 and its `schema` reads **2**. The member is **present only for an opt-in family** — this wire model
 has no null, so absence is how the format spells "not applicable"; rendering `null` produced a
 document the kit's own parser refuses, which is `no_null_ever` (Phase 153) doing its job.
-`docs/conformance-families.md` gains a `Why opt-in` column. `roadmap-engine#482`, which will replace
+`docs/conformance-families.md` gains a `Why opt-in` column. a downstream tooling phase (#482), which will replace
 that projection's roster with this file, is the coupled surface and is unstarted.
 
 **What adopting costs.** Nothing for a reader. One field for a constructor. The census a consumer
@@ -4918,7 +4950,7 @@ hardening vocabulary only when that vocabulary was unusual.
 **Why this is a step of its own rather than part of the retirement it begins.** The default was a
 WIRE fact, not only a source one: the block's ABSENCE MEANT one domain's four tokens, by a promise
 `Artifact.readHarden` makes in its own doc comment to every artifact written before those tokens
-were declarable — and both published `idl.json` artifacts in the estate, the UI tier's own and the
+were declarable — and both published `idl.json` artifacts, the UI tier's own and the
 shared cross-host corpus, carry no block at all. Phase 178 measured that before flipping and
 refused ([`DECISIONS.md`](DECISIONS.md) D40); this is step one of the two-step migration that
 finding left in its place. Step two — an absent block meaning "declared nothing", and `Default`
@@ -4952,7 +4984,7 @@ never opens the module is unaffected.
 **What it is for.** The kit shipped its families and enumerated them nowhere, so three readers each
 kept a list derived by a rule that could miss one, and a missing row in any of them is silent by
 construction: every check quantifies over the list, so the one thing a list cannot notice is a family
-nobody added to it. `roadmap-engine#476`'s join of the proofs registry to the laws census surfaced the
+nobody added to it. Downstream tooling phase #476's join of the proofs registry to the laws census surfaced the
 instance — `Conformance.opAlgebra`, the law the `tree-algebra-well-formed-states` obligation names, was
 absent from the roster every consumer's conformance census quantifies over, so every consumer reported
 it unrostered and none could ever mark it adopted.
@@ -4978,12 +5010,12 @@ dotnet run --project tests/Fuaran.Core.Tests -- --emit-families
 - [`docs/conformance-families.md`](docs/conformance-families.md) — the human-readable table.
 - [`docs/conformance-families.json`](docs/conformance-families.json) — **the machine export, and the
   one an offline reader consumes without building or running anything.** Its shape is a contract, for
-  `roadmap-engine#482`, which replaces that projection's own roster with this file. **`schema` reads
+  downstream tooling phase #482, which replaces that projection's own roster with this file. **`schema` reads
   2 since Phase 194 added the `reason` member** (a string from a closed vocabulary, PRESENT ONLY for
   an opt-in family — this wire model has no null, so absence is how it spells "not applicable") — an
   addition, not a break, and the number was moved
   anyway because this repository's own suite pins it, so a shape that changed under an unmoved stamp
-  would be the drift the pin exists to catch. `roadmap-engine#482` is unstarted and is the coupled
+  would be the drift the pin exists to catch. downstream tooling phase #482 is unstarted and is the coupled
   surface: it reads whatever ships, and a reader that keys on the number reads 2.
 
   ```json
@@ -5284,11 +5316,11 @@ change them, and where a staleness report will point when they drift.
 in-slot. The stamp names the kit that produced the vectors, so a consumer comparing stamps across
 this boundary sees `0.24.0` → `0.25.0` with no vector content change beneath it.
 
-## 0.24.0 — the apply-engine correctness campaign and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
+## 0.24.0 — the apply-engine correctness programme and the proof programme's contract changes — released 2026-09-15 as `v0.24.0`
 
 **This section describes a RELEASED slot** — `v0.24.0` is tagged (released 2026-09-15), so the
 entries below are a contract a consumer can pin today and nothing further may ride them. It was cut
-as a DRAFT on 2026-09-14 by the campaign driver so the phases below can ride one slot rather than each
+as a DRAFT on 2026-09-14 by the driving session so the phases below can ride one slot rather than each
 minting a number: Phase 137 (a previously accepted `InsertChild` whose subtree carries an
 already-present or internally duplicated id is now refused with `DuplicateId` — a parity
 correction with the other hosts), Phase 147 (`Dag.DagBreak.Reason` becomes a closed DU, the
@@ -5361,7 +5393,7 @@ SEQUENCE level. Same result shapes, same 0-based step index, same first-refusal-
 by `applyContained` at its first step — one move of a leaf under a leaf is the counterexample, and
 Phase 140 proved it (`can_apply_all_ignores_containment`). A domain with leaves that wanted to apply
 a script had to write its own loop over `applyContained` and lose the index contract, which is what
-every container-aware consumer in the estate does today. It can now call `applyAllWith` and get the
+every container-aware consumer does today. It can now call `applyAllWith` and get the
 same `(index, envelope, partial tree)` triple back, `NotAContainer` included.
 
 **`applyAll` and `canApplyAll` are now defined AS the `fun _ -> true` instances, and their behaviour

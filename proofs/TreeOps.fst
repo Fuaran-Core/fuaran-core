@@ -1710,7 +1710,7 @@ and ins_wf_all_conv (p:string) (n:tree) (ts:list tree)
 
          - it declines at a tree that is not id-unique. Section 0 says why: `Tree.tryFind`
            resolves to the FIRST preorder match, so on such a tree the answer is a fact about the
-           order as well as the contents, and a reorder moves the order. Nothing in the estate
+           order as well as the contents, and a reorder moves the order. Nothing downstream
            produces such a tree — `Diff.toOps` refuses one outright with `DuplicateIdInTree` —
            and declining is how a total function says "outside the claim".
          - it declines a step whose RESULT is not id-unique. By `ins_wf` and `ins_wf_conv` that is

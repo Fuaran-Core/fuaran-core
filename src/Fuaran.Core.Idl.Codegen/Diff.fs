@@ -1226,7 +1226,7 @@ module Diff =
     ///
     /// The two rows worth reading rather than skimming are the veneer rows and
     /// the native render-arm row, because both are conditional and both have
-    /// been got wrong in this estate before:
+    /// been got wrong in a downstream consumer before:
     ///
     /// - Phase 801 recorded that a payload-FIELD addition binds neither the C#
     ///   `Coverage` reflection nor the VB analyzer's `Vocabulary.cs`, because

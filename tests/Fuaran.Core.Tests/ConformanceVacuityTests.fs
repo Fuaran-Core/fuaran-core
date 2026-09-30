@@ -6,8 +6,8 @@ module Fuaran.Core.Tests.ConformanceVacuityTests
 // law reached at all?" and answers it INSIDE a run — and then discards what it measured. So the
 // outside of a run is unchanged: a family that exercised twelve hundred cases and a family that
 // exercised none report the same green, and a consumer's generated conformance census renders the
-// same "adopted" cell for both. The estate's own memory names that failure class twice already
-// (`expecto-filter-dot-separator-vacuous-green`, `lastexitcode-vacuous-green-sweep`); this file
+// same "adopted" cell for both. The maintainers' own records name that failure class twice already
+// (a test filter that matched no test, a launcher stage that skipped and exited 0); this file
 // exists so the kit does not manufacture a third instance.
 //
 // What it is: EVERY law family the roster ships, run once here, at the witnesses this repository

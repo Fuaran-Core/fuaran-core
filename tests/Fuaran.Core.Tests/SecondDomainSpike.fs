@@ -64,7 +64,7 @@ open Fuaran.Core.Idl
 //     (`Json.parseTolerantOfNull`, which erases a null member to absence) but the
 //     IDL's own `Decode.decode` entry point calls strict `Json.parse`, so the
 //     interpreter cannot reach it. The WRITE half is deliberately absent — the
-//     estate's canonical form is null-free by decision — so the honest
+//     the canonical wire form is null-free by decision — so the honest
 //     disposition is `tolerate`: an adopting vocabulary omits rather than nulls.
 //     Worth recording that the corpus does NOT exercise this: every fixture
 //     populates its optionals, so a corpus-only probe would have missed it
@@ -461,7 +461,7 @@ let tests =
                   let decoy =
                       """{
   "kind": "some-other-corpus",
-  "description": "Vectors for another vocabulary. Its round-trip family is spelled modelRoundTrips, as in the \"modelRoundTrips\" family elsewhere in the estate.",
+  "description": "Vectors for another vocabulary. Its round-trip family is spelled modelRoundTrips, as in the \"modelRoundTrips\" family elsewhere in the corpus.",
   "modelRoundTrips": []
 }"""
 

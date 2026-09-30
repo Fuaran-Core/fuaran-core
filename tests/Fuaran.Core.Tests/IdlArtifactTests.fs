@@ -22,7 +22,7 @@ open Fuaran.Core.Tests.ReferenceIdl
 //
 // **Phase 180 flipped the reader, and this file is amended rather than rewritten.** The
 // gate D40 named is met — `fuaran#1755` re-rendered both published artifacts (`bb10065`)
-// and `roadmapctl copies` reports the corpus and both bundled host snapshots in step —
+// and the workspace copy registry reports the corpus and both bundled host snapshots in step —
 // so `HardenPolicy.Default` is deleted and an absent `harden` block reads back as
 // `Undeclared`. Three consequences here, all of them deliberate:
 //
@@ -185,7 +185,7 @@ let tests =
                 // the engine's old tokens"; it was "an absent block must not change
                 // meaning while artifacts relying on that meaning exist". Phase 179 made
                 // the writer emit the block always, `fuaran#1755` re-rendered the two
-                // published artifacts, and `roadmapctl copies` reports both bundled host
+                // published artifacts, and the workspace copy registry reports both bundled host
                 // snapshots of the shared corpus in step — so the set of artifacts the
                 // flip could change the meaning of is empty, which is the condition D40
                 // named and the only thing that ever gated it.
@@ -251,7 +251,7 @@ let tests =
           testList
               "the additive class, measured rather than asserted"
               [ // The STABILITY entry calls this additive on the wire. The diff
-                // classifier is what the estate reads that claim through, so run it:
+                // classifier is what consumers read that claim through, so run it:
                 // between the bytes a pre-179 renderer wrote and the bytes this one
                 // writes, it must report NO hardening change — the block's presence says
                 // exactly what its absence did.

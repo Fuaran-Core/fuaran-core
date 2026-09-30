@@ -12,14 +12,14 @@ module Fuaran.Core.Tests.PublicSurfaceTests
 // was a reading of the diff.
 //
 // So: `api/<package>.txt`, one committed file per packable package, rendered from the built
-// assembly's IL METADATA — the same source the estate's pack-time guard reads, and the only
+// assembly's IL METADATA — the same source the pack-time guard reads, and the only
 // one that sees what a consumer actually links against. A `PublicSurface` test family renders
 // each package afresh and diffs it against its baseline; the diff is CLASSIFIED, and the test
 // fails unless the commit also moved the baseline.
 //
 // **What this deliberately is NOT: a gate on the class.** Additive or breaking, a classified
 // move passes. What is refused is an UNCLASSIFIED one — a surface that moved with its baseline
-// standing still. The estate's record-widening dispensation stands; the class line is what
+// standing still. The record-widening dispensation stands; the class line is what
 // lets a reviewer apply it.
 //
 // ---- the six classes, and why the three that LOOK additive are not -------------------
@@ -1178,7 +1178,7 @@ let tests =
 
           test "the class of every baseline moved since the newest tag" {
               // The "ride or advance" line, which STABILITY entries wrote by hand until now.
-              // A REPORT and not a gate: the class is what a reviewer applies the estate's
+              // A REPORT and not a gate: the class is what a reviewer applies the
               // record-widening dispensation to, so a breaking class printed here is
               // information, never a refusal. What it does assert is that it MEASURED
               // something — a newest tag was resolved and every baseline was read — because a

@@ -51,7 +51,7 @@ let private emitCopy =
 
 /// The registry's own normalisation, not a second one beside it: `OwnedConformance.fingerprint` IS
 /// `String.concat "\n"` of these lines, so the reading below refines the equality
-/// `roadmapctl copies` applies rather than inventing a neighbouring one that could drift from it.
+/// the workspace copy registry applies rather than inventing a neighbouring one that could drift from it.
 let private fingerprintLines = OwnedConformance.fingerprintLines
 
 // Ordinal throughout, for the reason `OwnedConformance.fingerprintLines` records: the

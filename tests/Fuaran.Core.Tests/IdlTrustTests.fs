@@ -12,7 +12,7 @@ open Fuaran.Core.Tests.ReferenceIdl
 // The phase was written to flip `HardenPolicy`'s default from the four tokens the
 // engine used to hard-code (`Custom` / `Markdown` / `Static` / `TextSource.Literal`,
 // all of them one domain's spelling) to "declared nothing, so say so". Its licensing
-// premise was that every vocabulary in the estate already declares its own tokens, so
+// premise was that every vocabulary downstream already declares its own tokens, so
 // the flip would be breaking on paper and land on no consumer.
 //
 // Measured before the flip, that premise is false in the two places that decide it —
@@ -214,8 +214,8 @@ let tests =
                 // writer emit the block for every policy, so nothing this renderer
                 // produces relies on the absent-block answer. `fuaran#1755` re-rendered
                 // the two published artifacts — `fuaran-dotnet/src/Fuaran.UI.Idl/idl.json`
-                // at `bb10065`, the shared cross-host corpus with it — and `roadmapctl
-                // copies` reports both bundled host snapshots of that corpus in step. The
+                // at `bb10065`, the shared cross-host corpus with it — and the workspace
+                // copy registry reports both bundled host snapshots of that corpus in step. The
                 // set of artifacts whose meaning the flip could change is empty, which is
                 // the condition D40 named and the only thing that ever gated it.
                 //

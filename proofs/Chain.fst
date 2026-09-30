@@ -2,7 +2,7 @@
    Chain — an F* model of Fuaran.Core's two integrity walkers, with tamper detection as a
    machine-checked theorem under one named hash assumption (fuaran-core Phase 136).
 
-   WHAT IS MODELLED. Both shapes the estate's ledgers rest on, side by side:
+   WHAT IS MODELLED. Both shapes the downstream ledgers rest on, side by side:
 
      - the CONTENT-ADDRESSED DAG of `Fuaran.Core.OpStream.Dag` — a node is (parents, actor, op),
        its id is `Dag.nodeHash` of the SORTED parents and the encoded actor-and-op, and

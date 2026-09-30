@@ -220,7 +220,7 @@ let private ancestors (start: string) (budget: int) : string list =
     go start budget []
 
 /// Every place a corpus is looked for beneath one anchor, in the order tried: under the
-/// language estate's own directory, which is where this workspace keeps it, and beside the
+/// language's own directory, which is where this workspace keeps it, and beside the
 /// repository itself (a plain side-by-side clone, and the in-repository clone CI makes).
 let private candidatesUnder (anchor: string) : string list =
     ancestors anchor 12
@@ -374,7 +374,7 @@ type Freshness =
     /// the run (CI); unset, it is reported and the run continues.
     | Compare of root: string * fatal: bool
     /// There is no corpus to compare against — said by name, never passed over in silence (the
-    /// same rule that governs an unreachable sibling copy elsewhere in the estate: "nothing to
+    /// same rule that governs an unreachable sibling copy elsewhere in the workspace: "nothing to
     /// check" must not read as "everything checked"). `fatal` when the leg was asked for, which
     /// is D31 unchanged: once asked for, an absent corpus FAILS.
     | NotChecked of why: string * fatal: bool

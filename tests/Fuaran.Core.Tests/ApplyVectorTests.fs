@@ -238,7 +238,7 @@ let tests =
           <| fun _ ->
               // The copy-freshness leg, on the same terms as the laws/ one: Phase 130's absent-
               // corpus failure preserved on the leg it was written for, the registry's
-              // `fingerprint` equality so this leg and `roadmapctl copies` agree, asked for by
+              // `fingerprint` equality so this leg and the workspace copy registry agree, asked for by
               // name (CI does) and skipped by name otherwise.
               match SiblingCorpus.resolve ApplyVectorExport.familyDirName with
               | SiblingCorpus.NotAsked why -> skiptest why

@@ -514,7 +514,7 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      multiplicity and order in the model's reports are unobserved by construction.
    - **The tree the skeleton algebra runs over is id-unique** (Phase 133). Not an oversight: the
      diamond is FALSE without it, because `Tree.tryFind` returns the first match in document order
-     and a reorder moves document order. Nothing in the estate produces such a tree, but no
+     and a reorder moves document order. Nothing downstream produces such a tree, but no
      shipped type carries the invariant. "Theorem 2" below has the argument.
    - _(**The composite's op alphabet excludes a nested `Batch`** was an assumption here from Phase
      133 — three of the fifteen pairs, all the same shape — and is RETIRED by Phase 162, which
@@ -550,7 +550,7 @@ What may be said, and at what strength, per the attested-stack programme's §6:
 
    Also not claimed: anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over
-   the real `RoadmapOp` union is roadmap-engine#343; this theorem is what makes its choice of
+   the real `RoadmapOp` union is a downstream tooling phase (#343); this theorem is what makes its choice of
    total order canonical-form-only), or about any domain's reconciliation policy — the model,
    like production, decides nothing and applies nothing on a halt.
 
@@ -802,9 +802,12 @@ token in this directory to get wrong.
 **The scheduled half is vacuous on today's data, and says so.** No row carries a phase-form
 `closes`; every bridge is `permanent` or `unscheduled`. It is not vacuous as code — the go-reds
 exercise both the shipped-phase arm and the no-oracle arm — and the oracle is worth naming: the
-roadmap store for this repository's own side is not in this repository and cannot be, so the family
-reads `FUARAN_CORE_ROADMAP`. Where a row makes a scheduling claim and no oracle is configured, the
-clause FAILS. A check that reads as green without its instrument is worse than an absent one, and
+roadmap store for this repository's own side is not in this repository and cannot be, so the
+family reads `tests/Fuaran.Core.Tests/open-phases.json`, a committed file that holds either the ids of the open
+phases or a declaration, with the reason, that no list is kept (it is declared inert today). It
+reads no environment variable, so public CI runs the clause exactly as a contributor does. Where a
+row makes a scheduling claim and the file is inert, the clause FAILS. A check that reads as green
+without its instrument is worse than an absent one, and
 the first row to carry a phase is the row that will find out.
 
 ## Exit criteria, with evidence
@@ -1408,7 +1411,7 @@ instance to its own `$modules`; the contract is stated under Theorem 2 and the p
 `WireDecode.fst` is this directory's second model, and the programme's WS6.1 **theorem 1**. The
 Fuaran wire is JSON with a kind-tag discipline, so this is a hand-written model of the decode
 combinators over an abstract JSON value rather than an EverParse artefact — EverParse targets
-binary formats and would say nothing about the layer where the estate's decoders actually live.
+binary formats and would say nothing about the layer where the downstream decoders actually live.
 
 It models `Fuaran.Core.Decode` clause for clause — `getProp`, `asString` / `asInt` / `asBool` /
 `asFloat`, `kindOf`, `strField` / `intField`, and `mapList`, the array walker and the only walker
@@ -2139,7 +2142,7 @@ extraction diff says so. No file under `src/` moved, no host does anything.
    - **Anything about a HOST.** A `Custom` renderer, a mounted guest, a host-call endpoint, a
      registered capability or any other function a deployment installs is host code the wire merely
      *names*. Those doors are enumerated, each with what mediates it and what is not claimed at it,
-     in the UI language estate's **escape-hatch inventory**; WIRE_FORMAT §22 (the render-time safety
+     in the UI language's **escape-hatch inventory**; WIRE_FORMAT §22 (the render-time safety
      floor) and §23 (host-declared kind admission) are its normative wire-side counterparts, and
      theorem 10 proves the other half at the seam — dispatch is default-deny, so a named capability
      that was never registered invokes nothing. These lemmas say the **wire** carries no invokable
@@ -2532,7 +2535,7 @@ _(The numbering in these headings is this directory's own running count. The att
 programme numbers its theorems separately, and its theorem 3 — interpreter budget monotonicity — is
 `fuaran-program`'s, not this one. Only "theorem 1" means the same thing in both.)_
 
-Every ledger in the estate rests on two functions: `Dag.firstBreak` / `verifyDag` over the
+Every downstream ledger rests on two functions: `Dag.firstBreak` / `verifyDag` over the
 content-addressed DAG, and `OpStream.firstChainBreak` / `verifyChain` over the linear chain. The
 claim they carry — that any tampered node is found — is what the attestation story is built on, and
 until this phase it was certified by go-red tests alone. `Chain.fst` models both walkers clause for
@@ -2781,7 +2784,7 @@ prefix-free hypothesis reddens `splice_split`; dropping the appeal to the op cod
 
 ### Snapshot and bounded replay — what a compaction keeps, and the one thing it cannot (Phase 191)
 
-`OpStream.compact` / `replayFrom` are the bounded-replay path every cache in the estate rests on: a
+`OpStream.compact` / `replayFrom` are the bounded-replay path every downstream cache rests on: a
 snapshot at sequence *n* plus the tail is meant to stand in for the whole stream.
 `Conformance.snapshotLaws` samples that. Section 7 of `Chain.fst` proves it, and both halves came out
 **sharper than the sentence they were chartered with** — which is the reason to mechanise a claim
@@ -3999,7 +4002,7 @@ the container check's contribution and nothing else's.
 ## Theorem 7 — the canonical form is injective (Phase 149)
 
 WIRE_FORMAT §2 promises that its twelve encoder rules make the canonical form **deterministic**:
-structurally equal values render byte-for-byte identically. Every digest in the estate needs the
+structurally equal values render byte-for-byte identically. Every downstream digest needs the
 stronger property nobody states — that **equal bytes imply equal values**. The op-stream chain id,
 the DAG content id, the teleport digest (§17.3) and cross-host attestation all hash the canonical
 rendering and read hash equality as value equality, and theorem 3's decomposition leaves
