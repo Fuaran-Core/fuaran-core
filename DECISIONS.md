@@ -1,5 +1,51 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-09-30 — D79: uniqueness over keyed positions is Core's refusal given the domain's declaration; the declaration stays a witness of its own, and `Children` stays what the engine rebuilds
+
+**Recorded by Phase 286. Amends Phase 137's scoping (D34), confirms Phase 189's; breaking, on the
+`0.33.0` draft (STABILITY.md).** Phase 137 made the insert validator walk the whole graft and scoped the
+guarantee to the witness surface, leaving uniqueness over keyed positions — a case table, a fallback, a
+named alternative — as "the domain's own obligation". Phase 189 gave the domain a way to DECLARE those
+positions (`KeyedWitness`) and certified the domain's own check against the declaration, but only the kit
+read it, so every consumer of a tree re-derived "all id-bearing positions" for itself, and a UI-domain
+analysis counted about fifty such walks with at least five different answers. The ruling was that the
+enumeration belongs in Core.
+
+*Uniqueness over keyed positions is now Core's refusal, given the declaration.* `KeyedWitness` carries
+the keyed NODES (`KeyedChildren`) and an arity-preserving rebuild of them (`ReplaceKeyedChildren`);
+`Tree.traversal` derives the witness whose walk covers both surfaces; `Ops.applyContainedKeyed` refuses a
+`DuplicateId` over that walk — an id held in a keyed position of the tree, or carried into one by the
+graft or by an `UpdateNode` payload. This AMENDS D34's scoping, not its mechanism: the scan is still
+`Tree.graftWellFormed`, over a different witness. Proved for the insert (`Preservation.fst` section 12,
+`keyed_apply_preserves_wf`) by showing the keyed insert IS the unkeyed insert over the traversal, so
+`apply_preserves_wf` transfers rather than being re-proved.
+
+*The declaration remains a separate witness — Phase 189's reason CONFIRMED.* Widening `NodeWitness` would
+oblige every domain to re-express a case table as an ordered list; the keyed positions stay a
+declaration beside it. The record moved from the kit to `Fuaran.Core.Tree` (same namespace) because the
+engine now reads it. `HasKeyedChildren` is DERIVED (`Tree.keyedIds`), not kept as a second field: two
+declarations of one fact can disagree, and the kit certifying one while the engine reads the other would
+certify something the engine never sees. The shard's wording was "kept for the kit"; the kit keeps the
+reading, through the derivation.
+
+*The structural surface remains what the engine rebuilds.* The keyed engine LOCATES through the traversal
+and EDITS through `Children`: inserts append to it, removes filter it, reorders permute it, and a keyed
+position is never added to, vacated or reordered by a skeleton op. So a `RemoveNode` / `MoveNode` of a
+node held DIRECTLY in a keyed position has no structural edit to make, and is refused as a new
+`Rejection.KeyedPosition (target, holder)` rather than as `UnknownNode` (the node is in the tree, so
+"unknown" would be false) or as `Rejected` (the domain extension point, which `Preservation.fst` proves
+Core never raises). A closed union gaining a case is breaking-source for an exhaustive match; the draft is
+already breaking, and a host that must now say what this refusal means is the point.
+
+*Keyed children come FIRST in the traversal.* A node's keyed positions are part of its own content, and
+putting the structural list at the tail makes appending to it appending to the combined list — which is
+what lets the proof transfer, first offender included.
+
+*Not decided here, and why.* Whether `KeyedWitness` joins the witness-record freeze (Phase 232): it is
+still being widened inside this draft, so the freeze decision belongs to the release that settles its
+shape; `SurfaceLaws.unfrozenWitnesses` says so. The footprint (`Ops.footprint`) still reads the
+structural surface; carrying keyed ids into it is Phase 247's.
+
 ## 2026-09-30 — D75: an incomplete match is a build error, the publication sweep is a standing arm of the suite, and the pack's reproducibility is re-measured — path-length-independent content, still no byte-identity claim
 
 **Recorded by Phase 294. Gate and packaging only; no package surface moves (STABILITY.md `0.33.0 — DRAFT`).**

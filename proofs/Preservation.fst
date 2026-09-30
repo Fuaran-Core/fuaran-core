@@ -35,6 +35,12 @@
    trees, and inductions over `ins` and `rem_at` are this module's cost class rather than that
    one's. `TreeDiff.fst` opens this module for them.
 
+   AND, SINCE PHASE 286, SECTION 12: the KEYED engine's insert (`Ops.applyContainedKeyed`) over a
+   tree that holds children in keyed positions as well as structural ones, shown to be the unkeyed
+   insert over the keyed walk, so `apply_preserves_wf` transfers to every id-bearing position a domain
+   declares (`keyed_apply_preserves_wf`). Placed last because it depends on section 4 and on nothing
+   after it.
+
    WHAT IS NOT CLAIMED. The witness laws themselves: `ReplaceChildren` is taken as an abstract
    function satisfying them, exactly as `DagFold.fst` takes the diamond, and a domain's own
    `ReplaceChildren` remains its promise (sampled by `Conformance.witnessLaws`). Vocabulary and
@@ -2932,3 +2938,139 @@ let kids_at_no_dups (q:string) (t:tree)
     | Some m ->
       find_in_wf q t m;
       (match m with TNode _ _ mcs -> wf_all_kid_ids_no_dups mcs)
+
+(* ======================================================================================
+   12. THE KEYED WALK — `Ops.applyContainedKeyed`'s insert, and the preservation theorem over
+       every id-bearing position a domain declares (Phase 286).
+
+       WHAT IS MODELLED. A tree whose nodes hold children in TWO places, as a domain with a
+       `KeyedWitness` does: `keyed`, the nodes a node holds in keyed positions (a case table, a
+       fallback), and `kids`, its structural `Children`. Both are concrete lists of the same tree
+       type — the theorem is about the keyed walk of a real tree, not about a parameter standing in
+       for one — and nothing here is conditional on a function the domain supplies.
+
+       `erase` is `Tree.traversal nodew keyw` read as a tree: a node's children are its keyed
+       children, THEN its structural ones. Its ids are `Tree.idsKeyed`, and `wf (erase t)` is
+       `Tree.wellFormedKeyed` answering `Structural`. `kins` is the keyed engine's insert: the
+       rebuild walks both lists (the engine locates through the traversal, so a parent held in or
+       below a keyed position is found) and the graft is appended to the STRUCTURAL list only,
+       which is what `ReplaceChildren` does and what `ReplaceKeyedChildren` never does.
+
+       WHAT IS PROVED.
+         - `erase_kins` — the keyed insert, erased, IS `TreeOps.ins` on the erased tree. This is
+           where "keyed first" earns its place in `Tree.traversal`: the structural list is the tail
+           of the combined one, so appending to it is appending to the combined list, and the
+           unkeyed engine's own insert is the keyed engine's, over the keyed walk.
+         - `kapply_insert_is_apply` — so `applyContainedKeyed`'s `InsertChild` clause (at
+           `canHold = fun _ -> true`) answers exactly what `Ops.apply` answers on the erased tree:
+           the same tree, or the same rejection. Its `InsertChild _ _, DuplicateId _` clause is
+           therefore `raisable`'s, quantified over the keyed walk.
+         - `keyed_dup_refusal_exact` — the keyed insert refuses a `DuplicateId` exactly when the
+           graft's keyed walk repeats an id or shares one with the tree's keyed walk: an id held in
+           a keyed position on either side is seen.
+         - `keyed_apply_preserves_wf` — THE THEOREM: an insert the keyed engine accepts into a tree
+           that is well formed over its keyed walk leaves a tree that is well formed over its keyed
+           walk. It is `apply_preserves_wf`, transferred, and re-proves nothing about the
+           membership algebra — which is the point of modelling the keyed engine as the unkeyed
+           one over the traversal rather than as a second engine.
+
+       WHAT IS NOT CLAIMED. The keyed engine's other clauses. `RemoveNode`, `MoveNode` and
+       `ReorderChildren` bring no id into the tree (they filter, relocate and permute what is
+       there), and a remove or move of a node held directly in a keyed position is refused as
+       `KeyedPosition` before it edits anything. `UpdateNode`'s keyed-payload check — the one
+       other way the keyed engine admits new ids — is exercised by the suite
+       (`KeyedApplyTests.fs`) and not modelled here. Nor is the domain's own obligation: that its
+       `KeyedChildren` reports every keyed position its own walk sees, and that
+       `ReplaceKeyedChildren` / `ReplaceChildren` leave each other's positions alone. Those are
+       `Conformance.keyedApplyLaws`' witness and agreement laws, sampled, exactly as the witness
+       laws are for `NodeWitness` (the module head's "WHAT IS NOT CLAIMED").
+
+       Nothing in this section is extracted: the oracle's differential runs the unkeyed engine,
+       and the keyed one is its instance over the traversal, which `erase_kins` states.
+   ====================================================================================== *)
+
+(* F#: a `'Node` under a `KeyedWitness` — `KeyedChildren` beside `Children`. *)
+[@@ noextract_to "FSharp"]
+noeq type ktree =
+  | KNode : kid:string -> kkind:string -> keyed:list ktree -> kids:list ktree -> ktree
+
+(* F#: `Tree.traversal nodew keyw` — the keyed children, then the structural ones. *)
+[@@ noextract_to "FSharp"]
+let rec erase (t:ktree) : Tot tree (decreases t) =
+  match t with
+  | KNode i k ks cs -> TNode i k (app (erase_all ks) (erase_all cs))
+and erase_all (ts:list ktree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> erase t :: erase_all r
+
+(* F#: the keyed engine's `InsertChild` rebuild — `updateNode (traversal nodew keyw) parent (fun p ->
+   nodew.ReplaceChildren p (nodew.Children p @ [node]))`. The rebuild descends both lists; the graft
+   lands at the end of the structural one, raw, as in `TreeOps.ins`. *)
+[@@ noextract_to "FSharp"]
+let rec kins (p:string) (n:ktree) (t:ktree) : Tot ktree (decreases t) =
+  match t with
+  | KNode i k ks cs ->
+    let ks' = kins_all p n ks in
+    let cs' = kins_all p n cs in
+    if i = p then KNode i k ks' (app cs' [n]) else KNode i k ks' cs'
+and kins_all (p:string) (n:ktree) (ts:list ktree) : Tot (list ktree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> kins p n t :: kins_all p n r
+
+(* F#: `applyContainedKeyed keyw (fun _ -> true) nodew idw (InsertChild (p, n)) t` — `validateInsert`
+   over the traversal: the graft scan is `Tree.graftWellFormedKeyed`, the parent lookup reaches the
+   keyed walk, `UnknownNode` enumerates `Tree.idsKeyed`. *)
+[@@ noextract_to "FSharp"]
+let kapply_insert (p:string) (n:ktree) (t:ktree) : Tot (outcome ktree rejection) =
+  match first_dup (erase n) (erase t) with
+  | Some d -> Error (DuplicateId d)
+  | None ->
+    if not (has_id p (erase t)) then Error (UnknownNode p (ids (erase t)))
+    else Ok (kins p n t)
+
+let rec erase_all_app (xs ys:list ktree)
+  : Lemma (ensures erase_all (app xs ys) == app (erase_all xs) (erase_all ys)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> erase_all_app r ys
+
+let rec erase_kins (p:string) (n:ktree) (t:ktree)
+  : Lemma (ensures erase (kins p n t) == ins p (erase n) (erase t)) (decreases t)
+  = match t with
+    | KNode i k ks cs ->
+      erase_kins_all p n ks;
+      erase_kins_all p n cs;
+      ins_all_app p (erase n) (erase_all ks) (erase_all cs);
+      if i = p then begin
+        erase_all_app (kins_all p n cs) [n];
+        app_assoc (erase_all (kins_all p n ks)) (erase_all (kins_all p n cs)) [erase n]
+      end
+      else ()
+and erase_kins_all (p:string) (n:ktree) (ts:list ktree)
+  : Lemma (ensures erase_all (kins_all p n ts) == ins_all p (erase n) (erase_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> erase_kins p n t; erase_kins_all p n r
+
+let kapply_insert_is_apply (p:string) (n:ktree) (t:ktree)
+  : Lemma (ensures (match kapply_insert p n t, apply (InsertChild p (erase n)) (erase t) with
+                    | Ok t', Ok e' -> erase t' == e'
+                    | Error x, Error y -> x == y
+                    | _, _ -> False))
+  = erase_kins p n t
+
+let keyed_dup_refusal_exact (p:string) (n:ktree) (t:ktree)
+  : Lemma (ensures (match kapply_insert p n t with
+                    | Error (DuplicateId _) -> True
+                    | _ -> False) <==>
+                   ~(no_dups (ids (erase n)) /\ disjoint (ids (erase n)) (ids (erase t))))
+  = first_dup_none_iff (erase n) (erase t)
+
+let keyed_apply_preserves_wf (p:string) (n:ktree) (t:ktree)
+  : Lemma (requires wf (erase t))
+          (ensures (match kapply_insert p n t with Ok t' -> wf (erase t') | Error _ -> True))
+  = kapply_insert_is_apply p n t;
+    erase_kins p n t;
+    apply_preserves_wf (InsertChild p (erase n)) (erase t)

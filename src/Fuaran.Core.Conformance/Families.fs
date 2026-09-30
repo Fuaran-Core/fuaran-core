@@ -592,7 +592,7 @@ module Families =
               "keyedChildrenLaws"
               ([ "KeyedWitness" ] @ treeWitness)
               (Some NeedsWitnessCapability)
-              [ "witness-surface-scope" ]
+              []
               (Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ])
               (Built,
                "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms")
@@ -603,9 +603,12 @@ module Families =
               "keyedApplyLaws"
               ([ "KeyedWitness" ] @ treeWitness)
               (Some NeedsWitnessCapability)
-              []
+              // `witness-surface-scope` moved here from `keyedChildrenLaws` (Phase 286): once the
+              // engine refuses keyed collisions itself, what the domain still owes is that its
+              // declaration covers its own walk — which is what this family's agreement law holds.
+              [ "witness-surface-scope" ]
               (Guarded
-                  [ "built arm (keyed holder / clean insert / keyed-vs-structural collision in either direction / keyed-vs-keyed collision) and op kind" ])
+                  [ "built arm (keyed holder / clean insert / keyed-vs-structural collision in either direction / keyed-vs-keyed collision / accepted op over the keyed walk) and op kind" ])
               (Built,
                "the three keyed collisions are built through PlaceKeyedChild and must be refused DuplicateId; its guard covers the built arms")
 

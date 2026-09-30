@@ -504,8 +504,8 @@
       "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1500",
+      "discharges": ["witness-surface-scope"],
+      "cases": "2100",
       "adequacy": "guarded-reached",
       "refusal": "built"
     },
@@ -517,7 +517,7 @@
       "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "needs-witness-capability",
-      "discharges": ["witness-surface-scope"],
+      "discharges": [],
       "cases": "600",
       "adequacy": "guarded-reached",
       "refusal": "built"

@@ -30,6 +30,12 @@ module internal KeyedApplyLaws =
     /// - **Declaring nothing changes nothing.** With `KeyedChildren = fun _ -> []`,
     ///   `applyContainedKeyed` / `canApplyContainedKeyed` answer exactly what `applyContained` /
     ///   `canApplyContained` answer, over every op kind the kit draws.
+    /// - **The keyed engine is one engine, and it keeps the keyed walk well formed.** Over ops
+    ///   drawn across the keyed walk — parents, targets and updates that sit in or below a keyed
+    ///   position — `canApplyContainedKeyed` agrees with `applyContainedKeyed` (accept/reject and
+    ///   the envelope), and an op it accepts into a tree whose keyed walk repeats no id leaves one
+    ///   that repeats none. The second is the sampled form of `keyed_apply_preserves_wf` over every
+    ///   op kind, the `UpdateNode` payload check included, which the model does not reach.
     ///
     /// **A witness that declares NO keyed position passes the keyed arms VACUOUSLY and the report
     /// says so**, in `keyedChildrenLaws`' words — while the identity law, which needs no
@@ -77,6 +83,18 @@ module internal KeyedApplyLaws =
         let mutable keyedInTree = 0
         let mutable keyedInGraft = 0
         let mutable keyedBoth = 0
+        let mutable acceptedKeyed = 0
+
+        let dryRun =
+            LawKit.LawCell
+                "canApplyContainedKeyed ≡ applyContainedKeyed (accept/reject + envelope) over ops drawn across the keyed walk"
+
+        let keyedPreservation =
+            LawKit.LawCell(
+                "an op applyContainedKeyed accepts keeps a tree well formed over its keyed walk",
+                Some "built arm"
+            )
+
         let mutable declaredKeyed = 0
         let mutable placementsTaken = 0
         let kinds = LawKit.OpKindTally()
@@ -270,9 +288,45 @@ module internal KeyedApplyLaws =
                             plainDry
                             keyedDry
                     )
-            ))
+            )
 
-        let cells = [ restores; placesInOrder; structuralLeavesKeyed; agreement; identity ]
+            // ---- the keyed engine over ops that address the keyed walk (drawn) ----
+            let kop = rng.Draw(LawKit.genOp t idw gen tree)
+            let applied = Ops.applyContainedKeyed keyw canHold nodew idw kop tree
+            let dry = Ops.canApplyContainedKeyed keyw canHold nodew idw kop tree
+
+            dryRun.Check(
+                (Result.map ignore applied = dry),
+                fun () -> at (sprintf "%A: applyContainedKeyed gave %A, canApplyContainedKeyed %A" kop applied dry)
+            )
+
+            match applied with
+            | Ok after when Tree.wellFormedKeyed nodew keyw idw tree = Tree.Structural ->
+                acceptedKeyed <- acceptedKeyed + 1
+
+                match Tree.wellFormedKeyed nodew keyw idw after with
+                | Tree.Structural -> keyedPreservation.Check(true, fun () -> "")
+                | Tree.RepeatedId d ->
+                    keyedPreservation.Check(
+                        false,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "an ACCEPTED %A left a tree whose keyed walk carries %s twice"
+                                    kop
+                                    (idw.ToString d)
+                            )
+                    )
+            | _ -> ())
+
+        let cells =
+            [ restores
+              placesInOrder
+              structuralLeavesKeyed
+              agreement
+              identity
+              dryRun
+              keyedPreservation ]
 
         if declaredKeyed = 0 && placementsTaken = 0 then
             // Vacuous BY DECLARATION for the keyed arms — the `keyedChildrenLaws` verdict, in its
@@ -295,5 +349,6 @@ module internal KeyedApplyLaws =
                        "clean insert", cleanInserts
                        "keyed in the tree, structural in the graft", keyedInTree
                        "structural in the tree, keyed in the graft", keyedInGraft
-                       "keyed in the tree and in the graft", keyedBoth ]
+                       "keyed in the tree and in the graft", keyedBoth
+                       "accepted op over the keyed walk", acceptedKeyed ]
                      @ kinds.Demands) ]

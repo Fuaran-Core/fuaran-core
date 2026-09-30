@@ -3078,6 +3078,48 @@ along the new seams in this change: sibling phases in the same batch append case
 would turn each of their appends into a cross-file conflict. A hash that answers one digest for
 everything still leaves `hashFnLaws` green — measured, and its missing op-tamper arm is Phase 302's.
 
+### The keyed witness reaches the apply path (Phase 286, DECISIONS.md "uniqueness over keyed positions is Core's refusal") — BREAKING: `record-widening` of `KeyedWitness` and a field removed, `union-widening` of `Rejection`; the rest `additive`
+
+**What changed.** A domain that holds nodes in keyed, non-structural positions declares them once, and
+Core's walks and refusals see them.
+
+- **`KeyedWitness` moves from `Fuaran.Core.Conformance` to `Fuaran.Core.Tree`**, same namespace
+  (`Fuaran.Core`), so source that references both assemblies — every kit consumer — compiles unchanged at
+  the type name. It gains `KeyedChildren: 'Node -> 'Node list` (the nodes, not only their ids) and
+  `ReplaceKeyedChildren: 'Node -> 'Node list -> 'Node` (arity-preserving), and **loses
+  `HasKeyedChildren`**, which is derived now (`Tree.keyedIds nodew keyw n`). Every construction breaks:
+  replace `HasKeyedChildren = f` with `KeyedChildren` returning the nodes, and add `ReplaceKeyedChildren`
+  (`fun n _ -> n` for a domain with no keyed position).
+- **`Rejection` gains `KeyedPosition of target * holder`**, declared last (every existing tag kept). Only
+  the keyed engine raises it; an exhaustive `match` over `Rejection` must add the case.
+- **Additive:** `Tree.traversal`, `Tree.preorderKeyed`, `Tree.idsKeyed`, `Tree.foldKeyed`,
+  `Tree.wellFormedKeyed`, `Tree.graftWellFormedKeyed`, `Tree.keyedIds`, `Tree.firstRepeatedId`;
+  `Ops.applyContainedKeyed` and `Ops.canApplyContainedKeyed`; `Conformance.keyedApplyLaws`.
+
+**What `applyContainedKeyed` does.** It locates through `Tree.traversal` (a node's keyed children, then
+its structural ones), so a node held in or below a keyed position can be an insert's or reorder's parent,
+a move's destination and an update's target; `UnknownNode` enumerates the keyed walk. Its `DuplicateId`
+refusal is `Tree.graftWellFormedKeyed`, seeing keyed positions on both sides of an insert, and an
+`UpdateNode` payload's keyed subtrees are checked against the tree its target keeps. It edits through
+`Children` alone: a remove or move of a node held directly in a keyed position is `KeyedPosition`. Graft
+containment (`NotAContainer`) walks keyed subtrees too. For a domain whose `KeyedChildren` is
+`fun _ -> []` every answer is `applyContained`'s — `keyedApplyLaws` runs both over every op kind the kit
+draws. `applyContained`, `apply` and the sequence forms are unchanged; there is no keyed sequence form —
+a caller threads `applyContainedKeyed`.
+
+**What a consumer does.** A domain with keyed positions supplies its `KeyedWitness` to
+`applyContainedKeyed` in production (not only to the kit), deletes any apply-path pre-check that re-walks
+keyed positions, and reaches keyed nodes through `Tree.traversal nodew keyw` instead of its own walkers.
+Run `Conformance.keyedApplyLaws` at your witness: its agreement law fails when `KeyedChildren` misses a
+position your own id check walks.
+
+**The ladder.** `keyed-apply-preserves-wf` is proved (`proofs/Preservation.fst` section 12, the insert
+clause; the keyed `UpdateNode` check is tested, not modelled). `witness-surface-scope` stays a
+domain obligation and is discharged by `Conformance.keyedApplyLaws` now — what the domain still owes is
+the declaration's accuracy — and `Conformance.keyedChildrenLaws` discharges nothing; the generated family
+census and the `api/` baselines for `Fuaran.Core.Tree`, `Fuaran.Core.Ops` and `Fuaran.Core.Conformance`
+are regenerated.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a
