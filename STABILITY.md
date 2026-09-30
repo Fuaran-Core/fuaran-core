@@ -2480,6 +2480,48 @@ job's. **The Fable gate has not been run over this change.** The new code is wri
 Fable-clean subset the rest of the package keeps, and that is a claim until the gate every cut
 cites says so; a release of this slot waits on it.
 
+### An unknown node-actor kind refuses instead of reading as `Human` (Phase 260) — BREAKING for a store that carries one; no public surface moves
+
+**What changed.** The two JSONL readers that decode a node's actor — `OpStream.fromJsonl` (with
+`fromJsonlWithSnapshots` and `fromJsonlVerified`, which are built on it) and `Dag.fromJsonl` (with
+`Dag.fromJsonlVerified`) — matched `"agent"` and sent every other `kind` to `Human`, carrying whatever
+`id` the object had. A store written by a build that knows a third kind of actor was therefore read by
+an older reader as a person, which is the misattribution the actor field exists to prevent. The match is
+now closed: `"human"` decodes to `Human`, `"agent"` to `Agent`, and any other `kind` — or an actor object
+with no `kind` at all — is a decode `Error` through the readers' existing `line N: <reason>` channel,
+naming the kind:
+
+```
+line 0: OpStream.fromJsonl: unknown actor kind "service"
+line 0: Dag.fromJsonl: the actor carries no kind
+```
+
+(`Dag.fromJsonl:` for the DAG reader.) Nothing else about the readers changes: a record with `"human"` or
+`"agent"` decodes to the same value as before, and the canonical encoder, the chain hash and every
+emitted byte are unchanged.
+
+**The class, stated plainly.** This is a change of BEHAVIOUR on read, not of surface. The managed and wire
+baselines do not move and the gate prints no class for it — the gate cannot see it, which is why it is
+recorded here. For a consumer it is BREAKING in exactly one case: a store that holds an actor with a
+`kind` other than `human` / `agent`, or with no `kind`, which an older build read as `Human` and this
+build refuses. Core's own encoder has never written such a record, so a store written only by Core
+reads exactly as before; one that was hand-edited, or written by a newer producer of the format, does
+not. It is not `additive`: a record that decoded before stops decoding.
+
+**What a consumer sees, and what a host should do with it.** A store that carries an unknown kind now
+fails to load with the `Error` above rather than loading with that node attributed to a person. The text
+names the kind, so a host can surface it as **version skew** — the store was written by a newer or
+different writer than this reader understands — and tell the operator to raise the reader, rather than
+report corruption. The refusal is whole-store, as every other decode fault in these readers is: no
+record is returned, so no node is silently mis-attributed. A host that wants to tolerate a newer actor
+kind has to decide that explicitly; this change removes the option of doing it by accident. The
+pre-320 reader, `OpStream.fromJsonlLegacyActor`, is unaffected: it reads the bare-string actor and lifts
+it to `Human` by design.
+
+**What adopting it costs.** Nothing for a store Core wrote. For a host that reads a store it did not
+write with these readers, read the `Error` case of `fromJsonl` where it may have ignored it; it was
+previously unreachable for an actor-kind fault.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

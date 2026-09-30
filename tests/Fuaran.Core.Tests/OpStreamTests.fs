@@ -412,7 +412,50 @@ let tests =
 
               match OpStream.fromJsonl sw line with
               | Ok _
-              | Error _ -> () ]
+              | Error _ -> ()
+
+          // ---- Phase 260: an unknown actor kind refuses instead of reading as Human ----
+
+          testCase "fromJsonl decodes both known actor kinds (Phase 260)"
+          <| fun _ ->
+              let line actor =
+                  sprintf """{"seq":0,"actor":%s,"op":{"kind":"inc","n":5},"prevHash":"","hash":""}""" actor
+
+              match OpStream.fromJsonl sw (line (Actor.encode (Human "ann"))) with
+              | Ok [ r ] -> Expect.equal r.Actor (Human "ann") "a human actor decodes as Human"
+              | other -> failtestf "expected one record, got %A" other
+
+              match OpStream.fromJsonl sw (line (Actor.encode (Agent("m", "v", "bot")))) with
+              | Ok [ r ] -> Expect.equal r.Actor (Agent("m", "v", "bot")) "an agent actor decodes as Agent"
+              | other -> failtestf "expected one record, got %A" other
+
+          testCase "fromJsonl refuses an unknown actor kind, naming the kind and the line (Phase 260)"
+          <| fun _ ->
+              let line =
+                  """{"seq":0,"actor":{"kind":"service","id":"svc-1"},"op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
+
+              match OpStream.fromJsonl sw line with
+              | Error m ->
+                  Expect.stringContains m "line 0" "names the failing line"
+                  Expect.stringContains m "unknown actor kind \"service\"" "names the kind it does not know"
+              | Ok recs -> failtestf "an unknown kind must not decode, got %A" recs
+
+          testCase "fromJsonl refuses an actor with no kind rather than reading it as Human (Phase 260)"
+          <| fun _ ->
+              let line =
+                  """{"seq":0,"actor":{"id":"ann"},"op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
+
+              match OpStream.fromJsonl sw line with
+              | Error m -> Expect.stringContains m "no kind" "names the absence"
+              | Ok recs -> failtestf "a kind-less actor must not decode, got %A" recs
+
+          testCase "an unknown actor kind refuses every reader built on the scanner (Phase 260)"
+          <| fun _ ->
+              let line =
+                  """{"seq":0,"actor":{"kind":"service","id":"svc-1"},"op":{"kind":"inc","n":5},"prevHash":"","hash":""}"""
+
+              Expect.isError (OpStream.fromJsonlWithSnapshots sw line) "the snapshot-aware reader refuses"
+              Expect.isError (OpStream.fromJsonlVerified OpStream.defaultHash sw line) "the verified reader refuses" ]
 
 // ---- Phase 81: attributed-stream lift ----
 

@@ -134,6 +134,48 @@ let tests =
               | Ok dag -> Expect.isFalse (Dag.verifyDag h sw dag) "a missing parent breaks verifyDag"
               | Error e -> failtestf "structural parse should succeed: %s" e
 
+          // Phase 260 — an unknown actor kind refuses instead of reading as Human.
+          testCase "fromJsonl decodes both known actor kinds (Phase 260)"
+          <| fun _ ->
+              let node actor =
+                  "{\"node\":true,\"id\":\"n\",\"parents\":[],\"actor\":"
+                  + actor
+                  + ",\"op\":"
+                  + sw.Encode(Inc 1)
+                  + "}"
+
+              match Dag.fromJsonl sw (node (Actor.encode (Human "ann"))) with
+              | Ok dag -> Expect.equal (Map.find "n" dag.Nodes).Actor (Human "ann") "a human actor decodes as Human"
+              | Error e -> failtestf "a known kind must decode: %s" e
+
+              match Dag.fromJsonl sw (node (Actor.encode (Agent("m", "v", "bot")))) with
+              | Ok dag ->
+                  Expect.equal (Map.find "n" dag.Nodes).Actor (Agent("m", "v", "bot")) "an agent actor decodes as Agent"
+              | Error e -> failtestf "a known kind must decode: %s" e
+
+          testCase "fromJsonl refuses an unknown actor kind, naming the kind and the line (Phase 260)"
+          <| fun _ ->
+              let node actor =
+                  "{\"node\":true,\"id\":\"n\",\"parents\":[],\"actor\":"
+                  + actor
+                  + ",\"op\":"
+                  + sw.Encode(Inc 1)
+                  + "}"
+
+              match Dag.fromJsonl sw (node "{\"kind\":\"service\",\"id\":\"svc-1\"}") with
+              | Error e ->
+                  Expect.stringContains e "line 0" "names the failing line"
+                  Expect.stringContains e "unknown actor kind \"service\"" "names the kind it does not know"
+              | Ok dag -> failtestf "an unknown kind must not decode, got %A" dag
+
+              match Dag.fromJsonl sw (node "{\"id\":\"ann\"}") with
+              | Error e -> Expect.stringContains e "no kind" "a kind-less actor is refused too, not read as Human"
+              | Ok dag -> failtestf "a kind-less actor must not decode, got %A" dag
+
+              Expect.isError
+                  (Dag.fromJsonlVerified h sw (node "{\"kind\":\"service\",\"id\":\"svc-1\"}"))
+                  "the verified reader refuses"
+
           // Phase 13 — verified load gates the structural decode on verifyDag.
           testCase "fromJsonlVerified accepts an intact DAG and rejects a dangling parent"
           <| fun _ ->
