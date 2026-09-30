@@ -3717,7 +3717,9 @@ validator framework inherit the safe spelling.
 - ~~**Decode is .NET-guarded.**~~ _Resolved 2026-06-18 (D8, Phase 241): decode is now fully
   portable — `Wire.Json.parse` + `Wire.Decode` + `OpStream.fromJsonl` are FSharp.Core-only and
   run under both pipelines. No host-side decode boundary remains._
-- **DAG op-stream** (Wave 27) is a future `Core.OpStream.Dag.*` follow-on over the linear
-  spine extracted here.
+- ~~**DAG op-stream** (Wave 27) is a future `Core.OpStream.Dag.*` follow-on over the linear
+  spine extracted here.~~ _Resolved 2026-09-30 (D32, Phase 131): `Fuaran.Core.OpStream.Dag` ships in the
+  published roster, and the fold over its lanes is a machine-checked theorem with the extracted model run
+  as a differential oracle. Nothing about the DAG is forward-looking any longer._
 - **Domain adoption** (re-expressing UI/Calc/Doc/CAD/Office over `Fuaran.Core.*`) is
   intentionally not in this repo; it lands per-domain.
