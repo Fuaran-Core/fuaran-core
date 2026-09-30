@@ -30,15 +30,19 @@ module internal FunctionLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable nested = None
-        let mutable associative = None
-        let mutable hygiene = None
-        let mutable effectJoin = None
+        let nested = LawKit.LawCell "apply ∘ composeAcross = the nested application"
 
-        for i in 0 .. iterations - 1 do
-            let s, r = draw rng
-            rng <- r
+        let associative =
+            LawKit.LawCell "composeAcross is associative where typed (disjoint slots commute)"
+
+        let hygiene =
+            LawKit.LawCell "hygiene holds under re-binding (no cross-slot capture)"
+
+        let effectJoin =
+            LawKit.LawCell "composed effect = componentwise join of the parts' (Fork 3)"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let s = rng.Draw draw
 
             let argMap = s.OuterArgs |> List.map (fun (a, v) -> a, ValueArg v) |> Map.ofList
 
@@ -55,16 +59,10 @@ module internal FunctionLaws =
                 |> Result.bind (Function.composeAcross wa wb embed s.SlotA s.ClosedInner)
                 |> Result.bind (Function.composeAcross wa wb embed s.SlotB s.ClosedInner)
 
-            if viaCompose <> viaApply && nested.IsNone then
-                nested <-
-                    Some(
-                        sprintf
-                            "seed=%d iter=%d: apply∘composeAcross ≠ nested application (%A vs %A)"
-                            seed
-                            i
-                            viaCompose
-                            viaApply
-                    )
+            nested.Check(
+                (viaCompose = viaApply),
+                fun () -> at (sprintf "apply∘composeAcross ≠ nested application (%A vs %A)" viaCompose viaApply)
+            )
 
             // ---- associative where typed (disjoint-slot composition is order-independent) ----
             let orderAB =
@@ -75,9 +73,7 @@ module internal FunctionLaws =
                 Function.composeAcross wa wb embed s.SlotB s.ClosedInner s.Outer
                 |> Result.bind (Function.composeAcross wa wb embed s.SlotA s.ClosedInner)
 
-            if orderAB <> orderBA && associative.IsNone then
-                associative <-
-                    Some(sprintf "seed=%d iter=%d: disjoint-slot composeAcross is not order-independent" seed i)
+            associative.Check((orderAB = orderBA), fun () -> at "disjoint-slot composeAcross is not order-independent")
 
             // ---- hygiene holds under re-binding ----
             // Wire two same-named (distinct-id) inner holes into the two slots; each re-roots under
@@ -89,9 +85,7 @@ module internal FunctionLaws =
 
             (match twoCopies with
              | Error e ->
-                 if hygiene.IsNone then
-                     hygiene <-
-                         Some(sprintf "seed=%d iter=%d: composing open inners into both slots failed: %A" seed i e)
+                 hygiene.Check(false, fun () -> at (sprintf "composing open inners into both slots failed: %A" e))
              | Ok composed ->
                  let copies =
                      (Function.signature wa "comp" composed).Holes
@@ -107,43 +101,31 @@ module internal FunctionLaws =
                              |> List.map (fun h -> h.Addr)
                              |> Set.ofList
 
-                         if (after.Contains a1 || not (after.Contains a2)) && hygiene.IsNone then
-                             hygiene <-
-                                 Some(sprintf "seed=%d iter=%d: re-binding %s captured the other copy %s" seed i a1 a2)
-                     | Error e ->
-                         if hygiene.IsNone then
-                             hygiene <- Some(sprintf "seed=%d iter=%d: binding one copy failed: %A" seed i e)
+                         hygiene.Check(
+                             not (after.Contains a1 || not (after.Contains a2)),
+                             fun () -> at (sprintf "re-binding %s captured the other copy %s" a1 a2)
+                         )
+                     | Error e -> hygiene.Check(false, fun () -> at (sprintf "binding one copy failed: %A" e))
                  | other ->
-                     if hygiene.IsNone then
-                         hygiene <-
-                             Some(
-                                 sprintf "seed=%d iter=%d: expected two distinct re-rooted copies, got %A" seed i other
-                             ))
+                     hygiene.Check(
+                         false,
+                         fun () -> at (sprintf "expected two distinct re-rooted copies, got %A" other)
+                     ))
 
             // ---- effect signature joins componentwise across the boundary (Fork 3) ----
             let joined = Function.composedEffectAcross wa wb s.OpenInnerA s.Outer
             let expected = Effect.join (wa.Effect s.Outer) (wb.Effect s.OpenInnerA)
 
-            if
-                (joined <> expected
-                 || not (Effect.covers joined (wa.Effect s.Outer))
-                 || not (Effect.covers joined (wb.Effect s.OpenInnerA)))
-                && effectJoin.IsNone
-            then
-                effectJoin <- Some(sprintf "seed=%d iter=%d: composed effect ≠ join of parts (Fork 3)" seed i)
+            effectJoin.Check(
+                not (
+                    joined <> expected
+                    || not (Effect.covers joined (wa.Effect s.Outer))
+                    || not (Effect.covers joined (wb.Effect s.OpenInnerA))
+                ),
+                fun () -> at "composed effect ≠ join of parts (Fork 3)"
+            ))
 
-        [ { Law = "apply ∘ composeAcross = the nested application"
-            Passed = nested.IsNone
-            Counterexample = nested }
-          { Law = "composeAcross is associative where typed (disjoint slots commute)"
-            Passed = associative.IsNone
-            Counterexample = associative }
-          { Law = "hygiene holds under re-binding (no cross-slot capture)"
-            Passed = hygiene.IsNone
-            Counterexample = hygiene }
-          { Law = "composed effect = componentwise join of the parts' (Fork 3)"
-            Passed = effectJoin.IsNone
-            Counterexample = effectJoin } ]
+        LawKit.results [ nested; associative; hygiene; effectJoin ]
 
     /// Apply one param-set, run the domain validator over the result, and effect-audit it — the
     /// per-case oracle shared by `verifyFunction` and `verifyFunctionSymbolic`. Returns the first
@@ -217,10 +199,12 @@ module internal FunctionLaws =
           Counterexample = counterexample }
 
     /// The per-hole symbolic domain (Phase 48): a finite candidate list (enumerable), or a sampler
-    /// for a large / unbounded space, carrying the space size where it is bounded-but-large.
+    /// for a large / unbounded space, carrying the space size where it is bounded-but-large. The
+    /// size is an `int64` (Phase 297): a full-width `IntRange` holds up to 2^32 values, which no
+    /// `int` carries.
     type private HoleDomain =
         | FiniteDom of string list
-        | SampledDom of sampler: (ConfRng.T -> string * ConfRng.T) * size: int option
+        | SampledDom of sampler: (ConfRng.T -> string * ConfRng.T) * size: int64 option
 
     /// Project a value-space into a symbolic domain. `Enum` / a small `IntRange` enumerate; a large
     /// `IntRange` samples uniformly in-range (carrying its finite size); the genuinely-large /
@@ -230,17 +214,39 @@ module internal FunctionLaws =
         match space with
         | Enum xs -> FiniteDom xs
         | IntRange(lo, hi) ->
-            let n = hi - lo + 1
+            // Sized in `int64`: `hi - lo + 1` wrapped for `IntRange(0, Int32.MaxValue)` and reported
+            // the space as empty, so every case was a false `DidNotApply` (Phase 297).
+            let n = int64 hi - int64 lo + 1L
 
-            if n <= 0 then
+            if n <= 0L then
                 FiniteDom []
-            elif n <= maxCases then
+            elif n <= int64 maxCases then
                 FiniteDom [ for v in lo..hi -> string v ]
-            else
+            elif n <= int64 System.Int32.MaxValue then
                 SampledDom(
                     (fun r ->
-                        let k, r' = ConfRng.intBelow n r
+                        let k, r' = ConfRng.intBelow (int n) r
                         string (lo + k), r'),
+                    Some n
+                )
+            else
+                // A range wider than `intBelow` reaches (2^31 .. 2^32 values): two draws — a
+                // quarter-width offset and a two-bit residue — rejected past the end, so the
+                // value stays exactly uniform in range and the offset never leaves `int`.
+                let quarter = int ((n + 3L) / 4L)
+
+                SampledDom(
+                    (fun r ->
+                        let mutable rng = r
+                        let mutable candidate = n
+
+                        while candidate >= n do
+                            let q, r1 = ConfRng.intBelow quarter rng
+                            let b, r2 = ConfRng.intBelow 4 r1
+                            rng <- r2
+                            candidate <- 4L * int64 q + int64 b
+
+                        string (int (int64 lo + candidate)), rng),
                     Some n
                 )
         | StringLen(lo, hi) ->
@@ -318,22 +324,46 @@ module internal FunctionLaws =
                 | SampledDom(_, None) -> false
                 | _ -> true)
 
-        // the finite product (meaningful only when sizeKnown) — drives exhaustive vs sampled + size.
-        let finiteProduct =
-            valueHoles
-            |> List.fold
-                (fun acc (_, d) ->
+        // The finite product (meaningful only when sizeKnown), SATURATED at `ceiling` (Phase 297):
+        // multiplied in `int64`, and clamped to the ceiling the moment it is reached, so that no
+        // product can wrap. Before this phase the product was an unchecked `int` — four holes of
+        // 1,000 wrapped negative, passed `<= maxCases`, and materialised the full cartesian product.
+        // A zero-sized hole still zeroes the product (an empty space is empty however wide the
+        // rest), and the multiply is guarded by division so a saturated `acc` times a 2^32-wide
+        // hole never leaves `int64`.
+        let productUpTo (ceiling: int64) : int64 =
+            (1L, valueHoles)
+            ||> List.fold (fun acc (_, d) ->
+                let size =
                     match d with
-                    | FiniteDom xs -> acc * List.length xs
-                    | SampledDom(_, Some n) -> acc * n
-                    | SampledDom(_, None) -> acc)
-                1
+                    | FiniteDom xs -> int64 (List.length xs)
+                    | SampledDom(_, Some n) -> n
+                    | SampledDom(_, None) -> 1L
+
+                if size = 0L then 0L
+                elif acc > (ceiling - 1L) / size then ceiling
+                else acc * size)
+
+        // The decision product saturates at `maxCases + 1`: reaching the ceiling means "more than
+        // maxCases", which is all the enumerable-vs-sampled decision reads. A negative `maxCases`
+        // is clamped to zero here so the product stays non-negative and such a call falls to the
+        // sampled branch with no draws, as it always did.
+        let spaceSize = productUpTo (int64 (max 0 maxCases) + 1L)
+
+        // The REPORTED size saturates one past `Int32.MaxValue`: a true product that fits an `int`
+        // is reported exactly, and one that does not is reported `None` — unknown / too large for
+        // the `int option` the report carries — rather than a wrapped or clamped number.
+        let reportedSize: int option =
+            let intCeiling = int64 System.Int32.MaxValue + 1L
+            let p = productUpTo intCeiling
+            if sizeKnown && p < intCeiling then Some(int p) else None
 
         let psetOf (valueArgs: (string * string) list) : Map<string, Arg<'Node>> =
             (fixedArgs, valueArgs) ||> List.fold (fun m (a, v) -> Map.add a (ValueArg v) m)
 
-        if enumerable && finiteProduct <= maxCases then
-            // exhaustive — enumerate the cartesian product of the per-hole candidate lists.
+        if enumerable && spaceSize <= int64 maxCases then
+            // exhaustive — enumerate the cartesian product of the per-hole candidate lists, LAZILY
+            // (Phase 297): a sequence taken up to `maxCases`, never a materialised list.
             let lists =
                 valueHoles
                 |> List.map (fun (a, d) ->
@@ -341,25 +371,25 @@ module internal FunctionLaws =
                     | FiniteDom xs -> a, xs
                     | SampledDom _ -> a, []) // unreachable under `enumerable`
 
-            let rec cartesian =
-                function
-                | [] -> [ [] ]
+            let rec cartesian (ls: (string * string list) list) : seq<(string * string) list> =
+                match ls with
+                | [] -> Seq.singleton []
                 | (addr, vals) :: rest ->
-                    let tails = cartesian rest
+                    seq {
+                        for v in vals do
+                            for t in cartesian rest -> (addr, v) :: t
+                    }
 
-                    [ for v in vals do
-                          for t in tails -> (addr, v) :: t ]
+            let cx =
+                cartesian lists
+                |> Seq.truncate maxCases
+                |> Seq.indexed
+                |> Seq.tryPick (fun (i, combo) -> verifyCase w reg fn seed i (psetOf combo))
 
-            let combos = List.toArray (cartesian lists)
-            let mutable cx = None
-            let mutable i = 0
-
-            while cx.IsNone && i < combos.Length do
-                cx <- verifyCase w reg fn seed i (psetOf combos.[i])
-                i <- i + 1
-
+            // Under `enumerable` every hole is finite and the product is below the ceiling, so
+            // `spaceSize` is the exact case count the sequence enumerates.
             { Verified = cx.IsNone
-              Coverage = Exhaustive combos.Length
+              Coverage = Exhaustive(int spaceSize)
               Counterexample = cx }
         else
             // sampled — draw `maxCases` param-sets, each varying hole drawn from its domain.
@@ -389,7 +419,7 @@ module internal FunctionLaws =
                 i <- i + 1
 
             { Verified = cx.IsNone
-              Coverage = Sampled(maxCases, (if sizeKnown then Some finiteProduct else None))
+              Coverage = Sampled(maxCases, reportedSize)
               Counterexample = cx }
 
     /// Render a counterexample as one readable line (Phase 48): the offending param-set
@@ -440,40 +470,47 @@ module internal FunctionLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
+        let soundLaw =
+            LawKit.LawCell "a sound artifact-function verifies clean across its param space"
+
+        let brokenLaw =
+            LawKit.LawCell "a broken artifact-function fails with a readable (param-set, defect) counterexample"
+
+        let detLaw =
+            LawKit.LawCell "verification is deterministic (same seed ⇒ identical report)"
+
+        // Each report is one verification run over the whole sample, so each law is asserted once,
+        // over that run — the evidence is the run having been made, not an iteration.
         let soundReport = verifyFunction w sound reg genParams seed iterations
         let brokenReport = verifyFunction w broken reg genParams seed iterations
         let brokenAgain = verifyFunction w broken reg genParams seed iterations
 
-        let soundLaw =
-            match soundReport.Verified, soundReport.Counterexample with
-            | false, Some cx ->
-                Some(sprintf "seed=%d: a sound function failed verification — %s" seed (renderCounterexample w cx))
-            | _ -> None
+        (match soundReport.Verified, soundReport.Counterexample with
+         | false, Some cx ->
+             soundLaw.Check(
+                 false,
+                 fun () -> sprintf "seed=%d: a sound function failed verification — %s" seed (renderCounterexample w cx)
+             )
+         | _ -> soundLaw.Saw())
 
-        let brokenLaw =
-            match brokenReport.Verified, brokenReport.Counterexample with
-            | false, Some cx ->
-                if System.String.IsNullOrWhiteSpace(renderCounterexample w cx) then
-                    Some(sprintf "seed=%d: the broken function's counterexample was empty (not readable)" seed)
-                else
-                    None
-            | _ -> Some(sprintf "seed=%d: a broken function verified clean (no counterexample surfaced)" seed)
+        (match brokenReport.Verified, brokenReport.Counterexample with
+         | false, Some cx ->
+             brokenLaw.Check(
+                 not (System.String.IsNullOrWhiteSpace(renderCounterexample w cx)),
+                 fun () -> sprintf "seed=%d: the broken function's counterexample was empty (not readable)" seed
+             )
+         | _ ->
+             brokenLaw.Check(
+                 false,
+                 fun () -> sprintf "seed=%d: a broken function verified clean (no counterexample surfaced)" seed
+             ))
 
-        let detLaw =
-            if brokenReport = brokenAgain then
-                None
-            else
-                Some(sprintf "seed=%d: verification was not deterministic (same seed ⇒ different report)" seed)
+        detLaw.Check(
+            (brokenReport = brokenAgain),
+            fun () -> sprintf "seed=%d: verification was not deterministic (same seed ⇒ different report)" seed
+        )
 
-        [ { Law = "a sound artifact-function verifies clean across its param space"
-            Passed = soundLaw.IsNone
-            Counterexample = soundLaw }
-          { Law = "a broken artifact-function fails with a readable (param-set, defect) counterexample"
-            Passed = brokenLaw.IsNone
-            Counterexample = brokenLaw }
-          { Law = "verification is deterministic (same seed ⇒ identical report)"
-            Passed = detLaw.IsNone
-            Counterexample = detLaw } ]
+        LawKit.results [ soundLaw; brokenLaw; detLaw ]
 
     /// The memoised-application laws (Phase 49) — the teeth on `Function.applyMemo`. A domain supplies
     /// the witness `w`, the canonical node-encoder `encode` (the cache-key content hash), and a `draw`
@@ -502,43 +539,39 @@ module internal FunctionLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let mutable rng = ConfRng.ofSeed seed
-        let mutable equalsDirect = None
-        let mutable paramMiss = None
-        let mutable effectingBypassed = None
-        let mutable replayParity = None
+        let equalsDirect =
+            LawKit.LawCell "a memoised apply equals the direct apply (a re-apply is a cache hit)"
 
-        for i in 0 .. iterations - 1 do
-            let s, r = draw rng
-            rng <- r
+        let paramMiss =
+            LawKit.LawCell "a changed param-set misses (the original still re-hits)"
+
+        let effectingBypassed =
+            LawKit.LawCell "an effecting function is never served from cache (bypassed — soundness, Fork 3)"
+
+        let replayParity =
+            LawKit.LawCell "replay-as-re-application matches direct replay (a repeat served from cache)"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let s = rng.Draw draw
 
             // ---- 1. a memoised apply equals the direct apply (pure fn); a re-apply is a hit ----
             (match Function.apply w s.Args s.PureFn, Function.applyMemo w encode s.Args s.PureFn Memo.empty with
              | Ok direct, Ok(memo1, c1) ->
                  match Function.applyMemo w encode s.Args s.PureFn c1 with
                  | Ok(memo2, c2) ->
-                     if
-                         (memo1 <> direct
-                          || memo2 <> direct
-                          || c1.Misses <> 1
-                          || c1.Hits <> 0
-                          || c2.Hits <> 1)
-                         && equalsDirect.IsNone
-                     then
-                         equalsDirect <-
-                             Some(
-                                 sprintf
-                                     "seed=%d iter=%d: memoised apply ≠ direct apply / re-apply was not a hit"
-                                     seed
-                                     i
-                             )
-                 | Error e ->
-                     if equalsDirect.IsNone then
-                         equalsDirect <- Some(sprintf "seed=%d iter=%d: a re-apply errored: %A" seed i e)
+                     equalsDirect.Check(
+                         not (
+                             memo1 <> direct
+                             || memo2 <> direct
+                             || c1.Misses <> 1
+                             || c1.Hits <> 0
+                             || c2.Hits <> 1
+                         ),
+                         fun () -> at "memoised apply ≠ direct apply / re-apply was not a hit"
+                     )
+                 | Error e -> equalsDirect.Check(false, fun () -> at (sprintf "a re-apply errored: %A" e))
              | other ->
-                 if equalsDirect.IsNone then
-                     equalsDirect <-
-                         Some(sprintf "seed=%d iter=%d: apply / applyMemo disagreed or errored: %A" seed i other))
+                 equalsDirect.Check(false, fun () -> at (sprintf "apply / applyMemo disagreed or errored: %A" other)))
 
             // ---- 2. a changed param-set misses; the original still re-hits ----
             (match Function.applyMemo w encode s.Args s.PureFn Memo.empty with
@@ -547,27 +580,22 @@ module internal FunctionLaws =
                  | Ok(_, c2) ->
                      match Function.applyMemo w encode s.Args s.PureFn c2 with
                      | Ok(_, c3) ->
-                         if (c2.Misses <> 2 || c2.Hits <> 0 || c3.Hits <> 1) && paramMiss.IsNone then
-                             paramMiss <-
-                                 Some(
+                         paramMiss.Check(
+                             not (c2.Misses <> 2 || c2.Hits <> 0 || c3.Hits <> 1),
+                             fun () ->
+                                 at (
                                      sprintf
-                                         "seed=%d iter=%d: a changed param-set did not miss / the original did not re-hit (misses=%d hits=%d→%d)"
-                                         seed
-                                         i
+                                         "a changed param-set did not miss / the original did not re-hit (misses=%d hits=%d→%d)"
                                          c2.Misses
                                          c2.Hits
                                          c3.Hits
                                  )
+                         )
                      | Error e ->
-                         if paramMiss.IsNone then
-                             paramMiss <- Some(sprintf "seed=%d iter=%d: re-apply of the original errored: %A" seed i e)
+                         paramMiss.Check(false, fun () -> at (sprintf "re-apply of the original errored: %A" e))
                  | Error e ->
-                     if paramMiss.IsNone then
-                         paramMiss <-
-                             Some(sprintf "seed=%d iter=%d: apply of the alternate param-set errored: %A" seed i e)
-             | Error e ->
-                 if paramMiss.IsNone then
-                     paramMiss <- Some(sprintf "seed=%d iter=%d: first apply errored: %A" seed i e))
+                     paramMiss.Check(false, fun () -> at (sprintf "apply of the alternate param-set errored: %A" e))
+             | Error e -> paramMiss.Check(false, fun () -> at (sprintf "first apply errored: %A" e)))
 
             // ---- 3. an effecting function is never served from (or stored in) the cache ----
             (match
@@ -577,34 +605,28 @@ module internal FunctionLaws =
              | Ok direct, Ok(m1, c1) ->
                  match Function.applyMemo w encode s.EffectingArgs s.EffectingFn c1 with
                  | Ok(m2, c2) ->
-                     if
-                         (m1 <> direct
-                          || m2 <> direct
-                          || not (Map.isEmpty c1.Entries)
-                          || c1.Hits <> 0
-                          || c1.Bypasses <> 1
-                          || c2.Hits <> 0
-                          || not (Map.isEmpty c2.Entries))
-                         && effectingBypassed.IsNone
-                     then
-                         effectingBypassed <-
-                             Some(
-                                 sprintf "seed=%d iter=%d: an effecting function was cached or served from cache" seed i
-                             )
+                     effectingBypassed.Check(
+                         not (
+                             m1 <> direct
+                             || m2 <> direct
+                             || not (Map.isEmpty c1.Entries)
+                             || c1.Hits <> 0
+                             || c1.Bypasses <> 1
+                             || c2.Hits <> 0
+                             || not (Map.isEmpty c2.Entries)
+                         ),
+                         fun () -> at "an effecting function was cached or served from cache"
+                     )
                  | Error e ->
-                     if effectingBypassed.IsNone then
-                         effectingBypassed <-
-                             Some(sprintf "seed=%d iter=%d: a re-apply of the effecting fn errored: %A" seed i e)
+                     effectingBypassed.Check(
+                         false,
+                         fun () -> at (sprintf "a re-apply of the effecting fn errored: %A" e)
+                     )
              | other ->
-                 if effectingBypassed.IsNone then
-                     effectingBypassed <-
-                         Some(
-                             sprintf
-                                 "seed=%d iter=%d: apply / applyMemo of the effecting fn disagreed or errored: %A"
-                                 seed
-                                 i
-                                 other
-                         ))
+                 effectingBypassed.Check(
+                     false,
+                     fun () -> at (sprintf "apply / applyMemo of the effecting fn disagreed or errored: %A" other)
+                 ))
 
             // ---- 4. replay-as-re-application matches direct replay (a repeat served from cache) ----
             // Build a recorded "session" of re-applications [Args; Args; ArgsAlt]; replay it both with a
@@ -634,34 +656,19 @@ module internal FunctionLaws =
                      OpStream.replay swMemo (s.PureFn, Memo.empty) records, OpStream.replay swPlain s.PureFn records
                  with
                  | Ok(mNode, mCache), Ok pNode ->
-                     if (mNode <> pNode || mCache.Hits < 1) && replayParity.IsNone then
-                         replayParity <-
-                             Some(
+                     replayParity.Check(
+                         not (mNode <> pNode || mCache.Hits < 1),
+                         fun () ->
+                             at (
                                  sprintf
-                                     "seed=%d iter=%d: memo replay ≠ direct replay or the repeated op was not served from cache (hits=%d)"
-                                     seed
-                                     i
+                                     "memo replay ≠ direct replay or the repeated op was not served from cache (hits=%d)"
                                      mCache.Hits
                              )
-                 | other ->
-                     if replayParity.IsNone then
-                         replayParity <- Some(sprintf "seed=%d iter=%d: a replay errored: %A" seed i other)
-             | Error e ->
-                 if replayParity.IsNone then
-                     replayParity <- Some(sprintf "seed=%d iter=%d: building the record session errored: %A" seed i e))
+                     )
+                 | other -> replayParity.Check(false, fun () -> at (sprintf "a replay errored: %A" other))
+             | Error e -> replayParity.Check(false, fun () -> at (sprintf "building the record session errored: %A" e))))
 
-        [ { Law = "a memoised apply equals the direct apply (a re-apply is a cache hit)"
-            Passed = equalsDirect.IsNone
-            Counterexample = equalsDirect }
-          { Law = "a changed param-set misses (the original still re-hits)"
-            Passed = paramMiss.IsNone
-            Counterexample = paramMiss }
-          { Law = "an effecting function is never served from cache (bypassed — soundness, Fork 3)"
-            Passed = effectingBypassed.IsNone
-            Counterexample = effectingBypassed }
-          { Law = "replay-as-re-application matches direct replay (a repeat served from cache)"
-            Passed = replayParity.IsNone
-            Counterexample = replayParity } ]
+        LawKit.results [ equalsDirect; paramMiss; effectingBypassed; replayParity ]
 
     // ---- cross-witness composition pilot (Phase 51) ----
     // Validate the Wave-13 frontier operators (`composeAcross`, Phase 47; `applyMemo`, Phase 49)
@@ -703,33 +710,30 @@ module internal FunctionLaws =
         let composition = compositionLaws wa wb embed draw seed iterations
 
         // The applyMemo half — an independent stream so the pilot stays deterministic per seed.
-        let mutable rng = ConfRng.ofSeed (seed + 101)
-        let mutable subMemo = None
-        let mutable composedMemo = None
+        let subMemo =
+            LawKit.LawCell "a pure cross-witness sub-function memoises (miss then hit on re-apply)"
 
-        for i in 0 .. iterations - 1 do
-            let s, r = draw rng
-            rng <- r
+        let composedMemo =
+            LawKit.LawCell "applyMemo over the cross-witness-composed function equals direct apply (re-apply is a hit)"
+
+        // The cursor is seeded from `seed + 101` (the independent stream); the counterexamples
+        // are stamped with the caller's `seed`, as they always were, so the runner's own stamp
+        // is set aside for one built over `seed`.
+        LawKit.run iterations (seed + 101) (fun rng i _ ->
+            let at = LawKit.failAt seed i
+            let s = rng.Draw draw
 
             // ---- a pure cross-witness sub-function memoises (miss then hit) ----
             (match Function.applyMemo wb encodeB Map.empty s.ClosedInner Memo.empty with
              | Ok(m1, c1) ->
                  match Function.applyMemo wb encodeB Map.empty s.ClosedInner c1 with
                  | Ok(m2, c2) ->
-                     if (m1 <> m2 || c1.Misses <> 1 || c1.Hits <> 0 || c2.Hits <> 1) && subMemo.IsNone then
-                         subMemo <-
-                             Some(
-                                 sprintf
-                                     "seed=%d iter=%d: a pure cross-witness sub-function did not memoise (miss then hit)"
-                                     seed
-                                     i
-                             )
-                 | Error e ->
-                     if subMemo.IsNone then
-                         subMemo <- Some(sprintf "seed=%d iter=%d: sub-function re-apply errored: %A" seed i e)
-             | Error e ->
-                 if subMemo.IsNone then
-                     subMemo <- Some(sprintf "seed=%d iter=%d: sub-function apply errored: %A" seed i e))
+                     subMemo.Check(
+                         not (m1 <> m2 || c1.Misses <> 1 || c1.Hits <> 0 || c2.Hits <> 1),
+                         fun () -> at "a pure cross-witness sub-function did not memoise (miss then hit)"
+                     )
+                 | Error e -> subMemo.Check(false, fun () -> at (sprintf "sub-function re-apply errored: %A" e))
+             | Error e -> subMemo.Check(false, fun () -> at (sprintf "sub-function apply errored: %A" e)))
 
             // ---- applyMemo over the cross-witness-COMPOSED function = direct apply (re-apply hits) ----
             let argMap = s.OuterArgs |> List.map (fun (a, v) -> a, ValueArg v) |> Map.ofList
@@ -744,41 +748,20 @@ module internal FunctionLaws =
                  | Ok direct, Ok(mm1, c1) ->
                      match Function.applyMemo wa encodeA argMap composed c1 with
                      | Ok(mm2, c2) ->
-                         if
-                             (mm1 <> direct || mm2 <> direct || c1.Misses <> 1 || c2.Hits <> 1)
-                             && composedMemo.IsNone
-                         then
-                             composedMemo <-
-                                 Some(
-                                     sprintf
-                                         "seed=%d iter=%d: applyMemo over the composed function ≠ direct apply / no re-apply hit"
-                                         seed
-                                         i
-                                 )
-                     | Error e ->
-                         if composedMemo.IsNone then
-                             composedMemo <- Some(sprintf "seed=%d iter=%d: composed re-apply errored: %A" seed i e)
+                         composedMemo.Check(
+                             not (mm1 <> direct || mm2 <> direct || c1.Misses <> 1 || c2.Hits <> 1),
+                             fun () -> at "applyMemo over the composed function ≠ direct apply / no re-apply hit"
+                         )
+                     | Error e -> composedMemo.Check(false, fun () -> at (sprintf "composed re-apply errored: %A" e))
                  | other ->
-                     if composedMemo.IsNone then
-                         composedMemo <-
-                             Some(
-                                 sprintf
-                                     "seed=%d iter=%d: apply / applyMemo over the composed fn disagreed: %A"
-                                     seed
-                                     i
-                                     other
-                             )
+                     composedMemo.Check(
+                         false,
+                         fun () -> at (sprintf "apply / applyMemo over the composed fn disagreed: %A" other)
+                     )
              | Error e ->
-                 if composedMemo.IsNone then
-                     composedMemo <- Some(sprintf "seed=%d iter=%d: composeAcross into both slots failed: %A" seed i e))
+                 composedMemo.Check(false, fun () -> at (sprintf "composeAcross into both slots failed: %A" e))))
 
-        composition
-        @ [ { Law = "a pure cross-witness sub-function memoises (miss then hit on re-apply)"
-              Passed = subMemo.IsNone
-              Counterexample = subMemo }
-            { Law = "applyMemo over the cross-witness-composed function equals direct apply (re-apply is a hit)"
-              Passed = composedMemo.IsNone
-              Counterexample = composedMemo } ]
+        composition @ LawKit.results [ subMemo; composedMemo ]
 
     // ---- verifyFunction contract honesty boundary (Phase 52) ----
     // The teeth on the `verifyFunction` (Phase 48) contract: it certifies a function emits a
@@ -817,48 +800,51 @@ module internal FunctionLaws =
         : LawResult list =
         let axes = [ Deterministic; Clock; Random; Network ]
 
-        // a stochastic (Random) sound function verifies on structure across the sampled param space.
         let stochasticVerifies =
-            let rep = verifyFunction w (mkSound Random) reg genParams seed iterations
+            LawKit.LawCell "a stochastic-effect function verifies for structural validity across its param space"
 
-            if rep.Verified then
-                None
-            else
-                let why =
-                    match rep.Counterexample with
-                    | Some cx -> renderCounterexample w cx
-                    | None -> "(no counterexample)"
+        let effectAgnostic =
+            LawKit.LawCell
+                "verification makes no output-determinism/quality claim (structural verdict is effect-class-agnostic)"
 
-                Some(sprintf "seed=%d: a stochastic-effect sound function failed structural verification — %s" seed why)
+        // Each law is asserted once, over a whole verification run (or a run per axis) — the
+        // evidence is the run having been made, not an iteration.
+
+        // a stochastic (Random) sound function verifies on structure across the sampled param space.
+        (let rep = verifyFunction w (mkSound Random) reg genParams seed iterations
+
+         stochasticVerifies.Check(
+             rep.Verified,
+             fun () ->
+                 let why =
+                     match rep.Counterexample with
+                     | Some cx -> renderCounterexample w cx
+                     | None -> "(no counterexample)"
+
+                 sprintf "seed=%d: a stochastic-effect sound function failed structural verification — %s" seed why
+         ))
 
         // the structural verdict is effect-class-agnostic: sound verifies under every axis; broken
         // verifies under none. Verify keys on structure, not the determinism class.
-        let effectAgnostic =
-            let soundVerdicts =
-                axes
-                |> List.map (fun d -> (verifyFunction w (mkSound d) reg genParams seed iterations).Verified)
+        (let soundVerdicts =
+            axes
+            |> List.map (fun d -> (verifyFunction w (mkSound d) reg genParams seed iterations).Verified)
 
-            let brokenVerdicts =
-                axes
-                |> List.map (fun d -> (verifyFunction w (mkBroken d) reg genParams seed iterations).Verified)
+         let brokenVerdicts =
+             axes
+             |> List.map (fun d -> (verifyFunction w (mkBroken d) reg genParams seed iterations).Verified)
 
-            if (soundVerdicts |> List.forall id) && (brokenVerdicts |> List.forall not) then
-                None
-            else
-                Some(
-                    sprintf
-                        "seed=%d: the structural verdict varied with the effect class (sound=%A broken=%A)"
-                        seed
-                        soundVerdicts
-                        brokenVerdicts
-                )
+         effectAgnostic.Check(
+             (soundVerdicts |> List.forall id) && (brokenVerdicts |> List.forall not),
+             fun () ->
+                 sprintf
+                     "seed=%d: the structural verdict varied with the effect class (sound=%A broken=%A)"
+                     seed
+                     soundVerdicts
+                     brokenVerdicts
+         ))
 
-        [ { Law = "a stochastic-effect function verifies for structural validity across its param space"
-            Passed = stochasticVerifies.IsNone
-            Counterexample = stochasticVerifies }
-          { Law = "verification makes no output-determinism/quality claim (structural verdict is effect-class-agnostic)"
-            Passed = effectAgnostic.IsNone
-            Counterexample = effectAgnostic } ]
+        LawKit.results [ stochasticVerifies; effectAgnostic ]
 
     // ---- memo soundness: the audited-effect gate (Phase 53) ----
     // The teeth on `Function.applyMemo`'s Phase-53 change — memoisation keys on the OBSERVED (walked)
@@ -876,34 +862,45 @@ module internal FunctionLaws =
     ///  - **an under-declared-impure function is bypassed** — `applyMemo` computes it directly
     ///    (byte-identical to `apply`), stores nothing, and never serves it on re-apply (the soundness
     ///    guard against a stale cached result).
+    ///
+    /// The gate distinction is a property of the fixture and is asserted once; the bypass is asserted
+    /// `iterations` times, each over a fresh cache (the family draws nothing, so the count is the
+    /// number of applications, not a sample size — `iterations = 0` leaves the bypass law never
+    /// reached, which is what it reports).
     let memoSoundnessLaws
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)
         (underDeclaredFn: 'Node)
         (underDeclaredArgs: Map<string, Arg<'Node>>)
         (seed: int)
-        (_iterations: int)
+        (iterations: int)
         : LawResult list =
+        let gateLaw =
+            LawKit.LawCell
+                "applyMemo gates on the observed effect, not the declared root (an under-declared root would wrongly memoise)"
+
+        let bypassLaw =
+            LawKit.LawCell "an under-declared-impure function is bypassed (never cached, never served from cache)"
+
         // the gate distinction: the declared root is memoisable, the observed (walked) effect is not.
         let declaredMemoisable = Memo.isMemoisable (w.Effect underDeclaredFn)
 
         let observedMemoisable =
             Memo.isMemoisable (Function.observedEffect w underDeclaredFn)
 
-        let gateLaw =
-            if declaredMemoisable && not observedMemoisable then
-                None
-            else
-                Some(
-                    sprintf
-                        "seed=%d: fixture is not a genuine under-declared case (declaredMemoisable=%b observedMemoisable=%b)"
-                        seed
-                        declaredMemoisable
-                        observedMemoisable
-                )
+        gateLaw.Check(
+            declaredMemoisable && not observedMemoisable,
+            fun () ->
+                sprintf
+                    "seed=%d: fixture is not a genuine under-declared case (declaredMemoisable=%b observedMemoisable=%b)"
+                    seed
+                    declaredMemoisable
+                    observedMemoisable
+        )
 
-        // bypass behaviour: apply = applyMemo, nothing cached, never served on re-apply.
-        let bypassLaw =
+        // bypass behaviour: apply = applyMemo, nothing cached, never served on re-apply. Nothing is
+        // drawn, so the counterexample carries the seed alone, as it always did.
+        LawKit.run iterations seed (fun _ _ _ ->
             match
                 Function.apply w underDeclaredArgs underDeclaredFn,
                 Function.applyMemo w encode underDeclaredArgs underDeclaredFn Memo.empty
@@ -911,17 +908,18 @@ module internal FunctionLaws =
             | Ok direct, Ok(m1, c1) ->
                 match Function.applyMemo w encode underDeclaredArgs underDeclaredFn c1 with
                 | Ok(m2, c2) ->
-                    if
-                        m1 <> direct
-                        || m2 <> direct
-                        || not (Map.isEmpty c1.Entries)
-                        || not (Map.isEmpty c2.Entries)
-                        || c1.Hits <> 0
-                        || c2.Hits <> 0
-                        || c1.Bypasses <> 1
-                        || c2.Bypasses <> 2
-                    then
-                        Some(
+                    bypassLaw.Check(
+                        not (
+                            m1 <> direct
+                            || m2 <> direct
+                            || not (Map.isEmpty c1.Entries)
+                            || not (Map.isEmpty c2.Entries)
+                            || c1.Hits <> 0
+                            || c2.Hits <> 0
+                            || c1.Bypasses <> 1
+                            || c2.Bypasses <> 2
+                        ),
+                        fun () ->
                             sprintf
                                 "seed=%d: under-declared fn not bypassed (entries=%d/%d hits=%d/%d bypasses=%d/%d)"
                                 seed
@@ -931,17 +929,20 @@ module internal FunctionLaws =
                                 c2.Hits
                                 c1.Bypasses
                                 c2.Bypasses
-                        )
-                    else
-                        None
-                | Error e -> Some(sprintf "seed=%d: re-apply of the under-declared fn errored: %A" seed e)
+                    )
+                | Error e ->
+                    bypassLaw.Check(
+                        false,
+                        fun () -> sprintf "seed=%d: re-apply of the under-declared fn errored: %A" seed e
+                    )
             | other ->
-                Some(sprintf "seed=%d: apply / applyMemo of the under-declared fn disagreed or errored: %A" seed other)
+                bypassLaw.Check(
+                    false,
+                    fun () ->
+                        sprintf
+                            "seed=%d: apply / applyMemo of the under-declared fn disagreed or errored: %A"
+                            seed
+                            other
+                ))
 
-        [ { Law =
-              "applyMemo gates on the observed effect, not the declared root (an under-declared root would wrongly memoise)"
-            Passed = gateLaw.IsNone
-            Counterexample = gateLaw }
-          { Law = "an under-declared-impure function is bypassed (never cached, never served from cache)"
-            Passed = bypassLaw.IsNone
-            Counterexample = bypassLaw } ]
+        LawKit.results [ gateLaw; bypassLaw ]
