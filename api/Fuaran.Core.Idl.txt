@@ -4,7 +4,7 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
-ctor Fuaran.Core.Idl.Annotations..ctor(Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+ctor Fuaran.Core.Idl.Annotations..ctor(Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Artifact+Identity..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, System.String)
 ctor Fuaran.Core.Idl.ClosureSig..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Idl.Deprecation..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
@@ -125,6 +125,7 @@ property Fuaran.Core.Idl.IdlEnum.WireCases : Microsoft.FSharp.Collections.FSharp
 property Fuaran.Core.Idl.ProposalModule.requiredAlternatives : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Idl.WireShape.Default : Fuaran.Core.Idl.WireShape { get }
 record-field Fuaran.Core.Idl.Annotations.Deprecated #0 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>
+record-field Fuaran.Core.Idl.Annotations.Doc #3 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.Annotations.InProcessOnly #1 : System.Boolean
 record-field Fuaran.Core.Idl.Annotations.Since #2 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.Artifact+Identity.Description #1 : System.String

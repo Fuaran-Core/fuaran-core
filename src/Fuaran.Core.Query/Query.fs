@@ -99,6 +99,74 @@ type QueryError =
     /// Distinct from `RequiredParamsUnbound` (left out), so a caller can tell the two apart.
     | RequiredParamsNull of names: string list
 
+/// What a model reads when a dispatch is refused (Phase 251) — the `InvokeError.describe` twin. Every
+/// case that refuses against a closed set names its members, and a `ParamTypeMismatch` over a type
+/// a JSON value cannot spell directly (`decimal`, `date`, `timestamp`) also says how to write one.
+/// The wire form of the same value is `QueryCodec.queryErrorJson`.
+module QueryError =
+
+    let private quoteAll (xs: string list) : string =
+        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
+
+    /// How to write a value of a type a JSON scalar does not carry as itself.
+    let private howToWrite (t: ColumnType) : string =
+        match t with
+        | DecimalType ->
+            " Write a decimal as a JSON string of decimal text, such as \"12.50\": an optional '-', digits, and an optional '.' followed by digits; never as a JSON number."
+        | DateType -> " Write a date as a JSON string, YYYY-MM-DD."
+        | TimestampType -> " Write a timestamp as a JSON string, YYYY-MM-DDThh:mm:ssZ."
+        | _ -> ""
+
+    /// One sentence a model can act on, naming the failure and what would be accepted.
+    let describe (e: QueryError) : string =
+        match e with
+        | NoSuchQuery(id, []) ->
+            "Refused: there is no query '"
+            + id
+            + "' you may run. There are no queries you may run."
+        | NoSuchQuery(id, known) ->
+            "Refused: there is no query '"
+            + id
+            + "' you may run. The queries you may run are "
+            + quoteAll known
+            + "."
+        | DuplicateQuery id -> "Refused: the query '" + id + "' is registered twice."
+        | UnknownParam(name, []) ->
+            "Refused: '"
+            + name
+            + "' is not a parameter of this query. It takes no parameters."
+        | UnknownParam(name, declared) ->
+            "Refused: '"
+            + name
+            + "' is not a parameter of this query. Its parameters are "
+            + quoteAll declared
+            + "."
+        | ParamTypeMismatch(name, expected, got) ->
+            "Refused: parameter '"
+            + name
+            + "' must be "
+            + ColumnType.tag expected
+            + "; you sent "
+            + ColumnType.tag got
+            + "."
+            + howToWrite expected
+        | RequiredParamsUnbound names -> "Refused: required parameters missing: " + quoteAll names + "."
+        | SourceNotResolved r -> "Refused: the data source '" + r + "' could not be resolved."
+        | ExecutionFailed(detail, []) -> "Refused: the query ran and failed: " + detail + "."
+        | ExecutionFailed(detail, recoverable) ->
+            "Refused: the query ran and failed: "
+            + detail
+            + ". You may retry with "
+            + quoteAll recoverable
+            + "."
+        | Timeout -> "Refused: the query timed out."
+        | RequiredParamsNull names -> "Refused: required parameters bound to no value: " + quoteAll names + "."
+
+    /// Every refusal, one sentence per line, in the order given — the reading of
+    /// `Query.validateParamsAll`'s answer.
+    let describeAll (es: QueryError list) : string =
+        es |> List.map describe |> String.concat "\n"
+
 /// The data-acquisition surface: typed registry (populate + enumerate + dispatch), the
 /// param-validation contract, the Phase 27 capture keying. Additive over `Column`/`Function`;
 /// FSharp.Core-only, Fable-clean.
@@ -234,6 +302,130 @@ module Query =
             | Pending -> Ok Pending
             | Failed m -> Error(ExecutionFailed(m, [])))
 
+    // ---- every refusal at once, the validated arguments handed on, and the schema (Phase 251) ----
+
+    /// Validate as `validateParams` does, but answer with EVERY refusal rather than the first: one
+    /// per refused argument (`UnknownParam` / `ParamTypeMismatch`), in argument order, then
+    /// `RequiredParamsUnbound` naming every required parameter left out, then `RequiredParamsNull`
+    /// naming every required parameter that is present and bound only to `Null`. The first-failure
+    /// form is kept, and the two agree by construction of that order: the head of this list is
+    /// exactly `validateParams`'s refusal, and `Ok ()` here is `Ok ()` there.
+    let validateParamsAll (q: Query) (args: (string * Cell) list) : Result<unit, QueryError list> =
+        let declared = q.Params |> List.map (fun p -> p.Name)
+        let argMap = Map.ofList args
+
+        let argFault (name: string, cell: Cell) : QueryError option =
+            match q.Params |> List.tryFind (fun p -> p.Name = name) with
+            | None -> Some(UnknownParam(name, declared))
+            | Some p ->
+                match cellType cell with
+                | None -> None
+                | Some t when t = p.Type -> None
+                | Some t -> Some(ParamTypeMismatch(name, p.Type, t))
+
+        let faults = args |> List.choose argFault
+
+        let unbound =
+            q.Params
+            |> List.filter (fun p -> p.Required && not (Map.containsKey p.Name argMap))
+            |> List.map (fun p -> p.Name)
+
+        let boundToValue (name: string) =
+            args |> List.exists (fun (n, c) -> n = name && (cellType c).IsSome)
+
+        let nullBound =
+            q.Params
+            |> List.filter (fun p -> p.Required && Map.containsKey p.Name argMap && not (boundToValue p.Name))
+            |> List.map (fun p -> p.Name)
+
+        let all =
+            faults
+            @ (if List.isEmpty unbound then
+                   []
+               else
+                   [ RequiredParamsUnbound unbound ])
+            @ (if List.isEmpty nullBound then
+                   []
+               else
+                   [ RequiredParamsNull nullBound ])
+
+        if List.isEmpty all then Ok() else Error all
+
+    /// `invoke`, with the resolver handed the validated argument list — typed, as `Cell`s, and the
+    /// very list `validateParams` checked — so a resolver reads its arguments instead of closing over
+    /// the caller's list. Additive beside `invoke`; the same three outcomes, and a resolver's
+    /// `Failed m` is projected into `ExecutionFailed` exactly as there.
+    let invokeWithArgs
+        (q: Query)
+        (args: (string * Cell) list)
+        (resolve: Query -> (string * Cell) list -> Deferred<QueryResult>)
+        : Result<Deferred<QueryResult>, QueryError> =
+        validateParams q args
+        |> Result.bind (fun () ->
+            match resolve q args with
+            | Ready r -> Ok(Ready r)
+            | Pending -> Ok Pending
+            | Failed m -> Error(ExecutionFailed(m, [])))
+
+    /// The text an exact decimal is written as: the grammar `DecimalText` READS, which is exactly
+    /// the set of strings the codec decodes into a `Decimal` cell (and canonicalises: `12.50` is
+    /// `Decimal "12.5"`).
+    let private decimalPattern = "^-?[0-9]+(\\.[0-9]+)?$"
+    let private datePattern = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+
+    let private timestampPattern =
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+
+    /// The JSON Schema of one value of a column type, as a model emits it and the codec reads it.
+    /// A `decimal` is a STRING with the decimal-text pattern, never a number: a model told
+    /// "number" emits a fractional token, and the codec refuses one, because a value that has
+    /// been through a float is not a value an exact type can vouch for. A `date` / `timestamp` is
+    /// a string of its canonical ISO-8601 shape; an `int` is bounded to the 32-bit range the cell
+    /// holds.
+    let private columnSchema (t: ColumnType) : JVal =
+        match t with
+        | IntType ->
+            JObj
+                [ "type", JStr "integer"
+                  "minimum", JInt System.Int32.MinValue
+                  "maximum", JInt System.Int32.MaxValue ]
+        | FloatType -> JObj [ "type", JStr "number" ]
+        | BoolType -> JObj [ "type", JStr "boolean" ]
+        | StringType -> JObj [ "type", JStr "string" ]
+        | DateType -> JObj [ "type", JStr "string"; "pattern", JStr datePattern ]
+        | TimestampType -> JObj [ "type", JStr "string"; "pattern", JStr timestampPattern ]
+        | DecimalType -> JObj [ "type", JStr "string"; "pattern", JStr decimalPattern ]
+
+    let private hostTag =
+        function
+        | Pure -> "pure"
+        | ReadsHost -> "readsHost"
+        | WritesHost -> "writesHost"
+
+    /// Project a query into a STANDARD JSON Schema `object` — `Function.toJsonSchema`'s twin, over
+    /// the same convention (Phase 251; the convention is written down beside `Function.toSchema`):
+    /// no tag, `"title"` the query id, each parameter a property keyed by its NAME with the schema
+    /// of its column type, the required ones listed, and what JSON Schema has no keyword for outside
+    /// `properties` under `x-` keys — `x-effect` (the two-axis effect class, as there) and
+    /// `x-result`, the schema of ONE result row keyed by column name, so a model reads what comes
+    /// back without it reading as an argument to fill. A parameter's value is what
+    /// `QueryCodec.decodeArgs` reads. `Canon.render` of the result is canonical and stable for a
+    /// fixed query.
+    let toJsonSchema (q: Query) : JVal =
+        JObj
+            [ "type", JStr "object"
+              "title", JStr q.Id
+              "x-effect",
+              JObj
+                  [ "host", JStr(hostTag q.Effect.Host)
+                    "determinism", JStr(Effect.determinismTag q.Effect.Determinism) ]
+              "properties", JObj(q.Params |> List.map (fun p -> p.Name, columnSchema p.Type))
+              "required", JArr(q.Params |> List.filter (fun p -> p.Required) |> List.map (fun p -> JStr p.Name))
+              "x-result",
+              JObj
+                  [ "type", JStr "object"
+                    "properties", JObj(q.ResultSchema |> List.map (fun (n, t) -> n, columnSchema t)) ] ]
+
 /// A typed query registry — the discovery surface an agent enumerates (the data-acquisition analogue
 /// of node-introspection / capability discovery): "what data may I acquire, with what typed params,
 /// producing what schema". Default-deny by shape on dispatch — only a registered id resolves.
@@ -271,6 +463,18 @@ module QueryRegistry =
         match Map.tryFind id r.Queries with
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
         | Some q -> Query.invoke q args resolve
+
+    /// `dispatch`, with the resolver handed the resolved query and the validated argument list
+    /// (`Query.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny the same.
+    let dispatchWithArgs
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (resolve: Query -> (string * Cell) list -> Deferred<QueryResult>)
+        : Result<Deferred<QueryResult>, QueryError> =
+        match Map.tryFind id r.Queries with
+        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
+        | Some q -> Query.invokeWithArgs q args resolve
 
 /// The canonical wire codec for a `Query` declaration + a `QueryResult`. Round-trips the typed
 /// params, the result schema, the effect class, the source (via `ColumnCodec`), and the paging
@@ -516,3 +720,266 @@ module QueryCodec =
         match Decode.parse s with
         | Error m -> Error(ExecutionFailed("parse: " + m, []))
         | Ok el -> deferredResultOf el
+
+    // ---- typed refusal (Phase 251) ----
+    // `CapabilityCodec.invokeErrorJson`'s twin: one `$type` per case, in camelCase, and a column
+    // type by its tag. The sentence a model reads is `QueryError.describe`.
+
+    let private strs (xs: string list) : JVal = JArr(xs |> List.map JStr)
+
+    /// Encode a `QueryError` to a `JVal` (`"$type"` is the case: `noSuchQuery`, `paramTypeMismatch`, …).
+    let queryErrorJson (e: QueryError) : JVal =
+        match e with
+        | NoSuchQuery(id, known) -> Canon.typed "noSuchQuery" [ "id", JStr id; "known", strs known ]
+        | DuplicateQuery id -> Canon.typed "duplicateQuery" [ "id", JStr id ]
+        | UnknownParam(name, declared) -> Canon.typed "unknownParam" [ "name", JStr name; "declared", strs declared ]
+        | ParamTypeMismatch(name, expected, got) ->
+            Canon.typed
+                "paramTypeMismatch"
+                [ "name", JStr name
+                  "expected", JStr(colTypeStr expected)
+                  "got", JStr(colTypeStr got) ]
+        | RequiredParamsUnbound names -> Canon.typed "requiredParamsUnbound" [ "names", strs names ]
+        | SourceNotResolved r -> Canon.typed "sourceNotResolved" [ "ref", JStr r ]
+        | ExecutionFailed(detail, recoverable) ->
+            Canon.typed "executionFailed" [ "detail", JStr detail; "recoverable", strs recoverable ]
+        | Timeout -> Canon.typed "timeout" []
+        | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
+
+    let encodeQueryError (e: QueryError) : string = Canon.render (queryErrorJson e)
+
+    /// Decode a `QueryError` from a `JVal`. The error side is a plain `string`: a refusal that
+    /// cannot be read is not itself a refusal of the query.
+    let queryErrorOf (el: JVal) : Result<QueryError, string> =
+        let strList (name: string) =
+            Decode.getProp name el |> Result.bind (Decode.mapList Decode.asString)
+
+        Decode.strField "$type" el
+        |> Result.bind (fun k ->
+            match k with
+            | "noSuchQuery" ->
+                Decode.strField "id" el
+                |> Result.bind (fun id -> strList "known" |> Result.map (fun known -> NoSuchQuery(id, known)))
+            | "duplicateQuery" -> Decode.strField "id" el |> Result.map DuplicateQuery
+            | "unknownParam" ->
+                Decode.strField "name" el
+                |> Result.bind (fun name -> strList "declared" |> Result.map (fun d -> UnknownParam(name, d)))
+            | "paramTypeMismatch" ->
+                Decode.strField "name" el
+                |> Result.bind (fun name ->
+                    Decode.strField "expected" el
+                    |> Result.bind colTypeOf
+                    |> Result.bind (fun exp ->
+                        Decode.strField "got" el
+                        |> Result.bind colTypeOf
+                        |> Result.map (fun got -> ParamTypeMismatch(name, exp, got))))
+            | "requiredParamsUnbound" -> strList "names" |> Result.map RequiredParamsUnbound
+            | "sourceNotResolved" -> Decode.strField "ref" el |> Result.map SourceNotResolved
+            | "executionFailed" ->
+                Decode.strField "detail" el
+                |> Result.bind (fun d -> strList "recoverable" |> Result.map (fun r -> ExecutionFailed(d, r)))
+            | "timeout" -> Ok Timeout
+            | "requiredParamsNull" -> strList "names" |> Result.map RequiredParamsNull
+            | other -> Error("unknown query error: " + other))
+
+    let decodeQueryError (s: string) : Result<QueryError, string> =
+        Decode.parse s |> Result.bind queryErrorOf
+
+    // ---- a model's arguments (Phase 251) ----
+    // `Query.toJsonSchema` tells a model to emit one object keyed by parameter name; this reads that
+    // object back into the typed argument list `validateParams` takes. Each value is read by the
+    // ONE cell decoder the column codec owns — as the single cell of a one-row column of the
+    // parameter's type — so an argument decodes exactly as the same value would in a result table:
+    // a decimal is read from decimal text and canonicalised, a date or timestamp only in its
+    // canonical form, and a fractional number token for a decimal is refused.
+
+    /// The column type a JSON scalar spells as itself, for naming what was sent.
+    let private sentType (v: JVal) : ColumnType option =
+        match v with
+        | JInt _ -> Some IntType
+        | JFloat _ -> Some FloatType
+        | JBool _ -> Some BoolType
+        | JStr _ -> Some StringType
+        | JArr _
+        | JObj _ -> None
+
+    let private argCell (name: string) (ty: ColumnType) (v: JVal) : Result<string * Cell, QueryError> =
+        let oneCell =
+            JObj
+                [ "schema", JArr [ JObj [ "name", JStr name; "type", JStr(colTypeStr ty) ] ]
+                  "columns", JObj [ name, JObj [ "values", JArr [ v ]; "validity", JArr [ JBool true ] ] ] ]
+
+        let refused () =
+            match sentType v with
+            | Some got -> Error(ParamTypeMismatch(name, ty, got))
+            | None ->
+                Error(
+                    ExecutionFailed(
+                        "decode: parameter '"
+                        + name
+                        + "' takes a "
+                        + colTypeStr ty
+                        + " value, not a JSON "
+                        + JVal.kindName v,
+                        []
+                    )
+                )
+
+        match ColumnCodec.decodeJson oneCell with
+        | Ok(Embedded { Columns = [ { Cells = [ cell ] } ] }) -> Ok(name, cell)
+        | _ -> refused ()
+
+    /// Read a model's argument object — the shape `Query.toJsonSchema` describes — into the typed
+    /// argument list, answering with EVERY refusal: an unknown member is `UnknownParam` naming the
+    /// declared parameters (whatever the read policy: a parameter the query does not declare is never
+    /// read past), and a value its parameter's type cannot read is `ParamTypeMismatch` naming the JSON
+    /// type that was sent. Required-ness is not checked here; `Query.validateParams` /
+    /// `validateParamsAll` take the list this returns.
+    let decodeArgsJson (q: Query) (el: JVal) : Result<(string * Cell) list, QueryError list> =
+        match el with
+        | JObj fields ->
+            let declared = q.Params |> List.map (fun p -> p.Name)
+
+            let decoded =
+                fields
+                |> List.map (fun (name, v) ->
+                    match q.Params |> List.tryFind (fun p -> p.Name = name) with
+                    | None -> Error(UnknownParam(name, declared))
+                    | Some p -> argCell name p.Type v)
+
+            match
+                decoded
+                |> List.choose (function
+                    | Error e -> Some e
+                    | Ok _ -> None)
+            with
+            | [] ->
+                Ok(
+                    decoded
+                    |> List.choose (function
+                        | Ok a -> Some a
+                        | Error _ -> None)
+                )
+            | errors -> Error errors
+        | other ->
+            Error
+                [ ExecutionFailed(
+                      "decode: a query's arguments are one JSON object keyed by parameter name, not a JSON "
+                      + JVal.kindName other,
+                      []
+                  ) ]
+
+    /// `decodeArgsJson` over text.
+    let decodeArgs (q: Query) (s: string) : Result<(string * Cell) list, QueryError list> =
+        match Decode.parse s with
+        | Error m -> Error [ ExecutionFailed("parse: " + m, []) ]
+        | Ok el -> decodeArgsJson q el
+
+    // ---- strict read policy (Phase 251) ----
+    // `CapabilityCodec`'s policy, over this codec's documents: `Strict` checks that every object
+    // this codec reads carries only the members it reads, then runs the ordinary decoder, so
+    // `Lenient` is byte-for-byte the old behaviour. The embedded `source` and `rows` documents are
+    // the column codec's, read by its own rules; the check stops at them.
+
+    let private quoteAll (xs: string list) : string =
+        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
+
+    let private tagOf (el: JVal) : string option =
+        match el with
+        | JObj fields ->
+            fields
+            |> List.tryPick (fun (k, v) ->
+                match k, v with
+                | "$type", JStr t -> Some t
+                | _ -> None)
+        | _ -> None
+
+    let private members (where: string) (known: string list) (el: JVal) : Result<unit, QueryError> =
+        match el with
+        | JObj fields ->
+            match fields |> List.tryFind (fun (k, _) -> not (List.contains k known)) with
+            | Some(k, _) ->
+                Error(
+                    ExecutionFailed(
+                        "decode: unknown member '"
+                        + k
+                        + "' in "
+                        + where
+                        + "; its members are "
+                        + quoteAll (List.sort known),
+                        []
+                    )
+                )
+            | None -> Ok()
+        | _ -> Ok()
+
+    let private within (name: string) (check: JVal -> Result<unit, QueryError>) (el: JVal) =
+        match el with
+        | JObj fields ->
+            match fields |> List.tryFind (fun (k, _) -> k = name) with
+            | Some(_, v) -> check v
+            | None -> Ok()
+        | _ -> Ok()
+
+    let private each (check: JVal -> Result<unit, QueryError>) (el: JVal) : Result<unit, QueryError> =
+        match el with
+        | JArr xs -> xs |> List.fold (fun acc x -> acc |> Result.bind (fun () -> check x)) (Ok())
+        | _ -> Ok()
+
+    let private strictQuery (el: JVal) =
+        members
+            "query"
+            [ "$type"
+              "id"
+              "params"
+              "resultSchema"
+              "effect"
+              "source"
+              "timeoutMs"
+              "pageSize" ]
+            el
+        |> Result.bind (fun () -> within "params" (each (members "query parameter" [ "name"; "type"; "required" ])) el)
+        |> Result.bind (fun () -> within "resultSchema" (each (members "result column" [ "name"; "type" ])) el)
+        |> Result.bind (fun () -> within "effect" (members "effect" [ "host"; "determinism" ]) el)
+
+    let private strictResult (el: JVal) =
+        members "query result" [ "$type"; "rows"; "pageNum"; "totalRowCount"; "nextPageToken" ] el
+
+    let private strictDeferredResult (el: JVal) =
+        let extra =
+            match tagOf el with
+            | Some "ready" -> [ "value" ]
+            | Some "failed" -> [ "message" ]
+            | _ -> []
+
+        members "deferred" ("$type" :: extra) el
+        |> Result.bind (fun () ->
+            match tagOf el with
+            | Some "ready" -> within "value" strictResult el
+            | _ -> Ok())
+
+    let private readWith
+        (policy: ReadPolicy)
+        (check: JVal -> Result<unit, QueryError>)
+        (read: JVal -> Result<'T, QueryError>)
+        (s: string)
+        : Result<'T, QueryError> =
+        match Decode.parse s with
+        | Error m -> Error(ExecutionFailed("parse: " + m, []))
+        | Ok el ->
+            match policy with
+            | ReadPolicy.Lenient -> read el
+            | ReadPolicy.Strict -> check el |> Result.bind (fun () -> read el)
+
+    /// `decode` under a read policy: `Strict` refuses an unknown member of the declaration, its
+    /// parameters, its result columns or its effect.
+    let decodeWith (policy: ReadPolicy) (s: string) : Result<Query, QueryError> = readWith policy strictQuery queryOf s
+
+    /// `decodeResult` under a read policy.
+    let decodeResultWith (policy: ReadPolicy) (s: string) : Result<QueryResult, QueryError> =
+        readWith policy strictResult resultOf s
+
+    /// `decodeDeferredResult` under a read policy: `Strict` refuses an unknown member of the
+    /// envelope or of the result it carries.
+    let decodeDeferredResultWith (policy: ReadPolicy) (s: string) : Result<Deferred<QueryResult>, QueryError> =
+        readWith policy strictDeferredResult deferredResultOf s

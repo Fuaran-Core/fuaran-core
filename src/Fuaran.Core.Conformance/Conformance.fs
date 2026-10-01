@@ -199,6 +199,16 @@ module Conformance =
         : LawResult list =
         StreamLaws.dagLaws sw gen hashFn seed iterations
 
+    /// Forward — see `StreamLaws.reachLaws` (Phase 289).
+    let reachLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        StreamLaws.reachLaws sw gen hashFn seed iterations
+
     /// Forward — see `StreamLaws.captureReplayLaws`.
     let captureReplayLaws
         (encode: 'v -> string)
@@ -394,6 +404,58 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         ConcurrencyLaws.arbitrationLaws nodew idw gen encode seed iterations
+
+    /// Forward — see `KeyedArbitrationLaws.keyedArbitrationLawsWith` (Phase 247): the arbitration
+    /// laws over `Arbitration.arbitrateWith footprintOf canApplyOf`, held to the keyed engine the
+    /// accepted scripts land with, with a container-illegal proposal and a keyed-id clash BUILT.
+    /// The injected pair sits last before the seed (the kit's `…With` rule).
+    let keyedArbitrationLawsWith
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (encode: 'Node -> string)
+        (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
+        (canApplyOf: SkeletonOp<'Node, 'Id> list -> 'Node -> Result<unit, int * Rejection<'Id>>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        KeyedArbitrationLaws.keyedArbitrationLawsWith
+            "Conformance.keyedArbitrationLawsWith"
+            keyw
+            nodew
+            idw
+            gen
+            encode
+            footprintOf
+            canApplyOf
+            seed
+            iterations
+
+    /// Forward — `keyedArbitrationLawsWith` pinned to the keyed composition (Phase 247):
+    /// `Ops.footprintKeyed keyw nodew idw` and `Ops.canApplyAllKeyed keyw canHold nodew idw`, with
+    /// `canHold` the generator's `CanHold` (every node, when it is `None`). The shape a domain that
+    /// arbitrates over containers or keyed positions runs.
+    let keyedArbitrationLaws
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (encode: 'Node -> string)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        KeyedArbitrationLaws.keyedArbitrationLawsWith
+            "Conformance.keyedArbitrationLawsWith"
+            keyw
+            nodew
+            idw
+            gen
+            encode
+            (Ops.footprintKeyed keyw nodew idw)
+            (Ops.canApplyAllKeyed keyw (LawKit.canHoldOf gen) nodew idw)
+            seed
+            iterations
 
     /// Forward — see `SeamLaws.capabilityLaws`.
     let capabilityLaws (seed: int) (iterations: int) : LawResult list = SeamLaws.capabilityLaws seed iterations

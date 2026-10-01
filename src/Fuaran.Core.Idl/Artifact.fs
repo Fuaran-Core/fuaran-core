@@ -228,6 +228,12 @@ module Artifact =
             @ (match a.Since with
                | Some v -> [ "since", JStr v ]
                | None -> [])
+            // Phase 255 — the authored doc, verbatim. Omitted when absent like every
+            // other slot, so only an artifact that declares one gains the key (and a
+            // new content hash).
+            @ (match a.Doc with
+               | Some v -> [ "doc", JStr v ]
+               | None -> [])
         )
 
     let private annotationsJson (a: Annotations) : (string * JVal) list =
@@ -851,10 +857,13 @@ module Artifact =
             inProcessOnly
             |> Result.bind (fun ipo ->
                 optStr "since"
-                |> Result.map (fun since ->
-                    { Deprecated = d
-                      InProcessOnly = ipo
-                      Since = since })))
+                |> Result.bind (fun since ->
+                    optStr "doc"
+                    |> Result.map (fun doc ->
+                        { Deprecated = d
+                          InProcessOnly = ipo
+                          Since = since
+                          Doc = doc }))))
 
     /// The annotation set under an owner's `annotations` key, or [[Annotations.Empty]]
     /// when the key is absent — the projection omits an empty set entirely, so absence

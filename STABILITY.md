@@ -2377,11 +2377,11 @@ measurement, the compat promise, and the migration route if the flip is ever wan
 
 ## 0.34.0 — DRAFT
 
-**Slot class: breaking (source).** Opened as an additive slot over the tagged  .33.0 and reclassed
-breaking before any tag, when Phase 252 widened HostedCodec (two fields) and retyped Gen.fsharpValue
-and Gen.typescriptValue, and Phase 248 retyped ArbitrationRejection.Conflicts. Each entry below names
+**Slot class: breaking (source).** Opened as an additive slot over the tagged `0.33.0` and reclassed
+breaking before any tag, when Phase 252 widened `HostedCodec` (two fields) and retyped `Gen.fsharpValue`
+and `Gen.typescriptValue`, and Phase 248 retyped `ArbitrationRejection.Conflicts`. Each entry below names
 its own class and the edit a consumer makes; the wire classes are recorded per entry. Pre-1.0 a breaking
-change is a minor bump, which this slot already is over  .33.0, so the number does not move.
+change is a minor bump, which this slot already is over `0.33.0`, so the number does not move.
 
 **Phase 331 — `tests/Fuaran.Core.Tests/ConformanceTests.fs` is split along the conformance kit's topic
 files. Class: `additive`, and the whole of it is tests: no package's public surface moves (the seventeen
@@ -2732,6 +2732,207 @@ alone, already in the kit's closure, so the kit's package graph gains one packag
 runner's comparison unit grows by 86 lines at the consumer's next Core raise.
 
 **Class: additive.** `api/Fuaran.Core.Conformance.txt` gains one member (`ParityVectors.sanitiseSweep`).
+
+### A reachability index on the lane DAG: `Dag.Reach`, the indexed append and merge, and two index-taking overloads (Phase 289) — ADDITIVE
+
+**What changed.** Every graph query on the lane DAG recomputed from the node map on each call:
+`ancestorsOf` walked the parents, `tryTopoOrder` / `tryReplayTo` / `between` re-drained a head's closure,
+`mergeBase` took two closures and one more per common ancestor, and `reconcileMany` one per head. A
+loop of them — a keyring walk asking reachability per act, a fold asking a merge base per lane pair —
+cost the history's size times the number of questions. `Fuaran.Core.OpStream.Dag` now ships an index
+that answers the same questions from what it built once:
+
+- `Dag.Reach<'Op>` (no equality; immutable; carries the DAG it indexes) and the `Dag.Reach` module:
+  `ofDag` (one drain of the whole node set), `dag`, `ancestors`, `reaches ancestor descendant`,
+  `tryTopoOrder`, `mergeBase` and `between`, each answering exactly as the unindexed function of the
+  same name (`reaches` as membership in `ancestorsOf`).
+- `Dag.appendIndexed` / `Dag.mergeIndexed`: `append` / `merge` that also return the index extended for
+  the new node, at O(N) rather than a rebuild. Their refusals are `append`'s and `merge`'s.
+- `Dag.tryReplayToWith` and `Dag.reconcileManyWith`: `tryReplayTo` and `reconcileMany` taking the index
+  where they take the DAG, so a consumer holding an index does not pay the closure walks inside the call.
+- `Conformance.reachLaws` (opt-in, `StrongerPromise`, `Guarded [ "DAG shape" ]`): every indexed answer
+  equals the unindexed one on generated DAGs and on a built cyclic load with a dangling parent, the
+  index grown by `appendIndexed` / `mergeIndexed` answers as `Reach.ofDag` of the result, and a sample
+  without a merge of two incomparable lanes reds the guard rather than passing the merge-base, delta
+  and reconcile laws on chains.
+
+The representation and its measured cost are DECISIONS.md's Phase 289 entry: a slot per orderable
+node, the whole DAG's drain order (a head's order, a union's and a delta's are filters of it), and a
+per-slot ancestor bitset over slots — N²/64 32-bit words, about 1.6 MB at 5,000 nodes.
+
+**What did NOT change, deliberately.** No existing function's signature or answer moves:
+`reconcileMany` is re-expressed over a shared private fold (`reconcileRegion`) with the partition it
+always computed, and the laws pin every indexed answer to the unindexed one. The shard named
+`replayToWith`; the overload is `tryReplayToWith`, because `replayTo` is obsolete and leaves after this
+draft, and an overload of it would leave with it. The shard named `Reach.topoOrder`; it is
+`Reach.tryTopoOrder`, because the unindexed function it equals is `tryTopoOrder` (`topoOrder` is
+private) and answers with a `Result`. `mergeIndexed` is beyond the shard's list: a session that appends
+and merges in a loop would otherwise rebuild at its first merge.
+
+**What adopting it costs.** Nothing for a consumer that does not build an index. A consumer that does
+builds it once per load (`Dag.Reach.ofDag`), keeps it current with `appendIndexed` / `mergeIndexed`
+where it appended with `append` / `merge`, and asks through `Dag.Reach.*` or passes it to the `…With`
+overloads. The index holds its DAG, so there is no DAG argument to mismatch.
+
+**Class: additive.** `api/Fuaran.Core.OpStream.Dag.txt` gains the `Reach` type and module and four
+functions; `api/Fuaran.Core.Conformance.txt` gains `Conformance.reachLaws`. No wire bytes move.
+
+
+### Off-walk identity in the footprint and arbitration: a keyed footprint, a domain's own arbitration pair, and the container rule at the partition (Phase 247) — ADDITIVE
+
+**What changed.** `Ops.footprint` reads an inserted subtree's ids over `Children` alone, so two scripts
+that each graft a subtree carrying the same id in a keyed position were declared independent and
+collided only at replay; and `Arbitration.arbitrate` checks applicability with `Ops.canApplyAll`, under
+which every node can hold children, so it admitted an insert under a leaf that the domain's own engine
+then refused (or, under plain `apply` with a witness that ignores a leaf's new children, dropped). Five
+members close both, beside what was there:
+
+- `Ops.footprintKeyed keyw nodew idw ops` — the footprint of the script `Ops.applyContainedKeyed` runs.
+  An `InsertChild`'s authored id set is the graft's keyed walk (`Tree.idsKeyed`), and an `UpdateNode`
+  payload's keyed subtrees, which the keyed engine checks as new content, are read and content-written
+  too. Two scripts bringing in one keyed id now fail `Ops.independent` with `Interference.SameTarget`
+  on it, and `Dag.conflicts` over it reports `ConcurrentUpdate` at that id. For a witness whose
+  `KeyedChildren` is `fun _ -> []` it returns exactly `Ops.footprint`.
+- `Ops.canApplyAllKeyed keyw canHold nodew idw ops root` — the sequence dry run over the keyed engine
+  (the `canApplyAllWith` mirror of `applyContainedKeyed`), first-refusal index and envelope.
+- `Arbitration.arbitrateWith footprint canApply baseTree proposals` — the partition with the domain's own
+  independence and applicability (the `concurrencyLawsWith` precedent). `arbitrate nodew idw` is now
+  defined as `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew idw)`; its output is
+  unchanged on every input.
+- `Arbitration.arbitrateContained canHold nodew idw` — the common case: `arbitrateWith` at
+  `Ops.footprint` and `Ops.canApplyAllWith canHold`, so an insert under a node `canHold` refuses is
+  `Inapplicable(_, NotAContainer _)`. A keyed domain composes `arbitrateWith (Ops.footprintKeyed …)
+  (Ops.canApplyAllKeyed …)`.
+- `Conformance.keyedArbitrationLaws` / `keyedArbitrationLawsWith` — a new opt-in family
+  (`NeedsWitnessCapability`; `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen`). It runs the
+  partition through `arbitrateWith` and BUILDS the two admissions this phase closes: an insert under a
+  node `OpGen.CanHold` refuses (must be `Inapplicable(NotAContainer)`), and two grafts carrying one id in
+  a keyed position through `PlaceKeyedChild` (never both admitted; the later is `Conflicts` citing the
+  earlier with `SameTarget` on the id). It also holds the accepted scripts to LAND under
+  `applyContainedKeyed` in any order, to one tree whose keyed walk repeats no id. Handed `arbitrate`'s
+  footprint or `arbitrate`'s applicability through the `With` form, the clash arm or the container arm
+  goes red. A generator with no `CanHold`, or a witness with no keyed position, makes the matching arm
+  vacuous BY DECLARATION, and the guard line says so.
+
+**What adopting it costs.** Nothing for a consumer who keeps calling `arbitrate` / `footprint`: neither's
+output moves. A domain with a container capability switches to `arbitrateContained canHold`; one with
+keyed positions to the keyed `arbitrateWith` pair and `footprintKeyed` wherever it feeds a footprint to
+`Dag.conflicts` / `Dag.reconcile`.
+
+**What it does not do.** A keyed-slot write still has no address kind of its own: the shard's fifth
+`Footprint` address set (`KeyedWrites`) and a `KeyedSlotClash` conflict shape are NOT in this entry. A
+fifth field on the published `Footprint` record breaks every full-record construction, and a sound
+landing needs `Dag.conflicts` and `MergeConflictShape` (and the `DagFold` model of them) to read the new
+set in the same change — otherwise `Dag.conflicts` would report nothing for a pair `Ops.independent`
+rejects on a slot, and `Dag.reconcile` would fold two lanes writing one slot as clean. It is left for a
+change that can move those together and class itself breaking (source).
+
+**Class: additive.** `api/Fuaran.Core.Ops.txt` gains four members (`Ops.footprintKeyed`,
+`Ops.canApplyAllKeyed`, `Arbitration.arbitrateWith`, `Arbitration.arbitrateContained`) and
+`api/Fuaran.Core.Conformance.txt` two (`Conformance.keyedArbitrationLaws`,
+`Conformance.keyedArbitrationLawsWith`); no existing member moves, and no wire byte.
+
+### An authored `doc` annotation, emitted as the member's `///` summary (Phase 255) — BREAKING (source): `Annotations` widened; additive on the artifact wire and the generated emission
+
+**What changed.** `Annotations` gains a fourth slot, `Doc: string option` — what the member IS, as
+authored prose — beside `Deprecated`, `InProcessOnly` and `Since`. It rides every annotatable
+declaration the set already reaches: kinds and tree-ops, their fields, the node envelope's fields,
+record fields, union cases, and enum cases through `Declare.enumAnnotate` (which takes the whole set,
+so it needed no change). `Annotations.Empty` is unchanged in meaning (`Doc = None`), and `IsEmpty`
+counts the new slot.
+
+- **The artifact** writes it as a `doc` key inside the existing `annotations` object (and inside an
+  enum's `caseAnnotations` entries), verbatim, and reads it back; absent means none. An artifact that
+  declares no doc renders byte-for-byte what it did, so only one that declares a doc gains the key and a
+  new content hash. A reader older than this slot ignores the key. The stability classifier needs no
+  change: it compares the canonical annotation object, so a doc on a member that declared nothing grades
+  `additive`, and a doc added to an annotated member, moved or withdrawn grades `host-surface-only`, as
+  for the other three slots.
+- **The F# generator** emits the doc FIRST in the member's `///` block, ahead of the deprecation,
+  in-process and since notes, one `///` line per authored line. Every line break an author can type ends
+  a line, so no authored text can fall out of a comment into the generated source; trailing whitespace
+  and blank lines at either end are dropped; a whitespace-only doc emits nothing. A character XML 1.0
+  cannot carry (a C0 control other than tab, an unpaired surrogate, U+FFFE / U+FFFF) becomes U+FFFD,
+  because the compiler checks every doc block as XML (FS3390) and nothing else can spell it.
+- **The block follows the compiler's mode, and that is the correction this entry records.** The F#
+  compiler reads a `///` block whose first line does not begin with `<` as TEXT: it wraps it in
+  `<summary>` and XML-encodes it itself. Encoding `<` and `&` in such a block as well — the first
+  design — makes the documentation file carry `&amp;lt;` and a reader see `&lt;'T>` where the author
+  wrote `<'T>`, which was measured, not inferred. So a text block is emitted verbatim. A block whose
+  first line DOES begin with `<` is read as XML and authored text is not valid XML in general, so a doc
+  that opens with `<` is emitted as an explicit `<summary>` holding every line of the block, the notes
+  included, with `<` and `&` encoded. The test project compiles a generated module covering both modes
+  with FS3390 as an error, and a drift guard holds that module to the generator.
+- **The TypeScript backend** does not render the doc: its emitted JavaScript has no per-member
+  declaration to carry a summary, and its annotation comments are `//` lines naming their subject.
+
+**What adopting it costs — the consumer edits.**
+
+- Every `Annotations` value written as a FULL record literal (`{ Deprecated = …; InProcessOnly = …;
+  Since = … }`) adds `Doc = None` (FS0764 until it does). A `{ Annotations.Empty with … }` expression
+  compiles unchanged (one full literal in this repository's own test fixtures took the edit).
+- A vocabulary that declares no doc regenerates byte-identical artifacts and generated modules. One that
+  declares a doc regenerates with exactly the added `///` lines — plus the `<summary>` pair, and the
+  encoded notes, for a doc that opens with `<`.
+- A consumer re-pins to adopt; the documentation reaches its own users when it ships an XML
+  documentation file.
+
+**Class: breaking (source).** `api/Fuaran.Core.Idl.txt` reports `record-widening` (`Annotations` gains
+`Doc`; the constructor gains a parameter). The wire baseline for `Fuaran.Core.Idl` moves by the members
+added under every `annotations` object (`additive` moves; its stated class since the newest tag was
+already `breaking`). `api/Fuaran.Core.Idl.Codegen.txt` does not move: the emitter's signatures are
+unchanged and only what it writes for a documented member differs.
+
+### The capability and query seams speak to a model (Phase 251) — ADDITIVE
+
+**What changed.** The two seams refused in typed unions and stopped there: nothing rendered a
+refusal for a model, neither codec encoded one, a body or resolver was not handed the arguments
+validation had accepted, validation stopped at the first failure, `Query` had no JSON Schema, and an
+unknown member was always read past. Each now has a Core answer, beside the existing forms:
+
+- **Refusals rendered.** `InvokeError.describe` and `QueryError.describe` (with `describeAll`) turn a
+  case into one sentence that names the failure and, wherever a closed set is refused against, its
+  members. `Space.describe` phrases a value space. A `ParamTypeMismatch` whose expected type is
+  `decimal`, `date` or `timestamp` also says how to write one (a decimal as a JSON string of decimal
+  text, such as `"12.50"`, never a JSON number).
+- **Refusals encoded.** `CapabilityCodec.invokeErrorJson` / `encodeInvokeError` / `invokeErrorOf` /
+  `decodeInvokeError`, and the `QueryCodec.queryErrorJson` family: one `"$type"` per case (the case
+  name in camelCase), a value space in its codec form, a column type by its tag. Both are wire roots
+  now (`invokeError`, `queryError`).
+- **Validated arguments handed on.** `Capability.invokeWithArgs` / `Registry.dispatchWithArgs` hand a
+  body the validated arguments TYPED by their spaces, as the new `ArgValue` union (`IntValue`,
+  `FloatValue`, `TextValue`, `TreeValue` — the parsed document of a slot argument);
+  `Capability.typeArgs` is that list on its own. `Query.invokeWithArgs` /
+  `QueryRegistry.dispatchWithArgs` hand a resolver the validated `(string * Cell) list`.
+- **Every violation at once.** `Capability.validateArgsAll` and `Query.validateParamsAll` answer every
+  refusal — per argument in argument order, then the unbound required ones, then (query) the required
+  ones bound only to `Null`. The first-failure forms are unchanged, and the head of each list is
+  exactly their answer; a suite enumerates every combination of a fixture's arguments to hold it.
+- **A query schema.** `Query.toJsonSchema` is `Function.toJsonSchema`'s twin: untagged JSON Schema,
+  parameters keyed by name, `x-effect`, and `x-result` (one result row, keyed by column) outside
+  `properties`. A `decimal` parameter or result column is a STRING with the pattern
+  `^-?[0-9]+(\.[0-9]+)?$` — exactly the text the codec reads into a `Decimal` cell — because a model
+  told "number" emits a fractional token the codec refuses. `QueryCodec.decodeArgs` /
+  `decodeArgsJson` read the argument object that schema describes, through the column codec's one
+  cell decoder, answering every refusal (an undeclared member is always `UnknownParam`).
+- **A strict read policy.** `ReadPolicy` (`Lenient`, the default, or `Strict`) and
+  `CapabilityCodec.decodeWith` / `decodeJsonWith` / `decodeInvocationWith` / `deferredOfWith` /
+  `decodeDeferredWith`, `QueryCodec.decodeWith` / `decodeResultWith` / `decodeDeferredResultWith`.
+  `Strict` refuses an unknown member of any object the codec reads, naming it and the members read; it
+  runs as a check before the unchanged decoder, so `Lenient` is the old behaviour byte for byte. The
+  embedded `source` and `rows` documents are the column codec's and a `ready` payload is the caller's
+  decoder's, so the check stops at them.
+- **The tag convention, written down** beside `Function.toSchema`: a wire document is `"$type"`, a
+  descriptor read beside the tree wire is `"kind"`, a JSON Schema for a model is untagged with `x-`
+  extensions outside `properties`.
+
+**What adopting it costs.** Nothing: every existing function, type and emitted byte is unchanged. A
+consumer that opens `Fuaran.Core` beside a namespace of its own declaring `ArgValue`, `ReadPolicy`, or
+a case named `IntValue` / `FloatValue` / `TextValue` / `TreeValue`, resolves the later-opened one.
+
+**Class: additive.** `api/Fuaran.Core.Function.txt` and `api/Fuaran.Core.Query.txt` gain members and
+types only; `api/wire/Fuaran.Core.Function.txt` and `api/wire/Fuaran.Core.Query.txt` gain the two
+refusal roots' documents, every existing document unchanged.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

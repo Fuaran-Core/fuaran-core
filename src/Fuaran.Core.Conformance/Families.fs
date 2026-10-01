@@ -350,6 +350,17 @@ module Families =
                   "each iteration builds, replays and round-trips one DAG, and tampers it whenever a fresh draw differs; a run that never tampers reds the tamper law as never reached")
               (DrawnMissIsRed,
                "the tampered node it must reject is built only when a fresh draw differs from the op it replaces; the tamper law is a strict runner cell, so a run that never tampers reds it as never reached (Phase 297)")
+          // Phase 289 — the reachability index against the unindexed functions. The shape is drawn
+          // by the kit, but whether two drawn lanes stay two depends on the caller's ops (the same op
+          // on the same parent is one node), so a merge of incomparable lanes is counted and guarded.
+          c
+              "reachLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "DAG shape" ])
+              (Drawn,
+               "the unknown head and the cyclic load are built every iteration, but a replay rejection and a reconcile refusal come from the caller's drawn ops and their agreement laws hold when none is drawn; the refusals are counted beside the DAG-shape guard, not demanded, since a domain whose ops never reject cannot produce one")
           // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
           // found and left for this phase. Each was `Unconditional` on the strength of what every
           // iteration BUILDS, and each also carries a law that compares a REFUSED outcome — an
@@ -611,6 +622,25 @@ module Families =
                   [ "built arm (keyed holder / clean insert / keyed-vs-structural collision in either direction / keyed-vs-keyed collision / accepted op over the keyed walk) and op kind" ])
               (Built,
                "the three keyed collisions are built through PlaceKeyedChild and must be refused DuplicateId; its guard covers the built arms")
+          // Phase 247 — arbitration at a domain's own footprint and applicability, held to the keyed
+          // engine the accepted scripts land with. The container-illegal proposal and the keyed-id
+          // clash are BUILT; the rest of the rejected bucket is drawn, as in `arbitrationLaws`.
+          c
+              "keyedArbitrationLaws"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded
+                  [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind (delegates to keyedArbitrationLawsWith)" ])
+              (Drawn, "delegates to keyedArbitrationLawsWith")
+          c
+              "keyedArbitrationLawsWith"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind" ])
+              (Drawn,
+               "the container-illegal proposal and the keyed-id clash are built and must be refused; Inapplicable also comes from the kit's corruption roll and Conflicts from drawn scripts, so the guard covers the arbitration bucket")
 
           // Phase 211 — the same contract, at a DOMAIN'S evaluator. Every arm the agreement law
           // distinguishes is DRAWN from the domain's own edits: a change that reached a reader, a

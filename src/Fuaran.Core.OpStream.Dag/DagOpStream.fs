@@ -1085,36 +1085,15 @@ module Dag =
     // rejects depends on whether `Inc 10` ran first. A lane's own replay is a property of the lane, so
     // the set of rejecting lanes is a property of the lane set — and the refusal is order-free.
 
-    /// The N-lane generalisation of `reconcile` (Phase 100), made total over rejecting lanes (Phase 300):
-    /// fold `heads` — N branch heads over `baseId`, whose state is `baseState` — into a single merge
-    /// script, or refuse with a `ReconcileFault` that names the same thing under every arrival order:
-    ///
-    ///  1. the region above the base is partitioned exactly as `reconcile` partitions it (heads
-    ///     deduplicated, shared history once, one exclusive delta per head);
-    ///  2. every UNORDERED pair of exclusive deltas is checked with `conflicts`; any interference ⇒
-    ///     `Error(LanesInterfere report)`, **nothing applied** (GP6);
-    ///  3. the shared region is replayed from `baseState` through `w.Apply`; a rejection ⇒
-    ///     `Error(SharedHistoryRejected …)`;
-    ///  4. every exclusive delta is replayed ON ITS OWN from the state step 3 reached; any that rejects
-    ///     ⇒ `Error(LanesRejected …)`, every rejecting lane, sorted by head id;
-    ///  5. otherwise `Ok(shared ++ exclusive_1 ++ … ++ exclusive_n)`, in the order `heads` names them.
-    ///
-    /// At N = 2, when both lanes apply, the script is `reconcile`'s. `Ok` still carries #78's promise
-    /// that the exclusive deltas provably commute; with step 4 it also carries the premise the fold
-    /// theorem used to ASSUME (`lanes_apply`): every lane applies from the base. The `heads` order
-    /// therefore pins **canonical form only** — `DagFold.fold_confluence_total` proves the outcome
-    /// equivalent under every permutation, and `Conformance.FoldConfluence.laneFoldLaws` certifies it
-    /// for a domain's own witness. Pairwise, not joint: set disjointness IS pairwise, so N
-    /// mutually-independent lanes are jointly independent.
-    let reconcileMany
+    /// The fold `reconcileMany` and `reconcileManyWith` share (Phase 289): steps 2 to 5 below, over a
+    /// region already partitioned — from the node map, or from a reachability index.
+    let private reconcileRegion
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (footprintOf: 'Op -> Footprint)
         (dag: T<'Op>)
-        (baseId: string)
+        (r: Region)
         (baseState: 'State)
-        (heads: string list)
         : Result<'Op list, ReconcileFault<'Op, 'Rej>> =
-        let r = region dag baseId heads
         let deltas = r.Exclusive |> List.map (fun (h, ids) -> h, ids, opsOf dag ids)
 
         let rec replayIds (st: 'State) (ids: string list) : Result<'State, string * 'Rej> =
@@ -1147,3 +1126,449 @@ module Dag =
                 match rejected with
                 | [] -> Ok(opsOf dag r.Shared @ (deltas |> List.collect (fun (_, _, ops) -> ops)))
                 | rs -> Error(ReconcileFault.LanesRejected rs)
+
+    /// The N-lane generalisation of `reconcile` (Phase 100), made total over rejecting lanes (Phase 300):
+    /// fold `heads` — N branch heads over `baseId`, whose state is `baseState` — into a single merge
+    /// script, or refuse with a `ReconcileFault` that names the same thing under every arrival order:
+    ///
+    ///  1. the region above the base is partitioned exactly as `reconcile` partitions it (heads
+    ///     deduplicated, shared history once, one exclusive delta per head);
+    ///  2. every UNORDERED pair of exclusive deltas is checked with `conflicts`; any interference ⇒
+    ///     `Error(LanesInterfere report)`, **nothing applied** (GP6);
+    ///  3. the shared region is replayed from `baseState` through `w.Apply`; a rejection ⇒
+    ///     `Error(SharedHistoryRejected …)`;
+    ///  4. every exclusive delta is replayed ON ITS OWN from the state step 3 reached; any that rejects
+    ///     ⇒ `Error(LanesRejected …)`, every rejecting lane, sorted by head id;
+    ///  5. otherwise `Ok(shared ++ exclusive_1 ++ … ++ exclusive_n)`, in the order `heads` names them.
+    ///
+    /// At N = 2, when both lanes apply, the script is `reconcile`'s. `Ok` still carries #78's promise
+    /// that the exclusive deltas provably commute; with step 4 it also carries the premise the fold
+    /// theorem used to ASSUME (`lanes_apply`): every lane applies from the base. The `heads` order
+    /// therefore pins **canonical form only** — `DagFold.fold_confluence_total` proves the outcome
+    /// equivalent under every permutation, and `Conformance.FoldConfluence.laneFoldLaws` certifies it
+    /// for a domain's own witness. Pairwise, not joint: set disjointness IS pairwise, so N
+    /// mutually-independent lanes are jointly independent.
+    let reconcileMany
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (dag: T<'Op>)
+        (baseId: string)
+        (baseState: 'State)
+        (heads: string list)
+        : Result<'Op list, ReconcileFault<'Op, 'Rej>> =
+        reconcileRegion w footprintOf dag (region dag baseId heads) baseState
+
+    // ---- the reachability index (Phase 289) ----
+    // Every graph query above recomputes from the node map: `ancestorsOf` walks the parents on each
+    // call, `tryTopoOrder` / `tryReplayTo` / `between` re-drain a head's closure, `mergeBase` takes
+    // two closures and one more per common ancestor, and `reconcileMany` one per head. Each is
+    // O(closure) per call, which is fine for one call and quadratic for a loop of them. `Reach`
+    // builds the answers once per load and answers the same questions from what it holds. It is an
+    // ADDITIONAL way to ask: every function above keeps its signature and its answer, and the laws
+    // (`Conformance.reachLaws`) pin each indexed answer equal to the unindexed one.
+    //
+    // The representation, and why (DECISIONS.md, the Phase 289 entry):
+    //   - a SLOT per orderable node, and the whole DAG's drain ORDER — the same Kahn drain the
+    //     per-head functions run, smallest ordinal id first, over the whole node set. The drain of a
+    //     down-closed node set is the whole drain restricted to it (a node's readiness depends only on
+    //     its ancestors, and a node outside the set never unlocks one inside it), so one head's order,
+    //     a union of heads' order and a branch delta's order are each a filter of this one array;
+    //   - per slot, the ANCESTOR BITSET over slots, self included. A node's ancestors always hold
+    //     smaller slots, so the set for slot s needs only s+1 bits: N²/64 words over the index, about
+    //     1.6 MB at 5,000 nodes and 156 MB at 50,000 — a bound stated for the shapes measured, not a
+    //     general claim;
+    //   - per slot, the closure SIZE, which is `mergeBase`'s ranking key.
+    //
+    // Words are 32-bit `int`s, so the arithmetic is the same under Fable as under .NET.
+    //
+    // A node the drain cannot order — on a cycle, or below one, which only a hand-built or
+    // unverified load can hold — gets no slot, and every question that touches one is answered by the
+    // unindexed function itself, so the index is exact on every DAG `fromJsonl` can produce. An
+    // orderable node's ancestors are all orderable, so the fallback never reaches a question about
+    // orderable nodes alone.
+
+    /// A reachability index over one DAG (Phase 289): built by `Reach.ofDag`, extended by
+    /// `appendIndexed` / `mergeIndexed`, and asked through the `Reach` module. Immutable — an
+    /// extension copies what it changes and shares the rest. It carries the DAG it indexes, so an
+    /// index cannot be asked about a different DAG than the one it was built for. No equality: two
+    /// indexes over one DAG may number its nodes differently and answer every question alike, and
+    /// THAT is the equality the laws state.
+    [<NoEquality; NoComparison>]
+    type Reach<'Op> =
+        private
+            {
+                /// The DAG this index answers for.
+                Graph: T<'Op>
+                /// Orderable node id -> slot.
+                Slot: Map<string, int>
+                /// Slot -> node id.
+                Ids: string array
+                /// Slot -> ancestor bitset over slots, self included; `s / 32 + 1` words for slot `s`.
+                Bits: int array array
+                /// Slot -> closure size.
+                Count: int array
+                /// Drain position -> slot: the whole DAG's drain, smallest ordinal id first.
+                Order: int array
+                /// Slot -> drain position.
+                Pos: int array
+                /// Ids a node names as a parent that the DAG does not hold. A node minted under one of
+                /// them is not a leaf of the old drain, so extending onto it rebuilds.
+                Dangling: Set<string>
+            }
+
+    /// Asking the reachability index (Phase 289). Each answer equals the unindexed function's, on
+    /// every DAG — `Conformance.reachLaws` holds them equal.
+    [<RequireQualifiedAccess; CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+    module Reach =
+
+        let private hasBit (bits: int array) (j: int) : bool =
+            let w = j >>> 5
+            w < bits.Length && ((bits.[w] >>> (j &&& 31)) &&& 1) = 1
+
+        let private popCount (bits: int array) : int =
+            let mutable c = 0
+
+            for w in bits do
+                let mutable v = w
+
+                while v <> 0 do
+                    v <- v &&& (v - 1)
+                    c <- c + 1
+
+            c
+
+        /// The ancestor bitset of a node at slot `s` whose parents hold the bitsets `parentBits`.
+        let private closureBits (parentBits: int array list) (s: int) : int array =
+            let own = Array.zeroCreate<int> ((s >>> 5) + 1)
+
+            for pb in parentBits do
+                for k in 0 .. pb.Length - 1 do
+                    own.[k] <- own.[k] ||| pb.[k]
+
+            own.[s >>> 5] <- own.[s >>> 5] ||| (1 <<< (s &&& 31))
+            own
+
+        /// Build the index over `dag` in one traversal: one drain of the whole node set, each node's
+        /// bitset the union of its parents'. O(N log N) for the drain and O(N²/32) word operations for
+        /// the bitsets.
+        let ofDag (dag: T<'Op>) : Reach<'Op> =
+            let present (p: string) = dag.Nodes.ContainsKey p
+
+            // in-degree over HELD parents, with multiplicity — the per-head drain's own count
+            let mutable indeg: Map<string, int> = Map.empty
+            let mutable children: Map<string, string list> = Map.empty
+            let mutable dangling: Set<string> = Set.empty
+
+            for KeyValue(id, n) in dag.Nodes do
+                let held = n.Parents |> List.filter present
+                indeg <- Map.add id (List.length held) indeg
+
+                for p in n.Parents do
+                    if present p then
+                        children <- Map.add p (id :: (Map.tryFind p children |> Option.defaultValue [])) children
+                    else
+                        dangling <- Set.add p dangling
+
+            let mutable ready =
+                indeg
+                |> Map.toSeq
+                |> Seq.filter (fun (_, d) -> d = 0)
+                |> Seq.map fst
+                |> Set.ofSeq
+
+            let ids = ResizeArray<string>()
+            let bits = ResizeArray<int array>()
+            let mutable slot: Map<string, int> = Map.empty
+
+            while not (Set.isEmpty ready) do
+                let id = Set.minElement ready
+                ready <- Set.remove id ready
+                let s = ids.Count
+                let slotNow = slot
+
+                let parentBits =
+                    dag.Nodes.[id].Parents
+                    |> List.choose (fun p -> Map.tryFind p slotNow |> Option.map (fun ps -> bits.[ps]))
+
+                ids.Add id
+                bits.Add(closureBits parentBits s)
+                slot <- Map.add id s slot
+
+                match Map.tryFind id children with
+                | Some kids ->
+                    for k in kids do
+                        let d = indeg.[k] - 1
+                        indeg <- Map.add k d indeg
+
+                        if d = 0 then
+                            ready <- Set.add k ready
+                | None -> ()
+
+            let bitsArr = bits.ToArray()
+            let n = ids.Count
+
+            { Graph = dag
+              Slot = slot
+              Ids = ids.ToArray()
+              Bits = bitsArr
+              Count = bitsArr |> Array.map popCount
+              Order = Array.init n (fun t -> t)
+              Pos = Array.init n (fun j -> j)
+              Dangling = dangling }
+
+        /// The DAG the index answers for.
+        let dag (reach: Reach<'Op>) : T<'Op> = reach.Graph
+
+        /// `Dag.ancestorsOf`, from the index: `id` itself and all its transitive parents the DAG
+        /// holds; empty for an id the DAG does not hold.
+        let ancestors (reach: Reach<'Op>) (id: string) : Set<string> =
+            match Map.tryFind id reach.Slot with
+            | Some s ->
+                let b = reach.Bits.[s]
+                let acc = ResizeArray<string>()
+
+                for j in 0..s do
+                    if hasBit b j then
+                        acc.Add reach.Ids.[j]
+
+                Set.ofSeq acc
+            | None -> ancestorsOf reach.Graph id
+
+        /// Is `ancestor` in `descendant`'s ancestor closure — `Set.contains ancestor (Dag.ancestorsOf
+        /// dag descendant)`, so a node reaches itself and nothing reaches an id the DAG does not hold.
+        /// One bit test where both are orderable.
+        let reaches (reach: Reach<'Op>) (ancestor: string) (descendant: string) : bool =
+            match Map.tryFind descendant reach.Slot with
+            | Some sd ->
+                match Map.tryFind ancestor reach.Slot with
+                | Some sa -> hasBit reach.Bits.[sd] sa
+                | None -> false
+            | None -> Set.contains ancestor (ancestorsOf reach.Graph descendant)
+
+        /// The drain restricted to one slot's closure: every orderable id in it, in order.
+        let private closureInOrder (reach: Reach<'Op>) (s: int) (keep: int -> bool) : string list =
+            let b = reach.Bits.[s]
+
+            [ for t in 0 .. reach.Pos.[s] do
+                  let j = reach.Order.[t]
+
+                  if hasBit b j && keep j then
+                      yield reach.Ids.[j] ]
+
+        /// `Dag.tryTopoOrder`, from the index: `Ok` the head's closure in the deterministic
+        /// topological order (`Ok []` for a head the DAG does not hold), or the cyclic-history error.
+        let tryTopoOrder (reach: Reach<'Op>) (headId: string) : Result<string list, string> =
+            match Map.tryFind headId reach.Slot with
+            | Some s -> Ok(closureInOrder reach s (fun _ -> true))
+            | None -> tryTopoOrder reach.Graph headId
+
+        /// `Dag.mergeBase`, from the index: the common ancestor with the largest closure, tie-broken by
+        /// id; `None` when the histories are disjoint or either id is not in the DAG.
+        let mergeBase (reach: Reach<'Op>) (left: string) (right: string) : string option =
+            if not (reach.Graph.Nodes.ContainsKey left && reach.Graph.Nodes.ContainsKey right) then
+                None
+            else
+                match Map.tryFind left reach.Slot, Map.tryFind right reach.Slot with
+                | Some sl, Some sr ->
+                    let bl = reach.Bits.[sl]
+                    let br = reach.Bits.[sr]
+                    let mutable best = -1
+
+                    for j in 0 .. min sl sr do
+                        if hasBit bl j && hasBit br j then
+                            if
+                                best < 0
+                                || reach.Count.[j] > reach.Count.[best]
+                                || (reach.Count.[j] = reach.Count.[best]
+                                    && System.String.CompareOrdinal(reach.Ids.[j], reach.Ids.[best]) > 0)
+                            then
+                                best <- j
+
+                    if best < 0 then None else Some reach.Ids.[best]
+                | _ -> mergeBase reach.Graph left right
+
+        /// `Dag.between`, from the index: the nodes in `head`'s closure and not in `baseId`'s, in
+        /// topological order; `[]` for a head the DAG does not hold.
+        let between (reach: Reach<'Op>) (baseId: string) (head: string) : DagNode<'Op> list =
+            let headSlot = Map.tryFind head reach.Slot
+            let baseSlot = Map.tryFind baseId reach.Slot
+
+            match headSlot with
+            | Some sh when baseSlot.IsSome || not (reach.Graph.Nodes.ContainsKey baseId) ->
+                let notInBase =
+                    match baseSlot with
+                    | Some sb -> fun j -> not (hasBit reach.Bits.[sb] j)
+                    | None -> fun _ -> true
+
+                closureInOrder reach sh notInBase |> List.map (fun id -> reach.Graph.Nodes.[id])
+            | _ -> between reach.Graph baseId head
+
+        /// The index for `dag'`, which is `reach`'s DAG with node `id` added (or already held) — the
+        /// step `appendIndexed` / `mergeIndexed` take. The new node is a leaf, so the drain of the
+        /// other nodes is unchanged: it enters at the first position after its last parent whose
+        /// node's id is ordinally larger than its own (the drain takes the smallest ready id, and a
+        /// leaf unlocks nothing), and its bitset is its parents' union. O(N) — the arrays are copied,
+        /// the bitsets shared. A node under an unorderable parent is unorderable; a node minted under
+        /// an id some held node names as a dangling parent is not a leaf, and the index is rebuilt.
+        let internal extend (reach: Reach<'Op>) (dag': T<'Op>) (id: string) : Reach<'Op> =
+            if reach.Graph.Nodes.ContainsKey id then
+                { reach with Graph = dag' }
+            elif reach.Dangling.Contains id then
+                ofDag dag'
+            else
+                let node = dag'.Nodes.[id]
+                let parentSlots = node.Parents |> List.map (fun p -> Map.tryFind p reach.Slot)
+
+                if parentSlots |> List.exists Option.isNone then
+                    { reach with Graph = dag' }
+                else
+                    let ps = parentSlots |> List.choose (fun p -> p)
+                    let n = reach.Ids.Length
+                    let s = n
+                    let after = ps |> List.fold (fun acc p -> max acc reach.Pos.[p]) -1
+
+                    let mutable q = after + 1
+
+                    while q < n && System.String.CompareOrdinal(id, reach.Ids.[reach.Order.[q]]) > 0 do
+                        q <- q + 1
+
+                    let own = closureBits (ps |> List.map (fun p -> reach.Bits.[p])) s
+
+                    { Graph = dag'
+                      Slot = Map.add id s reach.Slot
+                      Ids = Array.append reach.Ids [| id |]
+                      Bits = Array.append reach.Bits [| own |]
+                      Count = Array.append reach.Count [| popCount own |]
+                      Order =
+                        Array.init (n + 1) (fun t ->
+                            if t < q then reach.Order.[t]
+                            elif t = q then s
+                            else reach.Order.[t - 1])
+                      Pos =
+                        Array.init (n + 1) (fun j ->
+                            if j = s then q
+                            elif reach.Pos.[j] >= q then reach.Pos.[j] + 1
+                            else reach.Pos.[j])
+                      Dangling = reach.Dangling }
+
+    /// `append`, extending an index with the new node (Phase 289): `Ok(id, dag', reach')` where
+    /// `(id, dag')` is exactly `append`'s answer on `Reach.dag reach` and `reach'` answers every
+    /// question as `Reach.ofDag dag'` does, at O(N) instead of a rebuild. Refusals are `append`'s.
+    let appendIndexed
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (parentId: string)
+        (reach: Reach<'Op>)
+        : Result<string * T<'Op> * Reach<'Op>, DagAppendFault> =
+        match append hashFn w actor op parentId reach.Graph with
+        | Error f -> Error f
+        | Ok(id, dag') -> Ok(id, dag', Reach.extend reach dag' id)
+
+    /// `merge`, extending an index with the merge node (Phase 289) — `appendIndexed`'s contract for
+    /// the other way a node enters the DAG, so a session that appends and merges in a loop never
+    /// rebuilds. Refusals are `merge`'s.
+    let mergeIndexed
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (leftId: string)
+        (rightId: string)
+        (reach: Reach<'Op>)
+        : Result<string * T<'Op> * Reach<'Op>, DagAppendFault> =
+        match merge hashFn w actor op leftId rightId reach.Graph with
+        | Error f -> Error f
+        | Ok(id, dag') -> Ok(id, dag', Reach.extend reach dag' id)
+
+    /// `tryReplayTo` over an index (Phase 289): the same answer on `Reach.dag reach`, with the head's
+    /// order read from the index instead of drained from the node map. Takes the index where
+    /// `tryReplayTo` takes the DAG, so the DAG replayed is the one the index was built for.
+    let tryReplayToWith
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (reach: Reach<'Op>)
+        (headId: string)
+        : Result<'State, ReplayFault<'Rej>> =
+        if not (reach.Graph.Nodes.ContainsKey headId) then
+            Error(ReplayFault.UnknownHead headId)
+        elif not (reach.Slot.ContainsKey headId) then
+            // on or below a cycle: the unindexed replay names the cyclic history
+            tryReplayTo w state0 reach.Graph headId
+        else
+            match Reach.tryTopoOrder reach headId with
+            | Ok order ->
+                let rec go st =
+                    function
+                    | [] -> Ok st
+                    | id :: rest ->
+                        match w.Apply reach.Graph.Nodes.[id].Op st with
+                        | Ok st' -> go st' rest
+                        | Error e -> Error(ReplayFault.Rejected(id, e))
+
+                go state0 order
+            | Error _ -> tryReplayTo w state0 reach.Graph headId
+
+    /// `reconcileMany` over an index (Phase 289): the same answer on `Reach.dag reach`, with the
+    /// region above the base partitioned from the index — the base's and each head's closure a bitset,
+    /// the union's order a filter of the index's drain — instead of N+1 closure walks and a drain.
+    /// Takes the index where `reconcileMany` takes the DAG.
+    let reconcileManyWith
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (reach: Reach<'Op>)
+        (baseId: string)
+        (baseState: 'State)
+        (heads: string list)
+        : Result<'Op list, ReconcileFault<'Op, 'Rej>> =
+        let dag = reach.Graph
+
+        let unorderable (id: string) =
+            dag.Nodes.ContainsKey id && not (reach.Slot.ContainsKey id)
+
+        if unorderable baseId || List.exists unorderable heads then
+            reconcileMany w footprintOf dag baseId baseState heads
+        else
+            let has (s: int option) (j: int) =
+                match s with
+                | Some s -> j <= s && ((reach.Bits.[s].[j >>> 5] >>> (j &&& 31)) &&& 1) = 1
+                | None -> false
+
+            let hs = List.distinct heads
+            let baseSlot = Map.tryFind baseId reach.Slot
+            let closures = hs |> List.map (fun h -> h, Map.tryFind h reach.Slot)
+
+            let owners (j: int) =
+                closures |> List.sumBy (fun (_, c) -> if has c j then 1 else 0)
+
+            let last =
+                closures
+                |> List.fold
+                    (fun acc (_, c) -> max acc (c |> Option.map (fun s -> reach.Pos.[s]) |> Option.defaultValue -1))
+                    -1
+
+            let above =
+                [ for t in 0..last do
+                      let j = reach.Order.[t]
+
+                      if not (has baseSlot j) then
+                          let o = owners j
+
+                          if o > 0 then
+                              yield j, o ]
+
+            let r =
+                { Shared =
+                    above
+                    |> List.filter (fun (_, o) -> o >= 2)
+                    |> List.map (fun (j, _) -> reach.Ids.[j])
+                  Exclusive =
+                    closures
+                    |> List.map (fun (h, c) ->
+                        h,
+                        above
+                        |> List.filter (fun (j, o) -> o = 1 && has c j)
+                        |> List.map (fun (j, _) -> reach.Ids.[j])) }
+
+            reconcileRegion w footprintOf dag r baseState

@@ -138,6 +138,31 @@ let private runs =
                    KeyedApplyTests.deepGen
                    2860
                    300)
+           // Phase 247 — arbitration over containers and keyed positions, both built arms reached.
+           run
+               "Conformance.keyedArbitrationLaws"
+               200
+               (Conformance.keyedArbitrationLaws
+                   ConformanceTests.keyw
+                   ConformanceTests.knodew
+                   idw
+                   KeyedArbitrationTests.containedKGen
+                   KeyedArbitrationTests.encK
+                   2470
+                   200)
+           run
+               "Conformance.keyedArbitrationLawsWith"
+               200
+               (Conformance.keyedArbitrationLawsWith
+                   ConformanceTests.keyw
+                   ConformanceTests.knodew
+                   idw
+                   KeyedArbitrationTests.containedKGen
+                   KeyedArbitrationTests.encK
+                   (Ops.footprintKeyed ConformanceTests.keyw ConformanceTests.knodew idw)
+                   (Ops.canApplyAllKeyed ConformanceTests.keyw (fun n -> n.Kind <> "para") ConformanceTests.knodew idw)
+                   2470
+                   200)
 
            // ---- stream-shaped opt-ins ----
            run
@@ -165,6 +190,10 @@ let private runs =
                "Conformance.dagLaws"
                100
                (Conformance.dagLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 99 100)
+           run
+               "Conformance.reachLaws"
+               100
+               (Conformance.reachLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 289 100)
            run
                "Conformance.casLaws"
                200
